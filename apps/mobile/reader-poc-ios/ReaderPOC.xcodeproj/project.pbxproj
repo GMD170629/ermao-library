@@ -11,7 +11,7 @@
 		162B944D01D7FDD67F6806F7 /* 06-footnotes.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = 20D63C8A8A0B34E8CF704B7F /* 06-footnotes.azw3 */; };
 		1E7390843D32DD0C7B3EC691 /* PublicationPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D8EF2B158602805BBF28C53 /* PublicationPath.swift */; };
 		20483382FC819B71E8F5324F /* PackageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41DCFFF53C11A033900BAD0 /* PackageParserTests.swift */; };
-		22F211B000C6E4CB89DE4ADC /* LibMobi in Frameworks */ = {isa = PBXBuildFile; productRef = 9031C2E8E7ADAFC84304E0E0 /* LibMobi */; };
+		22F211B000C6E4CB89DE4ADC /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9031C2E8E7ADAFC84304E0E0 /* ErmaoMobiCore */; };
 		29C46112B25AA6A931B5B97F /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = 8A49C66B0E2050517B55320D /* ReadiumNavigator */; };
 		29D5EF006A1AAA5D5AED3C78 /* MobiPublicationParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513333F0E5949936B6C5E693 /* MobiPublicationParser.swift */; };
 		2C6CCEA4EEDD524D734842FD /* NavigatorSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A58A103F47550578C306646 /* NavigatorSession.swift */; };
@@ -97,7 +97,7 @@
 		8BC853981B1A571335DB3878 /* fixture-expectations.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "fixture-expectations.json"; sourceTree = "<group>"; };
 		9144DA943567312A79B5C76A /* MobiPublicationFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiPublicationFactoryTests.swift; sourceTree = "<group>"; };
 		9AF8FD2A5016120C9B0C2101 /* ReaderScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderScreen.swift; sourceTree = "<group>"; };
-		A5A30905E131BD52344D6083 /* LibMobi */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LibMobi; path = Dependencies/LibMobi; sourceTree = SOURCE_ROOT; };
+		A5A30905E131BD52344D6083 /* ErmaoMobiCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ErmaoMobiCore; path = ../native/mobi-core; sourceTree = SOURCE_ROOT; };
 		A980CA7C7D0B52C24C07795F /* 03-css.azw3 */ = {isa = PBXFileReference; path = "03-css.azw3"; sourceTree = "<group>"; };
 		B4C25A526B87A6B02943601C /* TechnicalReportWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TechnicalReportWriter.swift; sourceTree = "<group>"; };
 		B717CDBF23090B93A3C8B903 /* FixtureCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureCatalog.swift; sourceTree = "<group>"; };
@@ -120,7 +120,7 @@
 				6F33C9044270C073F32C1CC9 /* ReadiumShared in Frameworks */,
 				7BD0BB27B519243EA7E93CFA /* ReadiumStreamer in Frameworks */,
 				29C46112B25AA6A931B5B97F /* ReadiumNavigator in Frameworks */,
-				22F211B000C6E4CB89DE4ADC /* LibMobi in Frameworks */,
+				22F211B000C6E4CB89DE4ADC /* ErmaoMobiCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -187,7 +187,7 @@
 				7A1C11FC56F5280F6072DC06 /* SHA256SUMS */,
 				21F669BDDAD1411799D1271C /* test.azw3 */,
 			);
-			path = Fixtures;
+			path = "../../../../../test-data/library/mobi";
 			sourceTree = "<group>";
 		};
 		9FB0CE6215DE78960D2D3393 /* ReaderPOC */ = {
@@ -237,7 +237,7 @@
 		C1AF98F5D7C440AB4B96F82C /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				A5A30905E131BD52344D6083 /* LibMobi */,
+				A5A30905E131BD52344D6083 /* ErmaoMobiCore */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -319,7 +319,7 @@
 				D4EE7A064086CAFA2D34FD7A /* ReadiumShared */,
 				625C412EFA4987B36F9DA0BF /* ReadiumStreamer */,
 				8A49C66B0E2050517B55320D /* ReadiumNavigator */,
-				9031C2E8E7ADAFC84304E0E0 /* LibMobi */,
+				9031C2E8E7ADAFC84304E0E0 /* ErmaoMobiCore */,
 			);
 			productName = ReaderPOC;
 			productReference = 07DEB94FFF2713685DEE054F /* ReaderPOC.app */;
@@ -361,7 +361,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				3F650CDC1536A34AB7056B7C /* XCRemoteSwiftPackageReference "swift-toolkit" */,
-				AD037C65D41432F07B92645A /* XCLocalSwiftPackageReference "Dependencies/LibMobi" */,
+				AD037C65D41432F07B92645A /* XCLocalSwiftPackageReference "../native/mobi-core" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C8E99DE7DDF3F3305DE83743 /* Products */;
@@ -764,9 +764,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		AD037C65D41432F07B92645A /* XCLocalSwiftPackageReference "Dependencies/LibMobi" */ = {
+		AD037C65D41432F07B92645A /* XCLocalSwiftPackageReference "../native/mobi-core" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = Dependencies/LibMobi;
+			relativePath = ../native/mobi-core;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -792,9 +792,9 @@
 			package = 3F650CDC1536A34AB7056B7C /* XCRemoteSwiftPackageReference "swift-toolkit" */;
 			productName = ReadiumNavigator;
 		};
-		9031C2E8E7ADAFC84304E0E0 /* LibMobi */ = {
+		9031C2E8E7ADAFC84304E0E0 /* ErmaoMobiCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = LibMobi;
+			productName = ErmaoMobiCore;
 		};
 		D4EE7A064086CAFA2D34FD7A /* ReadiumShared */ = {
 			isa = XCSwiftPackageProductDependency;

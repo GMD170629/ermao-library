@@ -127,11 +127,13 @@ struct MainTabView: View {
     let cache: LibraryCacheStore
     var settingsViewModel: SettingsViewModel? = nil
     var administrativeSettingsStore: AdministrativeSettingsStore? = nil
+    var readerComposition: IosReaderComposition? = nil
     private let rootTabs = RootTabContract.definitions
 
     @State private var selectedTabID = RootTabContract.orderedIDs.first ?? ""
     @State private var paths = RootTabPaths()
     @State private var expandedLibraryWorkID: String?
+    @State private var readerLaunch: IosReaderLaunchRequest?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var selection: Binding<String> {
@@ -165,6 +167,11 @@ struct MainTabView: View {
                 }
             } else {
                 ProgressView().accessibilityLabel(Text("common.loading"))
+            }
+        }
+        .fullScreenCover(item: $readerLaunch) { request in
+            if let readerComposition {
+                IosReaderBootstrapView(request: request, composition: readerComposition)
             }
         }
     }
@@ -273,7 +280,9 @@ struct MainTabView: View {
                             cache: cache,
                             workID: workID,
                             onUnauthorized: store.refreshForForeground,
-                            openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) }
+                            openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
+                            openReader: { openReader($0, context: context) },
+                            readerAvailable: readerComposition != nil
                         )
                         .id(workID)
                     } else {
@@ -305,7 +314,9 @@ struct MainTabView: View {
                 cache: cache,
                 workID: workID,
                 onUnauthorized: store.refreshForForeground,
-                openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) }
+                openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
+                openReader: { openReader($0, context: context) },
+                readerAvailable: readerComposition != nil
             )
         case .facet(let kind, let facetID):
             FacetView(
@@ -363,6 +374,16 @@ struct MainTabView: View {
 
     private func open(_ route: AppRoute, in tab: TabPresentation) {
         paths.open(route, in: tab)
+    }
+
+    private func openReader(_ selection: WorkReaderSelection, context: ContentRequestContext) {
+        guard readerComposition != nil else { return }
+        readerLaunch = IosReaderLaunchRequest(
+            context: context,
+            workID: selection.workID,
+            volumeID: selection.volumeID,
+            displayTitle: selection.displayTitle
+        )
     }
 
 }

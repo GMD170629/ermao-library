@@ -12,7 +12,7 @@
     "start": "next start -p 3000",
     "start:ios": "next start -H 0.0.0.0 -p 3000",
     "pwa:ios": "pnpm build && pnpm start:ios",
-    "generate:reader-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.reader-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .reader-openapi.json generated/reader-v3.ts",
+    "generate:reader-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.reader-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .reader-openapi.json generated/reader-v4.ts",
     "lint": "eslint . --max-warnings=0",
     "pretest": "node scripts/generate-i18n-catalog.mjs",
     "test": "node scripts/run-tests.mjs",

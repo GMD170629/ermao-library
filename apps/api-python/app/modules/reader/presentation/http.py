@@ -19,21 +19,21 @@ def _reader_v1_retired(replacement: str) -> Never:
 
 @router.get("/reader/preferences", status_code=410)
 def list_reader_preferences() -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    return _reader_v1_retired("Reader v3 stores client preferences locally")
+    return _reader_v1_retired("Reader v4 stores client preferences locally")
 
 
 @router.put("/reader/preferences", status_code=410)
 async def save_reader_preferences() -> Annotated[
     Never, ErrorResponses(RetiredResourceError)
 ]:
-    return _reader_v1_retired("Reader v3 stores client preferences locally")
+    return _reader_v1_retired("Reader v4 stores client preferences locally")
 
 
 @router.get("/reader/preferences/{reader_type}", status_code=410)
 def get_reader_preference(
     reader_type: str,
 ) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    return _reader_v1_retired("Reader v3 stores client preferences locally")
+    return _reader_v1_retired("Reader v4 stores client preferences locally")
 
 
 @router.put("/reader/preferences/{reader_type}", status_code=410)
@@ -41,21 +41,21 @@ def get_reader_preference(
 async def save_reader_preference(
     reader_type: str,
 ) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    return _reader_v1_retired("Reader v3 stores client preferences locally")
+    return _reader_v1_retired("Reader v4 stores client preferences locally")
 
 
 @router.get("/reader/{edition_id}/bootstrap", status_code=410)
 def reader_bootstrap(
     edition_id: str,
 ) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    return _reader_v1_retired("/api/reader/v3/volumes/{volumeId}/bootstrap")
+    return _reader_v1_retired("/api/reader/v4/volumes/{volumeId}/bootstrap")
 
 
 @router.get("/editions/{edition_id}/progress", status_code=410)
 def get_progress(
     edition_id: str,
 ) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    return _reader_v1_retired("/api/reader/v3/volumes/{volumeId}/progress")
+    return _reader_v1_retired("/api/reader/v4/volumes/{volumeId}/progress")
 
 
 @router.post("/editions/{edition_id}/progress", status_code=410)
@@ -64,7 +64,7 @@ def get_progress(
 async def save_progress(
     edition_id: str,
 ) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    return _reader_v1_retired("/api/reader/v3/volumes/{volumeId}/progress")
+    return _reader_v1_retired("/api/reader/v4/volumes/{volumeId}/progress")
 
 
 @router.get("/editions/{edition_id}/file", status_code=410)

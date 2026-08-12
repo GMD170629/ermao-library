@@ -1,10 +1,18 @@
 import SwiftUI
 
+struct WorkReaderSelection: Equatable, Sendable {
+    let workID: String
+    let volumeID: String
+    let displayTitle: String
+}
+
 struct WorkDetailView: View {
     let context: ContentRequestContext
     let client: any ContentClient
     let cache: LibraryCacheStore
     let openFacet: (FacetKind, String) -> Void
+    let openReader: (WorkReaderSelection) -> Void
+    let readerAvailable: Bool
 
     @StateObject private var store: WorkDetailStore
     @State private var selectedSection = WorkDetailSection.about
@@ -18,12 +26,16 @@ struct WorkDetailView: View {
         cache: LibraryCacheStore,
         workID: String,
         onUnauthorized: @escaping @MainActor () -> Void,
-        openFacet: @escaping (FacetKind, String) -> Void
+        openFacet: @escaping (FacetKind, String) -> Void,
+        openReader: @escaping (WorkReaderSelection) -> Void = { _ in },
+        readerAvailable: Bool = false
     ) {
         self.context = context
         self.client = client
         self.cache = cache
         self.openFacet = openFacet
+        self.openReader = openReader
+        self.readerAvailable = readerAvailable
         _store = StateObject(
             wrappedValue: WorkDetailStore(
                 context: context,
@@ -69,7 +81,7 @@ struct WorkDetailView: View {
                 Button("common.refresh", systemImage: "arrow.clockwise") { store.load() }
                 Divider()
                 Button("work.reader.continue.action", systemImage: "book") {
-                    unavailableFeature = .reader
+                    openSelectedReader()
                 }
                 Button("work.action.edit", systemImage: "pencil") {
                     unavailableFeature = .editing
@@ -271,12 +283,41 @@ struct WorkDetailView: View {
     }
 
     private func readerAction(_ detail: WorkDetailContent) -> some View {
+        let selection = readerSelection(detail)
         PrimaryActionButton(
             detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action",
-            isDisabled: true,
-            action: {}
+            isDisabled: selection == nil,
+            action: { if let selection { openReader(selection) } }
         )
-        .accessibilityHint(Text("work.reader.unavailable.message"))
+        .accessibilityHint(Text(
+            selection == nil
+                ? LocalizedStringKey("work.reader.unavailable.message")
+                : LocalizedStringKey("work.reader.accessibility.hint")
+        ))
+    }
+
+    private func openSelectedReader() {
+        guard case .ready(let detail, _) = store.state,
+              let selection = readerSelection(detail)
+        else {
+            unavailableFeature = .reader
+            return
+        }
+        openReader(selection)
+    }
+
+    private func readerSelection(_ detail: WorkDetailContent) -> WorkReaderSelection? {
+        guard readerAvailable,
+              detail.selectedMediaKind == .ebook,
+              let volume = detail.volumes.first(where: { $0.id == detail.selectedVolumeID }),
+              volume.isReadable != false,
+              volume.formatLabel.localizedCaseInsensitiveContains("epub")
+        else { return nil }
+        return WorkReaderSelection(
+            workID: detail.work.id,
+            volumeID: volume.id,
+            displayTitle: detail.work.title
+        )
     }
 
     private var sectionPicker: some View {

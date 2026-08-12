@@ -273,7 +273,7 @@ export function ReaderEngineRuntime({
     } catch {
       setBookmarks([]);
     }
-    fetchReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, controller.signal)
+    fetchReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, bootstrap.sourceFormat, controller.signal)
       .then((serverBookmarks) => {
         setBookmarks((current) => {
           const next = mergeReaderBookmarks(current, serverBookmarks);
@@ -284,7 +284,7 @@ export function ReaderEngineRuntime({
           }
           bookmarkSyncReadyRef.current = true;
           if (JSON.stringify(next) !== JSON.stringify(serverBookmarks)) {
-            void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, next).catch(() => undefined);
+            void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, bootstrap.sourceFormat, next).catch(() => undefined);
           }
           return next;
         });
@@ -293,7 +293,7 @@ export function ReaderEngineRuntime({
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) bookmarkSyncReadyRef.current = true;
       });
     return () => controller.abort();
-  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.sourceFormat, bootstrap.volume.id]);
 
   const persistBookmarks = useCallback((update: (current: ReaderBookmark[]) => ReaderBookmark[]) => {
     setBookmarks((current) => {
@@ -304,11 +304,11 @@ export function ReaderEngineRuntime({
         // The visible state still works when private browsing blocks storage.
       }
       if (bookmarkSyncReadyRef.current) {
-        void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, next).catch(() => undefined);
+        void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, bootstrap.sourceFormat, next).catch(() => undefined);
       }
       return next;
     });
-  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.sourceFormat, bootstrap.volume.id]);
 
   const currentBookmarkLabel = useMemo(() => {
     if (currentLocation?.kind === 'comic') {

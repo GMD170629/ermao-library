@@ -17,7 +17,7 @@ test('reader fonts and large reader payloads bypass caches', () => {
   assert.match(source, /function isReaderFont/);
   assert.match(source, /if \(isReaderFont\(url\.pathname\)\) return true/);
   assert.match(source, /isLargeReaderPayload\(url\.pathname\)/);
-  assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/reader\/v2\/'\)/);
+  assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/reader\/'\)/);
   assert.match(source, /if \(isLocalDevelopmentHost\(url\.hostname\)\) return true/);
   assert.match(source, /m4b\|m4a\|mp3\|aac\|ogg\|opus\|flac\|wav/);
   assert.match(source, /files\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);

@@ -18,6 +18,11 @@ import com.ermao.library.shared.modules.administrativesettings.infrastructure.Kt
 import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
+import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 fun createAndroidMobileRuntime(
     context: Context,
@@ -58,3 +63,17 @@ fun createAndroidAdministrativeSettingsRepository(context: Context): Administrat
     val cookieVault = AndroidEncryptedCookieVault(context.applicationContext)
     return KtorAdministrativeSettingsRepository(ApiClientFactory(cookieVault))
 }
+
+fun createAndroidReaderServerGateway(context: Context): ReaderServerGateway =
+    KtorReaderBootstrapGateway(
+        ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+    )
+
+fun createAndroidReaderProgressSyncPort(
+    context: Context,
+    profile: ServerProfile,
+): ReaderProgressSyncPort =
+    KtorReaderProgressSyncPort(
+        clients = ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+        profile = profile,
+    )

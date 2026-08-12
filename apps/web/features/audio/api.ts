@@ -30,6 +30,7 @@ function normalizeTrack(value: unknown, index: number): AudioTrack | null {
     url: withBasePath(stringValue(item.url, `/api/files/${encodeURIComponent(fileId)}`)),
     mimeType: stringValue(item.mimeType, 'audio/mpeg'),
     codec: nullableString(item.codec),
+    contentHash: nullableString(item.contentHash),
     durationMs: Math.max(0, numberValue(item.durationMs)),
     discNumber: typeof item.discNumber === 'number' ? numberValue(item.discNumber) : null,
     trackNumber: typeof item.trackNumber === 'number' ? numberValue(item.trackNumber) : null,
@@ -56,7 +57,7 @@ function normalizeVolume(value: unknown, index: number): AudioVolumeSummary | nu
 export function normalizeAudioBootstrap(input: unknown, requestedVolumeId = ''): AudioBootstrap {
   const root = record(input);
   const raw = root.ok === true ? record(root.data) : root;
-  if (raw.schemaVersion !== 3) throw new Error('当前客户端不支持该有声书协议');
+  if (raw.schemaVersion !== 4) throw new Error('当前客户端不支持该有声书协议');
   if (raw.readerType !== 'audio') throw new Error('该卷册不是可播放的有声书');
   const book = record(raw.book);
   const mediaVersion = record(raw.mediaVersion);
@@ -69,16 +70,24 @@ export function normalizeAudioBootstrap(input: unknown, requestedVolumeId = ''):
   const trackIds = new Set(tracks.map((track) => track.fileId));
   const chapters = orderedChapters((Array.isArray(raw.units) ? raw.units : []).map(normalizeChapter).filter((chapter): chapter is AudioChapter => chapter !== null && trackIds.has(chapter.fileId)));
   const calculatedDuration = tracks.reduce((sum, track) => sum + track.durationMs, 0);
-  const resume = record(raw.resumeLocation);
+  const progressSnapshot = record(raw.progressSnapshot);
+  const resume = record(progressSnapshot.location);
   const resumeFileId = stringValue(resume.fileId).trim();
-  const resumeLocation: AudioLocation | null = resume.type === 'audio' && resumeFileId
+  const resumeLocation: AudioLocation | null = resume.kind === 'audio' && resumeFileId
     ? { type: 'audio', volumeId: volume.id, fileId: resumeFileId, chapterId: nullableString(resume.chapterId), positionMs: Math.max(0, numberValue(resume.positionMs)) }
     : null;
+  const localHashes = tracks
+    .flatMap((track) => track.contentHash ? [`${track.fileId}:${track.contentHash}`] : [])
+    .sort();
+  const serverContentFingerprint = stringValue(raw.contentFingerprint);
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     userId: stringValue(raw.userId),
     readerType: 'audio',
-    contentFingerprint: stringValue(raw.contentFingerprint),
+    contentFingerprint: serverContentFingerprint,
+    localContentFingerprint: localHashes.length > 0
+      ? `audio-v1:${localHashes.join('|')}`
+      : serverContentFingerprint,
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名有声书'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
     mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind: 'AUDIOBOOK', completed: mediaVersion.completed === true },
     volume,
@@ -87,13 +96,16 @@ export function normalizeAudioBootstrap(input: unknown, requestedVolumeId = ''):
     chapters,
     totalDurationMs: Math.max(numberValue(volumeValue.durationMs), calculatedDuration),
     resumeLocation,
-    progressPercent: clamp(numberValue(raw.progressPercent), 0, 100),
+    progressPercent: clamp(numberValue(progressSnapshot.percent), 0, 100),
+    serverUpdatedAtEpochMillis: typeof progressSnapshot.updatedAtEpochMillis === 'number'
+      ? numberValue(progressSnapshot.updatedAtEpochMillis)
+      : null,
     preferences: { playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1 }
   };
 }
 
 export async function fetchAudioBootstrap(volumeId: string, signal?: AbortSignal): Promise<AudioBootstrap> {
-  const response = await fetch(`/api/reader/v3/volumes/${encodeURIComponent(volumeId)}/bootstrap`, { credentials: 'same-origin', cache: 'no-store', signal });
+  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bootstrap`, { credentials: 'same-origin', cache: 'no-store', signal });
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const error = record(payload) as ErrorPayload;

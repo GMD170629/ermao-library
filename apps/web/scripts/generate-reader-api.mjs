@@ -9,7 +9,23 @@ const input = path.resolve(inputArg);
 const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
-const included = Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Foliate|Reflowable|Comic|Pdf|Reader)/.test(name)).sort();
+const included = new Set(
+  Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Foliate|Reflowable|Comic|Pdf|Reader)/.test(name))
+);
+let discoveredReference = true;
+while (discoveredReference) {
+  discoveredReference = false;
+  for (const name of [...included]) {
+    const serialized = JSON.stringify(schemas[name]);
+    for (const match of serialized.matchAll(/#\/components\/schemas\/([^"\\]+)/g)) {
+      if (included.has(match[1])) continue;
+      if (!Object.hasOwn(schemas, match[1])) throw new Error(`Reader schema references missing model: ${match[1]}`);
+      included.add(match[1]);
+      discoveredReference = true;
+    }
+  }
+}
+const includedNames = [...included].sort();
 
 function typeName(name) {
   const normalized = String(name ?? '').replace(/[^A-Za-z0-9_$]/g, '_');
@@ -57,20 +73,20 @@ function typeExpression(schema, depth = 0) {
 }
 
 const missingRefs = new Set();
-for (const name of included) {
+for (const name of includedNames) {
   const serialized = JSON.stringify(schemas[name]);
   for (const match of serialized.matchAll(/#\/components\/schemas\/([^"\\]+)/g)) {
-    if (!included.includes(match[1])) missingRefs.add(match[1]);
+    if (!included.has(match[1])) missingRefs.add(match[1]);
   }
 }
 if (missingRefs.size) throw new Error(`Reader schemas reference excluded models: ${[...missingRefs].join(', ')}`);
 
 const generated = [
   '/* eslint-disable */',
-  '// AUTO-GENERATED from the Reader v3 FastAPI OpenAPI contract.',
+  '// AUTO-GENERATED from the Reader v4 FastAPI OpenAPI contract.',
   '// Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.',
   '',
-  ...included.flatMap((name) => [`export type ${typeName(name)} = ${typeExpression(schemas[name])};`, ''])
+  ...includedNames.flatMap((name) => [`export type ${typeName(name)} = ${typeExpression(schemas[name])};`, ''])
 ].join('\n');
 
 await writeFile(output, generated, 'utf8');

@@ -1,4 +1,4 @@
-import type { ProgressMutation } from '../../lib/reader/model';
+import type { ExactProgressRecord } from '../../lib/reader/model';
 
 export type LocalProgressScope = {
   userId: string;
@@ -8,7 +8,7 @@ export type LocalProgressScope = {
 };
 
 export function latestScopedProgress(
-  mutations: readonly ProgressMutation[],
+  mutations: readonly ExactProgressRecord[],
   scope: LocalProgressScope
 ) {
   return mutations
@@ -16,12 +16,12 @@ export function latestScopedProgress(
       mutation.userId === scope.userId
       && mutation.workId === scope.workId
       && mutation.volumeId === scope.volumeId
-      && mutation.contentFingerprint === scope.contentFingerprint
+      && mutation.localContentFingerprint === scope.contentFingerprint
     ))
-    .sort((left, right) => right.clientSequence - left.clientSequence || right.updatedAt - left.updatedAt)[0] ?? null;
+    .sort((left, right) => right.updatedAtEpochMillis - left.updatedAtEpochMillis)[0] ?? null;
 }
 
-export function localProgressProjection(mutation: ProgressMutation | null) {
+export function localProgressProjection(mutation: ExactProgressRecord | null) {
   if (!mutation) return null;
   const location = mutation.location;
   if (location.kind === 'reflowable') {

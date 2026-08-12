@@ -4,6 +4,7 @@ export type AudioTrack = {
   url: string;
   mimeType: string;
   codec: string | null;
+  contentHash: string | null;
   durationMs: number;
   discNumber: number | null;
   trackNumber: number | null;
@@ -61,10 +62,11 @@ export type AudioLaunchSummary = {
 };
 
 export type AudioBootstrap = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   userId: string;
   readerType: 'audio';
   contentFingerprint: string;
+  localContentFingerprint: string;
   book: AudioBookSummary;
   mediaVersion: AudioMediaVersionSummary;
   volume: AudioVolumeSummary;
@@ -74,6 +76,7 @@ export type AudioBootstrap = {
   totalDurationMs: number;
   resumeLocation: AudioLocation | null;
   progressPercent: number;
+  serverUpdatedAtEpochMillis: number | null;
   preferences: {
     playbackRate: number;
     skipBackwardSeconds: number;

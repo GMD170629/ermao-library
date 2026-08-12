@@ -8,6 +8,7 @@ struct AppRootView: View {
     let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
     let settingsClientOverride: (any SettingsClient)?
+    let readerComposition: IosReaderComposition?
     @Environment(\.colorScheme) private var colorScheme
 
     init(
@@ -16,7 +17,8 @@ struct AppRootView: View {
         contentCache: LibraryCacheStore = LibraryCacheStore(),
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)? = nil,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)? = nil,
-        settingsClientOverride: (any SettingsClient)? = nil
+        settingsClientOverride: (any SettingsClient)? = nil,
+        readerComposition: IosReaderComposition? = nil
     ) {
         self.store = store
         self.contentClient = contentClient
@@ -24,6 +26,7 @@ struct AppRootView: View {
         self.settingsRepository = settingsRepository
         self.administrativeSettingsRepository = administrativeSettingsRepository
         self.settingsClientOverride = settingsClientOverride
+        self.readerComposition = readerComposition
     }
 
     var body: some View {
@@ -109,14 +112,16 @@ struct AppRootView: View {
                         cache: contentCache,
                         settingsRepository: settingsRepository,
                         administrativeSettingsRepository: administrativeSettingsRepository,
-                        settingsClientOverride: settingsClientOverride
+                        settingsClientOverride: settingsClientOverride,
+                        readerComposition: readerComposition
                     )
                     .id(authenticatedShellIdentity)
                 } else {
                     MainTabView(
                         store: store,
                         contentClient: contentClient,
-                        cache: contentCache
+                        cache: contentCache,
+                        readerComposition: readerComposition
                     )
                     .id(authenticatedShellIdentity)
                 }
@@ -144,6 +149,7 @@ private struct AuthenticatedShellHost: View {
     let contentClient: any ContentClient
     let cache: LibraryCacheStore
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
+    let readerComposition: IosReaderComposition?
     @StateObject private var settingsViewModel: SettingsViewModel
     @State private var administrativeSettingsStore: AdministrativeSettingsStore?
 
@@ -154,12 +160,14 @@ private struct AuthenticatedShellHost: View {
         cache: LibraryCacheStore,
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?,
-        settingsClientOverride: (any SettingsClient)?
+        settingsClientOverride: (any SettingsClient)?,
+        readerComposition: IosReaderComposition?
     ) {
         self.store = store
         self.contentClient = contentClient
         self.cache = cache
         self.administrativeSettingsRepository = administrativeSettingsRepository
+        self.readerComposition = readerComposition
         guard
             let profile = store.snapshot.profile,
             let userID = store.snapshot.userID,
@@ -248,7 +256,8 @@ private struct AuthenticatedShellHost: View {
             contentClient: contentClient,
             cache: cache,
             settingsViewModel: settingsViewModel,
-            administrativeSettingsStore: administrativeSettingsStore
+            administrativeSettingsStore: administrativeSettingsStore,
+            readerComposition: readerComposition
         )
     }
 }

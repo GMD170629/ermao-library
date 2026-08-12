@@ -420,7 +420,7 @@ export function volumeFileDownloadUrl(volumeId: string): string {
 }
 
 export async function updateVolumeReadingStatus(volumeId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
-  await apiJson(`/api/reader/v3/volumes/${encodeURIComponent(volumeId)}/reading-status`, {
+  await apiJson(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/reading-status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status })

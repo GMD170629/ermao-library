@@ -68,6 +68,18 @@ final class LocalizationTests: XCTestCase {
             "content.inaccessible.title",
             "work.detail.title",
             "work.reader.unavailable.message",
+            "work.reader.accessibility.hint",
+            "reader.close",
+            "reader.download.preparing",
+            "reader.opening",
+            "reader.toc",
+            "reader.settings",
+            "reader.progress",
+            "reader.restore.warning.message",
+            "reader.save.failure.message",
+            "reader.error.CORRUPT_FILE",
+            "reader.error.DRM_PROTECTED",
+            "reader.error.PERSISTENCE_FAILED",
         ]
 
         for locale in ["en", "zh-Hans"] {

@@ -49,3 +49,7 @@ data
 /design-qa/
 /design-qa.md
 /design-qa*.png
+
+# Local runtime and acceptance outputs
+apps/api-python/tmp/
+docs/testing/screenshots/

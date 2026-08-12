@@ -7,7 +7,7 @@ import type { AudioPlaybackState } from './types';
 const payload = {
   ok: true,
   data: {
-    schemaVersion: 3,
+    schemaVersion: 4,
     userId: 'user-1',
     readerType: 'audio',
     contentFingerprint: 'fingerprint-1',
@@ -23,14 +23,20 @@ const payload = {
       { id: 'file-2', mimeType: 'audio/mpeg', durationMs: 20_000, sortOrder: 1, url: '/api/files/file-2' }
     ],
     units: [{ id: 'chapter-1', title: '第一章', fileId: 'file-1', startMs: 0, endMs: 10_000, index: 0 }],
-    resumeLocation: { type: 'audio', fileId: 'file-2', chapterId: null, positionMs: 7_000 },
-    progressPercent: 50
+    progressSnapshot: {
+      schemaVersion: 4,
+      clientId: 'web-1',
+      updatedAtEpochMillis: 100,
+      percent: 50,
+      contentFingerprint: 'fingerprint-1',
+      location: { kind: 'audio', fileId: 'file-2', chapterId: null, positionMs: 7_000 }
+    }
   }
 };
 
-test('normalizes the volume-first Reader v3 audio bootstrap', () => {
+test('normalizes the volume-first Reader v4 audio bootstrap', () => {
   const bootstrap = normalizeAudioBootstrap(payload, 'volume-1');
-  assert.equal(bootstrap.schemaVersion, 3);
+  assert.equal(bootstrap.schemaVersion, 4);
   assert.equal(bootstrap.volume.id, 'volume-1');
   assert.deepEqual(bootstrap.availableVolumes.map((volume) => volume.id), ['volume-1', 'volume-2']);
   assert.equal(bootstrap.resumeLocation?.volumeId, 'volume-1');

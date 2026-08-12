@@ -19,6 +19,7 @@ import io.ktor.http.URLBuilder
 import io.ktor.http.contentType
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
+import io.ktor.utils.io.cancel
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
@@ -66,6 +67,17 @@ internal data class AuthenticatedBinary(
     val mimeType: String,
     val contentDisposition: String?,
 )
+
+internal data class AuthenticatedDownload(
+    val mimeType: String,
+    val contentLength: Long?,
+    val etag: String?,
+)
+
+internal sealed interface StreamedDownloadBodyResult {
+    data class Complete(val totalBytes: Long) : StreamedDownloadBodyResult
+    data class Failure(val error: AppError) : StreamedDownloadBodyResult
+}
 
 class ApiClient internal constructor(
     private val profile: ServerProfile,
@@ -291,9 +303,11 @@ class ApiClient internal constructor(
                 return redirectFailure("BINARY_REDIRECT_REJECTED")
             }
             if (response.status.value !in 200..299) {
+                val errorBody = response.bodyAsChannel().readBounded(DOWNLOAD_ERROR_BODY_BYTES)
+                    ?: return redirectFailure("DOWNLOAD_ERROR_BODY_TOO_LARGE")
                 return when (val decoded = decoder.decode(
                     response.status.value,
-                    response.bodyAsText(),
+                    errorBody.decodeToString(),
                     JsonElement.serializer(),
                 )) {
                     is ApiResult.Failure -> decoded
@@ -320,6 +334,86 @@ class ApiClient internal constructor(
                     mimeType = mimeType,
                     contentDisposition = response.headers[HttpHeaders.ContentDisposition],
                 ),
+                ApiResponseMetadata(
+                    response.status.value,
+                    response.headers.entries().associate { it.key to it.value },
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (timeout: HttpRequestTimeoutException) {
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message))
+        } catch (error: PlatformStorageException) {
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message))
+        } catch (error: Throwable) {
+            return ApiResult.Failure(mapTransportError(error))
+        }
+    }
+
+    /** Streams an authenticated response without retaining the publication in memory. */
+    internal suspend fun streamAuthenticatedDownload(
+        apiPath: String,
+        maximumBytes: Long,
+        allowedMimeTypes: Set<String>,
+        writeChunk: suspend (bytes: ByteArray, count: Int) -> Unit,
+    ): ApiResult<AuthenticatedDownload> {
+        try {
+            require(apiPath.startsWith("/api/")) { "Download path must start with /api/" }
+            require(!apiPath.contains('#')) { "Download path must not contain a fragment" }
+            require(maximumBytes > 0) { "Download size limit must be positive" }
+            require(allowedMimeTypes.isNotEmpty()) { "At least one download MIME type is required" }
+            val response = client.request(profile.baseUrl.resolveApiPath(apiPath)) {
+                method = HttpMethod.Get
+            }
+            if (response.status.value in REDIRECT_STATUS_CODES) {
+                response.bodyAsChannel().cancelQuietly()
+                return redirectFailure("DOWNLOAD_REDIRECT_REJECTED")
+            }
+            if (response.status.value !in 200..299) {
+                val errorChannel = response.bodyAsChannel()
+                val errorBody = errorChannel.readBounded(DOWNLOAD_ERROR_BODY_BYTES)
+                if (errorBody == null) {
+                    errorChannel.cancelQuietly()
+                    return redirectFailure("DOWNLOAD_ERROR_BODY_TOO_LARGE")
+                }
+                return when (val decoded = decoder.decode(
+                    response.status.value,
+                    errorBody.decodeToString(),
+                    JsonElement.serializer(),
+                )) {
+                    is ApiResult.Failure -> decoded
+                    is ApiResult.Success -> redirectFailure("UNEXPECTED_DOWNLOAD_RESPONSE")
+                }
+            }
+            val mimeType = response.headers[HttpHeaders.ContentType]
+                ?.substringBefore(';')
+                ?.trim()
+                ?.lowercase()
+                ?: run {
+                    response.bodyAsChannel().cancelQuietly()
+                    return redirectFailure("DOWNLOAD_CONTENT_TYPE_MISSING")
+                }
+            if (mimeType !in allowedMimeTypes) {
+                response.bodyAsChannel().cancelQuietly()
+                return redirectFailure("DOWNLOAD_CONTENT_TYPE_INVALID")
+            }
+            val declaredSize = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            if (declaredSize != null && declaredSize !in 1..maximumBytes) {
+                response.bodyAsChannel().cancelQuietly()
+                return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "DOWNLOAD_TOO_LARGE"))
+            }
+            val channel = response.bodyAsChannel()
+            when (val body = consumeStreamedDownloadBody(
+                channel,
+                maximumBytes,
+                declaredSize,
+                writeChunk,
+            )) {
+                is StreamedDownloadBodyResult.Failure -> return ApiResult.Failure(body.error)
+                is StreamedDownloadBodyResult.Complete -> Unit
+            }
+            return ApiResult.Success(
+                AuthenticatedDownload(mimeType, declaredSize, response.headers[HttpHeaders.ETag]),
                 ApiResponseMetadata(
                     response.status.value,
                     response.headers.entries().associate { it.key to it.value },
@@ -393,12 +487,72 @@ class ApiClient internal constructor(
         return result
     }
 
+    /** Rejected bodies are intentionally abandoned; cleanup failure must not replace the protocol result. */
+    private fun ByteReadChannel.cancelQuietly() {
+        try {
+            cancel()
+        } catch (_: Throwable) {
+            // The response has already been classified and no body bytes are retained.
+        }
+    }
+
     private companion object {
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         const val MAX_REDIRECTS = 3
         const val DEFAULT_MAXIMUM_ASSET_BYTES = 12 * 1024 * 1024
         const val BINARY_READ_BUFFER_BYTES = 64 * 1024
+        const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+        const val DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024
     }
+}
+
+internal suspend fun consumeStreamedDownloadBody(
+    channel: ByteReadChannel,
+    maximumBytes: Long,
+    declaredSize: Long?,
+    writeChunk: suspend (bytes: ByteArray, count: Int) -> Unit,
+): StreamedDownloadBodyResult {
+    require(maximumBytes > 0)
+    val buffer = ByteArray(64 * 1024)
+    var totalBytes = 0L
+    while (true) {
+        val remainingWithOverflowProbe = maximumBytes - totalBytes + 1L
+        val requestedBytes = minOf(buffer.size.toLong(), remainingWithOverflowProbe).toInt()
+        val count = try {
+            channel.readAvailable(buffer, 0, requestedBytes)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            return StreamedDownloadBodyResult.Failure(
+                AppError(AppErrorKind.NetworkUnavailable, "DOWNLOAD_INTERRUPTED"),
+            )
+        }
+        if (count < 0) break
+        if (count == 0) continue
+        totalBytes += count
+        if (totalBytes > maximumBytes) {
+            try {
+                channel.cancel()
+            } catch (_: Throwable) {
+                // The body is already rejected and no bytes are retained.
+            }
+            return StreamedDownloadBodyResult.Failure(
+                AppError(AppErrorKind.PayloadTooLarge, "DOWNLOAD_TOO_LARGE"),
+            )
+        }
+        writeChunk(buffer, count)
+    }
+    if (totalBytes == 0L) {
+        return StreamedDownloadBodyResult.Failure(
+            AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_EMPTY"),
+        )
+    }
+    if (declaredSize != null && totalBytes != declaredSize) {
+        return StreamedDownloadBodyResult.Failure(
+            AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_LENGTH_MISMATCH"),
+        )
+    }
+    return StreamedDownloadBodyResult.Complete(totalBytes)
 }
 
 internal expect fun mapTransportError(error: Throwable): AppError

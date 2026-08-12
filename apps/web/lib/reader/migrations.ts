@@ -4,7 +4,7 @@ import {
   type ReaderLocation
 } from '@shuku/reader-core';
 import { emitReaderDebug } from './debug';
-import type { ProgressMutationInput } from './model';
+import { currentReaderServerIdentity, type ProgressSaveInput } from './model';
 import type { ReaderPreferenceRepository } from './preferences';
 import type { ReaderProgressSyncCoordinator } from './sync-coordinator';
 import type { ReaderStorage } from './storage';
@@ -21,6 +21,7 @@ type LegacyProgressCandidate = {
   workId?: string;
   editionId?: string;
   contentFingerprint?: string;
+  localContentFingerprint?: string;
   volumeId?: string | null;
   readerType?: ReaderKind | 'epub' | 'ebook' | 'unknown';
   progress: unknown;
@@ -28,7 +29,7 @@ type LegacyProgressCandidate = {
 };
 
 export type LegacyMigrationResult = { status: 'migrated' | 'skipped' | 'quarantined'; reason?: string };
-type ProgressEnqueuer = Pick<ReaderProgressSyncCoordinator, 'enqueue'>;
+type ExactProgressSaver = Pick<ReaderProgressSyncCoordinator, 'saveExactOnly'>;
 
 function record(value: unknown): Record<string, unknown> {
   if (typeof value === 'string') {
@@ -108,7 +109,7 @@ function legacyLocation(candidate: LegacyProgressCandidate, progress: Record<str
 
 export async function migrateLegacyProgressCandidate(
   candidate: LegacyProgressCandidate,
-  coordinator: ProgressEnqueuer,
+  coordinator: ExactProgressSaver,
   storage: ReaderStorage
 ): Promise<LegacyMigrationResult> {
   if (!nonEmpty(candidate.userId) || !nonEmpty(candidate.workId) || !nonEmpty(candidate.volumeId) || !nonEmpty(candidate.contentFingerprint)) {
@@ -119,17 +120,19 @@ export async function migrateLegacyProgressCandidate(
   if (!location) return quarantineUnsafeLegacy(storage, candidate.sourceKey ?? 'legacy-progress', '无法确定阅读格式或位置');
   const extra = record(progress.extra);
   const percent = finite(progress.percent) ?? finite(extra.percentage) ?? 0;
-  const input: ProgressMutationInput = {
+  const input: ProgressSaveInput = {
+    serverIdentity: currentReaderServerIdentity(),
     userId: candidate.userId,
     workId: candidate.workId,
     volumeId: location.kind === 'comic'
       ? location.volumeId
       : candidate.volumeId,
     contentFingerprint: candidate.contentFingerprint,
+    localContentFingerprint: candidate.localContentFingerprint ?? candidate.contentFingerprint,
     location,
     percent
   };
-  await coordinator.enqueue(input);
-  emitReaderDebug('info', '旧阅读进度已迁移到卷册顺序队列', { volumeId: candidate.volumeId, source: candidate.sourceKey });
+  await coordinator.saveExactOnly(input);
+  emitReaderDebug('info', '旧阅读进度已迁移到本机精确位置', { volumeId: candidate.volumeId, source: candidate.sourceKey });
   return { status: 'migrated' };
 }

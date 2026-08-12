@@ -27,6 +27,9 @@ class ServerCompatibilityChecker(
         if (!compatibility.capabilities.cookieSession) {
             return ServerCompatibilityDecision.Incompatible("COOKIE_SESSION_REQUIRED")
         }
+        if (!compatibility.capabilities.readerV4) {
+            return ServerCompatibilityDecision.Incompatible("READER_V4_REQUIRED")
+        }
         return ServerCompatibilityDecision.Compatible(compatibility)
     }
 

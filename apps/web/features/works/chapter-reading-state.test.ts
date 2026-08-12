@@ -79,7 +79,7 @@ test('uses an exact foliate TOC index across paginated chapter rows', () => {
   );
 });
 
-test('uses the exact Reader v3 chapter index across pages before and after the current chapter', () => {
+test('uses the exact Reader chapter index across pages before and after the current chapter', () => {
   const firstPage = Array.from({ length: 5 }, (_, index) => ({
     href: `txt-section:${index}`,
     sortOrder: index

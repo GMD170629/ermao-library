@@ -90,6 +90,7 @@ fun WorkDetailScreen(
     onSelectVolume: (String) -> Unit,
     onSelectContentTab: (WorkDetailContentTab) -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
+    onOpenReader: (String) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -137,6 +138,7 @@ fun WorkDetailScreen(
                 onSelectVolume = onSelectVolume,
                 onSelectContentTab = onSelectContentTab,
                 onOpenFacet = onOpenFacet,
+                onOpenReader = onOpenReader,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -156,11 +158,18 @@ private fun WorkDetailBody(
     onSelectVolume: (String) -> Unit,
     onSelectContentTab: (WorkDetailContentTab) -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
+    onOpenReader: (String) -> Unit,
     modifier: Modifier,
 ) {
     val theme = WarmPageThemeValues
     val content = requireNotNull(state.content)
     val selectedMedia = content.media.firstOrNull { it.kind == state.selectedMediaKind }
+    val selectedVolume = selectedMedia?.volumes?.firstOrNull { it.id == state.selectedVolumeId }
+        ?: selectedMedia?.volumes?.firstOrNull { it.selected }
+        ?: selectedMedia?.volumes?.firstOrNull()
+    val canOpenReader = state.selectedMediaKind.equals("EBOOK", ignoreCase = true) &&
+        selectedVolume?.readable == true &&
+        selectedVolume.format.equals("epub", ignoreCase = true)
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = theme.spacing.three, end = theme.spacing.three, bottom = theme.spacing.six),
@@ -171,20 +180,22 @@ private fun WorkDetailBody(
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Button(
-                    onClick = {},
-                    enabled = false,
-                    modifier = Modifier.fillMaxWidth().testTag("work-reader-disabled"),
+                    onClick = { selectedVolume?.id?.let(onOpenReader) },
+                    enabled = canOpenReader,
+                    modifier = Modifier.fillMaxWidth().testTag("work-reader-action"),
                     colors = ButtonDefaults.buttonColors(disabledContainerColor = theme.colors.actionAccent.copy(alpha = 0.45f)),
                 ) {
                     Icon(Icons.Outlined.Book, contentDescription = null)
                     Text(primaryActionLabel(state.selectedMediaKind), modifier = Modifier.padding(start = theme.spacing.one))
                 }
-                Text(
-                    stringResource(R.string.work_reader_next_phase_message),
-                    style = theme.typography.caption,
-                    color = theme.colors.textSecondary,
-                    modifier = Modifier.padding(top = theme.spacing.one),
-                )
+                if (!canOpenReader) {
+                    Text(
+                        stringResource(R.string.work_reader_next_phase_message),
+                        style = theme.typography.caption,
+                        color = theme.colors.textSecondary,
+                        modifier = Modifier.padding(top = theme.spacing.one),
+                    )
+                }
             }
         }
         if (content.showsContentTabs) {

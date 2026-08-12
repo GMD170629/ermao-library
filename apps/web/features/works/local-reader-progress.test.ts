@@ -1,35 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ProgressMutation } from '../../lib/reader/model';
+import { exactProgressKey, type ExactProgressRecord } from '../../lib/reader/model';
 import { latestScopedProgress, localProgressProjection } from './local-reader-progress';
 
-function mutation(overrides: Partial<ProgressMutation> = {}): ProgressMutation {
-  return {
-    schemaVersion: 3,
-    mutationId: 'mutation-1',
-    clientId: 'client-1',
-    clientSequence: 1,
-    slotKey: 'slot',
+function mutation(overrides: Partial<ExactProgressRecord> = {}): ExactProgressRecord {
+  const identity = {
+    serverIdentity: 'https://library.example',
     userId: 'user-1',
-    workId: 'work-1',
+    clientId: 'client-1',
     volumeId: 'volume-1',
-    contentFingerprint: 'sha256:current',
+    localContentFingerprint: 'sha256:current'
+  };
+  return {
+    ...identity,
+    key: exactProgressKey(identity),
+    schemaVersion: 1,
+    workId: 'work-1',
     location: { kind: 'pdf', pageNumber: 2 },
     percent: 20,
-    createdAt: 1,
-    updatedAt: 1,
-    retryCount: 0,
-    nextAttemptAt: 1,
+    updatedAtEpochMillis: 1,
     ...overrides
   };
 }
 
 test('latestScopedProgress isolates user, volume, and content fingerprint', () => {
-  const latest = mutation({ mutationId: 'latest', clientSequence: 3 });
+  const latest = mutation({ updatedAtEpochMillis: 3 });
   const result = latestScopedProgress([
-    mutation({ mutationId: 'other-user', userId: 'user-2', clientSequence: 9 }),
-    mutation({ mutationId: 'stale-content', contentFingerprint: 'sha256:old', clientSequence: 8 }),
-    mutation({ mutationId: 'older', clientSequence: 2 }),
+    mutation({ userId: 'user-2', updatedAtEpochMillis: 9 }),
+    mutation({ localContentFingerprint: 'sha256:old', updatedAtEpochMillis: 8 }),
+    mutation({ updatedAtEpochMillis: 2 }),
     latest
   ], {
     userId: 'user-1',
@@ -37,7 +36,7 @@ test('latestScopedProgress isolates user, volume, and content fingerprint', () =
     volumeId: 'volume-1',
     contentFingerprint: 'sha256:current'
   });
-  assert.equal(result?.mutationId, 'latest');
+  assert.equal(result?.updatedAtEpochMillis, 3);
 });
 
 test('localProgressProjection exposes foliate TOC, Loc, and remaining time', () => {

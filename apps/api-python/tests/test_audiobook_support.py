@@ -9,12 +9,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from PIL import Image
+from sqlalchemy import text
+
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
 import app.worker.watcher as watcher_module
-import pytest
 from app.bootstrap.imports import (
     import_managed_book,
     load_import_enqueue_command_projection,
@@ -66,8 +69,6 @@ from app.worker.watcher import (
     WatchState,
     WorkerManager,
 )
-from PIL import Image
-from sqlalchemy import text
 from tests.test_worker_importer import write_epub_metadata_fixture
 
 
@@ -1100,14 +1101,14 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert all(row["fullHash"] is None for row in stored_hashes)
 
     bootstrap_response = client.get(
-        f"/api/reader/v3/volumes/{result.volume_id}/bootstrap"
+        f"/api/reader/v4/volumes/{result.volume_id}/bootstrap"
     )
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "audio"
     assert bootstrap["contentFingerprint"].startswith("sha256:")
     assert (
-        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+        client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
         ]["contentFingerprint"]
         == bootstrap["contentFingerprint"]
@@ -1156,61 +1157,58 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
 
     final_track = bootstrap["files"][-1]
     common = {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "clientId": "audio-player",
         "contentFingerprint": bootstrap["contentFingerprint"],
         "location": {
-            "type": "audio",
+            "kind": "audio",
             "fileId": final_track["id"],
             "chapterId": bootstrap["units"][-1]["id"],
             "positionMs": final_track["durationMs"],
         },
     }
     seek = client.put(
-        f"/api/reader/v3/volumes/{result.volume_id}/progress",
+        f"/api/reader/v4/volumes/{result.volume_id}/progress",
         json={
             **common,
-            "mutationId": "seek-to-end",
-            "clientSequence": 1,
+            "updatedAtEpochMillis": 1_700_000_001_000,
             "percent": 99.999,
         },
     )
     assert seek.status_code == 200
     assert seek.json()["data"]["progress"]["percent"] == 99.999
     assert (
-        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+        client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
         ]["mediaVersion"]["completed"]
         is False
     )
 
     ended = client.put(
-        f"/api/reader/v3/volumes/{result.volume_id}/progress",
+        f"/api/reader/v4/volumes/{result.volume_id}/progress",
         json={
             **common,
-            "mutationId": "media-ended",
-            "clientSequence": 2,
+            "updatedAtEpochMillis": 1_700_000_002_000,
             "percent": 100,
         },
     )
     assert ended.status_code == 200
     assert ended.json()["data"]["progress"]["percent"] == 100
     assert (
-        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+        client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
         ]["mediaVersion"]["completed"]
         is True
     )
 
     paused_after_finish = client.put(
-        f"/api/reader/v3/volumes/{result.volume_id}/progress",
+        f"/api/reader/v4/volumes/{result.volume_id}/progress",
         json={
             **common,
-            "mutationId": "pause-after-finish",
-            "clientSequence": 3,
+            "updatedAtEpochMillis": 1_700_000_003_000,
             "percent": 10,
             "location": {
-                "type": "audio",
+                "kind": "audio",
                 "fileId": first_track["id"],
                 "chapterId": bootstrap["units"][0]["id"],
                 "positionMs": 10_000,
@@ -1219,7 +1217,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     )
     assert paused_after_finish.status_code == 200
     assert (
-        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+        client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
         ]["mediaVersion"]["completed"]
         is False
@@ -1817,9 +1815,9 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
         ("Ghost Blows Out the Light Desert", None, 2000),
     ]
 
-    first_bootstrap = client.get(f"/api/reader/v3/volumes/{volumes[0]['id']}/bootstrap")
+    first_bootstrap = client.get(f"/api/reader/v4/volumes/{volumes[0]['id']}/bootstrap")
     second_bootstrap = client.get(
-        f"/api/reader/v3/volumes/{volumes[1]['id']}/bootstrap"
+        f"/api/reader/v4/volumes/{volumes[1]['id']}/bootstrap"
     )
     assert first_bootstrap.status_code == 200
     assert second_bootstrap.status_code == 200
@@ -2028,7 +2026,7 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
         (2, 1),
         (10, 2),
     ]
-    bootstrap = client.get(f"/api/reader/v3/volumes/{results[0].volume_id}/bootstrap")
+    bootstrap = client.get(f"/api/reader/v4/volumes/{results[0].volume_id}/bootstrap")
     assert bootstrap.status_code == 200
     assert [track["trackNumber"] for track in bootstrap.json()["data"]["files"]] == [
         1,
@@ -2648,11 +2646,10 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     assert [volume["id"] for volume in book["mediaVersions"][0]["volumes"]] == [
         reconciled.volume_id
     ]
-    bootstrap = client.get(f"/api/reader/v3/volumes/{reconciled.volume_id}/bootstrap")
+    bootstrap = client.get(f"/api/reader/v4/volumes/{reconciled.volume_id}/bootstrap")
     assert bootstrap.status_code == 200
     bootstrap_data = bootstrap.json()["data"]
     assert [track["trackNumber"] for track in bootstrap_data["files"]] == [1, 2, 3]
-    assert bootstrap_data["resumeFingerprintMismatch"] is False
-    assert bootstrap_data["resumeLocation"] == legacy_location | {
-        "volumeId": reconciled.volume_id
-    }, progress["locationJson"]
+    snapshot = bootstrap_data["progressSnapshot"]
+    assert snapshot["contentFingerprint"] == bootstrap_data["contentFingerprint"]
+    assert snapshot["location"] is None, progress["locationJson"]

@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 POC_ROOT="${SCRIPT_DIR:h}"
+REPO_ROOT="${POC_ROOT:h:h:h}"
 CALIBRE_APP="${CALIBRE_APP:-/Applications/calibre.app}"
 EBOOK_CONVERT="${CALIBRE_APP}/Contents/MacOS/ebook-convert"
 EXPECTED_VERSION="9.11.0"
@@ -11,7 +12,7 @@ export TZ="UTC"
 WORK_ROOT="${POC_ROOT}/.fixture-build"
 SOURCE_ROOT="${POC_ROOT}/Fixtures/Sources/Generated"
 EPUB_ROOT="${WORK_ROOT}/epub"
-FIXTURE_ROOT="${POC_ROOT}/ReaderPOC/Resources/Fixtures"
+FIXTURE_ROOT="${REPO_ROOT}/test-data/library/mobi"
 FONT_FILE="${POC_ROOT}/Fixtures/Sources/Assets/Literata-Regular.ttf"
 
 if [[ ! -x "${EBOOK_CONVERT}" ]]; then

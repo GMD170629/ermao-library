@@ -61,7 +61,7 @@ class ApiEnvelopeTest {
 
     private companion object {
         val COMPATIBILITY_FIXTURE = """
-            {"ok":true,"data":{"service":"ermao-books","serverIdentity":"server_fixture","serverVersion":"1.2.3","protocol":{"version":1,"minimumSupportedClientVersion":1},"readerSchemaVersion":4,"capabilities":{"setup":true,"cookieSession":true,"readerV3":true,"mediaRange":true,"managedOfflineDownloads":false}}}
+            {"ok":true,"data":{"service":"ermao-books","serverIdentity":"server_fixture","serverVersion":"1.2.3","protocol":{"version":1,"minimumSupportedClientVersion":1},"readerSchemaVersion":4,"capabilities":{"setup":true,"cookieSession":true,"readerV4":true,"mediaRange":true,"managedOfflineDownloads":false}}}
         """.trimIndent()
     }
 }

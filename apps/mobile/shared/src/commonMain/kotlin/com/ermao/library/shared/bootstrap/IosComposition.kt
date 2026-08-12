@@ -21,6 +21,11 @@ import com.ermao.library.shared.modules.personalsettings.infrastructure.KtorPers
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.infrastructure.KtorAdministrativeSettingsRepository
 import com.ermao.library.shared.core.time.currentEpochMillis
+import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 /** Composition root for Swift. Cookie payloads must be backed by Keychain in iosApp. */
 fun createIosMobileRuntimeBridge(
@@ -70,4 +75,22 @@ fun createIosAdministrativeSettingsRepository(
 ): AdministrativeSettingsRepository =
     KtorAdministrativeSettingsRepository(
         ApiClientFactory(SerializedCookieVault(cookieStore)),
+    )
+
+/** Shared Reader v4 bootstrap/download mapper; publication bytes still terminate in a native sink. */
+fun createIosReaderBootstrapGateway(
+    cookieStore: SecureCookiePayloadStore,
+): ReaderServerGateway =
+    KtorReaderBootstrapGateway(
+        ApiClientFactory(SerializedCookieVault(cookieStore)),
+    )
+
+/** Shared Reader v4 best-effort progress wire; exact local storage remains native. */
+fun createIosReaderProgressSyncPort(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+): ReaderProgressSyncPort =
+    KtorReaderProgressSyncPort(
+        clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
+        profile = profile,
     )

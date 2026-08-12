@@ -15,16 +15,21 @@ from app.modules.reader.application.dto import (
     ReaderBookmarkDto,
     ReaderBootstrapDto,
     ReaderExternalProgressDto,
+    ReaderLocationKind,
     ReaderProgressDto,
     ReaderReadingStatus,
     ReaderVolumeContextDto,
 )
 from app.modules.reader.application.ports import (
+    ReaderClock,
     ReaderEpubNavigationParser,
     ReaderUnitOfWork,
     ReaderVolumeRepository,
 )
-from app.modules.reader.domain.volume_format import reader_type_for_volume_format
+from app.modules.reader.domain.volume_format import (
+    ReaderType,
+    reader_type_for_volume_format,
+)
 
 
 class ReaderVolumeNotFound(Exception):
@@ -47,21 +52,22 @@ class ReaderFingerprintMismatch(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class SaveProgressCommand:
-    user_id: str
-    volume_id: str
-    mutation_id: str
-    client_id: str
-    client_sequence: int
-    content_fingerprint: str
-    location_json: str
-    percent: float
+class ReaderLocationFormatMismatch(Exception):
+    expected: ReaderLocationKind
+    received: ReaderLocationKind
 
 
 @dataclass(frozen=True, slots=True)
-class SaveProgressResult:
-    applied: bool
-    progress: ReaderProgressDto
+class SaveProgressCommand:
+    user_id: str
+    volume_id: str
+    access_scope: ReaderAccessScope
+    client_id: str
+    content_fingerprint: str
+    location_kind: ReaderLocationKind | None
+    location_json: str | None
+    percent: float
+    updated_at_epoch_millis: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +76,16 @@ class SetVolumeReadingStatusCommand:
     volume_id: str
     access_scope: ReaderAccessScope
     status: ReaderReadingStatus
+
+
+@dataclass(frozen=True, slots=True)
+class ReplaceBookmarksCommand:
+    user_id: str
+    volume_id: str
+    access_scope: ReaderAccessScope
+    content_fingerprint: str
+    bookmarks: tuple[ReaderBookmarkDto, ...]
+    location_kinds: tuple[ReaderLocationKind, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,10 +111,12 @@ class VolumeReaderService:
         repository: ReaderVolumeRepository,
         unit_of_work: ReaderUnitOfWork,
         epub_navigation_parser: ReaderEpubNavigationParser,
+        clock: ReaderClock,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
         self._epub_navigation_parser = epub_navigation_parser
+        self._clock = clock
 
     def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
         return self._repository.get_context(volume_id)
@@ -159,44 +177,46 @@ class VolumeReaderService:
                 if fingerprint_mismatch or selected_progress is None
                 else selected_progress.location_json
             ),
-            resume_fingerprint_mismatch=fingerprint_mismatch,
             media_completed=media_completed,
         )
 
-    def save_progress(self, command: SaveProgressCommand) -> SaveProgressResult:
-        context = self._repository.get_context(command.volume_id)
-        if context is None:
-            raise ReaderVolumeNotFound
+    def save_progress(self, command: SaveProgressCommand) -> ReaderProgressDto:
+        context = self._require_visible_context(command.volume_id, command.access_scope)
         reader_type = reader_type_for_volume_format(context.volume.format)
         if reader_type is None:
             raise ReaderVolumeFormatUnsupported
+        _require_matching_location_kind(reader_type, command.location_kind)
         expected_fingerprint = build_volume_content_fingerprint(
             asdict(context.volume),
             [asdict(file) for file in self._repository.list_files(command.volume_id)],
         )
-        if command.content_fingerprint != expected_fingerprint:
-            raise ReaderFingerprintMismatch(
-                expected=expected_fingerprint,
-                received=command.content_fingerprint,
-            )
+        now = _aware_utc(self._clock.now())
+        progressed_at = datetime.fromtimestamp(
+            command.updated_at_epoch_millis / 1000,
+            tz=UTC,
+        )
+        location_json = (
+            command.location_json
+            if command.content_fingerprint == expected_fingerprint
+            else None
+        )
         try:
-            progress, applied = self._repository.save_progress(
+            progress = self._repository.save_progress(
                 user_id=command.user_id,
                 context=context,
                 reader_type=reader_type.value,
                 percent=command.percent,
-                location_json=command.location_json,
+                location_json=location_json,
                 content_fingerprint=expected_fingerprint,
-                mutation_id=command.mutation_id,
                 client_id=command.client_id,
-                client_sequence=command.client_sequence,
-                now=datetime.now(UTC),
+                progressed_at=progressed_at,
+                now=now,
             )
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
             raise
-        return SaveProgressResult(applied=applied, progress=progress)
+        return progress
 
     def set_volume_reading_status(
         self, command: SetVolumeReadingStatusCommand
@@ -218,7 +238,7 @@ class VolumeReaderService:
                 reader_type=reader_type.value,
                 status=command.status,
                 content_fingerprint=fingerprint,
-                now=datetime.now(UTC),
+                now=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
         except Exception:
@@ -274,7 +294,7 @@ class VolumeReaderService:
         mutation_id = (
             "opds-" + hashlib.sha256(mutation_source.encode("utf-8")).hexdigest()[:48]
         )
-        now = datetime.now(UTC)
+        now = _aware_utc(self._clock.now())
         try:
             progress = self._repository.save_external_progress(
                 user_id=command.user_id,
@@ -321,21 +341,24 @@ class VolumeReaderService:
         return self._repository.list_bookmarks(user_id, volume_id, content_fingerprint)
 
     def replace_bookmarks(
-        self,
-        *,
-        user_id: str,
-        volume_id: str,
-        content_fingerprint: str,
-        bookmarks: list[ReaderBookmarkDto],
+        self, command: ReplaceBookmarksCommand
     ) -> list[ReaderBookmarkDto]:
-        self._require_current_fingerprint(volume_id, content_fingerprint)
+        context = self._require_visible_context(command.volume_id, command.access_scope)
+        reader_type = reader_type_for_volume_format(context.volume.format)
+        if reader_type is None:
+            raise ReaderVolumeFormatUnsupported
+        for location_kind in command.location_kinds:
+            _require_matching_location_kind(reader_type, location_kind)
+        self._require_current_fingerprint(
+            command.volume_id, command.content_fingerprint
+        )
         try:
             result = self._repository.replace_bookmarks(
-                user_id=user_id,
-                volume_id=volume_id,
-                content_fingerprint=content_fingerprint,
-                bookmarks=bookmarks,
-                now=datetime.now(UTC),
+                user_id=command.user_id,
+                volume_id=command.volume_id,
+                content_fingerprint=command.content_fingerprint,
+                bookmarks=list(command.bookmarks),
+                now=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
         except Exception:
@@ -364,6 +387,23 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _require_matching_location_kind(
+    reader_type: ReaderType,
+    location_kind: ReaderLocationKind | None,
+) -> None:
+    if location_kind is None:
+        return
+    expected_by_reader_type: dict[ReaderType, ReaderLocationKind] = {
+        ReaderType.REFLOWABLE: "reflow",
+        ReaderType.COMIC: "comic",
+        ReaderType.PDF: "pdf",
+        ReaderType.AUDIO: "audio",
+    }
+    expected = expected_by_reader_type[reader_type]
+    if location_kind != expected:
+        raise ReaderLocationFormatMismatch(expected=expected, received=location_kind)
 
 
 def _page_from_references(references: tuple[str, ...]) -> int | None:

@@ -7,7 +7,7 @@ export async function clearPrivateReaderData(storage: ReaderStorage) {
   try {
     await storage.clearAll();
   } catch (error) {
-    emitReaderDebug('error', 'Reader v3 私有数据清除失败', {
+    emitReaderDebug('error', 'Reader v4 私有数据清除失败', {
       error: error instanceof Error ? error.message : String(error)
     });
   }
@@ -23,7 +23,7 @@ export async function clearPrivateReaderData(storage: ReaderStorage) {
       // Private browsing can expose localStorage while rejecting access.
     }
   }
-  emitReaderDebug('info', '已清除 Reader v3 私有数据');
+  emitReaderDebug('info', '已清除 Reader v4 私有数据');
 }
 
 export { LEGACY_MIGRATION_MARKER_PREFIX };

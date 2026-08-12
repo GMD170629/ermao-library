@@ -65,7 +65,7 @@ def get_mobile_compatibility(
             capabilities=MobileCapabilitiesPayload(
                 setup=compatibility.capabilities.setup,
                 cookieSession=compatibility.capabilities.cookie_session,
-                readerV3=compatibility.capabilities.reader_v3,
+                readerV4=compatibility.capabilities.reader_v4,
                 mediaRange=compatibility.capabilities.media_range,
                 managedOfflineDownloads=(
                     compatibility.capabilities.managed_offline_downloads

@@ -126,7 +126,7 @@ function shouldBypass(request) {
   if (isLocalDevelopmentHost(url.hostname)) return true;
   if (isSensitiveApi(url.pathname)) return true;
   if (withoutBasePath(url.pathname) === '/api/app-config') return true;
-  if (withoutBasePath(url.pathname).startsWith('/api/reader/v2/')) return true;
+  if (withoutBasePath(url.pathname).startsWith('/api/reader/')) return true;
   if (isLargeReaderPayload(url.pathname)) return true;
   if (isReaderFont(url.pathname)) return true;
   if (/\.(cbz|zip|epub|pdf|m4b|m4a|mp3|aac|ogg|opus|flac|wav)$/i.test(url.pathname)) return true;

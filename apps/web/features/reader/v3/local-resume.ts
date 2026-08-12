@@ -1,31 +1,20 @@
 import type { ReaderKind, ReaderLocation, ReflowableFormat } from '@shuku/reader-core';
-import type { ProgressMutation } from '../../../lib/reader';
+import type { ExactProgressRecord, ReaderProgressSnapshot } from '../../../lib/reader';
 
-type VisualProgressMutation = ProgressMutation & { location: ReaderLocation };
-
-type LocalResumeContextBase = {
-  userId: string;
-  volumeId: string;
-  contentFingerprint: string;
+export type LocalResumeContext = {
+  readerKind: ReaderKind;
+  sourceFormat?: ReflowableFormat;
 };
-
-export type LocalResumeContext = LocalResumeContextBase & (
-  | { readerKind: 'reflowable'; sourceFormat: ReflowableFormat }
-  | { readerKind: Exclude<ReaderKind, 'reflowable'>; sourceFormat?: never }
-);
 
 export type StartupResumeDecision = {
   location: ReaderLocation | null;
   percent: number;
-  source: 'direct-target' | 'local-pending' | 'server';
-  localMutation: VisualProgressMutation | null;
+  source: 'direct-target' | 'local-exact' | 'server';
+  localExact: ExactProgressRecord | null;
 };
 
-function hasVisualReaderLocation(mutation: ProgressMutation): mutation is VisualProgressMutation {
-  return mutation.location.kind !== 'audio';
-}
-
-function locationForContext(location: ReaderLocation, context: LocalResumeContext): ReaderLocation | null {
+function locationForContext(location: ExactProgressRecord['location'], context: LocalResumeContext): ReaderLocation | null {
+  if (location.kind === 'audio') return null;
   if (context.readerKind === 'reflowable') {
     if (location.kind === 'epub') {
       return {
@@ -37,82 +26,56 @@ function locationForContext(location: ReaderLocation, context: LocalResumeContex
       };
     }
     if (location.kind !== 'reflowable') return null;
-    return location.format === context.sourceFormat ? location : null;
+    return !context.sourceFormat || location.format === context.sourceFormat ? location : null;
   }
   return location.kind === context.readerKind ? location : null;
 }
 
-/**
- * Selects only an exact content-scoped mutation. A pending position from a
- * different user, volume, rendition, or reader cannot be restored.
- */
-export function newestLocalResume(
-  mutations: readonly ProgressMutation[],
-  context: LocalResumeContext
-): VisualProgressMutation | null {
-  let latest: VisualProgressMutation | null = null;
-  for (const mutation of mutations) {
-    if (!hasVisualReaderLocation(mutation)) continue;
-    const normalizedLocation = locationForContext(mutation.location, context);
-    if (
-      mutation.userId !== context.userId
-      || mutation.volumeId !== context.volumeId
-      || mutation.contentFingerprint !== context.contentFingerprint
-      || !normalizedLocation
-    ) continue;
-
-    const normalizedMutation: VisualProgressMutation = normalizedLocation === mutation.location
-      ? mutation
-      : { ...mutation, location: normalizedLocation };
-
-    if (!latest) {
-      latest = normalizedMutation;
-      continue;
-    }
-    if (mutation.clientSequence !== latest.clientSequence) {
-      if (mutation.clientSequence > latest.clientSequence) latest = normalizedMutation;
-      continue;
-    }
-    if (mutation.updatedAt > latest.updatedAt) latest = normalizedMutation;
-  }
-  return latest;
-}
-
-/**
- * Reconciles the server snapshot with the durable local outbox. An explicit,
- * validated deep link is user intent and always wins; otherwise the newest
- * exact pending mutation wins over the potentially stale bootstrap response.
- */
+/** Explicit navigation wins; otherwise local exact wins timestamp ties. */
 export function resolveStartupResume(input: {
-  mutations: readonly ProgressMutation[];
+  localExact: ExactProgressRecord | null;
+  serverSnapshot: ReaderProgressSnapshot | null;
   context: LocalResumeContext;
-  initialLocation: ReaderLocation | null;
-  progressPercent: number;
+  serverLocation: ReaderLocation | null;
+  serverPercent: number;
   hasDirectTarget: boolean;
 }): StartupResumeDecision {
   if (input.hasDirectTarget) {
     return {
-      location: input.initialLocation,
-      percent: input.progressPercent,
+      location: input.serverLocation,
+      percent: input.serverPercent,
       source: 'direct-target',
-      localMutation: null
+      localExact: null
     };
   }
 
-  const localMutation = newestLocalResume(input.mutations, input.context);
-  if (localMutation) {
+  const localLocation = input.localExact
+    ? locationForContext(input.localExact.location, input.context)
+    : null;
+  const localWins = Boolean(
+    input.localExact
+    && localLocation
+    && (
+      !input.serverSnapshot
+      || input.localExact.updatedAtEpochMillis >= input.serverSnapshot.updatedAtEpochMillis
+    )
+  );
+  if (localWins && input.localExact && localLocation) {
+    const approximatePercent = localLocation.kind === 'reflowable' && typeof localLocation.progression === 'number'
+      ? localLocation.progression * 100
+      : input.serverPercent;
     return {
-      location: localMutation.location,
-      percent: localMutation.percent,
-      source: 'local-pending',
-      localMutation
+      location: localLocation,
+      percent: input.localExact.percent ?? approximatePercent,
+      source: 'local-exact',
+      localExact: input.localExact
     };
   }
 
   return {
-    location: input.initialLocation,
-    percent: input.progressPercent,
+    location: input.serverLocation,
+    percent: input.serverPercent,
     source: 'server',
-    localMutation: null
+    localExact: null
   };
 }

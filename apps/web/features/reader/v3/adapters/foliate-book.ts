@@ -50,6 +50,7 @@ export type OpenFoliateBookOptions = {
   format: ReflowableFormat;
   title: string;
   signal: AbortSignal;
+  expectedSha256?: string;
   fetch?: typeof globalThis.fetch;
   cache?: {
     storage: ReaderBookCache;
@@ -59,6 +60,21 @@ export type OpenFoliateBookOptions = {
   onPhase?: (phase: 'downloading' | 'parsing') => void;
   onCacheWarning?: (code: 'BOOK_CACHE_WRITE_FAILED') => void;
 };
+
+async function sha256(blob: Blob) {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function requireExpectedHash(blob: Blob, expectedSha256: string | undefined) {
+  if (!expectedSha256) return;
+  if (!/^sha256:[0-9a-f]{64}$/iu.test(expectedSha256)) {
+    throw new NovelOpenError('NOVEL_RESOURCE_FAILED', 'The publication hash is invalid');
+  }
+  if ((await sha256(blob)).toLowerCase() !== expectedSha256.toLowerCase()) {
+    throw new NovelOpenError('NOVEL_RESOURCE_FAILED', 'The publication hash does not match');
+  }
+}
 
 export type FoliateDownloadProgress = {
   loadedBytes: number;
@@ -350,6 +366,7 @@ async function openFoliateBookLocked(options: OpenFoliateBookOptions) {
   const cached = await options.cache?.storage.getBookFile(options.cache.identity).catch(() => null);
   if (cached && cached.format === options.format && cached.blob.size === cached.sizeBytes) {
     try {
+      await requireExpectedHash(cached.blob, options.expectedSha256);
       return await parseBookBlob(options, cached.blob);
     } catch (reason) {
       if (options.signal.aborted) throw reason;
@@ -358,6 +375,7 @@ async function openFoliateBookLocked(options: OpenFoliateBookOptions) {
   }
 
   const blob = await downloadBookBlob(options);
+  await requireExpectedHash(blob, options.expectedSha256);
   const opened = await parseBookBlob(options, blob);
   await persistBookBlob(options, blob);
   return opened;

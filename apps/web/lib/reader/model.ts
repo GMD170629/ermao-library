@@ -1,16 +1,12 @@
 import { READER_SCHEMA_VERSION, type ReaderLocation, type ReaderPreferences } from '@shuku/reader-core';
 
-// Keep the physical IndexedDB name so the v3 upgrader can quarantine or migrate legacy local records.
+// Keep the physical database name so the v4 upgrader can atomically migrate
+// exact positions out of the former durable progress outbox.
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v2';
-export const READER_DB_SCHEMA_VERSION = 3;
-export const READER_PROGRESS_DEBOUNCE_MS = 1_500;
+export const READER_DB_SCHEMA_VERSION = 4;
+export const READER_PROGRESS_DEBOUNCE_MS = 500;
+export const READER_ENGINE_PAYLOAD_MAX_BYTES = 64 * 1024;
 
-/**
- * Playback progress is part of the shared Reader v3 persistence/sync domain,
- * but audio is deliberately not a visual reader kind. Keeping the location
- * here avoids widening `ReaderKind` or letting audio enter `/reader` adapter
- * APIs while still giving the durable progress pipeline one typed contract.
- */
 export type AudioProgressLocation = {
   kind: 'audio';
   volumeId: string;
@@ -21,6 +17,62 @@ export type AudioProgressLocation = {
 
 export type ReaderProgressLocation = ReaderLocation | AudioProgressLocation;
 
+export type ReaderTextQuote = Readonly<{
+  exact: string;
+  prefix?: string;
+  suffix?: string;
+}>;
+
+export type ReaderLocationContentFingerprint = Readonly<{
+  originalFileHash: string;
+  parserVersion: string;
+  normalizationVersion: string;
+}>;
+
+export type ReaderEngineLocator = Readonly<{
+  engine: 'readium' | 'foliate';
+  platform: 'android' | 'ios' | 'web';
+  version: string;
+  payload: Readonly<Record<string, unknown>>;
+}>;
+
+export type ReaderV4Location =
+  | Readonly<{
+    kind: 'reflow';
+    resourceKey?: string;
+    progression?: number;
+    position?: number;
+    textQuote?: ReaderTextQuote;
+    contentFingerprint?: ReaderLocationContentFingerprint;
+    engineLocator?: ReaderEngineLocator;
+  }>
+  | Readonly<{
+    kind: 'comic';
+    pageIndex: number;
+    engineLocator?: ReaderEngineLocator;
+  }>
+  | Readonly<{
+    kind: 'pdf';
+    pageNumber: number;
+    engineLocator?: ReaderEngineLocator;
+  }>
+  | Readonly<{
+    kind: 'audio';
+    fileId: string;
+    chapterId: string | null;
+    positionMs: number;
+    engineLocator?: ReaderEngineLocator;
+  }>;
+
+export type ReaderProgressSnapshot = Readonly<{
+  schemaVersion: 4;
+  clientId: string;
+  updatedAtEpochMillis: number;
+  percent: number;
+  location: ReaderV4Location | null;
+  contentFingerprint: string;
+}>;
+
 export type ReaderPreferenceSnapshot = {
   key: string;
   userId: string;
@@ -30,46 +82,46 @@ export type ReaderPreferenceSnapshot = {
   updatedAt: number;
 };
 
-export type ProgressMutationInput = {
+export type ExactProgressIdentity = Readonly<{
+  serverIdentity: string;
+  userId: string;
+  clientId: string;
+  volumeId: string;
+  localContentFingerprint: string;
+}>;
+
+export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
+  key: string;
+  schemaVersion: 1;
+  workId: string;
+  location: ReaderProgressLocation;
+  percent: number | null;
+  updatedAtEpochMillis: number;
+}>;
+
+export type ProgressSaveInput = Readonly<{
+  serverIdentity: string;
   userId: string;
   workId: string;
   volumeId: string;
+  /** Stable fingerprint of the locally opened publication, not the server version token. */
+  localContentFingerprint: string;
+  /** Current server volume version token used to validate the uploaded location. */
   contentFingerprint: string;
   location: ReaderProgressLocation;
-  percent: number;
-};
+  percent: number | null;
+  locationContentFingerprint?: ReaderLocationContentFingerprint;
+}>;
 
-export type ProgressMutation = ProgressMutationInput & {
-  schemaVersion: 3;
-  mutationId: string;
-  clientId: string;
-  clientSequence: number;
-  slotKey: string;
-  createdAt: number;
-  updatedAt: number;
-  retryCount: number;
-  nextAttemptAt: number;
-};
+export type ProgressUpload = Readonly<{
+  volumeId: string;
+  snapshot: ReaderProgressSnapshot;
+}>;
 
-export type ProgressPutBody = Pick<
-  ProgressMutation,
-  'schemaVersion' | 'mutationId' | 'clientId' | 'clientSequence' | 'contentFingerprint' | 'location' | 'percent'
->;
-
-export type ProgressSyncResult =
-  | { outcome: 'accepted' }
-  | { outcome: 'stale' }
-  | { outcome: 'fingerprint-conflict'; message?: string }
-  | { outcome: 'terminal'; message: string };
-
-export type ProgressSyncTransport = (mutation: Readonly<ProgressMutation>, signal: AbortSignal) => Promise<ProgressSyncResult>;
-
-export type ReaderSyncLease = {
-  key: 'progress-sync';
-  ownerId: string;
-  expiresAt: number;
-  updatedAt: number;
-};
+export type ProgressSyncTransport = (
+  upload: ProgressUpload,
+  signal: AbortSignal
+) => Promise<ReaderProgressSnapshot>;
 
 export type ReaderSyncDiagnostic = {
   id: string;
@@ -80,32 +132,42 @@ export type ReaderSyncDiagnostic = {
   data?: Record<string, unknown>;
 };
 
-export type QuarantinedProgress = {
-  id: string;
-  mutation: ProgressMutation;
-  reason: 'fingerprint-conflict' | 'terminal' | 'unsafe-legacy';
-  message: string;
-  createdAt: number;
-};
+function encodeKeyPart(value: string) {
+  return `${value.length}:${value}`;
+}
 
 export function preferenceKey(userId: string, workId: string) {
   return `${encodeURIComponent(userId)}::${encodeURIComponent(workId)}`;
 }
 
-export function progressSlotKey(input: ProgressMutationInput) {
-  return [input.userId, input.volumeId, input.contentFingerprint]
-    .map(encodeURIComponent)
-    .join('::');
+export function exactProgressKey(identity: ExactProgressIdentity) {
+  return [
+    identity.serverIdentity,
+    identity.userId,
+    identity.clientId,
+    identity.volumeId,
+    identity.localContentFingerprint
+  ].map(encodeKeyPart).join('|');
 }
 
-export function toProgressPutBody(mutation: ProgressMutation): ProgressPutBody {
-  return {
-    schemaVersion: mutation.schemaVersion,
-    mutationId: mutation.mutationId,
-    clientId: mutation.clientId,
-    clientSequence: mutation.clientSequence,
-    contentFingerprint: mutation.contentFingerprint,
-    location: mutation.location,
-    percent: mutation.percent
-  };
+export function localContentFingerprintKey(
+  fingerprint: ReaderLocationContentFingerprint | undefined,
+  fallbackServerFingerprint: string
+) {
+  if (!fingerprint) return fallbackServerFingerprint;
+  return [
+    fingerprint.originalFileHash,
+    fingerprint.parserVersion,
+    fingerprint.normalizationVersion
+  ].map(encodeKeyPart).join('|');
+}
+
+export function currentReaderServerIdentity() {
+  if (typeof window !== 'undefined' && window.location.origin) return window.location.origin;
+  return 'same-origin';
+}
+
+export function normalizedPercent(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value < 0 || value > 100) return null;
+  return value;
 }

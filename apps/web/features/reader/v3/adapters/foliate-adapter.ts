@@ -174,6 +174,28 @@ function foliateNavigationTarget(value: unknown, sectionCount: number): FoliateR
   return { index, ...('anchor' in value ? { anchor: value.anchor } : {}) };
 }
 
+function normalizedQuoteText(value: string) {
+  return value.replace(/\s+/gu, ' ').trim();
+}
+
+export async function findFoliateTextQuoteSection(book: FoliateBook, exact: string) {
+  const needle = normalizedQuoteText(exact);
+  if (!needle) return null;
+  for (let index = 0; index < book.sections.length; index += 1) {
+    const section = book.sections[index];
+    if (!section?.createDocument) continue;
+    try {
+      const document = await Promise.resolve(section.createDocument());
+      if (normalizedQuoteText(document.body?.textContent ?? '').includes(needle)) return index;
+    } catch {
+      // A single unreadable resource must not block the remaining fallbacks.
+    } finally {
+      section.unload?.();
+    }
+  }
+  return null;
+}
+
 export async function resolveFoliatePaginatedRestoreTargets(
   book: FoliateBook,
   location: ReflowableLocation | null,
@@ -226,6 +248,18 @@ export async function resolveFoliatePaginatedRestoreTargets(
   const section = location.foliate?.section?.current;
   if (typeof section === 'number' && Number.isInteger(section) && section >= 0 && section < book.sections.length) {
     targets.push({ index: section });
+  }
+  if (location.textQuote?.exact) {
+    const quoteSection = await findFoliateTextQuoteSection(book, location.textQuote.exact);
+    if (quoteSection !== null) targets.push({ index: quoteSection });
+  }
+  if (
+    typeof location.position === 'number'
+    && Number.isInteger(location.position)
+    && location.position >= 1
+    && location.position <= book.sections.length
+  ) {
+    targets.push({ index: location.position - 1 });
   }
   return targets;
 }
@@ -486,6 +520,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
         format: this.format,
         title: this.title ?? context.source.volumeId,
         signal,
+        expectedSha256: context.source.localContentFingerprint?.originalFileHash,
         fetch: this.fetcher,
         cache: {
           storage: this.bookCache,
@@ -626,9 +661,20 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       if (target) return refineContinuousRestoreWithSectionFraction(location, target);
     }
     const section = location.foliate?.section?.current;
-    const target = typeof section === 'number' && section >= 0 && section < (this.book?.sections.length ?? 0)
+    let target = typeof section === 'number' && section >= 0 && section < (this.book?.sections.length ?? 0)
       ? { index: section }
       : null;
+    if (!target && location.textQuote?.exact && this.book) {
+      const quoteSection = await findFoliateTextQuoteSection(this.book, location.textQuote.exact);
+      if (quoteSection !== null) target = { index: quoteSection };
+    }
+    if (
+      !target
+      && typeof location.position === 'number'
+      && Number.isInteger(location.position)
+      && location.position >= 1
+      && location.position <= (this.book?.sections.length ?? 0)
+    ) target = { index: location.position - 1 };
     return refineContinuousRestoreWithSectionFraction(location, target);
   }
 

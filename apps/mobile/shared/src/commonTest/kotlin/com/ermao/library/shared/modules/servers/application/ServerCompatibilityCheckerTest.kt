@@ -31,6 +31,17 @@ class ServerCompatibilityCheckerTest {
         assertEquals("UNSUPPORTED_PROTOCOL_VERSION", decision.reasonCode)
     }
 
+    @Test
+    fun rejectsAServerThatDisablesReaderV4Capability() {
+        val unsupported = compatibility().let { current ->
+            current.copy(capabilities = current.capabilities.copy(readerV4 = false))
+        }
+
+        val decision = assertIs<ServerCompatibilityDecision.Incompatible>(checker.check(unsupported))
+
+        assertEquals("READER_V4_REQUIRED", decision.reasonCode)
+    }
+
     private fun compatibility(
         protocol: Int = 1,
         minimumClient: Int = 1,

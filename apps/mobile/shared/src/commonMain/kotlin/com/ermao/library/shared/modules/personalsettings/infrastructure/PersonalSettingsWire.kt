@@ -112,7 +112,7 @@ internal data class PersonalProtocolWire(
 internal data class PersonalCapabilitiesWire(
     val setup: Boolean,
     val cookieSession: Boolean,
-    val readerV3: Boolean,
+    val readerV4: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
 )

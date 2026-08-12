@@ -21,7 +21,7 @@ class MobileProtocolPayload(HttpContractModel):
 class MobileCapabilitiesPayload(HttpContractModel):
     setup: Literal[True] = True
     cookie_session: Literal[True] = Field(default=True, alias="cookieSession")
-    reader_v3: Literal[True] = Field(default=True, alias="readerV3")
+    reader_v4: Literal[True] = Field(default=True, alias="readerV4")
     media_range: Literal[True] = Field(default=True, alias="mediaRange")
     managed_offline_downloads: Literal[False] = Field(
         default=False,

@@ -58,6 +58,7 @@ import com.ermao.library.features.library.application.WorkDetailViewModel
 import com.ermao.library.features.library.ui.FacetScreen
 import com.ermao.library.features.library.ui.LibraryScreen
 import com.ermao.library.features.library.ui.WorkDetailScreen
+import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.navigation.MobileNavigation
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -382,6 +383,15 @@ fun MainShell(
                                             onSelectVolume = detailViewModel::selectVolume,
                                             onSelectContentTab = detailViewModel::selectContentTab,
                                             onOpenFacet = { kind, id -> libraryBackStack.add(FacetRoute(kind.name, id)) },
+                                            onOpenReader = { volumeId ->
+                                                appContext.startActivity(
+                                                    ReaderActivity.createServerIntent(
+                                                        appContext,
+                                                        session.profile.id,
+                                                        volumeId,
+                                                    ),
+                                                )
+                                            },
                                             onRetry = detailViewModel::retry,
                                         )
                                     }
@@ -562,6 +572,11 @@ fun MainShell(
                             } else {
                                 currentBackStack.add(route)
                             }
+                        },
+                        onOpenReader = { volumeId ->
+                            appContext.startActivity(
+                                ReaderActivity.createServerIntent(appContext, session.profile.id, volumeId),
+                            )
                         },
                         onRetry = detailViewModel::retry,
                     )

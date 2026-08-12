@@ -132,10 +132,10 @@ def _managed_fixture_dir(test_settings, name: str):
 _reader_progress_sequence = count(1)
 
 
-def _save_reader_progress_v3(client, volume_id: str, legacy_payload: dict):
+def _save_reader_progress_v4(client, volume_id: str, legacy_payload: dict):
     reader_type = legacy_payload["readerType"]
     target_volume_id = legacy_payload.get("volumeId") or volume_id
-    bootstrap = client.get(f"/api/reader/v3/volumes/{target_volume_id}/bootstrap")
+    bootstrap = client.get(f"/api/reader/v4/volumes/{target_volume_id}/bootstrap")
     assert bootstrap.status_code == 200
     bootstrap_data = bootstrap.json()["data"]
     fingerprint = bootstrap_data["contentFingerprint"]
@@ -146,27 +146,24 @@ def _save_reader_progress_v3(client, volume_id: str, legacy_payload: dict):
     )
     if reader_type == "comic":
         location = {
-            "type": "comic",
-            "volumeId": target_volume_id,
+            "kind": "comic",
             "pageIndex": page,
         }
     elif reader_type == "pdf":
-        location = {"type": "pdf", "pageNumber": page}
+        location = {"kind": "pdf", "pageNumber": page}
     else:
         location = {
-            "type": "epub",
-            "cfi": str(legacy_payload.get("position") or "0"),
-            "spineIndex": max(0, page - 1),
+            "kind": "reflow",
+            "position": page,
             "progression": float(legacy_payload.get("percent") or 0) / 100,
         }
     sequence = next(_reader_progress_sequence)
     return client.put(
-        f"/api/reader/v3/volumes/{target_volume_id}/progress",
+        f"/api/reader/v4/volumes/{target_volume_id}/progress",
         json={
-            "schemaVersion": 3,
-            "mutationId": f"compat-test-{sequence}",
+            "schemaVersion": 4,
             "clientId": "compat-test-client",
-            "clientSequence": sequence,
+            "updatedAtEpochMillis": 1_700_000_000_000 + sequence,
             "contentFingerprint": fingerprint,
             "location": location,
             "percent": legacy_payload.get("percent", 0),
@@ -3991,8 +3988,7 @@ def test_raw_text_detail_preserves_source_format_without_conversion_action(
         "book"
     ]
     assert [
-        volume["format"]
-        for volume in unchanged_detail["mediaVersions"][0]["volumes"]
+        volume["format"] for volume in unchanged_detail["mediaVersions"][0]["volumes"]
     ] == ["TXT"]
 
 
@@ -6229,7 +6225,7 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     )
 
     bootstrap = client.get(
-        f"/api/reader/v3/volumes/{second_result.volume_id}/bootstrap"
+        f"/api/reader/v4/volumes/{second_result.volume_id}/bootstrap"
     )
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
@@ -6255,7 +6251,7 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     assert second_file.content == second.read_bytes()[:4]
 
 
-def test_reader_v3_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
+def test_reader_v4_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
     client, db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -6284,7 +6280,7 @@ def test_reader_v3_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
         "workId": epub_imported.work_id,
     }
     epub_bootstrap = client.get(
-        f"/api/reader/v3/volumes/{epub_payload['volumeId']}/bootstrap"
+        f"/api/reader/v4/volumes/{epub_payload['volumeId']}/bootstrap"
     )
     assert epub_bootstrap.status_code == 200
     epub_data = epub_bootstrap.json()["data"]
@@ -6316,7 +6312,7 @@ def test_reader_v3_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
         "workId": comic_imported.work_id,
     }
     comic_bootstrap = client.get(
-        f"/api/reader/v3/volumes/{comic_payload['volumeId']}/bootstrap"
+        f"/api/reader/v4/volumes/{comic_payload['volumeId']}/bootstrap"
     )
     assert comic_bootstrap.status_code == 200
     comic_data = comic_bootstrap.json()["data"]
@@ -6410,7 +6406,7 @@ def test_reader_v3_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
     ]
 
     alt_bootstrap = client.get(
-        "/api/reader/v3/volumes/comic-edition-alt/bootstrap?volume=comic-alt-volume-2"
+        "/api/reader/v4/volumes/comic-edition-alt/bootstrap?volume=comic-alt-volume-2"
     )
     assert alt_bootstrap.status_code == 200
     alt_data = alt_bootstrap.json()["data"]
@@ -6495,7 +6491,7 @@ def legacy_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next
     )
     db_session.commit()
 
-    first_progress = _save_reader_progress_v3(
+    first_progress = _save_reader_progress_v4(
         client,
         volume_id,
         {
@@ -6513,7 +6509,7 @@ def legacy_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next
     assert first_detail["recentVolumeId"] == second_volume_id
     assert first_detail["chapter"] == "未开始"
 
-    second_progress = _save_reader_progress_v3(
+    second_progress = _save_reader_progress_v4(
         client,
         volume_id,
         {
@@ -6553,26 +6549,28 @@ def legacy_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next
     assert continue_item["progress"] == 20
     assert continue_item["chapter"] == "第 2 卷 · 第 1 页"
 
-    resumed = client.get(f"/api/reader/v3/volumes/{volume_id}/bootstrap").json()["data"]
-    assert resumed["selectedVolume"]["id"] == second_volume_id
-    assert resumed["progressPercent"] == 20
-    assert resumed["resumeLocation"] == {
-        "type": "comic",
-        "volumeId": second_volume_id,
+    resumed = client.get(f"/api/reader/v4/volumes/{second_volume_id}/bootstrap").json()[
+        "data"
+    ]
+    assert resumed["volume"]["id"] == second_volume_id
+    assert resumed["progressSnapshot"]["percent"] == 20
+    assert resumed["progressSnapshot"]["location"] == {
+        "kind": "comic",
         "pageIndex": 1,
+        "engineLocator": None,
     }
-    explicit = client.get(
-        f"/api/reader/v3/volumes/{volume_id}/bootstrap?volume={first_volume_id}"
-    ).json()["data"]
-    assert explicit["selectedVolume"]["id"] == first_volume_id
-    assert explicit["progressPercent"] == 100
-    assert explicit["resumeLocation"] == {
-        "type": "comic",
-        "volumeId": first_volume_id,
+    explicit = client.get(f"/api/reader/v4/volumes/{first_volume_id}/bootstrap").json()[
+        "data"
+    ]
+    assert explicit["volume"]["id"] == first_volume_id
+    assert explicit["progressSnapshot"]["percent"] == 100
+    assert explicit["progressSnapshot"]["location"] == {
+        "kind": "comic",
         "pageIndex": 2,
+        "engineLocator": None,
     }
 
-    completed = _save_reader_progress_v3(
+    completed = _save_reader_progress_v4(
         client,
         volume_id,
         {
@@ -6666,7 +6664,7 @@ def legacy_multi_volume_epub_detail_returns_selected_volume_chapters_and_scoped_
     db_session.commit()
     _login(client, db_session)
 
-    first_progress = _save_reader_progress_v3(
+    first_progress = _save_reader_progress_v4(
         client,
         "epub-edition",
         {
@@ -6679,7 +6677,7 @@ def legacy_multi_volume_epub_detail_returns_selected_volume_chapters_and_scoped_
         },
     )
     assert first_progress.status_code == 200
-    second_progress = _save_reader_progress_v3(
+    second_progress = _save_reader_progress_v4(
         client,
         "epub-edition",
         {
@@ -6872,7 +6870,7 @@ def test_file_streams_log_slow_requests(
     )
 
 
-def test_imported_pdf_supports_stream_bootstrap_and_v3_progress(
+def test_imported_pdf_supports_stream_bootstrap_and_v4_progress(
     client, db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -6919,7 +6917,7 @@ def test_imported_pdf_supports_stream_bootstrap_and_v3_progress(
     assert file_response.headers["content-type"].startswith("application/pdf")
     assert file_response.content == b"%PDF-"
 
-    bootstrap = client.get(f"/api/reader/v3/volumes/{volume_id}/bootstrap")
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap")
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
     assert data["readerType"] == "pdf"
@@ -6928,7 +6926,7 @@ def test_imported_pdf_supports_stream_bootstrap_and_v3_progress(
     assert data["volume"]["pageCount"] >= 1
     assert len(data["units"]) == 1
 
-    saved = _save_reader_progress_v3(
+    saved = _save_reader_progress_v4(
         client,
         volume_id,
         {
@@ -6940,14 +6938,14 @@ def test_imported_pdf_supports_stream_bootstrap_and_v3_progress(
         },
     )
     assert saved.status_code == 200
-    assert saved.json()["data"]["progress"]["readerType"] == "pdf"
-    resumed = client.get(f"/api/reader/v3/volumes/{volume_id}/bootstrap").json()["data"]
-    assert resumed["resumeLocation"] == {
-        "type": "pdf",
-        "volumeId": volume_id,
+    assert saved.json()["data"]["progress"]["location"]["kind"] == "pdf"
+    resumed = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap").json()["data"]
+    assert resumed["progressSnapshot"]["location"] == {
+        "kind": "pdf",
         "pageNumber": 1,
+        "engineLocator": None,
     }
-    assert resumed["progressPercent"] == 0
+    assert resumed["progressSnapshot"]["percent"] == 0
 
 
 def test_imported_comic_serves_archive_page(
@@ -7179,9 +7177,7 @@ def test_volume_pages_require_persisted_comic_page_index(
         {"volume_id": volume_id},
     )
     db_session.execute(
-        text(
-            "UPDATE LibraryFile SET pageIndexVersion = 0 WHERE volumeId = :volume_id"
-        ),
+        text("UPDATE LibraryFile SET pageIndexVersion = 0 WHERE volumeId = :volume_id"),
         {"volume_id": volume_id},
     )
     db_session.execute(

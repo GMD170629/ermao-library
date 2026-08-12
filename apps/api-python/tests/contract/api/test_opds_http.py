@@ -141,6 +141,11 @@ def test_opds_basic_catalog_and_progression_contract(
             )
         )
         assert progress is not None
+        assert progress.schema_version == 3
+        assert progress.mutation_id is not None
+        assert progress.mutation_id.startswith("opds-")
+        assert progress.client_id == "urn:device:test"
+        assert progress.client_sequence == int(modified.timestamp() * 1000)
         assert progress.source_protocol == "OPDS_PROGRESSION_1"
         assert progress.source_device_name == "Test Reader"
 

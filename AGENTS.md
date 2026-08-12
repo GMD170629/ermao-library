@@ -413,6 +413,10 @@ For every implementation:
 
 ## Mobile App Functional Baseline
 
+### Mobile Reader architecture
+
+`docs/mobile-reader-architecture.md` is the authoritative native Mobile Reader architecture and phase contract. Read it before designing or changing Reader domain models, location/progress persistence, publication storage, native Reader navigation or UI, Readium/libmobi/PDF/Comic engine adapters, or Reader server synchronization. It fixes the reading-morphology boundaries, dependency direction, shared JSON schema, fingerprint and restoration policy, native UI boundary, security rules, Android R2 opening chain, and the interfaces reserved for later phases. It does not override the Mobile phase 1–5 product, navigation, flow, visual, localization, accessibility, or platform-native requirements.
+
 ### iOS Physical-Device-Only Development
 
 iOS development, debugging, testing, visual inspection, screenshots, performance work,

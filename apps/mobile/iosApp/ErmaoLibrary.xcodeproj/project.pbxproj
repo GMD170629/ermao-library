@@ -59,6 +59,18 @@
 		B07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift */; };
 		B07200000000000000000072 /* SystemSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07200000000000000000072 /* SystemSettingsViews.swift */; };
 		B07300000000000000000073 /* UserSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07300000000000000000073 /* UserSettingsViews.swift */; };
+		B07400000000000000000074 /* IosReaderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07400000000000000000074 /* IosReaderModels.swift */; };
+		B07500000000000000000075 /* IosManagedPublicationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07500000000000000000075 /* IosManagedPublicationStore.swift */; };
+		B07600000000000000000076 /* IosReaderProgressStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07600000000000000000076 /* IosReaderProgressStore.swift */; };
+		B07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift */; };
+		B07800000000000000000078 /* IosReadiumRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07800000000000000000078 /* IosReadiumRuntime.swift */; };
+		B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07900000000000000000079 /* IosEpubReaderSession.swift */; };
+		B08000000000000000000080 /* IosEpubReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08000000000000000000080 /* IosEpubReaderView.swift */; };
+		B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08400000000000000000084 /* IosReaderLocalDatabase.swift */; };
+		B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08500000000000000000085 /* IosPublicationDownloadSink.swift */; };
+		B08600000000000000000086 /* IosReaderComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08600000000000000000086 /* IosReaderComposition.swift */; };
+		B08800000000000000000088 /* IosMobiCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08800000000000000000088 /* IosMobiCore.swift */; };
+		B08700000000000000000087 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F08700000000000000000087 /* libsqlite3.tbd */; };
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
 		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
 		B02200000000000000000022 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F02200000000000000000022 /* PrivacyInfo.xcprivacy */; };
@@ -70,7 +82,39 @@
 		B03500000000000000000035 /* ContentDiscoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03500000000000000000035 /* ContentDiscoveryUITests.swift */; };
 		B03600000000000000000036 /* MeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03600000000000000000036 /* MeSettingsTests.swift */; };
 		B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03700000000000000000037 /* AdministrativeSettingsTests.swift */; };
+		B08100000000000000000081 /* ReaderProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08100000000000000000081 /* ReaderProgressContractTests.swift */; };
+		B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08200000000000000000082 /* ReaderPersistenceTests.swift */; };
+		B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08300000000000000000083 /* ReaderSecurityTests.swift */; };
+		B08900000000000000000089 /* MobiCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08900000000000000000089 /* MobiCoreTests.swift */; };
+		B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09000000000000000000090 /* 01-basic-mobi6.mobi */; };
+		B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */; };
+		B09200000000000000000092 /* negative-synthetic-drm-header.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09200000000000000000092 /* negative-synthetic-drm-header.mobi */; };
+		B09300000000000000000093 /* negative-no-content.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09300000000000000000093 /* negative-no-content.mobi */; };
+		B09400000000000000000094 /* 01-basic-mobi6.abi-v1.snapshot in Resources */ = {isa = PBXBuildFile; fileRef = F09400000000000000000094 /* 01-basic-mobi6.abi-v1.snapshot */; };
+		B09500000000000000000095 /* 11-upstream-huff-cdic.abi-v1.snapshot in Resources */ = {isa = PBXBuildFile; fileRef = F09500000000000000000095 /* 11-upstream-huff-cdic.abi-v1.snapshot */; };
+		B09600000000000000000096 /* negative-synthetic-kfx.kfx in Resources */ = {isa = PBXBuildFile; fileRef = F09600000000000000000096 /* negative-synthetic-kfx.kfx */; };
+		B09700000000000000000097 /* negative-synthetic-azw4.azw4 in Resources */ = {isa = PBXBuildFile; fileRef = F09700000000000000000097 /* negative-synthetic-azw4.azw4 */; };
+		B09800000000000000000098 /* test.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F09800000000000000000098 /* test.azw3 */; };
+		B09900000000000000000099 /* 03-css.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F09900000000000000000099 /* 03-css.azw3 */; };
+		B10000000000000000000100 /* 04-font.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000100 /* 04-font.azw3 */; };
+		B10100000000000000000101 /* 05-images.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10100000000000000000101 /* 05-images.azw3 */; };
+		B10200000000000000000102 /* 06-footnotes.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10200000000000000000102 /* 06-footnotes.azw3 */; };
+		B10300000000000000000103 /* 07-complex-toc.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10300000000000000000103 /* 07-complex-toc.azw3 */; };
+		B10400000000000000000104 /* 08-zh-hans.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10400000000000000000104 /* 08-zh-hans.azw3 */; };
+		B10500000000000000000105 /* 09-ja-vertical.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10500000000000000000105 /* 09-ja-vertical.azw3 */; };
+		B10600000000000000000106 /* 10-long-chapter.azw3 in Resources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000106 /* 10-long-chapter.azw3 */; };
+		B10700000000000000000107 /* 12-basic.prc in Resources */ = {isa = PBXBuildFile; fileRef = F10700000000000000000107 /* 12-basic.prc */; };
+		B10800000000000000000108 /* 13-basic.azw in Resources */ = {isa = PBXBuildFile; fileRef = F10800000000000000000108 /* 13-basic.azw */; };
+		B10900000000000000000109 /* negative-upstream-drm-v1.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F10900000000000000000109 /* negative-upstream-drm-v1.mobi */; };
+		B11000000000000000000110 /* negative-truncated.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F11000000000000000000110 /* negative-truncated.mobi */; };
+		B11100000000000000000111 /* negative-corrupt-record-offset.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F11100000000000000000111 /* negative-corrupt-record-offset.mobi */; };
+		B11200000000000000000112 /* negative-pseudo.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F11200000000000000000112 /* negative-pseudo.mobi */; };
 		B90000000000000000000900 /* ErmaoShared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F90000000000000000000900 /* ErmaoShared.framework */; };
+		BR0100000000000000000001 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = PR0100000000000000000001 /* ReadiumShared */; };
+		BR0200000000000000000002 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0200000000000000000002 /* ReadiumStreamer */; };
+		BR0300000000000000000003 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = PR0300000000000000000003 /* ReadiumNavigator */; };
+		BR0400000000000000000004 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = PR0400000000000000000004 /* SwiftSoup */; };
+		BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0500000000000000000005 /* ErmaoMobiCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -143,6 +187,18 @@
 		F07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedAdministrativeSettingsMapping.swift; sourceTree = "<group>"; };
 		F07200000000000000000072 /* SystemSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSettingsViews.swift; sourceTree = "<group>"; };
 		F07300000000000000000073 /* UserSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSettingsViews.swift; sourceTree = "<group>"; };
+		F07400000000000000000074 /* IosReaderModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderModels.swift; sourceTree = "<group>"; };
+		F07500000000000000000075 /* IosManagedPublicationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosManagedPublicationStore.swift; sourceTree = "<group>"; };
+		F07600000000000000000076 /* IosReaderProgressStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderProgressStore.swift; sourceTree = "<group>"; };
+		F07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumSwiftLocatorMapper.swift; sourceTree = "<group>"; };
+		F07800000000000000000078 /* IosReadiumRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReadiumRuntime.swift; sourceTree = "<group>"; };
+		F07900000000000000000079 /* IosEpubReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderSession.swift; sourceTree = "<group>"; };
+		F08000000000000000000080 /* IosEpubReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderView.swift; sourceTree = "<group>"; };
+		F08400000000000000000084 /* IosReaderLocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderLocalDatabase.swift; sourceTree = "<group>"; };
+		F08500000000000000000085 /* IosPublicationDownloadSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPublicationDownloadSink.swift; sourceTree = "<group>"; };
+		F08600000000000000000086 /* IosReaderComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderComposition.swift; sourceTree = "<group>"; };
+		F08800000000000000000088 /* IosMobiCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiCore.swift; sourceTree = "<group>"; };
+		F08700000000000000000087 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		F02200000000000000000022 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -155,6 +211,33 @@
 		F03500000000000000000035 /* ContentDiscoveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentDiscoveryUITests.swift; sourceTree = "<group>"; };
 		F03600000000000000000036 /* MeSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeSettingsTests.swift; sourceTree = "<group>"; };
 		F03700000000000000000037 /* AdministrativeSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsTests.swift; sourceTree = "<group>"; };
+		F08100000000000000000081 /* ReaderProgressContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderProgressContractTests.swift; sourceTree = "<group>"; };
+		F08200000000000000000082 /* ReaderPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPersistenceTests.swift; sourceTree = "<group>"; };
+		F08300000000000000000083 /* ReaderSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSecurityTests.swift; sourceTree = "<group>"; };
+		F08900000000000000000089 /* MobiCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiCoreTests.swift; sourceTree = "<group>"; };
+		F09000000000000000000090 /* 01-basic-mobi6.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "01-basic-mobi6.mobi"; path = "../../../test-data/library/mobi/01-basic-mobi6.mobi"; sourceTree = SOURCE_ROOT; };
+		F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "11-upstream-huff-cdic.mobi"; path = "../../../test-data/library/mobi/11-upstream-huff-cdic.mobi"; sourceTree = SOURCE_ROOT; };
+		F09200000000000000000092 /* negative-synthetic-drm-header.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-synthetic-drm-header.mobi"; path = "../../../test-data/library/mobi/negative-synthetic-drm-header.mobi"; sourceTree = SOURCE_ROOT; };
+		F09300000000000000000093 /* negative-no-content.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-no-content.mobi"; path = "../../../test-data/library/mobi/negative-no-content.mobi"; sourceTree = SOURCE_ROOT; };
+		F09400000000000000000094 /* 01-basic-mobi6.abi-v1.snapshot */ = {isa = PBXFileReference; lastKnownFileType = text; name = "01-basic-mobi6.abi-v1.snapshot"; path = "../../../test-data/library/mobi/01-basic-mobi6.abi-v1.snapshot"; sourceTree = SOURCE_ROOT; };
+		F09500000000000000000095 /* 11-upstream-huff-cdic.abi-v1.snapshot */ = {isa = PBXFileReference; lastKnownFileType = text; name = "11-upstream-huff-cdic.abi-v1.snapshot"; path = "../../../test-data/library/mobi/11-upstream-huff-cdic.abi-v1.snapshot"; sourceTree = SOURCE_ROOT; };
+		F09600000000000000000096 /* negative-synthetic-kfx.kfx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-synthetic-kfx.kfx"; path = "../../../test-data/library/mobi/negative-synthetic-kfx.kfx"; sourceTree = SOURCE_ROOT; };
+		F09700000000000000000097 /* negative-synthetic-azw4.azw4 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-synthetic-azw4.azw4"; path = "../../../test-data/library/mobi/negative-synthetic-azw4.azw4"; sourceTree = SOURCE_ROOT; };
+		F09800000000000000000098 /* test.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "test.azw3"; path = "../../../test-data/library/mobi/test.azw3"; sourceTree = SOURCE_ROOT; };
+		F09900000000000000000099 /* 03-css.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "03-css.azw3"; path = "../../../test-data/library/mobi/03-css.azw3"; sourceTree = SOURCE_ROOT; };
+		F10000000000000000000100 /* 04-font.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "04-font.azw3"; path = "../../../test-data/library/mobi/04-font.azw3"; sourceTree = SOURCE_ROOT; };
+		F10100000000000000000101 /* 05-images.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "05-images.azw3"; path = "../../../test-data/library/mobi/05-images.azw3"; sourceTree = SOURCE_ROOT; };
+		F10200000000000000000102 /* 06-footnotes.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "06-footnotes.azw3"; path = "../../../test-data/library/mobi/06-footnotes.azw3"; sourceTree = SOURCE_ROOT; };
+		F10300000000000000000103 /* 07-complex-toc.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "07-complex-toc.azw3"; path = "../../../test-data/library/mobi/07-complex-toc.azw3"; sourceTree = SOURCE_ROOT; };
+		F10400000000000000000104 /* 08-zh-hans.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "08-zh-hans.azw3"; path = "../../../test-data/library/mobi/08-zh-hans.azw3"; sourceTree = SOURCE_ROOT; };
+		F10500000000000000000105 /* 09-ja-vertical.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "09-ja-vertical.azw3"; path = "../../../test-data/library/mobi/09-ja-vertical.azw3"; sourceTree = SOURCE_ROOT; };
+		F10600000000000000000106 /* 10-long-chapter.azw3 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "10-long-chapter.azw3"; path = "../../../test-data/library/mobi/10-long-chapter.azw3"; sourceTree = SOURCE_ROOT; };
+		F10700000000000000000107 /* 12-basic.prc */ = {isa = PBXFileReference; lastKnownFileType = file; name = "12-basic.prc"; path = "../../../test-data/library/mobi/12-basic.prc"; sourceTree = SOURCE_ROOT; };
+		F10800000000000000000108 /* 13-basic.azw */ = {isa = PBXFileReference; lastKnownFileType = file; name = "13-basic.azw"; path = "../../../test-data/library/mobi/13-basic.azw"; sourceTree = SOURCE_ROOT; };
+		F10900000000000000000109 /* negative-upstream-drm-v1.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-upstream-drm-v1.mobi"; path = "../../../test-data/library/mobi/negative-upstream-drm-v1.mobi"; sourceTree = SOURCE_ROOT; };
+		F11000000000000000000110 /* negative-truncated.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-truncated.mobi"; path = "../../../test-data/library/mobi/negative-truncated.mobi"; sourceTree = SOURCE_ROOT; };
+		F11100000000000000000111 /* negative-corrupt-record-offset.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-corrupt-record-offset.mobi"; path = "../../../test-data/library/mobi/negative-corrupt-record-offset.mobi"; sourceTree = SOURCE_ROOT; };
+		F11200000000000000000112 /* negative-pseudo.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-pseudo.mobi"; path = "../../../test-data/library/mobi/negative-pseudo.mobi"; sourceTree = SOURCE_ROOT; };
 		F80000000000000000000800 /* ErmaoLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ErmaoLibrary.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F80100000000000000000801 /* ErmaoLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F80200000000000000000802 /* ErmaoLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -167,6 +250,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				B90000000000000000000900 /* ErmaoShared.framework in Frameworks */,
+				BR0100000000000000000001 /* ReadiumShared in Frameworks */,
+				BR0200000000000000000002 /* ReadiumStreamer in Frameworks */,
+				BR0300000000000000000003 /* ReadiumNavigator in Frameworks */,
+				BR0400000000000000000004 /* SwiftSoup in Frameworks */,
+				BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */,
+				B08700000000000000000087 /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -221,6 +310,33 @@
 				F03400000000000000000034 /* ContentStoreTests.swift */,
 				F03600000000000000000036 /* MeSettingsTests.swift */,
 				F03700000000000000000037 /* AdministrativeSettingsTests.swift */,
+				F08100000000000000000081 /* ReaderProgressContractTests.swift */,
+				F08200000000000000000082 /* ReaderPersistenceTests.swift */,
+				F08300000000000000000083 /* ReaderSecurityTests.swift */,
+				F08900000000000000000089 /* MobiCoreTests.swift */,
+				F09000000000000000000090 /* 01-basic-mobi6.mobi */,
+				F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */,
+				F09200000000000000000092 /* negative-synthetic-drm-header.mobi */,
+				F09300000000000000000093 /* negative-no-content.mobi */,
+				F09400000000000000000094 /* 01-basic-mobi6.abi-v1.snapshot */,
+				F09500000000000000000095 /* 11-upstream-huff-cdic.abi-v1.snapshot */,
+				F09600000000000000000096 /* negative-synthetic-kfx.kfx */,
+				F09700000000000000000097 /* negative-synthetic-azw4.azw4 */,
+				F09800000000000000000098 /* test.azw3 */,
+				F09900000000000000000099 /* 03-css.azw3 */,
+				F10000000000000000000100 /* 04-font.azw3 */,
+				F10100000000000000000101 /* 05-images.azw3 */,
+				F10200000000000000000102 /* 06-footnotes.azw3 */,
+				F10300000000000000000103 /* 07-complex-toc.azw3 */,
+				F10400000000000000000104 /* 08-zh-hans.azw3 */,
+				F10500000000000000000105 /* 09-ja-vertical.azw3 */,
+				F10600000000000000000106 /* 10-long-chapter.azw3 */,
+				F10700000000000000000107 /* 12-basic.prc */,
+				F10800000000000000000108 /* 13-basic.azw */,
+				F10900000000000000000109 /* negative-upstream-drm-v1.mobi */,
+				F11000000000000000000110 /* negative-truncated.mobi */,
+				F11100000000000000000111 /* negative-corrupt-record-offset.mobi */,
+				F11200000000000000000112 /* negative-pseudo.mobi */,
 			);
 			path = ErmaoLibraryTests;
 			sourceTree = "<group>";
@@ -271,6 +387,7 @@
 				G12000000000000000000120 /* Work */,
 				G12100000000000000000121 /* Me */,
 				G12200000000000000000122 /* AdministrativeSettings */,
+				G12300000000000000000123 /* Reader */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -387,10 +504,29 @@
 			path = AdministrativeSettings;
 			sourceTree = "<group>";
 		};
+		G12300000000000000000123 /* Reader */ = {
+			isa = PBXGroup;
+			children = (
+				F07400000000000000000074 /* IosReaderModels.swift */,
+				F07500000000000000000075 /* IosManagedPublicationStore.swift */,
+				F07600000000000000000076 /* IosReaderProgressStore.swift */,
+				F07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift */,
+				F07800000000000000000078 /* IosReadiumRuntime.swift */,
+				F07900000000000000000079 /* IosEpubReaderSession.swift */,
+				F08000000000000000000080 /* IosEpubReaderView.swift */,
+				F08400000000000000000084 /* IosReaderLocalDatabase.swift */,
+				F08500000000000000000085 /* IosPublicationDownloadSink.swift */,
+				F08600000000000000000086 /* IosReaderComposition.swift */,
+				F08800000000000000000088 /* IosMobiCore.swift */,
+			);
+			path = Reader;
+			sourceTree = "<group>";
+		};
 		G20000000000000000000200 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				F90000000000000000000900 /* ErmaoShared.framework */,
+				F08700000000000000000087 /* libsqlite3.tbd */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -422,6 +558,13 @@
 			dependencies = (
 			);
 			name = ErmaoLibrary;
+			packageProductDependencies = (
+				PR0100000000000000000001 /* ReadiumShared */,
+				PR0200000000000000000002 /* ReadiumStreamer */,
+				PR0300000000000000000003 /* ReadiumNavigator */,
+				PR0400000000000000000004 /* SwiftSoup */,
+				PR0500000000000000000005 /* ErmaoMobiCore */,
+			);
 			productName = ErmaoLibrary;
 			productReference = F80000000000000000000800 /* ErmaoLibrary.app */;
 			productType = "com.apple.product-type.application";
@@ -495,6 +638,11 @@
 				"zh-Hans",
 			);
 			mainGroup = G00000000000000000000000;
+			packageReferences = (
+				PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */,
+				PK0200000000000000000002 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
+				PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */,
+			);
 			productRefGroup = G20100000000000000000201 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -521,6 +669,29 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */,
+				B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */,
+				B09200000000000000000092 /* negative-synthetic-drm-header.mobi in Resources */,
+				B09300000000000000000093 /* negative-no-content.mobi in Resources */,
+				B09400000000000000000094 /* 01-basic-mobi6.abi-v1.snapshot in Resources */,
+				B09500000000000000000095 /* 11-upstream-huff-cdic.abi-v1.snapshot in Resources */,
+				B09600000000000000000096 /* negative-synthetic-kfx.kfx in Resources */,
+				B09700000000000000000097 /* negative-synthetic-azw4.azw4 in Resources */,
+				B09800000000000000000098 /* test.azw3 in Resources */,
+				B09900000000000000000099 /* 03-css.azw3 in Resources */,
+				B10000000000000000000100 /* 04-font.azw3 in Resources */,
+				B10100000000000000000101 /* 05-images.azw3 in Resources */,
+				B10200000000000000000102 /* 06-footnotes.azw3 in Resources */,
+				B10300000000000000000103 /* 07-complex-toc.azw3 in Resources */,
+				B10400000000000000000104 /* 08-zh-hans.azw3 in Resources */,
+				B10500000000000000000105 /* 09-ja-vertical.azw3 in Resources */,
+				B10600000000000000000106 /* 10-long-chapter.azw3 in Resources */,
+				B10700000000000000000107 /* 12-basic.prc in Resources */,
+				B10800000000000000000108 /* 13-basic.azw in Resources */,
+				B10900000000000000000109 /* negative-upstream-drm-v1.mobi in Resources */,
+				B11000000000000000000110 /* negative-truncated.mobi in Resources */,
+				B11100000000000000000111 /* negative-corrupt-record-offset.mobi in Resources */,
+				B11200000000000000000112 /* negative-pseudo.mobi in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -614,6 +785,17 @@
 				B07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift in Sources */,
 				B07200000000000000000072 /* SystemSettingsViews.swift in Sources */,
 				B07300000000000000000073 /* UserSettingsViews.swift in Sources */,
+				B07400000000000000000074 /* IosReaderModels.swift in Sources */,
+				B07500000000000000000075 /* IosManagedPublicationStore.swift in Sources */,
+				B07600000000000000000076 /* IosReaderProgressStore.swift in Sources */,
+				B07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift in Sources */,
+				B07800000000000000000078 /* IosReadiumRuntime.swift in Sources */,
+				B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */,
+				B08000000000000000000080 /* IosEpubReaderView.swift in Sources */,
+				B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */,
+				B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */,
+				B08600000000000000000086 /* IosReaderComposition.swift in Sources */,
+				B08800000000000000000088 /* IosMobiCore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -628,6 +810,10 @@
 				B03400000000000000000034 /* ContentStoreTests.swift in Sources */,
 				B03600000000000000000036 /* MeSettingsTests.swift in Sources */,
 				B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */,
+				B08100000000000000000081 /* ReaderProgressContractTests.swift in Sources */,
+				B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */,
+				B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */,
+				B08900000000000000000089 /* MobiCoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -878,6 +1064,60 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../native/mobi-core";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/swift-toolkit.git";
+			requirement = {
+				kind = revision;
+				revision = f7d10d2bf5876408feae14d634416f69d1473fd8;
+			};
+		};
+		PK0200000000000000000002 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/scinfu/SwiftSoup.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.13.7;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		PR0100000000000000000001 /* ReadiumShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			productName = ReadiumShared;
+		};
+		PR0200000000000000000002 /* ReadiumStreamer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			productName = ReadiumStreamer;
+		};
+		PR0300000000000000000003 /* ReadiumNavigator */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			productName = ReadiumNavigator;
+		};
+		PR0400000000000000000004 /* SwiftSoup */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0200000000000000000002 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
+			productName = SwiftSoup;
+		};
+		PR0500000000000000000005 /* ErmaoMobiCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */;
+			productName = ErmaoMobiCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = P00100000000000000000001 /* Project object */;
 }

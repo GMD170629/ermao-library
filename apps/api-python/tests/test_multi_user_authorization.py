@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from sqlalchemy import text
+
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
@@ -15,7 +17,6 @@ from app.models.library import (
     LibraryWork,
 )
 from app.models.settings import MonitorFolder
-from sqlalchemy import text
 
 PASSWORD = "starshipnas"
 
@@ -425,20 +426,19 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
         "/api/shelves", json={"name": "First shelf", "bookIds": ["work-a"]}
     )
     assert shelf.status_code == 201
-    bootstrap = client.get("/api/reader/v3/volumes/volume-a/bootstrap")
+    bootstrap = client.get("/api/reader/v4/volumes/volume-a/bootstrap")
     assert bootstrap.status_code == 200
     content_fingerprint = bootstrap.json()["data"]["contentFingerprint"]
     bookmark = client.put(
-        "/api/reader/v3/volumes/volume-a/bookmarks",
+        "/api/reader/v4/volumes/volume-a/bookmarks",
         json={
             "contentFingerprint": content_fingerprint,
             "bookmarks": [
                 {
                     "id": "reflowable:epub:position:chapter.xhtml:0.25",
                     "location": {
-                        "type": "epub",
-                        "cfi": "epubcfi(/6/2!/4/1:0)",
-                        "href": "chapter.xhtml",
+                        "kind": "reflow",
+                        "resourceKey": "chapter.xhtml",
                         "progression": 0.25,
                     },
                     "label": "第一章",
@@ -450,8 +450,8 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     )
     assert bookmark.status_code == 200, bookmark.text
     assert (
-        bookmark.json()["data"]["bookmarks"][0]["location"]["cfi"]
-        == "epubcfi(/6/2!/4/1:0)"
+        bookmark.json()["data"]["bookmarks"][0]["location"]["resourceKey"]
+        == "chapter.xhtml"
     )
     db_session.add(
         LibraryReadingProgress(
@@ -490,7 +490,7 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     second_shelves = client.get("/api/shelves").json()["data"]["shelves"]
     assert second_shelves == []
     second_bookmarks = client.get(
-        "/api/reader/v3/volumes/volume-a/bookmarks",
+        "/api/reader/v4/volumes/volume-a/bookmarks",
         params={"contentFingerprint": content_fingerprint},
     )
     assert second_bookmarks.status_code == 200

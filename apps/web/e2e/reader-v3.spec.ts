@@ -4,10 +4,10 @@ import path from 'node:path';
 
 const root = path.resolve(process.cwd(), '../..');
 const pdfFixture = path.join(root, 'test-data/library/pdf/reading-notes.pdf');
-const epubFixture = path.join(root, 'test-data/library/epub/reader-v2.epub'); // Historical fixture content remains valid for Reader v3.
+const epubFixture = path.join(root, 'test-data/library/epub/reader-v2.epub'); // Historical fixture content remains valid for Reader v4.
 
 const defaultPreferences = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   appearance: { theme: 'warm' },
   interaction: { tapZones: 'standard', swipePageTurn: true, keyboardPageTurn: true, volumeKeyPageTurn: false },
   epub: {
@@ -67,7 +67,7 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', options: MockReaderOptions = 
   return {
     ok: true,
     data: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       userId: 'user-e2e',
       readerType,
       sourceFormat: kind === 'epub' ? 'epub' : null,
@@ -92,8 +92,15 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', options: MockReaderOptions = 
         supportsSpreads: kind !== 'pdf',
         readingDirection: 'ltr'
       },
-      serverPreferences: { schemaVersion: 3, settings: defaultPreferences, updatedAt: null },
-      resumeLocation: options.resumeLocation ?? (kind === 'epub' ? { type: 'reflowable', format: 'epub', progression: 0 } : kind === 'comic' ? { type: 'comic', volumeId, pageIndex: 1 } : { type: 'pdf', pageNumber: 1 }),
+      serverPreferences: { schemaVersion: 4, settings: defaultPreferences, updatedAt: null },
+      progressSnapshot: {
+        schemaVersion: 4,
+        clientId: 'e2e-client',
+        updatedAtEpochMillis: 1,
+        percent: options.progressPercent ?? 0,
+        contentFingerprint: `${kind}-fixture-v1`,
+        location: options.resumeLocation ?? (kind === 'epub' ? { kind: 'reflow', progression: 0 } : kind === 'comic' ? { kind: 'comic', pageIndex: 1 } : { kind: 'pdf', pageNumber: 1 })
+      },
       resumeFingerprintMismatch: false,
       progressPercent: options.progressPercent ?? 0
     }
@@ -111,12 +118,12 @@ async function mockReaderApi(
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.includes('/api/reader/v3/volumes/') && url.pathname.endsWith('/bootstrap')) {
+    if (url.pathname.includes('/api/reader/v4/volumes/') && url.pathname.endsWith('/bootstrap')) {
       if (options.bootstrapDelayMs) await new Promise((resolve) => setTimeout(resolve, options.bootstrapDelayMs));
       await route.fulfill({ json: bootstrap(kind, options) });
       return;
     }
-    if (url.pathname.includes('/api/reader/v3/volumes/') && url.pathname.endsWith('/progress')) {
+    if (url.pathname.includes('/api/reader/v4/volumes/') && url.pathname.endsWith('/progress')) {
       const body = request.postDataJSON();
       progressBodies.push(body);
       if (options.progressStatus && options.progressStatus >= 400) {
@@ -126,7 +133,7 @@ async function mockReaderApi(
         });
         return;
       }
-      await route.fulfill({ json: { ok: true, data: { mutationId: body.mutationId, applied: true, progress: { ...body, readerType: kind === 'epub' ? 'reflowable' : kind, workId: `work-${kind}`, volumeId: `${kind}-volume`, updatedAt: new Date().toISOString() } } } });
+      await route.fulfill({ json: { ok: true, data: { progress: body } } });
       return;
     }
     if (url.pathname.endsWith('/file') && pdf) {
@@ -1131,7 +1138,7 @@ test('an EPUB without other media or volume choices shows only its chapter hiera
   expect(consoleErrors).toEqual([]);
 });
 
-test('comic navigation, local theme persistence, reset, and V2 progress transport', async ({ page }) => {
+test('comic navigation, local theme persistence, reset, and Reader v4 progress transport', async ({ page }) => {
   const progressBodies: Array<Record<string, any>> = [];
   await mockReaderApi(page, 'comic', progressBodies);
   await page.goto('/reader/comic-volume');
@@ -1145,8 +1152,7 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await page.keyboard.press('ArrowRight');
   await expect(page.getByText('第 2 页 / 共 3 页').first()).toBeVisible();
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'comic'
-    && body.location.volumeId === 'comic-volume'
+    body.location?.kind === 'comic'
     && body.location.pageIndex === 2
   )), { timeout: 8_000 }).toBe(true);
 
@@ -1327,14 +1333,14 @@ test('EPUB reload restores the pending local CFI while an explicit href still wi
 
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'reflowable'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    body.location?.kind === 'reflow'
+    && typeof body.location.resourceKey === 'string'
+    && body.location.resourceKey.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'reflowable'
-    && typeof body.location.cfi === 'string'
-    && body.location.cfi.startsWith('epubcfi(')
+    body.location?.kind === 'reflow'
+    && typeof body.location.engineLocator?.payload?.cfi === 'string'
+    && body.location.engineLocator.payload.cfi.startsWith('epubcfi(')
   )), { timeout: 8_000 }).toBe(true);
 
   await page.reload();
@@ -1414,9 +1420,9 @@ test('EPUB cross-spine paging uses one foliate step without a custom track or an
     }));
   });
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'reflowable'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    body.location?.kind === 'reflow'
+    && typeof body.location.resourceKey === 'string'
+    && body.location.resourceKey.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect(page.locator('[data-epub-continuous-track], [data-epub-default-track]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
@@ -1522,12 +1528,20 @@ test('EPUB scrolled flow resumes inside a chapter instead of its beginning', asy
   const progressBodies: Array<Record<string, any>> = [];
   await mockReaderApi(page, 'epub', progressBodies, {
     resumeLocation: {
-      type: 'reflowable',
-      format: 'epub',
-      cfi: 'epubcfi(/6/2)',
-      href: 'chapter1.xhtml',
-      progression: 0.25,
-      foliate: { continuous: { sectionFraction: 0.5 } }
+      kind: 'reflow',
+      resourceKey: 'chapter1.xhtml',
+      progression: 0.5,
+      engineLocator: {
+        engine: 'foliate',
+        platform: 'web',
+        version: 'foliate-web-v1',
+        payload: {
+          cfi: 'epubcfi(/6/2)',
+          href: 'chapter1.xhtml',
+          fraction: 0.25,
+          foliate: { continuous: { sectionFraction: 0.5 } }
+        }
+      }
     },
     progressPercent: 25
   });
@@ -1540,8 +1554,8 @@ test('EPUB scrolled flow resumes inside a chapter instead of its beginning', asy
   await expect.poll(async () => Number(await engine.getAttribute('data-reader-location-progression'))).toBeGreaterThan(0.05);
   await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
   await expect.poll(() => progressBodies.some((body) => (
-    typeof body.location?.foliate?.continuous?.sectionFraction === 'number'
-    && body.location.foliate.continuous.sectionFraction > 0
+    typeof body.location?.progression === 'number'
+    && body.location.progression > 0
   ))).toBe(true);
 });
 
@@ -1683,9 +1697,9 @@ test('EPUB swipe submits one navigation command without a visual paging track', 
     return;
   }
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'reflowable'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    body.location?.kind === 'reflow'
+    && typeof body.location.resourceKey === 'string'
+    && body.location.resourceKey.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect(page.locator('[data-epub-continuous-track], [data-epub-default-track]')).toHaveCount(0);
 });
@@ -1765,9 +1779,9 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(1);
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'reflowable'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    body.location?.kind === 'reflow'
+    && typeof body.location.resourceKey === 'string'
+    && body.location.resourceKey.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   const secondBody = (await currentEpubIframe(page)).contentFrame().locator('body');
   await clickVisibleReflowableZone(secondBody, 0.9);

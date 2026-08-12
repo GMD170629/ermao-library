@@ -12,12 +12,14 @@ struct ErmaoLibraryApp: App {
     private let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     private let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
     private let settingsClientOverride: (any SettingsClient)?
+    private let readerComposition: IosReaderComposition?
 
     init() {
         let usesContentFixture = ProcessInfo.processInfo.environment[
             ContentUITestFixture.launchEnvironmentKey
         ] == "1"
         let cookieStore = KeychainCookiePayloadStore()
+        readerComposition = usesContentFixture ? nil : try? IosReaderComposition(cookieStore: cookieStore)
         let runtime: any MobileRuntimeClient = usesContentFixture
             ? ContentUITestFixture.makeRuntime()
             : AppCompositionRoot.makeRuntimeClient(cookieStore: cookieStore)
@@ -48,7 +50,8 @@ struct ErmaoLibraryApp: App {
                 contentCache: contentCache,
                 settingsRepository: settingsRepository,
                 administrativeSettingsRepository: administrativeSettingsRepository,
-                settingsClientOverride: settingsClientOverride
+                settingsClientOverride: settingsClientOverride,
+                readerComposition: readerComposition
             )
                 .task {
                     sessionStore.start()

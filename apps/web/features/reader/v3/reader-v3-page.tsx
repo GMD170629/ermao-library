@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   activateReaderUser,
+  currentReaderServerIdentity,
   emitReaderDebug,
   getReaderRuntime
 } from '../../../lib/reader';
@@ -211,7 +212,7 @@ function OpeningCover({ context, ready, background, color, indexProgress, downlo
   );
 }
 
-export function ReaderV3Page({ volumeId }: { volumeId: string }) {
+export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedHref = searchParams.get('href');
@@ -271,9 +272,6 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
     dispatch({ type: 'load', requestId });
 
     void (async () => {
-      // Snapshot immediately so a fast background sync cannot delete the
-      // newest local position between the bootstrap read and reconciliation.
-      const pendingAtOpenPromise = runtime.storage.listProgress().catch(() => []);
       let bootstrap = await fetchReaderBootstrap(volumeId, controller.signal);
       if (controller.signal.aborted) return;
       let hasDirectTarget = false;
@@ -322,42 +320,42 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
         currentWorkId: bootstrap.mediaVersion.workId,
         legacyEditionId: bootstrap.mediaVersion.id,
         contentFingerprint: bootstrap.contentFingerprint,
+        localContentFingerprint: bootstrap.localContentFingerprint,
         readerKind: bootstrap.readerType,
         volumeId: bootstrap.volume.id
       });
       if (controller.signal.aborted) return;
-      const [pendingAtOpen, pendingAfterMigration] = await Promise.all([
-        pendingAtOpenPromise,
-        runtime.storage.listProgress().catch(() => [])
-      ]);
+      const clientId = await runtime.storage.getClientId();
+      const localExact = await runtime.storage.getExactProgress({
+        serverIdentity: currentReaderServerIdentity(),
+        userId: bootstrap.userId,
+        clientId,
+        volumeId: bootstrap.volume.id,
+        localContentFingerprint: bootstrap.localContentFingerprint
+      }).catch(() => null);
       const startupResume = resolveStartupResume({
-        mutations: [...pendingAtOpen, ...pendingAfterMigration],
+        localExact,
+        serverSnapshot: bootstrap.serverProgressSnapshot,
         context: bootstrap.readerType === 'reflowable' ? {
-          userId: bootstrap.userId,
-          volumeId: bootstrap.volume.id,
-          contentFingerprint: bootstrap.contentFingerprint,
           readerKind: 'reflowable',
           sourceFormat: requireReflowableSourceFormat(bootstrap)
         } : {
-          userId: bootstrap.userId,
-          volumeId: bootstrap.volume.id,
-          contentFingerprint: bootstrap.contentFingerprint,
           readerKind: bootstrap.readerType
         },
-        initialLocation: bootstrap.initialLocation,
-        progressPercent: bootstrap.progressPercent,
+        serverLocation: bootstrap.initialLocation,
+        serverPercent: bootstrap.progressPercent,
         hasDirectTarget
       });
-      const localResume = startupResume.localMutation;
+      const localResume = startupResume.localExact;
       if (localResume) {
         bootstrap = {
           ...bootstrap,
           initialLocation: startupResume.location,
           progressPercent: startupResume.percent
         };
-        emitReaderDebug('info', '启动时优先恢复尚未同步的本地阅读位置', {
+        emitReaderDebug('info', '启动时按时间优先恢复本机精确阅读位置', {
           volumeId: bootstrap.volume.id,
-          clientSequence: localResume.clientSequence
+          updatedAtEpochMillis: localResume.updatedAtEpochMillis
         });
       }
       const preferences = readDeviceReaderPreferences(
@@ -366,7 +364,7 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
       );
       if (controller.signal.aborted) return;
       if (bootstrap.resumeFingerprintMismatch) {
-        const restoredCurrentLocalPosition = startupResume.source === 'local-pending';
+        const restoredCurrentLocalPosition = startupResume.source === 'local-exact';
         await runtime.storage.addDiagnostic({
           level: 'warning',
           code: 'content-fingerprint-conflict',
@@ -382,7 +380,7 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
           }
         }).catch(() => undefined);
       }
-      emitReaderDebug('info', 'Reader v3 启动完成', {
+      emitReaderDebug('info', 'Reader v4 启动完成', {
         volumeId: bootstrap.volume.id,
         workId: bootstrap.mediaVersion.workId,
         preferences: 'device-default',
@@ -440,16 +438,19 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
     };
   }, [state.bootstrap]);
 
-  const saveLocation = useCallback((location: Parameters<ReaderV3PageLocationHandler>[0], percent: number) => {
+  const saveLocation = useCallback((location: Parameters<ReaderV4PageLocationHandler>[0], percent: number) => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
     const write = runtime.progress.enqueue({
+      serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       workId: bootstrap.mediaVersion.workId,
       volumeId: bootstrap.volume.id,
+      localContentFingerprint: bootstrap.localContentFingerprint,
       contentFingerprint: bootstrap.contentFingerprint,
       location,
-      percent
+      percent,
+      locationContentFingerprint: bootstrap.locationContentFingerprint
     }).catch((reason) => {
       setStorageError(reason instanceof Error ? reason.message : '阅读进度无法写入本机');
     });
@@ -532,4 +533,4 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
   );
 }
 
-type ReaderV3PageLocationHandler = (location: import('@shuku/reader-core').ReaderLocation, percent: number) => void;
+type ReaderV4PageLocationHandler = (location: import('@shuku/reader-core').ReaderLocation, percent: number) => void;

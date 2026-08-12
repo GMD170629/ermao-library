@@ -1,13 +1,11 @@
 import { READER_SCHEMA_VERSION, type ReaderPreferences } from '@shuku/reader-core';
 import {
+  exactProgressKey,
   preferenceKey,
-  progressSlotKey,
-  type ProgressMutation,
-  type ProgressMutationInput,
-  type QuarantinedProgress,
+  type ExactProgressIdentity,
+  type ExactProgressRecord,
   type ReaderPreferenceSnapshot,
-  type ReaderSyncDiagnostic,
-  type ReaderSyncLease
+  type ReaderSyncDiagnostic
 } from './model';
 import type { ReaderStorage } from './storage';
 import {
@@ -21,17 +19,13 @@ function createId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
-/** Deterministic-enough in-memory implementation for Node tests and non-browser previews. */
+/** In-memory implementation used by policy tests and non-browser previews. */
 export class MemoryReaderStorage implements ReaderStorage, ReaderBookCache {
   private readonly preferences = new Map<string, ReaderPreferenceSnapshot>();
-  private readonly progress = new Map<string, ProgressMutation>();
-  private readonly slotMutationIds = new Map<string, string>();
+  private readonly exactProgress = new Map<string, ExactProgressRecord>();
   private readonly diagnostics: ReaderSyncDiagnostic[] = [];
-  private readonly quarantine: QuarantinedProgress[] = [];
-  private clientId = createId('client');
-  private sequence = 0;
-  private lease: ReaderSyncLease | null = null;
   private readonly bookFiles = new Map<string, CachedReaderBookFile>();
+  private clientId = createId('web');
 
   async getBookFile(identity: ReaderBookCacheIdentity) {
     return this.bookFiles.get(readerBookCacheKey(identity)) ?? null;
@@ -71,73 +65,17 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderBookCache {
     this.preferences.delete(preferenceKey(userId, workId));
   }
 
-  async enqueueProgress(input: ProgressMutationInput, now = Date.now()) {
-    this.sequence += 1;
-    const slotKey = progressSlotKey(input);
-    const previousId = this.slotMutationIds.get(slotKey);
-    const previous = previousId ? this.progress.get(previousId) : undefined;
-    if (previousId) this.progress.delete(previousId);
-
-    const mutation: ProgressMutation = {
-      ...input,
-      schemaVersion: 3,
-      mutationId: createId('progress'),
-      clientId: this.clientId,
-      clientSequence: this.sequence,
-      slotKey,
-      percent: Math.max(0, Math.min(100, Number.isFinite(input.percent) ? input.percent : 0)),
-      createdAt: previous?.createdAt ?? now,
-      updatedAt: now,
-      retryCount: 0,
-      nextAttemptAt: now
-    };
-    this.progress.set(mutation.mutationId, mutation);
-    this.slotMutationIds.set(slotKey, mutation.mutationId);
-    return mutation;
+  async getClientId() {
+    return this.clientId;
   }
 
-  async listProgress() {
-    return [...this.progress.values()].sort((left, right) => left.clientSequence - right.clientSequence);
+  async getExactProgress(identity: ExactProgressIdentity) {
+    return this.exactProgress.get(exactProgressKey(identity)) ?? null;
   }
 
-  async compareDeleteProgress(mutationId: string) {
-    const current = this.progress.get(mutationId);
-    if (!current || current.mutationId !== mutationId) return false;
-    this.progress.delete(mutationId);
-    if (this.slotMutationIds.get(current.slotKey) === mutationId) this.slotMutationIds.delete(current.slotKey);
-    return true;
-  }
-
-  async markProgressRetry(mutationId: string, nextAttemptAt: number, now = Date.now()) {
-    const current = this.progress.get(mutationId);
-    if (!current || current.mutationId !== mutationId) return false;
-    this.progress.set(mutationId, { ...current, retryCount: current.retryCount + 1, nextAttemptAt, updatedAt: now });
-    return true;
-  }
-
-  async quarantineProgress(mutation: ProgressMutation, reason: QuarantinedProgress['reason'], message: string, now = Date.now()) {
-    this.quarantine.push({ id: createId('quarantine'), mutation, reason, message, createdAt: now });
-    await this.compareDeleteProgress(mutation.mutationId);
-  }
-
-  async acquireProgressLease(ownerId: string, ttlMs: number, now = Date.now()) {
-    if (this.lease && this.lease.ownerId !== ownerId && this.lease.expiresAt > now) return false;
-    this.lease = { key: 'progress-sync', ownerId, expiresAt: now + ttlMs, updatedAt: now };
-    return true;
-  }
-
-  async renewProgressLease(ownerId: string, ttlMs: number, now = Date.now()) {
-    if (!this.lease || this.lease.ownerId !== ownerId || this.lease.expiresAt <= now) return false;
-    this.lease = { ...this.lease, expiresAt: now + ttlMs, updatedAt: now };
-    return true;
-  }
-
-  async releaseProgressLease(ownerId: string) {
-    if (this.lease?.ownerId === ownerId) this.lease = null;
-  }
-
-  async getProgressLease() {
-    return this.lease;
+  async putExactProgress(progress: ExactProgressRecord) {
+    this.exactProgress.set(progress.key, progress);
+    return progress;
   }
 
   async addDiagnostic(diagnostic: Omit<ReaderSyncDiagnostic, 'id' | 'createdAt'>, now = Date.now()) {
@@ -150,19 +88,11 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderBookCache {
     return [...this.diagnostics].sort((left, right) => right.createdAt - left.createdAt).slice(0, limit);
   }
 
-  async listQuarantine(limit = 100) {
-    return [...this.quarantine].sort((left, right) => right.createdAt - left.createdAt).slice(0, limit);
-  }
-
   async clearAll() {
     this.preferences.clear();
-    this.progress.clear();
-    this.slotMutationIds.clear();
+    this.exactProgress.clear();
     this.diagnostics.length = 0;
-    this.quarantine.length = 0;
     this.bookFiles.clear();
-    this.clientId = createId('client');
-    this.sequence = 0;
-    this.lease = null;
+    this.clientId = createId('web');
   }
 }

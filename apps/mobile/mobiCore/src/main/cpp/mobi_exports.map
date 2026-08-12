@@ -1,0 +1,7 @@
+ERMAO_MOBI_JNI_1 {
+    global:
+        Java_com_ermao_library_mobi_infrastructure_MobiCoreNative_*;
+        ermao_mobi_*;
+    local:
+        *;
+};

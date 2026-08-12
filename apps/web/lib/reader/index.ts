@@ -6,6 +6,7 @@ export * from './migrations';
 export * from './model';
 export * from './preferences';
 export * from './private-data';
+export * from './progress-wire';
 export * from './runtime';
 export * from './storage';
 export * from './sync-coordinator';

@@ -9,14 +9,17 @@ packages:
   Readium:
     url: https://github.com/readium/swift-toolkit.git
     exactVersion: 3.11.0
-  LibMobi:
-    path: Dependencies/LibMobi
+  ErmaoMobiCore:
+    path: ../native/mobi-core
 targets:
   ReaderPOC:
     type: application
     platform: iOS
     sources:
       - path: ReaderPOC
+      - path: ../../../test-data/library/mobi
+        name: Fixtures
+        buildPhase: resources
     dependencies:
       - package: Readium
         product: ReadiumShared
@@ -24,8 +27,8 @@ targets:
         product: ReadiumStreamer
       - package: Readium
         product: ReadiumNavigator
-      - package: LibMobi
-        product: LibMobi
+      - package: ErmaoMobiCore
+        product: ErmaoMobiCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ermao.library.reader-poc

@@ -6,9 +6,10 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, case, delete, false, or_, select, update
+from sqlalchemy import case, delete, false, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.epub_navigation import (
     EPUB_HREF_BASE_METADATA_KEY,
@@ -163,7 +164,7 @@ class SqlAlchemyReaderVolumeRepository:
     def list_visible_volumes_for_work(
         self, work_id: str, access_scope: ReaderAccessScope
     ) -> list[ReaderVolumeDto]:
-        visibility = LibraryVolume.id.is_not(None)
+        visibility: ColumnElement[bool] = LibraryVolume.id.is_not(None)
         if not access_scope.is_admin:
             clauses = []
             if access_scope.monitor_folder_ids:
@@ -312,7 +313,9 @@ class SqlAlchemyReaderVolumeRepository:
             ).hexdigest()[:32]
             rows.append(
                 {
-                    "id": existing.id if existing is not None else f"recovered_{digest}",
+                    "id": existing.id
+                    if existing is not None
+                    else f"recovered_{digest}",
                     "volumeId": volume_id,
                     "fileId": file_id,
                     "unitType": "chapter",
@@ -384,13 +387,12 @@ class SqlAlchemyReaderVolumeRepository:
         context: ReaderVolumeContextDto,
         reader_type: str,
         percent: float,
-        location_json: str,
+        location_json: str | None,
         content_fingerprint: str,
-        mutation_id: str,
         client_id: str,
-        client_sequence: int,
+        progressed_at: datetime,
         now: datetime,
-    ) -> tuple[ReaderProgressDto, bool]:
+    ) -> ReaderProgressDto:
         progress_insert = sqlite_insert(LibraryReadingProgress).values(
             id=cuid(),
             userId=user_id,
@@ -400,30 +402,18 @@ class SqlAlchemyReaderVolumeRepository:
             page=None,
             percent=percent,
             extra="{}",
-            schemaVersion=3,
+            schemaVersion=4,
             locationType=reader_type,
             locationJson=location_json,
             contentFingerprint=content_fingerprint,
-            mutationId=mutation_id,
+            mutationId=None,
             clientId=client_id,
-            clientSequence=client_sequence,
-            progressedAt=now,
-            sourceProtocol="SHUKU_WEB",
-            sourceDeviceName="Shuku Web Reader",
+            clientSequence=None,
+            progressedAt=progressed_at,
+            sourceProtocol="SHUKU_READER_V4",
+            sourceDeviceName=None,
             createdAt=now,
             updatedAt=now,
-        )
-        should_apply = and_(
-            or_(
-                LibraryReadingProgress.mutation_id.is_(None),
-                LibraryReadingProgress.mutation_id != mutation_id,
-            ),
-            or_(
-                LibraryReadingProgress.client_id.is_(None),
-                LibraryReadingProgress.client_id != client_id,
-                LibraryReadingProgress.client_sequence.is_(None),
-                LibraryReadingProgress.client_sequence < client_sequence,
-            ),
         )
         progress = self._session.scalar(
             progress_insert.on_conflict_do_update(
@@ -445,24 +435,15 @@ class SqlAlchemyReaderVolumeRepository:
                     "clientSequence": progress_insert.excluded["clientSequence"],
                     "progressedAt": progress_insert.excluded["progressedAt"],
                     "sourceProtocol": progress_insert.excluded["sourceProtocol"],
-                    "sourceDeviceName": progress_insert.excluded[
-                        "sourceDeviceName"
-                    ],
+                    "sourceDeviceName": progress_insert.excluded["sourceDeviceName"],
                     "updatedAt": progress_insert.excluded["updatedAt"],
                 },
-                where=should_apply,
-            ).returning(LibraryReadingProgress)
+            )
+            .returning(LibraryReadingProgress)
+            .execution_options(populate_existing=True)
         )
         if progress is None:
-            current = self._session.scalar(
-                select(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == user_id,
-                    LibraryReadingProgress.volume_id == context.volume.id,
-                )
-            )
-            if current is None:
-                raise RuntimeError("progress upsert returned no current row")
-            return _progress_dto(current), False
+            raise RuntimeError("progress upsert returned no row")
 
         history_insert = sqlite_insert(UserMediaHistory).values(
             id=cuid(),
@@ -484,7 +465,7 @@ class SqlAlchemyReaderVolumeRepository:
                 },
             )
         )
-        return _progress_dto(progress), True
+        return _progress_dto(progress)
 
     def set_reading_status(
         self,
@@ -514,16 +495,16 @@ class SqlAlchemyReaderVolumeRepository:
             page=None,
             percent=100,
             extra="{}",
-            schemaVersion=3,
-            locationType=reader_type,
+            schemaVersion=4,
+            locationType=None,
             locationJson=None,
             contentFingerprint=content_fingerprint,
-            mutationId=f"reading-status-{cuid()}",
+            mutationId=None,
             clientId="shuku-library",
-            clientSequence=int(now.timestamp() * 1000),
+            clientSequence=None,
             progressedAt=now,
-            sourceProtocol="SHUKU_WEB",
-            sourceDeviceName="Shuku Library",
+            sourceProtocol="SHUKU_READER_V4",
+            sourceDeviceName=None,
             createdAt=now,
             updatedAt=now,
         )
@@ -534,11 +515,28 @@ class SqlAlchemyReaderVolumeRepository:
                     LibraryReadingProgress.volume_id,
                 ],
                 set_={
-                    "percent": 100,
-                    "progressedAt": now,
-                    "updatedAt": now,
+                    "readerType": progress_insert.excluded["readerType"],
+                    "position": progress_insert.excluded.position,
+                    "page": progress_insert.excluded.page,
+                    "percent": progress_insert.excluded.percent,
+                    "extra": progress_insert.excluded.extra,
+                    "schemaVersion": progress_insert.excluded["schemaVersion"],
+                    "locationType": progress_insert.excluded["locationType"],
+                    "locationJson": progress_insert.excluded["locationJson"],
+                    "contentFingerprint": progress_insert.excluded[
+                        "contentFingerprint"
+                    ],
+                    "mutationId": progress_insert.excluded["mutationId"],
+                    "clientId": progress_insert.excluded["clientId"],
+                    "clientSequence": progress_insert.excluded["clientSequence"],
+                    "progressedAt": progress_insert.excluded["progressedAt"],
+                    "sourceProtocol": progress_insert.excluded["sourceProtocol"],
+                    "sourceDeviceName": progress_insert.excluded["sourceDeviceName"],
+                    "updatedAt": progress_insert.excluded["updatedAt"],
                 },
-            ).returning(LibraryReadingProgress)
+            )
+            .returning(LibraryReadingProgress)
+            .execution_options(populate_existing=True)
         )
         if progress is None:
             raise RuntimeError("reading status upsert returned no row")
@@ -697,7 +695,5 @@ class SqlAlchemyReaderVolumeRepository:
             )
         )
         for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
-            self._session.execute(
-                sqlite_insert(ReaderBookmark).values(list(chunk))
-            )
+            self._session.execute(sqlite_insert(ReaderBookmark).values(list(chunk)))
         return self.list_bookmarks(user_id, volume_id, content_fingerprint)

@@ -41,7 +41,7 @@ def test_mobile_compatibility_is_public_and_uses_the_typed_contract(
             "capabilities": {
                 "setup": True,
                 "cookieSession": True,
-                "readerV3": True,
+                "readerV4": True,
                 "mediaRange": True,
                 "managedOfflineDownloads": False,
             },

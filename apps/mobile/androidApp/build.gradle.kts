@@ -31,6 +31,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     sourceSets.named("main") {
@@ -41,6 +42,12 @@ android {
             rootProject.layout.buildDirectory.dir("generated/design-tokens/android").get().asFile.absolutePath,
         )
         res.directories.add(layout.buildDirectory.dir("generated/brand-res").get().asFile.absolutePath)
+    }
+
+    sourceSets.named("androidTest") {
+        assets.directories.add(
+            rootProject.layout.projectDirectory.dir("../../test-data/library/epub").asFile.absolutePath,
+        )
     }
 
     packaging {
@@ -84,6 +91,8 @@ tasks.named("preBuild") {
 dependencies {
     implementation(project(":shared"))
 
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.appcompat)
@@ -94,6 +103,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -101,6 +111,10 @@ dependencies {
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.jsoup)
+    implementation(libs.readium.shared)
+    implementation(libs.readium.streamer)
+    implementation(libs.readium.navigator)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)

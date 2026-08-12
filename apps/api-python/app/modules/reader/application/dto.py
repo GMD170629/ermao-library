@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Literal
 
 ReaderReadingStatus = Literal["UNREAD", "FINISHED"]
+ReaderLocationKind = Literal["reflow", "comic", "pdf", "audio"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,5 +148,4 @@ class ReaderBootstrapDto:
     progress_by_volume_id: dict[str, ReaderProgressDto]
     content_fingerprint: str
     resume_location_json: str | None
-    resume_fingerprint_mismatch: bool
     media_completed: bool

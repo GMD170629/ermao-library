@@ -22,7 +22,7 @@ class MobileProtocolCompatibility:
 class MobileCapabilities:
     setup: Literal[True]
     cookie_session: Literal[True]
-    reader_v3: Literal[True]
+    reader_v4: Literal[True]
     media_range: Literal[True]
     managed_offline_downloads: Literal[False]
 
@@ -56,7 +56,7 @@ def mobile_compatibility(
         capabilities=MobileCapabilities(
             setup=True,
             cookie_session=True,
-            reader_v3=True,
+            reader_v4=True,
             media_range=True,
             managed_offline_downloads=False,
         ),

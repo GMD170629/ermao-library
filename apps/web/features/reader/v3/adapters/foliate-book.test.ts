@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   NovelOpenError,
@@ -70,6 +71,31 @@ test('downloads a Foliate book once, reports byte progress, and reopens it from 
   assert.equal(progress.at(-1)?.percent, 100);
   assert.ok((progress.at(-1)?.loadedBytes ?? 0) > 0);
   await second.destroy();
+});
+
+test('validates downloaded and cached publications against the local SHA-256 identity', async () => {
+  const body = '已校验的本地图书内容';
+  const expectedSha256 = `sha256:${createHash('sha256').update(body).digest('hex')}`;
+  const storage = new MemoryReaderStorage();
+  const identity = { userId: 'user-1', volumeId: 'volume-hash', contentFingerprint: 'server-token' };
+  const opened = await openFoliateBook({
+    url: '/book.txt',
+    format: 'txt',
+    title: 'Hash checked',
+    signal: signal(),
+    expectedSha256,
+    cache: { storage, identity },
+    fetch: async () => new Response(body)
+  });
+  await opened.destroy();
+  await assert.rejects(openFoliateBook({
+    url: '/book.txt',
+    format: 'txt',
+    title: 'Hash mismatch',
+    signal: signal(),
+    expectedSha256: `sha256:${'0'.repeat(64)}`,
+    fetch: async () => new Response(body)
+  }), (reason: unknown) => reason instanceof NovelOpenError && reason.code === 'NOVEL_RESOURCE_FAILED');
 });
 
 test('keeps the downloaded book usable when persistent storage rejects the cache write', async () => {

@@ -12,7 +12,7 @@ async function deleteLegacyReaderDatabase() {
   });
 }
 
-/** Clears V1 private state only. Reader v3 owns all current writes and sync. */
+/** Clears the retired V1 private state; Reader v4 owns current exact progress. */
 export async function clearPrivatePwaData() {
   await deleteLegacyReaderDatabase();
   if ('caches' in window) {

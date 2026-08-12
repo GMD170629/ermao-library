@@ -1,7 +1,7 @@
 import type { ReaderKind } from '@shuku/reader-core';
 import { emitReaderDebug } from './debug';
 import { migrateLegacyPreferenceCandidate, migrateLegacyProgressCandidate } from './migrations';
-import type { ProgressMutationInput } from './model';
+import { exactProgressKey, normalizedPercent, type ProgressSaveInput } from './model';
 import { LEGACY_MIGRATION_MARKER_PREFIX } from './private-data';
 import { ReaderPreferenceRepository } from './preferences';
 import { getReaderProgressSyncCoordinator } from './sync-coordinator';
@@ -16,6 +16,7 @@ export type LegacyBrowserReaderContext = {
   currentWorkId: string;
   legacyEditionId: string;
   contentFingerprint: string;
+  localContentFingerprint: string;
   readerKind: ReaderKind;
   volumeId: string;
 };
@@ -181,7 +182,27 @@ export async function migrateLegacyBrowserReaderState(
   const storage = dependencies.storage ?? new IndexedDbReaderStorage();
   const repository = dependencies.repository ?? new ReaderPreferenceRepository(storage);
   const coordinator = getReaderProgressSyncCoordinator();
-  const enqueuer = coordinator ?? { enqueue: (input: ProgressMutationInput) => storage.enqueueProgress(input) };
+  const exactSaver = coordinator ?? {
+    saveExactOnly: async (input: ProgressSaveInput, updatedAtEpochMillis = Date.now()) => {
+      const clientId = await storage.getClientId();
+      const identity = {
+        serverIdentity: input.serverIdentity,
+        userId: input.userId,
+        clientId,
+        volumeId: input.volumeId,
+        localContentFingerprint: input.localContentFingerprint
+      };
+      return storage.putExactProgress({
+        ...identity,
+        key: exactProgressKey(identity),
+        schemaVersion: 1,
+        workId: input.workId,
+        location: input.location,
+        percent: normalizedPercent(input.percent),
+        updatedAtEpochMillis
+      });
+    }
+  };
   let migrated = 0;
   let quarantined = 0;
 
@@ -220,11 +241,12 @@ export async function migrateLegacyBrowserReaderState(
         workId: context.currentWorkId,
         editionId: context.legacyEditionId,
         contentFingerprint: context.contentFingerprint,
+        localContentFingerprint: context.localContentFingerprint,
         volumeId: context.volumeId,
         readerType: context.readerKind,
         progress: value.progress ?? value,
         sourceKey: key
-      }, enqueuer, storage);
+      }, exactSaver, storage);
       if (result.status === 'migrated') migrated += 1;
     } else {
       await diagnoseUnsafe(storage, key, '旧进度没有精确的用户、作品和内容指纹归属');
@@ -265,11 +287,12 @@ export async function migrateLegacyBrowserReaderState(
             workId: context.currentWorkId,
             editionId: context.legacyEditionId,
             contentFingerprint: context.contentFingerprint,
+            localContentFingerprint: context.localContentFingerprint,
             volumeId: context.volumeId,
             readerType: context.readerKind,
             progress: entry.value.progress,
             sourceKey: `${LEGACY_DB_NAME}/${LEGACY_PROGRESS_STORE}`
-          }, enqueuer, storage);
+          }, exactSaver, storage);
           if (result.status === 'migrated') migrated += 1;
         } else {
           await diagnoseUnsafe(storage, `${LEGACY_DB_NAME}/${LEGACY_PROGRESS_STORE}`, '旧进度队列没有精确的用户、作品和内容指纹归属');

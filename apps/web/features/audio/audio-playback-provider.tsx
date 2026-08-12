@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
-import { activateReaderUser, getReaderRuntime, type AudioProgressLocation } from '../../lib/reader';
+import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime, type AudioProgressLocation } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
@@ -150,9 +150,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const domainLocation: AudioProgressLocation = { kind: 'audio', ...location };
     lastProgressEnqueueRef.current = Date.now();
     return runtime.progress.enqueue({
+      serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       workId: bootstrap.mediaVersion.workId,
       volumeId: bootstrap.volume.id,
+      localContentFingerprint: bootstrap.localContentFingerprint,
       contentFingerprint: bootstrap.contentFingerprint,
       location: domainLocation,
       percent: audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed)
@@ -327,12 +329,39 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       if (previousBootstrap) await persistProgress(false, true);
       if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
       try {
-        const bootstrap = await fetchAudioBootstrap(normalizedVolumeId, controller.signal);
+        let bootstrap = await fetchAudioBootstrap(normalizedVolumeId, controller.signal);
         if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
         loadAbortRef.current = null;
         failedLoadRef.current = null;
-        bootstrapRef.current = bootstrap;
         activateReaderUser(bootstrap.userId);
+        const clientId = await runtime.storage.getClientId();
+        const localExact = await runtime.storage.getExactProgress({
+          serverIdentity: currentReaderServerIdentity(),
+          userId: bootstrap.userId,
+          clientId,
+          volumeId: bootstrap.volume.id,
+          localContentFingerprint: bootstrap.localContentFingerprint
+        }).catch(() => null);
+        if (
+          localExact?.location.kind === 'audio'
+          && (
+            bootstrap.serverUpdatedAtEpochMillis === null
+            || localExact.updatedAtEpochMillis >= bootstrap.serverUpdatedAtEpochMillis
+          )
+        ) {
+          bootstrap = {
+            ...bootstrap,
+            resumeLocation: {
+              type: 'audio',
+              volumeId: localExact.location.volumeId,
+              fileId: localExact.location.fileId,
+              chapterId: localExact.location.chapterId,
+              positionMs: localExact.location.positionMs
+            },
+            progressPercent: localExact.percent ?? bootstrap.progressPercent
+          };
+        }
+        bootstrapRef.current = bootstrap;
         const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.mediaVersion.workId);
         const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
         const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
@@ -382,7 +411,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     });
     pendingLoadRef.current = request;
     return request.promise;
-  }, [configureTrack, persistProgress, playCurrentAudio, updateState]);
+  }, [configureTrack, persistProgress, playCurrentAudio, runtime.storage, updateState]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();

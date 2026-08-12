@@ -51,7 +51,7 @@ test('parseFoliateRelocateDetail keeps validated official progress metrics', () 
   }), { fraction: 0.5 });
 });
 
-test('converts Foliate minute estimates to the seconds used by Reader v3', () => {
+test('converts Foliate minute estimates to the seconds used by Reader v4', () => {
   assert.deepEqual(foliateRemainingSeconds({ section: 2.5, total: 12 }), {
     section: 150,
     total: 720

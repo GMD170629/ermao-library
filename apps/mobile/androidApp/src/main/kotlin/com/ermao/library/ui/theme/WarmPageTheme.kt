@@ -7,6 +7,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import com.ermao.library.shared.modules.reader.ReaderTheme
 
 private val AppLightColorScheme = lightColorScheme(
     primary = AppLightColors.actionAccent,
@@ -47,6 +48,64 @@ fun WarmPageTheme(
 ) {
     val colors = if (darkTheme) AppDarkColors else AppLightColors
     val materialColors = if (darkTheme) AppDarkColorScheme else AppLightColorScheme
+
+    CompositionLocalProvider(
+        LocalWarmPageColors provides colors,
+        LocalWarmPageSpacing provides WarmPageSpacingTokens,
+        LocalWarmPageRadii provides WarmPageRadiusTokens,
+        LocalWarmPageTypography provides WarmPageTypographyTokens,
+    ) {
+        MaterialTheme(
+            colorScheme = materialColors,
+            typography = androidx.compose.material3.Typography(
+                displayLarge = WarmPageTypographyTokens.display,
+                headlineLarge = WarmPageTypographyTokens.title,
+                titleLarge = WarmPageTypographyTokens.sectionTitle,
+                titleMedium = WarmPageTypographyTokens.headline,
+                bodyLarge = WarmPageTypographyTokens.body,
+                bodyMedium = WarmPageTypographyTokens.callout,
+                labelLarge = WarmPageTypographyTokens.button,
+                labelMedium = WarmPageTypographyTokens.label,
+                labelSmall = WarmPageTypographyTokens.caption,
+            ),
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun ReaderWarmPageTheme(
+    readerTheme: ReaderTheme,
+    content: @Composable () -> Unit,
+) {
+    val systemDark = isSystemInDarkTheme()
+    val usesNightPalette = readerTheme == ReaderTheme.Night || readerTheme == ReaderTheme.System && systemDark
+    val colors = if (usesNightPalette) ReaderNightColors else ReaderPaperColors
+    val materialColors = if (usesNightPalette) {
+        darkColorScheme(
+            primary = colors.actionAccent,
+            onPrimary = colors.onAction,
+            background = colors.canvas,
+            onBackground = colors.textPrimary,
+            surface = colors.surface,
+            onSurface = colors.textPrimary,
+            surfaceVariant = colors.accentSoft,
+            onSurfaceVariant = colors.textSecondary,
+            outline = colors.divider,
+        )
+    } else {
+        lightColorScheme(
+            primary = colors.actionAccent,
+            onPrimary = colors.onAction,
+            background = colors.canvas,
+            onBackground = colors.textPrimary,
+            surface = colors.surface,
+            onSurface = colors.textPrimary,
+            surfaceVariant = colors.accentSoft,
+            onSurfaceVariant = colors.textSecondary,
+            outline = colors.divider,
+        )
+    }
 
     CompositionLocalProvider(
         LocalWarmPageColors provides colors,

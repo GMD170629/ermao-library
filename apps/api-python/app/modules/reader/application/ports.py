@@ -58,13 +58,12 @@ class ReaderVolumeRepository(Protocol):
         context: ReaderVolumeContextDto,
         reader_type: str,
         percent: float,
-        location_json: str,
+        location_json: str | None,
         content_fingerprint: str,
-        mutation_id: str,
         client_id: str,
-        client_sequence: int,
+        progressed_at: datetime,
         now: datetime,
-    ) -> tuple[ReaderProgressDto, bool]: ...
+    ) -> ReaderProgressDto: ...
 
     def set_reading_status(
         self,
@@ -118,3 +117,7 @@ class ReaderUnitOfWork(Protocol):
 
 class ReaderEpubNavigationParser(Protocol):
     def parse(self, source_path: str) -> tuple[ReaderRecoveredEpubChapterDto, ...]: ...
+
+
+class ReaderClock(Protocol):
+    def now(self) -> datetime: ...

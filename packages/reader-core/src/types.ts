@@ -23,6 +23,16 @@ export type ReflowableLocation = {
   format: ReflowableFormat;
   cfi?: string;
   href?: string;
+  /** Position within the current resource, never the whole-book percent. */
+  resourceProgression?: number;
+  /** Parser-independent position when supplied by a compatible publication. */
+  position?: number;
+  textQuote?: {
+    exact: string;
+    prefix?: string;
+    suffix?: string;
+  };
+  /** Whole-book fraction used only as the final approximate fallback. */
   progression?: number;
   foliate?: FoliateProgressSnapshot;
 };
@@ -145,6 +155,11 @@ type ReaderSourceBase = {
   volumeId: string;
   contentUrl: string;
   contentFingerprint: string;
+  localContentFingerprint?: {
+    originalFileHash: string;
+    parserVersion: string;
+    normalizationVersion: string;
+  };
   totalPages?: number | null;
 };
 

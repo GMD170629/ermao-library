@@ -109,10 +109,7 @@ export function PwaClient() {
     try {
       const latestWorker = await waitForLatestWorker(registration, latestVersion);
       await prepareForPwaUpdate();
-      await Promise.race([
-        getReaderRuntime().progress.flushNow(),
-        new Promise<void>((resolve) => { window.setTimeout(resolve, 5_000); })
-      ]);
+      await getReaderRuntime().progress.flushNow({ timeoutMs: 5_000 });
       refreshingRef.current = true;
       await purgeFrontendResourcesAndActivate(latestWorker);
       window.setTimeout(() => window.location.reload(), 5_000);
@@ -485,7 +482,7 @@ function PwaDebugPanel() {
     function recordReaderDebug(event: Event) {
       const detail = (event as CustomEvent<{ level?: DebugLevel; message?: string; data?: unknown }>).detail;
       if (!detail) return;
-      appendLog(detail.level ?? 'info', 'reader-v3', [detail.message ?? 'event', detail.data].filter((item) => typeof item !== 'undefined'));
+      appendLog(detail.level ?? 'info', 'reader-v4', [detail.message ?? 'event', detail.data].filter((item) => typeof item !== 'undefined'));
     }
 
     appendLog('info', 'pwa', [
@@ -496,25 +493,10 @@ function PwaDebugPanel() {
     ]);
 
     const readerRuntime = getReaderRuntime();
-    void Promise.all([
-      readerRuntime.storage.listProgress(),
-      readerRuntime.storage.getProgressLease(),
-      readerRuntime.storage.listDiagnostics(30),
-      readerRuntime.storage.listQuarantine(30)
-    ]).then(([outbox, lease, diagnostics, quarantine]) => {
-      appendLog('info', 'reader-v3/snapshot', [
-        `outbox=${outbox.length}`,
-        lease ? `lease=${lease.ownerId} expires=${new Date(lease.expiresAt).toISOString()}` : 'lease=none',
-        `diagnostics=${diagnostics.length}`,
-        `quarantine=${quarantine.length}`
-      ]);
-      diagnostics.reverse().forEach((item) => appendLog(item.level === 'warning' ? 'warn' : item.level, `reader-v3/${item.code}`, [item.message, item.data]));
-      quarantine.reverse().forEach((item) => appendLog('warn', `reader-v3/quarantine/${item.reason}`, [item.message, {
-        mutationId: item.mutation.mutationId,
-        volumeId: item.mutation.volumeId,
-        fingerprint: item.mutation.contentFingerprint
-      }]));
-    }).catch((error) => appendLog('warn', 'reader-v3/snapshot', ['读取本地诊断失败', error]));
+    void readerRuntime.storage.listDiagnostics(30).then((diagnostics) => {
+      appendLog('info', 'reader-v4/snapshot', [`diagnostics=${diagnostics.length}`]);
+      diagnostics.reverse().forEach((item) => appendLog(item.level === 'warning' ? 'warn' : item.level, `reader-v4/${item.code}`, [item.message, item.data]));
+    }).catch((error) => appendLog('warn', 'reader-v4/snapshot', ['读取本地诊断失败', error]));
 
     navigator.serviceWorker?.getRegistration().then((registration) => {
       appendLog('info', 'service-worker', [
