@@ -1,6 +1,7 @@
 package com.ermao.poc.mobireadium
 
 import android.content.Context
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -87,6 +88,8 @@ class MobiIntoEpubNavigatorInstrumentedTest {
 
             val bodyText = waitForBodyText(instrumentation, webView!!)
             val currentUrl = readWebViewUrl(instrumentation, webView)
+            Log.i("MobiReadiumPOC", "RENDERED_BODY=$bodyText")
+            Log.i("MobiReadiumPOC", "RENDERED_URL=$currentUrl")
             assertTrue(
                 "Readium WebView was created but did not render the libmobi HTML. body=$bodyText url=$currentUrl",
                 bodyText != null && bodyText != "\"\"" && bodyText != "null" && bodyText.length > 4,
