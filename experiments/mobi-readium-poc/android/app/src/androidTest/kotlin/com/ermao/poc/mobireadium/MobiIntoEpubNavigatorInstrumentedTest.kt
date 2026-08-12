@@ -86,13 +86,14 @@ class MobiIntoEpubNavigatorInstrumentedTest {
             assertNotNull("Readium EPUB Navigator never created its WebView", webView)
 
             val bodyText = waitForBodyText(instrumentation, webView!!)
+            val currentUrl = readWebViewUrl(instrumentation, webView)
             assertTrue(
-                "Readium WebView was created but did not render the libmobi HTML. body=$bodyText url=${webView.url}",
+                "Readium WebView was created but did not render the libmobi HTML. body=$bodyText url=$currentUrl",
                 bodyText != null && bodyText != "\"\"" && bodyText != "null" && bodyText.length > 4,
             )
             assertTrue(
-                "Navigator did not load a publication resource URL: ${webView.url}",
-                !webView.url.isNullOrBlank(),
+                "Navigator did not load a publication resource URL: $currentUrl",
+                !currentUrl.isNullOrBlank(),
             )
         } finally {
             scenario.close()
@@ -141,6 +142,17 @@ class MobiIntoEpubNavigatorInstrumentedTest {
             Thread.sleep(100)
         }
         return null
+    }
+
+    private fun readWebViewUrl(
+        instrumentation: android.app.Instrumentation,
+        webView: WebView,
+    ): String? {
+        val result = AtomicReference<String?>()
+        instrumentation.runOnMainSync {
+            result.set(webView.url)
+        }
+        return result.get()
     }
 
     private fun findWebView(view: View): WebView? {
