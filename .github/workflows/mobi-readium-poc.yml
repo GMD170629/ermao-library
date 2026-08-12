@@ -23,7 +23,7 @@ jobs:
             -DUSE_XMLWRITER=OFF \
             -DUSE_ENCRYPTION=OFF \
             -DBUILD_SHARED_LIBS=OFF
-          cmake --build /tmp/libmobi-build --parallel 2
+          cmake --build /tmp/libmobi-build --target mobitool --parallel 2
           /tmp/libmobi-build/tools/mobitool -v
 
       - name: Parse real MOBI test corpus into source resources
