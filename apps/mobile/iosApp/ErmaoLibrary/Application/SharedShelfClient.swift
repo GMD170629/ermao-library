@@ -1,0 +1,59 @@
+import Foundation
+@preconcurrency import ErmaoShared
+
+actor SharedShelfClient: ShelfClient {
+    private let repository: any ErmaoShared.ShelfRepository
+
+    init(repository: any ErmaoShared.ShelfRepository) {
+        self.repository = repository
+    }
+
+    func fetchShelves(context: ContentRequestContext, workID: String) async throws -> [ShelfOption] {
+        let result = try await repository.loadShelves(
+            context: sharedContext(context),
+            workId: workID
+        )
+        if let content = result as? ErmaoShared.ShelfResultContent<NSArray> {
+            return (content.value ?? []).compactMap { value in
+                guard let shelf = value as? ErmaoShared.ShelfSummary else { return nil }
+                return ShelfOption(id: shelf.id, name: shelf.name, containsWork: shelf.containsWork)
+            }
+        }
+        throw mapFailure(result)
+    }
+
+    func updateShelf(context: ContentRequestContext, workID: String, shelfID: String, add: Bool) async throws {
+        let result = try await repository.updateMembership(
+            context: sharedContext(context),
+            change: ErmaoShared.ShelfMembershipChange(
+                workId: workID,
+                shelfId: shelfID,
+                membership: add ? .add : .remove
+            )
+        )
+        if result is ErmaoShared.ShelfResultContent<AnyObject> { return }
+        throw mapFailure(result)
+    }
+
+    private func sharedContext(_ value: ContentRequestContext) -> ErmaoShared.ShelfRequestContext {
+        ErmaoShared.PublicKt.createShelfRequestContext(
+            profileId: value.profileID,
+            displayName: value.profileDisplayName,
+            baseUrl: value.baseURL,
+            serverIdentity: value.serverIdentity,
+            acceptsInsecureTls: value.acceptsInsecureTLS,
+            userId: value.userID,
+            authorizationVersion: value.authorizationVersion
+        )
+    }
+
+    private func mapFailure(_ result: Any) -> ContentClientError {
+        guard let failure = result as? ErmaoShared.ShelfResultFailure else { return .invalidResponse }
+        switch failure.error.kind {
+        case .unauthorized: return .unauthorized
+        case .offline: return .offline
+        case .inaccessible: return .inaccessible
+        default: return .transport
+        }
+    }
+}

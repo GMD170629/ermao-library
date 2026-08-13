@@ -1,26 +1,5 @@
 package com.ermao.library.shared.modules.reader.domain
 
-/**
- * Opaque content-version token issued by Reader v4.
- *
- * This is intentionally distinct from [ContentFingerprint]. The server token
- * describes the server's current volume content while [ContentFingerprint]
- * binds a local file to a concrete parser and normalization implementation.
- * Neither value may be inferred from the other.
- */
-data class ReaderServerContentFingerprint(val value: String) {
-    init {
-        require(value.isNotBlank()) { "Reader server content fingerprint is blank" }
-        require(value.length <= MAXIMUM_SERVER_FINGERPRINT_LENGTH) {
-            "Reader server content fingerprint is too long"
-        }
-    }
-
-    private companion object {
-        const val MAXIMUM_SERVER_FINGERPRINT_LENGTH = 191
-    }
-}
-
 data class ReaderSyncNamespace(
     val serverIdentity: String,
     val userId: String,
@@ -34,10 +13,9 @@ data class ReaderSyncNamespace(
 
     val stableKey: String
         get() = lengthPrefixed(serverIdentity, userId, authorizationVersion.toString())
-
 }
 
-/** Stable exact-local identity. Authorization version and server token are intentionally absent. */
+/** Stable local identity. Authorization changes do not erase an exact location. */
 data class ReaderLocalProgressIdentity(
     val namespace: ReaderSyncNamespace,
     val clientId: String,
@@ -66,7 +44,6 @@ data class ReaderProgressSyncTarget(
     val workId: String,
     val volumeId: String,
     val sourceFormat: ReaderFormat,
-    val serverContentFingerprint: ReaderServerContentFingerprint,
 ) {
     init {
         require(workId.isNotBlank()) { "Reader sync work id is blank" }
@@ -74,12 +51,80 @@ data class ReaderProgressSyncTarget(
     }
 
     val slotKey: String
-        get() = lengthPrefixed(
-            namespace.stableKey,
-            volumeId,
-            serverContentFingerprint.value,
-        )
+        get() = lengthPrefixed(namespace.stableKey, volumeId)
 }
+
+/** Exact Reader v4 server state. Percent is a display projection only. */
+data class ReaderProgressSnapshotV4(
+    val sourceId: String,
+    val revision: Long,
+    val locator: ReadiumLocatorEnvelope,
+    val displayPercent: Double,
+    val receivedAtEpochMillis: Long,
+    /** Original client capture time; absent on older Reader v4 servers. */
+    val capturedAtEpochMillis: Long? = null,
+) {
+    init {
+        require(sourceId.isNotBlank()) { "Reader snapshot source id is blank" }
+        require(revision > 0) { "Reader snapshot revision must be positive" }
+        require(displayPercent.isFinite() && displayPercent in 0.0..100.0) {
+            "Reader display percent is outside 0..100"
+        }
+        require(receivedAtEpochMillis >= 0) { "Reader server timestamp is negative" }
+        require(capturedAtEpochMillis == null || capturedAtEpochMillis >= 0) {
+            "Reader capture timestamp is negative"
+        }
+    }
+
+    val effectiveCapturedAtEpochMillis: Long
+        get() = capturedAtEpochMillis ?: receivedAtEpochMillis
+}
+
+data class ReaderProgressMutation(
+    val sourceId: String,
+    val clientId: String,
+    val mutationId: String,
+    val baseRevision: Long,
+    val capturedAtEpochMillis: Long,
+    val locator: ReadiumLocatorEnvelope,
+) {
+    init {
+        require(sourceId.isNotBlank()) { "Reader mutation source id is blank" }
+        require(clientId.isNotBlank()) { "Reader mutation client id is blank" }
+        require(mutationId.isNotBlank()) { "Reader mutation id is blank" }
+        require(baseRevision >= 0) { "Reader mutation base revision is negative" }
+        require(capturedAtEpochMillis >= 0) { "Reader mutation timestamp is negative" }
+    }
+}
+
+data class ReaderProgressConflict(
+    val pending: ReaderProgressMutation,
+    val server: ReaderProgressSnapshotV4,
+) {
+    init {
+        require(pending.sourceId == server.sourceId) { "Reader conflict source ids differ" }
+        require(pending.baseRevision < server.revision) { "Reader conflict does not contain a newer server revision" }
+    }
+}
+
+fun ReaderProgress.exactLocatorEnvelope(): ReadiumLocatorEnvelope {
+    val reflow = location as? ReflowReaderLocation
+        ?: throw IllegalArgumentException("Reader v4 exact sync currently requires a reflowable Readium location")
+    return ReadiumLocatorEnvelope.from(reflow)
+        ?: throw IllegalArgumentException("Reader progress does not contain an exact Readium block locator")
+}
+
+fun ReaderProgress.toMutation(
+    baseRevision: Long,
+    mutationId: String,
+): ReaderProgressMutation = ReaderProgressMutation(
+    sourceId = sourceId,
+    clientId = deviceId,
+    mutationId = mutationId,
+    baseRevision = baseRevision,
+    capturedAtEpochMillis = updatedAtEpochMillis,
+    locator = exactLocatorEnvelope(),
+)
 
 private fun lengthPrefixed(vararg values: String): String = buildString {
     values.forEach { value ->
@@ -87,117 +132,4 @@ private fun lengthPrefixed(vararg values: String): String = buildString {
         append(':')
         append(value)
     }
-}
-
-/** Cross-platform anchors which may be attempted in order without claiming local exactness. */
-data class ReaderPublicAnchor(
-    val format: ReaderFormat = ReaderFormat.Epub,
-    val contentFingerprint: ContentFingerprint? = null,
-    val engineLocator: EngineLocator? = null,
-    val resourceKey: String? = null,
-    val progression: Double? = null,
-    val textQuote: TextQuote? = null,
-    val position: Int? = null,
-    /** PDF and comic page numbers are one-based on the server wire. */
-    val pageNumber: Int? = null,
-    val fileId: String? = null,
-    val chapterId: String? = null,
-    val positionMillis: Long? = null,
-) {
-    init {
-        require(resourceKey == null || resourceKey.isNotBlank()) { "Reader anchor resource key is blank" }
-        require(progression == null || progression.isFinite() && progression in 0.0..1.0) {
-            "Reader anchor progression is outside 0..1"
-        }
-        require(position == null || position > 0) { "Reader anchor position must be positive" }
-        require(pageNumber == null || pageNumber > 0) { "Reader anchor page number must be positive" }
-        require(fileId == null || fileId.isNotBlank()) { "Reader anchor audio file id is blank" }
-        require(chapterId == null || chapterId.isNotBlank()) { "Reader anchor audio chapter id is blank" }
-        require(positionMillis == null || positionMillis >= 0) { "Reader anchor audio position is negative" }
-        require(
-            engineLocator != null || resourceKey != null || progression != null || textQuote != null || position != null ||
-                pageNumber != null || fileId != null || positionMillis != null,
-        ) {
-            "Reader public anchor is empty"
-        }
-        when (format) {
-            ReaderFormat.Pdf, ReaderFormat.Comic -> require(pageNumber != null)
-            ReaderFormat.Audio -> require(fileId != null && positionMillis != null)
-            else -> require(pageNumber == null && fileId == null && positionMillis == null)
-        }
-    }
-}
-
-/** Reader v4 server snapshot. It deliberately excludes local ContentFingerprint. */
-data class ReaderProgressSnapshotV4(
-    val sourceId: String,
-    val percent: Double,
-    val updatedAtEpochMillis: Long,
-    val clientId: String,
-    val serverContentFingerprint: ReaderServerContentFingerprint,
-    val anchor: ReaderPublicAnchor? = null,
-) {
-    init {
-        require(sourceId.isNotBlank()) { "Reader snapshot source id is blank" }
-        require(percent.isFinite() && percent in PERCENT_RANGE) { "Reader progress percent is outside 0..100" }
-        require(updatedAtEpochMillis >= 0) { "Reader snapshot timestamp is negative" }
-        require(clientId.isNotBlank()) { "Reader snapshot client id is blank" }
-    }
-
-    private companion object {
-        val PERCENT_RANGE = 0.0..100.0
-    }
-}
-
-fun ReaderProgress.projectedPercent(): Double = when (val currentLocation = location) {
-    is ReflowReaderLocation ->
-        currentLocation.totalProgression?.times(100.0)?.coerceIn(0.0, 100.0)
-            ?: percent
-            ?: currentLocation.progression?.times(100.0)?.coerceIn(0.0, 100.0)
-            ?: error("Reflow Reader progress requires a whole-volume percent or progression")
-    is PdfReaderLocation, is ComicReaderLocation, is AudioReaderLocation ->
-        requireNotNull(percent) { "Non-reflow Reader progress requires an explicit whole-volume percent" }
-}
-
-fun ReaderProgress.toServerSnapshot(
-    serverContentFingerprint: ReaderServerContentFingerprint,
-): ReaderProgressSnapshotV4 {
-    val reflow = location as? ReflowReaderLocation
-    return ReaderProgressSnapshotV4(
-        sourceId = sourceId,
-        percent = projectedPercent(),
-        updatedAtEpochMillis = updatedAtEpochMillis,
-        clientId = deviceId,
-        serverContentFingerprint = serverContentFingerprint,
-        anchor = when (val currentLocation = location) {
-            is ReflowReaderLocation -> ReaderPublicAnchor(
-                contentFingerprint = currentLocation.contentFingerprint,
-                engineLocator = currentLocation.engineLocator,
-                resourceKey = currentLocation.resourceKey,
-                progression = currentLocation.progression,
-                textQuote = currentLocation.textQuote,
-                position = currentLocation.position,
-            )
-            is PdfReaderLocation -> ReaderPublicAnchor(
-                format = ReaderFormat.Pdf,
-                contentFingerprint = currentLocation.contentFingerprint,
-                engineLocator = currentLocation.engineLocator,
-                pageNumber = currentLocation.pageIndex + 1,
-            )
-            is ComicReaderLocation -> ReaderPublicAnchor(
-                format = ReaderFormat.Comic,
-                contentFingerprint = currentLocation.contentFingerprint,
-                engineLocator = currentLocation.engineLocator,
-                pageNumber = currentLocation.pageIndex + 1,
-            )
-            is AudioReaderLocation -> ReaderPublicAnchor(
-                format = ReaderFormat.Audio,
-                contentFingerprint = currentLocation.contentFingerprint,
-                engineLocator = currentLocation.engineLocator,
-                fileId = currentLocation.fileId,
-                chapterId = currentLocation.chapterId,
-                positionMillis = currentLocation.positionMillis,
-            )
-        },
-    )
 }

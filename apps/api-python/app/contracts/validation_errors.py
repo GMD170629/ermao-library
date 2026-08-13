@@ -27,7 +27,9 @@ class RequestValidationIssue(HttpContractModel):
 
 
 class RequestValidationErrorBody(HttpContractModel):
-    code: Literal["REQUEST_VALIDATION_ERROR"] = "REQUEST_VALIDATION_ERROR"
+    code: Literal["REQUEST_VALIDATION_ERROR", "READER_LOCATOR_NOT_EXACT"] = (
+        "REQUEST_VALIDATION_ERROR"
+    )
     message: str
     details: list[RequestValidationIssue]
 

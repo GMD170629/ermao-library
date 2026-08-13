@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.KeyEvent
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
@@ -18,6 +20,8 @@ import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdentity
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressDatabase
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
+import com.ermao.library.features.reader.infrastructure.AndroidReaderPreferencesStore
+import com.ermao.library.features.reader.infrastructure.AndroidReaderBookmarkStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.infrastructure.AndroidReadiumRuntime
 import com.ermao.library.features.reader.infrastructure.ReaderOpenFailure
@@ -32,15 +36,21 @@ import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.BootstrapReaderPublication
 import com.ermao.library.shared.modules.reader.LocalFirstReaderProgressStore
 import com.ermao.library.shared.modules.reader.ReaderBootstrapRequest
+import com.ermao.library.shared.modules.reader.ReaderBootstrapContent
+import com.ermao.library.shared.modules.reader.ReaderBootstrapFailure
 import com.ermao.library.shared.modules.reader.ReaderProgressStore
+import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncPort
+import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncCoordinator
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncingStore
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.ReaderTapZones
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapContent
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapFailure
 import com.ermao.library.ErmaoLibraryApplication
 import com.ermao.library.shared.createAndroidReaderProgressSyncPort
+import com.ermao.library.shared.createAndroidReaderBookmarkSyncPort
 import com.ermao.library.shared.createAndroidReaderServerGateway
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import kotlinx.coroutines.Job
@@ -57,6 +67,10 @@ class ReaderActivity : AppCompatActivity() {
     private var opening by mutableStateOf(true)
     private var openError by mutableStateOf<ReaderError?>(null)
     private var readerTitle by mutableStateOf("")
+    private var controlsVisible by mutableStateOf(false)
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var touchDownAt = 0L
 
     private var session: ReadiumEpubSession? = null
     private var pendingNavigator: EpubNavigatorFragment? = null
@@ -69,6 +83,8 @@ class ReaderActivity : AppCompatActivity() {
 
     internal val controllerForTesting: ReaderScreenController?
         get() = controller
+    internal val controlsVisibleForTesting: Boolean
+        get() = controlsVisible
 
     override fun onCreate(savedInstanceState: Bundle?) {
         supportFragmentManager.fragmentFactory = EpubNavigatorFragment.createDummyFactory()
@@ -76,10 +92,21 @@ class ReaderActivity : AppCompatActivity() {
         removeRestoredNavigator()
 
         val source = runCatching { intent.readerSourceOrNull() }.getOrNull()
+        val managedRequest = runCatching { intent.managedDownloadRequestOrNull() }.getOrNull()
         val serverRequest = runCatching { intent.serverReaderRequestOrNull() }.getOrNull()
         if (source != null) {
             readerTitle = source.displayTitle
             session = createSession(source, AndroidReaderProgressStore(applicationContext))
+        } else if (managedRequest != null) {
+            openJob = lifecycleScope.launch {
+                try {
+                    openManagedDownload(managedRequest)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: RuntimeException) {
+                    showOpenError(ReaderErrorCode.ReaderEngineError)
+                }
+            }
         } else if (serverRequest != null) {
             openJob = lifecycleScope.launch {
                 try {
@@ -103,6 +130,8 @@ class ReaderActivity : AppCompatActivity() {
                 controller = controller,
                 opening = opening,
                 openError = openError,
+                controlsVisible = controlsVisible,
+                onControlsVisibleChange = { controlsVisible = it },
                 onClose = ::closeReader,
                 onNavigatorContainerReady = {
                     containerReady = true
@@ -121,6 +150,59 @@ class ReaderActivity : AppCompatActivity() {
         attachNavigatorIfReady()
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+                touchDownAt = event.eventTime
+            }
+            MotionEvent.ACTION_UP -> {
+                val moved = kotlin.math.hypot(event.x - touchDownX, event.y - touchDownY)
+                val tapSlop = 12 * resources.displayMetrics.density
+                if (!controlsVisible && moved <= tapSlop && event.eventTime - touchDownAt <= 600) {
+                    routeReaderTap(event.x / resources.displayMetrics.widthPixels.coerceAtLeast(1))
+                }
+            }
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) {
+            return super.dispatchKeyEvent(event)
+        }
+        val reader = controller ?: return super.dispatchKeyEvent(event)
+        val interaction = reader.preferences.value.interaction
+        val handled = when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_PAGE_UP ->
+                interaction.keyboardPageTurn && reader.goPrevious()
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_SPACE ->
+                interaction.keyboardPageTurn && reader.goNext()
+            KeyEvent.KEYCODE_VOLUME_UP -> interaction.volumeKeyPageTurn && reader.goPrevious()
+            KeyEvent.KEYCODE_VOLUME_DOWN -> interaction.volumeKeyPageTurn && reader.goNext()
+            else -> false
+        }
+        return if (handled) true else super.dispatchKeyEvent(event)
+    }
+
+    private fun routeReaderTap(horizontalFraction: Float) {
+        val reader = controller ?: return
+        when (reader.preferences.value.interaction.tapZones) {
+            ReaderTapZones.Disabled -> controlsVisible = true
+            ReaderTapZones.Standard -> when {
+                horizontalFraction < 0.33f -> reader.goPrevious()
+                horizontalFraction > 0.67f -> reader.goNext()
+                else -> controlsVisible = true
+            }
+            ReaderTapZones.Reversed -> when {
+                horizontalFraction < 0.33f -> reader.goNext()
+                horizontalFraction > 0.67f -> reader.goPrevious()
+                else -> controlsVisible = true
+            }
+        }
+    }
+
     override fun onStop() {
         if (!closing) session?.let { readerSession ->
             lifecycleScope.launch {
@@ -133,7 +215,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         openJob?.cancel()
-        lifecycleScope.launch { progressCoordinator?.cancel() }
+        lifecycleScope.launch { progressCoordinator?.cancelWorker() }
         session?.release()
         session = null
         super.onDestroy()
@@ -152,6 +234,11 @@ class ReaderActivity : AppCompatActivity() {
             privateNamespace.serverIdentity,
             privateNamespace.userId,
             privateNamespace.authorizationVersion,
+        )
+        val preferencesStore = AndroidReaderPreferencesStore(
+            applicationContext,
+            namespace.serverIdentity,
+            namespace.userId,
         )
         val serverGateway = createAndroidReaderServerGateway(applicationContext)
         val publicationStore = AndroidReaderPublicationStore(applicationContext)
@@ -183,22 +270,147 @@ class ReaderActivity : AppCompatActivity() {
                     ),
                 )
                 val coordinator = ReaderProgressSyncCoordinator(
-                    localStore = database,
+                    stateStore = database,
                     server = createAndroidReaderProgressSyncPort(applicationContext, authenticated.profile),
                     scope = lifecycleScope,
                 )
                 val syncingStore = LocalFirstReaderProgressStore(
-                    localStore = database,
+                    stateStore = database,
                     target = result.bootstrap.target,
                     coordinator = coordinator,
                 )
                 progressCoordinator = coordinator
                 syncingProgressStore = syncingStore
                 readerTitle = source.displayTitle
-                session = createSession(source, syncingStore, result.bootstrap.remoteSnapshot)
+                session = createSession(
+                    source,
+                    syncingStore,
+                    result.bootstrap.remoteSnapshot,
+                    preferencesStore,
+                    AndroidReaderBookmarkStore(
+                        applicationContext,
+                        namespace.serverIdentity,
+                        namespace.userId,
+                        source.sourceId,
+                        result.bootstrap.artifactVersion,
+                    ),
+                    createAndroidReaderBookmarkSyncPort(applicationContext, authenticated.profile),
+                    ReaderBookmarkSyncTarget(
+                        namespace.serverIdentity,
+                        source.sourceId,
+                        result.bootstrap.artifactVersion,
+                    ),
+                    namespaceKey = namespace.presentationKey(),
+                )
                 prepareSession(checkNotNull(session))
             }
         }
+    }
+
+    private suspend fun openManagedDownload(request: ManagedDownloadReaderRequest) {
+        val application = application as ErmaoLibraryApplication
+        val runtime = application.mobileRuntime
+        if (runtime.currentSession !is AppSession.Authenticated && runtime.currentSession !is AppSession.OfflineGrace) {
+            runtime.start()
+        }
+        val activeSession = when (val current = runtime.currentSession) {
+            is AppSession.Authenticated -> ActiveReaderSession(current.profile, current.identity, current)
+            is AppSession.OfflineGrace -> ActiveReaderSession(current.profile, current.identity, null)
+            else -> null
+        }
+        if (activeSession == null || activeSession.profile.id != request.profileId) {
+            showOpenError(ReaderErrorCode.ResourceMissing)
+            return
+        }
+        val readerNamespace = activeSession.identity.namespace
+        val preferencesStore = AndroidReaderPreferencesStore(
+            applicationContext,
+            readerNamespace.serverIdentity,
+            readerNamespace.userId,
+        )
+        val localFile = application.downloadFiles.resolveLocalReference(request.localReference)
+        if (localFile == null || !localFile.isFile || localFile.length() != request.expectedBytes) {
+            showOpenError(ReaderErrorCode.ResourceMissing)
+            return
+        }
+        val publicationStore = AndroidReaderPublicationStore(applicationContext)
+        val source = localFile.inputStream().use { input ->
+            publicationStore.publishLocalEpub(
+                sourceId = request.volumeId,
+                displayTitle = request.displayTitle,
+                input = input,
+                workId = request.workId,
+                volumeId = request.volumeId,
+            )
+        }
+        val authenticated = activeSession.authenticated
+        val progressStore: ReaderProgressStore
+        var bookmarkSyncPort: ReaderBookmarkSyncPort? = null
+        var remoteSnapshot: com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4? = null
+        if (authenticated != null) {
+            val namespace = ReaderSyncNamespace(
+                activeSession.identity.namespace.serverIdentity,
+                activeSession.identity.namespace.userId,
+                activeSession.identity.namespace.authorizationVersion,
+            )
+            when (val bootstrap = createAndroidReaderServerGateway(applicationContext).load(
+                ReaderBootstrapRequest(activeSession.profile, namespace, request.volumeId),
+            )) {
+                is ReaderBootstrapContent -> {
+                    if (bootstrap.value.artifactVersion != request.serverContentFingerprint) {
+                        showOpenError(ReaderErrorCode.ResourceMissing)
+                        return
+                    }
+                    val clientId = AndroidReaderDeviceIdentity(applicationContext).stableDeviceId()
+                    val database = AndroidReaderProgressDatabase(
+                        applicationContext,
+                        ReaderLocalProgressIdentity(namespace, clientId, source.sourceId, source.contentFingerprint),
+                    )
+                    val coordinator = ReaderProgressSyncCoordinator(
+                        stateStore = database,
+                        server = createAndroidReaderProgressSyncPort(applicationContext, activeSession.profile),
+                        scope = lifecycleScope,
+                    )
+                    val syncingStore = LocalFirstReaderProgressStore(database, bootstrap.value.target, coordinator)
+                    progressCoordinator = coordinator
+                    syncingProgressStore = syncingStore
+                    progressStore = syncingStore
+                    remoteSnapshot = bootstrap.value.remoteSnapshot
+                    bookmarkSyncPort = createAndroidReaderBookmarkSyncPort(applicationContext, activeSession.profile)
+                }
+                is ReaderBootstrapFailure -> {
+                    if (!bootstrap.recoverable) {
+                        showOpenError(ReaderErrorCode.ResourceMissing)
+                        return
+                    }
+                    progressStore = AndroidReaderProgressStore(applicationContext)
+                }
+            }
+        } else {
+            progressStore = AndroidReaderProgressStore(applicationContext)
+        }
+        readerTitle = source.displayTitle
+        session = createSession(
+            source,
+            progressStore,
+            remoteSnapshot,
+            preferencesStore,
+            AndroidReaderBookmarkStore(
+                applicationContext,
+                readerNamespace.serverIdentity,
+                readerNamespace.userId,
+                source.sourceId,
+                request.serverContentFingerprint,
+            ),
+            bookmarkSyncPort,
+            ReaderBookmarkSyncTarget(
+                readerNamespace.serverIdentity,
+                source.sourceId,
+                request.serverContentFingerprint,
+            ),
+            namespaceKey = readerNamespace.presentationKey(),
+        )
+        prepareSession(checkNotNull(session))
     }
 
     private suspend fun prepareSession(readerSession: ReadiumEpubSession) {
@@ -232,6 +444,11 @@ class ReaderActivity : AppCompatActivity() {
         source: LocalReaderSource,
         progressStore: ReaderProgressStore,
         remoteSnapshot: com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4? = null,
+        preferencesStore: AndroidReaderPreferencesStore? = null,
+        bookmarkStore: AndroidReaderBookmarkStore? = null,
+        bookmarkSyncPort: ReaderBookmarkSyncPort? = null,
+        bookmarkSyncTarget: ReaderBookmarkSyncTarget? = null,
+        namespaceKey: String? = null,
     ): ReadiumEpubSession = ReadiumEpubSession(
         source = source,
         publicationStore = AndroidReaderPublicationStore(applicationContext),
@@ -241,8 +458,22 @@ class ReaderActivity : AppCompatActivity() {
         locatorMapper = ReadiumLocatorMapper(),
         preferencesMapper = ReadiumPreferencesMapper(resources),
         remoteSnapshot = remoteSnapshot,
+        initialPreferences = preferencesStore?.load() ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
+        persistPreferences = { preferences -> preferencesStore?.save(preferences) },
+        bookmarkStore = bookmarkStore,
+        bookmarkSyncPort = bookmarkSyncPort,
+        bookmarkSyncTarget = bookmarkSyncTarget,
         externalLinkHandler = ::openExternalLink,
+        presentationNamespaceKey = namespaceKey,
+        publishProgressUpdate = (application as ErmaoLibraryApplication)
+            .readerProgressPresentationCenter::publish,
     )
+
+    private fun ReaderSyncNamespace.presentationKey(): String =
+        "$serverIdentity|$userId|$authorizationVersion"
+
+    private fun com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace.presentationKey(): String =
+        "$serverIdentity|$userId|$authorizationVersion"
 
     private fun openExternalLink(rawUrl: String) {
         val uri = rawUrl.toUri()
@@ -298,6 +529,9 @@ class ReaderActivity : AppCompatActivity() {
         private const val EXTRA_VOLUME_ID = "reader.volume-id"
         private const val EXTRA_SERVER_PROFILE_ID = "reader.server-profile-id"
         private const val EXTRA_SERVER_VOLUME_ID = "reader.server-volume-id"
+        private const val EXTRA_MANAGED_LOCAL_REFERENCE = "reader.managed-local-reference"
+        private const val EXTRA_MANAGED_SERVER_FINGERPRINT = "reader.managed-server-fingerprint"
+        private const val EXTRA_MANAGED_EXPECTED_BYTES = "reader.managed-expected-bytes"
         private const val SYNC_FLUSH_TIMEOUT_MILLIS = 2_500L
 
         fun createIntent(context: Context, source: LocalReaderSource): Intent {
@@ -315,6 +549,32 @@ class ReaderActivity : AppCompatActivity() {
             return Intent(context, ReaderActivity::class.java)
                 .putExtra(EXTRA_SERVER_PROFILE_ID, profileId)
                 .putExtra(EXTRA_SERVER_VOLUME_ID, volumeId)
+                .addFlags(if (context is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        fun createManagedDownloadIntent(
+            context: Context,
+            profileId: String,
+            workId: String,
+            volumeId: String,
+            displayTitle: String,
+            localReference: String,
+            serverContentFingerprint: String,
+            expectedBytes: Long,
+        ): Intent {
+            require(
+                profileId.isNotBlank() && workId.isNotBlank() && volumeId.isNotBlank() &&
+                    displayTitle.isNotBlank() && localReference.isNotBlank() &&
+                    serverContentFingerprint.isNotBlank() && expectedBytes > 0,
+            )
+            return Intent(context, ReaderActivity::class.java)
+                .putExtra(EXTRA_SERVER_PROFILE_ID, profileId)
+                .putExtra(EXTRA_WORK_ID, workId)
+                .putExtra(EXTRA_VOLUME_ID, volumeId)
+                .putExtra(EXTRA_TITLE, displayTitle)
+                .putExtra(EXTRA_MANAGED_LOCAL_REFERENCE, localReference)
+                .putExtra(EXTRA_MANAGED_SERVER_FINGERPRINT, serverContentFingerprint)
+                .putExtra(EXTRA_MANAGED_EXPECTED_BYTES, expectedBytes)
                 .addFlags(if (context is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
@@ -339,7 +599,35 @@ class ReaderActivity : AppCompatActivity() {
             val volumeId = getStringExtra(EXTRA_SERVER_VOLUME_ID) ?: return null
             return ServerReaderRequest(profileId, volumeId)
         }
+
+
+        private fun Intent.managedDownloadRequestOrNull(): ManagedDownloadReaderRequest? {
+            val localReference = getStringExtra(EXTRA_MANAGED_LOCAL_REFERENCE) ?: return null
+            return ManagedDownloadReaderRequest(
+                profileId = checkNotNull(getStringExtra(EXTRA_SERVER_PROFILE_ID)),
+                workId = checkNotNull(getStringExtra(EXTRA_WORK_ID)),
+                volumeId = checkNotNull(getStringExtra(EXTRA_VOLUME_ID)),
+                displayTitle = checkNotNull(getStringExtra(EXTRA_TITLE)),
+                localReference = localReference,
+                serverContentFingerprint = checkNotNull(getStringExtra(EXTRA_MANAGED_SERVER_FINGERPRINT)),
+                expectedBytes = getLongExtra(EXTRA_MANAGED_EXPECTED_BYTES, -1L).also { check(it > 0) },
+            )
+        }
     }
 
     private data class ServerReaderRequest(val profileId: String, val volumeId: String)
+    private data class ManagedDownloadReaderRequest(
+        val profileId: String,
+        val workId: String,
+        val volumeId: String,
+        val displayTitle: String,
+        val localReference: String,
+        val serverContentFingerprint: String,
+        val expectedBytes: Long,
+    )
+    private data class ActiveReaderSession(
+        val profile: com.ermao.library.shared.modules.servers.domain.ServerProfile,
+        val identity: com.ermao.library.shared.modules.auth.domain.SessionIdentity,
+        val authenticated: AppSession.Authenticated?,
+    )
 }

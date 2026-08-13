@@ -4,11 +4,12 @@ from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import command
+from sqlalchemy import inspect, select
+from sqlalchemy.engine.reflection import Inspector
+
 from app.core.config import Settings
 from app.db.runner import _run_alembic, head_revision
 from app.db.sqlite import create_sqlite_engine
-from sqlalchemy import inspect, select
-from sqlalchemy.engine.reflection import Inspector
 
 
 def _column_names(inspector: Inspector, table_name: str) -> set[str]:
@@ -37,7 +38,7 @@ def test_writeback_preparation_upgrade_is_reversible_and_restart_safe(
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
 
         inspector = inspect(engine)
-        assert head_revision(engine) == "0020_comic_page_index"
+        assert head_revision(engine) == "0021_reader_v4_exact_progress"
         assert {
             "id",
             "operationId",

@@ -1,106 +1,119 @@
 package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.ReaderProgress
+import com.ermao.library.shared.modules.reader.domain.ReaderProgressConflict
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
-import com.ermao.library.shared.modules.reader.domain.toServerSnapshot
+import com.ermao.library.shared.modules.reader.domain.toMutation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlin.coroutines.coroutineContext
+import kotlin.random.Random
 
-/**
- * Reader v4's deliberately ephemeral uploader.
- *
- * There is at most one request in flight. While it runs, newer progress
- * replaces the single pending slot. Success and failure both consume their
- * snapshot; a failure is never turned into durable sync state or retried.
- */
+/** Durable, single-flight, latest-only Reader v4 mutation coordinator. */
 class ReaderProgressSyncCoordinator(
-    private val localStore: ReaderProgressStore,
+    private val stateStore: ReaderProgressSyncStateStore,
     private val server: ReaderProgressSyncPort,
     private val scope: CoroutineScope,
+    private val createMutationId: () -> String = ::randomUuidV4,
 ) {
     private val mutex = Mutex()
-    private var pending: ReaderProgressUpload? = null
     private var worker: Job? = null
 
     suspend fun saveLocalAndSubmit(target: ReaderProgressSyncTarget, progress: ReaderProgress) {
         require(progress.sourceId == target.volumeId) { "Reader progress source does not match its volume" }
-        localStore.save(progress)
-        val upload = ReaderProgressUpload(
-            target = target,
-            snapshot = progress.toServerSnapshot(target.serverContentFingerprint),
-            localLocation = progress.location,
-        )
-        mutex.withLock {
-            pending = upload
-            if (worker?.isActive != true) {
-                worker = scope.launch { drain() }
-            }
-        }
+        val state = stateStore.loadSyncState()
+        val baseRevision = state.conflict?.server?.revision ?: state.confirmedRevision
+        val pending = progress.toMutation(baseRevision, createMutationId())
+        stateStore.commitProgressAndPending(progress, pending)
+        launchDrain(target)
+    }
+
+    suspend fun retryPending(target: ReaderProgressSyncTarget) {
+        val state = stateStore.loadSyncState()
+        if (state.pending != null && state.conflict == null && state.terminalFailureCode == null) launchDrain(target)
     }
 
     suspend fun awaitIdle() {
         while (true) {
-            val active = mutex.withLock { worker }
-            if (active == null) return
+            val active = mutex.withLock { worker } ?: return
             active.join()
         }
     }
 
-    suspend fun cancel() {
-        val active = mutex.withLock {
-            pending = null
-            worker.also { worker = null }
-        }
-        active?.cancel()
+    suspend fun cancelWorker() {
+        mutex.withLock { worker.also { worker = null } }?.cancel()
     }
 
-    private suspend fun drain() {
-        val runningJob = coroutineContext[Job]
+    private suspend fun launchDrain(target: ReaderProgressSyncTarget) {
+        mutex.withLock {
+            if (worker?.isActive != true) worker = scope.launch { drain(target) }
+        }
+    }
+
+    private suspend fun drain(target: ReaderProgressSyncTarget) {
         try {
             while (true) {
-                val next = mutex.withLock {
-                    val selected = pending
-                    pending = null
-                    if (selected == null) worker = null
-                    selected
-                } ?: return
-                try {
-                    server.push(next)
+                val state = stateStore.loadSyncState()
+                val next = state.pending ?: return
+                if (state.conflict != null || state.terminalFailureCode != null) return
+                when (val result = try {
+                    server.push(ReaderProgressUpload(target, next))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Throwable) {
-                    // v4 is best effort: the failed snapshot is intentionally discarded.
+                    ReaderProgressPushResult.RetryableFailure("NETWORK_UNAVAILABLE")
+                }) {
+                    is ReaderProgressPushResult.Accepted -> stateStore.acknowledge(next.mutationId, result.snapshot)
+                    is ReaderProgressPushResult.Conflict -> {
+                        stateStore.recordConflict(ReaderProgressConflict(next, result.current))
+                        return
+                    }
+                    is ReaderProgressPushResult.RetryableFailure -> return
+                    is ReaderProgressPushResult.Rejected -> {
+                        stateStore.recordTerminalFailure(next.mutationId, result.failureCode)
+                        return
+                    }
                 }
             }
         } finally {
-            mutex.withLock {
-                if (worker === runningJob) worker = null
-            }
+            mutex.withLock { worker = null }
         }
     }
 }
 
 class LocalFirstReaderProgressStore(
-    private val localStore: ReaderProgressStore,
+    private val stateStore: ReaderProgressSyncStateStore,
     private val target: ReaderProgressSyncTarget,
     private val coordinator: ReaderProgressSyncCoordinator,
 ) : ReaderProgressSyncingStore {
-    override suspend fun load(sourceId: String): ReaderProgress? = localStore.load(sourceId)
+    override suspend fun load(sourceId: String): ReaderProgress? = stateStore.load(sourceId)
 
-    override suspend fun save(progress: ReaderProgress) {
-        coordinator.saveLocalAndSubmit(target, progress)
-    }
+    override suspend fun save(progress: ReaderProgress) = coordinator.saveLocalAndSubmit(target, progress)
 
-    override suspend fun delete(sourceId: String) {
-        localStore.delete(sourceId)
-    }
+    override suspend fun delete(sourceId: String) = stateStore.delete(sourceId)
 
-    override suspend fun awaitPendingUpload() {
-        coordinator.awaitIdle()
+    override suspend fun awaitPendingUpload() = coordinator.awaitIdle()
+
+    override suspend fun retryPendingUpload() = coordinator.retryPending(target)
+
+    override suspend fun syncState(): ReaderProgressDurableState = stateStore.loadSyncState()
+}
+
+private fun randomUuidV4(): String {
+    val bytes = ByteArray(16).also(Random.Default::nextBytes)
+    bytes[6] = ((bytes[6].toInt() and 0x0f) or 0x40).toByte()
+    bytes[8] = ((bytes[8].toInt() and 0x3f) or 0x80).toByte()
+    return buildString(36) {
+        bytes.forEachIndexed { index, byte ->
+            if (index in setOf(4, 6, 8, 10)) append('-')
+            val value = byte.toInt() and 0xff
+            append(HEX[value ushr 4])
+            append(HEX[value and 0x0f])
+        }
     }
 }
+
+private const val HEX = "0123456789abcdef"

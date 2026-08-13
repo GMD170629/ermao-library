@@ -155,6 +155,8 @@ actor IosManagedPublicationStore {
         originalFileHash: String,
         expectedSize: Int64,
         expectedOriginalFileHash: String?,
+        parserVersion: String,
+        normalizationVersion: String,
         workID: String,
         volumeID: String
     ) throws -> IosManagedPublication {
@@ -171,8 +173,8 @@ actor IosManagedPublicationStore {
 
         let fingerprint = try IosContentFingerprint(
             originalFileHash: originalFileHash,
-            parserVersion: Self.parserVersion,
-            normalizationVersion: Self.normalizationVersion
+            parserVersion: parserVersion,
+            normalizationVersion: normalizationVersion
         )
         let key = opaqueKey(sourceID)
         let destination = root.appendingPathComponent(key).appendingPathExtension("epub")
@@ -259,10 +261,7 @@ actor IosManagedPublicationStore {
             throw IosReaderFailure(code: .corruptFile)
         }
         let metadata = try JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL))
-        guard metadata.sourceID == sourceID,
-              metadata.fingerprint.parserVersion == Self.parserVersion,
-              metadata.fingerprint.normalizationVersion == Self.normalizationVersion
-        else {
+        guard metadata.sourceID == sourceID else {
             throw IosReaderFailure(code: .corruptFile)
         }
         let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])

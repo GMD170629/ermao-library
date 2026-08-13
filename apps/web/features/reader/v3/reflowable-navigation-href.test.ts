@@ -8,7 +8,7 @@ test('blocks only known import pseudo-hrefs', () => {
   assert.equal(isEngineResolvableReflowableHref('fb2', 'fb2-section:1'), false);
 });
 
-test('passes through foliate-native and EPUB hrefs unchanged', () => {
+test('passes through normalized virtual and EPUB hrefs unchanged', () => {
   assert.equal(isEngineResolvableReflowableHref('mobi', 'filepos:1234'), true);
   assert.equal(isEngineResolvableReflowableHref('azw3', 'kindle:pos:fid:0001:off:0000000000'), true);
   assert.equal(isEngineResolvableReflowableHref('epub', 'OEBPS/text00003.html'), true);

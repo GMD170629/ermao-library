@@ -201,7 +201,7 @@ flowchart LR
 - API: Python 3.11, FastAPI, SQLAlchemy 2, Alembic
 - Database: SQLite
 - Import and media parsing: persistent Python worker, Watchdog, EbookLib, lxml, Mutagen, FFmpeg/ffprobe
-- Readers and players: Foliate.js, PDF.js, custom comic reader adapter, HTML5 Audio
+- Readers and players: Readium TS/Kotlin/Swift, PDF.js capability fallback, custom comic adapter, HTML5 Audio
 - Tooling: pnpm Workspace, Turborepo, Playwright, Pytest
 - Deployment: Docker Compose, multi-architecture `linux/amd64` and `linux/arm64` images, fnOS, PWA
 

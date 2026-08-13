@@ -72,6 +72,7 @@ EXPECTED_TABLES = {
     "ReaderBookmark",
     "ReaderPreference",
     "ReaderProgressCursor",
+    "ReaderProgressMutation",
     "Session",
     "Shelf",
     "ShelfCollectionMembership",
@@ -537,7 +538,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0020_comic_page_index"
+            assert _alembic_version(connection) == "0021_reader_v4_exact_progress"
             inspector = inspect(connection)
             assert "LibraryWork_hidden_createdAt_id_idx" in {
                 index["name"] for index in inspector.get_indexes("LibraryWork")

@@ -20,11 +20,20 @@ import com.ermao.library.shared.modules.personalsettings.PersonalSettingsReposit
 import com.ermao.library.shared.modules.personalsettings.infrastructure.KtorPersonalSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.infrastructure.KtorAdministrativeSettingsRepository
+import com.ermao.library.shared.modules.downloads.KtorDownloadsGateway
+import com.ermao.library.shared.modules.downloads.createDownloadsGateway
+import com.ermao.library.shared.modules.shelf.application.ShelfRepository
+import com.ermao.library.shared.modules.shelf.infrastructure.KtorShelfRepository
+import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
+import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
+import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 /** Composition root for Swift. Cookie payloads must be backed by Keychain in iosApp. */
@@ -61,6 +70,12 @@ fun createIosContentRepository(
         snapshots = snapshotStore,
     )
 
+fun createIosShelfRepository(
+    cookieStore: SecureCookiePayloadStore,
+): ShelfRepository = KtorShelfRepository(
+    ApiClientFactory(SerializedCookieVault(cookieStore)),
+)
+
 /** Independent personal-settings composition; cookie payloads stay behind the Keychain adapter. */
 fun createIosPersonalSettingsRepository(
     cookieStore: SecureCookiePayloadStore,
@@ -94,3 +109,49 @@ fun createIosReaderProgressSyncPort(
         clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
         profile = profile,
     )
+
+fun createIosReaderBookmarkSyncPort(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+): ReaderBookmarkSyncPort =
+    KtorReaderBookmarkSyncPort(
+        clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
+        profile = profile,
+    )
+
+/** Download bootstrap and streaming transfer reuse the Keychain-backed authenticated Cookie jar. */
+fun createIosDownloadsGateway(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+): KtorDownloadsGateway = createDownloadsGateway(
+    ApiClientFactory(SerializedCookieVault(cookieStore)),
+    profile,
+)
+
+/** Flat Swift boundary; native code never needs to construct ServerBaseUrl. */
+fun createIosDownloadsGateway(
+    cookieStore: SecureCookiePayloadStore,
+    profileId: String,
+    displayName: String,
+    baseUrl: String,
+    serverIdentity: String,
+    acceptsInsecureTls: Boolean,
+): KtorDownloadsGateway {
+    val parsed = ServerBaseUrl.parse(baseUrl)
+    require(parsed is ServerBaseUrlParseResult.Valid) { "Invalid server base URL" }
+    return createIosDownloadsGateway(
+        cookieStore = cookieStore,
+        profile = ServerProfile(
+            id = profileId,
+            displayName = displayName,
+            baseUrl = parsed.baseUrl,
+            serverIdentity = serverIdentity,
+            isActive = true,
+            tlsMode = if (acceptsInsecureTls) {
+                TlsMode.InsecureSkipAllValidation
+            } else {
+                TlsMode.SystemTrust
+            },
+        ),
+    )
+}

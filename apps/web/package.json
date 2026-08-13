@@ -26,8 +26,9 @@
     "i18n:migrate-expressions": "node scripts/migrate-i18n-jsx-expressions.mjs"
   },
   "dependencies": {
+    "@readium/navigator": "2.8.2",
+    "@readium/shared": "2.4.0",
     "@shuku/reader-core": "workspace:*",
-    "foliate-js": "1.0.1",
     "lucide-react": "^0.451.0",
     "next": "16.2.12",
     "pdfjs-dist": "6.1.200",

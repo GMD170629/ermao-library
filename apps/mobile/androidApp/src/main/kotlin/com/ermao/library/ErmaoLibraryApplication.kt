@@ -12,6 +12,11 @@ import com.ermao.library.shared.createAndroidPersonalSettingsRepository
 import com.ermao.library.shared.createAndroidAdministrativeSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
+import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
+import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
+import com.ermao.library.features.downloads.infrastructure.SharedDownloadCatalogAdapter
+import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
+import com.ermao.library.application.ReaderProgressPresentationCenter
 
 class ErmaoLibraryApplication : Application() {
     lateinit var mobileRuntime: MobileRuntime
@@ -24,6 +29,14 @@ class ErmaoLibraryApplication : Application() {
         private set
     lateinit var administrativeSettingsRepository: AdministrativeSettingsRepository
         private set
+    lateinit var downloadCatalog: AndroidDownloadCatalog
+        private set
+    lateinit var downloadFiles: AtomicDownloadFileSink
+        private set
+    lateinit var sharedDownloadCatalog: DownloadCatalogRepository
+        private set
+    lateinit var readerProgressPresentationCenter: ReaderProgressPresentationCenter
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -32,6 +45,11 @@ class ErmaoLibraryApplication : Application() {
         contentRepository = createAndroidContentRepository(this)
         personalSettingsRepository = createAndroidPersonalSettingsRepository(this)
         administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(this)
+        val downloadRoot = java.io.File(filesDir, "managed-downloads-v1")
+        downloadCatalog = AndroidDownloadCatalog(downloadRoot)
+        downloadFiles = AtomicDownloadFileSink(downloadRoot)
+        sharedDownloadCatalog = SharedDownloadCatalogAdapter(downloadCatalog, downloadFiles)
+        readerProgressPresentationCenter = ReaderProgressPresentationCenter()
         mobileRuntime = createAndroidMobileRuntime(
             context = this,
             profileRepository = mobileStore,

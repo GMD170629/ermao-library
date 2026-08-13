@@ -3,7 +3,7 @@
 > 状态：已采纳的产品与技术基线
 > 审计日期：2026-08-11
 > 适用范围：从零重建的 `apps/mobile` 及其所依赖的 App 专用后端契约
-> 事实来源：当前 Web 路由与交互、FastAPI 运行时路由与授权实现、Reader v3、媒体流、PWA/本地同步代码
+> 事实来源：当前 Web 路由与交互、FastAPI 运行时路由与授权实现、Reader v4、媒体流、PWA/本地同步代码
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
 ## 1. 基线目的
@@ -98,23 +98,23 @@ P0 必须形成以下连续闭环：
 | 静态书架 | `/shelves`；书架 CRUD API | 按 `ownerUserId` 隔离；用户手动管理作品 | P0 | “书架”Tab；详情 Stack；创建/编辑 Sheet；明确选择模式加入作品；禁止依赖右键和桌面拖放 |
 | 智能书架 | `/shelves`；书架 CRUD 与过滤规则 | 规则计算；可能出现不支持规则 | P0 浏览，P1 编辑 | P0 展示规则摘要和计算结果，不能允许手工增删作品；不支持规则必须显式提示 |
 | 书架集合 | `/shelves`；书架 CRUD | `COLLECTION` 只能包含书架，不能直接放作品；非空集合删除冲突 | P0 浏览，P1 复杂整理 | 集合 → 书架 → 作品的层级导航；删除使用系统确认并呈现 `409` 原因 |
-| 作品详情 | `/works/[id]`；work、media versions、volumes、reading units API | 一个作品可能有 `EBOOK / COMIC / AUDIOBOOK` 多媒介和多个 volume；部分章节/卷可失败 | P0 | 折叠头部、媒介 segmented control、卷列表、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
-| 阅读状态 | 作品详情；Reader v3 `PUT .../reading-status` | `UNREAD / READING / FINISHED`；用户级状态 | P0 | 详情动作 Sheet；开始阅读可推进到 READING；标记完成提供可撤销反馈 |
+| 作品详情 | `/works/[id]`；work、media versions、volumes、reading units API | 一个作品可能有 `EBOOK / COMIC / AUDIOBOOK` 多媒介和多个 volume；部分章节/卷可失败 | P0 | 折叠头部、媒介 segmented control、多卷封面网格、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
+| 阅读状态 | 作品详情；Reader v4 `PUT .../reading-status` | `UNREAD / READING / FINISHED`；用户级状态 | P0 | 详情动作 Sheet；开始阅读可推进到 READING；标记完成提供可撤销反馈 |
 | 批量加入个人书架 | Web 书库选择模式 | 普通用户可操作自己的书架 | P1 | 原生明确“选择”模式和底部操作栏；不复刻 Ctrl/Cmd 多选、右键菜单 |
 
 ### 4.3 阅读、播放与离线
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| Reader bootstrap | `/reader/[volumeId]`；`GET /api/reader/v3/volumes/{volumeId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、resume、files/units | P0 | 只使用 `volumeId` 与 Reader v3；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
-| 流式电子书 | Reader v3 + `GET/HEAD /api/files/{fileId}` 或 volume file | reflowable 内容、目录、位置、进度、下载失败、内容版本变化 | P0 | 全屏 Reader；点按区、滑页/滚动模式、目录、书签、进度和外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
-| 漫画 | Reader v3 + pages list/page API | LTR/RTL、页列表、图片加载失败、内存与预取窗口 | P0 | 原生图片管线；水平翻页或纵向滚动；捏合/双击缩放；有限预取；禁止一次加载全部页 |
-| PDF | Reader v3 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 系统/原生 PDF renderer、捏合缩放、页码 scrubber；连续模式不在未验证前承诺 |
-| 书签 | Reader v3 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
+| Reader bootstrap | `/reader/[volumeId]`；`GET /api/reader/v4/volumes/{volumeId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot 与 publication | P0 | 只使用 `volumeId` 与 Reader v4；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
+| 可重排电子书 | Reader v4 + `GET/HEAD /api/files/{fileId}` 或 volume file | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；完整工件、fingerprint、下载失败和内容版本变化 | P0 | **必须先形成与当前 `contentFingerprint` 匹配的完整、已验证本地工件，才能进入 Reader**；未完成、旧 fingerprint 或仅缓存部分字节均不可读。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
+| 漫画 | Reader v4 + pages list/page API | LTR/RTL、页列表、图片加载失败、内存与预取窗口 | P0 | 在线默认按页流式阅读，原生图片管线只做有限预取，禁止一次加载全部页；有完整本地工件时可离线打开，不要求在线阅读前下载整包 |
+| PDF | Reader v4 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 在线使用系统/原生 PDF renderer 通过 Range 流式读取，不要求先下载整份；完整本地工件可离线打开；捏合缩放、页码 scrubber，连续模式不在未验证前承诺 |
+| 书签 | Reader v4 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
-| 阅读进度同步 | Reader v3 progress PUT；Web durable outbox | `mutationId / clientId / clientSequence / contentFingerprint`；applied、旧序列、409 指纹冲突、terminal errors | P0 | 本地事务先写、UI 立即更新、持久 outbox、严格序列、退避重试、失败隔离；退出页面时 fire-and-forget 不合格 |
+| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | `clientId / updatedAtEpochMillis / percent / location / contentFingerprint`；服务端按请求到达顺序覆盖，陈旧 fingerprint 丢弃位置但保留百分比 | P0 | 500ms trailing debounce 后先原子保存本地精确位置，再作一次 best-effort PUT；单飞期间只保留内存中最新值，不建持久 outbox、不重试；后台/退出执行一次有界保存与上传 |
 | 音频书 | `/listen/[volumeId]` 仅为瞬时深链；bootstrap + file API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
-| 受管离线内容 | Web SW、reader book cache、媒体 Range API | 当前没有完整下载 manifest、增量目录同步或离线授权票据 | P0 受限范围 | 只承诺显式下载或已经可靠缓存的 volume；Download Center 显示进度、失败、重试、空间、网络策略；不得宣称全量离线书库 |
+| 受管离线内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed + fingerprint 校验为事实来源 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量离线书库 |
 | 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有离线缓存是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示离线缓存和文件导出 |
 
 ### 4.4 导入、发送与系统管理
@@ -253,6 +253,8 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 ### 7.3 离线能力边界
 
+格式访问策略固定为：可重排格式缺少匹配 fingerprint 的 completed 工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，存在 completed 工件时优先 `LocalArtifact`，离线且无工件时为 `Unavailable`。任务只有在临时 sink 分块写入成功、响应字节长度验证通过并原子提交后才可进入 completed；取消、空间不足、短响应或进程中断不得留下伪 completed。
+
 第一阶段可以承诺：
 
 - 已显式下载或已经可靠缓存的单个 volume；
@@ -275,7 +277,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 1. **日常续读**：首页继续阅读 → 详情/卷 → Reader 或播放器 → 本地耐久进度 → 联网同步 → 首页刷新。
 2. **发现与开始**：搜索 / 书库 / 系列 / 作者 / 书架 → 保留筛选上下文的作品列表 → 详情 → 媒介/卷 → 阅读或播放。
 3. **个人整理**：作品动作或书库选择模式 → 加入个人书架；书架 → 作品 → 返回原上下文。
-4. **离线阅读**：详情选择离线下载 → Download Center → 完成/失败/空间状态 → 离线打开 → 产生待同步进度 → 联网恢复。
+4. **下载与离线阅读**：可重排格式从详情下载完成后才能阅读；PDF/漫画可在线流式，也可显式下载后离线使用 → Download Center 按图书管理/搜索本地 completed 内容 → 离线打开 → 产生待同步进度 → 联网恢复。
 5. **账户安全**：我的 → 修改账户/语言/密码或退出 → 会话刷新 → 正确保留或清理私有命名空间。
 6. **权限变化**：管理员调整范围 → `authzVersion` 变化 → App 清理旧权限缓存 → 重新拉取书库和资源状态。
 7. **P1 手工导入**：有权用户选择设备文件 → 选择可访问的服务器目标 → 前台上传 → 查看自己的任务结果 → 打开新作品。
@@ -287,7 +289,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 - `/listen/{id}` 不是独立一级页面。
 - `/management`、`/organize*`、`/import-tasks` 等兼容入口不是 App IA。
 - 首页与书库目前不一致的上传按钮显隐不是权限规范；以 `/me.authorization` 和真实后端 guard 为准。
-- Reader v1、Reader v2、edition 路由均为 `410` 退役契约；App 从第一天只使用 Reader v3 + `volumeId`。
+- Reader v1–v3 与 edition 路由均为 `410` 退役契约；App 只使用 Reader v4 + `volumeId`。
 - 外部来源 `sources/source-search-records` 是 tombstone，不设计“移动端书源搜索”。
 - OPDS 面向第三方客户端，不作为官方 App 内部 API。
 - Web PWA Service Worker 不是原生 Download Center。
@@ -355,12 +357,12 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 - 系列/作者：`apps/web/features/library/library-grouping-page.tsx`
 - 书架：`apps/web/features/shelves/`、`apps/api-python/app/modules/shelf/presentation/http.py`
 - 作品详情：`apps/web/features/works/`、`apps/api-python/app/modules/library/presentation/http.py`
-- Reader v3：`apps/web/features/reader/v3/`、`apps/api-python/app/modules/reader/presentation/v3.py`
+- Reader v4：`apps/web/features/reader/v4/`、`apps/api-python/app/modules/reader/presentation/v4.py`
 - 跨客户端 Reader 契约：`packages/reader-core/src/`
 - 音频：`apps/web/features/audio/`
 - 媒体 Range：`apps/api-python/app/modules/media/presentation/http.py`、`infrastructure/http_streaming.py`
 - 会话与授权：`apps/api-python/app/core/auth.py`、`core/authorization.py`、`modules/auth/presentation/schemas.py`
-- 进度缓存/outbox：`apps/web/lib/reader/storage.ts`、`sync-coordinator.ts`、`runtime.ts`
+- Reader 本地精确进度与单飞同步：`apps/web/features/reader/v4/`、`packages/reader-core/src/`
 - PWA 与离线：`apps/web/public/sw.js`、`apps/web/lib/reader/book-cache.ts`
 - 设置权限导航：`apps/web/features/settings/center/settings-secondary-nav.tsx`
 - OpenAPI 已知缺口：`apps/api-python/docs/openapi-audit/README.md`

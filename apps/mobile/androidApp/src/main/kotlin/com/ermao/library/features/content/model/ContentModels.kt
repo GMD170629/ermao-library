@@ -74,11 +74,24 @@ data class VolumeContent(
     val id: String,
     val title: String,
     val format: String,
+    val readerType: String = "reflowable",
+    val volumeIndex: Double? = null,
+    val coverUrl: String = "",
     val sizeBytes: Long = 0,
     val progressPercent: Int?,
     val readable: Boolean,
     val selected: Boolean,
-)
+) {
+    fun displayIndex(position: Int): String {
+        val explicitIndex = volumeIndex?.takeIf { it.isFinite() && it > 0 }
+        val value = when {
+            explicitIndex == null -> (position + 1).toString()
+            explicitIndex % 1.0 == 0.0 -> explicitIndex.toInt().toString()
+            else -> explicitIndex.toString().trimEnd('0').trimEnd('.')
+        }
+        return value.padStart(2, '0')
+    }
+}
 
 @Immutable
 @Serializable
@@ -87,7 +100,13 @@ data class ReadingUnitContent(
     val title: String,
     val progressPercent: Int? = null,
     val positionLabel: String? = null,
+    val href: String? = null,
+    val sortOrder: Int = 0,
+    val readingState: ChapterReadingState = ChapterReadingState.Unread,
 )
+
+@Serializable
+enum class ChapterReadingState { Current, Read, Unread }
 
 @Immutable
 @Serializable
@@ -111,8 +130,6 @@ data class WorkDetailContent(
     val readingUnits: List<ReadingUnitContent> = emptyList(),
 ) {
     val hasDescription: Boolean get() = !description.isNullOrBlank()
-
-    val showsContentTabs: Boolean get() = hasDescription
 
     val showsMediaPicker: Boolean get() = media.map { it.kind.uppercase() }.distinct().size > 1
 

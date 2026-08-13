@@ -1,312 +1,146 @@
 package com.ermao.library.shared.modules.reader
 
-import com.ermao.library.shared.modules.reader.domain.toServerSnapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
 
 class ReaderDomainTest {
     @Test
-    fun progressJsonV4RoundTripsVersionedEngineLocator() {
-        val codec = ReaderProgressJson()
-        val progress = codec.decode(READER_PROGRESS_JSON_V4_GOLDEN)
+    fun exactComparatorRequiresFingerprintHrefAndBlockAnchor() {
+        val expected = envelope("#chapter-title", "same")
 
-        val encoded = codec.encode(progress)
-
-        assertEquals(progress, codec.decode(encoded))
-        assertEquals(Json.parseToJsonElement(READER_PROGRESS_JSON_V4_GOLDEN), Json.parseToJsonElement(encoded))
+        assertEquals(ExactBlockMatch.Exact, compare(expected, envelope("#chapter-title", "same")))
+        assertEquals(ExactBlockMatch.AnchorMismatch, compare(expected, envelope("#other", "other")))
+        assertEquals(
+            ExactBlockMatch.FingerprintMismatch,
+            compare(expected, envelope("#chapter-title", "same", hash = "b".repeat(64))),
+        )
     }
 
     @Test
-    fun legacyV1ProgressMigratesToVersionedIosReadiumLocator() {
-        val decoded = ReaderProgressJson().decode(READER_PROGRESS_JSON_V1_GOLDEN)
-        val locator = (decoded.location as ReflowReaderLocation).engineLocator
+    fun exactComparatorCanUseBoundedNormalizedText() {
+        val expected = envelope(null, "Café 正文", before = "前  文")
+        val recaptured = envelope(null, "Café 正文", before = "前 文")
 
-        assertEquals(ReaderEngine.Readium, locator?.engine)
-        assertEquals(ReaderEnginePlatform.Ios, locator?.platform)
-        assertEquals("3.8.0", locator?.version)
-        assertTrue(checkNotNull(locator).payload.canonicalJson.contains("epubcfi"))
+        assertEquals(ExactBlockMatch.Exact, compare(expected, recaptured))
+        assertEquals(
+            ExactBlockMatch.AnchorMismatch,
+            compare(expected, envelope(null, "Café 正文")),
+        )
     }
 
     @Test
-    fun engineLocatorRejectsPayloadAbove64KiB() {
+    fun localAndRemoteRestoreNeverProduceApproximateCandidates() {
+        val source = source()
+        val local = progress()
+        val remote = ReaderProgressSnapshotV4("volume-1", 9, envelope("#remote", "remote"), 80.0, 2_000, 2_000)
+
+        assertIs<ReaderRestorePublicEngineLocator>(planReaderProgressRestore(local, remote, source).candidates.single())
+        assertIs<ReaderRestorePublicEngineLocator>(planReaderProgressRestore(null, remote, source).candidates.single())
+    }
+
+    @Test
+    fun newestExactResumeWinsAndOlderDifferentAnchorIsOffered() {
+        val local = progress(updatedAt = 3_000)
+        val remote = ReaderProgressSnapshotV4(
+            "volume-1", 9, envelope("#remote", "remote"), 80.0, 4_000, 2_000,
+        )
+
+        val localWins = decideReaderResume(local, remote, source())
+
+        assertEquals(ReaderResumeSource.Local, localWins.selected?.source)
+        assertEquals(ReaderResumeSource.Server, localWins.alternative?.source)
+    }
+
+    @Test
+    fun serverWinsEqualTimestampAndLegacySnapshotFallsBackToReceivedTime() {
+        val local = progress(updatedAt = 2_000)
+        val remote = ReaderProgressSnapshotV4(
+            "volume-1", 9, envelope("#remote", "remote"), 80.0, 2_000,
+        )
+
+        val decision = decideReaderResume(local, remote, source())
+
+        assertEquals(ReaderResumeSource.Server, decision.selected?.source)
+        assertEquals(2_000, decision.selected?.capturedAtEpochMillis)
+    }
+
+    @Test
+    fun semanticallyIdenticalAnchorRestoresWithoutAlternative() {
+        val local = progress(updatedAt = 1_000)
+        val remote = ReaderProgressSnapshotV4(
+            "volume-1", 9, envelope("#chapter-title", "same"), 80.0, 2_000, 2_000,
+        )
+
+        val decision = decideReaderResume(local, remote, source())
+
+        assertEquals(ReaderResumeSource.Server, decision.selected?.source)
+        assertNull(decision.alternative)
+    }
+
+    @Test
+    fun fingerprintMismatchRefusesAutomaticRestoreInsteadOfUsingPercent() {
+        val mismatch = ReaderProgressSnapshotV4(
+            "volume-1",
+            9,
+            envelope("#remote", "remote", hash = "b".repeat(64)),
+            80.0,
+            2_000,
+        )
+
+        assertEquals(emptyList(), planReaderProgressRestore(null, mismatch, source()).candidates)
+    }
+
+    @Test
+    fun localCodecRejectsPreReleaseLegacyAndProgressionOnlyDocuments() {
         assertFailsWith<IllegalArgumentException> {
-            EngineLocatorPayload.parse("""{"value":"${"x".repeat(65_537)}"}""")
+            ReaderProgressJson().decode("""{"schema":"ermao.reader-progress","version":1}""")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            ReaderProgress(
+                "volume-1",
+                ReflowReaderLocation("part00000.html", 0.5, contentFingerprint = fingerprint()),
+                1,
+                "client",
+            )
         }
     }
 
-    @Test
-    fun engineLocatorAllowsA64KiBPayloadIndependentOfMetadataSize() {
-        val payload = EngineLocatorPayload.parse("""{"v":"${"x".repeat(65_528)}"}""")
-
-        val locator = EngineLocator(
-            ReaderEngine.Readium,
-            ReaderEnginePlatform.Android,
-            "v".repeat(191),
-            payload,
-        )
-
-        assertEquals(65_536, locator.payload.canonicalJson.encodeToByteArray().size)
-    }
-
-    @Test
-    fun textQuoteEnforcesServerWireBounds() {
-        TextQuote("x".repeat(8_192), "p".repeat(4_096), "s".repeat(4_096))
-
-        assertFailsWith<IllegalArgumentException> { TextQuote("x".repeat(8_193)) }
-        assertFailsWith<IllegalArgumentException> { TextQuote("x", prefix = "p".repeat(4_097)) }
-        assertFailsWith<IllegalArgumentException> { TextQuote("x", suffix = "s".repeat(4_097)) }
-    }
-
-    @Test
-    fun locatorOnlyReflowLocationIsValidAndProjectsExplicitPercent() {
-        val locator = EngineLocator(
-            ReaderEngine.Readium,
-            ReaderEnginePlatform.Android,
-            "3.3.0",
-            EngineLocatorPayload.parse("""{"href":"chapter.xhtml"}"""),
-        )
-        val progress = ReaderProgress(
-            "volume-1",
-            ReflowReaderLocation(engineLocator = locator, contentFingerprint = fingerprint()),
-            1,
-            "android-client",
-            percent = 37.0,
-        )
-
-        assertEquals(37.0, progress.toServerSnapshot(ReaderServerContentFingerprint("token")).percent)
-    }
-
-    @Test
-    fun progressionOnlyReflowLocationIsAValidPublicAnchor() {
-        val progress = ReaderProgress(
-            "volume-1",
-            ReflowReaderLocation(progression = 0.25, contentFingerprint = fingerprint()),
-            1,
-            "android-client",
-        )
-
-        val snapshot = progress.toServerSnapshot(ReaderServerContentFingerprint("token"))
-
-        assertEquals(0.25, snapshot.anchor?.progression)
-        assertEquals(null, snapshot.anchor?.resourceKey)
-    }
-
-    @Test
-    fun nonReflowRemoteRestoreTriesCompatibleEngineBeforeStandardAnchor() {
-        val engine = EngineLocator(
-            ReaderEngine.Readium,
-            ReaderEnginePlatform.Android,
-            "3.3.0",
-            EngineLocatorPayload.parse("""{"page":7}"""),
-        )
-        val remote = ReaderProgress(
-            "volume-1",
-            PdfReaderLocation(6, contentFingerprint = fingerprint(), engineLocator = engine),
-            10,
-            "android-client",
-            percent = 25.0,
-        ).toServerSnapshot(ReaderServerContentFingerprint("token"))
-        val source = LocalReaderSource("volume-1", "PDF", ReaderFormat.Pdf, fingerprint())
-
-        val plan = planReaderProgressRestore(null, remote, source)
-
-        assertIs<ReaderRestorePublicEngineLocator>(plan.candidates[0])
-        assertIs<ReaderRestorePdfPage>(plan.candidates[1])
-        assertIs<ReaderRestoreTotalProgression>(plan.candidates[2])
-    }
-
-    @Test
-    fun nonReflowEngineLocatorRoundTripsThroughLocalV4Json() {
-        val engine = EngineLocator(
-            ReaderEngine.Readium,
-            ReaderEnginePlatform.Android,
-            "3.3.0",
-            EngineLocatorPayload.parse("""{"page":7}"""),
-        )
-        val progress = ReaderProgress(
-            "volume-1",
-            PdfReaderLocation(6, contentFingerprint = fingerprint(), engineLocator = engine),
-            10,
-            "android-client",
-            percent = 25.0,
-        )
-
-        assertEquals(progress, ReaderProgressJson().decode(ReaderProgressJson().encode(progress)))
-    }
-
-    @Test
-    fun localTieKeepsExactButNewerRemoteUsesPublicFallbackOrder() {
-        val source = source()
-        val local = progress(updatedAt = 2_000)
-        val tie = ReaderProgressSnapshotV4(
-            "volume-1",
-            70.0,
-            2_000,
-            "ios",
-            ReaderServerContentFingerprint("server-token"),
-            anchor(),
-        )
-        val newer = tie.copy(updatedAtEpochMillis = 2_001)
-
-        val localPlan = planReaderProgressRestore(local, tie, source)
-        val remotePlan = planReaderProgressRestore(local, newer, source)
-
-        assertTrue(localPlan.usesLocalExact)
-        assertEquals(local, localPlan.localProgress)
-        assertNull(remotePlan.localProgress)
-        assertFalse(remotePlan.usesLocalExact)
-        assertIs<ReaderRestorePublicEngineLocator>(remotePlan.candidates[0])
-        assertIs<ReaderRestoreResourceProgression>(remotePlan.candidates[1])
-        assertIs<ReaderRestoreQuotedText>(remotePlan.candidates[2])
-        assertIs<ReaderRestorePosition>(remotePlan.candidates[3])
-        assertIs<ReaderRestoreTotalProgression>(remotePlan.candidates[4])
-    }
-
-    @Test
-    fun localFingerprintMismatchFallsBackOnlyToPercent() {
-        val local = progress().copy(
-            location = (progress().location as ReflowReaderLocation).copy(
-                contentFingerprint = fingerprint('b'),
-            ),
-        )
-
-        val plan = planReaderProgressRestore(local, null, source())
-
-        assertFalse(plan.usesLocalExact)
-        assertIs<ReaderRestoreTotalProgression>(plan.candidates.single())
-    }
-
-    @Test
-    fun remoteStructuredFingerprintMismatchFallsBackOnlyToPercent() {
-        val remote = ReaderProgressSnapshotV4(
-            "volume-1",
-            63.0,
-            9_000,
-            "ios",
-            ReaderServerContentFingerprint("server-token"),
-            anchor().copy(contentFingerprint = fingerprint('b')),
-        )
-
-        val plan = planReaderProgressRestore(null, remote, source())
-
-        assertIs<ReaderRestoreTotalProgression>(plan.candidates.single())
-    }
-
-    @Test
-    fun resourceOnlyRemoteAnchorPrecedesPercentFallback() {
-        val remote = ReaderProgressSnapshotV4(
-            "volume-1",
-            10.0,
-            9_000,
-            "ios",
-            ReaderServerContentFingerprint("server-token"),
-            ReaderPublicAnchor(resourceKey = "EPUB/chapter.xhtml"),
-        )
-
-        val plan = planReaderProgressRestore(null, remote, source())
-
-        val resource = assertIs<ReaderRestoreResourceProgression>(plan.candidates.first())
-        assertEquals(null, resource.progression)
-        assertIs<ReaderRestoreTotalProgression>(plan.candidates.last())
-    }
-
-    private fun progress(updatedAt: Long = 1_765_555_555_000) = ReaderProgress(
-        sourceId = "volume-1",
-        location = ReflowReaderLocation(
-            resourceKey = "EPUB/chapter.xhtml",
-            progression = 0.25,
-            totalProgression = 0.5,
-            position = 12,
-            textQuote = TextQuote("anchor", "before", "after"),
-            engineLocator = EngineLocator(
-                ReaderEngine.Readium,
-                ReaderEnginePlatform.Android,
-                "3.3.0",
-                EngineLocatorPayload.parse("""{"href":"EPUB/chapter.xhtml"}"""),
-            ),
+    private fun progress(updatedAt: Long = 1) = ReaderProgress(
+        "volume-1",
+        ReflowReaderLocation(
+            resourceKey = "part00000.html",
+            engineLocator = envelope("#chapter-title", "same").asEngineLocator(),
             contentFingerprint = fingerprint(),
         ),
-        updatedAtEpochMillis = updatedAt,
-        deviceId = "android-client",
+        updatedAt,
+        "client",
     )
 
-    private fun anchor() = ReaderPublicAnchor(
-        engineLocator = EngineLocator(
-            ReaderEngine.Readium,
-            ReaderEnginePlatform.Ios,
-            "3.8.0",
-            EngineLocatorPayload.parse("""{"href":"EPUB/chapter.xhtml"}"""),
-        ),
-        resourceKey = "EPUB/chapter.xhtml",
-        progression = 0.7,
-        textQuote = TextQuote("anchor"),
-        position = 42,
-    )
+    private fun source() = LocalReaderSource("volume-1", "Book", ReaderFormat.Epub, fingerprint())
 
-    private fun source() = LocalReaderSource(
-        "volume-1",
-        "Book",
-        ReaderFormat.Epub,
-        fingerprint(),
-    )
+    private fun fingerprint() = ContentFingerprint("sha256:" + "a".repeat(64), PARSER, NORMALIZATION)
 
-    private fun fingerprint(character: Char = 'a') = ContentFingerprint(
-        "sha256:" + character.toString().repeat(64),
-        "readium-kotlin:3.3.0",
-        "epub-native-sanitized-v1",
-    )
-}
+    private fun compare(expected: ReadiumLocatorEnvelope, actual: ReadiumLocatorEnvelope) =
+        com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks(expected, actual)
 
-const val READER_PROGRESS_JSON_V1_GOLDEN = """
-{
-  "schema":"ermao.reader-progress",
-  "version":1,
-  "sourceId":"volume-1",
-  "location":{
-    "kind":"reflow",
-    "resourceKey":"EPUB/chapter.xhtml",
-    "progression":0.375,
-    "totalProgression":0.625,
-    "position":42,
-    "engineLocator":{"href":"EPUB/chapter.xhtml","locations":{"cfi":"epubcfi(/6/14)"}},
-    "contentFingerprint":{
-      "originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "parserVersion":"readium-swift:3.8.0",
-      "normalizationVersion":"epub-native-sanitized-v1"
+    private fun envelope(
+        selector: String?,
+        highlight: String,
+        before: String? = null,
+        hash: String = "a".repeat(64),
+    ): ReadiumLocatorEnvelope {
+        val selectorJson = selector?.let { "\"cssSelector\":\"$it\"," } ?: ""
+        val beforeJson = before?.let { "\"before\":\"$it\"," } ?: ""
+        return ReadiumLocatorEnvelope.parse(
+            """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"$hash","parser":"$PARSER","normalization":"$NORMALIZATION"},"payload":{"href":"part00000.html","type":"application/xhtml+xml","locations":{$selectorJson"progression":0.42},"text":{$beforeJson"highlight":"$highlight"}}}""",
+        )
     }
-  },
-  "updatedAtEpochMillis":1765555555000,
-  "deviceId":"ios-client"
-}
-"""
 
-/** Cross-platform exact local progress fixture for Android and iOS v4 stores. */
-const val READER_PROGRESS_JSON_V4_GOLDEN = """
-{
-  "schema":"ermao.reader-progress",
-  "version":4,
-  "sourceId":"volume-1",
-  "location":{
-    "kind":"reflow",
-    "resourceKey":"EPUB/chapter.xhtml",
-    "progression":0.25,
-    "totalProgression":0.5,
-    "position":12,
-    "textQuote":{"exact":"anchor","prefix":"before","suffix":"after"},
-    "engineLocator":{"engine":"readium","platform":"android","version":"3.3.0","payload":{"href":"EPUB/chapter.xhtml"}},
-    "contentFingerprint":{
-      "originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "parserVersion":"readium-kotlin:3.3.0",
-      "normalizationVersion":"epub-native-sanitized-v1"
+    private companion object {
+        const val PARSER = "readium:epub"
+        const val NORMALIZATION = "epub-v1"
     }
-  },
-  "updatedAtEpochMillis":1765555555000,
-  "deviceId":"android-client"
 }
-"""

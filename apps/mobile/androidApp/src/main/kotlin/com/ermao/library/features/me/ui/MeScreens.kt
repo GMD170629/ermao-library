@@ -87,6 +87,7 @@ fun MeRootScreen(
     onOpenSecurity: () -> Unit,
     onOpenLanguage: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenDownloads: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     canOpenAdministration: Boolean = false,
@@ -114,6 +115,8 @@ fun MeRootScreen(
             SettingsRow(R.string.me_profile_title, R.string.me_profile_summary, Icons.Outlined.AccountCircle, onOpenProfile)
             SettingsDivider()
             SettingsRow(R.string.me_security_title, R.string.me_security_summary, Icons.Outlined.Lock, onOpenSecurity)
+            SettingsSection(R.string.me_section_offline_storage)
+            SettingsRow(R.string.me_downloads_title, R.string.me_downloads_summary, Icons.Outlined.Storage, onOpenDownloads)
             SettingsSection(R.string.me_section_connected_services)
             SettingsRow(
                 R.string.me_email_kindle_title,

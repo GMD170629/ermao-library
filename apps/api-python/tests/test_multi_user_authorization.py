@@ -428,7 +428,9 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     assert shelf.status_code == 201
     bootstrap = client.get("/api/reader/v4/volumes/volume-a/bootstrap")
     assert bootstrap.status_code == 200
-    content_fingerprint = bootstrap.json()["data"]["contentFingerprint"]
+    content_fingerprint = bootstrap.json()["data"]["publicationFingerprint"][
+        "originalFileHash"
+    ]
     bookmark = client.put(
         "/api/reader/v4/volumes/volume-a/bookmarks",
         json={

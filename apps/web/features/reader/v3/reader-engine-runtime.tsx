@@ -13,6 +13,7 @@ import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './ada
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import type { ReaderBookCache } from '../../../lib/reader/book-cache';
+import { projectReadiumEffectivePreferences } from './adapters/readium-presentation';
 
 type ReaderEngineRuntimeProps = {
   bootstrap: ReaderBootstrap;
@@ -64,6 +65,8 @@ function adapterNavigationItems(entries: ReaderNavigationEntry[]): ReaderNavigat
 }
 
 function novelErrorMessage(code: string | undefined, translate: (source: string) => string) {
+  if (code === 'READER_EXACT_RESTORE_UNVERIFIED') return translate('无法精确恢复到另一设备的位置');
+  if (code === 'READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE') return translate('服务器尚未提供 Readium Publication，无法打开此书。');
   if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
   if (code === 'NOVEL_DRM_PROTECTED') return translate('文件可能受 DRM 保护，无法打开。');
   if (code === 'NOVEL_PARSE_FAILED') return translate('小说文件无法解析，请检查文件完整性和格式。');
@@ -110,6 +113,12 @@ export function ReaderEngineRuntime({
   const interactionBlockedRef = useRef(true);
   const onSelectVolumeRef = useRef(onSelectVolume);
   onSelectVolumeRef.current = onSelectVolume;
+  const runtimePreferences = useMemo(
+    () => bootstrap.readerType === 'reflowable'
+      ? projectReadiumEffectivePreferences(effectivePreferences)
+      : effectivePreferences,
+    [bootstrap.readerType, effectivePreferences]
+  );
 
   useEffect(() => {
     if (!container) return undefined;
@@ -120,10 +129,12 @@ export function ReaderEngineRuntime({
     container.replaceChildren();
 
     void (async () => {
-      const openNextVolume = () => {
+      const openNextVolume = async () => {
         const currentIndex = bootstrap.availableVolumes.findIndex((volume) => volume.id === bootstrap.volume.id);
         const nextVolume = currentIndex >= 0 ? bootstrap.availableVolumes[currentIndex + 1] : undefined;
-        if (nextVolume) onSelectVolumeRef.current(nextVolume.id);
+        if (!nextVolume) return false;
+        onSelectVolumeRef.current(nextVolume.id);
+        return true;
       };
       const handleAdapterInputIntent = (intent: ReaderAdapterInputIntent) => {
         const blocked = interactionBlockedRef.current || Boolean(shellEventsRef.current?.isInteractionBlocked());
@@ -139,15 +150,12 @@ export function ReaderEngineRuntime({
         return executeRef.current(intent.command);
       };
       if (bootstrap.readerType === 'reflowable') {
-        const adapterModule = await import('./adapters/foliate-adapter');
-        created = adapterModule.createFoliateAdapter({
+        const adapterModule = await import('./adapters/readium-adapter');
+        created = adapterModule.createReadiumWebReaderAdapter({
           container,
-          title: bootstrap.book.title,
-          userId: bootstrap.userId,
-          bookCache,
-          onCacheWarning: () => onStorageWarning(i18nAttribute('书籍已打开，但本机存储空间不足；下次阅读时需要重新下载。')),
-          onEndOfVolume: openNextVolume,
-          onInputIntent: handleAdapterInputIntent
+          initialHref: bootstrap.units[0]?.href ?? null,
+          onInputIntent: handleAdapterInputIntent,
+          onEndOfVolume: openNextVolume
         });
       } else if (bootstrap.readerType === 'comic') {
         const adapterModule = await import('./adapters/comic-adapter');
@@ -185,13 +193,13 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bookCache, bootstrap.availableVolumes, bootstrap.book.title, bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.userId, bootstrap.volume.id, container, i18nAttribute, onStorageWarning]);
+  }, [bookCache, bootstrap.availableVolumes, bootstrap.book.title, bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.volume.id, container, i18nAttribute, onStorageWarning]);
 
   const session = useReaderSession({
     adapter,
     source: bootstrap.source,
     initialLocation: bootstrap.initialLocation,
-    preferences: effectivePreferences,
+    preferences: runtimePreferences,
     onLocationChange,
     onExternalLink: (href) => window.open(href, '_blank', 'noopener,noreferrer'),
     onPasswordRequired: (reason) => {
@@ -249,7 +257,7 @@ export function ReaderEngineRuntime({
     ? { ...adapterCapabilities, canGoNext: true }
     : adapterCapabilities;
   const settings = {
-    ...preferencesToReaderSettings(effectivePreferences),
+    ...preferencesToReaderSettings(runtimePreferences),
     manualTheme: preferences.appearance.theme
   };
   const items = useMemo(() => {
@@ -389,7 +397,7 @@ export function ReaderEngineRuntime({
       settings={settings}
       capabilities={effectiveCapabilities}
       readingDirection={bootstrap.readerType === 'comic'
-        ? effectivePreferences.comic.direction
+        ? runtimePreferences.comic.direction
         : (session.state.capabilities?.readingDirection ?? bootstrap.capabilities.readingDirection)}
       onBack={onBack}
       onSettingsChange={(next) => {
@@ -414,8 +422,16 @@ export function ReaderEngineRuntime({
       {(events) => {
         shellEventsRef.current = events;
         return (
-          <div className="relative h-full min-h-0 w-full overflow-hidden">
-            <div ref={setContainer} className="h-full min-h-0 w-full" aria-label={i18nAttribute("{value0} 阅读内容", { value0: bootstrap.book.title })} />
+          <div className={`relative h-full min-h-0 w-full overflow-hidden ${bootstrap.readerType === 'reflowable'
+            ? 'box-border py-[clamp(32px,5vh,64px)] max-[640px]:py-[clamp(16px,2.5vh,32px)]'
+            : ''}`}>
+            <div
+              ref={setContainer}
+              className={`h-full min-h-0 w-full ${bootstrap.readerType === 'reflowable'
+                ? 'relative mx-auto [&>.readium-navigator-iframe]:inset-0 [&>.readium-navigator-iframe]:h-full [&>.readium-navigator-iframe]:w-full [&>.readium-navigator-iframe]:border-0'
+                : ''}`}
+              aria-label={i18nAttribute("{value0} 阅读内容", { value0: bootstrap.book.title })}
+            />
             {(!adapter
               || session.state.lifecycle === 'bootstrapping'
               || session.state.lifecycle === 'loading'

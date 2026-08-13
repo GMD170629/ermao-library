@@ -86,30 +86,39 @@ struct IosReaderProgressContract: Equatable, Sendable {
     let deviceID: String
 }
 
-/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v1/v4 documents.
+/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v4 documents.
 /// The KMP codec remains the persistence authority; this decoder lets iOS map
 /// an engine locator without turning its arbitrary JSON members into domain state.
 enum IosReaderProgressContractDecoder {
     static func decode(_ payload: String) throws -> IosReaderProgressContract {
+        _ = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: payload)
         let data = Data(payload.utf8)
         let document = try JSONDecoder().decode(Document.self, from: data)
-        guard document.schema == "ermao.reader-progress", [1, 4].contains(document.version),
+        let resourceKeyIsValid = document.location.resourceKey.map {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? true
+        let progressionIsValid = document.location.progression.map {
+            $0.isFinite && (0 ... 1).contains($0)
+        } ?? true
+        let totalProgressionIsValid = document.location.totalProgression.map {
+            $0.isFinite && (0 ... 1).contains($0)
+        } ?? true
+        let positionIsValid = document.location.position.map { $0 > 0 } ?? true
+        let textQuoteIsValid = document.location.textQuote.map {
+            !$0.exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && ($0.prefix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
+                && ($0.suffix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
+        } ?? true
+        let engineLocatorIsValid = document.location.engineLocator.map(\.isObject) ?? false
+        guard document.schema == "ermao.reader-progress", document.version == 4,
               document.location.kind == "reflow",
               !document.sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              document.location.resourceKey.map {
-                  !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-              } ?? true,
-              document.location.progression.map { $0.isFinite && (0 ... 1).contains($0) } ?? true,
-              document.location.totalProgression.map { $0.isFinite && (0 ... 1).contains($0) } ?? true,
-              document.location.position.map { $0 > 0 } ?? true,
-              document.location.textQuote.map {
-                  !$0.exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                      && ($0.prefix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
-                      && ($0.suffix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
-              } ?? true,
-              document.location.engineLocator.map(\.isObject) ?? true,
-              document.location.engineLocator != nil || document.location.resourceKey != nil
-                  || document.location.textQuote != nil || document.location.position != nil,
+              resourceKeyIsValid,
+              progressionIsValid,
+              totalProgressionIsValid,
+              positionIsValid,
+              textQuoteIsValid,
+              engineLocatorIsValid,
               !document.deviceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             throw IosReaderFailure(code: .locationRestoreFailed)
@@ -138,7 +147,10 @@ enum IosReaderProgressContractDecoder {
     }
 
     private static func canonicalJSON(_ value: JSONValue) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: value.foundationValue, options: [.sortedKeys])
+        let data = try JSONSerialization.data(
+            withJSONObject: value.foundationValue,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
         guard let result = String(data: data, encoding: .utf8) else {
             throw IosReaderFailure(code: .locationRestoreFailed)
         }
@@ -146,7 +158,7 @@ enum IosReaderProgressContractDecoder {
     }
 
     private static func enginePayload(_ value: JSONValue, schemaVersion: Int) throws -> String {
-        if schemaVersion == 1 { return try canonicalJSON(value) }
+        guard schemaVersion == 4 else { throw IosReaderFailure(code: .locationRestoreFailed) }
         guard case let .object(fields) = value,
               fields["engine"]?.stringValue == "readium",
               fields["platform"]?.stringValue == "ios",

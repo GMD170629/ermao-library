@@ -1,9 +1,7 @@
 import Foundation
 @preconcurrency import ErmaoShared
 
-/// Reader v4 exact-local persistence plus a deliberately ephemeral upload slot.
-/// A save is durable as soon as SQLite succeeds. The subsequent PUT has no
-/// disk-backed outbox, retry, lease, quarantine, or sequence state.
+/// Durable latest-only Reader v4 synchronization for the native iOS shell.
 final class IosReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
     private let database: IosReaderLocalDatabase
     private let target: ErmaoShared.ReaderProgressSyncTarget
@@ -16,7 +14,7 @@ final class IosReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unc
     ) {
         self.database = database
         self.target = target
-        uploadSlot = IosReaderProgressUploadSlot(port: syncPort)
+        uploadSlot = IosReaderProgressUploadSlot(database: database, target: target, port: syncPort)
     }
 
     func load(sourceId: String) async throws -> ErmaoShared.ReaderProgress? {
@@ -25,17 +23,19 @@ final class IosReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unc
 
     func save(progress: ErmaoShared.ReaderProgress) async throws {
         guard progress.sourceId == target.volumeId,
-              let location = progress.location as? ErmaoShared.ReflowReaderLocation
+              progress.location is ErmaoShared.ReflowReaderLocation
         else { throw IosReaderFailure(code: .persistenceFailed) }
 
-        // The exact local write is the only durability boundary. Upload is
-        // offered only after it commits, and a failed PUT is intentionally lost.
-        try await database.save(progress: progress)
+        let state = try await database.loadSyncState()
+        let baseRevision = state.conflict?.server.revision ?? state.confirmedRevision
         let upload = ErmaoShared.PublicKt.createReaderProgressUpload(
             target: target,
-            progress: progress
+            progress: progress,
+            baseRevision: baseRevision,
+            mutationId: UUID().uuidString.lowercased()
         )
-        await uploadSlot.offer(upload)
+        try await database.commitProgressAndPending(progress: progress, pending: upload.mutation)
+        await uploadSlot.wake()
     }
 
     func delete(sourceId: String) async throws {
@@ -45,22 +45,34 @@ final class IosReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unc
     func awaitPendingUpload() async throws {
         await uploadSlot.awaitIdle()
     }
+
+    func retryPendingUpload() async throws {
+        await uploadSlot.wake()
+    }
+
+    func syncState() async throws -> ErmaoShared.ReaderProgressDurableState {
+        try await database.loadSyncState()
+    }
 }
 
-/// One request may be in flight. Any number of locations arriving during that
-/// request collapse into one latest pending upload. Success and failure both
-/// consume the attempted value; there is no retry path.
+/// Single-flight worker. The database, not actor memory, owns the latest slot.
 private actor IosReaderProgressUploadSlot {
+    private let database: IosReaderLocalDatabase
+    private let target: ErmaoShared.ReaderProgressSyncTarget
     private let port: ErmaoShared.ReaderProgressSyncPort
-    private var latest: ErmaoShared.ReaderProgressUpload?
     private var worker: Task<Void, Never>?
 
-    init(port: ErmaoShared.ReaderProgressSyncPort) {
+    init(
+        database: IosReaderLocalDatabase,
+        target: ErmaoShared.ReaderProgressSyncTarget,
+        port: ErmaoShared.ReaderProgressSyncPort
+    ) {
+        self.database = database
+        self.target = target
         self.port = port
     }
 
-    func offer(_ upload: ErmaoShared.ReaderProgressUpload) {
-        latest = upload
+    func wake() {
         guard worker == nil else { return }
         worker = Task { await drain() }
     }
@@ -70,11 +82,43 @@ private actor IosReaderProgressUploadSlot {
     }
 
     private func drain() async {
-        while let selected = latest {
-            latest = nil
-            _ = try? await port.push(upload: selected)
+        defer { worker = nil }
+        while !Task.isCancelled {
+            guard let state = try? await database.loadSyncState(),
+                  state.conflict == nil,
+                  state.terminalFailureCode == nil,
+                  let pending = state.pending
+            else { return }
+            let upload = ErmaoShared.ReaderProgressUpload(target: target, mutation: pending)
+            let result: ErmaoShared.ReaderProgressPushResult
+            do {
+                result = try await port.push(upload: upload)
+            } catch {
+                return
+            }
+            switch result {
+            case let accepted as ErmaoShared.ReaderProgressPushResultAccepted:
+                try? await database.acknowledge(mutationID: pending.mutationId, snapshot: accepted.snapshot)
+            case let conflict as ErmaoShared.ReaderProgressPushResultConflict:
+                let value = ErmaoShared.ReaderProgressConflict(pending: pending, server: conflict.current)
+                try? await database.recordConflict(value)
+                return
+            case is ErmaoShared.ReaderProgressPushResultRetryableFailure:
+                return
+            case let rejected as ErmaoShared.ReaderProgressPushResultRejected:
+                try? await database.recordTerminalFailure(
+                    mutationID: pending.mutationId,
+                    code: rejected.failureCode
+                )
+                return
+            default:
+                try? await database.recordTerminalFailure(
+                    mutationID: pending.mutationId,
+                    code: "INVALID_PROGRESS_RESPONSE"
+                )
+                return
+            }
         }
-        worker = nil
     }
 }
 

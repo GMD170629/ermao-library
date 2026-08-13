@@ -39,6 +39,8 @@ enum ContentUITestFixture {
         FixtureContentClient()
     }
 
+    static func makeShelfClient() -> any ShelfClient { FixtureShelfClient() }
+
     static func makeSettingsClient() -> any SettingsClient {
         FixtureSettingsClient()
     }
@@ -70,6 +72,18 @@ private struct FixtureSettingsClient: SettingsClient {
     func deleteAvatar() async throws -> SettingsAccount { account }
     func updateLocale(_ locale: SettingsLocale) async throws -> SettingsLocale { locale }
     func loadServerVersion() async throws -> String { "fixture-server" }
+}
+
+private actor FixtureShelfClient: ShelfClient {
+    private var selected = false
+
+    func fetchShelves(context: ContentRequestContext, workID: String) async throws -> [ShelfOption] {
+        [ShelfOption(id: "favorites", name: "Favorites", containsWork: selected)]
+    }
+
+    func updateShelf(context: ContentRequestContext, workID: String, shelfID: String, add: Bool) async throws {
+        selected = add
+    }
 }
 
 private struct FixtureContentClient: ContentClient {
@@ -159,6 +173,58 @@ private struct FixtureContentClient: ContentClient {
 
     func fetchWorkDetail(context: ContentRequestContext, query: WorkDetailQuery) async throws -> WorkDetailContent {
         let work = works.first(where: { $0.id == query.workID }) ?? works[0]
+        let selectedKind = query.mediaKind ?? work.availableMediaKinds.first
+        let selectedVolumeID = query.volumeID ?? "volume-1"
+        let volumes: [WorkVolume] = if work.id == "the-left-hand-of-darkness", selectedKind == .ebook {
+            [
+                WorkVolume(
+                    id: "volume-1",
+                    mediaVersionID: "media-version-1",
+                    title: "The Left Hand of Darkness I",
+                    formatLabel: "EPUB",
+                    volumeIndex: 1,
+                    sizeLabel: "2.6 MB",
+                    progress: 34,
+                    isReadable: true,
+                    isSelected: selectedVolumeID == "volume-1"
+                ),
+                WorkVolume(
+                    id: "volume-2",
+                    mediaVersionID: "media-version-1",
+                    title: "The Left Hand of Darkness II",
+                    formatLabel: "EPUB",
+                    volumeIndex: 2,
+                    sizeLabel: "3.1 MB",
+                    progress: 12,
+                    isReadable: true,
+                    isSelected: selectedVolumeID == "volume-2"
+                ),
+                WorkVolume(
+                    id: "volume-3",
+                    mediaVersionID: "media-version-1",
+                    title: "The Left Hand of Darkness III",
+                    formatLabel: "EPUB",
+                    volumeIndex: 3,
+                    sizeLabel: "3.4 MB",
+                    progress: nil,
+                    isReadable: true,
+                    isSelected: selectedVolumeID == "volume-3"
+                )
+            ]
+        } else {
+            [
+                WorkVolume(
+                    id: "volume-1",
+                    mediaVersionID: "media-version-1",
+                    title: "Volume 1",
+                    formatLabel: "EPUB",
+                    sizeLabel: "2.6 MB",
+                    progress: work.progress,
+                    isReadable: true,
+                    isSelected: true
+                )
+            ]
+        }
         return WorkDetailContent(
             work: work,
             description: work.id == "a-wizard-of-earthsea"
@@ -168,21 +234,11 @@ private struct FixtureContentClient: ContentClient {
             seriesFacet: FacetIdentity(id: "earthsea", kind: .series, name: "Earthsea"),
             authorFacets: [FacetIdentity(id: "ursula-le-guin", kind: .author, name: work.author)],
             availableMediaKinds: work.availableMediaKinds,
-            selectedMediaKind: query.mediaKind ?? work.availableMediaKinds.first,
-            selectedVolumeID: query.volumeID ?? "volume-1",
+            selectedMediaKind: selectedKind,
+            selectedVolumeID: selectedVolumeID,
             readingStatus: work.progress == nil ? .unread : .reading,
-            volumes: [
-                WorkVolume(
-                    id: "volume-1",
-                    title: "Volume 1",
-                    formatLabel: "EPUB",
-                    sizeLabel: "2.6 MB",
-                    progress: work.progress,
-                    isReadable: true,
-                    isSelected: true
-                )
-            ],
-            chapters: [
+            volumes: volumes,
+            chapters: work.id == "the-left-hand-of-darkness" ? [] : [
                 WorkChapter(id: "chapter-1", title: "Chapter 1", progress: work.progress, isCurrent: true),
                 WorkChapter(id: "chapter-2", title: "Chapter 2", progress: nil, isCurrent: false),
             ]

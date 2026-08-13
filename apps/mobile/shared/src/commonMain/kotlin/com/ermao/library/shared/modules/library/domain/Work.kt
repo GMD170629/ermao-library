@@ -32,6 +32,7 @@ data class WorkDetailSummary(
     val selectedDetailTab: String,
     val activeMedia: ActiveMedia? = null,
     val readingUnits: List<ReadingUnit> = emptyList(),
+    val readingUnitsPage: ReadingUnitsPage? = null,
 )
 
 data class AppliedFacet(

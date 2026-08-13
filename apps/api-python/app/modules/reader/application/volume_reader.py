@@ -8,7 +8,9 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from app.modules.reader.application.content_fingerprint import (
+    build_publication_fingerprint,
     build_volume_content_fingerprint,
+    publication_fingerprint_key,
 )
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
@@ -18,11 +20,13 @@ from app.modules.reader.application.dto import (
     ReaderLocationKind,
     ReaderProgressDto,
     ReaderReadingStatus,
+    ReaderUnitDto,
     ReaderVolumeContextDto,
 )
 from app.modules.reader.application.ports import (
     ReaderClock,
     ReaderEpubNavigationParser,
+    ReaderPublicationLocatorIndex,
     ReaderUnitOfWork,
     ReaderVolumeRepository,
 )
@@ -58,16 +62,43 @@ class ReaderLocationFormatMismatch(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class ReaderLocatorMediaTypeMismatch(Exception):
+    expected: str
+    received: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderLocatorResourceMismatch(Exception):
+    href: str
+    media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderProgressRevisionConflict(Exception):
+    current: ReaderProgressDto
+
+
+class ReaderProgressBaseRevisionInvalid(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
 class SaveProgressCommand:
     user_id: str
     volume_id: str
     access_scope: ReaderAccessScope
     client_id: str
-    content_fingerprint: str
-    location_kind: ReaderLocationKind | None
-    location_json: str | None
-    percent: float
-    updated_at_epoch_millis: int
+    mutation_id: str
+    base_revision: int
+    publication_original_file_hash: str
+    publication_parser: str
+    publication_normalization: str
+    locator_json: str
+    locator_href: str
+    locator_media_type: str
+    locator_progression: float | None
+    locator_total_progression: float | None
+    captured_at_epoch_millis: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,11 +143,13 @@ class VolumeReaderService:
         unit_of_work: ReaderUnitOfWork,
         epub_navigation_parser: ReaderEpubNavigationParser,
         clock: ReaderClock,
+        publication_locator_index: ReaderPublicationLocatorIndex,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
         self._epub_navigation_parser = epub_navigation_parser
         self._clock = clock
+        self._publication_locator_index = publication_locator_index
 
     def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
         return self._repository.get_context(volume_id)
@@ -146,14 +179,18 @@ class VolumeReaderService:
         progress_by_volume_id = {
             progress.volume_id: progress for progress in progresses
         }
-        fingerprint = build_volume_content_fingerprint(
+        publication_fingerprint = self._publication_locator_index.fingerprint(
+            volume_id=volume_id,
+            access_scope=access_scope,
+        ) or build_publication_fingerprint(
             asdict(context.volume), [asdict(file) for file in files]
         )
+        fingerprint_key = publication_fingerprint_key(publication_fingerprint)
         selected_progress = progress_by_volume_id.get(volume_id)
         fingerprint_mismatch = bool(
             selected_progress
             and selected_progress.content_fingerprint
-            and selected_progress.content_fingerprint != fingerprint
+            and selected_progress.content_fingerprint != fingerprint_key
         )
         selected_media_volumes = [
             volume
@@ -171,7 +208,7 @@ class VolumeReaderService:
             files=tuple(files),
             units=tuple(units),
             progress_by_volume_id=progress_by_volume_id,
-            content_fingerprint=fingerprint,
+            publication_fingerprint=publication_fingerprint,
             resume_location_json=(
                 None
                 if fingerprint_mismatch or selected_progress is None
@@ -185,33 +222,85 @@ class VolumeReaderService:
         reader_type = reader_type_for_volume_format(context.volume.format)
         if reader_type is None:
             raise ReaderVolumeFormatUnsupported
-        _require_matching_location_kind(reader_type, command.location_kind)
-        expected_fingerprint = build_volume_content_fingerprint(
-            asdict(context.volume),
-            [asdict(file) for file in self._repository.list_files(command.volume_id)],
+        _require_matching_locator_media_type(reader_type, command.locator_media_type)
+        expected_publication = self._publication_locator_index.validate(
+            volume_id=command.volume_id,
+            access_scope=command.access_scope,
+            href=command.locator_href,
+            media_type=command.locator_media_type,
         )
+        if expected_publication is None:
+            raise ReaderLocatorResourceMismatch(
+                href=command.locator_href,
+                media_type=command.locator_media_type,
+            )
+        received_publication = (
+            command.publication_original_file_hash.lower(),
+            command.publication_parser,
+            command.publication_normalization,
+        )
+        expected_identity = (
+            expected_publication.original_file_hash.lower(),
+            expected_publication.parser,
+            expected_publication.normalization,
+        )
+        if received_publication != expected_identity:
+            raise ReaderFingerprintMismatch(
+                expected=publication_fingerprint_key(expected_publication),
+                received="|".join(received_publication),
+            )
+        fingerprint_key = publication_fingerprint_key(expected_publication)
         now = _aware_utc(self._clock.now())
         progressed_at = datetime.fromtimestamp(
-            command.updated_at_epoch_millis / 1000,
+            command.captured_at_epoch_millis / 1000,
             tz=UTC,
         )
-        location_json = (
-            command.location_json
-            if command.content_fingerprint == expected_fingerprint
-            else None
+        repeated = self._repository.get_progress_mutation(
+            command.user_id, command.volume_id, command.mutation_id
+        )
+        if repeated is not None:
+            return repeated
+        current = self._repository.get_progress(command.user_id, command.volume_id)
+        if current is None and command.base_revision != 0:
+            raise ReaderProgressBaseRevisionInvalid
+        if current is not None and current.revision != command.base_revision:
+            raise ReaderProgressRevisionConflict(current=current)
+        next_revision = command.base_revision + 1
+        display_percent = _derive_display_percent(
+            current=current,
+            units=self._repository.list_units(command.volume_id),
+            href=command.locator_href,
+            progression=command.locator_progression,
+            total_progression=command.locator_total_progression,
         )
         try:
-            progress = self._repository.save_progress(
+            progress = self._repository.save_exact_progress(
                 user_id=command.user_id,
                 context=context,
                 reader_type=reader_type.value,
-                percent=command.percent,
-                location_json=location_json,
-                content_fingerprint=expected_fingerprint,
+                display_percent=display_percent,
+                locator_json=command.locator_json,
+                content_fingerprint=fingerprint_key,
                 client_id=command.client_id,
+                mutation_id=command.mutation_id,
+                base_revision=command.base_revision,
+                next_revision=next_revision,
                 progressed_at=progressed_at,
                 now=now,
             )
+            if progress is None:
+                repeated = self._repository.get_progress_mutation(
+                    command.user_id, command.volume_id, command.mutation_id
+                )
+                if repeated is not None:
+                    self._unit_of_work.rollback()
+                    return repeated
+                current = self._repository.get_progress(
+                    command.user_id, command.volume_id
+                )
+                if current is None:
+                    raise ReaderProgressBaseRevisionInvalid
+                raise ReaderProgressRevisionConflict(current=current)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
@@ -335,9 +424,14 @@ class VolumeReaderService:
         *,
         user_id: str,
         volume_id: str,
+        access_scope: ReaderAccessScope,
         content_fingerprint: str,
     ) -> list[ReaderBookmarkDto]:
-        self._require_current_fingerprint(volume_id, content_fingerprint)
+        self._require_current_fingerprint(
+            volume_id,
+            content_fingerprint,
+            access_scope=access_scope,
+        )
         return self._repository.list_bookmarks(user_id, volume_id, content_fingerprint)
 
     def replace_bookmarks(
@@ -350,7 +444,9 @@ class VolumeReaderService:
         for location_kind in command.location_kinds:
             _require_matching_location_kind(reader_type, location_kind)
         self._require_current_fingerprint(
-            command.volume_id, command.content_fingerprint
+            command.volume_id,
+            command.content_fingerprint,
+            access_scope=command.access_scope,
         )
         try:
             result = self._repository.replace_bookmarks(
@@ -367,14 +463,27 @@ class VolumeReaderService:
         return result
 
     def _require_current_fingerprint(
-        self, volume_id: str, received_fingerprint: str
+        self,
+        volume_id: str,
+        received_fingerprint: str,
+        *,
+        access_scope: ReaderAccessScope,
     ) -> None:
         context = self._repository.get_context(volume_id)
         if context is None:
             raise ReaderVolumeNotFound
-        expected = build_volume_content_fingerprint(
-            asdict(context.volume),
-            [asdict(file) for file in self._repository.list_files(volume_id)],
+        publication = self._publication_locator_index.fingerprint(
+            volume_id=volume_id,
+            access_scope=access_scope,
+        )
+        expected = (
+            f"{publication.original_file_hash}\0{publication.parser}"
+            f"\0{publication.normalization}"
+            if publication is not None
+            else build_volume_content_fingerprint(
+                asdict(context.volume),
+                [asdict(file) for file in self._repository.list_files(volume_id)],
+            )
         )
         if expected != received_fingerprint:
             raise ReaderFingerprintMismatch(
@@ -404,6 +513,57 @@ def _require_matching_location_kind(
     expected = expected_by_reader_type[reader_type]
     if location_kind != expected:
         raise ReaderLocationFormatMismatch(expected=expected, received=location_kind)
+
+
+def _require_matching_locator_media_type(
+    reader_type: ReaderType, media_type: str
+) -> None:
+    normalized = media_type.partition(";")[0].strip().lower()
+    accepted_prefixes: dict[ReaderType, tuple[str, ...]] = {
+        ReaderType.REFLOWABLE: (
+            "application/xhtml+xml",
+            "text/html",
+            "text/plain",
+        ),
+        ReaderType.COMIC: ("image/",),
+        ReaderType.PDF: ("application/pdf",),
+        ReaderType.AUDIO: ("audio/",),
+    }
+    if any(normalized.startswith(prefix) for prefix in accepted_prefixes[reader_type]):
+        return
+    raise ReaderLocatorMediaTypeMismatch(
+        expected=reader_type.value,
+        received=media_type,
+    )
+
+
+def _derive_display_percent(
+    *,
+    current: ReaderProgressDto | None,
+    units: list[ReaderUnitDto],
+    href: str,
+    progression: float | None,
+    total_progression: float | None,
+) -> float:
+    """Derive a presentation-only percentage without affecting restoration."""
+
+    if total_progression is not None:
+        return round(total_progression * 100, 6)
+    normalized_href = href.partition("#")[0]
+    located_index: int | None = None
+    for index, unit in enumerate(units):
+        unit_href = unit.href
+        if unit_href.partition("#")[0] == normalized_href:
+            located_index = index
+            break
+    if located_index is not None and units:
+        within_resource = progression or 0
+        return round((located_index + within_resource) / len(units) * 100, 6)
+    if current is not None:
+        return current.percent
+    if progression is not None:
+        return round(progression * 100, 6)
+    return 0
 
 
 def _page_from_references(references: tuple[str, ...]) -> int | None:

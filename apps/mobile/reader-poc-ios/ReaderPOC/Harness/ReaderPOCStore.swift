@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -14,6 +15,7 @@ final class ReaderPOCStore: ObservableObject {
         let result: MobiPublicationResult
         let publicationBuildMilliseconds: Double
         let performanceGrade: TechnicalGrade
+        let fingerprint: LocatorPublicationFingerprint
     }
 
     @Published private(set) var selectedFixtureID = FixtureCatalog.all.first?.id
@@ -44,6 +46,8 @@ final class ReaderPOCStore: ObservableObject {
         let clock = ContinuousClock()
         let started = clock.now
         do {
+            let sourceData = try Data(contentsOf: url, options: .mappedIfSafe)
+            let sourceHash = SHA256.hash(data: sourceData).map { String(format: "%02x", $0) }.joined()
             let result = try await factory.open(url)
             let elapsed = started.duration(to: clock.now).milliseconds
             let threshold = descriptor.isLongChapter ? 8_000.0 : 2_000.0
@@ -52,7 +56,12 @@ final class ReaderPOCStore: ObservableObject {
                 descriptor: descriptor,
                 result: result,
                 publicationBuildMilliseconds: elapsed,
-                performanceGrade: grade
+                performanceGrade: grade,
+                fingerprint: LocatorPublicationFingerprint(
+                    originalFileHash: sourceHash,
+                    parser: NativeMobiExtractor.libmobiVersion,
+                    normalization: NativeMobiExtractor.normalizationVersion
+                )
             ))
             log("Built Publication in \(elapsed.formatted(.number.precision(.fractionLength(1)))) ms")
             log("Verified \(result.preflight.resourceCount) resources and \(result.preflight.verifiedReferenceCount) references")

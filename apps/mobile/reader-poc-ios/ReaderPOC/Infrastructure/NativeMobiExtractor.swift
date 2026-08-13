@@ -6,6 +6,10 @@ actor NativeMobiExtractor: MobiExtracting {
         String(cString: ermao_mobi_parser_identifier())
     }
 
+    static var normalizationVersion: String {
+        String(cString: ermao_mobi_normalization_identifier())
+    }
+
     func extract(_ file: URL) async throws -> MobiExtractedBook {
         guard FileManager.default.fileExists(atPath: file.path) else {
             throw MobiExtractionError.fileNotFound
@@ -238,10 +242,10 @@ actor NativeMobiExtractor: MobiExtracting {
         guard copyStatus == ERMAO_MOBI_OK else {
             throw mapCoreError(copyStatus)
         }
-        let value = buffer.withUnsafeBufferPointer { pointer in
+        let value: String? = buffer.withUnsafeBufferPointer { pointer -> String? in
             guard let baseAddress = pointer.baseAddress else { return nil }
             return String(cString: baseAddress)
-        }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil
     }
 
@@ -257,7 +261,9 @@ actor NativeMobiExtractor: MobiExtracting {
         data.reserveCapacity(capacity)
         var offset: UInt64 = 0
         while offset < length {
-            let requested = Int(min(UInt64(ERMAO_MOBI_MAX_READ_BYTES), length - offset))
+            // UINT32_C-based C macros are not imported by Swift 6. Keep this in
+            // lockstep with ERMAO_MOBI_MAX_READ_BYTES from ermao_mobi.h.
+            let requested = Int(min(UInt64(256 * 1024), length - offset))
             var buffer = [UInt8](repeating: 0, count: requested)
             var bytesRead: UInt32 = 0
             let status = buffer.withUnsafeMutableBufferPointer { pointer in

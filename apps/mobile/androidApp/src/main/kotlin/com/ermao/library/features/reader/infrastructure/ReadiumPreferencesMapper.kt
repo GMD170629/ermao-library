@@ -2,43 +2,97 @@ package com.ermao.library.features.reader.infrastructure
 
 import android.content.res.Configuration
 import android.content.res.Resources
+import android.graphics.Color as AndroidColor
+import com.ermao.library.shared.modules.reader.ReaderFontFamily
+import com.ermao.library.shared.modules.reader.ReaderPageMargin
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
+import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTextAlignment
 import com.ermao.library.shared.modules.reader.ReaderTheme
-import org.readium.r2.shared.ExperimentalReadiumApi
+import com.ermao.library.shared.modules.reader.ReaderThemeMode
 import org.readium.r2.navigator.epub.EpubPreferences
+import org.readium.r2.navigator.preferences.Color
+import org.readium.r2.navigator.preferences.ColumnCount
 import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.preferences.Theme
+import org.readium.r2.shared.ExperimentalReadiumApi
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumPreferencesMapper(private val resources: Resources) {
-    fun toReadium(preferences: ReaderPreferences): EpubPreferences = EpubPreferences(
-        fontFamily = preferences.fontFamily?.let(::fontFamily),
-        fontSize = preferences.fontSize,
-        lineHeight = preferences.lineHeight,
-        letterSpacing = preferences.letterSpacing,
-        pageMargins = preferences.pageMargins,
-        publisherStyles = preferences.publisherStyles,
-        scroll = preferences.readingMode == ReaderReadingMode.ContinuousScroll,
-        textAlign = when (preferences.textAlignment) {
-            ReaderTextAlignment.PublisherDefault -> null
-            ReaderTextAlignment.Start -> TextAlign.START
-            ReaderTextAlignment.Justify -> TextAlign.JUSTIFY
-        },
-        theme = when (preferences.theme) {
-            ReaderTheme.Paper -> Theme.SEPIA
-            ReaderTheme.Night -> Theme.DARK
-            ReaderTheme.System -> if (resources.configuration.isNightMode) Theme.DARK else Theme.LIGHT
+    fun toReadium(preferences: ReaderPreferences): EpubPreferences {
+        val epub = preferences.epub
+        val theme = effectiveTheme(preferences)
+        val colors = theme.colors
+        return EpubPreferences(
+            backgroundColor = if (epub.typography.allowPublisherColors) null else color(colors.background),
+            columnCount = when (epub.spreadMode) {
+                ReaderSpreadMode.Auto -> ColumnCount.AUTO
+                ReaderSpreadMode.Single -> ColumnCount.ONE
+                ReaderSpreadMode.Double -> ColumnCount.TWO
+            },
+            fontFamily = if (epub.typography.allowPublisherFonts) null else fontFamily(epub.fontFamily),
+            fontSize = epub.fontSize / BASE_FONT_SIZE,
+            fontWeight = epub.fontWeight / NORMAL_FONT_WEIGHT,
+            lineHeight = if (epub.typography.preservePublisherStyles) null else epub.lineHeight,
+            letterSpacing = epub.letterSpacing.coerceAtLeast(0.0),
+            pageMargins = when (epub.pageMargin) {
+                ReaderPageMargin.Narrow -> 0.5
+                ReaderPageMargin.Standard -> 1.0
+                ReaderPageMargin.Wide -> 1.5
+            },
+            paragraphIndent = epub.typography.paragraphIndent,
+            paragraphSpacing = epub.typography.paragraphSpacing,
+            // Readium exposes one all-or-nothing publisher stylesheet flag.
+            // Keep it disabled so the supported native typography preferences remain effective.
+            publisherStyles = false,
+            scroll = epub.flow == ReaderReadingMode.ContinuousScroll,
+            textAlign = when (epub.typography.textAlign) {
+                ReaderTextAlignment.PublisherDefault -> null
+                ReaderTextAlignment.Start -> TextAlign.START
+                ReaderTextAlignment.Justify -> TextAlign.JUSTIFY
+            },
+            textColor = if (epub.typography.allowPublisherColors) null else color(colors.foreground),
+            theme = when (theme) {
+                ReaderTheme.Warm -> Theme.SEPIA
+                ReaderTheme.Night, ReaderTheme.Black -> Theme.DARK
+                ReaderTheme.Day, ReaderTheme.Green -> Theme.LIGHT
+            },
+        )
+    }
+
+    fun effectiveTheme(preferences: ReaderPreferences): ReaderTheme =
+        if (preferences.appearance.themeMode == ReaderThemeMode.System) {
+            if (resources.configuration.isNightMode) ReaderTheme.Night else ReaderTheme.Day
+        } else {
+            preferences.appearance.theme
+        }
+
+    private fun fontFamily(value: ReaderFontFamily): FontFamily = FontFamily(
+        when (value) {
+            ReaderFontFamily.Pingfang, ReaderFontFamily.Heiti, ReaderFontFamily.Yahei -> FontFamily.SANS_SERIF.name
+            ReaderFontFamily.Songti -> FontFamily.SERIF.name
+            ReaderFontFamily.Kaiti -> FontFamily.CURSIVE.name
         },
     )
 
-    private fun fontFamily(value: String): FontFamily = when (value.lowercase()) {
-        "serif" -> FontFamily.SERIF
-        "sans-serif", "sans_serif" -> FontFamily.SANS_SERIF
-        "monospace" -> FontFamily.MONOSPACE
-        else -> FontFamily(value)
+    private fun color(value: String): Color = Color(AndroidColor.parseColor(value))
+
+    private val ReaderTheme.colors: ThemeColors
+        get() = when (this) {
+            ReaderTheme.Day -> ThemeColors("#F7F7F4", "#1E293B")
+            ReaderTheme.Warm -> ThemeColors("#FDF6EA", "#2B2118")
+            ReaderTheme.Green -> ThemeColors("#E8F0E3", "#203126")
+            ReaderTheme.Night -> ThemeColors("#0F172A", "#E2E8F0")
+            ReaderTheme.Black -> ThemeColors("#000000", "#F8FAFC")
+        }
+
+    private data class ThemeColors(val background: String, val foreground: String)
+
+    companion object {
+        private const val BASE_FONT_SIZE = 18.0
+        private const val NORMAL_FONT_WEIGHT = 400.0
     }
 }
 

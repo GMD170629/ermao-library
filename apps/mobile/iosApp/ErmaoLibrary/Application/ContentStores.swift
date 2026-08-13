@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 @preconcurrency import ErmaoShared
 
 enum ContentCacheIssue: String, Sendable {
@@ -808,8 +809,13 @@ final class WorkDetailStore: ObservableObject {
     private let client: any ContentClient
     private let cache: LibraryCacheStore
     private let workID: String
+    var workIDValue: String { workID }
     private let onUnauthorized: @MainActor () -> Void
     private var requestGeneration = UUID()
+    private var activeMediaKind: LibraryMediaKind?
+    private var activeVolumeID: String?
+    private var latestProgressUpdate: ErmaoShared.ReaderProgressPresentationUpdate?
+    private var cancellables: Set<AnyCancellable> = []
 
     init(context: ContentRequestContext, client: any ContentClient, cache: LibraryCacheStore, workID: String, onUnauthorized: @escaping @MainActor () -> Void) {
         self.context = context
@@ -817,10 +823,20 @@ final class WorkDetailStore: ObservableObject {
         self.cache = cache
         self.workID = workID
         self.onUnauthorized = onUnauthorized
+        ReaderProgressPresentationCenter.shared.updates
+            .filter { $0.namespaceKey == context.namespaceKey && $0.workId == workID }
+            .sink { [weak self] update in self?.apply(update) }
+            .store(in: &cancellables)
     }
 
-    func load(mediaKind: LibraryMediaKind? = nil, volumeID: String? = nil) {
-        state = .loading
+    func load(
+        mediaKind: LibraryMediaKind? = nil,
+        volumeID: String? = nil,
+        showBlockingLoading: Bool = true
+    ) {
+        activeMediaKind = mediaKind
+        activeVolumeID = volumeID
+        if showBlockingLoading || currentContent == nil { state = .loading }
         let generation = UUID()
         requestGeneration = generation
         Task { [weak self] in
@@ -832,8 +848,9 @@ final class WorkDetailStore: ObservableObject {
                     query: WorkDetailQuery(workID: workID, mediaKind: mediaKind, volumeID: volumeID)
                 )
                 guard requestGeneration == generation else { return }
-                state = .ready(value, isCached: false)
-                do { try await cache.save(value, namespace: context.namespaceKey, key: key) }
+                let presented = latestProgressUpdate.map { value.applying($0) } ?? value
+                state = .ready(presented, isCached: false)
+                do { try await cache.save(presented, namespace: context.namespaceKey, key: key) }
                 catch { cacheIssue = .writeFailed }
             } catch {
                 guard requestGeneration == generation else { return }
@@ -846,10 +863,104 @@ final class WorkDetailStore: ObservableObject {
                 }
                 do {
                     if let cached = try await cache.load(WorkDetailContent.self, namespace: context.namespaceKey, key: key) {
-                        state = .ready(cached, isCached: true)
+                        state = .ready(latestProgressUpdate.map { cached.applying($0) } ?? cached, isCached: true)
                     } else { state = .failure }
                 } catch { cacheIssue = .readFailed; state = .failure }
             }
         }
+    }
+
+    func refreshIfLoaded() {
+        guard currentContent != nil else { return }
+        load(mediaKind: activeMediaKind, volumeID: activeVolumeID, showBlockingLoading: false)
+    }
+
+    private var currentContent: WorkDetailContent? {
+        guard case .ready(let content, _) = state else { return nil }
+        return content
+    }
+
+    private func apply(_ update: ErmaoShared.ReaderProgressPresentationUpdate) {
+        guard update.capturedAtEpochMillis >= (latestProgressUpdate?.capturedAtEpochMillis ?? -1) else { return }
+        latestProgressUpdate = update
+        guard case .ready(let content, let isCached) = state else { return }
+        let presented = content.applying(update)
+        state = .ready(presented, isCached: isCached)
+        let key = "work|\(workID)|\(activeMediaKind?.rawValue ?? "default")|\(activeVolumeID ?? "default")"
+        Task {
+            do { try await cache.save(presented, namespace: context.namespaceKey, key: key) }
+            catch { cacheIssue = .writeFailed }
+        }
+    }
+}
+
+private extension WorkDetailContent {
+    func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate) -> WorkDetailContent {
+        guard work.id == update.workId, volumes.contains(where: { $0.id == update.volumeId }) else { return self }
+        let updatedWork = WorkCard(
+            id: work.id,
+            title: work.title,
+            author: work.author,
+            cover: work.cover,
+            progress: update.percent,
+            availableMediaKinds: work.availableMediaKinds
+        )
+        let updatedVolumes = volumes.map { volume in
+            guard volume.id == update.volumeId else { return volume }
+            return WorkVolume(
+                id: volume.id,
+                mediaVersionID: volume.mediaVersionID,
+                title: volume.title,
+                formatLabel: volume.formatLabel,
+                volumeIndex: volume.volumeIndex,
+                cover: volume.cover,
+                sizeLabel: volume.sizeLabel,
+                progress: update.percent,
+                isReadable: volume.isReadable,
+                isSelected: volume.isSelected
+            )
+        }
+        let states = ErmaoShared.PublicKt.resolveReaderChapterStates(
+            units: chapters.map {
+                ErmaoShared.ReaderChapterUnit(href: $0.href, sortOrder: Int32($0.sortOrder))
+            },
+            currentHref: update.currentHref,
+            currentSortOrder: nil,
+            progressPercent: update.percent,
+            metadata: ErmaoShared.ReaderChapterListMetadata(
+                page: 1,
+                pageSize: Int32(max(1, chapters.count)),
+                currentIndex: nil
+            )
+        )
+        let updatedChapters = chapters.enumerated().map { index, chapter in
+            let state: WorkChapterReadingState = switch states[index] {
+            case .current: .current
+            case .read: .read
+            default: .unread
+            }
+            return WorkChapter(
+                id: chapter.id,
+                title: chapter.title,
+                progress: state == .current ? update.percent : nil,
+                isCurrent: state == .current,
+                href: chapter.href,
+                sortOrder: chapter.sortOrder,
+                state: state
+            )
+        }
+        return WorkDetailContent(
+            work: updatedWork,
+            description: description,
+            tags: tags,
+            seriesFacet: seriesFacet,
+            authorFacets: authorFacets,
+            availableMediaKinds: availableMediaKinds,
+            selectedMediaKind: selectedMediaKind,
+            selectedVolumeID: selectedVolumeID,
+            readingStatus: update.percent >= 100 ? .finished : .reading,
+            volumes: updatedVolumes,
+            chapters: updatedChapters
+        )
     }
 }

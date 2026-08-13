@@ -1,6 +1,7 @@
 import { IndexedDbReaderStorage } from './storage';
 import { ReaderPreferenceRepository } from './preferences';
 import {
+  ReaderProgressConflictError,
   type ProgressSyncTransport
 } from './model';
 import { parseReaderV4ProgressSnapshot } from './progress-wire';
@@ -19,17 +20,22 @@ const progressTransport: ProgressSyncTransport = async (upload, signal) => {
     credentials: 'same-origin',
     cache: 'no-store',
     signal,
-    body: JSON.stringify(upload.snapshot)
+    body: JSON.stringify(upload.request)
   });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const message = typeof record(root.error).message === 'string'
     ? String(record(root.error).message)
     : typeof root.detail === 'string' ? root.detail : undefined;
+  if (response.status === 409 && record(root.error).code === 'READER_PROGRESS_CONFLICT') {
+    const current = parseReaderV4ProgressSnapshot(record(root.error).current);
+    if (current) throw new ReaderProgressConflictError(current);
+  }
   if (!response.ok || root.ok !== true) {
     throw new Error(message ?? `阅读进度上传失败（${response.status}）`);
   }
-  const snapshot = parseReaderV4ProgressSnapshot(record(root.data).progress);
+  const data = record(root.data);
+  const snapshot = parseReaderV4ProgressSnapshot(data.progress ?? data);
   if (!snapshot) throw new Error('服务端返回了无效的 Reader v4 进度快照');
   return snapshot;
 };

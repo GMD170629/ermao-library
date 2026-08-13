@@ -17,13 +17,12 @@ import com.ermao.library.shared.modules.reader.application.ReaderPublicationDown
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
-import com.ermao.library.shared.modules.reader.domain.ReaderServerContentFingerprint
+import com.ermao.library.shared.modules.reader.domain.PublicationFingerprint
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.longOrNull
 
@@ -117,37 +116,36 @@ class KtorReaderBootstrapGateway internal constructor(
         }
         val publicationFile = files.singleOrNull { file ->
             file.id.isNotBlank() &&
+                file.kind.equals("EPUB", ignoreCase = true) &&
                 file.mimeType.lowercase() in EPUB_MIME_TYPES &&
-                file.sizeBytes > 0 &&
-                file.url == fileUrl
+                file.sizeBytes > 0
         } ?: return ReaderBootstrapResult.Failure("READER_EPUB_FILE_MISSING", recoverable = false)
-        val serverFingerprint = try {
-            ReaderServerContentFingerprint(contentFingerprint)
-        } catch (_: IllegalArgumentException) {
-            return ReaderBootstrapResult.Failure("READER_SERVER_FINGERPRINT_INVALID", false)
-        }
         val target = try {
             ReaderProgressSyncTarget(
                 namespace = request.namespace,
                 workId = book.id,
                 volumeId = volume.id,
                 sourceFormat = ReaderFormat.Epub,
-                serverContentFingerprint = serverFingerprint,
+            )
+        } catch (_: IllegalArgumentException) {
+            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
+        }
+        val exactPublicationFingerprint = try {
+            PublicationFingerprint(
+                originalFileHash = publicationFingerprint.originalFileHash,
+                parser = publicationFingerprint.parser,
+                normalization = publicationFingerprint.normalization,
             )
         } catch (_: IllegalArgumentException) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
         }
         val remoteSnapshot = progressSnapshot?.let { snapshot ->
             val snapshotSchema = (snapshot["schemaVersion"] as? JsonPrimitive)?.longOrNull
-            val snapshotFingerprint = snapshot.optionalString("contentFingerprint")
             if (snapshotSchema != READER_SERVER_SCHEMA_VERSION.toLong()) {
                 return ReaderBootstrapResult.Failure("READER_PROGRESS_SNAPSHOT_INVALID", false)
             }
             try {
-                progressMapper.run {
-                    if (snapshotFingerprint == contentFingerprint) snapshot.toDomainSnapshot(volume.id)
-                    else snapshot.toDomainSnapshotWithoutAnchor(volume.id)
-                }
+                progressMapper.decodeSnapshot(snapshot, volume.id)
             } catch (_: IllegalArgumentException) {
                 return ReaderBootstrapResult.Failure("READER_PROGRESS_SNAPSHOT_INVALID", false)
             }
@@ -165,8 +163,10 @@ class KtorReaderBootstrapGateway internal constructor(
                     mimeType = publicationFile.mimeType.lowercase(),
                     expectedSizeBytes = publicationFile.sizeBytes,
                     expectedOriginalFileHash = publicationFile.contentHash,
+                    publicationFingerprint = exactPublicationFingerprint,
                 ),
                 remoteSnapshot = remoteSnapshot,
+                artifactVersion = exactPublicationFingerprint.stableKey,
             ),
         )
     }
@@ -207,7 +207,7 @@ private data class ReaderBootstrapWire(
     val userId: String,
     val readerType: String,
     val sourceFormat: String? = null,
-    val contentFingerprint: String,
+    val publicationFingerprint: PublicationFingerprintWire,
     val book: ReaderBootstrapBookWire,
     val mediaVersion: ReaderBootstrapMediaVersionWire,
     val volume: ReaderBootstrapVolumeWire,
@@ -216,7 +216,21 @@ private data class ReaderBootstrapWire(
     val units: List<JsonObject>,
     val fileUrl: String,
     val capabilities: JsonObject,
+    val publication: ReaderPublicationAccessWire? = null,
     val progressSnapshot: JsonObject? = null,
+)
+
+@Serializable
+private data class PublicationFingerprintWire(
+    val originalFileHash: String,
+    val parser: String,
+    val normalization: String,
+)
+
+@Serializable
+private data class ReaderPublicationAccessWire(
+    val manifestUrl: String,
+    val positionsUrl: String,
 )
 
 @Serializable
@@ -242,6 +256,3 @@ private data class ReaderBootstrapFileWire(
     val sortOrder: Int,
     val codec: String? = null,
 )
-
-private fun JsonObject.optionalString(name: String): String? =
-    (this[name] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)

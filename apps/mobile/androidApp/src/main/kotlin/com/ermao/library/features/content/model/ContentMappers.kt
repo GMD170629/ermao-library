@@ -6,6 +6,10 @@ import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
 import com.ermao.library.shared.modules.library.domain.WorkSummary
+import com.ermao.library.shared.modules.reader.ReaderChapterListMetadata
+import com.ermao.library.shared.modules.reader.ReaderChapterState
+import com.ermao.library.shared.modules.reader.ReaderChapterUnit
+import com.ermao.library.shared.modules.reader.resolveReaderChapterStates
 
 fun ContentResult.Content<*>.freshness(): ContentFreshness = when {
     isStale -> ContentFreshness.Stale
@@ -59,7 +63,23 @@ fun HomeSnapshot.toUiContent(): HomeContent {
 fun HomeSnapshot.hasSectionFailure(): Boolean =
     continueReading is HomeSection.Failure || recentReading is HomeSection.Failure || recentAdded is HomeSection.Failure
 
-fun WorkDetailSummary.toUiContent(): WorkDetailContent = WorkDetailContent(
+fun WorkDetailSummary.toUiContent(): WorkDetailContent {
+    val units = (readingUnits.ifEmpty { activeMedia?.units.orEmpty() })
+        .distinctBy { unit -> unit.id }
+        .sortedBy { unit -> unit.sortOrder }
+    val page = readingUnitsPage
+    val chapterStates = resolveReaderChapterStates(
+        units = units.map { ReaderChapterUnit(it.href, it.sortOrder) },
+        currentHref = activeMedia?.currentHref,
+        currentSortOrder = activeMedia?.currentChapterSortOrder,
+        progressPercent = activeMedia?.progress?.coerceIn(0.0, 100.0) ?: if (completed) 100.0 else 0.0,
+        metadata = ReaderChapterListMetadata(
+            page = page?.page ?: 1,
+            pageSize = page?.pageSize ?: maxOf(1, units.size),
+            currentIndex = activeMedia?.currentChapterIndex,
+        ),
+    )
+    return WorkDetailContent(
     work = WorkCard(
         id = id,
         title = title,
@@ -82,6 +102,9 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent = WorkDetailContent(
                     id = volume.id,
                     title = volume.title,
                     format = volume.format,
+                    readerType = volume.readerType,
+                    volumeIndex = volume.volumeIndex,
+                    coverUrl = volume.coverUrl,
                     sizeBytes = volume.sizeBytes,
                     progressPercent = volume.progress.toInt().takeIf { it > 0 },
                     readable = volume.readable,
@@ -92,19 +115,23 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent = WorkDetailContent(
     },
     selectedMediaKind = recentMediaKind?.wireValue,
     completed = completed,
-    readingUnits = (readingUnits.ifEmpty { activeMedia?.units.orEmpty() })
-        .distinctBy { unit -> unit.id }
-        .sortedBy { unit -> unit.sortOrder }
-        .map { unit ->
+    readingUnits = units.mapIndexed { index, unit ->
             ReadingUnitContent(
                 id = unit.id,
                 title = unit.title?.takeIf(String::isNotBlank) ?: unit.id,
-                progressPercent = activeMedia?.takeIf { active ->
-                    active.currentChapterTitle == unit.title
-                }?.progress?.toInt(),
+                progressPercent = activeMedia?.progress?.toInt()
+                    ?.takeIf { chapterStates[index] == ReaderChapterState.Current },
+                href = unit.href,
+                sortOrder = unit.sortOrder,
+                readingState = when (chapterStates[index]) {
+                    ReaderChapterState.Current -> ChapterReadingState.Current
+                    ReaderChapterState.Read -> ChapterReadingState.Read
+                    ReaderChapterState.Unread -> ChapterReadingState.Unread
+                },
             )
         },
-)
+    )
+}
 
 fun ContentSort.toShared(): com.ermao.library.shared.modules.library.LibrarySort = when (this) {
     ContentSort.RecentAdded -> com.ermao.library.shared.modules.library.LibrarySort.RecentlyAdded

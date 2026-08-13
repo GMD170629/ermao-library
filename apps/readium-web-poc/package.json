@@ -1,0 +1,24 @@
+{
+  "name": "@shuku/readium-web-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:server": "server/build.sh",
+    "dev:server": "pnpm build:server && build/server/readium_web_poc_server ../../test-data/library/mobi 8787",
+    "dev": "vite --host 0.0.0.0 --port 4173",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "typecheck": "tsc -b --pretty false",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@readium/navigator": "2.8.2",
+    "@readium/shared": "2.4.0"
+  },
+  "devDependencies": {
+    "tsx": "4.20.5",
+    "typescript": "5.9.3",
+    "vite": "7.1.2"
+  }
+}

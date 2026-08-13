@@ -1,7 +1,9 @@
+import hashlib
 import json
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,6 +54,10 @@ def _login(client: TestClient, db_session: Session) -> User:
 
 
 def _ebook_volume(db_session: Session) -> LibraryVolume:
+    source_path = (
+        Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
+    )
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     work = LibraryWork(
         id="work-reader-v3",
         origin="MANUAL",
@@ -79,13 +85,14 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
     file = LibraryFile(
         id="file-reader-v3",
         volume_id=volume.id,
-        path="library/reader-v3.epub",
-        fingerprint="sha256:reader-v3",
+        path=str(source_path),
+        fingerprint=f"sha256:{source_hash}",
+        full_hash=source_hash,
         hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
-        size_bytes=10,
+        size_bytes=source_path.stat().st_size,
         sort_order=0,
     )
     db_session.add_all([work, media_version, volume, file])
@@ -125,6 +132,57 @@ def _write_reader_epub(path: Path) -> None:
         )
 
 
+def _exact_locator(
+    bootstrap: dict[str, object],
+    *,
+    href: str = "OEBPS/chapter1.xhtml",
+    media_type: str = "application/xhtml+xml",
+    progression: float = 0.5,
+    total_progression: float | None = 0.5,
+    platform: str = "web",
+) -> dict[str, object]:
+    locations: dict[str, object] = {
+        "cssSelector": "#paragraph-42",
+        "progression": progression,
+        "position": 42,
+    }
+    if total_progression is not None:
+        locations["totalProgression"] = total_progression
+    return {
+        "engine": "readium",
+        "platform": platform,
+        "version": "readium-test:1",
+        "publication": bootstrap["publicationFingerprint"],
+        "payload": {
+            "href": href,
+            "type": media_type,
+            "locations": locations,
+            "text": {
+                "before": "前文",
+                "highlight": "跨端锚点",
+                "after": "后文",
+            },
+        },
+    }
+
+
+def _progress_payload(
+    bootstrap: dict[str, object],
+    *,
+    base_revision: int = 0,
+    mutation_id: str | None = None,
+    locator: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "schemaVersion": 4,
+        "clientId": "web-installation",
+        "mutationId": mutation_id or str(uuid4()),
+        "baseRevision": base_revision,
+        "capturedAtEpochMillis": 1_700_000_001_000,
+        "locator": locator or _exact_locator(bootstrap),
+    }
+
+
 def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     client: TestClient,
     db_session: Session,
@@ -147,62 +205,34 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
 
+    mutation_id = str(uuid4())
     progress_response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "web",
-            "updatedAtEpochMillis": 1_700_000_001_000,
-            "contentFingerprint": bootstrap["contentFingerprint"],
-            "location": {
-                "kind": "reflow",
-                "resourceKey": "chapter-1.xhtml",
-                "progression": 0.5,
-                "position": 42,
-                "textQuote": {"exact": "跨端锚点"},
-                "contentFingerprint": {
-                    "originalFileHash": "sha256:local-publication",
-                    "parserVersion": "readium:3.3.0",
-                    "normalizationVersion": "reader-location-v1",
-                },
-                "engineLocator": {
-                    "engine": "readium",
-                    "platform": "android",
-                    "version": "3.3.0",
-                    "payload": {"href": "chapter-1.xhtml"},
-                },
-            },
-            "percent": 50,
-        },
+        json=_progress_payload(bootstrap, mutation_id=mutation_id),
     )
     assert progress_response.status_code == 200
-    progress = progress_response.json()["data"]["progress"]
+    progress = progress_response.json()["data"]
     assert set(progress) == {
         "schemaVersion",
-        "clientId",
-        "updatedAtEpochMillis",
-        "percent",
-        "location",
-        "contentFingerprint",
+        "revision",
+        "locator",
+        "displayPercent",
+        "receivedAtEpochMillis",
+        "capturedAtEpochMillis",
     }
     assert progress["schemaVersion"] == 4
-    assert progress["clientId"] == "web"
-    assert progress["updatedAtEpochMillis"] == 1_700_000_001_000
-    assert progress["location"]["engineLocator"]["engine"] == "readium"
-    assert set(progress["location"]) == {
-        "kind",
-        "resourceKey",
-        "progression",
-        "position",
-        "textQuote",
-        "contentFingerprint",
-        "engineLocator",
-    }
+    assert progress["revision"] == 1
+    assert progress["displayPercent"] == 50
+    assert progress["capturedAtEpochMillis"] == 1_700_000_001_000
+    assert progress["locator"]["engine"] == "readium"
+    assert progress["locator"]["payload"]["href"] == "OEBPS/chapter1.xhtml"
     stored = db_session.query(LibraryReadingProgress).one()
     assert stored.user_id == user.id
     assert stored.volume_id == volume.id
     assert stored.percent == 50
     assert stored.location_json is not None
+    assert stored.revision == 1
+    assert stored.mutation_id == mutation_id
     initial_bootstrap = client.get(
         f"/api/reader/v4/volumes/{volume.id}/bootstrap"
     ).json()["data"]
@@ -210,37 +240,39 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
 
     stale_response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "ios",
-            "updatedAtEpochMillis": 1_600_000_000_000,
-            "contentFingerprint": "stale-server-token",
-            "location": {"kind": "reflow", "progression": 0.1},
-            "percent": 10,
-        },
+        json=_progress_payload(
+            bootstrap,
+            base_revision=0,
+            locator=_exact_locator(
+                bootstrap, progression=0.1, total_progression=0.1, platform="ios"
+            ),
+        ),
     )
-    assert stale_response.status_code == 200
-    stale_progress = stale_response.json()["data"]["progress"]
-    assert stale_progress["clientId"] == "ios"
-    assert stale_progress["updatedAtEpochMillis"] == 1_600_000_000_000
-    assert stale_progress["percent"] == 10
-    assert stale_progress["location"] is None
-    assert stale_progress["contentFingerprint"] == bootstrap["contentFingerprint"]
+    assert stale_response.status_code == 409
+    assert stale_response.json()["error"]["code"] == "READER_PROGRESS_CONFLICT"
+    assert stale_response.json()["error"]["current"] == progress
     db_session.expire_all()
     stored = db_session.query(LibraryReadingProgress).one()
-    assert stored.percent == 10
-    assert stored.location_json is None
-    assert int(stored.progressed_at.replace(tzinfo=UTC).timestamp() * 1000) == (
-        1_600_000_000_000
-    )
-    assert stored.updated_at != stored.progressed_at
+    assert stored.percent == 50
+    assert stored.revision == 1
     resumed = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
         "data"
     ]["progressSnapshot"]
-    assert resumed == stale_progress
+    assert resumed == progress
+
+    repeated = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(
+            bootstrap,
+            base_revision=0,
+            mutation_id=mutation_id,
+        ),
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["data"] == progress
 
 
-def test_reader_v4_preserves_non_reflowable_location(
+def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -258,51 +290,127 @@ def test_reader_v4_preserves_non_reflowable_location(
 
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "ios-pdf",
-            "updatedAtEpochMillis": 1_700_000_004_000,
-            "percent": 25,
-            "location": {"kind": "pdf", "pageNumber": 3},
-            "contentFingerprint": bootstrap["contentFingerprint"],
-        },
+        json=_progress_payload(
+            bootstrap,
+            locator=_exact_locator(
+                bootstrap,
+                href="page-3",
+                media_type="application/pdf",
+                progression=0.25,
+                total_progression=0.25,
+            ),
+        ),
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["progress"]["location"] == {
-        "kind": "pdf",
-        "pageNumber": 3,
-        "engineLocator": None,
+
+    out_of_range = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(
+            bootstrap,
+            base_revision=1,
+            locator=_exact_locator(
+                bootstrap,
+                href="page-13",
+                media_type="application/pdf",
+                progression=0.25,
+                total_progression=0.25,
+            ),
+        ),
+    )
+    assert out_of_range.status_code == 422
+    error_code = out_of_range.json()["error"]["code"]
+    assert error_code == "READER_LOCATOR_RESOURCE_INVALID"
+
+
+def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    volume.format = "CBZ"
+    volume.page_count = 2
+    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    file.kind = "CBZ"
+    file.mime_type = "application/vnd.comicbook+zip"
+    db_session.add_all(
+        [
+            LibraryReadingUnit(
+                id=f"comic-page-{page_number}",
+                volume_id=volume.id,
+                file_id=file.id,
+                unit_type="page",
+                title=f"Page {page_number}",
+                href=f"images/{page_number:04}.jpg",
+                media_type="image/jpeg",
+                sort_order=page_number,
+                metadata_json="{}",
+            )
+            for page_number in (1, 2)
+        ]
+    )
+    db_session.commit()
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+
+    accepted = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(
+            bootstrap,
+            locator=_exact_locator(
+                bootstrap,
+                href="page-2",
+                media_type="image/jpeg",
+            ),
+        ),
+    )
+    wrong_media_type = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(
+            bootstrap,
+            locator=_exact_locator(
+                bootstrap,
+                href="page-2",
+                media_type="image/png",
+            ),
+        ),
+    )
+
+    assert accepted.status_code == 200
+    assert wrong_media_type.status_code == 422
+    assert wrong_media_type.json()["error"]["code"] == (
+        "READER_LOCATOR_RESOURCE_INVALID"
+    )
+
+
+def test_reader_v4_rejects_position_only_reflow_anchor(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+
+    locator = _exact_locator(bootstrap)
+    locator["payload"] = {
+        "href": "chapter-1.xhtml",
+        "type": "application/xhtml+xml",
+        "locations": {"position": 1},
     }
-
-
-def test_reader_v4_accepts_position_only_reflow_anchor(
-    client: TestClient,
-    db_session: Session,
-) -> None:
-    _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
-
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "position-only",
-            "updatedAtEpochMillis": 1_700_000_005_000,
-            "percent": 20,
-            "location": {"kind": "reflow", "position": 1},
-            "contentFingerprint": bootstrap["contentFingerprint"],
-        },
+        json=_progress_payload(bootstrap, locator=locator),
     )
 
-    assert response.status_code == 200
-    assert response.json()["data"]["progress"]["location"]["position"] == 1
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "READER_LOCATOR_NOT_EXACT"
 
 
-def test_reader_v4_allows_progress_without_location(
+def test_reader_v4_rejects_progress_without_locator(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -312,86 +420,54 @@ def test_reader_v4_allows_progress_without_location(
         "data"
     ]
 
+    payload = _progress_payload(bootstrap)
+    payload.pop("locator")
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "percent-only",
-            "updatedAtEpochMillis": 1_700_000_005_001,
-            "percent": 20,
-            "location": None,
-            "contentFingerprint": bootstrap["contentFingerprint"],
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["progress"]["location"] is None
-
-
-@pytest.mark.parametrize(
-    "location",
-    [
-        {"kind": "reflow", "position": 0},
-        {
-            "kind": "reflow",
-            "contentFingerprint": {
-                "originalFileHash": "sha256:local",
-                "parserVersion": "readium:1",
-                "normalizationVersion": "v1",
-            },
-        },
-        {
-            "kind": "reflow",
-            "progression": 0.5,
-            "engineLocator": {
-                "engine": "readium",
-                "platform": "android",
-                "version": "1",
-                "payload": {"oversized": "x" * 65_536},
-            },
-        },
-        {
-            "kind": "reflow",
-            "progression": 0.5,
-            "engineLocator": {
-                "engine": "unknown",
-                "platform": "android",
-                "version": "1",
-                "payload": {},
-            },
-        },
-        {"type": "pdf", "pageNumber": 1},
-        {"kind": "pdf", "pageNumber": 1, "volumeId": "legacy-volume"},
-    ],
-)
-def test_reader_v4_rejects_noncanonical_location_payloads(
-    client: TestClient,
-    db_session: Session,
-    location: dict[str, object],
-) -> None:
-    _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
-
-    response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "invalid-location",
-            "updatedAtEpochMillis": 1_700_000_006_000,
-            "percent": 20,
-            "location": location,
-            "contentFingerprint": bootstrap["contentFingerprint"],
-        },
+        json=payload,
     )
 
     assert response.status_code == 422
     assert db_session.query(LibraryReadingProgress).count() == 0
 
 
-def test_reader_v4_rejects_location_kind_that_does_not_match_volume(
+@pytest.mark.parametrize(
+    "mutate_locator",
+    [
+        lambda locator: locator.update({"engine": "foliate"}),
+        lambda locator: locator.update({"platform": "desktop"}),
+        lambda locator: locator["publication"].update(
+            {"originalFileHash": "sha256:not-a-digest"}
+        ),
+        lambda locator: locator["payload"].update({"href": ""}),
+        lambda locator: locator["payload"]["text"].update({"highlight": "x" * 513}),
+        lambda locator: locator.update({"extra": True}),
+    ],
+)
+def test_reader_v4_rejects_noncanonical_location_payloads(
+    client: TestClient,
+    db_session: Session,
+    mutate_locator: object,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+
+    locator = _exact_locator(bootstrap)
+    assert callable(mutate_locator)
+    mutate_locator(locator)
+    response = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(bootstrap, locator=locator),
+    )
+
+    assert response.status_code == 422
+    assert db_session.query(LibraryReadingProgress).count() == 0
+
+
+def test_reader_v4_rejects_locator_media_type_that_does_not_match_volume(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -403,22 +479,14 @@ def test_reader_v4_rejects_location_kind_that_does_not_match_volume(
 
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "wrong-format",
-            "updatedAtEpochMillis": 1_700_000_007_000,
-            "percent": 20,
-            "location": {"kind": "pdf", "pageNumber": 1},
-            "contentFingerprint": bootstrap["contentFingerprint"],
-        },
+        json=_progress_payload(
+            bootstrap,
+            locator=_exact_locator(bootstrap, media_type="application/pdf"),
+        ),
     )
 
     assert response.status_code == 422
-    assert response.json()["error"] == {
-        "message": "阅读位置格式与卷册格式不匹配",
-        "code": "READER_LOCATION_FORMAT_MISMATCH",
-        "details": {"expectedKind": "reflow", "receivedKind": "pdf"},
-    }
+    assert response.json()["error"]["code"] == ("READER_LOCATOR_MEDIA_TYPE_MISMATCH")
     assert db_session.query(LibraryReadingProgress).count() == 0
 
 
@@ -435,7 +503,9 @@ def test_reader_v4_rejects_bookmark_kind_that_does_not_match_volume(
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/bookmarks",
         json={
-            "contentFingerprint": bootstrap["contentFingerprint"],
+            "contentFingerprint": bootstrap["publicationFingerprint"][
+                "originalFileHash"
+            ],
             "bookmarks": [
                 {
                     "id": "wrong-format-bookmark",
@@ -566,19 +636,14 @@ def test_volume_reading_status_replaces_all_legacy_progress_state(
     progress = db_session.query(LibraryReadingProgress).one()
     assert progress.schema_version == 4
     assert progress.reader_type == "reflowable"
-    assert progress.position == "0"
-    assert progress.page is None
+    assert progress.position == "legacy-position"
+    assert progress.page == 7
     assert progress.percent == 100
-    assert progress.extra == "{}"
-    assert progress.location_type is None
-    assert progress.location_json is None
-    assert progress.content_fingerprint != "sha256:legacy"
-    assert progress.mutation_id is None
-    assert progress.client_id == "shuku-library"
-    assert progress.client_sequence is None
-    assert progress.progressed_at > legacy_progressed_at
-    assert progress.source_protocol == "SHUKU_READER_V4"
-    assert progress.source_device_name is None
+    assert progress.extra == '{"legacy":true}'
+    assert progress.location_type == "comic"
+    assert progress.location_json == '{"type":"comic","pageIndex":7}'
+    assert progress.content_fingerprint == "sha256:legacy"
+    assert progress.revision == 0
 
 
 def test_reader_v4_bootstrap_does_not_parse_or_write_missing_epub_navigation(
@@ -805,8 +870,8 @@ def test_reader_v4_bootstrap_returns_legacy_navigation_projection_without_repair
 
 
 def test_reader_v2_and_edition_file_routes_are_gone(client: TestClient) -> None:
-    assert client.get("/api/reader/v2/editions/legacy/bootstrap").status_code == 410
-    assert client.get("/api/editions/legacy/file").status_code == 410
+    assert client.get("/api/reader/v2/editions/legacy/bootstrap").status_code == 404
+    assert client.get("/api/editions/legacy/file").status_code == 404
 
 
 def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
@@ -824,7 +889,7 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
             id="reader-v3-legacy-bookmark",
             user_id=user.id,
             volume_id=volume.id,
-            content_fingerprint=bootstrap["contentFingerprint"],
+            content_fingerprint="\0".join(bootstrap["publicationFingerprint"].values()),
             bookmark_id="legacy-created-at",
             location_json=json.dumps(
                 {
@@ -843,7 +908,11 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
 
     response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/bookmarks",
-        params={"contentFingerprint": bootstrap["contentFingerprint"]},
+        params={
+            "contentFingerprint": "\0".join(
+                bootstrap["publicationFingerprint"].values()
+            )
+        },
     )
 
     assert response.status_code == 200
@@ -862,6 +931,9 @@ def test_volume_file_route_streams_the_selected_volume_only(
     stored_file = test_settings.resolved_storage_root / "library" / "reader-v3.epub"
     stored_file.parent.mkdir(parents=True, exist_ok=True)
     stored_file.write_bytes(b"reader-v3")
+    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_file.path = "library/reader-v3.epub"
+    db_session.commit()
 
     response = client.get(f"/api/volumes/{volume.id}/file")
 
@@ -949,9 +1021,16 @@ def test_work_cover_fallback_uses_media_priority_then_volume_order(
 def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     client: TestClient,
     db_session: Session,
+    tmp_path: Path,
 ) -> None:
     _login(client, db_session)
     source = _ebook_volume(db_session)
+    source_file = db_session.query(LibraryFile).filter_by(volume_id=source.id).one()
+    derived_path = tmp_path / "reader-v3-derived.epub"
+    derived_path.write_bytes(Path(source_file.path).read_bytes())
+    with zipfile.ZipFile(derived_path, "a") as archive:
+        archive.writestr("META-INF/derived-volume", "derived")
+    derived_hash = hashlib.sha256(derived_path.read_bytes()).hexdigest()
     derived = LibraryVolume(
         id="volume-reader-v3-derived",
         media_version_id=source.media_version_id,
@@ -967,13 +1046,14 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
         LibraryFile(
             id="file-reader-v3-derived",
             volume_id=derived.id,
-            path="library/reader-v3-derived.epub",
-            fingerprint="sha256:reader-v3-derived",
+            path=str(derived_path),
+            fingerprint=f"sha256:{derived_hash}",
+            full_hash=derived_hash,
             hash_status="COMPLETED",
             mtime_ms=2,
             kind="EPUB",
             mime_type="application/epub+zip",
-            size_bytes=11,
+            size_bytes=derived_path.stat().st_size,
             sort_order=0,
         )
     )
@@ -984,14 +1064,12 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     ).json()["data"]
     source_save = client.put(
         f"/api/reader/v4/volumes/{source.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "web",
-            "updatedAtEpochMillis": 1_700_000_001_000,
-            "contentFingerprint": source_bootstrap["contentFingerprint"],
-            "location": {"kind": "reflow", "progression": 1},
-            "percent": 100,
-        },
+        json=_progress_payload(
+            source_bootstrap,
+            locator=_exact_locator(
+                source_bootstrap, progression=1, total_progression=1
+            ),
+        ),
     )
     assert source_save.status_code == 200
     assert (
@@ -1006,16 +1084,17 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     ).json()["data"]
     derived_save = client.put(
         f"/api/reader/v4/volumes/{derived.id}/progress",
-        json={
-            "schemaVersion": 4,
-            "clientId": "web",
-            "updatedAtEpochMillis": 1_700_000_002_000,
-            "contentFingerprint": derived_bootstrap["contentFingerprint"],
-            "location": {"kind": "reflow", "progression": 1},
-            "percent": 100,
-        },
+        json=_progress_payload(
+            derived_bootstrap,
+            locator=_exact_locator(
+                derived_bootstrap,
+                href="OEBPS/chapter1.xhtml",
+                progression=1,
+                total_progression=1,
+            ),
+        ),
     )
-    assert derived_save.status_code == 200
+    assert derived_save.status_code == 200, derived_save.json()
     assert (
         client.get(f"/api/reader/v4/volumes/{source.id}/bootstrap").json()["data"][
             "mediaVersion"
@@ -1040,67 +1119,22 @@ def test_reader_v4_openapi_requires_no_edition_or_user_identity(
     assert required == {
         "schemaVersion",
         "clientId",
-        "updatedAtEpochMillis",
-        "contentFingerprint",
-        "percent",
+        "mutationId",
+        "baseRevision",
+        "capturedAtEpochMillis",
+        "locator",
     }
     components = schema["components"]["schemas"]
-    location_schema = components[request_name]["properties"]["location"]["anyOf"][0]
-    discriminator = location_schema["discriminator"]
-    assert discriminator["propertyName"] == "kind"
-    mapping = discriminator["mapping"]
-    expected_components = {
-        "audio": "AudioLocation",
-        "comic": "ComicLocation",
-        "pdf": "PdfLocation",
-        "reflow": "ReflowLocation",
-    }
-    assert set(mapping) == set(expected_components)
-    location_components: dict[str, dict[str, object]] = {}
-    for kind, component_prefix in expected_components.items():
-        reference = mapping[kind]
-        assert reference.startswith(f"#/components/schemas/{component_prefix}")
-        component_name = reference.rsplit("/", 1)[-1]
-        location_components[kind] = components[component_name]
-
-    assert set(location_components["reflow"]["properties"]) == {
-        "kind",
-        "resourceKey",
-        "progression",
-        "position",
-        "textQuote",
-        "contentFingerprint",
-        "engineLocator",
-    }
-    assert set(location_components["comic"]["properties"]) == {
-        "kind",
-        "pageIndex",
-        "engineLocator",
-    }
-    assert set(location_components["pdf"]["properties"]) == {
-        "kind",
-        "pageNumber",
-        "engineLocator",
-    }
-    assert set(location_components["audio"]["properties"]) == {
-        "kind",
-        "fileId",
-        "chapterId",
-        "positionMs",
-        "engineLocator",
-    }
-    reflow_properties = location_components["reflow"]["properties"]
-    engine_reference = reflow_properties["engineLocator"]["anyOf"][0]["$ref"]
-    assert engine_reference.startswith("#/components/schemas/ReaderEngineLocator")
-    engine_component = components[engine_reference.rsplit("/", 1)[-1]]
-    assert set(engine_component["required"]) == {
+    locator_reference = components[request_name]["properties"]["locator"]["$ref"]
+    locator_component = components[locator_reference.rsplit("/", 1)[-1]]
+    assert set(locator_component["required"]) == {
         "engine",
         "platform",
         "version",
+        "publication",
         "payload",
     }
-    assert "EpubLocation" not in components
-    assert "ReflowableLocation" not in components
+    assert locator_component["properties"]["engine"]["const"] == "readium"
 
 
 @pytest.mark.parametrize(
@@ -1113,14 +1147,11 @@ def test_reader_v4_openapi_requires_no_edition_or_user_identity(
         ("put", "bookmarks"),
     ],
 )
-def test_reader_v3_volume_routes_are_retired(
+def test_reader_v3_volume_routes_are_removed(
     client: TestClient,
     method: str,
     resource: str,
 ) -> None:
     response = client.request(method, f"/api/reader/v3/volumes/legacy/{resource}")
 
-    assert response.status_code == 410
-    assert response.json()["error"]["details"]["replacement"] == (
-        f"/api/reader/v4/volumes/{{volumeId}}/{resource}"
-    )
+    assert response.status_code == 404

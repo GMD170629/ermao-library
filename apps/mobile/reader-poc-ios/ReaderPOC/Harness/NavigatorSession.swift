@@ -1,6 +1,22 @@
 import Darwin
 import Foundation
 import ReadiumNavigator
+import ReadiumShared
+import UIKit
+
+struct LocatorPublicationFingerprint: Equatable, Sendable {
+    let originalFileHash: String
+    let parser: String
+    let normalization: String
+
+    var jsonObject: [String: String] {
+        [
+            "originalFileHash": originalFileHash,
+            "parser": parser,
+            "normalization": normalization,
+        ]
+    }
+}
 
 @MainActor
 final class NavigatorSession: ObservableObject {
@@ -12,11 +28,14 @@ final class NavigatorSession: ObservableObject {
     @Published private(set) var javascriptResult = ""
     @Published private(set) var lastFeatureProbe: FeatureProbeResult?
     @Published private(set) var firstPageMilliseconds: Double?
+    @Published private(set) var locatorExchangeResult = ""
 
     weak var navigator: EPUBNavigatorViewController?
+    private var fingerprint: LocatorPublicationFingerprint?
     private var attachedAt: ContinuousClock.Instant?
-    func attach(_ navigator: EPUBNavigatorViewController) {
+    func attach(_ navigator: EPUBNavigatorViewController, fingerprint: LocatorPublicationFingerprint) {
         self.navigator = navigator
+        self.fingerprint = fingerprint
         isReady = false
         firstPageMilliseconds = nil
         attachedAt = ContinuousClock().now
@@ -46,6 +65,134 @@ final class NavigatorSession: ObservableObject {
             try? await Task.sleep(for: .milliseconds(100))
         }
         return isReady
+    }
+
+    func copyExactLocatorToPasteboard() async {
+        guard let navigator,
+              let fingerprint,
+              let visibleLocator = await navigator.firstVisibleElementLocator()
+        else {
+            locatorExchangeResult = String(localized: "locator.captureFailed")
+            return
+        }
+        do {
+            let boundedLocator = visibleLocator.copy(text: { text in
+                text.highlight = text.highlight.map { String($0.unicodeScalars.prefix(512)) }
+                text.before = text.before.map { String($0.unicodeScalars.prefix(256)) }
+                text.after = text.after.map { String($0.unicodeScalars.prefix(256)) }
+            })
+            let payload = try JSONSerialization.jsonObject(with: boundedLocator.jsonData())
+            let envelope: [String: Any] = [
+                "engine": "readium",
+                "platform": "ios",
+                "version": "readium-swift:3.11.0",
+                "publication": fingerprint.jsonObject,
+                "payload": payload,
+            ]
+            let data = try JSONSerialization.data(
+                withJSONObject: envelope,
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            )
+            guard data.count <= 65_536, let json = String(data: data, encoding: .utf8) else {
+                locatorExchangeResult = String(localized: "locator.payloadTooLarge")
+                return
+            }
+            UIPasteboard.general.string = json
+            locatorExchangeResult = String(localized: "locator.copied")
+        } catch {
+            locatorExchangeResult = error.localizedDescription
+        }
+    }
+
+    func goToLocatorFromPasteboard() async {
+        guard let navigator,
+              let json = UIPasteboard.general.string,
+              let data = json.data(using: .utf8),
+              data.count <= 65_536
+        else {
+            locatorExchangeResult = String(localized: "locator.pasteFailed")
+            return
+        }
+        do {
+            let decoded = try JSONSerialization.jsonObject(with: data)
+            let payload: Any
+            if let envelope = decoded as? [String: Any] {
+                if let engine = envelope["engine"] as? String, engine != "readium" {
+                    locatorExchangeResult = String(localized: "locator.wrongEngine")
+                    return
+                }
+                if let remote = envelope["publication"] as? [String: String],
+                   let local = fingerprint,
+                   remote != local.jsonObject
+                {
+                    locatorExchangeResult = String(localized: "locator.fingerprintMismatch")
+                    return
+                }
+                payload = envelope["payload"] ?? envelope
+            } else {
+                payload = decoded
+            }
+            guard let locatorJSON = JSONValue(payload),
+                  let locator = try Locator(json: locatorJSON, warnings: nil)
+            else {
+                locatorExchangeResult = String(localized: "locator.invalid")
+                return
+            }
+            let moved = await navigator.go(to: locator, options: .animated)
+            guard moved,
+                  let recaptured = await navigator.firstVisibleElementLocator(),
+                  Self.matchesExactBlock(expected: locator, actual: recaptured)
+            else {
+                locatorExchangeResult = String(localized: "locator.restoreFailed")
+                return
+            }
+            locatorExchangeResult = String(localized: "locator.restored")
+        } catch {
+            locatorExchangeResult = error.localizedDescription
+        }
+    }
+
+    /// A successful `go` is only an attempted navigation. The proof is the
+    /// first-visible Locator recaptured afterwards matching the same block.
+    private static func matchesExactBlock(expected: Locator, actual: Locator) -> Bool {
+        guard normalizedHref(expected.href.string) == normalizedHref(actual.href.string) else { return false }
+
+        let expectedLocations = expected.jsonObject["locations"]?.object
+        let actualLocations = actual.jsonObject["locations"]?.object
+
+        if let selector = expectedLocations?["cssSelector"]?.string,
+           !selector.isEmpty,
+           selector == actualLocations?["cssSelector"]?.string {
+            return true
+        }
+
+        let expectedFragments = Set(expected.locations.fragments)
+        let actualFragments = Set(actual.locations.fragments)
+        if !expectedFragments.isEmpty, !expectedFragments.isDisjoint(with: actualFragments) {
+            return true
+        }
+
+        guard let expectedHighlight = expected.text.highlight,
+              let actualHighlight = actual.text.highlight,
+              normalizedText(expectedHighlight) == normalizedText(actualHighlight)
+        else { return false }
+        let beforeMatches = expected.text.before == nil || actual.text.before == nil
+            || normalizedText(expected.text.before!) == normalizedText(actual.text.before!)
+        let afterMatches = expected.text.after == nil || actual.text.after == nil
+            || normalizedText(expected.text.after!) == normalizedText(actual.text.after!)
+        return beforeMatches && afterMatches
+    }
+
+    private static func normalizedHref(_ value: String) -> String {
+        value.replacingOccurrences(of: "^\\./", with: "", options: .regularExpression)
+            .split(separator: "#", maxSplits: 1).first.map(String.init) ?? value
+    }
+
+    private static func normalizedText(_ value: String) -> String {
+        value.precomposedStringWithCanonicalMapping
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     func runPageTurnStress(count: Int = 500) async {

@@ -75,7 +75,44 @@ final class LocalizationTests: XCTestCase {
             "reader.toc",
             "reader.settings",
             "reader.progress",
+            "reader.appearance",
+            "reader.notes",
+            "reader.bookmarks",
+            "reader.bookmarks.pending",
+            "reader.theme.day",
+            "reader.theme.warm",
+            "reader.theme.green",
+            "reader.theme.night",
+            "reader.theme.black",
+            "reader.font.pingfang",
+            "reader.font.heiti",
+            "reader.font.songti",
+            "reader.font.yahei",
+            "reader.font.kaiti",
+            "reader.margin.narrow",
+            "reader.margin.standard",
+            "reader.margin.wide",
+            "reader.progressStyle.auto",
+            "reader.progressStyle.percent",
+            "reader.progressStyle.position",
+            "reader.progressStyle.remaining",
+            "reader.progressStyle.hidden",
+            "reader.tapZones.standard",
+            "reader.tapZones.reversed",
+            "reader.tapZones.disabled",
+            "reader.spread.auto",
+            "reader.spread.single",
+            "reader.spread.double",
+            "reader.alignment.publisher",
+            "reader.alignment.left",
+            "reader.alignment.justify",
+            "reader.settings.reset",
             "reader.restore.warning.message",
+            "reader.resume.prompt.format",
+            "reader.resume.return",
+            "reader.resume.returnFailed",
+            "work.chapter.current",
+            "work.chapter.read",
             "reader.save.failure.message",
             "reader.error.CORRUPT_FILE",
             "reader.error.DRM_PROTECTED",
@@ -93,6 +130,28 @@ final class LocalizationTests: XCTestCase {
                 XCTAssertNotEqual(localized, key, "Missing \(key) in \(locale)")
                 XCTAssertFalse(localized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+        }
+    }
+
+    func testDynamicReaderOptionLabelsUseLocalizedRuntimeKeys() throws {
+        let expectations = [
+            (locale: "en", key: "reader.theme.warm", value: "Warm"),
+            (locale: "en", key: "reader.font.pingfang", value: "PingFang"),
+            (locale: "en", key: "reader.margin.standard", value: "Standard"),
+            (locale: "zh-Hans", key: "reader.theme.warm", value: "暖色"),
+            (locale: "zh-Hans", key: "reader.font.pingfang", value: "苹方"),
+            (locale: "zh-Hans", key: "reader.margin.standard", value: "标准"),
+        ]
+
+        for expectation in expectations {
+            let localizationPath = try XCTUnwrap(
+                Bundle.main.path(forResource: expectation.locale, ofType: "lproj")
+            )
+            let bundle = try XCTUnwrap(Bundle(path: localizationPath))
+            XCTAssertEqual(
+                localizedReaderOption(expectation.key, bundle: bundle),
+                expectation.value
+            )
         }
     }
 }

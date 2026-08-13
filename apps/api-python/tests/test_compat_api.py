@@ -12,6 +12,7 @@ from itertools import count
 from pathlib import Path
 from threading import Thread
 from urllib.parse import parse_qs, quote, urlparse
+from uuid import uuid4
 
 import pytest
 from PIL import Image, ImageDraw
@@ -138,35 +139,48 @@ def _save_reader_progress_v4(client, volume_id: str, legacy_payload: dict):
     bootstrap = client.get(f"/api/reader/v4/volumes/{target_volume_id}/bootstrap")
     assert bootstrap.status_code == 200
     bootstrap_data = bootstrap.json()["data"]
-    fingerprint = bootstrap_data["contentFingerprint"]
+    fingerprint = bootstrap_data["publicationFingerprint"]
     page = int(
         legacy_payload.get("page")
         or legacy_payload.get("extra", {}).get("pageIndex")
         or 1
     )
     if reader_type == "comic":
-        location = {
-            "kind": "comic",
-            "pageIndex": page,
-        }
+        href = f"page-{page}"
+        media_type = "image/jpeg"
     elif reader_type == "pdf":
-        location = {"kind": "pdf", "pageNumber": page}
+        href = f"page-{page}"
+        media_type = "application/pdf"
     else:
-        location = {
-            "kind": "reflow",
-            "position": page,
-            "progression": float(legacy_payload.get("percent") or 0) / 100,
-        }
+        href = f"part{page:05}.html"
+        media_type = "application/xhtml+xml"
     sequence = next(_reader_progress_sequence)
     return client.put(
         f"/api/reader/v4/volumes/{target_volume_id}/progress",
         json={
             "schemaVersion": 4,
             "clientId": "compat-test-client",
-            "updatedAtEpochMillis": 1_700_000_000_000 + sequence,
-            "contentFingerprint": fingerprint,
-            "location": location,
-            "percent": legacy_payload.get("percent", 0),
+            "mutationId": str(uuid4()),
+            "baseRevision": bootstrap_data["progressSnapshot"]["revision"]
+            if bootstrap_data["progressSnapshot"]
+            else 0,
+            "capturedAtEpochMillis": 1_700_000_000_000 + sequence,
+            "locator": {
+                "engine": "readium",
+                "platform": "web",
+                "version": "compat-test:1",
+                "publication": fingerprint,
+                "payload": {
+                    "href": href,
+                    "type": media_type,
+                    "locations": {
+                        "fragments": [f"compat-{page}"],
+                        "totalProgression": (
+                            float(legacy_payload.get("percent") or 0) / 100
+                        ),
+                    },
+                },
+            },
         },
     )
 
@@ -6251,7 +6265,7 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     assert second_file.content == second.read_bytes()[:4]
 
 
-def test_reader_v4_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
+def test_reader_v4_bootstrap_is_volume_scoped_and_reader_v2_is_removed(
     client, db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -6294,8 +6308,7 @@ def test_reader_v4_bootstrap_is_volume_scoped_and_reader_v2_is_retired(
     retired = client.get(
         f"/api/reader/v2/editions/{epub_payload['volumeId']}/bootstrap"
     )
-    assert retired.status_code == 410
-    assert retired.json()["error"]["code"] == "RESOURCE_RETIRED"
+    assert retired.status_code == 404
     return
     epub_detail = client.get(f"/api/works/{epub_payload['workId']}")
     assert epub_detail.status_code == 200
@@ -6938,14 +6951,10 @@ def test_imported_pdf_supports_stream_bootstrap_and_v4_progress(
         },
     )
     assert saved.status_code == 200
-    assert saved.json()["data"]["progress"]["location"]["kind"] == "pdf"
+    assert saved.json()["data"]["locator"]["payload"]["type"] == ("application/pdf")
     resumed = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap").json()["data"]
-    assert resumed["progressSnapshot"]["location"] == {
-        "kind": "pdf",
-        "pageNumber": 1,
-        "engineLocator": None,
-    }
-    assert resumed["progressSnapshot"]["percent"] == 0
+    assert resumed["progressSnapshot"]["locator"] == saved.json()["data"]["locator"]
+    assert resumed["progressSnapshot"]["displayPercent"] == 0
 
 
 def test_imported_comic_serves_archive_page(

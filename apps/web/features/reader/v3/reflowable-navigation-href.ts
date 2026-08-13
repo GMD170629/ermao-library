@@ -3,8 +3,7 @@ const PSEUDO_READING_HREF = /^(mobi-section|txt-chapter|fb2-section):/i;
 
 /**
  * Returns false only for known library import pseudo-hrefs that must not be
- * passed to foliate `goTo`/`resolveHref`. All other hrefs (including foliate
- * native `filepos:` / `kindle:pos:` and EPUB spine paths) pass through unchanged.
+ * passed to a Readium Navigator. All ordinary publication hrefs pass through.
  */
 export function isEngineResolvableReflowableHref(
   _format: string | null | undefined,

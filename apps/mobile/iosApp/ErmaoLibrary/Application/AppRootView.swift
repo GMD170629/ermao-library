@@ -4,7 +4,9 @@ import SwiftUI
 struct AppRootView: View {
     @ObservedObject var store: SessionStore
     let contentClient: any ContentClient
+    let shelfClient: any ShelfClient
     let contentCache: LibraryCacheStore
+    @ObservedObject var downloads: DownloadCenterStore
     let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
     let settingsClientOverride: (any SettingsClient)?
@@ -14,7 +16,9 @@ struct AppRootView: View {
     init(
         store: SessionStore,
         contentClient: any ContentClient = ContentCompositionRoot.makeClient(),
+        shelfClient: any ShelfClient = ShelfCompositionRoot.makeClient(),
         contentCache: LibraryCacheStore = LibraryCacheStore(),
+        downloads: DownloadCenterStore = DownloadCenterStore(),
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)? = nil,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)? = nil,
         settingsClientOverride: (any SettingsClient)? = nil,
@@ -22,7 +26,9 @@ struct AppRootView: View {
     ) {
         self.store = store
         self.contentClient = contentClient
+        self.shelfClient = shelfClient
         self.contentCache = contentCache
+        self.downloads = downloads
         self.settingsRepository = settingsRepository
         self.administrativeSettingsRepository = administrativeSettingsRepository
         self.settingsClientOverride = settingsClientOverride
@@ -51,6 +57,11 @@ struct AppRootView: View {
                 }
             } message: {
                 Text(infrastructureErrorMessage)
+            }
+            .onChange(of: store.snapshot.phase) { phase in
+                if phase != .authenticated {
+                    Task { await downloads.cancelAllTransfers() }
+                }
             }
     }
 
@@ -108,8 +119,10 @@ struct AppRootView: View {
                 if settingsRepository != nil || settingsClientOverride != nil {
                     AuthenticatedShellHost(
                         store: store,
-                        contentClient: contentClient,
+                contentClient: contentClient,
+                shelfClient: shelfClient,
                         cache: contentCache,
+                        downloads: downloads,
                         settingsRepository: settingsRepository,
                         administrativeSettingsRepository: administrativeSettingsRepository,
                         settingsClientOverride: settingsClientOverride,
@@ -119,14 +132,20 @@ struct AppRootView: View {
                 } else {
                     MainTabView(
                         store: store,
+                        downloads: downloads,
                         contentClient: contentClient,
+                        shelfClient: shelfClient,
                         cache: contentCache,
                         readerComposition: readerComposition
                     )
                     .id(authenticatedShellIdentity)
                 }
             case .offlineGrace:
-                OfflineShellView(store: store)
+                OfflineShellView(
+                    store: store,
+                    downloads: downloads,
+                    readerComposition: readerComposition
+                )
                     .id(store.navigationGeneration)
             }
         }
@@ -147,7 +166,9 @@ struct AppRootView: View {
 private struct AuthenticatedShellHost: View {
     @ObservedObject var store: SessionStore
     let contentClient: any ContentClient
+    let shelfClient: any ShelfClient
     let cache: LibraryCacheStore
+    @ObservedObject var downloads: DownloadCenterStore
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
     let readerComposition: IosReaderComposition?
     @StateObject private var settingsViewModel: SettingsViewModel
@@ -157,7 +178,9 @@ private struct AuthenticatedShellHost: View {
     init(
         store: SessionStore,
         contentClient: any ContentClient,
+        shelfClient: any ShelfClient,
         cache: LibraryCacheStore,
+        downloads: DownloadCenterStore,
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?,
         settingsClientOverride: (any SettingsClient)?,
@@ -165,7 +188,9 @@ private struct AuthenticatedShellHost: View {
     ) {
         self.store = store
         self.contentClient = contentClient
+        self.shelfClient = shelfClient
         self.cache = cache
+        self.downloads = downloads
         self.administrativeSettingsRepository = administrativeSettingsRepository
         self.readerComposition = readerComposition
         guard
@@ -212,8 +237,14 @@ private struct AuthenticatedShellHost: View {
                 lifecycle: SettingsLifecycleHooks(
                     refreshSession: { await store.refreshCurrentSession() },
                     showReauthentication: { store.requireReauthentication() },
-                    purgeCurrentNamespace: { try await store.purgeCurrentNamespace() },
-                    logout: { try await store.logoutAwaitingCompletion(purgeNamespace: false) }
+                    purgeCurrentNamespace: {
+                        await downloads.cancelAllTransfers()
+                        try await store.purgeCurrentNamespace()
+                    },
+                    logout: {
+                        await downloads.cancelAllTransfers()
+                        try await store.logoutAwaitingCompletion(purgeNamespace: true)
+                    }
                 )
             )
         )
@@ -253,7 +284,9 @@ private struct AuthenticatedShellHost: View {
     var body: some View {
         MainTabView(
             store: store,
+            downloads: downloads,
             contentClient: contentClient,
+            shelfClient: shelfClient,
             cache: cache,
             settingsViewModel: settingsViewModel,
             administrativeSettingsStore: administrativeSettingsStore,

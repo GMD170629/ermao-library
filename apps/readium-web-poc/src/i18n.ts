@@ -1,0 +1,82 @@
+export type Locale = 'zh-CN' | 'en-US';
+
+const messages = {
+  'zh-CN': {
+    title: 'Readium Web POC',
+    subtitle: 'AZW3 → libmobi → Web Publication Manifest → Readium Navigator',
+    publication: '测试出版物',
+    open: '打开',
+    previous: '上一页',
+    next: '下一页',
+    paginated: '分页',
+    scroll: '滚动',
+    capture: '采集精确位置',
+    exportLocator: '导出 Web Locator',
+    importLocator: '导入 iOS / Web Locator',
+    go: '跳转并验证',
+    locator: '当前位置',
+    comparison: '互跳精度',
+    probes: '正文与资源探针',
+    loading: '正在打开 Publication…',
+    ready: '正文已由 Readium Web 显示',
+    noLocator: '等待位置事件',
+    exactBlock: '精确：同一 DOM block / 文本锚点',
+    approximate: '近似：同资源 progression 误差 ≤ 2%',
+    fallback: '降级：仅资源或全书进度',
+    unverified: '尚未验证',
+    probeText: '正文',
+    probeCss: 'CSS',
+    probeFont: '字体',
+    probeImages: '图片',
+    pass: '通过',
+    pending: '待测',
+    fail: '失败',
+    importPlaceholder: '粘贴 iOS Readium Locator JSON，或完整 engineLocator envelope',
+    language: 'English',
+    error: '错误',
+    manifest: 'Manifest',
+    exactDefinition: '“精确”指相同资源中的同一 DOM block / 文本锚点，不指相同页码或像素。'
+  },
+  'en-US': {
+    title: 'Readium Web POC',
+    subtitle: 'AZW3 → libmobi → Web Publication Manifest → Readium Navigator',
+    publication: 'Test publication',
+    open: 'Open',
+    previous: 'Previous',
+    next: 'Next',
+    paginated: 'Paginated',
+    scroll: 'Scroll',
+    capture: 'Capture exact location',
+    exportLocator: 'Export Web Locator',
+    importLocator: 'Import iOS / Web Locator',
+    go: 'Go and verify',
+    locator: 'Current location',
+    comparison: 'Cross-platform precision',
+    probes: 'Content and resource probes',
+    loading: 'Opening Publication…',
+    ready: 'Readium Web is displaying publication content',
+    noLocator: 'Waiting for a location event',
+    exactBlock: 'Exact: same DOM block / text anchor',
+    approximate: 'Approximate: resource progression delta ≤ 2%',
+    fallback: 'Fallback: resource or publication progression only',
+    unverified: 'Not verified',
+    probeText: 'Text',
+    probeCss: 'CSS',
+    probeFont: 'Font',
+    probeImages: 'Images',
+    pass: 'Pass',
+    pending: 'Pending',
+    fail: 'Fail',
+    importPlaceholder: 'Paste an iOS Readium Locator JSON or a full engineLocator envelope',
+    language: '中文',
+    error: 'Error',
+    manifest: 'Manifest',
+    exactDefinition: '“Exact” means the same DOM block or text anchor in the same resource, not the same page number or pixel.'
+  }
+} as const;
+
+export type MessageKey = keyof (typeof messages)['zh-CN'];
+
+export function translate(locale: Locale, key: MessageKey): string {
+  return messages[locale][key];
+}

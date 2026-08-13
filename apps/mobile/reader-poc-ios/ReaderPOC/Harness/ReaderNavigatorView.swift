@@ -5,6 +5,7 @@ import UIKit
 
 struct ReaderNavigatorView: UIViewControllerRepresentable {
     let publication: Publication
+    let fingerprint: LocatorPublicationFingerprint
     @ObservedObject var session: NavigatorSession
 
     func makeCoordinator() -> Coordinator {
@@ -23,7 +24,7 @@ struct ReaderNavigatorView: UIViewControllerRepresentable {
                 )
             )
             navigator.delegate = context.coordinator
-            session.attach(navigator)
+            session.attach(navigator, fingerprint: fingerprint)
             return navigator
         } catch {
             let controller = UIViewController()

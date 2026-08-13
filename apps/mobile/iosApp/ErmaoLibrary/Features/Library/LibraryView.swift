@@ -564,7 +564,6 @@ private struct GroupingCoverStackView: View {
 
 private struct LibraryFilterSheet: View {
     let onApply: (LibraryFilters) -> Void
-    let offlineAvailability: OfflineFilterAvailability
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appTheme) private var theme
     @State private var draft: LibraryFilters
@@ -575,8 +574,10 @@ private struct LibraryFilterSheet: View {
         onApply: @escaping (LibraryFilters) -> Void
     ) {
         self.onApply = onApply
-        self.offlineAvailability = offlineAvailability
-        _draft = State(initialValue: applied)
+        _ = offlineAvailability
+        var normalized = applied
+        normalized.downloadedOnly = false
+        _draft = State(initialValue: normalized)
     }
 
     var body: some View {
@@ -591,31 +592,6 @@ private struct LibraryFilterSheet: View {
                     filterRow("library.reading.unread", value: .unread, selection: $draft.readingStatuses)
                     filterRow("library.reading.reading", value: .reading, selection: $draft.readingStatuses)
                     filterRow("library.reading.finished", value: .finished, selection: $draft.readingStatuses)
-                }
-                Section("library.filter.offline.section") {
-                    switch offlineAvailability {
-                    case .available:
-                        Toggle("library.filter.downloaded", isOn: $draft.downloadedOnly)
-                            .frame(minHeight: .iosMinimumTouchTarget)
-                    case .unavailable:
-                        VStack(alignment: .leading, spacing: .spaceHalf) {
-                            HStack {
-                                Text("library.filter.downloaded.unavailable")
-                                    .foregroundStyle(theme.textTertiary)
-                                Spacer()
-                                Image(systemName: "square")
-                                    .foregroundStyle(theme.textTertiary)
-                                    .accessibilityHidden(true)
-                            }
-                            Text("library.filter.downloaded.explanation")
-                                .appTextStyle(.caption)
-                                .foregroundStyle(theme.textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(minHeight: .iosMinimumTouchTarget)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityAddTraits(.isStaticText)
-                    }
                 }
             }
             .listStyle(.insetGrouped)

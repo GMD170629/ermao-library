@@ -1,11 +1,15 @@
 package com.ermao.library.shared.core.network
 
+import kotlinx.serialization.json.JsonElement
+
 data class AppError(
     val kind: AppErrorKind,
     val code: String,
     val diagnosticMessage: String? = null,
     val fieldErrors: Map<String, List<String>> = emptyMap(),
     val parameters: Map<String, String> = emptyMap(),
+    /** Untrusted structured details; feature adapters must validate before mapping. */
+    val details: JsonElement? = null,
 )
 
 enum class AppErrorKind {

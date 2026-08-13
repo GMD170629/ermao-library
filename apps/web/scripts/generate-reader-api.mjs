@@ -10,7 +10,7 @@ const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
 const included = new Set(
-  Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Foliate|Reflowable|Comic|Pdf|Reader)/.test(name))
+  Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/.test(name))
 );
 let discoveredReference = true;
 while (discoveredReference) {
@@ -49,8 +49,8 @@ function typeExpression(schema, depth = 0) {
   if (schema.$ref) return refName(schema.$ref);
   if (Object.hasOwn(schema, 'const')) return literal(schema.const);
   if (Array.isArray(schema.enum)) return schema.enum.map(literal).join(' | ') || 'never';
-  if (Array.isArray(schema.oneOf)) return schema.oneOf.map((item) => typeExpression(item, depth)).join(' | ');
-  if (Array.isArray(schema.anyOf)) return schema.anyOf.map((item) => typeExpression(item, depth)).join(' | ');
+  if (Array.isArray(schema.oneOf)) return [...new Set(schema.oneOf.map((item) => typeExpression(item, depth)))].join(' | ');
+  if (Array.isArray(schema.anyOf)) return [...new Set(schema.anyOf.map((item) => typeExpression(item, depth)))].join(' | ');
   if (Array.isArray(schema.allOf)) return schema.allOf.map((item) => typeExpression(item, depth)).join(' & ');
   if (schema.type === 'array') return `Array<${typeExpression(schema.items, depth + 1)}>`;
   if (schema.type === 'string') return 'string';
@@ -64,7 +64,8 @@ function typeExpression(schema, depth = 0) {
       return `${'  '.repeat(depth + 1)}${propertyName(name)}${optional}: ${typeExpression(value, depth + 1)};`;
     });
     if (schema.additionalProperties) {
-      properties.push(`${'  '.repeat(depth + 1)}[key: string]: ${schema.additionalProperties === true ? 'unknown' : typeExpression(schema.additionalProperties, depth + 1)};`);
+      const valueType = schema.additionalProperties === true ? 'unknown' : typeExpression(schema.additionalProperties, depth + 1);
+      properties.push(`${'  '.repeat(depth + 1)}[key: string]: ${valueType} | null | undefined;`);
     }
     if (!properties.length) return 'Record<string, unknown>';
     return `{\n${properties.join('\n')}\n${'  '.repeat(depth)}}`;

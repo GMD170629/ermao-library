@@ -42,6 +42,7 @@ android {
             rootProject.layout.buildDirectory.dir("generated/design-tokens/android").get().asFile.absolutePath,
         )
         res.directories.add(layout.buildDirectory.dir("generated/brand-res").get().asFile.absolutePath)
+        assets.directories.add(layout.buildDirectory.dir("generated/reader-assets").get().asFile.absolutePath)
     }
 
     sourceSets.named("androidTest") {
@@ -83,13 +84,20 @@ val syncBrandAsset by tasks.registering(Sync::class) {
     }
 }
 
+val syncReaderAssets by tasks.registering(Sync::class) {
+    from(rootProject.layout.projectDirectory.dir("../web/public/fonts/reader"))
+    into(layout.buildDirectory.dir("generated/reader-assets/fonts/reader"))
+}
+
 tasks.named("preBuild") {
     dependsOn(rootProject.tasks.named("generateDesignTokens"))
     dependsOn(syncBrandAsset)
+    dependsOn(syncReaderAssets)
 }
 
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":mobiCore"))
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

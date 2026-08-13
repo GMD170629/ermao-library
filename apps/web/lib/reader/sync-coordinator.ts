@@ -1,261 +1,171 @@
+import { hasExactReadiumAnchor, parseReadiumLocatorEnvelope } from '@shuku/reader-core';
 import { emitReaderDebug } from './debug';
 import {
   READER_PROGRESS_DEBOUNCE_MS,
+  ReaderProgressConflictError,
   exactProgressKey,
   normalizedPercent,
+  publicationFingerprintKey,
+  syncStateKey,
   type ExactProgressRecord,
+  type ExactProgressSaveInput,
+  type PendingProgressMutation,
   type ProgressSaveInput,
   type ProgressSyncTransport,
   type ProgressUpload,
   type ReaderProgressSnapshot
 } from './model';
-import { toV4WireLocation } from './progress-wire';
 import type { ReaderStorage } from './storage';
 
-type ReaderProgressSyncCoordinatorOptions = {
-  debounceMs?: number;
-  now?: () => number;
-  exitUploadTimeoutMs?: number;
-};
-
-type PendingWaiter = {
-  resolve: (record: ExactProgressRecord) => void;
-  reject: (reason: unknown) => void;
-};
-
+type Options = { debounceMs?: number; now?: () => number; exitUploadTimeoutMs?: number };
+type Waiter = { resolve: (record: ExactProgressRecord) => void; reject: (reason: unknown) => void };
 export const READER_PROGRESS_CHANGED_EVENT = 'shuku:reader-progress-changed';
 
-/**
- * One trailing local save plus a best-effort in-memory uploader.
- *
- * There is deliberately no outbox, lease, retry policy, quarantine, sequence
- * counter, or cross-tab ownership. While one request is in flight, new stable
- * progress replaces a single memory slot and only that latest snapshot is sent
- * after the request completes. A failed request is discarded.
- */
+function id() {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : '00000000-0000-4000-8000-'.concat(Math.random().toString(16).slice(2).padEnd(12, '0').slice(0, 12));
+}
+
+/** Durable latest-only progress synchronization with explicit revision conflicts. */
 export class ReaderProgressSyncCoordinator {
   private readonly debounceMs: number;
   private readonly now: () => number;
   private readonly exitUploadTimeoutMs: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private pendingInput: ProgressSaveInput | null = null;
-  private pendingWaiters: PendingWaiter[] = [];
+  private pendingInput: ExactProgressSaveInput | null = null;
+  private waiters: Waiter[] = [];
   private commitPromise: Promise<ExactProgressRecord | null> | null = null;
-  private uploadSlot: ProgressUpload | null = null;
+  private readonly uploadSlots = new Map<string, PendingProgressMutation>();
   private uploadPromise: Promise<void> | null = null;
-  private activeAbortController: AbortController | null = null;
-  private readonly latestServerSnapshots = new Map<string, ReaderProgressSnapshot>();
-  private started = false;
+  private abort: AbortController | null = null;
   private activeUserId: string | null = null;
+  private started = false;
+  private readonly latest = new Map<string, ReaderProgressSnapshot>();
 
-  constructor(
-    private readonly storage: ReaderStorage,
-    private readonly transport: ProgressSyncTransport,
-    options: ReaderProgressSyncCoordinatorOptions = {}
-  ) {
+  constructor(private readonly storage: ReaderStorage, private readonly transport: ProgressSyncTransport, options: Options = {}) {
     this.debounceMs = options.debounceMs ?? READER_PROGRESS_DEBOUNCE_MS;
     this.now = options.now ?? Date.now;
     this.exitUploadTimeoutMs = options.exitUploadTimeoutMs ?? 2_500;
   }
 
-  start() {
-    if (this.started) return;
-    this.started = true;
-    if (typeof window !== 'undefined') {
-      window.addEventListener('pagehide', this.handlePageHide);
-      document.addEventListener('visibilitychange', this.handleVisibilityChange);
-    }
-  }
-
-  stop() {
-    if (typeof window !== 'undefined' && this.started) {
-      window.removeEventListener('pagehide', this.handlePageHide);
-      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-    }
-    this.started = false;
-    void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs });
-  }
-
-  activateUser(userId: string) {
-    if (!userId) return;
-    this.activeUserId = userId;
-  }
-
-  deactivateUser() {
-    void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs });
-    this.activeUserId = null;
-  }
+  start() { if (this.started) return; this.started = true; if (typeof window !== 'undefined') { window.addEventListener('online', this.handleOnline); window.addEventListener('pagehide', this.handleExit); document.addEventListener('visibilitychange', this.handleVisibility); } }
+  stop() { if (typeof window !== 'undefined' && this.started) { window.removeEventListener('online', this.handleOnline); window.removeEventListener('pagehide', this.handleExit); document.removeEventListener('visibilitychange', this.handleVisibility); } this.started = false; void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs }); }
+  activateUser(userId: string) { if (!userId) return; this.activeUserId = userId; void this.storage.listPendingProgress(userId).then((items) => items.forEach((item) => this.queueUpload(item))); }
+  deactivateUser() { void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs }); this.activeUserId = null; }
 
   enqueue(input: ProgressSaveInput) {
-    if (this.activeUserId && this.activeUserId !== input.userId) {
-      return Promise.reject(new Error('Progress owner does not match the active reader user'));
-    }
-    this.activeUserId = input.userId;
-    this.pendingInput = input;
-    this.clearTimer();
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      void this.commitPending();
-    }, Math.max(0, this.debounceMs));
-    return new Promise<ExactProgressRecord>((resolve, reject) => {
-      this.pendingWaiters.push({ resolve, reject });
-    });
+    if ('location' in input) return this.saveAudioExact(input);
+    const locator = parseReadiumLocatorEnvelope(input.locator);
+    if (!locator || !hasExactReadiumAnchor(locator.payload)) return Promise.reject(new Error('READER_LOCATOR_NOT_EXACT'));
+    if (this.activeUserId && this.activeUserId !== input.userId) return Promise.reject(new Error('Progress owner does not match active user'));
+    this.activeUserId = input.userId; this.pendingInput = { ...input, locator }; this.clearTimer();
+    this.timer = setTimeout(() => { this.timer = null; void this.commitPending(); }, Math.max(0, this.debounceMs));
+    return new Promise<ExactProgressRecord>((resolve, reject) => this.waiters.push({ resolve, reject }));
   }
 
-  /** Used by one-shot migrations: persist exact data before deleting legacy data. */
-  async saveExactOnly(input: ProgressSaveInput, updatedAtEpochMillis = this.now()) {
+  private async saveAudioExact(input: Extract<ProgressSaveInput, { location: unknown }>) {
     const clientId = await this.storage.getClientId();
-    const identity = {
-      serverIdentity: input.serverIdentity,
-      userId: input.userId,
-      clientId,
-      volumeId: input.volumeId,
-      localContentFingerprint: input.localContentFingerprint
-    };
-    return this.storage.putExactProgress({
-      ...identity,
-      key: exactProgressKey(identity),
-      schemaVersion: 1,
-      workId: input.workId,
-      location: input.location,
-      percent: normalizedPercent(input.percent),
-      updatedAtEpochMillis
-    });
+    const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, volumeId: input.volumeId, localContentFingerprint: input.localContentFingerprint } as const;
+    const capturedAtEpochMillis = this.now();
+    return this.storage.putExactProgress({ ...identity, key: exactProgressKey(identity), schemaVersion: 1, workId: input.workId, location: input.location, displayPercent: normalizedPercent(input.percent), percent: normalizedPercent(input.percent), revision: 0, capturedAtEpochMillis, updatedAtEpochMillis: capturedAtEpochMillis });
   }
 
   async flushNow(options: { timeoutMs?: number } = {}) {
-    this.clearTimer();
-    do {
-      await this.commitPending();
-    } while (this.pendingInput);
-    const currentUpload = this.uploadPromise;
-    if (!currentUpload) return;
-    if (options.timeoutMs === undefined) {
-      await currentUpload;
-      return;
-    }
-    const timeoutMs = options.timeoutMs;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const completed = await Promise.race([
-      currentUpload.then(() => true),
-      new Promise<false>((resolve) => {
-        timeout = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
-      })
-    ]);
-    if (timeout) clearTimeout(timeout);
-    if (!completed) {
-      this.uploadSlot = null;
-      this.activeAbortController?.abort();
-    }
+    this.clearTimer(); do { await this.commitPending(); } while (this.pendingInput);
+    if (!this.uploadPromise) return;
+    if (options.timeoutMs === undefined) return this.uploadPromise;
+    await Promise.race([this.uploadPromise, new Promise<void>((resolve) => setTimeout(resolve, options.timeoutMs))]);
+  }
+  getLatestServerSnapshot(volumeId: string) { return this.latest.get(volumeId) ?? null; }
+
+  async getConflict(serverIdentity: string, userId: string, volumeId: string) {
+    const clientId = await this.storage.getClientId();
+    return this.storage.getProgressConflict(syncStateKey({ serverIdentity, userId, clientId, volumeId }));
   }
 
-  getLatestServerSnapshot(volumeId: string) {
-    return this.latestServerSnapshots.get(volumeId) ?? null;
+  /** User chose “continue this device”; no automatic conflict overwrite is allowed. */
+  async resolveConflictWithLocal(serverIdentity: string, userId: string, volumeId: string) {
+    const conflict = await this.getConflict(serverIdentity, userId, volumeId);
+    if (!conflict) return false;
+    const mutation: PendingProgressMutation = {
+      ...conflict.localMutation,
+      mutationId: id(),
+      baseRevision: conflict.revision,
+      capturedAtEpochMillis: this.now()
+    };
+    await this.storage.deleteProgressConflict(conflict.key);
+    await this.storage.putPendingProgress(mutation);
+    this.queueUpload(mutation);
+    return true;
   }
 
-  private readonly handlePageHide = () => {
-    void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs });
-  };
-
-  private readonly handleVisibilityChange = () => {
-    if (document.visibilityState === 'hidden') {
-      void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs });
-    }
-  };
-
-  private clearTimer() {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+  /** User chose the other device after the adapter verified exact-block navigation. */
+  async resolveConflictWithRemote(serverIdentity: string, userId: string, volumeId: string) {
+    const conflict = await this.getConflict(serverIdentity, userId, volumeId);
+    if (!conflict) return null;
+    const fingerprint = publicationFingerprintKey(conflict.locator.publication);
+    const identity = { serverIdentity, userId, clientId: conflict.clientId, volumeId, publicationFingerprint: fingerprint } as const;
+    await this.storage.putExactProgress({
+      ...identity,
+      key: exactProgressKey(identity),
+      schemaVersion: 1,
+      workId: conflict.workId,
+      locator: conflict.locator,
+      displayPercent: conflict.displayPercent,
+      revision: conflict.revision,
+      capturedAtEpochMillis: conflict.capturedAtEpochMillis ?? conflict.receivedAtEpochMillis
+    });
+    await this.storage.deletePendingProgress(conflict.key);
+    await this.storage.deleteProgressConflict(conflict.key);
+    return conflict.locator;
   }
+
+  private readonly handleOnline = () => { if (this.activeUserId) void this.storage.listPendingProgress(this.activeUserId).then((items) => items.forEach((item) => this.queueUpload(item))); };
+  private readonly handleExit = () => { void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs }); };
+  private readonly handleVisibility = () => { if (document.visibilityState === 'hidden') this.handleExit(); else this.handleOnline(); };
+  private clearTimer() { if (this.timer) clearTimeout(this.timer); this.timer = null; }
 
   private commitPending() {
     if (this.commitPromise) return this.commitPromise;
-    const input = this.pendingInput;
-    const waiters = this.pendingWaiters;
-    this.pendingInput = null;
-    this.pendingWaiters = [];
+    const input = this.pendingInput; const waiters = this.waiters; this.pendingInput = null; this.waiters = [];
     if (!input) return Promise.resolve(null);
-
-    const updatedAtEpochMillis = this.now();
-    this.commitPromise = this.saveExactOnly(input, updatedAtEpochMillis)
-      .then((exact) => {
-        waiters.forEach(({ resolve }) => resolve(exact));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(READER_PROGRESS_CHANGED_EVENT, { detail: exact }));
-        }
-        emitReaderDebug('info', '阅读位置已保存到本机精确进度', {
-          volumeId: exact.volumeId,
-          updatedAtEpochMillis
-        });
-        const percent = normalizedPercent(input.percent);
-        if (percent !== null) {
-          const snapshot: ReaderProgressSnapshot = {
-            schemaVersion: 4,
-            clientId: exact.clientId,
-            updatedAtEpochMillis,
-            percent,
-            location: toV4WireLocation(input.location, input.locationContentFingerprint),
-            contentFingerprint: input.contentFingerprint
-          };
-          this.queueUpload({ volumeId: input.volumeId, snapshot });
-        }
-        return exact;
-      })
-      .catch((reason) => {
-        waiters.forEach(({ reject }) => reject(reason));
-        throw reason;
-      })
-      .finally(() => {
-        this.commitPromise = null;
-      });
+    const capturedAtEpochMillis = this.now();
+    this.commitPromise = this.storage.getClientId().then(async (clientId) => {
+      const fingerprint = publicationFingerprintKey(input.locator.publication);
+      const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, volumeId: input.volumeId, publicationFingerprint: fingerprint };
+      const key = syncStateKey(identity);
+      const mutation: PendingProgressMutation = { key, schemaVersion: 1, serverIdentity: input.serverIdentity, userId: input.userId, workId: input.workId, volumeId: input.volumeId, clientId, mutationId: id(), baseRevision: input.baseRevision, capturedAtEpochMillis, locator: input.locator, displayPercent: normalizedPercent(input.displayPercent) };
+      const exact: ExactProgressRecord = { ...identity, key: exactProgressKey(identity), schemaVersion: 1, workId: input.workId, locator: input.locator, displayPercent: mutation.displayPercent, revision: input.baseRevision, capturedAtEpochMillis };
+      await this.storage.putExactAndPending(exact, mutation);
+      waiters.forEach(({ resolve }) => resolve(exact));
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(READER_PROGRESS_CHANGED_EVENT, { detail: exact }));
+      this.queueUpload(mutation);
+      return exact;
+    }).catch((reason) => { waiters.forEach(({ reject }) => reject(reason)); throw reason; }).finally(() => { this.commitPromise = null; });
     return this.commitPromise;
   }
 
-  private queueUpload(upload: ProgressUpload) {
-    this.uploadSlot = upload;
-    if (this.uploadPromise) return;
-    this.uploadPromise = this.drainUploadSlot().finally(() => {
-      this.uploadPromise = null;
-      if (this.uploadSlot) this.queueUpload(this.uploadSlot);
-    });
-  }
-
-  private async drainUploadSlot() {
-    while (this.uploadSlot) {
-      const upload = this.uploadSlot;
-      this.uploadSlot = null;
-      const controller = new AbortController();
-      this.activeAbortController = controller;
+  private queueUpload(mutation: PendingProgressMutation) { this.uploadSlots.set(mutation.key, mutation); if (this.uploadPromise) return; this.uploadPromise = this.drain().finally(() => { this.uploadPromise = null; if (this.uploadSlots.size) this.uploadPromise = this.drain().finally(() => { this.uploadPromise = null; }); }); }
+  private async drain() {
+    while (this.uploadSlots.size) {
+      const mutation = [...this.uploadSlots.values()].sort((left, right) => left.capturedAtEpochMillis - right.capturedAtEpochMillis)[0];
+      if (!mutation) return;
+      this.uploadSlots.delete(mutation.key); const controller = new AbortController(); this.abort = controller;
+      const upload: ProgressUpload = { volumeId: mutation.volumeId, request: { schemaVersion: 4, clientId: mutation.clientId, mutationId: mutation.mutationId, baseRevision: mutation.baseRevision, capturedAtEpochMillis: mutation.capturedAtEpochMillis, locator: mutation.locator } };
       try {
-        const serverSnapshot = await this.transport(upload, controller.signal);
-        this.latestServerSnapshots.set(upload.volumeId, serverSnapshot);
-        emitReaderDebug('info', '阅读进度快照已上传', {
-          volumeId: upload.volumeId,
-          updatedAtEpochMillis: upload.snapshot.updatedAtEpochMillis
-        });
+        const snapshot = await this.transport(upload, controller.signal); this.latest.set(mutation.volumeId, snapshot);
+        await this.storage.deletePendingProgress(mutation.key, mutation.mutationId); await this.storage.deleteProgressConflict(mutation.key);
       } catch (reason) {
-        if (!controller.signal.aborted) {
-          emitReaderDebug('warning', '阅读进度上传失败，本次请求已放弃', {
-            volumeId: upload.volumeId,
-            error: reason instanceof Error ? reason.message : String(reason)
-          });
-        }
-      } finally {
-        if (this.activeAbortController === controller) this.activeAbortController = null;
-      }
+        if (reason instanceof ReaderProgressConflictError) {
+          await this.storage.putProgressConflict({ ...reason.conflict, key: mutation.key, schemaVersion: 1, serverIdentity: mutation.serverIdentity, userId: mutation.userId, workId: mutation.workId, volumeId: mutation.volumeId, clientId: mutation.clientId, localMutation: mutation });
+          emitReaderDebug('warning', '阅读进度存在跨设备冲突', { volumeId: mutation.volumeId, revision: reason.conflict.revision });
+        } else if (!controller.signal.aborted) emitReaderDebug('warning', '阅读进度已保留，将在联网后重试', { volumeId: mutation.volumeId });
+      } finally { if (this.abort === controller) this.abort = null; }
     }
   }
 }
 
-let defaultCoordinator: ReaderProgressSyncCoordinator | null = null;
-
-export function setReaderProgressSyncCoordinator(coordinator: ReaderProgressSyncCoordinator | null) {
-  if (defaultCoordinator === coordinator) return;
-  defaultCoordinator?.stop();
-  defaultCoordinator = coordinator;
-  defaultCoordinator?.start();
-}
-
-export function getReaderProgressSyncCoordinator() {
-  return defaultCoordinator;
-}
+let current: ReaderProgressSyncCoordinator | null = null;
+export function setReaderProgressSyncCoordinator(coordinator: ReaderProgressSyncCoordinator | null) { if (current === coordinator) return; current?.stop(); current = coordinator; current?.start(); }
+export function getReaderProgressSyncCoordinator() { return current; }

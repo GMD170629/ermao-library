@@ -32,6 +32,9 @@ class MainActivity : AppCompatActivity() {
                     contentRepository = (application as ErmaoLibraryApplication).contentRepository,
                     personalSettingsRepository = (application as ErmaoLibraryApplication).personalSettingsRepository,
                     administrativeSettingsRepository = (application as ErmaoLibraryApplication).administrativeSettingsRepository,
+                    downloadCatalog = (application as ErmaoLibraryApplication).downloadCatalog,
+                    downloadFiles = (application as ErmaoLibraryApplication).downloadFiles,
+                    sharedDownloadCatalog = (application as ErmaoLibraryApplication).sharedDownloadCatalog,
                     localeController = localeController,
                     actions = MainActions(
                         onOpenServerCenter = mainViewModel::openServerCenter,

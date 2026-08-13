@@ -201,7 +201,7 @@ flowchart LR
 - API：Python 3.11、FastAPI、SQLAlchemy 2、Alembic
 - 数据库：SQLite
 - 导入与媒体解析：持久化 Python Worker、Watchdog、EbookLib、lxml、Mutagen、FFmpeg/ffprobe
-- 阅读器与播放器：Foliate.js、PDF.js、自研漫画阅读适配器、HTML5 Audio
+- 阅读器与播放器：Readium TS/Kotlin/Swift、PDF.js 能力回退、自研漫画适配器、HTML5 Audio
 - 工程：pnpm Workspace、Turborepo、Playwright、Pytest
 - 部署：Docker Compose、`linux/amd64` 与 `linux/arm64` 多架构镜像、fnOS、PWA
 

@@ -57,6 +57,8 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.readium.shared)
+
     testImplementation(libs.junit4)
     testImplementation(kotlin("test"))
 

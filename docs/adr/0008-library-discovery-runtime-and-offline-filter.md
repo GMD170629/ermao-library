@@ -16,7 +16,7 @@ Persistent discovery pages cross the platform boundary as opaque strings through
 
 Works is the only root scope with sort, grid/list, and filters. Series and Authors use the server's stable grouping order. Series facets use `series_index`; Author facets use `recent_read`.
 
-`downloadedOnly` remains in the filter contract with a default of `false`, but production reports `OfflineFilterAvailability.Unavailable("MANAGED_DOWNLOADS_UNAVAILABLE")`. Both apps display a disabled, localized Downloaded row and must reject an attempted `downloadedOnly=true` request. Cached metadata is never presented as proof that a work can be opened offline.
+`downloadedOnly` remains in the server-backed filter contract with a default of `false`, but production reports `OfflineFilterAvailability.Unavailable("MANAGED_DOWNLOADS_UNAVAILABLE")` and must reject an attempted `downloadedOnly=true` request. Cached metadata is never presented as proof that a work can be opened offline. ADR 0009 establishes the separate, local-manifest-backed Download Center as the downloaded-content discovery and search surface; Library must not expose this unavailable filter as a second entry point.
 
 ## Consequences
 
@@ -24,4 +24,4 @@ Works is the only root scope with sort, grid/list, and filters. Series and Autho
 - Search and pagination can reject obsolete or duplicate responses by stable request identity.
 - Scope snapshots preserve independent query and scroll anchors.
 - Platform UI remains responsible for native Search, Menu, Sheet, predictive back, focus restoration, and compact/expanded containers.
-- The temporary disabled filter may be removed only after a production managed-download manifest/index port exists and the connected server advertises the compatible capability. The Mobile Library Discovery owner is responsible for that removal.
+- The unavailable Library filter row may be hidden once the Download Center is available. It may become an interactive Library filter only after a separate product decision defines how the local manifest is joined into Library discovery; server capability alone is insufficient.

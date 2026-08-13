@@ -2,7 +2,7 @@
 
 import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
 import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Highlighter, LayoutTemplate, ListTree, Minus, MousePointer2, NotebookPen, Palette, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, SlidersHorizontal, Sparkles, Trash2, Type, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { cn } from '../../components/ui/cn';
 import { VolumeSelect } from '../../components/ui/volume-select';
 import { useI18n } from '../../i18n/provider';
@@ -235,7 +235,7 @@ function precisePercent(value: number, readerType: ReaderKind, locale: string) {
   }).format(safe);
 }
 
-function foliateLocationLabel(extra: Record<string, unknown>) {
+function logicalLocationLabel(extra: Record<string, unknown>) {
   const current = numberFromExtra(extra.locationCurrent);
   const next = numberFromExtra(extra.locationNext);
   const total = numberFromExtra(extra.locationTotal);
@@ -321,7 +321,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
     : null;
   const currentNavigationTitle = currentNavigationItem?.title ?? null;
   const currentNavigationLabel = currentNavigationTitle;
-  const locationLabel = readerType === 'reflowable' ? foliateLocationLabel(progressExtra) : null;
+  const locationLabel = readerType === 'reflowable' ? logicalLocationLabel(progressExtra) : null;
   const percentLabel = `${precisePercent(progress.percent, readerType, locale)}%`;
   const positionLabel = readerType === 'reflowable'
     ? (currentNavigationLabel ?? locationLabel ?? progress.position)
@@ -1149,20 +1149,42 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     </ReaderSettingsSection>
                     <ReaderSettingsSection icon={BookOpen} title={i18nAttribute("翻页设置")} dark={dark}>
                       {readerType === 'reflowable' ? (
-                        <CompactSettingOptions label={i18nAttribute("动画")} value={settings.ebookPageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(value) => updateSettings({ ebookPageTurnAnimation: value as EbookPageTurnAnimation })} dark={dark} />
+                        <CompactSettingOptions
+                          label={i18nAttribute("动画")}
+                          value={settings.ebookPageTurnAnimation}
+                          options={READER_PAGE_TURN_ANIMATION_OPTIONS}
+                          disabled
+                          description={i18nAttribute("Readium 暂不支持可配置翻页动画，此设置当前不生效。")}
+                          onChange={(value) => updateSettings({ ebookPageTurnAnimation: value as EbookPageTurnAnimation })}
+                          dark={dark}
+                        />
                       ) : readerType === 'comic' ? (
                         <CompactSettingOptions label={i18nAttribute("动画")} value={settings.comicPageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(value) => updateSettings({ comicPageTurnAnimation: value as ComicPageTurnAnimation })} dark={dark} />
                       ) : null}
                       <CompactSettingOptions label={i18nAttribute("点击区域")} value={settings.tapZones} options={READER_TAP_ZONE_OPTIONS} onChange={(value) => updateSettings({ tapZones: value as ReaderSettings['tapZones'] })} dark={dark} />
-                      <ReaderToggleRow label={i18nAttribute("滑动翻页")} checked={settings.swipePageTurn} onChange={(checked) => updateSettings({ swipePageTurn: checked })} dark={dark} />
+                      <ReaderToggleRow
+                        label={i18nAttribute("滑动翻页")}
+                        description={readerType === 'reflowable' ? i18nAttribute("Readium 使用原生触摸滑动，当前无法关闭。") : undefined}
+                        checked={readerType === 'reflowable' ? true : settings.swipePageTurn}
+                        disabled={readerType === 'reflowable'}
+                        onChange={(checked) => updateSettings({ swipePageTurn: checked })}
+                        dark={dark}
+                      />
                     </ReaderSettingsSection>
                   </div>
 
                   <ReaderSettingsSection icon={LayoutTemplate} title={i18nAttribute("排版")} dark={dark}>
                     {readerType === 'reflowable' ? (
                       <>
-                        <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.ebookFlow} options={READER_FLOW_OPTIONS} onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("页面")} value={settings.ebookSpreadMode} options={READER_SPREAD_MODE_OPTIONS} onChange={(value) => updateSettings({ ebookSpreadMode: value as EbookSpreadMode })} dark={dark} />
+                        <CompactSettingOptions
+                          label={i18nAttribute("阅读方式")}
+                          value="paginated"
+                          options={READER_FLOW_OPTIONS.map((option) => ({ ...option, disabled: option.value === 'scrolled' }))}
+                          description={i18nAttribute("滚动模式暂未适配，当前使用分页阅读。")}
+                          onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })}
+                          dark={dark}
+                        />
+                        <CompactSettingOptions label={i18nAttribute("页面")} value={settings.ebookSpreadMode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} onChange={(value) => updateSettings({ ebookSpreadMode: value as EbookSpreadMode })} dark={dark} />
                       </>
                     ) : readerType === 'comic' ? (
                       <>
@@ -1254,6 +1276,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 type="range"
                 min={0}
                 max={100}
+                step={0.1}
                 value={progressScrubPercent ?? clampPercent(progress.percent)}
                 disabled={!controls || capabilities?.canJumpToProgress === false}
                 onChange={(event) => {
@@ -1316,6 +1339,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 type="range"
                 min={0}
                 max={100}
+                step={0.1}
                 value={progressScrubPercent ?? clampPercent(progress.percent)}
                 disabled={!controls || capabilities?.canJumpToProgress === false}
                 onChange={(event) => {
@@ -1376,32 +1400,38 @@ function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange
   );
 }
 
-function CompactSettingOptions({ label, value, options, onChange, dark, disabled = false, disambiguateLabels = false }: {
+function CompactSettingOptions({ label, value, options, onChange, dark, disabled = false, disambiguateLabels = false, description }: {
   label: string;
   value: string;
-  options: ReadonlyArray<{ value: string; label: string; icon?: LucideIcon }>;
+  options: ReadonlyArray<{ value: string; label: string; icon?: LucideIcon; disabled?: boolean }>;
   onChange: (value: string) => void;
   dark: boolean;
   disabled?: boolean;
   disambiguateLabels?: boolean;
+  description?: string;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
+  const descriptionId = useId();
   return (
-    <div className={cn('flex items-center gap-3', disabled && 'opacity-45')}>
-      <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
-      <ReaderSegmentedControl
-        ariaLabel={i18nAttribute(label)}
-        value={value}
-        options={options.map((option) => ({
-          ...option,
-          label: i18nAttribute(option.label),
-          ariaLabel: i18nAttribute(disambiguateLabels ? `${label}${option.label}` : option.label)
-        }))}
-        onChange={onChange}
-        dark={dark}
-        disabled={disabled}
-        className={cn('flex-1', options.length <= 3 && 'min-[900px]:max-w-[32rem]')}
-      />
+    <div className={cn('space-y-1', disabled && 'opacity-45')}>
+      <div className="flex items-center gap-3">
+        <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
+        <ReaderSegmentedControl
+          ariaLabel={i18nAttribute(label)}
+          ariaDescribedBy={description ? descriptionId : undefined}
+          value={value}
+          options={options.map((option) => ({
+            ...option,
+            label: i18nAttribute(option.label),
+            ariaLabel: i18nAttribute(disambiguateLabels ? `${label}${option.label}` : option.label)
+          }))}
+          onChange={onChange}
+          dark={dark}
+          disabled={disabled}
+          className={cn('flex-1', options.length <= 3 && 'min-[900px]:max-w-[32rem]')}
+        />
+      </div>
+      {description ? <p id={descriptionId} className="pl-12 text-[11px] leading-4 opacity-55">{description}</p> : null}
     </div>
   );
 }
@@ -1489,13 +1519,14 @@ function ReaderToggleRow({ label, description, checked, disabled = false, onChan
   onChange: (checked: boolean) => void;
   dark: boolean;
 }) {
+  const descriptionId = useId();
   return (
     <label className={cn('shuku-reader-control-border flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2', disabled && 'opacity-45', dark ? 'bg-white/[0.045]' : 'bg-white/55')}>
       <span className="min-w-0 flex-1">
         <span className="block text-xs font-medium">{label}</span>
-        {description ? <span className="mt-0.5 block text-[11px] leading-4 opacity-55">{description}</span> : null}
+        {description ? <span id={descriptionId} className="mt-0.5 block text-[11px] leading-4 opacity-55">{description}</span> : null}
       </span>
-      <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+      <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} aria-describedby={description ? descriptionId : undefined} onChange={(event) => onChange(event.target.checked)} />
       <span data-reader-toggle-control="true" aria-hidden="true" className={cn('relative h-6 w-11 shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2', checked ? 'shuku-reader-accent-toggle' : dark ? 'shuku-reader-control-border bg-white/10' : 'shuku-reader-control-border bg-stone-900/10')}>
         <span data-reader-toggle-knob="true" className={cn('absolute left-0.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform', checked && 'translate-x-5')} />
       </span>

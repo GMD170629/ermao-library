@@ -97,6 +97,8 @@ private actor IosPublicationDownloadWorker {
                 originalFileHash: hash,
                 expectedSize: download.expectedSizeBytes,
                 expectedOriginalFileHash: download.expectedOriginalFileHash,
+                parserVersion: download.publicationFingerprint.parser,
+                normalizationVersion: download.publicationFingerprint.normalization,
                 workID: download.workId,
                 volumeID: download.volumeId
             )

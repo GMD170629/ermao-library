@@ -16,33 +16,21 @@ export function latestScopedProgress(
       mutation.userId === scope.userId
       && mutation.workId === scope.workId
       && mutation.volumeId === scope.volumeId
-      && mutation.localContentFingerprint === scope.contentFingerprint
+      && (mutation.localContentFingerprint ?? mutation.publicationFingerprint) === scope.contentFingerprint
     ))
-    .sort((left, right) => right.updatedAtEpochMillis - left.updatedAtEpochMillis)[0] ?? null;
+    .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0] ?? null;
 }
 
 export function localProgressProjection(mutation: ExactProgressRecord | null) {
   if (!mutation) return null;
   const location = mutation.location;
-  if (location.kind === 'reflowable') {
-    const metrics = location.foliate;
+  if (!location && mutation.locator) {
     return {
-      percent: mutation.percent,
-      currentHref: metrics?.toc?.href ?? location.href ?? null,
-      currentChapterIndex: metrics?.toc?.index ?? null,
-      currentChapterTitle: metrics?.toc?.title ?? null,
-      locationCurrent: metrics?.location?.current ?? null,
-      locationNext: metrics?.location?.next ?? null,
-      locationTotal: metrics?.location?.total ?? null,
-      remainingSectionSeconds: metrics?.remainingSeconds?.section ?? null,
-      remainingTotalSeconds: metrics?.remainingSeconds?.total ?? null
+      percent: mutation.displayPercent,
+      currentHref: mutation.locator.payload.href,
+      position: mutation.locator.payload.locations.position ?? null
     };
   }
-  if (location.kind === 'pdf') {
-    return { percent: mutation.percent, pageNumber: location.pageNumber };
-  }
-  if (location.kind === 'comic') {
-    return { percent: mutation.percent, pageNumber: location.pageIndex };
-  }
-  return { percent: mutation.percent };
+  if (!location) return { percent: mutation.displayPercent };
+  return { percent: mutation.displayPercent };
 }

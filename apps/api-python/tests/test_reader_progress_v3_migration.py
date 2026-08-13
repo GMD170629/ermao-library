@@ -30,6 +30,9 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
         )
         legacy_work = sa.Table("LibraryWork", sa.MetaData(), autoload_with=engine)
         legacy_file = sa.Table("LibraryFile", sa.MetaData(), autoload_with=engine)
+        legacy_progress = sa.Table(
+            "LibraryReadingProgress", sa.MetaData(), autoload_with=engine
+        )
         with Session(engine) as session, session.begin():
             user = User(
                 id="migration-user",
@@ -112,63 +115,71 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                     updatedAt=now,
                 )
             )
-            progress = LibraryReadingProgress(
-                id="migration-progress",
-                user_id=user.id,
-                volume_id=volume.id,
-                reader_type="reflowable",
-                position="0",
-                percent=12.5,
-                extra=json.dumps(
-                    {
-                        "sourceFormat": "txt",
-                        "currentHref": "txt-section:9",
-                        "navigationKey": "migration-unit-9",
-                        "chapterIndex": 9,
-                        "chapterTitle": "第9章",
-                        "sectionIndex": 9,
-                    }
-                ),
-                schema_version=1,
-                location_type=None,
-                location_json=None,
-            )
-            session.add_all(
+            session.execute(
+                sa.insert(legacy_progress),
                 [
-                    progress,
-                    LibraryReadingProgress(
-                        id="migration-comic-progress",
-                        user_id=user.id,
-                        volume_id=comic_volume.id,
-                        reader_type="comic",
-                        position="0",
-                        page=4,
-                        percent=25,
-                        extra="{}",
-                        schema_version=1,
-                    ),
-                    LibraryReadingProgress(
-                        id="migration-pdf-progress",
-                        user_id=user.id,
-                        volume_id=pdf_volume.id,
-                        reader_type="pdf",
-                        position="0",
-                        page=7,
-                        percent=35,
-                        extra="{}",
-                        schema_version=1,
-                    ),
-                    LibraryReadingProgress(
-                        id="migration-audio-progress",
-                        user_id=user.id,
-                        volume_id=audio_volume.id,
-                        reader_type="audio",
-                        position="45000",
-                        percent=40,
-                        extra="{}",
-                        schema_version=1,
-                    ),
-                ]
+                    {
+                        "id": "migration-progress",
+                        "userId": user.id,
+                        "volumeId": volume.id,
+                        "readerType": "reflowable",
+                        "position": "0",
+                        "page": None,
+                        "percent": 12.5,
+                        "extra": json.dumps(
+                            {
+                                "sourceFormat": "txt",
+                                "currentHref": "txt-section:9",
+                                "navigationKey": "migration-unit-9",
+                                "chapterIndex": 9,
+                                "chapterTitle": "第9章",
+                                "sectionIndex": 9,
+                            }
+                        ),
+                        "schemaVersion": 1,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    },
+                    {
+                        "id": "migration-comic-progress",
+                        "userId": user.id,
+                        "volumeId": comic_volume.id,
+                        "readerType": "comic",
+                        "position": "0",
+                        "page": 4,
+                        "percent": 25,
+                        "extra": "{}",
+                        "schemaVersion": 1,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    },
+                    {
+                        "id": "migration-pdf-progress",
+                        "userId": user.id,
+                        "volumeId": pdf_volume.id,
+                        "readerType": "pdf",
+                        "position": "0",
+                        "page": 7,
+                        "percent": 35,
+                        "extra": "{}",
+                        "schemaVersion": 1,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    },
+                    {
+                        "id": "migration-audio-progress",
+                        "userId": user.id,
+                        "volumeId": audio_volume.id,
+                        "readerType": "audio",
+                        "position": "45000",
+                        "page": None,
+                        "percent": 40,
+                        "extra": "{}",
+                        "schemaVersion": 1,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    },
+                ],
             )
 
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
@@ -231,6 +242,6 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                     "positionMs": 45000,
                 },
             }
-            assert head_revision(engine) == "0020_comic_page_index"
+            assert head_revision(engine) == "0021_reader_v4_exact_progress"
     finally:
         engine.dispose()

@@ -11,6 +11,7 @@ from app.modules.reader.application.dto import (
     ReaderEpubSourceDto,
     ReaderFileDto,
     ReaderProgressDto,
+    ReaderPublicationFingerprintDto,
     ReaderReadingStatus,
     ReaderRecoveredEpubChapterDto,
     ReaderUnitDto,
@@ -51,19 +52,26 @@ class ReaderVolumeRepository(Protocol):
         self, user_id: str, volume_ids: list[str]
     ) -> list[ReaderProgressDto]: ...
 
-    def save_progress(
+    def get_progress_mutation(
+        self, user_id: str, volume_id: str, mutation_id: str
+    ) -> ReaderProgressDto | None: ...
+
+    def save_exact_progress(
         self,
         *,
         user_id: str,
         context: ReaderVolumeContextDto,
         reader_type: str,
-        percent: float,
-        location_json: str | None,
+        display_percent: float,
+        locator_json: str,
         content_fingerprint: str,
         client_id: str,
+        mutation_id: str,
+        base_revision: int,
+        next_revision: int,
         progressed_at: datetime,
         now: datetime,
-    ) -> ReaderProgressDto: ...
+    ) -> ReaderProgressDto | None: ...
 
     def set_reading_status(
         self,
@@ -121,3 +129,21 @@ class ReaderEpubNavigationParser(Protocol):
 
 class ReaderClock(Protocol):
     def now(self) -> datetime: ...
+
+
+class ReaderPublicationLocatorIndex(Protocol):
+    def fingerprint(
+        self,
+        *,
+        volume_id: str,
+        access_scope: ReaderAccessScope,
+    ) -> ReaderPublicationFingerprintDto | None: ...
+
+    def validate(
+        self,
+        *,
+        volume_id: str,
+        access_scope: ReaderAccessScope,
+        href: str,
+        media_type: str,
+    ) -> ReaderPublicationFingerprintDto | None: ...

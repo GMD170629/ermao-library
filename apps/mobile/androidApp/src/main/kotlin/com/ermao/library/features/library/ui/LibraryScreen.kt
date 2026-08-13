@@ -650,13 +650,12 @@ private fun FilterSheet(
                     onChange(filters.copy(reading = filters.reading.toggle(value, checked)))
                 }
             }
-            Text(stringResource(R.string.library_filter_offline), style = theme.typography.headline, modifier = Modifier.padding(top = theme.spacing.two))
-            when (offlineAvailability) {
-                OfflineFilterAvailability.Available -> FilterRow(
+            if (offlineAvailability is OfflineFilterAvailability.Available) {
+                Text(stringResource(R.string.library_filter_offline), style = theme.typography.headline, modifier = Modifier.padding(top = theme.spacing.two))
+                FilterRow(
                     stringResource(R.string.library_filter_downloaded),
                     filters.downloadedOnly,
                 ) { checked -> onChange(filters.copy(downloadedOnly = checked)) }
-                is OfflineFilterAvailability.Unavailable -> DisabledOfflineFilterRow()
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = theme.spacing.three),
@@ -678,25 +677,6 @@ private fun FilterRow(label: String, checked: Boolean, onCheckedChange: (Boolean
     ) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
         Text(label, modifier = Modifier.padding(start = 8.dp))
-    }
-}
-
-@Composable
-private fun DisabledOfflineFilterRow() {
-    val theme = WarmPageThemeValues
-    Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(checked = false, onCheckedChange = null, enabled = false)
-        Column(Modifier.padding(start = 8.dp)) {
-            Text(stringResource(R.string.library_filter_downloaded_unavailable), color = theme.colors.textTertiary)
-            Text(
-                stringResource(R.string.library_filter_downloaded_explanation),
-                style = theme.typography.caption,
-                color = theme.colors.textTertiary,
-            )
-        }
     }
 }
 

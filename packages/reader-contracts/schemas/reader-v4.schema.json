@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.app/contracts/reader-v4.schema.json",
+  "title": "Shuku Reader v4 exact progress contract",
+  "type": "object",
+  "$defs": {
+    "publicationFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["originalFileHash", "parser", "normalization"],
+      "properties": {
+        "originalFileHash": {
+          "type": "string",
+          "pattern": "^(sha256:)?[a-fA-F0-9]{64}$"
+        },
+        "parser": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "normalization": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "locatorText": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "before": {"type": "string", "maxLength": 256},
+        "highlight": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "\\S"},
+        "after": {"type": "string", "maxLength": 256}
+      }
+    },
+    "locatorLocations": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "cssSelector": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "\\S"},
+        "fragments": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "\\S"}
+        },
+        "progression": {"type": "number", "minimum": 0, "maximum": 1},
+        "totalProgression": {"type": "number", "minimum": 0, "maximum": 1},
+        "position": {"type": "integer", "minimum": 1}
+      }
+    },
+    "readiumLocator": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["href", "type", "locations"],
+      "properties": {
+        "href": {"type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"},
+        "type": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
+        "title": {"type": "string", "maxLength": 4096},
+        "locations": {"$ref": "#/$defs/locatorLocations"},
+        "text": {"$ref": "#/$defs/locatorText"}
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "locations": {
+              "required": ["cssSelector"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "locations": {
+              "required": ["fragments"],
+              "properties": {"fragments": {"minItems": 1}}
+            }
+          }
+        },
+        {
+          "required": ["text"],
+          "properties": {
+            "text": {"required": ["highlight"]}
+          }
+        }
+      ]
+    },
+    "locatorEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "platform", "version", "publication", "payload"],
+      "properties": {
+        "engine": {"const": "readium"},
+        "platform": {"enum": ["web", "android", "ios"]},
+        "version": {"type": "string", "minLength": 1, "maxLength": 256},
+        "publication": {"$ref": "#/$defs/publicationFingerprint"},
+        "payload": {"$ref": "#/$defs/readiumLocator"}
+      }
+    },
+    "progressSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "revision",
+        "locator",
+        "displayPercent",
+        "receivedAtEpochMillis"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 4},
+        "revision": {"type": "integer", "minimum": 1},
+        "locator": {"$ref": "#/$defs/locatorEnvelope"},
+        "displayPercent": {"type": "number", "minimum": 0, "maximum": 100},
+        "receivedAtEpochMillis": {"type": "integer", "minimum": 0}
+      }
+    },
+    "progressPutRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "clientId",
+        "mutationId",
+        "baseRevision",
+        "capturedAtEpochMillis",
+        "locator"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 4},
+        "clientId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "mutationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "baseRevision": {"type": "integer", "minimum": 0},
+        "capturedAtEpochMillis": {"type": "integer", "minimum": 0},
+        "locator": {"$ref": "#/$defs/locatorEnvelope"}
+      }
+    },
+    "progressConflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["message", "code", "current"],
+          "properties": {
+            "message": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "code": {"const": "READER_PROGRESS_CONFLICT"},
+            "current": {"$ref": "#/$defs/progressSnapshot"}
+          }
+        }
+      }
+    },
+    "progressSuccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "data"],
+      "properties": {
+        "ok": {"const": true},
+        "data": {"$ref": "#/$defs/progressSnapshot"}
+      }
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/progressPutRequest"},
+    {"$ref": "#/$defs/progressSuccess"},
+    {"$ref": "#/$defs/progressConflict"}
+  ]
+}

@@ -40,6 +40,16 @@ test('maps EPUB-authored contents and split resources to the preceding TOC inter
   assert.equal(resolveEpubSpineIntervalHref(toc, 14, 'text/part0013_split_001.html'), 'text/part0013.html');
 });
 
+test('resolves the active TOC interval for a Readium position inside a split resource', () => {
+  const toc = [
+    { href: 'text/part0001.html', index: 1 },
+    { href: 'text/part0005.html', index: 5 },
+    { href: 'text/part0009.html', index: 9 }
+  ];
+
+  assert.equal(resolveActiveEpubNavigationIndex(toc, 'text/part0007.html', 7), 1);
+});
+
 test('leaves an exact TOC spine alone for fragment-aware matching', () => {
   const toc = [
     { href: 'text/all.xhtml#first', sectionIndex: 3 },

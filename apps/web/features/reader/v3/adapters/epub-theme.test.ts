@@ -87,13 +87,13 @@ test('EPUB theme applies V4 font weight, letter spacing, and responsive page mar
   assert.equal(resolveEpubViewportLayout(1200).automaticColumnCount, 2);
 });
 
-test('EPUB theme repaints the Foliate paginator background on the current page', () => {
+test('EPUB theme exposes the selected reader background on the current page', () => {
   const snapshot = createEpubThemeSnapshot({
     ...DEFAULT_READER_PREFERENCES,
     appearance: { ...DEFAULT_READER_PREFERENCES.appearance, theme: 'black' }
   });
 
-  assert.match(snapshot, /--theme-bg-color: #000000/);
+  assert.match(snapshot, /--shuku-reader-background: #000000/);
 });
 
 test('EPUB theme keeps the selected line height on the body while descendants inherit it', () => {

@@ -6,7 +6,9 @@ import com.ermao.library.shared.modules.reader.domain.ReaderPreferences
 import com.ermao.library.shared.modules.reader.domain.ReaderProgress
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderSource
-import com.ermao.library.shared.modules.reader.domain.projectedPercent
+import com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
+import com.ermao.library.shared.modules.reader.domain.exactLocatorEnvelope
+import com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks
 import kotlinx.coroutines.flow.StateFlow
 
 interface ReaderProgressStore {
@@ -106,46 +108,111 @@ data class ReaderProgressRestorePlan(
 
 }
 
+enum class ReaderResumeSource { Local, Server }
+
+data class ReaderResumeTarget(
+    val source: ReaderResumeSource,
+    val capturedAtEpochMillis: Long,
+    val displayPercent: Double,
+    val localProgress: ReaderProgress? = null,
+    val remoteSnapshot: ReaderProgressSnapshotV4? = null,
+) {
+    init {
+        require(capturedAtEpochMillis >= 0)
+        require(displayPercent.isFinite() && displayPercent in 0.0..100.0)
+        require((localProgress != null) != (remoteSnapshot != null))
+    }
+}
+
+data class ReaderResumeDecision(
+    val selected: ReaderResumeTarget?,
+    val alternative: ReaderResumeTarget?,
+) {
+    init {
+        require(selected != null || alternative == null)
+        require(alternative == null || selected?.source != alternative.source)
+    }
+}
+
 /**
- * Chooses ownership only by the client event timestamp. A local tie wins so
- * the same client keeps its exact engine location. A newer server snapshot is
- * restored only through public candidates and is never persisted as fake exact
- * local progress.
+ * Chooses the newest fingerprint-compatible exact position. Equal timestamps
+ * intentionally prefer the server, and semantically identical anchors never
+ * produce a redundant alternative prompt.
+ */
+fun decideReaderResume(
+    localProgress: ReaderProgress?,
+    remoteSnapshot: ReaderProgressSnapshotV4?,
+    openedSource: ReaderSource,
+): ReaderResumeDecision {
+    val validLocal = localProgress?.takeIf {
+        it.sourceId == openedSource.sourceId &&
+            it.location.contentFingerprint == openedSource.contentFingerprint &&
+            runCatching { it.exactLocatorEnvelope() }.isSuccess
+    }
+    val validRemote = remoteSnapshot?.takeIf {
+        it.sourceId == openedSource.sourceId &&
+            it.locator.publication.toContentFingerprint() == openedSource.contentFingerprint
+    }
+    val localTarget = validLocal?.let {
+        ReaderResumeTarget(
+            source = ReaderResumeSource.Local,
+            capturedAtEpochMillis = it.updatedAtEpochMillis,
+            displayPercent = it.percent
+                ?: (it.location as? ReflowReaderLocation)?.totalProgression?.times(100)
+                ?: 0.0,
+            localProgress = it,
+        )
+    }
+    val remoteTarget = validRemote?.let {
+        ReaderResumeTarget(
+            source = ReaderResumeSource.Server,
+            capturedAtEpochMillis = it.effectiveCapturedAtEpochMillis,
+            displayPercent = it.displayPercent,
+            remoteSnapshot = it,
+        )
+    }
+    if (localTarget == null) return ReaderResumeDecision(remoteTarget, null)
+    if (remoteTarget == null) return ReaderResumeDecision(localTarget, null)
+    val sameAnchor = compareExactReadiumBlocks(
+        validLocal.exactLocatorEnvelope(),
+        validRemote.locator,
+    ) == com.ermao.library.shared.modules.reader.domain.ExactBlockMatch.Exact
+    val selected = if (localTarget.capturedAtEpochMillis > remoteTarget.capturedAtEpochMillis) {
+        localTarget
+    } else {
+        remoteTarget
+    }
+    if (sameAnchor) return ReaderResumeDecision(selected, null)
+    return ReaderResumeDecision(
+        selected = selected,
+        alternative = if (selected.source == ReaderResumeSource.Local) remoteTarget else localTarget,
+    )
+}
+
+/**
+ * Restores only exact locations. A durable local location wins because an
+ * unresolved pending mutation/conflict must never be silently replaced by a
+ * remote revision. A fresh device without local state may use the server's
+ * exact Readium Locator after the three-part Publication fingerprint matches.
  */
 fun planReaderProgressRestore(
     localProgress: ReaderProgress?,
     remoteSnapshot: ReaderProgressSnapshotV4?,
     openedSource: ReaderSource,
 ): ReaderProgressRestorePlan {
-    val validLocal = localProgress?.takeIf { it.sourceId == openedSource.sourceId }
-    val validRemote = remoteSnapshot?.takeIf { it.sourceId == openedSource.sourceId }
-    return if (validLocal != null && (validRemote == null || validLocal.updatedAtEpochMillis >= validRemote.updatedAtEpochMillis)) {
-        val exactFingerprint =
-            validLocal.location.contentFingerprint.originalFileHash == openedSource.contentFingerprint.originalFileHash
+    val selected = decideReaderResume(localProgress, remoteSnapshot, openedSource).selected
+    return if (selected?.localProgress != null) {
         ReaderProgressRestorePlan(
-            localProgress = validLocal,
+            localProgress = selected.localProgress,
             remoteSnapshot = null,
-            candidates = if (exactFingerprint) {
-                if (validLocal.location is com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation) {
-                    restoreCandidates(validLocal.location, openedSource)
-                } else {
-                    listOf(ReaderRestoreCandidate.ExactLocalLocation(validLocal.location))
-                }
-            } else {
-                listOf(ReaderRestoreCandidate.TotalProgression(validLocal.projectedPercent() / 100.0))
-            },
-            usesLocalExact = exactFingerprint,
+            candidates = listOf(ReaderRestoreCandidate.ExactLocalLocation(selected.localProgress.location)),
+            usesLocalExact = true,
         )
-    } else if (validRemote != null) {
-        val fingerprintMatches = validRemote.anchor?.contentFingerprint?.originalFileHash
-            ?.let { it == openedSource.contentFingerprint.originalFileHash }
-            ?: true
+    } else if (selected?.remoteSnapshot != null) {
         ReaderProgressRestorePlan(
             null,
-            validRemote,
-            if (fingerprintMatches) restoreCandidates(validRemote) else {
-                listOf(ReaderRestoreCandidate.TotalProgression(validRemote.percent / 100.0))
-            },
+            selected.remoteSnapshot,
+            listOf(ReaderRestoreCandidate.PublicEngineLocator(selected.remoteSnapshot.locator.asEngineLocator())),
             usesLocalExact = false,
         )
     } else {
@@ -153,42 +220,8 @@ fun planReaderProgressRestore(
     }
 }
 
-fun restoreCandidates(snapshot: ReaderProgressSnapshotV4): List<ReaderRestoreCandidate> = buildList {
-    snapshot.anchor?.let { anchor ->
-        when (anchor.format) {
-            com.ermao.library.shared.modules.reader.domain.ReaderFormat.Pdf ->
-                run {
-                    anchor.engineLocator?.let { add(ReaderRestoreCandidate.PublicEngineLocator(it)) }
-                    add(ReaderRestoreCandidate.PdfPage(checkNotNull(anchor.pageNumber)))
-                }
-            com.ermao.library.shared.modules.reader.domain.ReaderFormat.Comic ->
-                run {
-                    anchor.engineLocator?.let { add(ReaderRestoreCandidate.PublicEngineLocator(it)) }
-                    add(ReaderRestoreCandidate.ComicPage(checkNotNull(anchor.pageNumber)))
-                }
-            com.ermao.library.shared.modules.reader.domain.ReaderFormat.Audio ->
-                run {
-                    anchor.engineLocator?.let { add(ReaderRestoreCandidate.PublicEngineLocator(it)) }
-                    add(ReaderRestoreCandidate.AudioPosition(
-                        checkNotNull(anchor.fileId),
-                        anchor.chapterId,
-                        checkNotNull(anchor.positionMillis),
-                    ))
-                }
-            else -> {
-                anchor.engineLocator?.let { add(ReaderRestoreCandidate.PublicEngineLocator(it)) }
-                anchor.resourceKey?.let {
-                    add(ReaderRestoreCandidate.ResourceProgression(it, anchor.progression))
-                }
-                anchor.textQuote?.let { quote ->
-                    add(ReaderRestoreCandidate.QuotedText(quote.exact, quote.prefix, quote.suffix))
-                }
-                anchor.position?.let { add(ReaderRestoreCandidate.Position(it)) }
-            }
-        }
-    }
-    add(ReaderRestoreCandidate.TotalProgression((snapshot.percent / 100.0).coerceIn(0.0, 1.0)))
-}
+fun restoreCandidates(snapshot: ReaderProgressSnapshotV4): List<ReaderRestoreCandidate> =
+    listOf(ReaderRestoreCandidate.PublicEngineLocator(snapshot.locator.asEngineLocator()))
 
 fun restoreCandidates(
     savedLocation: ReaderLocation,
@@ -196,17 +229,7 @@ fun restoreCandidates(
 ): List<ReaderRestoreCandidate> {
     val reflow = savedLocation as? com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
         ?: return emptyList()
-    return buildList {
-        if (reflow.contentFingerprint == openedSource.contentFingerprint && reflow.engineLocator != null) {
-            add(ReaderRestoreCandidate.ExactEngineLocation(reflow))
-        }
-        if (reflow.resourceKey != null) {
-            add(ReaderRestoreCandidate.ResourceProgression(reflow.resourceKey, reflow.progression))
-        }
-        reflow.textQuote?.let { quote ->
-            add(ReaderRestoreCandidate.QuotedText(quote.exact, quote.prefix, quote.suffix))
-        }
-        reflow.position?.let { add(ReaderRestoreCandidate.Position(it)) }
-        reflow.totalProgression?.let { add(ReaderRestoreCandidate.TotalProgression(it)) }
-    }
+    if (reflow.contentFingerprint != openedSource.contentFingerprint) return emptyList()
+    if (com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope.from(reflow) == null) return emptyList()
+    return listOf(ReaderRestoreCandidate.ExactEngineLocation(reflow))
 }

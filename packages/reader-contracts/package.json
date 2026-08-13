@@ -1,0 +1,9 @@
+{
+  "name": "@shuku/reader-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "schemas",
+    "fixtures"
+  ]
+}

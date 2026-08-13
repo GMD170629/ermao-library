@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LocalLibrary
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,10 +32,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -50,6 +53,8 @@ import androidx.navigation3.ui.NavDisplay
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ermao.library.R
 import com.ermao.library.features.content.model.LibraryScope
+import com.ermao.library.features.content.model.VolumeContent
+import com.ermao.library.features.content.model.WorkCard
 import com.ermao.library.features.home.application.HomeViewModel
 import com.ermao.library.features.home.ui.HomeScreen
 import com.ermao.library.features.library.application.FacetViewModel
@@ -87,6 +92,25 @@ import com.ermao.library.features.administrativesettings.EmailKindleTab
 import com.ermao.library.features.administrativesettings.SharedAdministrativeSettingsAdapter
 import com.ermao.library.features.administrativesettings.rememberAdministrativeSettingsSystemActions
 import com.ermao.library.BuildConfig
+import com.ermao.library.features.downloads.application.DownloadCenterViewModel
+import com.ermao.library.features.downloads.application.DownloadedWorkViewModel
+import com.ermao.library.features.downloads.application.DownloadActionsViewModel
+import com.ermao.library.features.downloads.application.AndroidReaderAccessOutcome
+import com.ermao.library.features.downloads.presentation.DownloadPreparationActivity
+import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
+import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
+import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
+import com.ermao.library.features.downloads.model.DownloadReaderEntryAction
+import com.ermao.library.features.downloads.model.downloadReaderEntryAction
+import com.ermao.library.features.downloads.ui.DownloadCenterScreen
+import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
+import com.ermao.library.shared.core.network.AndroidEncryptedCookieVault
+import com.ermao.library.shared.core.network.ApiClientFactory
+import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
+import com.ermao.library.shared.modules.downloads.DownloadRequestContext
+import com.ermao.library.shared.modules.downloads.createDownloadsGateway
+import com.ermao.library.shared.modules.downloads.toDownloadNamespace
+import com.ermao.library.features.content.ui.ContentAreaMessage
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.createAdministrativeSettingsContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -119,12 +143,27 @@ data class FacetRoute(
     val facetId: String,
 ) : NavKey
 
+@Serializable
+data object DownloadsCenterRoute : NavKey
+
+@Serializable
+data class DownloadedWorkRoute(val workId: String) : NavKey
+
+@Serializable
+data class ReaderUnavailableRoute(
+    val volumeId: String,
+    val accessKind: String,
+) : NavKey
+
 @Composable
 fun MainShell(
     session: AppSession.Authenticated,
     contentRepository: ContentRepository,
     personalSettingsRepository: PersonalSettingsRepository,
     administrativeSettingsRepository: AdministrativeSettingsRepository,
+    downloadCatalog: AndroidDownloadCatalog,
+    downloadFiles: AtomicDownloadFileSink,
+    sharedDownloadCatalog: DownloadCatalogRepository,
     localeController: AppLocaleController,
     onSessionUnauthorized: () -> Unit,
     onRefreshSession: suspend () -> Unit,
@@ -140,12 +179,36 @@ fun MainShell(
     var selectedTabValue by rememberSaveable { mutableStateOf(TabId.Home.stableValue) }
     val selectedTab = MobileNavigation.tabIdOrDefault(selectedTabValue)
     val contentContext = ContentRequestContext(session.profile, session.identity.namespace)
+    val downloadNamespace = AndroidDownloadNamespace(
+        session.identity.namespace.serverIdentity,
+        session.identity.namespace.userId,
+        session.identity.namespace.authorizationVersion,
+    )
     val appContext = LocalContext.current.applicationContext
+    val shelfRepository = remember(appContext) { com.ermao.library.shared.createAndroidShelfRepository(appContext) }
     val contentKey = listOf(
         session.identity.namespace.serverIdentity,
         session.identity.namespace.userId,
         session.identity.namespace.authorizationVersion,
     ).joinToString("-")
+    val downloadActionsViewModel: DownloadActionsViewModel = viewModel(
+        key = "download-actions-$contentKey",
+        factory = DownloadActionsViewModel.factory(
+            androidCatalog = downloadCatalog,
+            sharedCatalog = sharedDownloadCatalog,
+            sink = downloadFiles,
+            gateway = createDownloadsGateway(
+                ApiClientFactory(AndroidEncryptedCookieVault(appContext), requestTimeoutMillis = 30L * 60L * 1000L),
+                session.profile,
+            ),
+            context = DownloadRequestContext(session.profile, session.identity.namespace.toDownloadNamespace()),
+        ),
+    )
+    val downloadRecordsByVolume by downloadActionsViewModel.recordsByVolume.collectAsStateWithLifecycle()
+    val downloadFailuresByVolume by downloadActionsViewModel.failureByVolume.collectAsStateWithLifecycle()
+    DisposableEffect(downloadActionsViewModel) {
+        onDispose(downloadActionsViewModel::cancelAll)
+    }
     val meViewModel: com.ermao.library.features.me.application.MeViewModel = viewModel(
         key = "me-$contentKey",
         factory = AndroidMeFeatureFactory.viewModelFactory(
@@ -153,11 +216,17 @@ fun MainShell(
             session = session,
             sideEffects = object : SettingsSideEffects {
                 override suspend fun refreshSession() = onRefreshSession()
-                override suspend fun purgeCurrentNamespace() = onPurgeCurrentNamespace()
+                override suspend fun purgeCurrentNamespace() {
+                    downloadActionsViewModel.cancelAllAndJoin()
+                    sharedDownloadCatalog.clearNamespace(session.identity.namespace.toDownloadNamespace())
+                    onPurgeCurrentNamespace()
+                }
                 override suspend fun logoutAfterPasswordChange() {
                     onLogout(false)
                 }
                 override suspend fun logout() {
+                    downloadActionsViewModel.cancelAllAndJoin()
+                    sharedDownloadCatalog.clearNamespace(session.identity.namespace.toDownloadNamespace())
                     onLogout(true)
                 }
                 override fun requireReauthentication() = onSessionUnauthorized()
@@ -367,6 +436,7 @@ fun MainShell(
                                             key = "expanded-work-$contentKey-$workId",
                                             factory = WorkDetailViewModel.factory(
                                                 contentRepository,
+                                                shelfRepository,
                                                 contentContext,
                                                 appContext,
                                                 workId,
@@ -381,18 +451,31 @@ fun MainShell(
                                             onBack = { libraryViewModel.selectWork(null) },
                                             onSelectMedia = detailViewModel::selectMedia,
                                             onSelectVolume = detailViewModel::selectVolume,
-                                            onSelectContentTab = detailViewModel::selectContentTab,
+                                            onOpenShelfPicker = detailViewModel::openShelfPicker,
+                                            onDismissShelfPicker = detailViewModel::dismissShelfPicker,
+                                            onToggleShelf = detailViewModel::toggleShelf,
+                                            onSaveShelves = detailViewModel::saveShelves,
                                             onOpenFacet = { kind, id -> libraryBackStack.add(FacetRoute(kind.name, id)) },
-                                            onOpenReader = { volumeId ->
-                                                appContext.startActivity(
-                                                    ReaderActivity.createServerIntent(
-                                                        appContext,
-                                                        session.profile.id,
-                                                        volumeId,
-                                                    ),
-                                                )
-                                            },
                                             onRetry = detailViewModel::retry,
+                                            onRefresh = detailViewModel::refresh,
+                                            downloadRecordsByVolume = downloadRecordsByVolume,
+                                            downloadFailuresByVolume = downloadFailuresByVolume,
+                                            onDownloadVolume = downloadActionsViewModel::requestDownload,
+                                            onCancelDownload = downloadActionsViewModel::cancelDownload,
+                                            onOpenSelectedVolume = { volume ->
+                                                detailState.content?.work?.let { work ->
+                                                    openWorkVolume(
+                                                        context = appContext,
+                                                        profileId = session.profile.id,
+                                                        work = work,
+                                                        volume = volume,
+                                                        existing = downloadRecordsByVolume[volume.id],
+                                                        files = downloadFiles,
+                                                        requestAccess = downloadActionsViewModel::requestReaderAccess,
+                                                        onUnavailable = { libraryBackStack.add(it) },
+                                                    )
+                                                }
+                                            },
                                         )
                                     }
                                 }
@@ -410,6 +493,7 @@ fun MainShell(
                         onOpenSecurity = { meBackStack.add(MeRoute.Security) },
                         onOpenLanguage = { meBackStack.add(MeRoute.Language) },
                         onOpenAbout = { meBackStack.add(MeRoute.About) },
+                        onOpenDownloads = { meBackStack.add(DownloadsCenterRoute) },
                         canOpenAdministration = AdministrativeCapability.ViewAdministration in administrativeCapabilities,
                         onOpenEmailAndKindle = {
                             meBackStack.add(AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle))
@@ -461,6 +545,63 @@ fun MainShell(
                         state = meAboutState,
                         onBack = { meBackStack.removeLastOrNull() },
                         onRetry = meViewModel::loadAbout,
+                    )
+                }
+                entry<DownloadsCenterRoute> {
+                    val downloadsViewModel: DownloadCenterViewModel = viewModel(
+                        key = "downloads-$contentKey",
+                        factory = DownloadCenterViewModel.factory(downloadCatalog, downloadNamespace) { record ->
+                            downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+                        },
+                    )
+                    val downloadsState by downloadsViewModel.uiState.collectAsStateWithLifecycle()
+                    DownloadCenterScreen(
+                        state = downloadsState,
+                        onBack = { meBackStack.removeLastOrNull() },
+                        onQueryChanged = downloadsViewModel::updateQuery,
+                        onClearQuery = downloadsViewModel::clearQuery,
+                        onOpenWork = { workId -> meBackStack.add(DownloadedWorkRoute(workId)) },
+                        onRetry = downloadsViewModel::retry,
+                        onCancelDownload = downloadActionsViewModel::cancelDownload,
+                        onRetryDownload = downloadActionsViewModel::requestDownload,
+                        onRemoveDownload = downloadActionsViewModel::removeDownload,
+                    )
+                }
+                entry<DownloadedWorkRoute> { route ->
+                    val downloadedWorkViewModel: DownloadedWorkViewModel = viewModel(
+                        key = "downloaded-work-$contentKey-${route.workId}",
+                        factory = DownloadedWorkViewModel.factory(downloadCatalog, downloadNamespace, route.workId) { record ->
+                            downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+                        },
+                    )
+                    val downloadedWorkState by downloadedWorkViewModel.uiState.collectAsStateWithLifecycle()
+                    DownloadedWorkScreen(
+                        state = downloadedWorkState,
+                        onBack = { meBackStack.removeLastOrNull() },
+                        onOpenVolume = { volume ->
+                            if (volume.readerType.equals("reflowable", true) && volume.format.equals("EPUB", true)) {
+                                appContext.startActivity(
+                                    ReaderActivity.createManagedDownloadIntent(
+                                        context = appContext,
+                                        profileId = session.profile.id,
+                                        workId = volume.workId,
+                                        volumeId = volume.volumeId,
+                                        displayTitle = volume.workTitle,
+                                        localReference = checkNotNull(volume.localReference),
+                                        serverContentFingerprint = volume.contentFingerprint,
+                                        expectedBytes = volume.expectedBytes,
+                                    ),
+                                )
+                            } else {
+                                meBackStack.add(ReaderUnavailableRoute(volume.volumeId, volume.readerType))
+                            }
+                        },
+                    )
+                }
+                entry<ReaderUnavailableRoute> { route ->
+                    ReaderUnavailableScreen(
+                        isRemoteStream = route.accessKind.equals("pdf", true) || route.accessKind.equals("comic", true),
+                        onBack = { meBackStack.removeLastOrNull() },
                     )
                 }
                 entry<AdministrativeSettingsRoute.Root> { route ->
@@ -553,7 +694,7 @@ fun MainShell(
                 entry<WorkDetailRoute> { route ->
                     val detailViewModel: WorkDetailViewModel = viewModel(
                         key = "work-$contentKey-${route.workId}",
-                        factory = WorkDetailViewModel.factory(contentRepository, contentContext, appContext, route.workId, onSessionUnauthorized),
+                        factory = WorkDetailViewModel.factory(contentRepository, shelfRepository, contentContext, appContext, route.workId, onSessionUnauthorized),
                     )
                     val detailState by detailViewModel.uiState.collectAsState()
                     WorkDetailScreen(
@@ -563,7 +704,10 @@ fun MainShell(
                         onBack = { currentBackStack.removeLastOrNull() },
                         onSelectMedia = detailViewModel::selectMedia,
                         onSelectVolume = detailViewModel::selectVolume,
-                        onSelectContentTab = detailViewModel::selectContentTab,
+                        onOpenShelfPicker = detailViewModel::openShelfPicker,
+                        onDismissShelfPicker = detailViewModel::dismissShelfPicker,
+                        onToggleShelf = detailViewModel::toggleShelf,
+                        onSaveShelves = detailViewModel::saveShelves,
                         onOpenFacet = { kind, id ->
                             val route = FacetRoute(kind.name, id)
                             val existingIndex = currentBackStack.indexOf(route)
@@ -573,12 +717,26 @@ fun MainShell(
                                 currentBackStack.add(route)
                             }
                         },
-                        onOpenReader = { volumeId ->
-                            appContext.startActivity(
-                                ReaderActivity.createServerIntent(appContext, session.profile.id, volumeId),
-                            )
-                        },
                         onRetry = detailViewModel::retry,
+                        onRefresh = detailViewModel::refresh,
+                        downloadRecordsByVolume = downloadRecordsByVolume,
+                        downloadFailuresByVolume = downloadFailuresByVolume,
+                        onDownloadVolume = downloadActionsViewModel::requestDownload,
+                        onCancelDownload = downloadActionsViewModel::cancelDownload,
+                        onOpenSelectedVolume = { volume ->
+                            detailState.content?.work?.let { work ->
+                                openWorkVolume(
+                                    context = appContext,
+                                    profileId = session.profile.id,
+                                    work = work,
+                                    volume = volume,
+                                    existing = downloadRecordsByVolume[volume.id],
+                                    files = downloadFiles,
+                                    requestAccess = downloadActionsViewModel::requestReaderAccess,
+                                    onUnavailable = { currentBackStack.add(it) },
+                                )
+                            }
+                        },
                     )
                 }
                 entry<FacetRoute> { route ->
@@ -608,6 +766,114 @@ fun MainShell(
                     )
                 }
             },
+        )
+    }
+}
+
+private fun AndroidReaderAccessOutcome.toReaderRoute(volumeId: String): ReaderUnavailableRoute? = when (this) {
+    is AndroidReaderAccessOutcome.LocalArtifact -> ReaderUnavailableRoute(volumeId, readerType)
+    is AndroidReaderAccessOutcome.RemoteStream -> ReaderUnavailableRoute(volumeId, readerType)
+    AndroidReaderAccessOutcome.DownloadRequired -> null
+    is AndroidReaderAccessOutcome.Unavailable -> ReaderUnavailableRoute(volumeId, "unavailable")
+}
+
+private fun openWorkVolume(
+    context: android.content.Context,
+    profileId: String,
+    work: WorkCard,
+    volume: VolumeContent,
+    existing: com.ermao.library.features.downloads.model.AndroidDownloadRecord?,
+    files: AtomicDownloadFileSink,
+    requestAccess: (String, Boolean, (AndroidReaderAccessOutcome) -> Unit) -> Unit,
+    onUnavailable: (ReaderUnavailableRoute) -> Unit,
+) {
+    fun openPreparation() {
+        context.startActivity(
+            DownloadPreparationActivity.createIntent(
+                context = context,
+                profileId = profileId,
+                workId = work.id,
+                workTitle = work.title,
+                author = work.author,
+                coverApiPath = work.coverUrl,
+                volumeId = volume.id,
+            ),
+        )
+    }
+    when (downloadReaderEntryAction(volume.readerType, volume.format, existing) { record ->
+        files.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+    }) {
+        DownloadReaderEntryAction.OpenPreparation -> {
+            openPreparation()
+            return
+        }
+        DownloadReaderEntryAction.ValidateCurrentArtifact,
+        DownloadReaderEntryAction.ValidateStreamingAccess,
+        -> Unit
+    }
+    requestAccess(volume.id, true) { outcome ->
+        when (outcome) {
+            AndroidReaderAccessOutcome.DownloadRequired -> openPreparation()
+            else -> {
+                val readerIntent = outcome.toNativeReaderIntent(context, profileId, work.id, work.title, volume.id)
+                if (readerIntent != null) context.startActivity(readerIntent)
+                else outcome.toReaderRoute(volume.id)?.let(onUnavailable)
+            }
+        }
+    }
+}
+
+private fun AndroidReaderAccessOutcome.toNativeReaderIntent(
+    context: android.content.Context,
+    profileId: String,
+    workId: String,
+    workTitle: String,
+    volumeId: String,
+): android.content.Intent? {
+    val artifact = this as? AndroidReaderAccessOutcome.LocalArtifact ?: return null
+    if (!artifact.readerType.equals("reflowable", true) || !artifact.format.equals("EPUB", true)) return null
+    return ReaderActivity.createManagedDownloadIntent(
+        context = context,
+        profileId = profileId,
+        workId = workId,
+        volumeId = volumeId,
+        displayTitle = workTitle,
+        localReference = artifact.localReference,
+        serverContentFingerprint = artifact.contentFingerprint,
+        expectedBytes = artifact.expectedBytes,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReaderUnavailableScreen(
+    isRemoteStream: Boolean,
+    onBack: () -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    Scaffold(
+        containerColor = theme.colors.canvas,
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { Text(stringResource(R.string.reader_not_implemented_title)) },
+                navigationIcon = {
+                    androidx.compose.material3.IconButton(onClick = onBack) {
+                        androidx.compose.material3.Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.navigate_back),
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = theme.colors.canvas),
+            )
+        },
+    ) { padding ->
+        ContentAreaMessage(
+            title = stringResource(R.string.reader_not_implemented_title),
+            message = stringResource(
+                if (isRemoteStream) R.string.work_reader_renderer_pending else R.string.reader_not_implemented_message,
+            ),
+            modifier = Modifier.padding(padding),
         )
     }
 }

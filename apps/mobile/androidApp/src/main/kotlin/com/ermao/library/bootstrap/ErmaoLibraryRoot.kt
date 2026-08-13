@@ -2,11 +2,18 @@ package com.ermao.library.bootstrap
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ermao.library.R
 import com.ermao.library.features.auth.LoginScreen
 import com.ermao.library.features.auth.LoginEntryAlert
@@ -21,6 +28,22 @@ import com.ermao.library.shared.modules.personalsettings.PersonalSettingsReposit
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsLocale
 import com.ermao.library.features.me.platform.AppLocaleController
+import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
+import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
+import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
+import com.ermao.library.features.downloads.application.DownloadCenterViewModel
+import com.ermao.library.features.downloads.application.DownloadedWorkViewModel
+import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
+import com.ermao.library.features.downloads.ui.DownloadCenterScreen
+import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlin.math.ceil
 
 @Composable
@@ -31,6 +54,9 @@ fun ErmaoLibraryRoot(
     contentRepository: ContentRepository,
     personalSettingsRepository: PersonalSettingsRepository? = null,
     administrativeSettingsRepository: AdministrativeSettingsRepository? = null,
+    downloadCatalog: AndroidDownloadCatalog? = null,
+    downloadFiles: AtomicDownloadFileSink? = null,
+    sharedDownloadCatalog: DownloadCatalogRepository? = null,
     localeController: AppLocaleController? = null,
 ) {
     val shellStateHolder = rememberSaveableStateHolder()
@@ -175,7 +201,10 @@ fun ErmaoLibraryRoot(
             if (
                 personalSettingsRepository != null &&
                 administrativeSettingsRepository != null &&
-                localeController != null
+                localeController != null &&
+                downloadCatalog != null &&
+                downloadFiles != null &&
+                sharedDownloadCatalog != null
             ) {
                 val shellStateKey = listOf(
                     session.identity.namespace.serverIdentity,
@@ -189,6 +218,9 @@ fun ErmaoLibraryRoot(
                         contentRepository = contentRepository,
                         personalSettingsRepository = personalSettingsRepository,
                         administrativeSettingsRepository = administrativeSettingsRepository,
+                        downloadCatalog = downloadCatalog,
+                        downloadFiles = downloadFiles,
+                        sharedDownloadCatalog = sharedDownloadCatalog,
                         localeController = localeController,
                         onSessionUnauthorized = actions.onRequireReauthentication,
                         onRefreshSession = actions.onRefreshSessionAwaiting,
@@ -229,19 +261,132 @@ fun ErmaoLibraryRoot(
             onSwitchServer = actions.onOpenServerCenter,
             modifier = modifier,
         )
-        is AppSession.OfflineGrace -> OfflineEmptyShell(
-            profile = session.profile,
-            userEmail = session.identity.email,
-            onRetryAuthentication = actions.onRetrySession,
-            onSwitchServer = actions.onOpenServerCenter,
-            modifier = modifier,
-        )
+        is AppSession.OfflineGrace -> if (downloadCatalog != null && downloadFiles != null) {
+            OfflineDownloadsShell(
+                session = session,
+                downloadCatalog = downloadCatalog,
+                downloadFiles = downloadFiles,
+                onRetryAuthentication = actions.onRetrySession,
+                onSwitchServer = actions.onOpenServerCenter,
+                modifier = modifier,
+            )
+        } else {
+            OfflineEmptyShell(
+                profile = session.profile,
+                userEmail = session.identity.email,
+                onRetryAuthentication = actions.onRetrySession,
+                onSwitchServer = actions.onOpenServerCenter,
+                modifier = modifier,
+            )
+        }
         is AppSession.IncompatibleServer -> LoginEntry(
             state, actions,
             LoginEntryAlert.IncompatibleServer.takeIf { state.operationErrorCode != null },
             modifier,
         )
     }
+}
+
+@Composable
+private fun OfflineDownloadsShell(
+    session: AppSession.OfflineGrace,
+    downloadCatalog: AndroidDownloadCatalog,
+    downloadFiles: AtomicDownloadFileSink,
+    onRetryAuthentication: () -> Unit,
+    onSwitchServer: () -> Unit,
+    modifier: Modifier,
+) {
+    val namespace = AndroidDownloadNamespace(
+        session.identity.namespace.serverIdentity,
+        session.identity.namespace.userId,
+        session.identity.namespace.authorizationVersion,
+    )
+    val namespaceKey = "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
+    val appContext = LocalContext.current.applicationContext
+    var selectedWorkId by rememberSaveable(namespaceKey) { mutableStateOf<String?>(null) }
+    var showReaderUnavailable by rememberSaveable(namespaceKey) { mutableStateOf(false) }
+    if (showReaderUnavailable) {
+        BlockingServerStateScreen(
+            title = stringResource(R.string.reader_not_implemented_title),
+            message = stringResource(R.string.reader_not_implemented_message),
+            primaryLabel = stringResource(R.string.navigate_back),
+            onPrimary = { showReaderUnavailable = false },
+            modifier = modifier,
+        )
+        return
+    }
+    val workId = selectedWorkId
+    if (workId != null) {
+        val workViewModel: DownloadedWorkViewModel = viewModel(
+            key = "offline-download-work-$namespaceKey-$workId",
+            factory = DownloadedWorkViewModel.factory(downloadCatalog, namespace, workId) { record ->
+                downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+            },
+        )
+        val workState by workViewModel.uiState.collectAsStateWithLifecycle()
+        DownloadedWorkScreen(
+            state = workState,
+            onBack = { selectedWorkId = null },
+            onOpenVolume = { record ->
+                if (record.readerType.equals("reflowable", true) && record.format.equals("EPUB", true)) {
+                    appContext.startActivity(
+                        com.ermao.library.features.reader.presentation.ReaderActivity.createManagedDownloadIntent(
+                            context = appContext,
+                            profileId = session.profile.id,
+                            workId = record.workId,
+                            volumeId = record.volumeId,
+                            displayTitle = record.workTitle,
+                            localReference = checkNotNull(record.localReference),
+                            serverContentFingerprint = record.contentFingerprint,
+                            expectedBytes = record.expectedBytes,
+                        ),
+                    )
+                } else {
+                    showReaderUnavailable = true
+                }
+            },
+            modifier = modifier,
+        )
+        return
+    }
+    val centerViewModel: DownloadCenterViewModel = viewModel(
+        key = "offline-downloads-$namespaceKey",
+        factory = DownloadCenterViewModel.factory(downloadCatalog, namespace) { record ->
+            downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+        },
+    )
+    val centerState by centerViewModel.uiState.collectAsStateWithLifecycle()
+    DownloadCenterScreen(
+        state = centerState,
+        onBack = {},
+        onQueryChanged = centerViewModel::updateQuery,
+        onClearQuery = centerViewModel::clearQuery,
+        onOpenWork = { selectedWorkId = it },
+        onRetry = centerViewModel::retry,
+        onCancelDownload = {},
+        onRetryDownload = {},
+        onRemoveDownload = {},
+        modifier = modifier,
+        showBackNavigation = false,
+        allowManagementActions = false,
+        offlineActions = {
+            val theme = WarmPageThemeValues
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three),
+                verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
+            ) {
+                Text(stringResource(R.string.offline_scope_message), color = theme.colors.textSecondary)
+                Row {
+                    TextButton(onClick = onRetryAuthentication) {
+                        Text(stringResource(R.string.offline_retry_authentication))
+                    }
+                    TextButton(onClick = onSwitchServer) {
+                        Text(stringResource(R.string.server_choose_other_action))
+                    }
+                }
+            }
+        },
+    )
 }
 
 private const val INVALID_CREDENTIALS = "INVALID_CREDENTIALS"

@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonObject
 
 enum class ReaderEngine(val wireValue: String) {
     Readium("readium"),
-    Foliate("foliate"),
 }
 
 enum class ReaderEnginePlatform(val wireValue: String) {
@@ -169,6 +168,11 @@ data class ReaderProgress(
         require(deviceId.isNotBlank()) { "Reader progress device id is blank" }
         require(percent == null || percent.isFinite() && percent in 0.0..100.0) {
             "Reader progress percent is outside 0..100"
+        }
+        if (location is ReflowReaderLocation) {
+            require(ReadiumLocatorEnvelope.from(location) != null) {
+                "Reflow Reader progress requires an exact Readium block locator"
+            }
         }
     }
 }

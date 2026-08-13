@@ -86,6 +86,15 @@ class ApiClient internal constructor(
 ) {
     private val decoder = ApiEnvelopeDecoder(json)
 
+    /** Feature infrastructure may stream authenticated bodies without exposing Ktor publicly. */
+    internal fun authenticatedHttpClient(): HttpClient = client
+
+    internal fun resolveAuthenticatedApiPath(apiPath: String): String {
+        require(apiPath.startsWith("/api/")) { "API path must start with /api/" }
+        require(!apiPath.contains('#') && !apiPath.contains('?')) { "API path must not contain a query or fragment" }
+        return profile.baseUrl.resolveApiPath(apiPath)
+    }
+
     suspend fun <T> execute(request: ApiRequest<T>): ApiResult<T> {
         try {
             require(request.apiPath.startsWith("/api/")) { "API path must start with /api/" }

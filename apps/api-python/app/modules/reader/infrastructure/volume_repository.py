@@ -25,6 +25,7 @@ from app.models.library import (
     LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
+    ReaderProgressMutation,
     UserMediaHistory,
 )
 from app.modules.reader.application.dto import (
@@ -76,6 +77,27 @@ def _progress_dto(progress: LibraryReadingProgress) -> ReaderProgressDto:
         source_protocol=progress.source_protocol,
         source_device_name=progress.source_device_name,
         updated_at=progress.updated_at,
+        revision=progress.revision,
+    )
+
+
+def _mutation_progress_dto(mutation: ReaderProgressMutation) -> ReaderProgressDto:
+    return ReaderProgressDto(
+        id=mutation.id,
+        user_id=mutation.user_id,
+        volume_id=mutation.volume_id,
+        reader_type="readium",
+        percent=mutation.display_percent,
+        location_json=mutation.locator_json,
+        content_fingerprint=mutation.content_fingerprint,
+        mutation_id=mutation.mutation_id,
+        client_id=mutation.client_id,
+        client_sequence=None,
+        progressed_at=mutation.captured_at,
+        source_protocol="SHUKU_READER_V4",
+        source_device_name=None,
+        updated_at=mutation.received_at,
+        revision=mutation.revision,
     )
 
 
@@ -238,6 +260,7 @@ class SqlAlchemyReaderVolumeRepository:
                 unit_type=unit.unit_type,
                 title=unit.title,
                 href=unit.href,
+                media_type=unit.media_type,
                 sort_order=unit.sort_order,
                 start_ms=unit.start_ms,
                 end_ms=unit.end_ms,
@@ -380,70 +403,117 @@ class SqlAlchemyReaderVolumeRepository:
         ).all()
         return [_progress_dto(progress) for progress in progresses]
 
-    def save_progress(
+    def get_progress_mutation(
+        self, user_id: str, volume_id: str, mutation_id: str
+    ) -> ReaderProgressDto | None:
+        mutation = self._session.scalar(
+            select(ReaderProgressMutation).where(
+                ReaderProgressMutation.user_id == user_id,
+                ReaderProgressMutation.volume_id == volume_id,
+                ReaderProgressMutation.mutation_id == mutation_id,
+            )
+        )
+        return _mutation_progress_dto(mutation) if mutation is not None else None
+
+    def save_exact_progress(
         self,
         *,
         user_id: str,
         context: ReaderVolumeContextDto,
         reader_type: str,
-        percent: float,
-        location_json: str | None,
+        display_percent: float,
+        locator_json: str,
         content_fingerprint: str,
         client_id: str,
+        mutation_id: str,
+        base_revision: int,
+        next_revision: int,
         progressed_at: datetime,
         now: datetime,
-    ) -> ReaderProgressDto:
-        progress_insert = sqlite_insert(LibraryReadingProgress).values(
-            id=cuid(),
-            userId=user_id,
-            volumeId=context.volume.id,
-            readerType=reader_type,
-            position="0",
-            page=None,
-            percent=percent,
-            extra="{}",
-            schemaVersion=4,
-            locationType=reader_type,
-            locationJson=location_json,
-            contentFingerprint=content_fingerprint,
-            mutationId=None,
-            clientId=client_id,
-            clientSequence=None,
-            progressedAt=progressed_at,
-            sourceProtocol="SHUKU_READER_V4",
-            sourceDeviceName=None,
-            createdAt=now,
-            updatedAt=now,
-        )
-        progress = self._session.scalar(
-            progress_insert.on_conflict_do_update(
-                index_elements=[
-                    LibraryReadingProgress.user_id,
-                    LibraryReadingProgress.volume_id,
-                ],
-                set_={
-                    "readerType": progress_insert.excluded["readerType"],
-                    "percent": progress_insert.excluded.percent,
-                    "schemaVersion": progress_insert.excluded["schemaVersion"],
-                    "locationType": progress_insert.excluded["locationType"],
-                    "locationJson": progress_insert.excluded["locationJson"],
-                    "contentFingerprint": progress_insert.excluded[
-                        "contentFingerprint"
-                    ],
-                    "mutationId": progress_insert.excluded["mutationId"],
-                    "clientId": progress_insert.excluded["clientId"],
-                    "clientSequence": progress_insert.excluded["clientSequence"],
-                    "progressedAt": progress_insert.excluded["progressedAt"],
-                    "sourceProtocol": progress_insert.excluded["sourceProtocol"],
-                    "sourceDeviceName": progress_insert.excluded["sourceDeviceName"],
-                    "updatedAt": progress_insert.excluded["updatedAt"],
-                },
+    ) -> ReaderProgressDto | None:
+        if base_revision == 0:
+            insert_statement = sqlite_insert(LibraryReadingProgress).values(
+                id=cuid(),
+                userId=user_id,
+                volumeId=context.volume.id,
+                readerType=reader_type,
+                position="0",
+                page=None,
+                percent=display_percent,
+                extra="{}",
+                schemaVersion=4,
+                locationType="readium",
+                locationJson=locator_json,
+                contentFingerprint=content_fingerprint,
+                mutationId=mutation_id,
+                clientId=client_id,
+                clientSequence=None,
+                progressedAt=progressed_at,
+                sourceProtocol="SHUKU_READER_V4",
+                sourceDeviceName=None,
+                createdAt=now,
+                updatedAt=now,
+                revision=next_revision,
             )
-            .returning(LibraryReadingProgress)
-            .execution_options(populate_existing=True)
-        )
+            progress = self._session.scalar(
+                insert_statement.on_conflict_do_nothing(
+                    index_elements=[
+                        LibraryReadingProgress.user_id,
+                        LibraryReadingProgress.volume_id,
+                    ]
+                ).returning(LibraryReadingProgress)
+            )
+        else:
+            progress = self._session.scalar(
+                update(LibraryReadingProgress)
+                .where(
+                    LibraryReadingProgress.user_id == user_id,
+                    LibraryReadingProgress.volume_id == context.volume.id,
+                    LibraryReadingProgress.revision == base_revision,
+                )
+                .values(
+                    reader_type=reader_type,
+                    percent=display_percent,
+                    schema_version=4,
+                    location_type="readium",
+                    location_json=locator_json,
+                    content_fingerprint=content_fingerprint,
+                    mutation_id=mutation_id,
+                    client_id=client_id,
+                    client_sequence=None,
+                    progressed_at=progressed_at,
+                    source_protocol="SHUKU_READER_V4",
+                    source_device_name=None,
+                    updated_at=now,
+                    revision=next_revision,
+                )
+                .returning(LibraryReadingProgress)
+                .execution_options(populate_existing=True)
+            )
         if progress is None:
-            raise RuntimeError("progress upsert returned no row")
+            return None
+
+        self._session.add(
+            ReaderProgressMutation(
+                user_id=user_id,
+                volume_id=context.volume.id,
+                mutation_id=mutation_id,
+                client_id=client_id,
+                revision=next_revision,
+                locator_json=locator_json,
+                content_fingerprint=content_fingerprint,
+                display_percent=display_percent,
+                captured_at=progressed_at,
+                received_at=now,
+            )
+        )
+        self._session.execute(
+            delete(ReaderProgressMutation).where(
+                ReaderProgressMutation.user_id == user_id,
+                ReaderProgressMutation.volume_id == context.volume.id,
+                ReaderProgressMutation.revision <= next_revision - 32,
+            )
+        )
 
         history_insert = sqlite_insert(UserMediaHistory).values(
             id=cuid(),
@@ -484,6 +554,12 @@ class SqlAlchemyReaderVolumeRepository:
                     LibraryReadingProgress.volume_id == context.volume.id,
                 )
             )
+            self._session.execute(
+                delete(ReaderProgressMutation).where(
+                    ReaderProgressMutation.user_id == user_id,
+                    ReaderProgressMutation.volume_id == context.volume.id,
+                )
+            )
             return None
 
         progress_insert = sqlite_insert(LibraryReadingProgress).values(
@@ -516,22 +592,8 @@ class SqlAlchemyReaderVolumeRepository:
                 ],
                 set_={
                     "readerType": progress_insert.excluded["readerType"],
-                    "position": progress_insert.excluded.position,
-                    "page": progress_insert.excluded.page,
                     "percent": progress_insert.excluded.percent,
-                    "extra": progress_insert.excluded.extra,
                     "schemaVersion": progress_insert.excluded["schemaVersion"],
-                    "locationType": progress_insert.excluded["locationType"],
-                    "locationJson": progress_insert.excluded["locationJson"],
-                    "contentFingerprint": progress_insert.excluded[
-                        "contentFingerprint"
-                    ],
-                    "mutationId": progress_insert.excluded["mutationId"],
-                    "clientId": progress_insert.excluded["clientId"],
-                    "clientSequence": progress_insert.excluded["clientSequence"],
-                    "progressedAt": progress_insert.excluded["progressedAt"],
-                    "sourceProtocol": progress_insert.excluded["sourceProtocol"],
-                    "sourceDeviceName": progress_insert.excluded["sourceDeviceName"],
                     "updatedAt": progress_insert.excluded["updatedAt"],
                 },
             )

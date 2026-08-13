@@ -1,7 +1,14 @@
 export type EpubNavigationTarget = {
-  href?: string;
+  href?: string | null;
+  index?: number;
   sectionIndex?: number;
 };
+
+function navigationSectionIndex(item: EpubNavigationTarget) {
+  return typeof item.sectionIndex === 'number' && Number.isFinite(item.sectionIndex)
+    ? item.sectionIndex
+    : item.index;
+}
 
 /**
  * Resolves a spine resource that is not itself present in the TOC to the last
@@ -15,7 +22,7 @@ export function resolveEpubSpineIntervalHref(
 ) {
   if (typeof currentSectionIndex !== 'number' || !Number.isFinite(currentSectionIndex)) return fallbackHref;
   const indexed = items
-    .map((item, order) => ({ href: item.href, sectionIndex: item.sectionIndex, order }))
+    .map((item, order) => ({ href: item.href, sectionIndex: navigationSectionIndex(item), order }))
     .filter((item): item is { href: string; sectionIndex: number; order: number } => (
       Boolean(item.href)
       && typeof item.sectionIndex === 'number'
@@ -44,6 +51,10 @@ function normalizedHref(value: string) {
   return { path, fragment, full: fragment ? `${path}#${fragment}` : path };
 }
 
+function sameResourcePath(first: string, second: string) {
+  return first === second || first.endsWith(`/${second}`) || second.endsWith(`/${first}`);
+}
+
 /**
  * Resolves a real TOC target without assuming one TOC entry per spine item.
  * A resource-only location is deliberately left unresolved when that XHTML
@@ -63,18 +74,25 @@ export function resolveActiveEpubNavigationIndex(
 
     const sameResource = items
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.href && normalizedHref(item.href).path === current.path);
-    if (current.fragment) {
-      const resourceOnly = sameResource.filter(({ item }) => item.href && !normalizedHref(item.href).fragment);
-      return sameResource.length === 1 && resourceOnly.length === 1 ? resourceOnly[0].index : null;
+      .filter(({ item }) => item.href && sameResourcePath(normalizedHref(item.href).path, current.path));
+    if (sameResource.length > 0) {
+      if (current.fragment) {
+        const resourceOnly = sameResource.filter(({ item }) => item.href && !normalizedHref(item.href).fragment);
+        return sameResource.length === 1 && resourceOnly.length === 1 ? resourceOnly[0].index : null;
+      }
+      return sameResource.length === 1 ? sameResource[0].index : null;
     }
-    return sameResource.length === 1 ? sameResource[0].index : null;
+
+    const intervalHref = resolveEpubSpineIntervalHref(items, sectionIndex, currentHref);
+    if (intervalHref && normalizedHref(intervalHref).full !== current.full) {
+      return resolveActiveEpubNavigationIndex(items, intervalHref, null);
+    }
   }
 
   if (typeof sectionIndex === 'number' && Number.isFinite(sectionIndex)) {
     const matches = items
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.sectionIndex === sectionIndex);
+      .filter(({ item }) => navigationSectionIndex(item) === sectionIndex);
     return matches.length === 1 ? matches[0].index : null;
   }
   return null;

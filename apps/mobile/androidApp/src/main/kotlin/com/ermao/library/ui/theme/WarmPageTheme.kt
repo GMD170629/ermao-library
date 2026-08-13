@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import com.ermao.library.shared.modules.reader.ReaderTheme
+import com.ermao.library.shared.modules.reader.ReaderThemeMode
 
 private val AppLightColorScheme = lightColorScheme(
     primary = AppLightColors.actionAccent,
@@ -76,11 +77,17 @@ fun WarmPageTheme(
 @Composable
 fun ReaderWarmPageTheme(
     readerTheme: ReaderTheme,
+    themeMode: ReaderThemeMode = ReaderThemeMode.Manual,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val usesNightPalette = readerTheme == ReaderTheme.Night || readerTheme == ReaderTheme.System && systemDark
-    val colors = if (usesNightPalette) ReaderNightColors else ReaderPaperColors
+    val effectiveTheme = if (themeMode == ReaderThemeMode.System) {
+        if (systemDark) ReaderTheme.Night else ReaderTheme.Day
+    } else {
+        readerTheme
+    }
+    val usesNightPalette = effectiveTheme == ReaderTheme.Night || effectiveTheme == ReaderTheme.Black
+    val colors = readerColors(effectiveTheme)
     val materialColors = if (usesNightPalette) {
         darkColorScheme(
             primary = colors.actionAccent,

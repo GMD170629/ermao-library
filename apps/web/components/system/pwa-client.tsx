@@ -10,6 +10,10 @@ import {
   purgeFrontendResourcesAndActivate,
   waitForLatestWorker
 } from '../../lib/pwa/frontend-resource-update';
+import {
+  probeApplicationReachability,
+  resolveApplicationOnline
+} from '../../lib/pwa/network-availability';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
 import { activateReaderUser, clearPrivateReaderData, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
@@ -29,6 +33,7 @@ type BeforeInstallPromptEvent = Event & {
 const INSTALL_DISMISSED_KEY = 'shuku:pwa:install-dismissed';
 const INSTALL_ACCEPTED_KEY = 'shuku:pwa:install-accepted';
 const PWA_DEBUG_ENABLED_KEY = 'shuku:pwa:debug-enabled';
+const NETWORK_RECHECK_INTERVAL_MS = 30_000;
 
 type DebugLevel = 'log' | 'info' | 'warn' | 'warning' | 'error';
 type DebugLog = {
@@ -84,6 +89,7 @@ export function PwaClient() {
   const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const latestVersionRef = useRef('');
   const restoreTimerRef = useRef<number | null>(null);
+  const offlineRef = useRef(false);
   const installPromptAllowed = useMemo(
     () => !(
       pathname === '/login'
@@ -122,7 +128,7 @@ export function PwaClient() {
   }, []);
 
   const checkForForcedUpdate = useCallback(async (registration: ServiceWorkerRegistration) => {
-    if (!navigator.onLine || forcedUpdateRef.current || !navigator.serviceWorker.controller) return;
+    if (forcedUpdateRef.current || !navigator.serviceWorker.controller) return;
     try {
       const { status } = await checkFrontendResourceVersion(
         navigator.serviceWorker.controller,
@@ -148,18 +154,34 @@ export function PwaClient() {
   }, [session?.authorization?.authzVersion, session?.user?.id]);
 
   useEffect(() => {
-    setOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
     setShowIosHint(canShowInstallHint() && isIosSafari());
+    let disposed = false;
+    let networkCheckSequence = 0;
 
-    function updateOnlineState() {
-      const nextOffline = !navigator.onLine;
+    async function updateOnlineState(checkForUpdate = false) {
+      const sequence = ++networkCheckSequence;
+      const applicationOnline = await resolveApplicationOnline(
+        navigator.onLine,
+        () => probeApplicationReachability(withBasePath('/api/app-config'))
+      );
+      if (disposed || sequence !== networkCheckSequence) return;
+
+      const wasOffline = offlineRef.current;
+      const nextOffline = !applicationOnline;
+      offlineRef.current = nextOffline;
       setOffline(nextOffline);
-      if (!nextOffline) {
+      if (wasOffline && applicationOnline) {
         setRecentlyRestored(true);
         if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
         restoreTimerRef.current = window.setTimeout(() => setRecentlyRestored(false), 4200);
-        if (registrationRef.current) void checkForForcedUpdate(registrationRef.current);
       }
+      if (applicationOnline && checkForUpdate && registrationRef.current) {
+        void checkForForcedUpdate(registrationRef.current);
+      }
+    }
+
+    function handleOnlineStateEvent() {
+      void updateOnlineState(true);
     }
 
     function onBeforeInstallPrompt(event: Event) {
@@ -175,11 +197,15 @@ export function PwaClient() {
       setShowIosHint(false);
     }
 
-    window.addEventListener('online', updateOnlineState);
-    window.addEventListener('offline', updateOnlineState);
+    window.addEventListener('online', handleOnlineStateEvent);
+    window.addEventListener('offline', handleOnlineStateEvent);
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
     window.addEventListener('appinstalled', onAppInstalled);
     startReaderRuntime();
+    void updateOnlineState();
+    const networkRecheckTimer = window.setInterval(() => {
+      if (!navigator.onLine) void updateOnlineState();
+    }, NETWORK_RECHECK_INTERVAL_MS);
 
     const canRegisterServiceWorker = process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator;
     if (canRegisterServiceWorker) {
@@ -205,9 +231,7 @@ export function PwaClient() {
         window.location.reload();
       };
       const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible' && registrationRef.current) {
-          void checkForForcedUpdate(registrationRef.current);
-        }
+        if (document.visibilityState === 'visible') void updateOnlineState(true);
       };
       navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
       document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -216,23 +240,27 @@ export function PwaClient() {
       }, 60_000);
 
       return () => {
-        window.removeEventListener('online', updateOnlineState);
-        window.removeEventListener('offline', updateOnlineState);
+        disposed = true;
+        window.removeEventListener('online', handleOnlineStateEvent);
+        window.removeEventListener('offline', handleOnlineStateEvent);
         window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
         window.removeEventListener('appinstalled', onAppInstalled);
         navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.clearInterval(versionCheckTimer);
+        window.clearInterval(networkRecheckTimer);
         if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
         stopReaderRuntime();
       };
     }
 
     return () => {
-      window.removeEventListener('online', updateOnlineState);
-      window.removeEventListener('offline', updateOnlineState);
+      disposed = true;
+      window.removeEventListener('online', handleOnlineStateEvent);
+      window.removeEventListener('offline', handleOnlineStateEvent);
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
       window.removeEventListener('appinstalled', onAppInstalled);
+      window.clearInterval(networkRecheckTimer);
       if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
       stopReaderRuntime();
     };

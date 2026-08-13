@@ -100,6 +100,45 @@ val ReaderNightColors = WarmPageColors(
     onAction = colorOf(GeneratedDesignTokens.ReaderNight.OnAction),
 )
 
+fun readerColors(theme: com.ermao.library.shared.modules.reader.ReaderTheme): WarmPageColors = when (theme) {
+    com.ermao.library.shared.modules.reader.ReaderTheme.Warm -> ReaderPaperColors
+    com.ermao.library.shared.modules.reader.ReaderTheme.Night -> ReaderNightColors
+    com.ermao.library.shared.modules.reader.ReaderTheme.Day -> readerPalette(
+        background = "#F7F7F4",
+        foreground = "#1E293B",
+        accent = "#B45309",
+    )
+    com.ermao.library.shared.modules.reader.ReaderTheme.Green -> readerPalette(
+        background = "#E8F0E3",
+        foreground = "#203126",
+        accent = "#3F6F4E",
+    )
+    com.ermao.library.shared.modules.reader.ReaderTheme.Black -> readerPalette(
+        background = "#000000",
+        foreground = "#F8FAFC",
+        accent = "#F59E0B",
+    )
+}
+
+private fun readerPalette(background: String, foreground: String, accent: String): WarmPageColors {
+    val canvas = colorOf(background)
+    val text = colorOf(foreground)
+    val action = colorOf(accent)
+    return WarmPageColors(
+        canvas = canvas,
+        surface = canvas,
+        surfaceRaised = canvas,
+        textPrimary = text,
+        textSecondary = text.copy(alpha = 0.72f),
+        textTertiary = text.copy(alpha = 0.52f),
+        divider = text.copy(alpha = 0.16f),
+        brandAccent = action,
+        actionAccent = action,
+        accentSoft = action.copy(alpha = 0.16f),
+        onAction = if (background == "#000000") text else Color.White,
+    )
+}
+
 val WarmPageSpacingTokens = WarmPageSpacing(
     none = GeneratedDesignTokens.Spacing.Space0.dp,
     half = GeneratedDesignTokens.Spacing.Space0_5.dp,

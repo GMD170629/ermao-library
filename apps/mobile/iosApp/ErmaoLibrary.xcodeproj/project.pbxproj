@@ -27,6 +27,7 @@
 		B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01800000000000000000018 /* GeneratedDesignTokens.swift */; };
 		B04000000000000000000040 /* ContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04000000000000000000040 /* ContentClient.swift */; };
 		B04100000000000000000041 /* ContentStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04100000000000000000041 /* ContentStores.swift */; };
+		B15600000000000000000156 /* ReaderProgressPresentationCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */; };
 		B04200000000000000000042 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04200000000000000000042 /* ContentComponents.swift */; };
 		B04300000000000000000043 /* LibraryCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04300000000000000000043 /* LibraryCacheStore.swift */; };
 		B04400000000000000000044 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04400000000000000000044 /* HomeView.swift */; };
@@ -34,6 +35,7 @@
 		B04600000000000000000046 /* FacetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04600000000000000000046 /* FacetView.swift */; };
 		B04700000000000000000047 /* WorkDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04700000000000000000047 /* WorkDetailView.swift */; };
 		B04800000000000000000048 /* SharedContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000048 /* SharedContentClient.swift */; };
+		B04800000000000000000049 /* SharedShelfClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000049 /* SharedShelfClient.swift */; };
 		B04900000000000000000049 /* ContentUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04900000000000000000049 /* ContentUITestFixture.swift */; };
 		B05000000000000000000050 /* SettingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05000000000000000000050 /* SettingsModels.swift */; };
 		B05100000000000000000051 /* AvatarImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05100000000000000000051 /* AvatarImageProcessor.swift */; };
@@ -74,6 +76,7 @@
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
 		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
 		B02200000000000000000022 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F02200000000000000000022 /* PrivacyInfo.xcprivacy */; };
+		B12400000000000000000124 /* ReaderFonts in Resources */ = {isa = PBXBuildFile; fileRef = F12400000000000000000124 /* ReaderFonts */; };
 		B03000000000000000000030 /* SessionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03000000000000000000030 /* SessionStoreTests.swift */; };
 		B03100000000000000000031 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03100000000000000000031 /* PersistenceTests.swift */; };
 		B03200000000000000000032 /* LocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03200000000000000000032 /* LocalizationTests.swift */; };
@@ -115,6 +118,12 @@
 		BR0300000000000000000003 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = PR0300000000000000000003 /* ReadiumNavigator */; };
 		BR0400000000000000000004 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = PR0400000000000000000004 /* SwiftSoup */; };
 		BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0500000000000000000005 /* ErmaoMobiCore */; };
+		A17400000000000000000174 /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17400000000000000000174 /* DownloadModels.swift */; };
+		A17500000000000000000175 /* DownloadCenterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17500000000000000000175 /* DownloadCenterStore.swift */; };
+		A17600000000000000000176 /* DownloadCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17600000000000000000176 /* DownloadCenterView.swift */; };
+		A17700000000000000000177 /* ManagedDownloadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17700000000000000000177 /* ManagedDownloadStore.swift */; };
+		A17800000000000000000178 /* SharedManagedDownloadTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */; };
+		A13800000000000000000138 /* DownloadStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13800000000000000000138 /* DownloadStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -155,6 +164,7 @@
 		F01800000000000000000018 /* GeneratedDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeneratedDesignTokens.swift; path = "../build/generated/design-tokens/swift/GeneratedDesignTokens.swift"; sourceTree = SOURCE_ROOT; };
 		F04000000000000000000040 /* ContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentClient.swift; sourceTree = "<group>"; };
 		F04100000000000000000041 /* ContentStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStores.swift; sourceTree = "<group>"; };
+		F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderProgressPresentationCenter.swift; sourceTree = "<group>"; };
 		F04200000000000000000042 /* ContentComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentComponents.swift; sourceTree = "<group>"; };
 		F04300000000000000000043 /* LibraryCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCacheStore.swift; sourceTree = "<group>"; };
 		F04400000000000000000044 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -162,6 +172,7 @@
 		F04600000000000000000046 /* FacetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacetView.swift; sourceTree = "<group>"; };
 		F04700000000000000000047 /* WorkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailView.swift; sourceTree = "<group>"; };
 		F04800000000000000000048 /* SharedContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContentClient.swift; sourceTree = "<group>"; };
+		F04800000000000000000049 /* SharedShelfClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedShelfClient.swift; sourceTree = "<group>"; };
 		F04900000000000000000049 /* ContentUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentUITestFixture.swift; sourceTree = "<group>"; };
 		F05000000000000000000050 /* SettingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModels.swift; sourceTree = "<group>"; };
 		F05100000000000000000051 /* AvatarImageProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarImageProcessor.swift; sourceTree = "<group>"; };
@@ -202,6 +213,7 @@
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		F02200000000000000000022 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F12400000000000000000124 /* ReaderFonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReaderFonts; path = ../../web/public/fonts/reader; sourceTree = SOURCE_ROOT; };
 		F02300000000000000000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F03000000000000000000030 /* SessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStoreTests.swift; sourceTree = "<group>"; };
 		F03100000000000000000031 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
@@ -242,6 +254,12 @@
 		F80100000000000000000801 /* ErmaoLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F80200000000000000000802 /* ErmaoLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90000000000000000000900 /* ErmaoShared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = ErmaoShared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		E17400000000000000000174 /* DownloadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadModels.swift; sourceTree = "<group>"; };
+		E17500000000000000000175 /* DownloadCenterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterStore.swift; sourceTree = "<group>"; };
+		E17600000000000000000176 /* DownloadCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterView.swift; sourceTree = "<group>"; };
+		E17700000000000000000177 /* ManagedDownloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedDownloadStore.swift; sourceTree = "<group>"; };
+		E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedManagedDownloadTransfer.swift; sourceTree = "<group>"; };
+		E13800000000000000000138 /* DownloadStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -314,6 +332,7 @@
 				F08200000000000000000082 /* ReaderPersistenceTests.swift */,
 				F08300000000000000000083 /* ReaderSecurityTests.swift */,
 				F08900000000000000000089 /* MobiCoreTests.swift */,
+				E13800000000000000000138 /* DownloadStoreTests.swift */,
 				F09000000000000000000090 /* 01-basic-mobi6.mobi */,
 				F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */,
 				F09200000000000000000092 /* negative-synthetic-drm-header.mobi */,
@@ -359,7 +378,9 @@
 				F01700000000000000000017 /* SharedRuntimeAdapter.swift */,
 				F04000000000000000000040 /* ContentClient.swift */,
 				F04100000000000000000041 /* ContentStores.swift */,
+				F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */,
 				F04800000000000000000048 /* SharedContentClient.swift */,
+				F04800000000000000000049 /* SharedShelfClient.swift */,
 				F04900000000000000000049 /* ContentUITestFixture.swift */,
 			);
 			path = Application;
@@ -388,6 +409,7 @@
 				G12100000000000000000121 /* Me */,
 				G12200000000000000000122 /* AdministrativeSettings */,
 				G12300000000000000000123 /* Reader */,
+				C12300000000000000000123 /* Downloads */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -418,6 +440,7 @@
 				F01500000000000000000015 /* KeychainCookiePayloadStore.swift */,
 				F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */,
 				F04300000000000000000043 /* LibraryCacheStore.swift */,
+				E17700000000000000000177 /* ManagedDownloadStore.swift */,
 			);
 			path = Persistence;
 			sourceTree = "<group>";
@@ -428,6 +451,7 @@
 				F02000000000000000000020 /* Assets.xcassets */,
 				F02100000000000000000021 /* Localizable.xcstrings */,
 				F02200000000000000000022 /* PrivacyInfo.xcprivacy */,
+				F12400000000000000000124 /* ReaderFonts */,
 				F02300000000000000000023 /* Info.plist */,
 			);
 			path = Resources;
@@ -520,6 +544,17 @@
 				F08800000000000000000088 /* IosMobiCore.swift */,
 			);
 			path = Reader;
+			sourceTree = "<group>";
+		};
+		C12300000000000000000123 /* Downloads */ = {
+			isa = PBXGroup;
+			children = (
+				E17400000000000000000174 /* DownloadModels.swift */,
+				E17500000000000000000175 /* DownloadCenterStore.swift */,
+				E17600000000000000000176 /* DownloadCenterView.swift */,
+				E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */,
+			);
+			path = Downloads;
 			sourceTree = "<group>";
 		};
 		G20000000000000000000200 /* Frameworks */ = {
@@ -662,6 +697,7 @@
 				B02000000000000000000020 /* Assets.xcassets in Resources */,
 				B02100000000000000000021 /* Localizable.xcstrings in Resources */,
 				B02200000000000000000022 /* PrivacyInfo.xcprivacy in Resources */,
+				B12400000000000000000124 /* ReaderFonts in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -753,6 +789,7 @@
 				B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */,
 				B04000000000000000000040 /* ContentClient.swift in Sources */,
 				B04100000000000000000041 /* ContentStores.swift in Sources */,
+				B15600000000000000000156 /* ReaderProgressPresentationCenter.swift in Sources */,
 				B04200000000000000000042 /* ContentComponents.swift in Sources */,
 				B04300000000000000000043 /* LibraryCacheStore.swift in Sources */,
 				B04400000000000000000044 /* HomeView.swift in Sources */,
@@ -760,6 +797,7 @@
 				B04600000000000000000046 /* FacetView.swift in Sources */,
 				B04700000000000000000047 /* WorkDetailView.swift in Sources */,
 				B04800000000000000000048 /* SharedContentClient.swift in Sources */,
+				B04800000000000000000049 /* SharedShelfClient.swift in Sources */,
 				B04900000000000000000049 /* ContentUITestFixture.swift in Sources */,
 				B05000000000000000000050 /* SettingsModels.swift in Sources */,
 				B05100000000000000000051 /* AvatarImageProcessor.swift in Sources */,
@@ -796,6 +834,11 @@
 				B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */,
 				B08600000000000000000086 /* IosReaderComposition.swift in Sources */,
 				B08800000000000000000088 /* IosMobiCore.swift in Sources */,
+				A17400000000000000000174 /* DownloadModels.swift in Sources */,
+				A17500000000000000000175 /* DownloadCenterStore.swift in Sources */,
+				A17600000000000000000176 /* DownloadCenterView.swift in Sources */,
+				A17700000000000000000177 /* ManagedDownloadStore.swift in Sources */,
+				A17800000000000000000178 /* SharedManagedDownloadTransfer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -814,6 +857,7 @@
 				B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */,
 				B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */,
 				B08900000000000000000089 /* MobiCoreTests.swift in Sources */,
+				A13800000000000000000138 /* DownloadStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

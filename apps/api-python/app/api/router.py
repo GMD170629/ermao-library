@@ -10,6 +10,7 @@ from app.modules.media.presentation.http import router as media_router
 from app.modules.metadata.presentation.http import router as metadata_router
 from app.modules.mobile.presentation.http import router as mobile_router
 from app.modules.organize.presentation.http import router as organize_router
+from app.modules.publications.presentation.http import router as publications_router
 from app.modules.reader.presentation.router import router as reader_router
 from app.modules.shelf.presentation.http import router as shelf_router
 from app.modules.system.presentation.router import router as system_router
@@ -17,6 +18,7 @@ from app.modules.system.presentation.router import router as system_router
 api_router = APIRouter(route_class=TypedContractRoute)
 api_router.include_router(auth_router)
 api_router.include_router(reader_router)
+api_router.include_router(publications_router)
 api_router.include_router(system_router)
 api_router.include_router(metadata_router)
 api_router.include_router(mobile_router)

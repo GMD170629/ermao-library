@@ -190,7 +190,7 @@ def test_work_reading_units_query_returns_only_requested_navigation(client, db_s
     }
 
 
-def test_work_reading_units_query_projects_reader_v3_chapter_location(
+def test_work_reading_units_query_projects_exact_readium_chapter_location(
     client, db_session
 ):
     user = _login(client, db_session)
@@ -203,20 +203,21 @@ def test_work_reading_units_query_projects_reader_v3_chapter_location(
             position="0",
             percent=12.5,
             extra="{}",
-            schema_version=3,
+            schema_version=4,
             location_type="reflowable",
-            location_json='{"type":"reflowable","format":"txt","href":"002.jpg","foliate":{"toc":{"index":1,"title":"第二章","href":"002.jpg"},"section":{"current":1,"total":2}}}',
+            location_json='{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"shuku-txt-parser-v1","normalization":"shuku-txt-publication-v1"},"payload":{"href":"002.jpg","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-2"},"text":{"highlight":"第二章"}}}',
         )
     )
     db_session.commit()
 
     response = client.get(
         "/api/works/detail-work/volumes/detail-volume-01/reading-units",
-        params={"page": 1, "pageSize": 2},
+        params={"page": 1, "pageSize": 1},
     )
 
     assert response.status_code == 200
     data = response.json()["data"]
+    assert [unit["id"] for unit in data["units"]] == ["detail-page-1"]
     assert data["currentHref"] == "002.jpg"
     assert data["currentChapterIndex"] == 1
     assert data["currentChapterSortOrder"] == 1

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 @preconcurrency import ErmaoShared
 
 struct IosReaderLaunchRequest: Identifiable, Equatable, Sendable {
@@ -6,18 +7,53 @@ struct IosReaderLaunchRequest: Identifiable, Equatable, Sendable {
     let workID: String
     let volumeID: String
     let displayTitle: String
+    let managedDownloadRecordID: String?
+
+    init(
+        context: ContentRequestContext,
+        workID: String,
+        volumeID: String,
+        displayTitle: String,
+        managedDownloadRecordID: String? = nil
+    ) {
+        self.context = context
+        self.workID = workID
+        self.volumeID = volumeID
+        self.displayTitle = displayTitle
+        self.managedDownloadRecordID = managedDownloadRecordID
+    }
 
     var id: String { "\(context.namespaceKey)|\(volumeID)" }
 }
+
+struct IosReaderDownloadArtifact: Sendable {
+    let fileURL: URL
+    let sourceID: String
+    let displayTitle: String
+    let workID: String
+    let volumeID: String
+    let serverContentFingerprint: String
+}
+
+protocol IosReaderDownloadArtifactProviding: Sendable {
+    func verifiedReaderArtifact(recordID: String, namespace: String) async throws -> IosReaderDownloadArtifact?
+}
+
+extension ManagedDownloadStore: IosReaderDownloadArtifactProviding {}
 
 @MainActor
 final class IosReaderComposition: ObservableObject {
     private let cookieStore: KeychainCookiePayloadStore
     private let managedStore: IosManagedPublicationStore
     private let deviceIdentity: IosReaderDeviceIdentity
+    private let downloadArtifacts: any IosReaderDownloadArtifactProviding
 
-    init(cookieStore: KeychainCookiePayloadStore) throws {
+    init(
+        cookieStore: KeychainCookiePayloadStore,
+        downloadArtifacts: any IosReaderDownloadArtifactProviding
+    ) throws {
         self.cookieStore = cookieStore
+        self.downloadArtifacts = downloadArtifacts
         managedStore = try IosManagedPublicationStore()
         deviceIdentity = IosReaderDeviceIdentity()
     }
@@ -41,6 +77,25 @@ final class IosReaderComposition: ObservableObject {
             acceptsInsecureTls: request.context.acceptsInsecureTLS
         )
         let gateway = IosCompositionKt.createIosReaderBootstrapGateway(cookieStore: cookieStore)
+        if let recordID = request.managedDownloadRecordID {
+            guard let artifact = try await downloadArtifacts.verifiedReaderArtifact(
+                recordID: recordID,
+                namespace: request.context.namespaceKey
+            ), artifact.sourceID == request.volumeID else {
+                throw IosReaderFailure(code: .resourceMissing)
+            }
+            _ = try await managedStore.importEPUB(
+                from: artifact.fileURL,
+                sourceID: artifact.sourceID,
+                displayTitle: artifact.displayTitle,
+                workID: artifact.workID,
+                volumeID: artifact.volumeID
+            )
+            try await managedStore.bindServerContentFingerprint(
+                sourceID: artifact.sourceID,
+                value: artifact.serverContentFingerprint
+            )
+        }
         let bootstrapRequest = ErmaoShared.ReaderBootstrapRequest(
             profile: profile,
             namespace: namespace,
@@ -60,12 +115,14 @@ final class IosReaderComposition: ObservableObject {
         let target: ErmaoShared.ReaderProgressSyncTarget
         let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
         let source: ErmaoShared.ReaderSource
+        let bookmarkContentFingerprint: String
         if let onlineBootstrap {
             target = onlineBootstrap.target
             remoteSnapshot = onlineBootstrap.remoteSnapshot
+            bookmarkContentFingerprint = onlineBootstrap.artifactVersion
             do {
                 let existing = try await managedStore.resolve(sourceID: request.volumeID)
-                if existing.serverContentFingerprint == target.serverContentFingerprint.value {
+                if existing.serverContentFingerprint == onlineBootstrap.artifactVersion {
                     source = Self.sharedSource(existing)
                 } else {
                     source = try await download(bootstrap: onlineBootstrap, gateway: gateway)
@@ -75,23 +132,23 @@ final class IosReaderComposition: ObservableObject {
             }
             try await managedStore.bindServerContentFingerprint(
                 sourceID: request.volumeID,
-                value: target.serverContentFingerprint.value
+                value: onlineBootstrap.artifactVersion
             )
         } else {
             // Offline opening is allowed only for a previously verified managed
             // publication whose server version was durably bound at bootstrap.
             let existing = try await managedStore.resolve(sourceID: request.volumeID)
-            guard let serverFingerprint = existing.serverContentFingerprint else {
+            guard existing.serverContentFingerprint != nil else {
                 throw IosReaderFailure(code: .networkUnavailable)
             }
             target = ErmaoShared.ReaderProgressSyncTarget(
                 namespace: namespace,
                 workId: request.workID,
                 volumeId: request.volumeID,
-                sourceFormat: .epub,
-                serverContentFingerprint: ErmaoShared.ReaderServerContentFingerprint(value: serverFingerprint)
+                sourceFormat: .epub
             )
             remoteSnapshot = nil
+            bookmarkContentFingerprint = existing.serverContentFingerprint!
             source = Self.sharedSource(existing)
         }
 
@@ -116,12 +173,38 @@ final class IosReaderComposition: ObservableObject {
             target: target,
             syncPort: syncPort
         )
+        let preferencesStore = IosReaderPreferencesStore(
+            serverIdentity: request.context.serverIdentity,
+            userID: request.context.userID
+        )
+        let bookmarkStore = IosReaderBookmarkStore(
+            serverIdentity: request.context.serverIdentity,
+            userID: request.context.userID,
+            volumeID: source.sourceId,
+            contentFingerprint: bookmarkContentFingerprint
+        )
+        let bookmarkSyncPort = IosCompositionKt.createIosReaderBookmarkSyncPort(
+            cookieStore: cookieStore,
+            profile: profile
+        )
         return IosEpubReaderSession(
             sourceID: source.sourceId,
             displayTitle: source.displayTitle,
+            preferences: preferencesStore.load(),
             managedStore: managedStore,
             progressStore: progressStore,
+            preferencesStore: preferencesStore,
+            bookmarkStore: bookmarkStore,
+            bookmarkSyncPort: bookmarkSyncPort,
+            bookmarkSyncTarget: ErmaoShared.ReaderBookmarkSyncTarget(
+                serverIdentity: request.context.serverIdentity,
+                volumeId: source.sourceId,
+                contentFingerprint: bookmarkContentFingerprint
+            ),
             remoteSnapshot: remoteSnapshot,
+            namespaceKey: request.context.namespaceKey,
+            workID: request.workID,
+            publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
             deviceIdentity: deviceIdentity
         )
     }

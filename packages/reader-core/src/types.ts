@@ -23,6 +23,8 @@ export type ReflowableLocation = {
   format: ReflowableFormat;
   cfi?: string;
   href?: string;
+  /** Zero-based reading-order resource used for local chapter navigation. */
+  spineIndex?: number;
   /** Position within the current resource, never the whole-book percent. */
   resourceProgression?: number;
   /** Parser-independent position when supplied by a compatible publication. */
@@ -34,33 +36,8 @@ export type ReflowableLocation = {
   };
   /** Whole-book fraction used only as the final approximate fallback. */
   progression?: number;
-  foliate?: FoliateProgressSnapshot;
-};
-
-export type FoliateProgressSnapshot = {
-  continuous?: {
-    sectionFraction: number;
-  };
-  toc?: {
-    index: number;
-    title: string;
-    href?: string;
-    navigationKey?: string;
-  };
-  navigationFingerprint?: string;
-  section?: {
-    current: number;
-    total: number;
-  };
-  location?: {
-    current: number;
-    next: number;
-    total: number;
-  };
-  remainingSeconds?: {
-    section: number;
-    total: number;
-  };
+  /** Cross-platform position. Only this verified Readium envelope may auto-sync. */
+  exactLocator?: ReadiumLocatorEnvelope;
 };
 
 export type ComicLocation = {
@@ -160,6 +137,9 @@ type ReaderSourceBase = {
     parserVersion: string;
     normalizationVersion: string;
   };
+  publicationFingerprint?: PublicationFingerprint;
+  /** Absolute RWPM manifest URL. Required by the Readium Web adapter. */
+  publicationManifestUrl?: string;
   totalPages?: number | null;
 };
 
@@ -239,3 +219,4 @@ export type ReaderAdapterEvent =
   | (ReaderAdapterEventBase & { type: 'external-link'; href: string })
   | (ReaderAdapterEventBase & { type: 'password-required'; reason: 'need-password' | 'incorrect-password' })
   | (ReaderAdapterEventBase & { type: 'error'; error: ReaderError });
+import type { PublicationFingerprint, ReadiumLocatorEnvelope } from './exact-locator';

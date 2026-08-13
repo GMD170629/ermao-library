@@ -42,7 +42,8 @@ class MeRootScreenTest {
                     onOpenProfile = { openedProfile = true },
                     onOpenSecurity = {},
                     onOpenLanguage = {},
-                    onOpenAbout = {},
+                onOpenAbout = {},
+                onOpenDownloads = {},
                     onRetry = {},
                 )
             }

@@ -9,6 +9,17 @@
 "action.previousPage" = "Previous Page";
 "action.nextPage" = "Next Page";
 "action.run500Turns" = "Run 500 Page Turns";
+"action.copyLocator" = "Copy Exact Locator";
+"action.pasteLocator" = "Paste and Go to Locator";
+"locator.captureFailed" = "Could not capture the first visible content anchor.";
+"locator.payloadTooLarge" = "The Locator exceeds the 64 KiB safety limit.";
+"locator.copied" = "Copied the iOS Readium Locator.";
+"locator.pasteFailed" = "The pasteboard does not contain a valid Locator.";
+"locator.wrongEngine" = "The Locator does not belong to the Readium engine.";
+"locator.fingerprintMismatch" = "The Locator does not match the current Publication fingerprint.";
+"locator.invalid" = "The Locator JSON is invalid.";
+"locator.restored" = "Navigated to the Locator. Copy again to compare the anchor.";
+"locator.restoreFailed" = "Readium could not navigate to this Locator.";
 "fixture.basicMobi6" = "Classic MOBI6 with three chapters";
 "fixture.basicKF8" = "Basic KF8/AZW3 end-to-end smoke test";
 "fixture.css" = "Linked CSS and publisher styling";

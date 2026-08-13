@@ -27,6 +27,8 @@ set(ERMAO_MOBI_SOURCES
 
 add_library(ermao_mobi_core STATIC ${ERMAO_MOBI_SOURCES})
 add_library(Ermao::MobiCore ALIAS ermao_mobi_core)
+add_library(ermao_mobi_core_shared SHARED ${ERMAO_MOBI_SOURCES})
+set_target_properties(ermao_mobi_core_shared PROPERTIES OUTPUT_NAME ermao_mobi_core)
 set_target_properties(ermao_mobi_core PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED YES
@@ -34,7 +36,18 @@ set_target_properties(ermao_mobi_core PROPERTIES
     POSITION_INDEPENDENT_CODE YES
     C_VISIBILITY_PRESET hidden
 )
+set_target_properties(ermao_mobi_core_shared PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED YES
+    C_EXTENSIONS NO
+    POSITION_INDEPENDENT_CODE YES
+    C_VISIBILITY_PRESET hidden
+)
 target_include_directories(ermao_mobi_core
+    PUBLIC "${ERMAO_MOBI_VENDOR_ROOT}/public"
+    PRIVATE "${ERMAO_MOBI_VENDOR_ROOT}/include" "${ERMAO_MOBI_VENDOR_ROOT}/src"
+)
+target_include_directories(ermao_mobi_core_shared
     PUBLIC "${ERMAO_MOBI_VENDOR_ROOT}/public"
     PRIVATE "${ERMAO_MOBI_VENDOR_ROOT}/include" "${ERMAO_MOBI_VENDOR_ROOT}/src"
 )
@@ -46,11 +59,22 @@ target_compile_definitions(ermao_mobi_core PRIVATE
     HAVE_UNISTD_H
     MOBI_INLINE=inline
 )
+target_compile_definitions(ermao_mobi_core_shared PRIVATE
+    PACKAGE_VERSION="0.12"
+    USE_XMLWRITER
+    USE_ZLIB
+    HAVE_STRDUP
+    HAVE_UNISTD_H
+    MOBI_INLINE=inline
+)
 target_link_libraries(ermao_mobi_core PUBLIC ZLIB::ZLIB)
+target_link_libraries(ermao_mobi_core_shared PUBLIC ZLIB::ZLIB)
 
 if(ERMAO_MOBI_ENABLE_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(ermao_mobi_core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(ermao_mobi_core PUBLIC -fsanitize=address,undefined)
+    target_compile_options(ermao_mobi_core_shared PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(ermao_mobi_core_shared PUBLIC -fsanitize=address,undefined)
 endif()
 
 if(ERMAO_MOBI_BUILD_FUZZER AND NOT ANDROID AND CMAKE_C_COMPILER_ID MATCHES "Clang")

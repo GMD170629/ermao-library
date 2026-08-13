@@ -36,6 +36,7 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
     MediaVersionMigrationEvent,
+    ReaderProgressMutation,
     UserMediaHistory,
     WorkDetailPreference,
 )
@@ -111,6 +112,7 @@ __all__ = [
     "ReaderBookmark",
     "ReaderPreference",
     "ReaderProgressCursor",
+    "ReaderProgressMutation",
     "Session",
     "Shelf",
     "ShelfCollectionMembership",

@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from urllib.parse import urlsplit
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 from typing_extensions import TypeAliasType
 
 from app.contracts.http_errors import HttpContractError
@@ -39,88 +49,191 @@ else:
         | list["ReaderJsonValue"]
         | dict[str, "ReaderJsonValue"],
     )
+
+
+class ReadiumExtensionModel(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    __pydantic_extra__: dict[str, ReaderJsonValue] = Field(init=False)
+
+
 _MAX_UTC_EPOCH_MILLIS = 253_402_300_799_999
+_MAX_LOCATOR_ENVELOPE_BYTES = 65_536
+_SHA256_PATTERN = re.compile(r"^(?:sha256:)?[a-fA-F0-9]{64}$")
 
 
-class ReaderContentFingerprint(ReaderWireModel):
-    original_file_hash: str = Field(
-        alias="originalFileHash", min_length=1, max_length=191
+class PublicationFingerprint(ReaderWireModel):
+    original_file_hash: str = Field(alias="originalFileHash", max_length=71)
+    parser: str = Field(min_length=1, max_length=256)
+    normalization: str = Field(min_length=1, max_length=256)
+
+    @field_validator("parser", "normalization")
+    @classmethod
+    def require_non_blank_component(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Publication fingerprint components must not be blank")
+        return value
+
+    @field_validator("original_file_hash")
+    @classmethod
+    def normalize_sha256(cls, value: str) -> str:
+        if not _SHA256_PATTERN.fullmatch(value):
+            raise ValueError("originalFileHash must contain a SHA-256 digest")
+        return f"sha256:{value.removeprefix('sha256:').lower()}"
+
+
+class ReadiumLocatorText(ReaderWireModel):
+    before: str | None = Field(
+        default=None, max_length=256, exclude_if=lambda value: value is None
     )
-    parser_version: str = Field(alias="parserVersion", min_length=1, max_length=191)
-    normalization_version: str = Field(
-        alias="normalizationVersion", min_length=1, max_length=191
+    highlight: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        exclude_if=lambda value: value is None,
+    )
+    after: str | None = Field(
+        default=None, max_length=256, exclude_if=lambda value: value is None
     )
 
 
-class ReaderTextQuote(ReaderWireModel):
-    exact: str = Field(min_length=1, max_length=8192)
-    prefix: str | None = Field(default=None, max_length=4096)
-    suffix: str | None = Field(default=None, max_length=4096)
+class ReadiumLocatorLocations(ReadiumExtensionModel):
+    """Readium locations with validated portable anchors and extension fields."""
 
-
-class ReaderEngineLocator(ReaderWireModel):
-    engine: Literal["readium", "foliate"]
-    platform: Literal["android", "ios", "web"]
-    version: str = Field(min_length=1, max_length=191)
-    payload: dict[str, ReaderJsonValue]
+    css_selector: str | None = Field(
+        default=None,
+        alias="cssSelector",
+        min_length=1,
+        max_length=4096,
+        exclude_if=lambda value: value is None,
+    )
+    fragments: list[str] = Field(default_factory=list, max_length=16)
+    progression: float | None = Field(
+        default=None, ge=0, le=1, exclude_if=lambda value: value is None
+    )
+    total_progression: float | None = Field(
+        default=None,
+        alias="totalProgression",
+        ge=0,
+        le=1,
+        exclude_if=lambda value: value is None,
+    )
+    position: int | None = Field(
+        default=None, ge=1, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
-    def require_bounded_payload(self) -> ReaderEngineLocator:
+    def validate_fragments(self) -> ReadiumLocatorLocations:
+        if any(
+            not fragment.strip() or len(fragment) > 4096 for fragment in self.fragments
+        ):
+            raise ValueError("Locator fragments must be non-empty and bounded")
+        if self.css_selector is not None and not self.css_selector.strip():
+            raise ValueError("Locator CSS selector must not be blank")
+        return self
+
+
+class ReadiumLocatorPayload(ReadiumExtensionModel):
+    """Validated portable subset of a Readium Locator JSON object."""
+
+    href: str = Field(min_length=1, max_length=8192)
+    type: str = Field(min_length=1, max_length=256)
+    title: str | None = Field(
+        default=None, max_length=4096, exclude_if=lambda value: value is None
+    )
+    locations: ReadiumLocatorLocations
+    text: ReadiumLocatorText | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def require_exact_anchor(self) -> ReadiumLocatorPayload:
+        if not self.href.strip() or not self.type.strip() or "\\" in self.href:
+            raise ValueError("Readium Locator href and media type must be canonical")
+        parsed_href = urlsplit(self.href)
+        path_segments = parsed_href.path.replace("\\", "/").split("/")
+        if (
+            parsed_href.scheme
+            or parsed_href.netloc
+            or parsed_href.path.startswith("/")
+            or ".." in path_segments
+        ):
+            raise ValueError("Readium Locator href must be publication-relative")
+        has_text_anchor = (
+            self.text is not None
+            and self.text.highlight is not None
+            and bool(self.text.highlight.strip())
+        )
+        if not (
+            self.locations.css_selector or self.locations.fragments or has_text_anchor
+        ):
+            raise PydanticCustomError(
+                "reader_locator_not_exact",
+                "Readium Locator requires a CSS selector, fragment, or text highlight",
+            )
+        return self
+
+
+class LocatorEnvelope(ReaderWireModel):
+    engine: Literal["readium"]
+    platform: Literal["android", "ios", "web"]
+    version: str = Field(min_length=1, max_length=256)
+    publication: PublicationFingerprint
+    payload: ReadiumLocatorPayload
+
+    @field_validator("version")
+    @classmethod
+    def require_non_blank_version(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Readium Navigator version must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def require_bounded_envelope(self) -> LocatorEnvelope:
         encoded = json.dumps(
-            self.payload,
+            self.model_dump(by_alias=True, exclude_none=True),
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
-        if len(encoded) > 65_536:
-            raise ValueError("engineLocator payload exceeds 64 KiB")
+        if len(encoded) > _MAX_LOCATOR_ENVELOPE_BYTES:
+            raise ValueError("Locator envelope exceeds 64 KiB")
         return self
 
 
+class ReaderProgressPut(ReaderWireModel):
+    schema_version: Literal[4] = Field(alias="schemaVersion")
+    client_id: str = Field(alias="clientId", min_length=1, max_length=256)
+    mutation_id: UUID = Field(alias="mutationId")
+    base_revision: int = Field(alias="baseRevision", ge=0)
+    captured_at_epoch_millis: int = Field(
+        alias="capturedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
+    )
+    locator: LocatorEnvelope
+
+    @field_validator("client_id")
+    @classmethod
+    def require_non_blank_client_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Reader clientId must not be blank")
+        return value
+
+
+# Bookmarks retain their independent collection contract until their revisioned
+# synchronization capability is replaced. They deliberately do not participate
+# in progress restoration.
 class ReflowLocation(ReaderWireModel):
     kind: Literal["reflow"]
-    resource_key: str | None = Field(
-        default=None, alias="resourceKey", min_length=1, max_length=2048
-    )
+    resource_key: str = Field(alias="resourceKey", min_length=1, max_length=2048)
     progression: float | None = Field(default=None, ge=0, le=1)
-    position: int | None = Field(default=None, ge=1)
-    text_quote: ReaderTextQuote | None = Field(default=None, alias="textQuote")
-    content_fingerprint: ReaderContentFingerprint | None = Field(
-        default=None, alias="contentFingerprint"
-    )
-    engine_locator: ReaderEngineLocator | None = Field(
-        default=None, alias="engineLocator"
-    )
-
-    @model_validator(mode="after")
-    def require_anchor(self) -> ReflowLocation:
-        if all(
-            value is None
-            for value in (
-                self.resource_key,
-                self.progression,
-                self.position,
-                self.text_quote,
-                self.engine_locator,
-            )
-        ):
-            raise ValueError("Reflow location requires an anchor")
-        return self
 
 
 class ComicLocation(ReaderWireModel):
     kind: Literal["comic"]
     page_index: int = Field(alias="pageIndex", ge=1)
-    engine_locator: ReaderEngineLocator | None = Field(
-        default=None, alias="engineLocator"
-    )
 
 
 class PdfLocation(ReaderWireModel):
     kind: Literal["pdf"]
     page_number: int = Field(alias="pageNumber", ge=1)
-    engine_locator: ReaderEngineLocator | None = Field(
-        default=None, alias="engineLocator"
-    )
 
 
 class AudioLocation(ReaderWireModel):
@@ -128,28 +241,12 @@ class AudioLocation(ReaderWireModel):
     file_id: str = Field(alias="fileId", min_length=1, max_length=191)
     chapter_id: str | None = Field(default=None, alias="chapterId", max_length=191)
     position_ms: int = Field(alias="positionMs", ge=0)
-    engine_locator: ReaderEngineLocator | None = Field(
-        default=None, alias="engineLocator"
-    )
 
 
 ReaderLocation: TypeAlias = Annotated[
     ReflowLocation | ComicLocation | PdfLocation | AudioLocation,
     Field(discriminator="kind"),
 ]
-
-
-class ReaderProgressPut(ReaderWireModel):
-    schema_version: Literal[4] = Field(alias="schemaVersion")
-    client_id: str = Field(alias="clientId", min_length=1, max_length=191)
-    updated_at_epoch_millis: int = Field(
-        alias="updatedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
-    )
-    percent: float = Field(ge=0, le=100)
-    location: ReaderLocation | None = None
-    content_fingerprint: str = Field(
-        alias="contentFingerprint", min_length=1, max_length=191
-    )
 
 
 class ReaderBookSummary(ReaderWireModel):
@@ -224,15 +321,22 @@ class ReaderCapabilities(ReaderWireModel):
     supports_spreads: bool = Field(alias="supportsSpreads")
 
 
+class ReaderPublicationAccess(ReaderWireModel):
+    manifest_url: str = Field(alias="manifestUrl")
+    positions_url: str = Field(alias="positionsUrl")
+
+
 class ReaderProgressSnapshot(ReaderWireModel):
     schema_version: Literal[4] = Field(4, alias="schemaVersion")
-    client_id: str = Field(alias="clientId")
-    updated_at_epoch_millis: int = Field(
-        alias="updatedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
+    revision: int = Field(ge=1)
+    locator: LocatorEnvelope
+    display_percent: float = Field(alias="displayPercent", ge=0, le=100)
+    received_at_epoch_millis: int = Field(
+        alias="receivedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
     )
-    percent: float = Field(ge=0, le=100)
-    location: ReaderLocation | None = None
-    content_fingerprint: str = Field(alias="contentFingerprint")
+    captured_at_epoch_millis: int | None = Field(
+        default=None, alias="capturedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
+    )
 
 
 class ReaderBootstrapData(ReaderWireModel):
@@ -240,7 +344,9 @@ class ReaderBootstrapData(ReaderWireModel):
     user_id: str = Field(alias="userId")
     reader_type: ReaderFormat = Field(alias="readerType")
     source_format: ReflowableFormat | None = Field(default=None, alias="sourceFormat")
-    content_fingerprint: str = Field(alias="contentFingerprint")
+    publication_fingerprint: PublicationFingerprint = Field(
+        alias="publicationFingerprint"
+    )
     book: ReaderBookSummary
     media_version: ReaderMediaVersionSummary = Field(alias="mediaVersion")
     volume: ReaderVolumeSummary
@@ -249,6 +355,7 @@ class ReaderBootstrapData(ReaderWireModel):
     units: list[ReaderUnitSummary]
     file_url: str = Field(alias="fileUrl")
     capabilities: ReaderCapabilities
+    publication: ReaderPublicationAccess | None = None
     progress_snapshot: ReaderProgressSnapshot | None = Field(
         default=None, alias="progressSnapshot"
     )
@@ -259,13 +366,9 @@ class ReaderBootstrapResponse(ReaderWireModel):
     data: ReaderBootstrapData
 
 
-class ReaderProgressData(ReaderWireModel):
-    progress: ReaderProgressSnapshot
-
-
 class ReaderProgressResponse(ReaderWireModel):
     ok: Literal[True] = True
-    data: ReaderProgressData
+    data: ReaderProgressSnapshot
 
 
 class ReaderReadingStatusPut(ReaderWireModel):
@@ -320,6 +423,12 @@ class ReaderErrorBody(ReaderWireModel):
     details: dict[str, ReaderJsonValue] | None = None
 
 
+class ReaderProgressConflictBody(ReaderWireModel):
+    message: str
+    code: Literal["READER_PROGRESS_CONFLICT"] = "READER_PROGRESS_CONFLICT"
+    current: ReaderProgressSnapshot
+
+
 class ReaderUnauthorizedError(HttpContractError[ReaderErrorBody]):
     status_code = 401
     body_model = ReaderErrorBody
@@ -333,6 +442,11 @@ class ReaderNotFoundError(HttpContractError[ReaderErrorBody]):
 class ReaderConflictError(HttpContractError[ReaderErrorBody]):
     status_code = 409
     body_model = ReaderErrorBody
+
+
+class ReaderProgressConflictError(HttpContractError[ReaderProgressConflictBody]):
+    status_code = 409
+    body_model = ReaderProgressConflictBody
 
 
 class ReaderValidationError(HttpContractError[ReaderErrorBody]):

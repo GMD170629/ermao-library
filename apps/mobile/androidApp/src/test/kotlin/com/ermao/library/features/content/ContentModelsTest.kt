@@ -15,6 +15,22 @@ import org.junit.Test
 
 class ContentModelsTest {
     @Test
+    fun volumeIndexUsesServerValueAndFallsBackToOneBasedPosition() {
+        val base = VolumeContent(
+            id = "volume-1",
+            title = "Volume",
+            format = "EPUB",
+            progressPercent = null,
+            readable = true,
+            selected = false,
+        )
+
+        assertEquals("01", base.displayIndex(0))
+        assertEquals("03", base.copy(volumeIndex = 3.0).displayIndex(0))
+        assertEquals("1.5", base.copy(volumeIndex = 1.5).displayIndex(0))
+    }
+
+    @Test
     fun filterCountIncludesOnlySupportedPhaseSevenOptions() {
         val filters = WorksFilters(
             media = setOf(MediaFilter.Ebook, MediaFilter.Audiobook),
@@ -66,9 +82,8 @@ class ContentModelsTest {
         )
 
         assertFalse(content.hasDescription)
-        assertFalse(content.showsContentTabs)
         assertFalse(content.showsMediaPicker)
-        assertTrue(content.copy(description = "Description").showsContentTabs)
+        assertTrue(content.copy(description = "Description").hasDescription)
         assertTrue(content.copy(media = content.media + MediaContent("COMIC", emptyList())).showsMediaPicker)
     }
 }

@@ -19,9 +19,13 @@ import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
+import com.ermao.library.shared.modules.shelf.application.ShelfRepository
+import com.ermao.library.shared.modules.shelf.infrastructure.KtorShelfRepository
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 fun createAndroidMobileRuntime(
@@ -52,6 +56,11 @@ fun createAndroidContentRepository(context: Context): ContentRepository {
     )
 }
 
+fun createAndroidShelfRepository(context: Context): ShelfRepository =
+    KtorShelfRepository(
+        ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+    )
+
 /** Independent personal-settings composition; authenticated cookies remain in encrypted storage. */
 fun createAndroidPersonalSettingsRepository(context: Context): PersonalSettingsRepository {
     val cookieVault = AndroidEncryptedCookieVault(context.applicationContext)
@@ -74,6 +83,15 @@ fun createAndroidReaderProgressSyncPort(
     profile: ServerProfile,
 ): ReaderProgressSyncPort =
     KtorReaderProgressSyncPort(
+        clients = ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+        profile = profile,
+    )
+
+fun createAndroidReaderBookmarkSyncPort(
+    context: Context,
+    profile: ServerProfile,
+): ReaderBookmarkSyncPort =
+    KtorReaderBookmarkSyncPort(
         clients = ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
         profile = profile,
     )

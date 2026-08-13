@@ -13,6 +13,8 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderPublication
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ContentFingerprint
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.ReaderAppearancePreferences
+import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
@@ -67,6 +69,7 @@ class ReaderEpubInstrumentedTest {
     fun opensRendersNavigatesAndAppliesPreferencesWithReadium() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             waitForReader(scenario)
+            scenario.onActivity { activity -> assertFalse(activity.controlsVisibleForTesting) }
             val initial = currentLocation(scenario)
             assertNotNull(initial.engineLocator)
             assertTrue(renderedText(scenario).contains("第一章"))
@@ -93,24 +96,26 @@ class ReaderEpubInstrumentedTest {
                 assertTrue(checkNotNull(activity.controllerForTesting).goNext())
                 checkNotNull(activity.controllerForTesting).updatePreferences(
                     ReaderPreferences(
-                        fontSize = 1.4,
-                        lineHeight = 1.6,
-                        theme = ReaderTheme.Night,
-                        readingMode = ReaderReadingMode.ContinuousScroll,
+                        appearance = ReaderAppearancePreferences(theme = ReaderTheme.Night),
+                        epub = ReaderEpubPreferences(
+                            fontSize = 25,
+                            lineHeight = 1.6,
+                            flow = ReaderReadingMode.ContinuousScroll,
+                        ),
                     ),
                 )
             }
             waitUntil(scenario, "Readium preferences") { activity ->
                 val navigator = activity.navigatorOrNull() ?: return@waitUntil false
-                abs(navigator.settings.value.fontSize - 1.4) < 0.01 &&
+                abs(navigator.settings.value.fontSize - (25.0 / 18.0)) < 0.01 &&
                     navigator.settings.value.scroll &&
                     navigator.settings.value.theme == Theme.DARK
             }
 
             scenario.onActivity { activity ->
                 val preferences = checkNotNull(activity.controllerForTesting).preferences.value
-                assertEquals(1.6, preferences.lineHeight, 0.01)
-                assertEquals(ReaderReadingMode.ContinuousScroll, preferences.readingMode)
+                assertEquals(1.6, preferences.epub.lineHeight, 0.01)
+                assertEquals(ReaderReadingMode.ContinuousScroll, preferences.epub.flow)
                 val controller = checkNotNull(activity.controllerForTesting)
                 assertTrue(controller.goTo(controller.tableOfContents.last().location))
             }

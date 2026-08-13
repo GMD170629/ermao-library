@@ -7,7 +7,9 @@ import UIKit
 struct ErmaoLibraryApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sessionStore: SessionStore
+    @StateObject private var downloadCenter: DownloadCenterStore
     private let contentClient: any ContentClient
+    private let shelfClient: any ShelfClient
     private let contentCache: LibraryCacheStore
     private let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     private let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
@@ -19,14 +21,24 @@ struct ErmaoLibraryApp: App {
             ContentUITestFixture.launchEnvironmentKey
         ] == "1"
         let cookieStore = KeychainCookiePayloadStore()
-        readerComposition = usesContentFixture ? nil : try? IosReaderComposition(cookieStore: cookieStore)
+        let managedDownloads = ManagedDownloadStore()
+        readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
+            cookieStore: cookieStore,
+            downloadArtifacts: managedDownloads
+        )
         let runtime: any MobileRuntimeClient = usesContentFixture
             ? ContentUITestFixture.makeRuntime()
             : AppCompositionRoot.makeRuntimeClient(cookieStore: cookieStore)
         let contentCache = LibraryCacheStore()
+        let downloadTransfer: any ManagedDownloadTransferring = usesContentFixture
+            ? UnavailableManagedDownloadTransfer()
+            : SharedManagedDownloadTransfer(cookieStore: cookieStore)
         contentClient = usesContentFixture
             ? ContentUITestFixture.makeContentClient()
             : ContentCompositionRoot.makeClient(cookieStore: cookieStore)
+        shelfClient = usesContentFixture
+            ? ContentUITestFixture.makeShelfClient()
+            : ShelfCompositionRoot.makeClient(cookieStore: cookieStore)
         settingsRepository = usesContentFixture
             ? nil
             : IosCompositionKt.createIosPersonalSettingsRepository(cookieStore: cookieStore)
@@ -37,8 +49,20 @@ struct ErmaoLibraryApp: App {
             ? ContentUITestFixture.makeSettingsClient()
             : nil
         self.contentCache = contentCache
+        _downloadCenter = StateObject(
+            wrappedValue: DownloadCenterStore(
+                repository: managedDownloads,
+                transfer: downloadTransfer
+            )
+        )
         _sessionStore = StateObject(
-            wrappedValue: SessionStore(runtime: runtime, privateContentCache: contentCache)
+            wrappedValue: SessionStore(
+                runtime: runtime,
+                privateContentCache: CompositePrivateContentCache(
+                    libraryCache: contentCache,
+                    downloads: managedDownloads
+                )
+            )
         )
     }
 
@@ -47,7 +71,9 @@ struct ErmaoLibraryApp: App {
             AppRootView(
                 store: sessionStore,
                 contentClient: contentClient,
+                shelfClient: shelfClient,
                 contentCache: contentCache,
+                downloads: downloadCenter,
                 settingsRepository: settingsRepository,
                 administrativeSettingsRepository: administrativeSettingsRepository,
                 settingsClientOverride: settingsClientOverride,

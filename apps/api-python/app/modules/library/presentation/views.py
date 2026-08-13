@@ -292,42 +292,20 @@ def _media_position_label(
         return "未开始"
     if reader_type != "audio":
         location = _progress_location(progress)
+        payload = (
+            location.get("payload")
+            if location.get("engine") == "readium"
+            and isinstance(location.get("payload"), dict)
+            else {}
+        )
+        href = payload.get("href")
         page = _number_or_none(
-            location.get("pageIndex")
-            if location.get("type") == "comic"
-            else location.get("pageNumber")
-            if location.get("type") == "pdf"
+            href.removeprefix("page-")
+            if isinstance(href, str) and href.startswith("page-")
             else None
         )
         if page is not None:
             return f"第 {page} 页"
-        foliate = location.get("foliate")
-        foliate = foliate if isinstance(foliate, dict) else {}
-        toc = foliate.get("toc")
-        toc = toc if isinstance(toc, dict) else {}
-        chapter_title = toc.get("title")
-        if isinstance(chapter_title, str) and chapter_title:
-            return chapter_title
-        foliate_location = foliate.get("location")
-        foliate_location = (
-            foliate_location if isinstance(foliate_location, dict) else {}
-        )
-        location_current = _number_or_none(foliate_location.get("current"))
-        location_next = _number_or_none(foliate_location.get("next"))
-        location_total = _number_or_none(foliate_location.get("total"))
-        if (
-            location_current is not None
-            and location_next is not None
-            and location_total is not None
-            and location_total > 0
-        ):
-            start = min(location_total, location_current + 1)
-            end = min(location_total, max(start, location_next + 1))
-            return (
-                f"Loc {start} / {location_total}"
-                if start == end
-                else f"Loc {start}–{end} / {location_total}"
-            )
         return "继续上次位置"
     location = _progress_location(progress)
     position_ms = _number_or_none(
@@ -1139,7 +1117,8 @@ def _active_media_view(
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, unit_page), total_pages)
     selected_rows = unit_rows[(page - 1) * page_size : page * page_size]
-    reading_units = [_reading_unit_view(unit) for unit in selected_rows]
+    all_reading_units = [_reading_unit_view(unit) for unit in unit_rows]
+    reading_units = all_reading_units[(page - 1) * page_size : page * page_size]
     progress = db.scalar(
         select(LibraryReadingProgress).where(
             LibraryReadingProgress.user_id == user_id,
@@ -1174,7 +1153,7 @@ def _active_media_view(
             "totalPages": total_pages,
         },
     }
-    progress_navigation = _progress_navigation(progress_view, reading_units)
+    progress_navigation = _progress_navigation(progress_view, all_reading_units)
     return {
         "key": selected_tab,
         "formatLabel": selected_volume.get("format") or "UNKNOWN",
@@ -1327,14 +1306,15 @@ def _work_reading_units_view(
     )
     total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
     bounded_page = min(max(1, page), total_pages)
-    units = db.scalars(
+    all_units = db.scalars(
         select(LibraryReadingUnit)
         .where(LibraryReadingUnit.volume_id == volume_id)
         .order_by(LibraryReadingUnit.sort_order, LibraryReadingUnit.id)
-        .limit(bounded_page_size)
-        .offset((bounded_page - 1) * bounded_page_size)
     ).all()
-    unit_views = [_reading_unit_view(unit) for unit in units]
+    all_unit_views = [_reading_unit_view(unit) for unit in all_units]
+    unit_views = all_unit_views[
+        (bounded_page - 1) * bounded_page_size : bounded_page * bounded_page_size
+    ]
     progress = db.scalar(
         select(LibraryReadingProgress).where(
             LibraryReadingProgress.user_id == user.id,
@@ -1351,7 +1331,7 @@ def _work_reading_units_view(
         if progress is not None
         else None
     )
-    navigation = _progress_navigation(progress_view, unit_views)
+    navigation = _progress_navigation(progress_view, all_unit_views)
     return {
         "units": unit_views,
         "page": {

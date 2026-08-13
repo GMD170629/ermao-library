@@ -1,97 +1,110 @@
 package com.ermao.library.shared.modules.reader
 
-import com.ermao.library.shared.modules.reader.application.LocalFirstReaderProgressStore
 import com.ermao.library.shared.modules.reader.application.ReaderProgressPushResult
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncCoordinator
-import com.ermao.library.shared.modules.reader.application.ReaderProgressUpload
+import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncStateStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class ReaderProgressSyncTest {
     @Test
-    fun localSavePrecedesSingleNetworkPut() = runBlocking {
+    fun exactLocalAndPendingCommitPrecedesNetwork() = runBlocking {
         val events = mutableListOf<String>()
-        val local = FakeStore { events += "local" }
+        val store = FakeStore { events += "durable" }
         val coordinator = ReaderProgressSyncCoordinator(
-            local,
+            store,
             server = { upload ->
-                events += "network:${upload.snapshot.percent}"
-                ReaderProgressPushResult.Accepted(upload.snapshot)
+                events += "network"
+                ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, upload.mutation.baseRevision + 1))
             },
             scope = CoroutineScope(coroutineContext),
+            createMutationId = { MUTATION_ID },
         )
 
-        coordinator.saveLocalAndSubmit(target(), progress(0.4, 1))
+        coordinator.saveLocalAndSubmit(target(), progress(1))
         coordinator.awaitIdle()
 
-        assertEquals(listOf("local", "network:40.0"), events)
-        assertEquals(progress(0.4, 1), local.value)
+        assertEquals(listOf("durable", "network"), events)
+        assertEquals(1, store.state.confirmedRevision)
+        assertNull(store.state.pending)
     }
 
     @Test
-    fun inFlightRequestKeepsOnlyLatestPendingSnapshotAndFailureIsDiscarded() = runBlocking {
-        val releaseFirst = CompletableDeferred<Unit>()
-        val startedFirst = CompletableDeferred<Unit>()
-        val uploaded = mutableListOf<Double>()
+    fun retryableFailureKeepsDurableLatestPendingAcrossWorkerRuns() = runBlocking {
+        val store = FakeStore()
+        var calls = 0
         val coordinator = ReaderProgressSyncCoordinator(
-            FakeStore(),
+            store,
             server = { upload ->
-                uploaded += upload.snapshot.percent
+                calls += 1
+                if (calls == 1) ReaderProgressPushResult.RetryableFailure("OFFLINE")
+                else ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, 1))
+            },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { MUTATION_ID },
+        )
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        coordinator.awaitIdle()
+        assertNotNull(store.state.pending)
+
+        coordinator.retryPending(target())
+        coordinator.awaitIdle()
+        assertNull(store.state.pending)
+    }
+
+    @Test
+    fun conflictIsDurableAndStopsAutomaticOverwrite() = runBlocking {
+        val store = FakeStore()
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload -> ReaderProgressPushResult.Conflict(snapshot(upload.mutation.locator, 5)) },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { MUTATION_ID },
+        )
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        coordinator.awaitIdle()
+
+        assertEquals(5, store.state.conflict?.server?.revision)
+        assertNotNull(store.state.pending)
+        Unit
+    }
+
+    @Test
+    fun inFlightUpdatesCollapseToDurableLatestMutation() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val uploaded = mutableListOf<Long>()
+        var mutationCounter = 0
+        val store = FakeStore()
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload ->
+                uploaded += upload.mutation.capturedAtEpochMillis
                 if (uploaded.size == 1) {
-                    startedFirst.complete(Unit)
-                    releaseFirst.await()
-                    ReaderProgressPushResult.Discarded("OFFLINE")
-                } else ReaderProgressPushResult.Accepted(upload.snapshot)
+                    started.complete(Unit)
+                    release.await()
+                }
+                ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, uploaded.size.toLong()))
             },
             scope = CoroutineScope(coroutineContext),
+            createMutationId = { "00000000-0000-4000-8000-${(++mutationCounter).toString().padStart(12, '0')}" },
         )
 
-        coordinator.saveLocalAndSubmit(target(), progress(0.1, 1))
-        startedFirst.await()
-        coordinator.saveLocalAndSubmit(target(), progress(0.2, 2))
-        coordinator.saveLocalAndSubmit(target(), progress(0.3, 3))
-        releaseFirst.complete(Unit)
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        started.await()
+        coordinator.saveLocalAndSubmit(target(), progress(2))
+        coordinator.saveLocalAndSubmit(target(), progress(3))
+        release.complete(Unit)
         coordinator.awaitIdle()
 
-        assertEquals(listOf(10.0, 30.0), uploaded)
-    }
-
-    @Test
-    fun localFailurePreventsNetworkPut() = runBlocking {
-        var uploaded: ReaderProgressUpload? = null
-        val coordinator = ReaderProgressSyncCoordinator(
-            object : ReaderProgressStore {
-                override suspend fun load(sourceId: String) = null
-                override suspend fun save(progress: ReaderProgress) = error("disk full")
-                override suspend fun delete(sourceId: String) = Unit
-            },
-            server = { upload ->
-                uploaded = upload
-                ReaderProgressPushResult.Accepted(upload.snapshot)
-            },
-            scope = CoroutineScope(coroutineContext),
-        )
-
-        runCatching { coordinator.saveLocalAndSubmit(target(), progress(0.5, 1)) }
-
-        assertNull(uploaded)
-    }
-
-    @Test
-    fun exactIdentityIgnoresAuthorizationVersionButSeparatesClientAndContent() {
-        val first = identity(ReaderSyncNamespace("server", "user", 4))
-        val second = identity(ReaderSyncNamespace("server", "user", 5))
-
-        assertEquals(first.stableKey, second.stableKey)
-        kotlin.test.assertNotEquals(first.stableKey, first.copy(clientId = "another-client").stableKey)
-        kotlin.test.assertNotEquals(
-            first.stableKey,
-            first.copy(localContentFingerprint = fingerprint('b')).stableKey,
-        )
+        assertEquals(listOf(1L, 3L), uploaded)
     }
 
     private fun target() = ReaderProgressSyncTarget(
@@ -99,43 +112,62 @@ class ReaderProgressSyncTest {
         "work-1",
         "volume-1",
         ReaderFormat.Epub,
-        ReaderServerContentFingerprint("server-token"),
     )
 
-    private fun progress(progression: Double, timestamp: Long) = ReaderProgress(
+    private fun progress(timestamp: Long) = ReaderProgress(
         "volume-1",
         ReflowReaderLocation(
-            "chapter.xhtml",
-            progression,
-            progression,
+            resourceKey = "chapter.xhtml",
+            engineLocator = envelope().asEngineLocator(),
             contentFingerprint = fingerprint(),
         ),
         timestamp,
         "android-client",
     )
 
-    private fun identity(namespace: ReaderSyncNamespace) = ReaderLocalProgressIdentity(
-        namespace,
-        "android-client",
+    private fun snapshot(locator: ReadiumLocatorEnvelope, revision: Long) = ReaderProgressSnapshotV4(
         "volume-1",
-        fingerprint(),
+        revision,
+        locator,
+        50.0,
+        100,
     )
 
-    private fun fingerprint(character: Char = 'a') = ContentFingerprint(
-        "sha256:" + character.toString().repeat(64),
-        "readium-kotlin:3.3.0",
-        "v1",
+    private fun envelope() = ReadiumLocatorEnvelope.parse(
+        """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"${"a".repeat(64)}","parser":"readium:epub","normalization":"epub-v1"},"payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p1"},"text":{"highlight":"anchor"}}}""",
     )
 
-    private class FakeStore(private val afterSave: () -> Unit = {}) : ReaderProgressStore {
+    private fun fingerprint() = ContentFingerprint("sha256:" + "a".repeat(64), "readium:epub", "epub-v1")
+
+    private class FakeStore(private val committed: () -> Unit = {}) : ReaderProgressSyncStateStore {
         var value: ReaderProgress? = null
+        var state = ReaderProgressDurableState()
+
         override suspend fun load(sourceId: String) = value
-        override suspend fun save(progress: ReaderProgress) {
+        override suspend fun save(progress: ReaderProgress) { value = progress }
+        override suspend fun delete(sourceId: String) { value = null; state = ReaderProgressDurableState() }
+        override suspend fun loadSyncState() = state
+        override suspend fun commitProgressAndPending(progress: ReaderProgress, pending: ReaderProgressMutation) {
             value = progress
-            afterSave()
+            state = state.copy(pending = pending, conflict = null, terminalFailureCode = null)
+            committed()
         }
-        override suspend fun delete(sourceId: String) {
-            value = null
+        override suspend fun acknowledge(mutationId: String, snapshot: ReaderProgressSnapshotV4) {
+            val pending = state.pending
+            state = state.copy(
+                confirmedRevision = snapshot.revision,
+                pending = if (pending?.mutationId == mutationId) null else pending?.copy(baseRevision = snapshot.revision),
+            )
         }
+        override suspend fun recordConflict(conflict: ReaderProgressConflict) {
+            state = state.copy(conflict = conflict)
+        }
+        override suspend fun recordTerminalFailure(mutationId: String, failureCode: String) {
+            state = state.copy(terminalFailureCode = failureCode)
+        }
+    }
+
+    private companion object {
+        const val MUTATION_ID = "58a3ac3c-52d0-41ed-9c85-0524b532f25b"
     }
 }

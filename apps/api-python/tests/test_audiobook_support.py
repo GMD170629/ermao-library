@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from PIL import Image
@@ -1106,12 +1107,12 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "audio"
-    assert bootstrap["contentFingerprint"].startswith("sha256:")
+    assert bootstrap["publicationFingerprint"]["originalFileHash"].startswith("sha256:")
     assert (
         client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
-        ]["contentFingerprint"]
-        == bootstrap["contentFingerprint"]
+        ]["publicationFingerprint"]
+        == bootstrap["publicationFingerprint"]
     )
     assert [track["trackNumber"] for track in bootstrap["files"]] == [2, 10]
     assert {track["codec"] for track in bootstrap["files"]} == {"mp3"}
@@ -1159,24 +1160,29 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     common = {
         "schemaVersion": 4,
         "clientId": "audio-player",
-        "contentFingerprint": bootstrap["contentFingerprint"],
-        "location": {
-            "kind": "audio",
-            "fileId": final_track["id"],
-            "chapterId": bootstrap["units"][-1]["id"],
-            "positionMs": final_track["durationMs"],
+        "locator": {
+            "engine": "readium",
+            "platform": "web",
+            "version": "audio-test:1",
+            "publication": bootstrap["publicationFingerprint"],
+            "payload": {
+                "href": final_track["id"],
+                "type": "audio/mpeg",
+                "locations": {"fragments": [bootstrap["units"][-1]["id"]]},
+            },
         },
     }
     seek = client.put(
         f"/api/reader/v4/volumes/{result.volume_id}/progress",
         json={
             **common,
-            "updatedAtEpochMillis": 1_700_000_001_000,
-            "percent": 99.999,
+            "mutationId": str(uuid4()),
+            "baseRevision": 0,
+            "capturedAtEpochMillis": 1_700_000_001_000,
         },
     )
     assert seek.status_code == 200
-    assert seek.json()["data"]["progress"]["percent"] == 99.999
+    assert seek.json()["data"]["revision"] == 1
     assert (
         client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
@@ -1188,12 +1194,23 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
         f"/api/reader/v4/volumes/{result.volume_id}/progress",
         json={
             **common,
-            "updatedAtEpochMillis": 1_700_000_002_000,
-            "percent": 100,
+            "mutationId": str(uuid4()),
+            "baseRevision": 1,
+            "capturedAtEpochMillis": 1_700_000_002_000,
+            "locator": {
+                **common["locator"],
+                "payload": {
+                    **common["locator"]["payload"],
+                    "locations": {
+                        "fragments": [bootstrap["units"][-1]["id"]],
+                        "totalProgression": 1,
+                    },
+                },
+            },
         },
     )
     assert ended.status_code == 200
-    assert ended.json()["data"]["progress"]["percent"] == 100
+    assert ended.json()["data"]["displayPercent"] == 100
     assert (
         client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
@@ -1205,13 +1222,19 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
         f"/api/reader/v4/volumes/{result.volume_id}/progress",
         json={
             **common,
-            "updatedAtEpochMillis": 1_700_000_003_000,
-            "percent": 10,
-            "location": {
-                "kind": "audio",
-                "fileId": first_track["id"],
-                "chapterId": bootstrap["units"][0]["id"],
-                "positionMs": 10_000,
+            "mutationId": str(uuid4()),
+            "baseRevision": 2,
+            "capturedAtEpochMillis": 1_700_000_003_000,
+            "locator": {
+                **common["locator"],
+                "payload": {
+                    "href": first_track["id"],
+                    "type": "audio/mpeg",
+                    "locations": {
+                        "fragments": [bootstrap["units"][0]["id"]],
+                        "totalProgression": 0.1,
+                    },
+                },
             },
         },
     )
@@ -2651,5 +2674,4 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     bootstrap_data = bootstrap.json()["data"]
     assert [track["trackNumber"] for track in bootstrap_data["files"]] == [1, 2, 3]
     snapshot = bootstrap_data["progressSnapshot"]
-    assert snapshot["contentFingerprint"] == bootstrap_data["contentFingerprint"]
-    assert snapshot["location"] is None, progress["locationJson"]
+    assert snapshot is None, progress["locationJson"]

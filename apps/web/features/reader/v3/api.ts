@@ -1,6 +1,6 @@
-import { normalizeReaderPreferences, type ReaderLocation, type ReaderNavigationEntry, type ReaderSource, type ReflowableFormat } from '@shuku/reader-core';
+import { normalizeReaderPreferences, parseReadiumLocatorEnvelope, publicationFingerprintsMatch, type PublicationFingerprint, type ReaderLocation, type ReaderNavigationEntry, type ReaderSource, type ReflowableFormat } from '@shuku/reader-core';
 import { withBasePath } from '../../../lib/base-path';
-import { localContentFingerprintKey, parseReaderV4ProgressSnapshot, parseV4Location, remoteLocationMatchesPublication, toV4WireLocation, v4LocationToDomain, type ReaderLocationContentFingerprint, type ReaderProgressSnapshot } from '../../../lib/reader';
+import { parseReaderV4ProgressSnapshot, v4LocationToDomain, type ReaderProgressSnapshot } from '../../../lib/reader';
 import type { ReaderBookmark } from './bookmarks';
 
 type VisualReaderType = 'reflowable' | 'comic' | 'pdf';
@@ -50,7 +50,7 @@ export type ReaderBootstrap = Readonly<{
   readerType: VisualReaderType;
   sourceFormat: ReflowableFormat | null;
   contentFingerprint: string;
-  localContentFingerprint: string;
+  publicationFingerprint: PublicationFingerprint;
   book: Readonly<{ id: string; title: string; author: string | null; coverUrl: string | null }>;
   mediaVersion: Readonly<{ id: string; workId: string; mediaKind: MediaKind; completed: boolean }>;
   volume: ReaderVolume;
@@ -63,7 +63,6 @@ export type ReaderBootstrap = Readonly<{
   resumeFingerprintMismatch: boolean;
   progressPercent: number;
   serverProgressSnapshot: ReaderProgressSnapshot | null;
-  locationContentFingerprint?: ReaderLocationContentFingerprint;
   source: ReaderSource;
   initialLocation: ReaderLocation | null;
   serverPreferences: Readonly<{ settings: import('@shuku/reader-core').ReaderPreferences; updatedAt: string | null }>;
@@ -97,6 +96,16 @@ function sourceFormat(value: unknown): ReflowableFormat | null {
 
 function visualReaderType(value: unknown): VisualReaderType | null {
   return value === 'reflowable' || value === 'comic' || value === 'pdf' ? value : null;
+}
+
+function publicationFingerprint(value: unknown): PublicationFingerprint | null {
+  const item = record(value);
+  const originalFileHash = stringValue(item.originalFileHash).trim();
+  const parser = stringValue(item.parser).trim();
+  const normalization = stringValue(item.normalization).trim();
+  return /^(?:sha256:)?[a-f\d]{64}$/iu.test(originalFileHash) && parser && normalization
+    ? { originalFileHash: `sha256:${originalFileHash.replace(/^sha256:/iu, '').toLowerCase()}`, parser, normalization }
+    : null;
 }
 
 function mapVolume(value: unknown): ReaderVolume | null {
@@ -167,50 +176,47 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   const format = sourceFormat(data.sourceFormat);
   if (readerType === 'reflowable' && !format) throw new Error('可重排卷册缺少源格式');
   const units = mapUnits(data.units);
+  const publicationAccess = record(data.publication);
   const files = (Array.isArray(data.files) ? data.files : []).flatMap((raw) => {
     const file = record(raw);
     const id = stringValue(file.id).trim();
     if (!id) return [];
     return [{ id, kind: stringValue(file.kind), mimeType: stringValue(file.mimeType), sizeBytes: numberValue(file.sizeBytes), contentHash: nullableString(file.contentHash), durationMs: nullableNumber(file.durationMs), discNumber: nullableNumber(file.discNumber), trackNumber: nullableNumber(file.trackNumber), sortOrder: numberValue(file.sortOrder), url: withBasePath(stringValue(file.url)) }];
   });
-  const contentFingerprint = stringValue(data.contentFingerprint).trim();
   const fileUrl = stringValue(data.fileUrl).trim();
-  if (!contentFingerprint || !fileUrl) throw new Error('阅读器启动信息缺少内容文件');
+  if (!fileUrl) throw new Error('阅读器启动信息缺少内容文件');
   const capabilities = record(data.capabilities);
-  const originalFileHash = files.find((file) => file.kind === 'CONTENT')?.contentHash
-    ?? files.find((file) => file.contentHash)?.contentHash
-    ?? null;
-  const locationContentFingerprint = originalFileHash?.startsWith('sha256:')
-    ? {
-        originalFileHash,
-        parserVersion: 'foliate-web-v1',
-        normalizationVersion: 'shuku-reader-v4'
-      }
-    : undefined;
-  const localContentFingerprint = localContentFingerprintKey(
-    locationContentFingerprint,
-    contentFingerprint
-  );
+  const fingerprint = publicationFingerprint(data.publicationFingerprint);
+  if (readerType === 'reflowable' && !fingerprint) throw new Error('阅读器启动信息缺少 Publication 指纹');
+  const contentFingerprint = fingerprint
+    ? [fingerprint.originalFileHash, fingerprint.parser, fingerprint.normalization].join('\u0000')
+    : 'non-reflowable';
   const serverProgressSnapshot = data.progressSnapshot === null || data.progressSnapshot === undefined
     ? null
     : parseReaderV4ProgressSnapshot(data.progressSnapshot);
   if (data.progressSnapshot !== null && data.progressSnapshot !== undefined && !serverProgressSnapshot) {
     throw new Error('阅读器启动信息包含无效的 Reader v4 进度快照');
   }
+  const publicationManifestUrl = readerType === 'reflowable'
+    ? nullableString(publicationAccess.manifestUrl)
+    : null;
+  if (readerType === 'reflowable' && !publicationManifestUrl) {
+    throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
+  }
   const source: ReaderSource = readerType === 'reflowable'
-    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format ?? 'epub', contentUrl: withBasePath(fileUrl), contentFingerprint, ...(locationContentFingerprint ? { localContentFingerprint: locationContentFingerprint } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
-    : { workId, volumeId: volume.id, kind: readerType, contentUrl: withBasePath(fileUrl), contentFingerprint, ...(locationContentFingerprint ? { localContentFingerprint: locationContentFingerprint } : {}), totalPages: volume.pageCount };
-  const locationMatchesPublication = remoteLocationMatchesPublication(
-    serverProgressSnapshot?.location ?? null,
-    locationContentFingerprint
-  );
+    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format ?? 'epub', contentUrl: withBasePath(fileUrl), contentFingerprint, ...(fingerprint ? { publicationFingerprint: fingerprint } : {}), ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
+    : { workId, volumeId: volume.id, kind: readerType, contentUrl: withBasePath(fileUrl), contentFingerprint, totalPages: volume.pageCount };
+  const locationMatchesPublication = Boolean(serverProgressSnapshot && fingerprint
+    && publicationFingerprintsMatch(serverProgressSnapshot.locator.publication, fingerprint));
   return {
     schemaVersion: 4,
     userId: stringValue(data.userId),
     readerType,
     sourceFormat: format,
     contentFingerprint,
-    localContentFingerprint,
+    publicationFingerprint: fingerprint ?? {
+      originalFileHash: '0'.repeat(64), parser: 'non-reflowable', normalization: 'non-reflowable-v1'
+    },
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名作品'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
     mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind, completed: mediaVersion.completed === true },
     volume,
@@ -233,21 +239,19 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
       readingDirection: 'ltr'
     },
     resumeFingerprintMismatch: data.resumeFingerprintMismatch === true,
-    progressPercent: serverProgressSnapshot?.percent ?? 0,
+    progressPercent: serverProgressSnapshot?.displayPercent ?? 0,
     serverProgressSnapshot,
-    ...(locationContentFingerprint ? { locationContentFingerprint } : {}),
     source,
     initialLocation: v4LocationToDomain(
-      locationMatchesPublication ? serverProgressSnapshot?.location ?? null : null,
+      locationMatchesPublication ? serverProgressSnapshot?.locator ?? null : null,
       volume.id,
-      format,
-      serverProgressSnapshot?.percent ?? 0
+      format
     ),
     serverPreferences: { settings: normalizeReaderPreferences({}), updatedAt: null }
   };
 }
 
-function bookmark(
+export function readerBookmarkFromWire(
   value: unknown,
   volumeId: string,
   format: ReflowableFormat | null
@@ -257,10 +261,43 @@ function bookmark(
   const label = stringValue(item.label);
   const createdAt = stringValue(item.createdAt);
   const percent = Math.max(0, Math.min(100, numberValue(item.percent)));
-  const wireLocation = parseV4Location(item.location);
-  const location = v4LocationToDomain(wireLocation, volumeId, format, percent);
+  const wireLocation = record(item.location);
+  const resourceKey = stringValue(wireLocation.resourceKey).trim();
+  const resourceProgression = typeof wireLocation.progression === 'number'
+    && Number.isFinite(wireLocation.progression)
+    && wireLocation.progression >= 0
+    && wireLocation.progression <= 1
+    ? wireLocation.progression
+    : undefined;
+  const location: ReaderLocation | null = wireLocation.kind === 'reflow' && resourceKey && format
+    ? {
+        kind: 'reflowable',
+        format,
+        href: resourceKey,
+        ...(resourceProgression !== undefined ? { resourceProgression } : {})
+      }
+    : null;
   if (!id || !createdAt || !location) return null;
   return { id, label, createdAt, location, percent };
+}
+
+export function readerBookmarkToWire(entry: ReaderBookmark) {
+  const exact = entry.location.kind === 'reflowable' ? entry.location.exactLocator : null;
+  const resourceKey = entry.location.kind === 'reflowable'
+    ? entry.location.href ?? exact?.payload.href
+    : null;
+  const progression = entry.location.kind === 'reflowable'
+    ? entry.location.resourceProgression ?? exact?.payload.locations.progression
+    : null;
+  if (!resourceKey) throw new Error('书签缺少可同步的位置锚点');
+  return {
+    ...entry,
+    location: {
+      kind: 'reflow' as const,
+      resourceKey,
+      ...(typeof progression === 'number' ? { progression } : {})
+    }
+  };
 }
 
 export async function fetchReaderBookmarks(volumeId: string, contentFingerprint: string, format: ReflowableFormat | null, signal?: AbortSignal): Promise<ReaderBookmark[]> {
@@ -270,19 +307,15 @@ export async function fetchReaderBookmarks(volumeId: string, contentFingerprint:
   const root = record(payload);
   const data = record(root.data);
   if (!response.ok || root.ok !== true || !Array.isArray(data.bookmarks)) throw new Error(stringValue(record(root.error).message, '读取书签失败'));
-  return data.bookmarks.map((item) => bookmark(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
+  return data.bookmarks.map((item) => readerBookmarkFromWire(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
 }
 
 export async function saveReaderBookmarks(volumeId: string, contentFingerprint: string, format: ReflowableFormat | null, bookmarks: ReaderBookmark[]): Promise<ReaderBookmark[]> {
-  const wireBookmarks = bookmarks.map((entry) => {
-    const location = toV4WireLocation(entry.location);
-    if (!location) throw new Error('书签缺少可同步的位置锚点');
-    return { ...entry, location };
-  });
+  const wireBookmarks = bookmarks.map(readerBookmarkToWire);
   const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentFingerprint, bookmarks: wireBookmarks }) });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);
   if (!response.ok || root.ok !== true || !Array.isArray(data.bookmarks)) throw new Error(stringValue(record(root.error).message, '保存书签失败'));
-  return data.bookmarks.map((item) => bookmark(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
+  return data.bookmarks.map((item) => readerBookmarkFromWire(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
 }

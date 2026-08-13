@@ -750,6 +750,57 @@ class LibraryReadingProgress(Base):
         default=db_timestamp,
         onupdate=db_timestamp,
     )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+class ReaderProgressMutation(Base):
+    """Bounded idempotency receipt for an exact Reader v4 progress mutation."""
+
+    __tablename__ = "ReaderProgressMutation"
+    __table_args__ = (
+        UniqueConstraint(
+            "userId",
+            "volumeId",
+            "mutationId",
+            name="ReaderProgressMutation_userId_volumeId_mutationId_key",
+        ),
+        Index(
+            "ReaderProgressMutation_userId_volumeId_revision_idx",
+            "userId",
+            "volumeId",
+            "revision",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    user_id: Mapped[str] = mapped_column(
+        "userId",
+        String(191),
+        ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    volume_id: Mapped[str] = mapped_column(
+        "volumeId",
+        String(191),
+        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    mutation_id: Mapped[str] = mapped_column("mutationId", String(36), nullable=False)
+    client_id: Mapped[str] = mapped_column("clientId", String(256), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    locator_json: Mapped[str] = mapped_column("locatorJson", Text, nullable=False)
+    content_fingerprint: Mapped[str] = mapped_column(
+        "contentFingerprint", String(191), nullable=False
+    )
+    display_percent: Mapped[float] = mapped_column(
+        "displayPercent", Float, nullable=False
+    )
+    captured_at: Mapped[datetime] = mapped_column(
+        "capturedAt", TimestampMilliseconds(), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        "receivedAt", TimestampMilliseconds(), nullable=False
+    )
 
 
 class UserMediaHistory(Base):

@@ -1,6 +1,6 @@
 import Foundation
-import ReadiumShared
-import ReadiumStreamer
+@preconcurrency import ReadiumShared
+@preconcurrency import ReadiumStreamer
 import SwiftSoup
 
 @MainActor
@@ -19,14 +19,7 @@ final class IosReadiumRuntime {
                 pdfFactory: DefaultPDFDocumentFactory()
             ),
             contentProtections: [],
-            onCreatePublication: { _, container, _ in
-                container = container.map { href, resource in
-                    guard IosEpubContentSanitizer.isMarkup(href.string) else { return resource }
-                    return resource.mapAsString { markup in
-                        IosEpubContentSanitizer.sanitize(markup, resource: href.string)
-                    }
-                }
-            }
+            onCreatePublication: sanitizeEpubPublication
         )
     }
 
@@ -53,6 +46,21 @@ final class IosReadiumRuntime {
             throw IosReaderFailure(code: .drmProtected)
         }
         return publication
+    }
+}
+
+// Readium resolves container resources on background executors. Keeping this transform
+// outside the @MainActor runtime prevents its resource mapper from inheriting main-actor isolation.
+private func sanitizeEpubPublication(
+    _: inout Manifest,
+    container: inout Container,
+    _: inout PublicationServicesBuilder
+) async {
+    container = container.map { href, resource in
+        guard IosEpubContentSanitizer.isMarkup(href.string) else { return resource }
+        return resource.mapAsString { markup in
+            IosEpubContentSanitizer.sanitize(markup, resource: href.string)
+        }
     }
 }
 

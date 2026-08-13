@@ -16,6 +16,16 @@ ENV NEXT_PUBLIC_BASE_PATH=$SHUKU_BASE_PATH
 COPY . .
 RUN pnpm --filter @shuku/web build
 
+FROM debian:bookworm-slim AS mobi-core-builder
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential cmake zlib1g-dev \
+  && rm -rf /var/lib/apt/lists/*
+COPY apps/mobile/native/mobi-core /src/mobi-core
+RUN cmake -S /src/mobi-core -B /build/mobi-core \
+      -DERMAO_MOBI_BUILD_TESTS=OFF \
+      -DERMAO_MOBI_BUILD_FUZZER=OFF \
+  && cmake --build /build/mobi-core --config Release --target ermao_mobi_core_shared
+
 FROM python:3.11.15-slim-bookworm AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -24,6 +34,7 @@ ENV NODE_ENV=production \
   PORT=3000 \
   PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1 \
+  ERMAO_MOBI_CORE_LIBRARY=/usr/local/lib/libermao_mobi_core.so \
   PATH=/opt/shuku-python/bin:$PATH
 
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
@@ -41,6 +52,10 @@ COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder /app/apps/api-python/app ./apps/api-python/app
 COPY --from=builder /app/apps/api-python/pyproject.toml ./apps/api-python/pyproject.toml
+COPY --from=mobi-core-builder /build/mobi-core/libermao_mobi_core.so /usr/local/lib/libermao_mobi_core.so
+COPY --from=mobi-core-builder /src/mobi-core/LICENSE /usr/share/licenses/shuku-mobi-core/LICENSE
+COPY --from=mobi-core-builder /src/mobi-core/UPSTREAM.md /usr/share/licenses/shuku-mobi-core/UPSTREAM.md
+COPY --from=mobi-core-builder /src/mobi-core /usr/share/shuku/source/mobi-core
 RUN python -m venv /opt/shuku-python \
   && /opt/shuku-python/bin/pip install --no-cache-dir ./apps/api-python \
   && /opt/shuku-python/bin/python -m compileall -q ./apps/api-python/app \

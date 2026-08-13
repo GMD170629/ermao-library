@@ -161,16 +161,16 @@ flowchart LR
     Home -->|"目标不唯一"| Detail
     Detail --> Reader
     Detail --> Playing
-    Reader --> Local["本地 progress 事务"]
-    Local --> Outbox["Durable outbox"]
-    Outbox --> Home
+    Reader --> Local["本地精确 progress 事务"]
+    Local --> Sync["Reader v4 单飞 best-effort PUT"]
+    Sync --> Home
 ```
 
 规则：
 
 - 普通冷启动不自动弹 Reader；A02 的继续卡承担恢复入口。
 - CTA 目标唯一才直达；多媒介、多卷、bootstrap/fingerprint 失效进入 A05。
-- A06 返回先完成本地事务，不等待网络 flush。
+- A06 返回先完成本地事务，再执行一次有界上传；网络失败不建立持久重试队列。
 - 首页重新获得焦点时只更新受影响的继续/最近阅读区块，不重载整页。
 - 同一 volume 的重复点击复用正在存在的 Reader session。
 
@@ -215,7 +215,7 @@ flowchart LR
 ### 7.3 作品决策
 
 - A05 默认选中最近使用媒介，否则选择服务端稳定排序第一项。
-- 主 CTA 对应当前选中 volume；卷列表每一项也有明确打开动作。
+- 主 CTA 对应当前选中 volume；多卷封面网格中的每一项都可选择，并由主 CTA 明确打开当前卷。
 - EBOOK/COMIC/PDF 进入 A06；AUDIOBOOK 进入 A07。
 - 下载、加入书架和阅读状态不能竞争主 CTA 的视觉等级。
 
@@ -276,7 +276,10 @@ flowchart LR
 flowchart TD
     Detail["A05 作品详情"] --> Queue["加入下载"]
     Queue --> Center["A08 下载中心"]
-    Center --> Complete["下载完成"]
+    Center --> Complete["下载完成并发布本地工件"]
+    Complete --> Intent{"来源是开始/继续阅读?"}
+    Intent -- "是" --> ReaderReady["自动进入 A06 Reader"]
+    Intent -- "否" --> Center
     Complete --> Offline["网络不可用或明确 401"]
     Offline --> Gate{"30 天 entitlement 有效?"}
     Gate -- "否" --> Reauth["必须重新认证"]
@@ -290,8 +293,10 @@ flowchart TD
 ### 10.1 下载
 
 - A05 的下载动作是次级明确动作，不与开始/继续 CTA 合并。
+- 可重排格式的开始/继续动作必须先检查当前 fingerprint 的 completed 本地工件；缺失时进入下载意图并明确“下载完成后阅读”。PDF 与漫画在线时直接进入流式 Reader，下载仍是离线用途的次级动作。
+- 可重排格式由开始/继续阅读触发下载时，单卷流程依次发布“创建任务、传输进度、Ready to Open”；只有临时文件校验、原子发布和 completed manifest 落盘后才能自动进入 Reader。用户单独点击次级“下载”动作时完成后仍停留当前上下文，不擅自跳转。
 - 入队后停留 A05，并提供“查看下载”。
-- A08 显示进行中、已完成、失败三个稳定分组。
+- A08 显示进行中、已完成、失败三个稳定分组；已完成目录固定为 `作品（书名） → media version → volume`，media version identity/kind 来自 Reader v4 bootstrap，不得按扩展名猜测或把同一作品的电子书、漫画、有声书卷册压成一层。可在本页直接搜索本地已下载书名、作者和卷名。搜索不请求服务器书库，也不将普通缓存视为下载完成。
 - 普通失败行内重试；空间不足引导管理下载。
 - 移除离线副本使用 Dialog，并明确不会删除服务器作品。
 
@@ -306,10 +311,10 @@ flowchart TD
 
 ### 10.3 恢复联网
 
-- 同一 server/user 登录成功后恢复 outbox；不同用户不能看到或消费旧队列。
+- 同一 server/user 登录成功后只恢复音频/书签等仍有持久队列的能力；Reader v4 progress 不补发失败快照，下一次真实位置变化再同步。
 - `authzVersion` 改变后先切换 namespace，再逐个验证下载授权。
 - 不再可访问的内容立即锁定并从可读列表移除。
-- 主动退出登录立即终止 entitlement、删除可读缓存并隔离 outbox。
+- 主动退出登录立即终止 entitlement、删除可读缓存并隔离音频/书签等持久队列。
 
 ## 11. F07：多服务器切换
 
@@ -317,7 +322,7 @@ flowchart TD
 flowchart LR
     Me["我的"] --> Center["A01 服务器中心"]
     Center --> Target["选择非 active profile"]
-    Target --> Pending{"存在未同步 outbox?"}
+    Target --> Pending{"存在音频/书签未同步队列?"}
     Pending -- "否" --> Switch["切换"]
     Pending -- "是" --> Dialog["同步 / 隔离 / 取消"]
     Dialog --> Switch
@@ -330,7 +335,7 @@ flowchart LR
 - 退出 Reader；
 - 停止旧服务器音频；
 - 暂停旧服务器下载；
-- 检查 progress/bookmark outbox。
+- 对 Reader v4 progress 做一次有界本地保存/上传，并检查音频/书签持久队列。
 
 切换后：
 
@@ -393,7 +398,7 @@ flowchart LR
 - 填写、回填和 Sheet 选择不发起检查，也不显示在线、离线、不兼容或证书徽标。
 - 登录检查期间锁定当前表单；取消或视图销毁后旧结果不得覆盖新输入。
 - 不可达、不兼容和不安全 SSL 使用平台原生 Alert；关闭后完整保留表单草稿。
-- 登录成功切换 active namespace 前若存在 outbox，仍使用切换 Dialog。
+- 登录成功切换 active namespace 前若存在音频/书签持久队列，仍使用切换 Dialog。
 
 ### 14.4 Expanded
 
@@ -564,7 +569,7 @@ switch-failed
 | Primary CTA | 固定对应当前媒介/volume 的“开始/继续阅读”或“开始/继续收听” |
 | Detail content tabs | 有简介时显示 `简介 / 媒体版本`；简介为空时隐藏该一级切换并直接展示媒体内容 |
 | Media control | 仅存在两个及以上媒体版本时显示 `电子书 / 漫画 / 有声书` segmented control；单媒体版本直接进入其卷册或章节内容 |
-| Volume / chapter list | 多卷时展示当前媒介的 volume；单卷电子书直接回退到图书章节。阅读进度固定在卷册/章节标题下方，格式、大小/时长再降一级 |
+| Volume / chapter content | 多卷时使用当前媒介的 2:3 封面网格；单卷电子书直接回退到图书章节。卷序号固定在封面左上，阅读进度紧贴封面底部；章节仍使用连续列表 |
 | Mini player | 非 Reader 且有音频会话时显示 |
 
 ### 18.3 动作层级
@@ -581,7 +586,7 @@ switch-failed
 ### 18.4 交互
 
 - 切媒介只更新当前详情状态。
-- 点击 volume 更新选中项；明确打开动作进入 A06/A07。单卷电子书不增加无意义的卷册层，直接展示章节并允许从当前章节继续。
+- 点击 volume 封面更新选中项，主 CTA 进入 A06/A07；下载状态使用封面右上独立原生图标。单卷电子书不增加无意义的卷册层，直接展示章节并允许从当前章节继续。
 - 作者/系列进入共享 facet，并保留详情为返回来源。
 - 详情中的下载使用独立图标状态：未下载为云朵、进行中为带暂停符号的环形控件、完成为勾选圆圈；再次点击进行中控件提供暂停与取消。阅读进度不得复用该位置或形态。
 - 加入书架打开 picker Sheet。
@@ -715,17 +720,19 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 
 | 区域 | 内容 |
 |---|---|
-| Navigation | 返回“我的”、标题“下载”、选择/管理动作 |
+| Navigation | 返回“我的”、标题“下载”、本地已下载搜索、选择/管理动作 |
 | Global status | offline/401 宽限 Banner、剩余天数、待同步数量；正常时隐藏 |
 | Storage summary | 已用空间、可释放空间、下载设置入口 |
 | Active section | 任务标题、volume/格式、进度、已传输/总量、状态、暂停/继续 |
-| Completed section | 已下载内容、大小、最后打开、离线可用状态 |
+| Completed section | 按“作品 → media version → volume”展开的已下载内容；作品层显示书名/作者/总大小，media version 层显示媒介种类与卷数，volume 层显示卷名/格式/大小/离线可用；搜索命中书名、作者或卷名 |
 | Failed section | 稳定错误摘要、重试；不弹逐项 Dialog |
 | Mini player | 有播放会话时显示 |
 
 ### 21.3 交互
 
-- 点击已完成内容进入 A06/A07；返回回 A08。
+- 点击已完成 volume 直接进入 A06/A07，不重新进入作品详情；返回回 A08。进入前仍校验 namespace、当前 fingerprint 与本地文件，旧 manifest 缺失 media version id 时只进入稳定 legacy 分组，不伪造服务端归属。
+- 搜索仅过滤当前 `serverIdentity + userId + authzVersion` 命名空间中、与记录 fingerprint 一致且已验证完成的本地工件；空查询恢复完整按作品列表。
+- 作品封面是非阻塞增强：首帧先显示缓存封面或统一 fallback，再通过当前 namespace 的 authenticated cover adapter 渐进替换；封面缺失/失败不得阻塞目录、搜索、下载完成或 Reader 跳转，也不得把 cover cache 计为 completed publication。
 - 点击失败任务进入 `downloads.detail` 或行内展开稳定原因。
 - overflow 提供暂停、继续、重试、移除离线副本。
 - 移除使用 Dialog；批量移除显示数量和预计释放空间。
@@ -864,7 +871,7 @@ permission-revoked
 
 - 真实 API 字段映射到正确页面层级。
 - loading、empty、error、offline、permission、success、conflict、stale 不重复呈现。
-- entitlement、authzVersion、fingerprint、outbox 和 download 状态均有可见落点。
+- entitlement、authzVersion、fingerprint、音频/书签持久队列和 download 状态均有可见落点；Reader v4 progress 明确为本地精确保存加内存单飞上传。
 - 404 文案不泄露权限或资源存在性。
 
 ### 27.4 原生交互

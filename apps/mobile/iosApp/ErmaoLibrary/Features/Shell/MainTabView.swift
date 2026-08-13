@@ -66,6 +66,8 @@ enum RootTabContract {
 
 enum AppRoute: Hashable, Sendable {
     case work(workID: String)
+    case downloads
+    case reader(ReaderHandoff)
     case facet(kind: FacetKind, facetID: String)
     case collection(HomeCollectionKind)
     case settings(SettingsRoute)
@@ -74,6 +76,8 @@ enum AppRoute: Hashable, Sendable {
     var identityKey: String {
         switch self {
         case .work(let workID): "work:\(workID)"
+        case .downloads: "downloads"
+        case .reader(let handoff): "reader:\(handoff.volumeID):\(handoff.source)"
         case .facet(let kind, let facetID): "facet:\(kind.rawValue):\(facetID)"
         case .collection(let kind): "collection:\(kind.rawValue)"
         case .settings(let route): "settings:\(route.rawValue)"
@@ -123,7 +127,9 @@ struct RootTabPaths {
 
 struct MainTabView: View {
     @ObservedObject var store: SessionStore
+    @ObservedObject var downloads: DownloadCenterStore
     let contentClient: any ContentClient
+    let shelfClient: any ShelfClient
     let cache: LibraryCacheStore
     var settingsViewModel: SettingsViewModel? = nil
     var administrativeSettingsStore: AdministrativeSettingsStore? = nil
@@ -134,6 +140,7 @@ struct MainTabView: View {
     @State private var paths = RootTabPaths()
     @State private var expandedLibraryWorkID: String?
     @State private var readerLaunch: IosReaderLaunchRequest?
+    @State private var readerPreparation: ReaderPreparationRequest?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var selection: Binding<String> {
@@ -172,6 +179,20 @@ struct MainTabView: View {
         .fullScreenCover(item: $readerLaunch) { request in
             if let readerComposition {
                 IosReaderBootstrapView(request: request, composition: readerComposition)
+            }
+        }
+        .fullScreenCover(item: $readerPreparation) { request in
+            ReaderDownloadTransitionView(
+                request: request,
+                store: downloads,
+                client: contentClient,
+                cache: cache,
+                readerComposition: readerComposition
+            )
+        }
+        .task(id: contentContext?.namespaceKey) {
+            if let contentContext {
+                downloads.activate(context: contentContext)
             }
         }
     }
@@ -215,6 +236,7 @@ struct MainTabView: View {
                         MeRootView(
                             viewModel: settingsViewModel,
                             onOpenRoute: { open(.settings($0), in: .me) },
+                            onOpenDownloads: openDownloadsCenter,
                             canOpenAdministration: administrativeSettingsStore?.permissions.isAdmin == true ||
                                 administrativeSettingsStore?.permissions.canManageSystem == true,
                             onOpenEmailAndKindle: {
@@ -277,12 +299,15 @@ struct MainTabView: View {
                         WorkDetailView(
                             context: context,
                             client: contentClient,
+                            shelfClient: shelfClient,
                             cache: cache,
+                            downloads: downloads,
                             workID: workID,
                             onUnauthorized: store.refreshForForeground,
                             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
-                            openReader: { openReader($0, context: context) },
-                            readerAvailable: readerComposition != nil
+                            openDownloads: openDownloadsCenter,
+                            openReader: { openReader($0, context: context, fallbackTab: .library) },
+                            prepareReader: { readerPreparation = $0 }
                         )
                         .id(workID)
                     } else {
@@ -311,13 +336,23 @@ struct MainTabView: View {
             WorkDetailView(
                 context: context,
                 client: contentClient,
+                shelfClient: shelfClient,
                 cache: cache,
+                downloads: downloads,
                 workID: workID,
                 onUnauthorized: store.refreshForForeground,
                 openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
-                openReader: { openReader($0, context: context) },
-                readerAvailable: readerComposition != nil
+                openDownloads: openDownloadsCenter,
+                openReader: { openReader($0, context: context, fallbackTab: presentation) },
+                prepareReader: { readerPreparation = $0 }
             )
+        case .downloads:
+            DownloadCenterView(
+                store: downloads,
+                openReader: { openReader($0, context: context, fallbackTab: presentation) }
+            )
+        case .reader(let handoff):
+            ReaderHandoffView(handoff: handoff)
         case .facet(let kind, let facetID):
             FacetView(
                 context: context,
@@ -376,14 +411,52 @@ struct MainTabView: View {
         paths.open(route, in: tab)
     }
 
-    private func openReader(_ selection: WorkReaderSelection, context: ContentRequestContext) {
+    private func openReader(
+        _ selection: WorkReaderSelection,
+        context: ContentRequestContext,
+        managedDownloadRecordID: String? = nil
+    ) {
         guard readerComposition != nil else { return }
         readerLaunch = IosReaderLaunchRequest(
             context: context,
             workID: selection.workID,
             volumeID: selection.volumeID,
-            displayTitle: selection.displayTitle
+            displayTitle: selection.displayTitle,
+            managedDownloadRecordID: managedDownloadRecordID
         )
+    }
+
+    private func openReader(
+        _ handoff: ReaderHandoff,
+        context: ContentRequestContext,
+        fallbackTab: TabPresentation
+    ) {
+        if handoff.readerType == .reflowable,
+           handoff.format.caseInsensitiveCompare("EPUB") == .orderedSame,
+           readerComposition != nil {
+            let recordID: String?
+            if case .verifiedLocal(let value) = handoff.source {
+                recordID = value
+            } else {
+                recordID = nil
+            }
+            openReader(
+                WorkReaderSelection(
+                    workID: handoff.workID,
+                    volumeID: handoff.volumeID,
+                    displayTitle: handoff.title
+                ),
+                context: context,
+                managedDownloadRecordID: recordID
+            )
+        } else {
+            open(.reader(handoff), in: fallbackTab)
+        }
+    }
+
+    private func openDownloadsCenter() {
+        selectedTabID = rootTabs.first(where: { $0.presentation == .me })?.id ?? "me"
+        paths.open(.downloads, in: .me)
     }
 
 }
@@ -436,36 +509,82 @@ private extension ServerDirectoryPurpose {
 
 struct OfflineShellView: View {
     @ObservedObject var store: SessionStore
+    @ObservedObject var downloads: DownloadCenterStore
+    let readerComposition: IosReaderComposition?
     @Environment(\.appTheme) private var theme
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: .space2) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 44))
-                    .foregroundStyle(theme.textSecondary)
-                    .accessibilityHidden(true)
-                Text("offline.empty.title")
-                    .appTextStyle(.headline)
-                Text("offline.empty.message")
-                    .appTextStyle(.body)
-                    .foregroundStyle(theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                if let email = store.snapshot.userEmail {
-                    Text(email)
-                        .appTextStyle(.caption)
-                        .foregroundStyle(theme.textTertiary)
+            DownloadCenterView(store: downloads) { handoff in
+                // Offline access only reaches already verified records in DownloadCenterView.
+                if handoff.readerType == .reflowable,
+                   handoff.format.caseInsensitiveCompare("EPUB") == .orderedSame,
+                   readerComposition != nil,
+                   let offlineContext,
+                   case .verifiedLocal(let recordID) = handoff.source {
+                    readerLaunch = IosReaderLaunchRequest(
+                        context: offlineContext,
+                        workID: handoff.workID,
+                        volumeID: handoff.volumeID,
+                        displayTitle: handoff.title,
+                        managedDownloadRecordID: recordID
+                    )
+                } else {
+                    selectedHandoff = handoff
                 }
-                Button("offline.reauthenticate.action") { store.retry() }
-                    .buttonStyle(.borderedProminent)
-                Button("auth.chooseServer") { store.chooseAnotherServer() }
-                    .buttonStyle(.bordered)
             }
-            .padding(.space3)
-            .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("offline.shell.title")
-            .appCanvas()
+            .navigationDestination(
+                isPresented: Binding(
+                    get: { selectedHandoff != nil },
+                    set: { if !$0 { selectedHandoff = nil } }
+                )
+            ) {
+                if let selectedHandoff {
+                    ReaderHandoffView(handoff: selectedHandoff)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let email = store.snapshot.userEmail {
+                            Text(email)
+                        }
+                        Button("offline.reauthenticate.action") { store.retry() }
+                        Button("auth.chooseServer") { store.chooseAnotherServer() }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel(Text("common.more"))
+                }
+            }
+            .task(id: offlineContext?.namespaceKey) {
+                if let offlineContext {
+                    downloads.activate(context: offlineContext)
+                }
+            }
         }
+        .fullScreenCover(item: $readerLaunch) { request in
+            if let readerComposition {
+                IosReaderBootstrapView(request: request, composition: readerComposition)
+            }
+        }
+    }
+
+    @State private var selectedHandoff: ReaderHandoff?
+    @State private var readerLaunch: IosReaderLaunchRequest?
+
+    private var offlineContext: ContentRequestContext? {
+        guard let profile = store.snapshot.profile,
+              let userID = store.snapshot.userID,
+              let authorization = store.snapshot.authorization else { return nil }
+        return ContentRequestContext(
+            profileID: profile.id,
+            profileDisplayName: profile.displayName,
+            serverIdentity: profile.serverIdentity,
+            userID: userID,
+            authorizationVersion: authorization.authorizationVersion,
+            baseURL: profile.baseURL,
+            acceptsInsecureTLS: profile.tlsMode == .insecureSkipAllValidation
+        )
     }
 }

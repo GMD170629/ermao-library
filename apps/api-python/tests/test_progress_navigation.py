@@ -13,7 +13,7 @@ ANCHORED_UNITS = [
 def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource():
     progress = {
         "percent": 12,
-        "locationJson": '{"type":"reflowable","format":"epub","href":"text/all.xhtml#chapter-2"}',
+        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium-epub:1","normalization":"shuku-epub-v1"},"payload":{"href":"text/all.xhtml","type":"application/xhtml+xml","locations":{"fragments":["chapter-2"]}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
@@ -23,10 +23,10 @@ def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource(
     assert navigation["currentChapterSortOrder"] == 2
 
 
-def test_progress_navigation_projects_reader_v3_location_for_chapter_detail():
+def test_progress_navigation_projects_exact_readium_location_for_chapter_detail():
     progress = {
         "percent": 0.2,
-        "locationJson": '{"type":"reflowable","format":"txt","href":"txt-section:9","foliate":{"toc":{"index":9,"title":"第9章","href":"txt-section:9","navigationKey":"unit-9"},"section":{"current":9,"total":2000}}}',
+        "locationJson": '{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","parser":"shuku-txt:1","normalization":"shuku-txt-v1"},"payload":{"href":"txt-section:9","type":"application/xhtml+xml","locations":{"cssSelector":"#p-9"},"text":{"highlight":"第9章"}}}',
     }
     units = [
         {
@@ -44,14 +44,14 @@ def test_progress_navigation_projects_reader_v3_location_for_chapter_detail():
     assert navigation["currentChapterTitle"] == "第9章"
     assert navigation["currentChapterSortOrder"] == 9
     assert navigation["currentChapterIndex"] == 9
-    assert navigation["currentSectionIndex"] == 9
+    assert navigation["currentSectionIndex"] is None
     assert navigation["progressExtra"] == {}
 
 
 def test_progress_navigation_does_not_guess_ambiguous_resource_only_href():
     progress = {
         "percent": 0,
-        "locationJson": '{"type":"reflowable","format":"epub","href":"Text/all.xhtml","foliate":{"section":{"current":0}}}',
+        "locationJson": '{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","parser":"readium-epub:1","normalization":"shuku-epub-v1"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
@@ -62,7 +62,7 @@ def test_progress_navigation_does_not_guess_ambiguous_resource_only_href():
     assert progress_percent_with_navigation(progress, ANCHORED_UNITS) == 0
 
 
-def test_progress_navigation_does_not_estimate_mobi_chapter_without_exact_navigation():
+def test_progress_navigation_does_not_estimate_mobi_chapter_from_unmatched_exact_href():
     units = [
         {
             "href": f"filepos:{index * 100}",
@@ -74,21 +74,21 @@ def test_progress_navigation_does_not_estimate_mobi_chapter_without_exact_naviga
     ]
     progress = {
         "percent": 11.201454819672687,
-        "locationJson": '{"type":"reflowable","format":"mobi","cfi":"epubcfi(/6/14!/4/4,/86,/128/1:134)","progression":0.11201454819672686}',
+        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parser":"libmobi:0.12@test","normalization":"ermao-mobi-core-v1"},"payload":{"href":"missing.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#missing"}}}',
     }
 
     navigation = progress_navigation(progress, units)
 
-    assert navigation["currentHref"] is None
+    assert navigation["currentHref"] == "missing.xhtml"
     assert navigation["currentChapterTitle"] is None
     assert navigation["currentChapterSortOrder"] is None
     assert navigation["progressEstimated"] is False
 
 
-def test_progress_navigation_uses_foliate_toc_index_without_section_guessing():
+def test_progress_navigation_does_not_accept_non_readium_location_shape():
     progress = {
         "percent": 42.5,
-        "locationJson": '{"type":"reflowable","format":"epub","foliate":{"toc":{"navigationKey":"epub:chapter-2","index":1,"title":"Exact chapter"},"section":{"current":8,"total":12},"location":{"current":41,"next":43,"total":100}}}',
+        "locationJson": '{"type":"reflowable","format":"epub","legacyRenderer":{"toc":{"navigationKey":"epub:chapter-2","index":1,"title":"Exact chapter"}}}',
     }
     units = [
         {**unit, "navigationKey": f"epub:chapter-{index + 1}"}
@@ -97,8 +97,8 @@ def test_progress_navigation_uses_foliate_toc_index_without_section_guessing():
 
     navigation = progress_navigation(progress, units)
 
-    assert navigation["currentChapterTitle"] == ANCHORED_UNITS[1]["title"]
-    assert navigation["currentChapterSortOrder"] == 2
+    assert navigation["currentChapterTitle"] is None
+    assert navigation["currentChapterSortOrder"] is None
     assert navigation["progressEstimated"] is False
 
 
@@ -122,7 +122,7 @@ def test_progress_navigation_ignores_removed_legacy_extra_fields():
 def test_progress_navigation_does_not_override_unmatched_href_with_percent():
     progress = {
         "percent": 50,
-        "locationJson": '{"type":"reflowable","format":"epub","href":"Text/all.xhtml"}',
+        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","parser":"readium-epub:1","normalization":"shuku-epub-v1"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)

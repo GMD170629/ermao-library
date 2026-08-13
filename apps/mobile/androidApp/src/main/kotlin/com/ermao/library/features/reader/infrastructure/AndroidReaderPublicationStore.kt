@@ -56,6 +56,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
                 output.fd.sync()
             }
             require(written > 0) { "Reader publication is empty" }
+            validateEpubArchive(temporary)
             atomicReplace(temporary, target)
         } finally {
             temporary.delete()
@@ -181,8 +182,8 @@ internal class AndroidReaderPublicationStore(context: Context) {
                     format = ReaderFormat.Epub,
                     contentFingerprint = ContentFingerprint(
                         computedHash,
-                        READIUM_PARSER_VERSION,
-                        EPUB_NORMALIZATION_VERSION,
+                        download.publicationFingerprint.parser,
+                        download.publicationFingerprint.normalization,
                     ),
                     workId = download.workId,
                     volumeId = download.volumeId,

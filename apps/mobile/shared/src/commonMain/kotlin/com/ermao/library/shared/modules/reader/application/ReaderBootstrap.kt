@@ -2,8 +2,8 @@ package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
-import com.ermao.library.shared.modules.reader.domain.ReaderServerContentFingerprint
 import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.domain.PublicationFingerprint
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 data class ReaderBootstrapRequest(
@@ -27,6 +27,7 @@ data class ReaderPublicationDownload(
     val mimeType: String,
     val expectedSizeBytes: Long,
     val expectedOriginalFileHash: String?,
+    val publicationFingerprint: PublicationFingerprint,
 ) {
     init {
         require(sourceId == volumeId) { "Reader v4 source id must be its volume id" }
@@ -36,6 +37,13 @@ data class ReaderPublicationDownload(
         require(apiPath.startsWith("/api/") && !apiPath.contains('#'))
         require(expectedSizeBytes > 0)
         require(expectedOriginalFileHash == null || expectedOriginalFileHash.matches(SHA256_PATTERN))
+        require(
+            expectedOriginalFileHash == null ||
+                expectedOriginalFileHash.removePrefix("sha256:").equals(
+                    publicationFingerprint.originalFileHash.removePrefix("sha256:"),
+                    ignoreCase = true,
+                ),
+        ) { "Download hash and Publication fingerprint do not match" }
     }
 
     private companion object {
@@ -47,8 +55,11 @@ data class ReaderBootstrap(
     val target: ReaderProgressSyncTarget,
     val publication: ReaderPublicationDownload,
     val remoteSnapshot: ReaderProgressSnapshotV4?,
+    /** Download artifact version from bootstrap; never part of a progress PUT. */
+    val artifactVersion: String,
 ) {
     init {
+        require(artifactVersion.isNotBlank())
         require(remoteSnapshot == null || remoteSnapshot.sourceId == target.volumeId) {
             "Reader bootstrap snapshot belongs to another volume"
         }

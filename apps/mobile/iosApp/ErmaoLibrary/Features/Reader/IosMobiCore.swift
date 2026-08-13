@@ -96,7 +96,7 @@ actor IosMobiBook {
     }
     private static let noIndex = UInt32.max
 
-    private var handle: OpaquePointer?
+    private nonisolated(unsafe) var handle: OpaquePointer?
 
     private init(handle: OpaquePointer) {
         self.handle = handle

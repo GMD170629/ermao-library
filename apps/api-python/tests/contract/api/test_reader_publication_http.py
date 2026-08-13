@@ -1,0 +1,429 @@
+from __future__ import annotations
+
+import hashlib
+import shutil
+import zipfile
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.core.auth import hash_password
+from app.core.config import Settings
+from app.models.auth import User
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryWork,
+)
+
+
+def _login(client: TestClient, db: Session) -> User:
+    user = User(
+        email="publication-reader@example.com",
+        name="Publication Reader",
+        password_hash=hash_password("starshipnas"),
+        role="admin",
+    )
+    db.add(user)
+    db.commit()
+    response = client.post(
+        "/api/auth/login",
+        json={"email": user.email, "password": "starshipnas"},
+    )
+    assert response.status_code == 200
+    return user
+
+
+def _write_epub(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <metadata><dc:title>跨端出版物</dc:title><dc:creator>测试作者</dc:creator>
+            <dc:language>zh-CN</dc:language></metadata><manifest>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+            <item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/>
+            <item id="style" href="Styles/book.css" media-type="text/css"/>
+            </manifest><spine><itemref idref="chapter"/></spine></package>""",
+        )
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            """<html xmlns="http://www.w3.org/1999/xhtml"
+            xmlns:epub="http://www.idpf.org/2007/ops"><body>
+            <nav epub:type="toc"><ol><li><a href="Text/chapter.xhtml#anchor">第一章</a></li></ol></nav>
+            </body></html>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter.xhtml",
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+            <link rel="stylesheet" href="../Styles/book.css"/></head>
+            <body><h1 id="anchor">第一章</h1><p>天地玄黄，宇宙洪荒</p></body></html>""",
+        )
+        archive.writestr("OEBPS/Styles/book.css", "body { line-height: 1.6; }")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _seed_epub(
+    db: Session,
+    settings: Settings,
+    *,
+    user_suffix: str = "",
+) -> LibraryVolume:
+    relative_path = Path("library") / "exact.epub"
+    source_path = settings.resolved_storage_root / relative_path
+    source_hash = _write_epub(source_path)
+    work = LibraryWork(
+        id=f"work-publication{user_suffix}",
+        origin="MANUAL",
+        title="跨端出版物",
+        normalized_title="跨端出版物",
+        author="测试作者",
+        normalized_author="测试作者",
+        tags="[]",
+    )
+    media = LibraryMediaVersion(
+        id=f"media-publication{user_suffix}",
+        work_id=work.id,
+        media_kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id=f"volume-publication{user_suffix}",
+        media_version_id=media.id,
+        title="跨端出版物",
+        sort_order=0,
+        format="EPUB",
+        resource_key="manual:publication",
+        import_status="COMPLETED",
+    )
+    source = LibraryFile(
+        id=f"file-publication{user_suffix}",
+        volume_id=volume.id,
+        path=str(relative_path),
+        fingerprint=f"sha256:{source_hash}",
+        full_hash=source_hash,
+        hash_status="COMPLETED",
+        mtime_ms=int(source_path.stat().st_mtime * 1000),
+        kind="EPUB",
+        mime_type="application/epub+zip",
+        size_bytes=source_path.stat().st_size,
+        sort_order=0,
+    )
+    db.add_all([work, media, volume, source])
+    db.commit()
+    return volume
+
+
+def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
+    relative_path = Path("library") / "exact.txt"
+    source_path = settings.resolved_storage_root / relative_path
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(
+        b"\xff\xfe"
+        + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
+    )
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    work = LibraryWork(
+        id="work-txt-publication",
+        origin="MANUAL",
+        title="确定性文本出版物",
+        normalized_title="确定性文本出版物",
+        author="测试作者",
+        normalized_author="测试作者",
+        tags="[]",
+    )
+    media = LibraryMediaVersion(
+        id="media-txt-publication",
+        work_id=work.id,
+        media_kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id="volume-txt-publication",
+        media_version_id=media.id,
+        title=work.title,
+        sort_order=0,
+        format="TXT",
+        resource_key="manual:txt-publication",
+        import_status="COMPLETED",
+    )
+    source = LibraryFile(
+        id="file-txt-publication",
+        volume_id=volume.id,
+        path=str(relative_path),
+        fingerprint=f"sha256:{source_hash}",
+        full_hash=source_hash,
+        hash_status="COMPLETED",
+        mtime_ms=int(source_path.stat().st_mtime * 1000),
+        kind="TXT",
+        mime_type="text/plain",
+        size_bytes=source_path.stat().st_size,
+        sort_order=0,
+    )
+    db.add_all([work, media, volume, source])
+    db.commit()
+    return volume
+
+
+def test_epub_publication_requires_authentication(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    volume = _seed_epub(db_session, test_settings)
+
+    response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
+
+    assert response.status_code == 401
+
+
+def test_epub_publication_exposes_stable_rwpm_and_private_resources(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    volume = _seed_epub(db_session, test_settings)
+
+    manifest_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
+
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert manifest["metadata"]["title"] == "跨端出版物"
+    assert manifest["readingOrder"] == [
+        {"href": "OEBPS/Text/chapter.xhtml", "type": "application/xhtml+xml"}
+    ]
+    assert manifest["toc"][0] == {
+        "href": "OEBPS/Text/chapter.xhtml#anchor",
+        "title": "第一章",
+    }
+    runtime = manifest["https://shuku.app/reader/runtime"]
+    assert runtime["parser"] == "epub-package:1"
+    assert runtime["normalization"] == "shuku-epub-raw-v1"
+    assert runtime["originalFileHash"].startswith("sha256:")
+    assert len(runtime["originalFileHash"]) == 71
+
+    resource_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/Text/chapter.xhtml"
+    )
+    assert resource_response.status_code == 200
+    assert resource_response.headers["cache-control"] == "private, max-age=60"
+    assert "default-src 'none'" in resource_response.headers["content-security-policy"]
+    assert "天地玄黄" in resource_response.text
+
+    head_response = client.head(
+        f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/Text/chapter.xhtml"
+    )
+    assert head_response.status_code == 200
+    assert head_response.content == b""
+    assert int(head_response.headers["content-length"]) == len(
+        resource_response.content
+    )
+
+    positions_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+    )
+    assert positions_response.status_code == 200
+    assert positions_response.json() == {
+        "total": 1,
+        "positions": [
+            {
+                "href": "OEBPS/Text/chapter.xhtml",
+                "type": "application/xhtml+xml",
+                "locations": {
+                    "position": 1,
+                    "progression": 0.0,
+                    "totalProgression": 0.0,
+                },
+            }
+        ],
+    }
+
+
+def test_epub_publication_rejects_unindexed_and_traversal_resources(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    volume = _seed_epub(db_session, test_settings)
+
+    missing = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/not-in-manifest.js"
+    )
+    traversal = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/%2e%2e/secret"
+    )
+
+    assert missing.status_code == 404
+    assert traversal.status_code == 404
+
+
+def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    fixture = (
+        Path(__file__).parents[5] / "test-data" / "library" / "mobi" / "08-zh-hans.azw3"
+    )
+    target = test_settings.resolved_storage_root / "library" / "exact.azw3"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(fixture, target)
+    source_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+    work = LibraryWork(
+        id="work-mobi-publication",
+        origin="MANUAL",
+        title="中文字符完整性验证",
+        normalized_title="中文字符完整性验证",
+        author="测试作者",
+        normalized_author="测试作者",
+        tags="[]",
+    )
+    media = LibraryMediaVersion(
+        id="media-mobi-publication",
+        work_id=work.id,
+        media_kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id="volume-mobi-publication",
+        media_version_id=media.id,
+        title=work.title,
+        sort_order=0,
+        format="AZW3",
+        resource_key="manual:mobi-publication",
+        import_status="COMPLETED",
+    )
+    source = LibraryFile(
+        id="file-mobi-publication",
+        volume_id=volume.id,
+        path="library/exact.azw3",
+        fingerprint=f"sha256:{source_hash}",
+        full_hash=source_hash,
+        hash_status="COMPLETED",
+        mtime_ms=int(target.stat().st_mtime * 1000),
+        kind="AZW3",
+        mime_type="application/x-mobipocket-ebook",
+        size_bytes=target.stat().st_size,
+        sort_order=0,
+    )
+    db_session.add_all([work, media, volume, source])
+    db_session.commit()
+
+    manifest_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
+
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert manifest["readingOrder"][0]["href"] == "part00000.html"
+    runtime = manifest["https://shuku.app/reader/runtime"]
+    assert runtime == {
+        "originalFileHash": f"sha256:{source_hash}",
+        "parser": "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add",
+        "normalization": "ermao-mobi-core-v1",
+        "positionPageLength": 1024,
+    }
+    resource_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/part00000.html"
+    )
+    assert resource_response.status_code == 200
+    assert "天地玄黄" in resource_response.text
+    assert not list(test_settings.resolved_storage_root.rglob("*.epub"))
+
+
+def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    volume = _seed_txt(db_session, test_settings)
+
+    bootstrap_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    manifest_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
+
+    assert bootstrap_response.status_code == 200
+    bootstrap = bootstrap_response.json()["data"]
+    assert bootstrap["publication"] == {
+        "manifestUrl": (
+            f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        ),
+        "positionsUrl": (
+            f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+        ),
+    }
+    assert bootstrap["publicationFingerprint"] == {
+        "originalFileHash": bootstrap["files"][0]["contentHash"],
+        "parser": "shuku-txt-parser-v1",
+        "normalization": "shuku-txt-publication-v1",
+    }
+
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert manifest["metadata"]["identifier"] == bootstrap["publicationFingerprint"][
+        "originalFileHash"
+    ].replace("sha256:", "urn:shuku:txt:")
+    assert manifest["metadata"]["title"] == "确定性文本出版物"
+    assert manifest["metadata"]["author"] == "测试作者"
+    assert manifest["metadata"]["readingProgression"] == "ltr"
+    assert manifest["readingOrder"] == [
+        {
+            "href": "text/chapter-0001.xhtml",
+            "type": "application/xhtml+xml",
+            "title": "正文",
+        },
+        {
+            "href": "text/chapter-0002.xhtml",
+            "type": "application/xhtml+xml",
+            "title": "第一章 开端",
+        },
+        {
+            "href": "text/chapter-0003.xhtml",
+            "type": "application/xhtml+xml",
+            "title": "第二章",
+        },
+    ]
+    assert manifest["https://shuku.app/reader/runtime"] == {
+        "originalFileHash": bootstrap["publicationFingerprint"]["originalFileHash"],
+        "parser": "shuku-txt-parser-v1",
+        "normalization": "shuku-txt-publication-v1",
+        "positionPageLength": 1024,
+    }
+
+    resource_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/text/chapter-0002.xhtml"
+    )
+    assert resource_response.status_code == 200
+    assert resource_response.headers["content-type"].startswith("application/xhtml+xml")
+    assert 'id="heading-0002"' in resource_response.text
+    assert 'id="block-0002-000001"' in resource_response.text
+    assert "天地 &amp; &lt;宇宙&gt;" in resource_response.text
+
+    positions_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+    )
+    assert positions_response.status_code == 200
+    assert positions_response.json()["total"] == 3
+
+    missing_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/text/not-indexed.xhtml"
+    )
+    traversal_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/%2e%2e/secret"
+    )
+    assert missing_response.status_code == 404
+    assert traversal_response.status_code == 404

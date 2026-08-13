@@ -117,11 +117,16 @@ data class VolumeFileSummaryWire(
 fun WorkDetailSummaryPayloadWire.toDomain(): WorkDetailSummary = book.toDomain(
     activeMedia = activeMedia?.toDomain(),
     readingUnits = readingUnits.map(ReadingUnitWire::toDomain),
+    readingUnitsPage = readingUnitsPage?.toDomain(),
 )
+
+private fun ReadingUnitsPageWire.toDomain(): com.ermao.library.shared.modules.library.domain.ReadingUnitsPage =
+    com.ermao.library.shared.modules.library.domain.ReadingUnitsPage(page, pageSize, total, totalPages)
 
 fun WorkWire.toDomain(
     activeMedia: ActiveMedia? = null,
     readingUnits: List<ReadingUnit> = emptyList(),
+    readingUnitsPage: com.ermao.library.shared.modules.library.domain.ReadingUnitsPage? = null,
 ): WorkDetailSummary {
     require(id.isNotBlank()) { "Work id is blank" }
     require(title.isNotBlank()) { "Work title is blank" }
@@ -146,6 +151,7 @@ fun WorkWire.toDomain(
         selectedDetailTab = selectedDetailTab,
         activeMedia = activeMedia,
         readingUnits = readingUnits,
+        readingUnitsPage = readingUnitsPage,
     )
 }
 

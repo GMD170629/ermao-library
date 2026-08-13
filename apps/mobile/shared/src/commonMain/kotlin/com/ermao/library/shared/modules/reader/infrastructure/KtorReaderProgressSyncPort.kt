@@ -4,11 +4,13 @@ import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
+import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.reader.application.ReaderProgressPushResult
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
 import com.ermao.library.shared.modules.reader.application.ReaderProgressUpload
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.JsonObject
 
 class KtorReaderProgressSyncPort(
     private val clients: ApiClientFactory,
@@ -29,14 +31,25 @@ class KtorReaderProgressSyncPort(
                     requestBody = mapper.encodeProgressUpload(upload),
                 ),
             )) {
-                is ApiResult.Success -> try {
-                    ReaderProgressPushResult.Accepted(
-                        mapper.decodeSnapshot(result.value, upload.target.volumeId),
-                    )
-                } catch (_: IllegalArgumentException) {
-                    ReaderProgressPushResult.Discarded("INVALID_PROGRESS_RESPONSE")
+                is ApiResult.Success -> runCatching {
+                    ReaderProgressPushResult.Accepted(mapper.decodeSnapshot(result.value, upload.target.volumeId))
+                }.getOrElse { ReaderProgressPushResult.Rejected("INVALID_PROGRESS_RESPONSE") }
+                is ApiResult.Failure -> {
+                    if (result.error.code == "READER_PROGRESS_CONFLICT") {
+                        val details = result.error.details as? JsonObject
+                        val current = (details?.get("current") as? JsonObject)
+                            ?: details
+                        val conflict = current?.let {
+                            runCatching { mapper.decodeSnapshot(it, upload.target.volumeId) }.getOrNull()
+                        }
+                        if (conflict != null) ReaderProgressPushResult.Conflict(conflict)
+                        else ReaderProgressPushResult.Rejected("INVALID_PROGRESS_CONFLICT")
+                    } else if (result.error.kind in RETRYABLE_KINDS) {
+                        ReaderProgressPushResult.RetryableFailure(result.error.code)
+                    } else {
+                        ReaderProgressPushResult.Rejected(result.error.code)
+                    }
                 }
-                is ApiResult.Failure -> ReaderProgressPushResult.Discarded(result.error.code)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -63,5 +76,14 @@ class KtorReaderProgressSyncPort(
 
     private companion object {
         const val HEX = "0123456789ABCDEF"
+        val RETRYABLE_KINDS = setOf(
+            AppErrorKind.NetworkUnavailable,
+            AppErrorKind.Timeout,
+            AppErrorKind.RateLimited,
+            AppErrorKind.ServiceUnavailable,
+            AppErrorKind.ServerFailure,
+            AppErrorKind.TlsFailure,
+            AppErrorKind.Unauthorized,
+        )
     }
 }

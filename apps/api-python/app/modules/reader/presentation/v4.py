@@ -27,6 +27,10 @@ from app.modules.reader.application.dto import (
 from app.modules.reader.application.volume_reader import (
     ReaderFingerprintMismatch,
     ReaderLocationFormatMismatch,
+    ReaderLocatorMediaTypeMismatch,
+    ReaderLocatorResourceMismatch,
+    ReaderProgressBaseRevisionInvalid,
+    ReaderProgressRevisionConflict,
     ReaderVolumeFormatUnsupported,
     ReaderVolumeNotFound,
     ReplaceBookmarksCommand,
@@ -40,6 +44,8 @@ from app.modules.reader.domain.volume_format import (
     reader_type_for_volume_format,
 )
 from app.modules.reader.presentation.v4_schemas import (
+    LocatorEnvelope,
+    PublicationFingerprint,
     ReaderBookmark,
     ReaderBookmarksData,
     ReaderBookmarksReplaceRequest,
@@ -55,10 +61,12 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderLocation,
     ReaderMediaVersionSummary,
     ReaderNotFoundError,
-    ReaderProgressData,
+    ReaderProgressConflictBody,
+    ReaderProgressConflictError,
     ReaderProgressPut,
     ReaderProgressResponse,
     ReaderProgressSnapshot,
+    ReaderPublicationAccess,
     ReaderReadingStatusData,
     ReaderReadingStatusPut,
     ReaderReadingStatusResponse,
@@ -76,10 +84,12 @@ router = APIRouter(
 )
 
 _LOCATION_ADAPTER: TypeAdapter[ReaderLocation] = TypeAdapter(ReaderLocation)
+_LOCATOR_ADAPTER: TypeAdapter[LocatorEnvelope] = TypeAdapter(LocatorEnvelope)
 _METADATA_ADAPTER = TypeAdapter(dict[str, ReaderJsonValue])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 _REFLOWABLE_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"})
+_PUBLICATION_SERVER_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt"})
 
 
 def _current_user(db: Session, request: Request, settings: Settings) -> User:
@@ -146,6 +156,23 @@ def _location_json(location: ReaderLocation | None) -> str | None:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+def _locator(raw_json: str | None) -> LocatorEnvelope | None:
+    if not raw_json:
+        return None
+    try:
+        return _LOCATOR_ADAPTER.validate_json(raw_json)
+    except ValidationError:
+        return None
+
+
+def _locator_json(locator: LocatorEnvelope) -> str:
+    return json.dumps(
+        locator.model_dump(by_alias=True, exclude_none=True),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 def _metadata(raw_json: str) -> dict[str, ReaderJsonValue]:
     try:
         return _METADATA_ADAPTER.validate_python(json.loads(raw_json))
@@ -183,17 +210,17 @@ def _volume_summary(
 
 def _progress_snapshot(
     progress: ReaderProgressDto,
-    *,
-    content_fingerprint: str,
-    location_json: str | None,
 ) -> ReaderProgressSnapshot:
+    locator = _locator(progress.location_json)
+    if locator is None or progress.revision < 1:
+        raise ValueError("Exact Reader v4 progress requires a revisioned Locator")
     return ReaderProgressSnapshot(
         schemaVersion=4,
-        clientId=progress.client_id or "shuku-server",
-        updatedAtEpochMillis=_epoch_millis(progress.progressed_at),
-        percent=progress.percent,
-        location=_location(location_json),
-        contentFingerprint=content_fingerprint,
+        revision=progress.revision,
+        locator=locator,
+        displayPercent=progress.percent,
+        receivedAtEpochMillis=_epoch_millis(progress.updated_at),
+        capturedAtEpochMillis=_epoch_millis(progress.progressed_at),
     )
 
 
@@ -227,6 +254,32 @@ def _raise_service_error(error: Exception) -> Never:
                     "expectedKind": error.expected,
                     "receivedKind": error.received,
                 },
+            )
+        ) from error
+    if isinstance(error, ReaderLocatorMediaTypeMismatch):
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="Readium Locator 媒体类型与卷册格式不匹配",
+                code="READER_LOCATOR_MEDIA_TYPE_MISMATCH",
+                details={
+                    "expectedReaderType": error.expected,
+                    "receivedMediaType": error.received,
+                },
+            )
+        ) from error
+    if isinstance(error, ReaderLocatorResourceMismatch):
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="Readium Locator 资源不属于当前 Publication",
+                code="READER_LOCATOR_RESOURCE_INVALID",
+                details={"href": error.href, "mediaType": error.media_type},
+            )
+        ) from error
+    if isinstance(error, ReaderProgressBaseRevisionInvalid):
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="阅读进度基准版本无效",
+                code="READER_PROGRESS_BASE_REVISION_INVALID",
             )
         ) from error
     raise error
@@ -276,7 +329,11 @@ def reader_bootstrap_v4(
             userId=user.id,
             readerType=reader_type.value,
             sourceFormat=source_format,
-            contentFingerprint=bootstrap.content_fingerprint,
+            publicationFingerprint=PublicationFingerprint(
+                originalFileHash=bootstrap.publication_fingerprint.original_file_hash,
+                parser=bootstrap.publication_fingerprint.parser,
+                normalization=bootstrap.publication_fingerprint.normalization,
+            ),
             book=ReaderBookSummary(
                 id=context.work.id,
                 title=context.work.title,
@@ -345,13 +402,23 @@ def reader_bootstrap_v4(
                 supportsScrolling=capabilities.supports_scrolling,
                 supportsSpreads=capabilities.supports_spreads,
             ),
-            progressSnapshot=(
-                _progress_snapshot(
-                    progress,
-                    content_fingerprint=bootstrap.content_fingerprint,
-                    location_json=bootstrap.resume_location_json,
+            publication=(
+                ReaderPublicationAccess(
+                    manifestUrl=(
+                        f"/api/reader/v4/volumes/{volume_id}/publication/manifest.json"
+                    ),
+                    positionsUrl=(
+                        f"/api/reader/v4/volumes/{volume_id}/publication/positions.json"
+                    ),
                 )
+                if normalized_format in _PUBLICATION_SERVER_FORMATS
+                else None
+            ),
+            progressSnapshot=(
+                _progress_snapshot(progress)
                 if progress is not None
+                and progress.revision >= 1
+                and bootstrap.resume_location_json is not None
                 else None
             ),
         )
@@ -416,13 +483,15 @@ def save_progress_v4(
     ErrorResponses(
         ReaderUnauthorizedError,
         ReaderNotFoundError,
+        ReaderConflictError,
+        ReaderProgressConflictError,
         ReaderValidationError,
     ),
 ]:
     user = _current_user(db, request, settings)
     if not can_access_volume(db, user, volume_id):
         raise _not_found()
-    location_json = _location_json(payload.location)
+    locator_json = _locator_json(payload.locator)
     try:
         progress = _service(db, settings).save_progress(
             SaveProgressCommand(
@@ -430,28 +499,41 @@ def save_progress_v4(
                 volume_id=volume_id,
                 access_scope=_access_scope(db, user),
                 client_id=payload.client_id,
-                content_fingerprint=payload.content_fingerprint,
-                location_kind=(payload.location.kind if payload.location else None),
-                location_json=location_json,
-                percent=payload.percent,
-                updated_at_epoch_millis=payload.updated_at_epoch_millis,
+                mutation_id=str(payload.mutation_id),
+                base_revision=payload.base_revision,
+                publication_original_file_hash=(
+                    payload.locator.publication.original_file_hash
+                ),
+                publication_parser=payload.locator.publication.parser,
+                publication_normalization=(payload.locator.publication.normalization),
+                locator_json=locator_json,
+                locator_href=payload.locator.payload.href,
+                locator_media_type=payload.locator.payload.type,
+                locator_progression=payload.locator.payload.locations.progression,
+                locator_total_progression=(
+                    payload.locator.payload.locations.total_progression
+                ),
+                captured_at_epoch_millis=payload.captured_at_epoch_millis,
             )
         )
     except (
         ReaderVolumeNotFound,
         ReaderVolumeFormatUnsupported,
+        ReaderFingerprintMismatch,
         ReaderLocationFormatMismatch,
+        ReaderLocatorMediaTypeMismatch,
+        ReaderLocatorResourceMismatch,
+        ReaderProgressBaseRevisionInvalid,
     ) as error:
         _raise_service_error(error)
-    return ReaderProgressResponse(
-        data=ReaderProgressData(
-            progress=_progress_snapshot(
-                progress,
-                content_fingerprint=progress.content_fingerprint or "",
-                location_json=progress.location_json,
-            ),
-        )
-    )
+    except ReaderProgressRevisionConflict as error:
+        raise ReaderProgressConflictError(
+            ReaderProgressConflictBody(
+                message="另一设备已更新阅读位置",
+                current=_progress_snapshot(error.current),
+            )
+        ) from error
+    return ReaderProgressResponse(data=_progress_snapshot(progress))
 
 
 @router.get(
@@ -481,6 +563,7 @@ def list_bookmarks_v4(
         bookmarks = _service(db, settings).list_bookmarks(
             user_id=user.id,
             volume_id=volume_id,
+            access_scope=_access_scope(db, user),
             content_fingerprint=content_fingerprint,
         )
     except (ReaderVolumeNotFound, ReaderFingerprintMismatch) as error:

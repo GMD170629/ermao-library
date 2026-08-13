@@ -11,7 +11,11 @@ struct ReaderScreen: View {
 
     var body: some View {
         NavigationStack {
-            ReaderNavigatorView(publication: loaded.result.publication, session: session)
+            ReaderNavigatorView(
+                publication: loaded.result.publication,
+                fingerprint: loaded.fingerprint,
+                session: session
+            )
                 .background(POCTheme.readerPaper)
                 .navigationTitle(loaded.result.book.metadata.title)
                 .navigationBarTitleDisplayMode(.inline)
@@ -24,6 +28,12 @@ struct ReaderScreen: View {
                         Menu {
                             Button(String(localized: "action.featureProbe")) {
                                 Task { await session.evaluateFeatureProbe(fixtureID: loaded.descriptor.id) }
+                            }
+                            Button(String(localized: "action.copyLocator")) {
+                                Task { await session.copyExactLocatorToPasteboard() }
+                            }
+                            Button(String(localized: "action.pasteLocator")) {
+                                Task { await session.goToLocatorFromPasteboard() }
                             }
                             Button(String(localized: "action.saveReport")) {
                                 saveReport()
@@ -83,6 +93,24 @@ struct ReaderScreen: View {
             }
             .disabled(!session.isReady)
             .accessibilityIdentifier("reader.runFeatureProbe")
+
+            HStack {
+                Button(String(localized: "action.copyLocator")) {
+                    Task { await session.copyExactLocatorToPasteboard() }
+                }
+                .accessibilityIdentifier("reader.copyLocator")
+                Button(String(localized: "action.pasteLocator")) {
+                    Task { await session.goToLocatorFromPasteboard() }
+                }
+                .accessibilityIdentifier("reader.pasteLocator")
+            }
+            .disabled(!session.isReady)
+
+            if !session.locatorExchangeResult.isEmpty {
+                Text(session.locatorExchangeResult)
+                    .font(.caption.monospaced())
+                    .accessibilityIdentifier("reader.locatorExchangeResult")
+            }
 
             if let stress = session.lastStressResult {
                 Text(String(format: String(localized: "stress.result"), stress.grade.rawValue, stress.p95Milliseconds))

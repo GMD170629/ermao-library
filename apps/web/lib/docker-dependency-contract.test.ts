@@ -5,7 +5,7 @@ import test from 'node:test';
 
 const webRoot = path.resolve(import.meta.dirname, '..');
 
-test('Docker builds install the pinned foliate-js package without a removed submodule', async () => {
+test('Docker builds install the pinned Readium Web packages', async () => {
   const packageJson = JSON.parse(await readFile(path.join(webRoot, 'package.json'), 'utf8')) as {
     dependencies?: Record<string, string>;
   };
@@ -14,7 +14,8 @@ test('Docker builds install the pinned foliate-js package without a removed subm
     readFile(path.join(webRoot, 'Dockerfile.prod'), 'utf8'),
   ]);
 
-  assert.equal(packageJson.dependencies?.['foliate-js'], '1.0.1');
+  assert.equal(packageJson.dependencies?.['@readium/navigator'], '2.8.2');
+  assert.equal(packageJson.dependencies?.['@readium/shared'], '2.4.0');
   for (const dockerfile of dockerfiles) {
     assert.doesNotMatch(dockerfile, /third_party\/foliate-js/);
     assert.match(dockerfile, /pnpm install --frozen-lockfile --filter @shuku\/web\.\.\./);

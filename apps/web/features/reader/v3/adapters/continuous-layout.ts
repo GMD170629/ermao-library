@@ -1,138 +1,20 @@
-export type ContinuousViewportAnchor = Readonly<{
-  key: string;
-  offset: number;
-}>;
-
+export type ContinuousViewportAnchor = Readonly<{ key: string; offset: number }>;
 export type ContinuousItemState = 'placeholder' | 'loading' | 'ready' | 'failed';
-
-function normalizedContinuousValue(value: number) {
-  return Number.isFinite(value) && value > 0 ? value : 1;
-}
-
-/**
- * A Fenwick-tree backed index for continuous-reader heights and content weights.
- * Logical books can keep every section in this index without creating a matching
- * DOM node, while point updates and scroll-offset lookups remain logarithmic.
- */
+function normalizedContinuousValue(value: number) { return Number.isFinite(value) && value > 0 ? value : 1; }
 export class ContinuousOffsetIndex {
-  private readonly values: number[];
-  private readonly tree: number[];
-
-  constructor(values: readonly number[]) {
-    this.values = values.map(normalizedContinuousValue);
-    this.tree = Array.from({ length: this.values.length + 1 }, () => 0);
-    this.values.forEach((value, index) => this.add(index, value));
-  }
-
-  get length() {
-    return this.values.length;
-  }
-
-  valueAt(index: number) {
-    return this.values[index] ?? 0;
-  }
-
-  set(index: number, value: number) {
-    if (!Number.isInteger(index) || index < 0 || index >= this.values.length) return;
-    const normalized = normalizedContinuousValue(value);
-    const previous = this.values[index] ?? 0;
-    if (Math.abs(previous - normalized) < 0.01) return;
-    this.values[index] = normalized;
-    this.add(index, normalized - previous);
-  }
-
-  prefix(endExclusive: number) {
-    let cursor = Math.max(0, Math.min(this.values.length, Math.floor(endExclusive)));
-    let total = 0;
-    while (cursor > 0) {
-      total += this.tree[cursor] ?? 0;
-      cursor -= cursor & -cursor;
-    }
-    return total;
-  }
-
-  range(start: number, endExclusive: number) {
-    const boundedStart = Math.max(0, Math.min(this.values.length, Math.floor(start)));
-    const boundedEnd = Math.max(boundedStart, Math.min(this.values.length, Math.floor(endExclusive)));
-    return this.prefix(boundedEnd) - this.prefix(boundedStart);
-  }
-
-  total() {
-    return this.prefix(this.values.length);
-  }
-
-  indexAtOffset(offset: number) {
-    if (!this.values.length) return -1;
-    const bounded = Math.max(0, Math.min(this.total() - Number.EPSILON, Number.isFinite(offset) ? offset : 0));
-    let index = 0;
-    let accumulated = 0;
-    let step = 1;
-    while (step * 2 <= this.values.length) step *= 2;
-    for (; step > 0; step = Math.floor(step / 2)) {
-      const candidate = index + step;
-      const candidateTotal = accumulated + (this.tree[candidate] ?? 0);
-      if (candidate <= this.values.length && candidateTotal <= bounded) {
-        index = candidate;
-        accumulated = candidateTotal;
-      }
-    }
-    return Math.min(index, this.values.length - 1);
-  }
-
-  private add(index: number, delta: number) {
-    for (let cursor = index + 1; cursor < this.tree.length; cursor += cursor & -cursor) {
-      this.tree[cursor] = (this.tree[cursor] ?? 0) + delta;
-    }
-  }
+  private readonly values: number[]; private readonly tree: number[];
+  constructor(values: readonly number[]) { this.values = values.map(normalizedContinuousValue); this.tree = Array.from({ length: this.values.length + 1 }, () => 0); this.values.forEach((value, index) => this.add(index, value)); }
+  get length() { return this.values.length; }
+  valueAt(index: number) { return this.values[index] ?? 0; }
+  set(index: number, value: number) { if (!Number.isInteger(index) || index < 0 || index >= this.values.length) return; const normalized = normalizedContinuousValue(value); const previous = this.values[index] ?? 0; if (Math.abs(previous - normalized) < 0.01) return; this.values[index] = normalized; this.add(index, normalized - previous); }
+  prefix(endExclusive: number) { let cursor = Math.max(0, Math.min(this.values.length, Math.floor(endExclusive))); let total = 0; while (cursor > 0) { total += this.tree[cursor] ?? 0; cursor -= cursor & -cursor; } return total; }
+  range(start: number, endExclusive: number) { const a = Math.max(0, Math.min(this.values.length, Math.floor(start))); const b = Math.max(a, Math.min(this.values.length, Math.floor(endExclusive))); return this.prefix(b) - this.prefix(a); }
+  total() { return this.prefix(this.values.length); }
+  indexAtOffset(offset: number) { if (!this.values.length) return -1; const bounded = Math.max(0, Math.min(this.total() - Number.EPSILON, Number.isFinite(offset) ? offset : 0)); let index = 0; let accumulated = 0; let step = 1; while (step * 2 <= this.values.length) step *= 2; for (; step > 0; step = Math.floor(step / 2)) { const candidate = index + step; const candidateTotal = accumulated + (this.tree[candidate] ?? 0); if (candidate <= this.values.length && candidateTotal <= bounded) { index = candidate; accumulated = candidateTotal; } } return Math.min(index, this.values.length - 1); }
+  private add(index: number, delta: number) { for (let cursor = index + 1; cursor < this.tree.length; cursor += cursor & -cursor) this.tree[cursor] = (this.tree[cursor] ?? 0) + delta; }
 }
-
-export function continuousPlaceholderRanges(count: number, maximumRangeSize = 256) {
-  const boundedCount = Math.max(0, Math.floor(count));
-  const boundedRangeSize = Math.max(1, Math.floor(maximumRangeSize));
-  const ranges: Array<Readonly<{ start: number; end: number }>> = [];
-  for (let start = 0; start < boundedCount; start += boundedRangeSize) {
-    ranges.push({ start, end: Math.min(boundedCount, start + boundedRangeSize) });
-  }
-  return ranges;
-}
-
-export function continuousItemAtReadingLine(
-  items: readonly Pick<HTMLElement, 'offsetTop' | 'offsetHeight'>[],
-  scrollTop: number,
-  viewportHeight: number,
-  readingLineRatio = 0.25
-) {
-  if (!items.length) return -1;
-  const line = scrollTop + Math.max(0, viewportHeight) * Math.max(0, Math.min(1, readingLineRatio));
-  const containing = items.findIndex((item) => item.offsetTop + Math.max(1, item.offsetHeight) > line);
-  return containing >= 0 ? containing : items.length - 1;
-}
-
-export function captureContinuousAnchor(
-  root: HTMLElement,
-  items: readonly HTMLElement[],
-  keyOf: (item: HTMLElement) => string | undefined
-): ContinuousViewportAnchor | null {
-  if (!items.length) return null;
-  const index = continuousItemAtReadingLine(items, root.scrollTop, root.clientHeight);
-  const item = items[index];
-  const key = item ? keyOf(item) : undefined;
-  return item && key ? { key, offset: item.offsetTop - root.scrollTop } : null;
-}
-
-export function restoreContinuousAnchor(
-  root: HTMLElement,
-  items: readonly HTMLElement[],
-  anchor: ContinuousViewportAnchor | null,
-  keyOf: (item: HTMLElement) => string | undefined
-) {
-  if (!anchor) return;
-  const item = items.find((candidate) => keyOf(candidate) === anchor.key);
-  if (item) root.scrollTop = Math.max(0, item.offsetTop - anchor.offset);
-}
-
-export function estimatedContinuousHeight(size: number | undefined, viewportHeight: number) {
-  const minimum = Math.max(320, viewportHeight * 0.8);
-  if (!Number.isFinite(size) || !size || size <= 0) return Math.round(minimum);
-  return Math.round(Math.max(minimum, Math.min(viewportHeight * 8, size * 0.42)));
-}
+export function continuousPlaceholderRanges(count: number, maximumRangeSize = 256) { const ranges: Array<Readonly<{ start: number; end: number }>> = []; for (let start = 0; start < Math.max(0, Math.floor(count)); start += Math.max(1, Math.floor(maximumRangeSize))) ranges.push({ start, end: Math.min(Math.max(0, Math.floor(count)), start + Math.max(1, Math.floor(maximumRangeSize))) }); return ranges; }
+export function continuousItemAtReadingLine(items: readonly Pick<HTMLElement, 'offsetTop' | 'offsetHeight'>[], scrollTop: number, viewportHeight: number, readingLineRatio = 0.25) { if (!items.length) return -1; const line = scrollTop + Math.max(0, viewportHeight) * Math.max(0, Math.min(1, readingLineRatio)); const index = items.findIndex((item) => item.offsetTop + Math.max(1, item.offsetHeight) > line); return index >= 0 ? index : items.length - 1; }
+export function captureContinuousAnchor(root: HTMLElement, items: readonly HTMLElement[], keyOf: (item: HTMLElement) => string | undefined): ContinuousViewportAnchor | null { const index = continuousItemAtReadingLine(items, root.scrollTop, root.clientHeight); const item = items[index]; const key = item ? keyOf(item) : undefined; return item && key ? { key, offset: item.offsetTop - root.scrollTop } : null; }
+export function restoreContinuousAnchor(root: HTMLElement, items: readonly HTMLElement[], anchor: ContinuousViewportAnchor | null, keyOf: (item: HTMLElement) => string | undefined) { if (!anchor) return; const item = items.find((candidate) => keyOf(candidate) === anchor.key); if (item) root.scrollTop = Math.max(0, item.offsetTop - anchor.offset); }
+export function estimatedContinuousHeight(size: number | undefined, viewportHeight: number) { const minimum = Math.max(320, viewportHeight * 0.8); return !Number.isFinite(size) || !size || size <= 0 ? Math.round(minimum) : Math.round(Math.max(minimum, Math.min(viewportHeight * 8, size * 0.42))); }

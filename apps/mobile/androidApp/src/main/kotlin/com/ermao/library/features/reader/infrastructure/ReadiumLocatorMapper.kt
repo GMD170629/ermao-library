@@ -6,6 +6,8 @@ import com.ermao.library.shared.modules.reader.EngineLocatorPayload
 import com.ermao.library.shared.modules.reader.ReaderEngine
 import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderLocation
+import com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope
+import com.ermao.library.shared.modules.reader.ExactBlockMatch
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.TextQuote
 import org.json.JSONObject
@@ -23,19 +25,33 @@ internal class ReadiumLocatorMapper {
                 ?.takeIf(String::isNotBlank)
                 ?.let { highlight ->
                     TextQuote(
-                        exact = highlight,
-                        prefix = locator.text.before?.takeIf(String::isNotBlank),
-                        suffix = locator.text.after?.takeIf(String::isNotBlank),
+                        exact = highlight.takeUnicodeCodePoints(ReadiumLocatorEnvelope.MAXIMUM_HIGHLIGHT_LENGTH),
+                        prefix = locator.text.before?.takeIf(String::isNotBlank)
+                            ?.takeUnicodeCodePoints(ReadiumLocatorEnvelope.MAXIMUM_CONTEXT_LENGTH),
+                        suffix = locator.text.after?.takeIf(String::isNotBlank)
+                            ?.takeUnicodeCodePoints(ReadiumLocatorEnvelope.MAXIMUM_CONTEXT_LENGTH),
                     )
                 },
             engineLocator = EngineLocator(
                 engine = ReaderEngine.Readium,
                 platform = ReaderEnginePlatform.Android,
                 version = READIUM_VERSION,
-                payload = EngineLocatorPayload.parse(locator.toJSON().toString()),
+                payload = EngineLocatorPayload.parse(boundedPayload(locator).toString()),
             ),
             contentFingerprint = fingerprint,
         )
+
+    fun exactEnvelope(locator: Locator, fingerprint: ContentFingerprint): ReadiumLocatorEnvelope? =
+        ReadiumLocatorEnvelope.from(toDomain(locator, fingerprint))
+
+    fun compareExactBlock(
+        expected: ReadiumLocatorEnvelope,
+        recaptured: Locator,
+        fingerprint: ContentFingerprint,
+    ): ExactBlockMatch {
+        val actual = exactEnvelope(recaptured, fingerprint) ?: return ExactBlockMatch.AnchorMismatch
+        return com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks(expected, actual)
+    }
 
     fun exactEngineLocator(location: ReaderLocation, fingerprint: ContentFingerprint): Locator? {
         val reflow = location as? ReflowReaderLocation ?: return null
@@ -78,6 +94,24 @@ internal class ReadiumLocatorMapper {
     }
 
     private companion object {
-        const val READIUM_VERSION = "3.3.0"
+        const val READIUM_VERSION = "readium-kotlin:3.3.0"
+    }
+
+    private fun boundedPayload(locator: Locator): JSONObject = locator.toJSON().also { root ->
+        root.optJSONObject("text")?.let { text ->
+            truncate(text, "highlight", ReadiumLocatorEnvelope.MAXIMUM_HIGHLIGHT_LENGTH)
+            truncate(text, "before", ReadiumLocatorEnvelope.MAXIMUM_CONTEXT_LENGTH)
+            truncate(text, "after", ReadiumLocatorEnvelope.MAXIMUM_CONTEXT_LENGTH)
+        }
+    }
+
+    private fun truncate(value: JSONObject, key: String, maximum: Int) {
+        val text = value.optString(key).takeIf(String::isNotBlank) ?: return
+        if (text.codePointCount(0, text.length) > maximum) {
+            value.put(key, text.takeUnicodeCodePoints(maximum))
+        }
     }
 }
+
+private fun String.takeUnicodeCodePoints(maximum: Int): String =
+    substring(0, offsetByCodePoints(0, minOf(maximum, codePointCount(0, length))))

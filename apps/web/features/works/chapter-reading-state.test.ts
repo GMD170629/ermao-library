@@ -63,7 +63,7 @@ test('does not derive paginated chapter state from overall percent', () => {
   );
 });
 
-test('uses an exact foliate TOC index across paginated chapter rows', () => {
+test('uses an exact current chapter index across paginated chapter rows', () => {
   const pageTwo = [
     { href: 'chapter-6.xhtml', sortOrder: 6 },
     { href: 'chapter-7.xhtml', sortOrder: 7 }

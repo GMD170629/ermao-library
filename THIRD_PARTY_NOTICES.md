@@ -1,21 +1,19 @@
 # Third-party notices
 
-## foliate-js
+## Readium Web
 
-The Web application includes [foliate-js](https://github.com/johnfactotum/foliate-js)
-as a Git submodule at commit
-`78914aef4466eb960965702401634c2cb348e9b1`. foliate-js is Copyright (c) 2022
-John Factotum and is distributed under the MIT License. The authoritative license
-text is retained at `third_party/foliate-js/LICENSE`.
+The Web reader uses `@readium/navigator` 2.8.2 and `@readium/shared` 2.4.0.
+Both packages are distributed under the BSD 3-Clause License. Their complete
+license texts are included with the installed packages.
 
-The pinned foliate-js source tree contains browser bundles derived from these
-projects:
+## libmobi
 
-- [fflate 0.8.2](https://github.com/101arrowz/fflate), MIT License.
-- [zip.js 2.7.52](https://github.com/gildas-lormeau/zip.js), BSD 3-Clause License.
-- [PDF.js](https://github.com/mozilla/pdf.js), Apache License 2.0. Its bundled
-  assets remain in the upstream submodule; the novel-reader integration does not
-  load foliate-js's PDF module.
+MOBI-family publication normalization uses the pinned libmobi 0.12 source in
+`apps/mobile/native/mobi-core`. libmobi is distributed under LGPL-3.0-or-later;
+the authoritative license and upstream provenance are retained in that
+directory as `LICENSE` and `UPSTREAM.md` and are copied into the backend image.
 
-The submodule is kept unmodified so its upstream copyright and license material
-remain available alongside the source.
+## PDF.js
+
+The PDF capability fallback uses `pdfjs-dist` 6.1.200 under the Apache License
+2.0. Its complete license text is included with the installed package.

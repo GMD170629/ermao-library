@@ -19,7 +19,7 @@
 
 ## 2. 共同画布
 
-- 画布：除 Work Detail v2 概念组外使用 `390 × 844`，不含设备外框和演示板；Work Detail v2 保留带设备框的评审稿，真实平台验收截图仍按设备原生画布归档；
+- 画布：除 Work Detail 概念组外使用 `390 × 844`，不含设备外框和演示板；Work Detail 当前概念组保留带设备框的评审稿，真实平台验收截图仍按设备原生画布归档；
 - 外观：Shell 页面使用 `App Light`，Reader 使用 `Paper`，Audio 使用方向 A 的暖铜沉浸外观；
 - 内容：八页复用同一用户、服务器和作品身份；出现媒体内容时继续复用同一封面、作者、阅读位置和进度；
 - 视觉：暖白 Canvas、黑色正文、克制珊瑚红、2:3 Cover、系统无衬线与原生图标；
@@ -58,11 +58,11 @@
 
 ## 5. Work Detail
 
-![Work Detail Introduction iOS App Light v2](assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png)
+![Work Detail Multi-volume Cover Grid iOS App Light v3](assets/mobile-app-hifi-v1/work-detail-media-volumes-cover-grid-ios-app-light-v3.png)
 
-文件：[简介](assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png) · [媒体版本与多卷](assets/mobile-app-hifi-v1/work-detail-media-volumes-ios-app-light-v2.png) · [单卷电子书章节回退](assets/mobile-app-hifi-v1/work-detail-ebook-chapters-ios-app-light-v2.png) · [二级操作 Sheet](assets/mobile-app-hifi-v1/work-detail-actions-sheet-ios-app-light-v2.png)
+文件：[简介](assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png) · [媒体版本与多卷封面 v3](assets/mobile-app-hifi-v1/work-detail-media-volumes-cover-grid-ios-app-light-v3.png) · [单卷电子书章节回退](assets/mobile-app-hifi-v1/work-detail-ebook-chapters-ios-app-light-v2.png) · [二级操作 Sheet](assets/mobile-app-hifi-v1/work-detail-actions-sheet-ios-app-light-v2.png)
 
-这四张 v2 稿替代旧 `work-detail-app-light-v1.png`，共同组成 Work Detail 的最终视觉基线。它们是带 iPhone 展示框的概念稿，冻结 App 自有内容构图、密度和层级；实现截图仍使用真实设备画布，系统导航、Tab、Menu 与 Sheet 外壳不得按展示框逐像素仿制。
+多卷封面 v3 替代原 `work-detail-media-volumes-ios-app-light-v2.png`；其余三张 v2 稿继续有效，共同组成 Work Detail 的当前视觉基线。它们是带 iPhone 展示框的概念稿，冻结 App 自有内容构图、密度和层级；实现截图仍使用真实设备画布，系统导航、Tab、Menu 与 Sheet 外壳不得按展示框逐像素仿制。
 
 冻结项：
 
@@ -70,9 +70,10 @@
 - Cover 与作品名组成第一视觉层，作者、系列和阅读状态依次降级；
 - Cover 全局使用透明展示框，不为真实封面或 Fallback 补充背景色；详情身份区按“标题、作者、方形标签、阅读状态、系列”组织，作者与系列保留整行点击但不显示箭头，系列使用下划线并与封面底部对齐；
 - 主 CTA 之后在简介存在时使用“简介 / 媒体版本”一级 Tab；简介为空时隐藏该 Tab 并直接展示媒体内容；仅有一个媒体版本时隐藏媒体类型控件，直接展示卷册或章节；
-- Volume 使用连续列表、Divider 和小型选中标记，不使用卡片墙；阅读进度固定在卷册标题下方；单卷电子书直接回退到目录行，不额外显示“图书章节 / 共 N 章”标题行；
+- 多卷 Volume 使用与 Mobile Work card 统一的 2:3 Cover 网格：标准 Compact 三列，大字体或窄屏降为两列；左上显示卷序号，阅读进度以 2pt 轨道紧贴封面底部，当前卷使用 2pt `brandAccent` 描边；单卷电子书直接回退到目录行，不额外显示“图书章节 / 共 N 章”标题行；
 - “未开始 / 未读”是默认状态，不在身份区重复显示；只有正在阅读或已完成时显示阅读状态；
 - 下载状态与阅读进度严格分离：云朵直接开始下载，环形控件可暂停/取消，勾选圆圈表示完成；详情行不显示“下载中 68%”一类文字；
+- 格式访问优先级沿用 Phase 1：可重排格式未完成下载时，主动作表达“下载后阅读”且不得进入 Reader；PDF/漫画在线主动作仍是流式阅读，云朵只表示另存完整离线工件。本构图规则不得覆盖这一功能差异；
 - 编辑、下载、设置封面和阅读状态位于平台原生二级操作容器；能力与权限不足时隐藏或提供明确的 Web 管理路径，不使用伪成功状态；
 - Work Detail 仍位于 LibraryStack 的 AuthenticatedShell 内，因此保留四项 Tab；只有 Reader 隐藏 Tab 与 mini player。
 
@@ -141,8 +142,10 @@
 冻结项：
 
 - 使用从“我的”压入的系统导航语义，标题“下载”，右侧为选择/管理动作；
+- 导航区同时提供本地已下载搜索；搜索范围只包含当前私有命名空间中的 completed 工件，并按“作品（书名） → media version → volume”聚合展示，不能退化为服务器书库搜索；media version 行使用 Reader v4 的真实媒介种类，不能按文件扩展名猜测；
 - 正常锚点同时展示存储占用、一个进行中、两个已完成和一个失败任务，不使用临时 Sheet 代替持久页面；
-- determinate 下载进度为 4pt，并同时显示百分比或传输量；已完成项明确“离线可用”；
+- determinate 下载进度为 4pt，并同时显示百分比或传输量；从开始/继续阅读触发的单卷任务在 completed 工件落盘后自动进入 Reader，独立下载动作不自动跳转；已完成 volume 可从下载中心直达 Reader；
+- 作品层封面先使用缓存或统一 fallback，占位尺寸始终稳定，再异步过渡到 authenticated cover；封面失败不折叠作品/media version/volume 层级，不出现跳高，也不影响本地搜索和打开；
 - 下载失败使用稳定摘要和行内“重试”，不弹逐项 Dialog；移除离线副本等破坏性动作仍按 Phase 2 进入确认 Dialog；
 - 页面属于 MeStack，保留四项 Tab 且“我的”为选中项；当前正常锚点不显示 offline/401 宽限 Banner 或 mini player。
 
@@ -166,7 +169,7 @@
 
 ## 12. 本轮验收结论
 
-- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；除 Work Detail v2 四张带设备框评审稿外，主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
+- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；除 Work Detail 当前四张带设备框评审稿外，主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
 - Home 没有第二套搜索，Library 是唯一发现入口；
 - Library 活动筛选已去除大面积胶囊背景；
 - Home 与 Library 在标准 `390pt` Compact 宽度下均保持一行三本的信息密度；

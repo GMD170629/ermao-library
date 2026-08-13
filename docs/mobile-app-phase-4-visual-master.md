@@ -47,19 +47,17 @@
 ```text
 AppAppearance = system → appLight | appDark
 
-ReaderAppearance = paper | night | system
-paper → ReaderTheme.warm
-night → ReaderTheme.night
-system → 系统浅色时 paper，系统深色时 night
+ReaderAppearance = day | warm | green | night | black | system
+system → 系统浅色时 day，系统深色时 night
 ```
 
 规则：
 
 - App 外壳始终跟随系统浅/深外观，不新增手动主题设置入口；
 - App Dark 是“暖白书页”的暖墨色派生，不是方向 B“夜航书房”；
-- Reader 默认使用 Paper，用户可以选择 Paper、Night 或跟随系统；
-- 本规范不删除或修改 `reader-core` 现有的 `day/warm/green/night/black` 公共类型；
-- `day`、`green`、`black` 仍是兼容输入，但不属于 Mobile v1 的视觉母版目标；
+- Reader 默认使用 Warm，用户可以选择 Day、Warm、Green、Night、Black 或跟随系统；
+- 五套 Reader 主题与 Web Reader 使用同一组背景、正文、链接和强调色；
+- “暖白书页”继续作为默认视觉方向，但不再限制 Reader 的主题选择范围；
 - 外观切换不能销毁页面、Reader、音频、下载或未同步状态。
 
 ## 4. 颜色令牌
@@ -314,7 +312,7 @@ v1 不建设通用动画库，不添加全局 spring、卡片悬浮、缩放按�
 | Home | 一个强继续任务，最近内容用 Cover 与留白形成节奏 |
 | Library | 搜索、scope、筛选与网格保持扫描效率；标准 390pt Compact 每行三本，文字放大时自适应降列或切 List |
 | Shelves | 用层级、缩进和 Cover 组图区分合集与书架，不依赖多色卡片 |
-| Work Detail | Cover 与书名优先，主 CTA 唯一；简介与媒体版本独立切换；媒体版本使用电子书/漫画/有声书和连续内容结构，单卷电子书直接显示章节 |
+| Work Detail | Cover 与书名优先，主 CTA 唯一；简介与媒体版本独立切换；多卷媒体使用与 Work card 一致的 2:3 封面网格，单卷电子书直接显示章节 |
 | Reader | Paper/Night 正文优先，控制层克制且原生 |
 | Now Playing | 允许更沉浸的暖铜色调，但仍使用 v1 令牌和原生控制 |
 | Downloads | 状态、空间和恢复动作优先，失败使用行内反馈 |

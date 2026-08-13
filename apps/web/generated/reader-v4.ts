@@ -2,44 +2,43 @@
 // AUTO-GENERATED from the Reader v4 FastAPI OpenAPI contract.
 // Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.
 
-export type AudioLocation_Input = {
+export type AudioLocation = {
   kind: "audio";
   fileId: string;
   chapterId?: string | null;
   positionMs: number;
-  engineLocator?: ReaderEngineLocator_Input | null;
 };
 
-export type AudioLocation_Output = {
-  kind: "audio";
-  fileId: string;
-  chapterId?: string | null;
-  positionMs: number;
-  engineLocator?: ReaderEngineLocator_Output | null;
-};
-
-export type ComicLocation_Input = {
+export type ComicLocation = {
   kind: "comic";
   pageIndex: number;
-  engineLocator?: ReaderEngineLocator_Input | null;
 };
 
-export type ComicLocation_Output = {
-  kind: "comic";
-  pageIndex: number;
-  engineLocator?: ReaderEngineLocator_Output | null;
+export type LocatorEnvelope_Input = {
+  engine: "readium";
+  platform: "android" | "ios" | "web";
+  version: string;
+  publication: PublicationFingerprint;
+  payload: ReadiumLocatorPayload_Input;
 };
 
-export type PdfLocation_Input = {
+export type LocatorEnvelope_Output = {
+  engine: "readium";
+  platform: "android" | "ios" | "web";
+  version: string;
+  publication: PublicationFingerprint;
+  payload: ReadiumLocatorPayload_Output;
+};
+
+export type PdfLocation = {
   kind: "pdf";
   pageNumber: number;
-  engineLocator?: ReaderEngineLocator_Input | null;
 };
 
-export type PdfLocation_Output = {
-  kind: "pdf";
-  pageNumber: number;
-  engineLocator?: ReaderEngineLocator_Output | null;
+export type PublicationFingerprint = {
+  originalFileHash: string;
+  parser: string;
+  normalization: string;
 };
 
 export type ReaderBookSummary = {
@@ -49,29 +48,21 @@ export type ReaderBookSummary = {
   coverUrl?: string | null;
 };
 
-export type ReaderBookmark_Input = {
+export type ReaderBookmark = {
   id: string;
-  location: ReflowLocation_Input | ComicLocation_Input | PdfLocation_Input | AudioLocation_Input;
-  label: string;
-  percent: number;
-  createdAt: string;
-};
-
-export type ReaderBookmark_Output = {
-  id: string;
-  location: ReflowLocation_Output | ComicLocation_Output | PdfLocation_Output | AudioLocation_Output;
+  location: ReflowLocation | ComicLocation | PdfLocation | AudioLocation;
   label: string;
   percent: number;
   createdAt: string;
 };
 
 export type ReaderBookmarksData = {
-  bookmarks: Array<ReaderBookmark_Output>;
+  bookmarks: Array<ReaderBookmark>;
 };
 
 export type ReaderBookmarksReplaceRequest = {
   contentFingerprint: string;
-  bookmarks: Array<ReaderBookmark_Input>;
+  bookmarks: Array<ReaderBookmark>;
 };
 
 export type ReaderBookmarksResponse = {
@@ -84,7 +75,7 @@ export type ReaderBootstrapData = {
   userId: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
   sourceFormat?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
-  contentFingerprint: string;
+  publicationFingerprint: PublicationFingerprint;
   book: ReaderBookSummary;
   mediaVersion: ReaderMediaVersionSummary;
   volume: ReaderVolumeSummary;
@@ -93,6 +84,7 @@ export type ReaderBootstrapData = {
   units: Array<ReaderUnitSummary>;
   fileUrl: string;
   capabilities: ReaderCapabilities;
+  publication?: ReaderPublicationAccess | null;
   progressSnapshot?: ReaderProgressSnapshot | null;
 };
 
@@ -114,35 +106,11 @@ export type ReaderCapabilities = {
   supportsSpreads: boolean;
 };
 
-export type ReaderContentFingerprint = {
-  originalFileHash: string;
-  parserVersion: string;
-  normalizationVersion: string;
-};
-
-export type ReaderEngineLocator_Input = {
-  engine: "readium" | "foliate";
-  platform: "android" | "ios" | "web";
-  version: string;
-  payload: {
-    [key: string]: ReaderJsonValue_Input;
-  };
-};
-
-export type ReaderEngineLocator_Output = {
-  engine: "readium" | "foliate";
-  platform: "android" | "ios" | "web";
-  version: string;
-  payload: {
-    [key: string]: ReaderJsonValue_Output;
-  };
-};
-
 export type ReaderErrorBody = {
   message: string;
   code?: string | null;
   details?: {
-    [key: string]: ReaderJsonValue_Output;
+    [key: string]: ReaderJsonValue_Output | null | undefined;
   } | null;
 };
 
@@ -160,12 +128,12 @@ export type ReaderFileSummary = {
   contentHash?: string | null;
 };
 
-export type ReaderJsonValue_Input = string | number | number | boolean | Array<ReaderJsonValue_Input> | {
-  [key: string]: ReaderJsonValue_Input;
+export type ReaderJsonValue_Input = string | number | boolean | Array<ReaderJsonValue_Input> | {
+  [key: string]: ReaderJsonValue_Input | null | undefined;
 } | null;
 
-export type ReaderJsonValue_Output = string | number | number | boolean | Array<ReaderJsonValue_Output> | {
-  [key: string]: ReaderJsonValue_Output;
+export type ReaderJsonValue_Output = string | number | boolean | Array<ReaderJsonValue_Output> | {
+  [key: string]: ReaderJsonValue_Output | null | undefined;
 } | null;
 
 export type ReaderMediaVersionSummary = {
@@ -175,31 +143,38 @@ export type ReaderMediaVersionSummary = {
   completed: boolean;
 };
 
-export type ReaderProgressData = {
-  progress: ReaderProgressSnapshot;
+export type ReaderProgressConflictBody = {
+  message: string;
+  code?: "READER_PROGRESS_CONFLICT";
+  current: ReaderProgressSnapshot;
 };
 
 export type ReaderProgressPut = {
   schemaVersion: 4;
   clientId: string;
-  updatedAtEpochMillis: number;
-  percent: number;
-  location?: ReflowLocation_Input | ComicLocation_Input | PdfLocation_Input | AudioLocation_Input | null;
-  contentFingerprint: string;
+  mutationId: string;
+  baseRevision: number;
+  capturedAtEpochMillis: number;
+  locator: LocatorEnvelope_Input;
 };
 
 export type ReaderProgressResponse = {
   ok?: true;
-  data: ReaderProgressData;
+  data: ReaderProgressSnapshot;
 };
 
 export type ReaderProgressSnapshot = {
   schemaVersion?: 4;
-  clientId: string;
-  updatedAtEpochMillis: number;
-  percent: number;
-  location?: ReflowLocation_Output | ComicLocation_Output | PdfLocation_Output | AudioLocation_Output | null;
-  contentFingerprint: string;
+  revision: number;
+  locator: LocatorEnvelope_Output;
+  displayPercent: number;
+  receivedAtEpochMillis: number;
+  capturedAtEpochMillis?: number | null;
+};
+
+export type ReaderPublicationAccess = {
+  manifestUrl: string;
+  positionsUrl: string;
 };
 
 export type ReaderReadingStatusData = {
@@ -217,12 +192,6 @@ export type ReaderReadingStatusResponse = {
   data: ReaderReadingStatusData;
 };
 
-export type ReaderTextQuote = {
-  exact: string;
-  prefix?: string | null;
-  suffix?: string | null;
-};
-
 export type ReaderUnitSummary = {
   id: string;
   index: number;
@@ -233,7 +202,7 @@ export type ReaderUnitSummary = {
   endMs?: number | null;
   durationMs?: number | null;
   metadata?: {
-    [key: string]: ReaderJsonValue_Output;
+    [key: string]: ReaderJsonValue_Output | null | undefined;
   };
 };
 
@@ -254,22 +223,50 @@ export type ReaderVolumeSummary = {
   lastReadAt?: string | null;
 };
 
-export type ReflowLocation_Input = {
-  kind: "reflow";
-  resourceKey?: string | null;
+export type ReadiumLocatorLocations_Input = {
+  cssSelector?: string | null;
+  fragments?: Array<string>;
   progression?: number | null;
+  totalProgression?: number | null;
   position?: number | null;
-  textQuote?: ReaderTextQuote | null;
-  contentFingerprint?: ReaderContentFingerprint | null;
-  engineLocator?: ReaderEngineLocator_Input | null;
+  [key: string]: ReaderJsonValue_Input | null | undefined;
 };
 
-export type ReflowLocation_Output = {
-  kind: "reflow";
-  resourceKey?: string | null;
+export type ReadiumLocatorLocations_Output = {
+  cssSelector?: string | null;
+  fragments?: Array<string>;
   progression?: number | null;
+  totalProgression?: number | null;
   position?: number | null;
-  textQuote?: ReaderTextQuote | null;
-  contentFingerprint?: ReaderContentFingerprint | null;
-  engineLocator?: ReaderEngineLocator_Output | null;
+  [key: string]: ReaderJsonValue_Output | null | undefined;
+};
+
+export type ReadiumLocatorPayload_Input = {
+  href: string;
+  type: string;
+  title?: string | null;
+  locations: ReadiumLocatorLocations_Input;
+  text?: ReadiumLocatorText | null;
+  [key: string]: ReaderJsonValue_Input | null | undefined;
+};
+
+export type ReadiumLocatorPayload_Output = {
+  href: string;
+  type: string;
+  title?: string | null;
+  locations: ReadiumLocatorLocations_Output;
+  text?: ReadiumLocatorText | null;
+  [key: string]: ReaderJsonValue_Output | null | undefined;
+};
+
+export type ReadiumLocatorText = {
+  before?: string | null;
+  highlight?: string | null;
+  after?: string | null;
+};
+
+export type ReflowLocation = {
+  kind: "reflow";
+  resourceKey: string;
+  progression?: number | null;
 };

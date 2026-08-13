@@ -3,6 +3,7 @@ import SwiftUI
 struct MeRootView: View {
     @ObservedObject var viewModel: SettingsViewModel
     let onOpenRoute: @MainActor @Sendable (SettingsRoute) -> Void
+    let onOpenDownloads: @MainActor @Sendable () -> Void
     let canOpenAdministration: Bool
     let onOpenEmailAndKindle: @MainActor @Sendable () -> Void
     let onOpenKindleQueue: @MainActor @Sendable () -> Void
@@ -14,6 +15,7 @@ struct MeRootView: View {
     init(
         viewModel: SettingsViewModel,
         onOpenRoute: @escaping @MainActor @Sendable (SettingsRoute) -> Void,
+        onOpenDownloads: @escaping @MainActor @Sendable () -> Void = {},
         canOpenAdministration: Bool = false,
         onOpenEmailAndKindle: @escaping @MainActor @Sendable () -> Void = {},
         onOpenKindleQueue: @escaping @MainActor @Sendable () -> Void = {},
@@ -21,6 +23,7 @@ struct MeRootView: View {
     ) {
         self.viewModel = viewModel
         self.onOpenRoute = onOpenRoute
+        self.onOpenDownloads = onOpenDownloads
         self.canOpenAdministration = canOpenAdministration
         self.onOpenEmailAndKindle = onOpenEmailAndKindle
         self.onOpenKindleQueue = onOpenKindleQueue
@@ -48,6 +51,18 @@ struct MeRootView: View {
                         titleKey: "settings.security.title",
                         subtitleKey: "settings.security.subtitle",
                         systemImage: "lock.shield"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .listRowBackground(theme.surface)
+
+            Section("me.offline.section") {
+                Button(action: onOpenDownloads) {
+                    settingsNavigationLabel(
+                        titleKey: "downloads.title",
+                        subtitleKey: "downloads.me.subtitle",
+                        systemImage: "arrow.down.circle"
                     )
                 }
                 .buttonStyle(.plain)

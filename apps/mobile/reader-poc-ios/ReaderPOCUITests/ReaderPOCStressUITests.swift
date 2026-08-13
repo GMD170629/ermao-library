@@ -61,6 +61,32 @@ final class ReaderPOCStressUITests: XCTestCase {
         }
     }
 
+    func testZhHansExactLocatorCopiesAndRestoresOnPhysicalDevice() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--reader-poc-ui-test", "--locator-round-trip"]
+        app.launch()
+        try openNavigator(fixtureID: "zh-hans", in: app)
+
+        let copy = app.buttons["reader.copyLocator"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 12))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: copy)
+        waitForExpectations(timeout: 12)
+        copy.tap()
+
+        let result = app.staticTexts["reader.locatorExchangeResult"]
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        let copiedMessage = result.label
+        XCTAssertFalse(copiedMessage.isEmpty)
+
+        app.buttons["reader.pasteLocator"].tap()
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label != %@", copiedMessage),
+            object: result
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 8), .completed)
+        app.buttons["reader.close"].tap()
+    }
+
     func testBasicKF8FiveHundredTurnsAndLifecycleTransitions() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--reader-poc-ui-test", "--stress-smoke"]

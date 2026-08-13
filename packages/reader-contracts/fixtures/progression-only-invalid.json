@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 4,
+  "clientId": "web-installation-01",
+  "mutationId": "9783800d-7492-4585-9abd-ed83dd364cac",
+  "baseRevision": 0,
+  "capturedAtEpochMillis": 1786500000000,
+  "locator": {
+    "engine": "readium",
+    "platform": "web",
+    "version": "readium-ts:2.8.2",
+    "publication": {
+      "originalFileHash": "sha256:f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678",
+      "parser": "libmobi:0.12@85dcfe",
+      "normalization": "ermao-mobi-core-v1"
+    },
+    "payload": {
+      "href": "part00000.html",
+      "type": "application/xhtml+xml",
+      "locations": {
+        "progression": 0.42,
+        "position": 17
+      }
+    }
+  }
+}

@@ -19,3 +19,4 @@ rootProject.name = "ermao-mobile"
 include(":shared")
 include(":androidApp")
 include(":mobiCore")
+include(":readerMobiPoc")

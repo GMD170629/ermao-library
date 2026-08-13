@@ -172,8 +172,11 @@ actor SharedContentClient: ContentClient {
         let volumes = selectedVersions.flatMap(\.volumes).map { volume in
             WorkVolume(
                 id: volume.id,
+                mediaVersionID: volume.mediaVersionId,
                 title: volume.title,
                 formatLabel: volume.format,
+                volumeIndex: volume.volumeIndex?.doubleValue,
+                cover: cover(volume.coverUrl),
                 sizeLabel: ByteCountFormatter.string(
                     fromByteCount: volume.sizeBytes,
                     countStyle: .file
@@ -192,21 +195,41 @@ actor SharedContentClient: ContentClient {
         } else {
             .unread
         }
-        let currentChapterTitle = value.activeMedia?.currentChapterTitle
         let currentChapterProgress = value.activeMedia?.progress ?? 0
         let readingUnits = value.readingUnits.isEmpty
             ? value.activeMedia?.units ?? []
             : value.readingUnits
-        let chapters = readingUnits.compactMap { unit -> WorkChapter? in
+        let chapterUnits = readingUnits.filter { $0.volumeId == selectedVolumeID }
+        let chapterStates = ErmaoShared.PublicKt.resolveReaderChapterStates(
+            units: chapterUnits.map {
+                ErmaoShared.ReaderChapterUnit(href: $0.href, sortOrder: Int32($0.sortOrder))
+            },
+            currentHref: value.activeMedia?.currentHref,
+            currentSortOrder: value.activeMedia?.currentChapterSortOrder,
+            progressPercent: currentChapterProgress,
+            metadata: ErmaoShared.ReaderChapterListMetadata(
+                page: 1,
+                pageSize: Int32(max(1, chapterUnits.count)),
+                currentIndex: value.activeMedia?.currentChapterIndex
+            )
+        )
+        let chapters = chapterUnits.enumerated().compactMap { index, unit -> WorkChapter? in
             guard unit.volumeId == selectedVolumeID,
                   let title = unit.title,
                   !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            let isCurrent = title == currentChapterTitle
+            let state: WorkChapterReadingState = switch chapterStates[index] {
+            case .current: .current
+            case .read: .read
+            default: .unread
+            }
             return WorkChapter(
                 id: unit.id,
                 title: title,
-                progress: isCurrent && currentChapterProgress > 0 ? currentChapterProgress : nil,
-                isCurrent: isCurrent
+                progress: state == .current && currentChapterProgress > 0 ? currentChapterProgress : nil,
+                isCurrent: state == .current,
+                href: unit.href,
+                sortOrder: Int(unit.sortOrder),
+                state: state
             )
         }
         return WorkDetailContent(

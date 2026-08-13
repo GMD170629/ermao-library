@@ -342,23 +342,24 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           volumeId: bootstrap.volume.id,
           localContentFingerprint: bootstrap.localContentFingerprint
         }).catch(() => null);
+        const localAudioLocation = localExact?.location;
         if (
-          localExact?.location.kind === 'audio'
+          localAudioLocation?.kind === 'audio'
           && (
             bootstrap.serverUpdatedAtEpochMillis === null
-            || localExact.updatedAtEpochMillis >= bootstrap.serverUpdatedAtEpochMillis
+            || (localExact?.capturedAtEpochMillis ?? -1) >= bootstrap.serverUpdatedAtEpochMillis
           )
         ) {
           bootstrap = {
             ...bootstrap,
             resumeLocation: {
               type: 'audio',
-              volumeId: localExact.location.volumeId,
-              fileId: localExact.location.fileId,
-              chapterId: localExact.location.chapterId,
-              positionMs: localExact.location.positionMs
+              volumeId: localAudioLocation.volumeId,
+              fileId: localAudioLocation.fileId,
+              chapterId: localAudioLocation.chapterId,
+              positionMs: localAudioLocation.positionMs
             },
-            progressPercent: localExact.percent ?? bootstrap.progressPercent
+            progressPercent: localExact?.percent ?? bootstrap.progressPercent
           };
         }
         bootstrapRef.current = bootstrap;

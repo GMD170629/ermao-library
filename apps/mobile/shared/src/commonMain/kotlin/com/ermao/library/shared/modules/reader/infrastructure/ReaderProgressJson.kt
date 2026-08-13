@@ -12,6 +12,7 @@ import com.ermao.library.shared.modules.reader.domain.ReaderLocation
 import com.ermao.library.shared.modules.reader.domain.ReaderProgress
 import com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.domain.TextQuote
+import com.ermao.library.shared.modules.reader.domain.exactLocatorEnvelope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -25,27 +26,32 @@ import kotlinx.serialization.json.contentOrNull
 class ReaderProgressDocumentException(message: String, cause: Throwable? = null) :
     IllegalArgumentException(message, cause)
 
-/** Local exact Reader progress. Encoder writes v4; decoder migrates v1 documents. */
+/** Local exact Reader progress. Reader v4 is pre-release, so no legacy document is accepted. */
 class ReaderProgressJson(
     private val json: Json = defaultReaderProgressJson,
 ) {
+    @Throws(ReaderProgressDocumentException::class)
     fun encode(progress: ReaderProgress): String = try {
+        if (progress.location is ReflowReaderLocation) progress.exactLocatorEnvelope()
         json.encodeToString(progress.toWire())
     } catch (error: SerializationException) {
         throw ReaderProgressDocumentException("Reader progress could not be encoded", error)
     }
 
+    @Throws(ReaderProgressDocumentException::class)
     fun decode(payload: String): ReaderProgress {
         val document = try {
             json.decodeFromString<ReaderProgressDocumentWire>(payload)
         } catch (error: SerializationException) {
             throw ReaderProgressDocumentException("Reader progress document is malformed", error)
         }
-        if (document.schema != SCHEMA_NAME || document.version !in setOf(LEGACY_SCHEMA_VERSION, SCHEMA_VERSION)) {
+        if (document.schema != SCHEMA_NAME || document.version != SCHEMA_VERSION) {
             throw ReaderProgressDocumentException("Reader progress schema is unsupported")
         }
         return try {
-            document.toDomain()
+            document.toDomain().also {
+                if (it.location is ReflowReaderLocation) it.exactLocatorEnvelope()
+            }
         } catch (error: IllegalArgumentException) {
             throw ReaderProgressDocumentException("Reader progress document is invalid", error)
         }
@@ -87,13 +93,13 @@ class ReaderProgressJson(
 
     private fun ReaderProgressDocumentWire.toDomain() = ReaderProgress(
         sourceId,
-        location.toDomain(version),
+        location.toDomain(),
         updatedAtEpochMillis,
         deviceId,
         percent,
     )
 
-    private fun ReaderLocationWire.toDomain(version: Int): ReaderLocation = when (this) {
+    private fun ReaderLocationWire.toDomain(): ReaderLocation = when (this) {
         is ReflowLocationWire -> {
             val fingerprint = contentFingerprint.toDomain()
             ReflowReaderLocation(
@@ -102,17 +108,17 @@ class ReaderProgressJson(
                 totalProgression,
                 position,
                 textQuote?.let { TextQuote(it.exact, it.prefix, it.suffix) },
-                engineLocator?.toEngineLocator(version, fingerprint),
+                engineLocator?.toEngineLocator(),
                 fingerprint,
             )
         }
         is PdfLocationWire -> {
             val fingerprint = contentFingerprint.toDomain()
-            PdfReaderLocation(pageIndex, pageProgression, fingerprint, engineLocator?.toEngineLocator(version, fingerprint))
+            PdfReaderLocation(pageIndex, pageProgression, fingerprint, engineLocator?.toEngineLocator())
         }
         is ComicLocationWire -> {
             val fingerprint = contentFingerprint.toDomain()
-            ComicReaderLocation(pageIndex, fingerprint, engineLocator?.toEngineLocator(version, fingerprint))
+            ComicReaderLocation(pageIndex, fingerprint, engineLocator?.toEngineLocator())
         }
         is AudioLocationWire -> {
             val fingerprint = contentFingerprint.toDomain()
@@ -121,7 +127,7 @@ class ReaderProgressJson(
                 chapterId,
                 positionMillis,
                 fingerprint,
-                engineLocator?.toEngineLocator(version, fingerprint),
+                engineLocator?.toEngineLocator(),
             )
         }
     }
@@ -135,31 +141,15 @@ class ReaderProgressJson(
         ),
     )
 
-    private fun JsonObject.toEngineLocator(version: Int, fingerprint: ContentFingerprint): EngineLocator {
-        if (version == LEGACY_SCHEMA_VERSION) {
-            val parser = fingerprint.parserVersion.lowercase()
-            return EngineLocator(
-                engine = if ("foliate" in parser) ReaderEngine.Foliate else ReaderEngine.Readium,
-                platform = when {
-                    "swift" in parser -> ReaderEnginePlatform.Ios
-                    "foliate" in parser -> ReaderEnginePlatform.Web
-                    else -> ReaderEnginePlatform.Android
-                },
-                version = fingerprint.parserVersion.substringAfter(':', "legacy"),
-                payload = EngineLocatorPayload.parse(json.encodeToString(JsonObject.serializer(), this)),
-            )
-        }
-        return EngineLocator(
+    private fun JsonObject.toEngineLocator(): EngineLocator = EngineLocator(
             engine = requiredEnum("engine", ReaderEngine.entries, ReaderEngine::wireValue),
             platform = requiredEnum("platform", ReaderEnginePlatform.entries, ReaderEnginePlatform::wireValue),
             version = requiredString("version"),
             payload = payloadObject(),
         )
-    }
 }
 
 private const val SCHEMA_NAME = "ermao.reader-progress"
-private const val LEGACY_SCHEMA_VERSION = 1
 private const val SCHEMA_VERSION = 4
 
 private val defaultReaderProgressJson = Json {
@@ -249,10 +239,9 @@ private fun JsonObject.requiredString(name: String): String =
         ?: throw ReaderProgressDocumentException("Reader progress field $name is missing")
 
 private fun JsonObject.payloadObject(): EngineLocatorPayload {
-    val element = this["payload"] ?: throw ReaderProgressDocumentException("Reader progress field payload is missing")
-    // A short-lived pre-release v4 encoder wrote the object as a JSON string.
-    val raw = if (element is JsonPrimitive && element.isString) element.content else element.toString()
-    return EngineLocatorPayload.parse(raw)
+    val element = this["payload"] as? JsonObject
+        ?: throw ReaderProgressDocumentException("Reader progress field payload must be an object")
+    return EngineLocatorPayload.parse(element.toString())
 }
 
 private fun <T> JsonObject.requiredEnum(

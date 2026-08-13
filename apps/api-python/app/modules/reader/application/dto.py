@@ -87,6 +87,7 @@ class ReaderUnitDto:
     unit_type: str
     title: str
     href: str
+    media_type: str | None
     sort_order: int
     start_ms: int | None
     end_ms: int | None
@@ -110,6 +111,14 @@ class ReaderProgressDto:
     source_protocol: str
     source_device_name: str | None
     updated_at: datetime
+    revision: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderPublicationFingerprintDto:
+    original_file_hash: str
+    parser: str
+    normalization: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +155,6 @@ class ReaderBootstrapDto:
     files: tuple[ReaderFileDto, ...]
     units: tuple[ReaderUnitDto, ...]
     progress_by_volume_id: dict[str, ReaderProgressDto]
-    content_fingerprint: str
+    publication_fingerprint: ReaderPublicationFingerprintDto
     resume_location_json: str | None
     media_completed: bool

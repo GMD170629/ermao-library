@@ -19,31 +19,34 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNull
 
 class KtorReaderBootstrapGatewayTest {
     @Test
-    fun mapsV4SnapshotAndVersionedPublicAnchor() = runBlocking {
+    fun mapsExactV4SnapshotAndArtifactVersion() = runBlocking {
         val content = assertIs<Content>(gateway(VALID_BOOTSTRAP).load(request())).value
 
-        assertEquals("server-token", content.target.serverContentFingerprint.value)
-        assertEquals(2_222, content.remoteSnapshot?.updatedAtEpochMillis)
-        assertEquals("server-token", content.remoteSnapshot?.serverContentFingerprint?.value)
-        assertEquals(ReaderEnginePlatform.Ios, content.remoteSnapshot?.anchor?.engineLocator?.platform)
+        assertEquals(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|readium:epub|epub-v1",
+            content.artifactVersion,
+        )
+        assertEquals("/api/volumes/volume-1/file", content.publication.apiPath)
+        assertEquals(1_234, content.publication.expectedSizeBytes)
+        assertEquals("readium:epub", content.publication.publicationFingerprint.parser)
+        assertEquals(18, content.remoteSnapshot?.revision)
+        assertEquals(2_222, content.remoteSnapshot?.receivedAtEpochMillis)
+        assertEquals(ReaderEnginePlatform.Ios, content.remoteSnapshot?.locator?.platform)
     }
 
     @Test
-    fun fingerprintMismatchRetainsOnlyPercentAndClientTimestamp() = runBlocking {
+    fun malformedProgressSnapshotFailsClosedWithoutPercentageFallback() = runBlocking {
         val mismatch = VALID_BOOTSTRAP.replace(
-            "\"contentFingerprint\":\"server-token\",\"location\"",
-            "\"contentFingerprint\":\"old-token\",\"location\"",
+            "\"locations\":{\"cssSelector\":\"#chapter-title\"},\"text\":{\"highlight\":\"Chapter\"}",
+            "\"locations\":{\"progression\":0.8}",
         )
 
-        val content = assertIs<Content>(gateway(mismatch).load(request())).value
+        val failure = assertIs<Failure>(gateway(mismatch).load(request()))
 
-        assertEquals(80.0, content.remoteSnapshot?.percent)
-        assertEquals(2_222, content.remoteSnapshot?.updatedAtEpochMillis)
-        assertNull(content.remoteSnapshot?.anchor)
+        assertEquals("READER_PROGRESS_SNAPSHOT_INVALID", failure.failureCode)
     }
 
     @Test
@@ -80,12 +83,12 @@ class KtorReaderBootstrapGatewayTest {
         val VALID_BOOTSTRAP = """
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
-              "contentFingerprint":"server-token","book":{"id":"work-1","title":"Book"},
+              "publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"book":{"id":"work-1","title":"Book"},
               "mediaVersion":{"id":"media-1","workId":"work-1","mediaKind":"EBOOK","completed":true},
               "volume":{"id":"volume-1","title":"Volume"},"availableVolumes":[],
-              "files":[{"id":"file-1","kind":"publication","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","contentHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sortOrder":0}],
-              "units":[],"fileUrl":"/api/files/file-1","capabilities":{},
-              "progressSnapshot":{"schemaVersion":4,"clientId":"ios-client","updatedAtEpochMillis":2222,"percent":80.0,"contentFingerprint":"server-token","location":{"kind":"reflow","resourceKey":"EPUB/chapter.xhtml","progression":0.8,"engineLocator":{"engine":"readium","platform":"ios","version":"3.8.0","payload":{"href":"EPUB/chapter.xhtml"}}}}
+              "files":[{"id":"file-1","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","contentHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sortOrder":0}],
+              "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},"publication":{"manifestUrl":"/api/reader/v4/volumes/volume-1/publication/manifest.json","positionsUrl":"/api/reader/v4/volumes/volume-1/publication/positions.json"},
+              "progressSnapshot":{"schemaVersion":4,"revision":18,"locator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
             }
         """.trimIndent()
     }

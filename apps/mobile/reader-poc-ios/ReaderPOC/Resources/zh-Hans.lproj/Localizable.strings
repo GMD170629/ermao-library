@@ -9,6 +9,17 @@
 "action.previousPage" = "上一页";
 "action.nextPage" = "下一页";
 "action.run500Turns" = "连续翻页 500 次";
+"action.copyLocator" = "复制精确 Locator";
+"action.pasteLocator" = "粘贴并跳转 Locator";
+"locator.captureFailed" = "无法取得首个可见正文锚点。";
+"locator.payloadTooLarge" = "Locator 超过 64 KiB 安全上限。";
+"locator.copied" = "已复制 iOS Readium Locator。";
+"locator.pasteFailed" = "剪贴板中没有有效 Locator。";
+"locator.wrongEngine" = "Locator 不是 Readium 引擎数据。";
+"locator.fingerprintMismatch" = "Locator 与当前 Publication 指纹不匹配。";
+"locator.invalid" = "Locator JSON 无效。";
+"locator.restored" = "已跳转到 Locator；请重新复制以核对锚点。";
+"locator.restoreFailed" = "Readium 无法跳转到这个 Locator。";
 "fixture.basicMobi6" = "普通 MOBI6，包含三个章节";
 "fixture.basicKF8" = "基础 KF8/AZW3 端到端冒烟测试";
 "fixture.css" = "外链 CSS 与出版方样式";

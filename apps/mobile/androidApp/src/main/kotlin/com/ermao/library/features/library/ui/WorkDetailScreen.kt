@@ -2,10 +2,12 @@ package com.ermao.library.features.library.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,11 +16,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -29,7 +35,11 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,13 +50,13 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -58,26 +68,36 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.ermao.library.R
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ReadingUnitContent
+import com.ermao.library.features.content.model.ChapterReadingState
 import com.ermao.library.features.content.model.VolumeContent
 import com.ermao.library.features.content.model.WorkDetailContent
 import com.ermao.library.features.content.ui.ContentAreaMessage
+import com.ermao.library.features.content.ui.ContentCover
 import com.ermao.library.features.content.ui.CoverSize
 import com.ermao.library.features.content.ui.WorkCover
-import com.ermao.library.features.library.application.WorkDetailContentTab
 import com.ermao.library.features.library.application.WorkDetailUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import com.ermao.library.features.downloads.model.AndroidDownloadRecord
+import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,14 +108,23 @@ fun WorkDetailScreen(
     onBack: () -> Unit,
     onSelectMedia: (String) -> Unit,
     onSelectVolume: (String) -> Unit,
-    onSelectContentTab: (WorkDetailContentTab) -> Unit,
+    onOpenShelfPicker: () -> Unit,
+    onDismissShelfPicker: () -> Unit,
+    onToggleShelf: (String) -> Unit,
+    onSaveShelves: () -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
-    onOpenReader: (String) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    onRefresh: () -> Unit = {},
+    downloadRecordsByVolume: Map<String, AndroidDownloadRecord> = emptyMap(),
+    downloadFailuresByVolume: Map<String, String> = emptyMap(),
+    onDownloadVolume: (String) -> Unit = {},
+    onCancelDownload: (String) -> Unit = {},
+    onOpenSelectedVolume: (VolumeContent) -> Unit = {},
 ) {
     val theme = WarmPageThemeValues
     var showActions by remember { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { onRefresh() }
     Scaffold(
         modifier = modifier.testTag("work-detail"),
         containerColor = theme.colors.canvas,
@@ -136,9 +165,13 @@ fun WorkDetailScreen(
                 context = context,
                 onSelectMedia = onSelectMedia,
                 onSelectVolume = onSelectVolume,
-                onSelectContentTab = onSelectContentTab,
+                onOpenShelfPicker = onOpenShelfPicker,
                 onOpenFacet = onOpenFacet,
-                onOpenReader = onOpenReader,
+                downloadRecordsByVolume = downloadRecordsByVolume,
+                downloadFailuresByVolume = downloadFailuresByVolume,
+                onDownloadVolume = onDownloadVolume,
+                onCancelDownload = onCancelDownload,
+                onOpenSelectedVolume = onOpenSelectedVolume,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -146,6 +179,9 @@ fun WorkDetailScreen(
 
     if (showActions && state.content != null) {
         WorkActionsSheet(state.content, onDismiss = { showActions = false })
+    }
+    if (state.isShelfPickerVisible) {
+        ShelfPickerSheet(state, onDismissShelfPicker, onToggleShelf, onSaveShelves)
     }
 }
 
@@ -156,9 +192,13 @@ private fun WorkDetailBody(
     context: ContentRequestContext,
     onSelectMedia: (String) -> Unit,
     onSelectVolume: (String) -> Unit,
-    onSelectContentTab: (WorkDetailContentTab) -> Unit,
+    onOpenShelfPicker: () -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
-    onOpenReader: (String) -> Unit,
+    downloadRecordsByVolume: Map<String, AndroidDownloadRecord>,
+    downloadFailuresByVolume: Map<String, String>,
+    onDownloadVolume: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
+    onOpenSelectedVolume: (VolumeContent) -> Unit,
     modifier: Modifier,
 ) {
     val theme = WarmPageThemeValues
@@ -167,9 +207,6 @@ private fun WorkDetailBody(
     val selectedVolume = selectedMedia?.volumes?.firstOrNull { it.id == state.selectedVolumeId }
         ?: selectedMedia?.volumes?.firstOrNull { it.selected }
         ?: selectedMedia?.volumes?.firstOrNull()
-    val canOpenReader = state.selectedMediaKind.equals("EBOOK", ignoreCase = true) &&
-        selectedVolume?.readable == true &&
-        selectedVolume.format.equals("epub", ignoreCase = true)
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = theme.spacing.three, end = theme.spacing.three, bottom = theme.spacing.six),
@@ -179,18 +216,42 @@ private fun WorkDetailBody(
         item { ReadingSummary(content) }
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
+                    Button(
+                        onClick = onOpenShelfPicker,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = theme.colors.accentSoft,
+                            contentColor = theme.colors.actionAccent,
+                        ),
+                        modifier = Modifier.weight(1f).height(56.dp).testTag("work-shelf-action"),
+                    ) {
+                        Icon(Icons.Outlined.BookmarkBorder, contentDescription = null)
+                        Text(stringResource(R.string.work_action_add_shelf), modifier = Modifier.padding(start = theme.spacing.one))
+                    }
                 Button(
-                    onClick = { selectedVolume?.id?.let(onOpenReader) },
-                    enabled = canOpenReader,
-                    modifier = Modifier.fillMaxWidth().testTag("work-reader-action"),
-                    colors = ButtonDefaults.buttonColors(disabledContainerColor = theme.colors.actionAccent.copy(alpha = 0.45f)),
+                    onClick = { selectedVolume?.let(onOpenSelectedVolume) },
+                    enabled = selectedVolume?.readable == true,
+                    modifier = Modifier.weight(1f).height(56.dp).testTag("work-reader-action"),
                 ) {
-                    Icon(Icons.Outlined.Book, contentDescription = null)
+                    Icon(Icons.Outlined.PlayCircle, contentDescription = null)
                     Text(primaryActionLabel(state.selectedMediaKind), modifier = Modifier.padding(start = theme.spacing.one))
                 }
-                if (!canOpenReader) {
+                }
+                val captionResource = if (selectedVolume == null) {
+                    R.string.work_reader_next_phase_message
+                } else {
+                    val volume = selectedVolume
+                    when {
+                        volume.readerType.equals("reflowable", true) &&
+                            downloadRecordsByVolume[volume.id]?.isReadable != true -> R.string.work_reader_download_required
+                        !volume.readerType.equals("reflowable", true) || !volume.format.equals("EPUB", true) ->
+                            R.string.work_reader_renderer_pending
+                        else -> null
+                    }
+                }
+                captionResource?.let { resource ->
                     Text(
-                        stringResource(R.string.work_reader_next_phase_message),
+                        stringResource(resource),
                         style = theme.typography.caption,
                         color = theme.colors.textSecondary,
                         modifier = Modifier.padding(top = theme.spacing.one),
@@ -198,22 +259,9 @@ private fun WorkDetailBody(
                 }
             }
         }
-        if (content.showsContentTabs) {
-            item {
-                PrimaryTabRow(selectedTabIndex = state.selectedContentTab.ordinal, containerColor = theme.colors.canvas) {
-                    WorkDetailContentTab.entries.forEach { tab ->
-                        Tab(
-                            selected = state.selectedContentTab == tab,
-                            onClick = { onSelectContentTab(tab) },
-                            text = { Text(contentTabLabel(tab)) },
-                        )
-                    }
-                }
-            }
-        }
-        when (state.selectedContentTab.takeIf { content.showsContentTabs } ?: WorkDetailContentTab.MediaVersions) {
-            WorkDetailContentTab.Description -> item { DescriptionContent(content) }
-            WorkDetailContentTab.MediaVersions -> {
+        if (content.hasDescription) item { DescriptionContent(content) }
+        item { HorizontalDivider(color = theme.colors.divider, modifier = Modifier.padding(vertical = theme.spacing.one)) }
+        run {
                 if (content.showsMediaPicker) item {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         content.media.forEachIndexed { index, media ->
@@ -228,34 +276,34 @@ private fun WorkDetailBody(
                     }
                 }
                 if (content.usesEbookChapterFallback(state.selectedMediaKind)) {
-                    item { ChapterFallbackMessage() }
-                    items(content.readingUnits, key = ReadingUnitContent::id) { chapter -> ChapterRow(chapter) }
+                    item { ChapterCard(content.readingUnits) }
                 } else {
                     item {
-                        Text(
-                            if (content.showsMediaPicker) {
-                                pluralStringResource(
-                                    R.plurals.work_media_volume_count,
-                                    selectedMedia?.volumes?.size ?: 0,
-                                    mediaLabel(state.selectedMediaKind.orEmpty()),
-                                    selectedMedia?.volumes?.size ?: 0,
-                                )
-                            } else {
-                                val count = selectedMedia?.volumes?.size ?: 0
-                                pluralStringResource(R.plurals.work_volume_count, count, count)
-                            },
-                            style = theme.typography.sectionTitle,
+                        val count = selectedMedia?.volumes?.size ?: 0
+                        SectionHeader(
+                            stringResource(R.string.work_all_volumes),
+                            pluralStringResource(R.plurals.work_volume_total, count, count),
                         )
                     }
                     if (selectedMedia == null || selectedMedia.volumes.isEmpty()) {
                         item { Text(stringResource(R.string.work_no_readable_volumes), color = theme.colors.textSecondary) }
-                    } else {
-                        items(selectedMedia.volumes, key = VolumeContent::id) { volume ->
-                            VolumeRow(volume, volume.id == state.selectedVolumeId, onSelectVolume)
-                        }
+                    } else item {
+                        VolumeCoverRail(
+                            volumes = selectedMedia.volumes,
+                            selectedVolumeId = selectedVolume?.id,
+                            repository = repository,
+                            context = context,
+                            downloadRecordsByVolume = downloadRecordsByVolume,
+                            downloadFailuresByVolume = downloadFailuresByVolume,
+                            onSelectVolume = onSelectVolume,
+                            onDownloadVolume = onDownloadVolume,
+                            onCancelDownload = onCancelDownload,
+                        )
+                    }
+                    if (content.readingUnits.isNotEmpty()) {
+                        item { ChapterCard(content.readingUnits) }
                     }
                 }
-            }
         }
     }
 }
@@ -284,16 +332,15 @@ private fun IdentityHeader(
             FacetLink(content.work.author, content.authorFacetId != null) {
                 content.authorFacetId?.let { onOpenFacet(LibraryScope.Authors, it) }
             }
-            if (content.tags.isNotEmpty()) {
+            val format = content.media.firstOrNull()?.volumes?.firstOrNull()?.format?.takeIf(String::isNotBlank)
+            if (format != null || content.tags.isNotEmpty()) {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
                 ) {
+                    format?.let { TagLabel(it.lowercase()) }
                     content.tags.forEach { tag -> TagLabel(tag) }
                 }
-            }
-            if (content.completed || content.work.progressPercent != null) {
-                ReadingStatusLabel(content)
             }
             content.seriesName?.let { series ->
                 Spacer(Modifier.weight(1f))
@@ -342,28 +389,17 @@ private fun TagLabel(tag: String) {
 }
 
 @Composable
-private fun ReadingStatusLabel(content: WorkDetailContent) {
-    val theme = WarmPageThemeValues
-    Surface(shape = RoundedCornerShape(8.dp), color = theme.colors.accentSoft) {
-        Text(
-            if (content.completed) stringResource(R.string.reading_status_finished)
-            else if (content.work.progressPercent != null) stringResource(R.string.reading_status_reading)
-            else stringResource(R.string.reading_status_unread),
-            style = theme.typography.callout,
-            color = theme.colors.actionAccent,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-        )
-    }
-}
-
-@Composable
 private fun ReadingSummary(content: WorkDetailContent) {
     val theme = WarmPageThemeValues
     val progress = content.work.progressPercent ?: 0
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(theme.spacing.two)) {
-            Text("$progress%", style = theme.typography.display)
-            Text(stringResource(R.string.work_overall_reading_progress), style = theme.typography.callout, color = theme.colors.textSecondary)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.work_reading_progress), style = theme.typography.callout, color = theme.colors.textSecondary)
+            Text("  $progress%", style = theme.typography.headline)
+            Spacer(Modifier.weight(1f))
+            content.readingUnits.firstOrNull { it.readingState == ChapterReadingState.Current }?.title?.let { title ->
+                Text(stringResource(R.string.work_reading_position, title), style = theme.typography.callout, color = theme.colors.textSecondary)
+            }
         }
         LinearProgressIndicator(
             progress = { progress / 100f },
@@ -371,72 +407,277 @@ private fun ReadingSummary(content: WorkDetailContent) {
             color = theme.colors.brandAccent,
             trackColor = theme.colors.divider,
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Schedule, contentDescription = null, tint = theme.colors.textSecondary)
-            Text(stringResource(R.string.work_progress_sync_hint), style = theme.typography.caption, color = theme.colors.textSecondary)
-        }
     }
 }
 
 @Composable
 private fun DescriptionContent(content: WorkDetailContent) {
     val theme = WarmPageThemeValues
-    Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.two)) {
-        Text(stringResource(R.string.work_description_title), style = theme.typography.sectionTitle)
-        Text(
-            content.description?.takeIf(String::isNotBlank) ?: stringResource(R.string.work_description_empty),
-            style = theme.typography.body,
-            color = if (content.description.isNullOrBlank()) theme.colors.textSecondary else theme.colors.textPrimary,
-        )
+    var expanded by remember { mutableStateOf(false) }
+    Surface(shape = RoundedCornerShape(theme.radii.task), color = theme.colors.surface) {
+        Column(Modifier.padding(theme.spacing.three), verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
+            Text(stringResource(R.string.work_description_title), style = theme.typography.sectionTitle)
+            Text(
+                content.description.orEmpty(),
+                style = theme.typography.body,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.align(Alignment.End)) {
+                Text(stringResource(if (expanded) R.string.work_collapse else R.string.work_expand))
+                Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
+            }
+        }
     }
 }
 
 @Composable
-private fun VolumeRow(volume: VolumeContent, selected: Boolean, onSelectVolume: (String) -> Unit) {
+private fun VolumeCoverRail(
+    volumes: List<VolumeContent>,
+    selectedVolumeId: String?,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    downloadRecordsByVolume: Map<String, AndroidDownloadRecord>,
+    downloadFailuresByVolume: Map<String, String>,
+    onSelectVolume: (String) -> Unit,
+    onDownloadVolume: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
+) {
     val theme = WarmPageThemeValues
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { onSelectVolume(volume.id) }.padding(vertical = theme.spacing.two),
-            verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cardWidth = ((maxWidth - theme.spacing.three) / 2.5f).coerceAtLeast(112.dp)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+            contentPadding = PaddingValues(end = theme.spacing.three),
         ) {
-            if (selected) Box(Modifier.width(3.dp).height(52.dp).background(theme.colors.brandAccent, RoundedCornerShape(2.dp)))
-            Column(Modifier.weight(1f).padding(start = if (selected) theme.spacing.two else 0.dp)) {
-                Text(volume.title, style = theme.typography.headline)
-                Text(
-                    stringResource(R.string.work_volume_reading_progress, volume.progressPercent ?: 0),
-                    style = theme.typography.callout,
-                    color = theme.colors.textSecondary,
+            items(volumes, key = VolumeContent::id) { volume ->
+                val position = volumes.indexOf(volume)
+                VolumeCoverItem(
+                    volume = volume,
+                    position = position,
+                    selected = volume.id == selectedVolumeId,
+                    repository = repository,
+                    context = context,
+                    download = downloadRecordsByVolume[volume.id],
+                    downloadFailure = downloadFailuresByVolume[volume.id],
+                    onSelectVolume = onSelectVolume,
+                    onDownloadVolume = onDownloadVolume,
+                    onCancelDownload = onCancelDownload,
+                    modifier = Modifier.width(cardWidth),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VolumeCoverItem(
+    volume: VolumeContent,
+    position: Int,
+    selected: Boolean,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    download: AndroidDownloadRecord?,
+    downloadFailure: String?,
+    onSelectVolume: (String) -> Unit,
+    onDownloadVolume: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val theme = WarmPageThemeValues
+    val index = volume.displayIndex(position)
+    val progress = volume.progressPercent?.coerceIn(0, 100) ?: 0
+    val state = when {
+        progress >= 100 -> stringResource(R.string.work_volume_accessibility_finished)
+        progress > 0 -> stringResource(R.string.work_volume_accessibility_progress, progress)
+        else -> stringResource(R.string.work_volume_accessibility_not_started)
+    }
+    val downloadLabel = when {
+        download?.isReadable == true -> stringResource(R.string.downloads_offline_available)
+        download?.status == AndroidDownloadStatus.Downloading || download?.status == AndroidDownloadStatus.Queued ->
+            stringResource(R.string.work_download_pause)
+        else -> stringResource(R.string.work_volume_download_action)
+    }
+    val volumeLabel = stringResource(R.string.work_volume_accessibility_label, index, volume.title)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
+        Box {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (selected) Modifier.border(
+                            width = 2.dp,
+                            color = theme.colors.brandAccent,
+                            shape = RoundedCornerShape(theme.radii.coverCompact),
+                        ) else Modifier,
+                    )
+                    .clickable(enabled = volume.readable) { onSelectVolume(volume.id) }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = volumeLabel
+                        this.selected = selected
+                        stateDescription = state
+                        if (!volume.readable) disabled()
+                    }
+                    .testTag("work-volume-${volume.id}"),
+            ) {
+                ContentCover(
+                    contentId = volume.id,
+                    title = volume.title,
+                    coverUrl = volume.coverUrl,
+                    repository = repository,
+                    context = context,
+                    size = CoverSize.Small,
+                    modifier = Modifier.fillMaxWidth().alpha(if (volume.readable) 1f else 0.5f),
+                )
+                if (progress > 0) {
+                    VolumeCoverProgress(
+                        progress = progress,
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(theme.radii.coverCompact),
+                color = theme.colors.surfaceRaised.copy(alpha = 0.92f),
+                modifier = Modifier.align(Alignment.TopStart).padding(theme.spacing.one),
+            ) {
                 Text(
-                    listOfNotNull(volume.format.takeIf(String::isNotBlank), formatBytes(volume.sizeBytes)).joinToString(" · "),
+                    index,
                     style = theme.typography.caption,
                     color = theme.colors.textSecondary,
+                    modifier = Modifier.padding(horizontal = theme.spacing.one, vertical = theme.spacing.half),
                 )
             }
-            IconButton(onClick = {}, enabled = false, modifier = Modifier.semantics { disabled() }) {
-                Icon(Icons.Outlined.CloudDownload, contentDescription = stringResource(R.string.work_download_unavailable))
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(48.dp)
+                    .clickable(enabled = download?.isReadable != true) {
+                        if (download?.status == AndroidDownloadStatus.Downloading ||
+                            download?.status == AndroidDownloadStatus.Queued
+                        ) onCancelDownload(volume.id) else onDownloadVolume(volume.id)
+                    }
+                    .semantics { contentDescription = downloadLabel },
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = theme.colors.surfaceRaised.copy(alpha = 0.92f),
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = when {
+                            download?.isReadable == true -> Icons.Outlined.CheckCircle
+                            download?.status == AndroidDownloadStatus.Downloading ||
+                                download?.status == AndroidDownloadStatus.Queued -> Icons.Outlined.PauseCircle
+                            else -> Icons.Outlined.CloudDownload
+                        },
+                        contentDescription = null,
+                        tint = if (download?.isReadable == true) theme.colors.brandAccent else theme.colors.textSecondary,
+                        modifier = Modifier.padding(5.dp),
+                    )
+                }
             }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = theme.colors.textSecondary)
         }
-        HorizontalDivider(color = theme.colors.divider)
+        Text(
+            volume.title,
+            style = theme.typography.callout,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (downloadFailure != null) {
+            Text(
+                stringResource(R.string.work_download_failed_inline),
+                style = theme.typography.caption,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                maxLines = 2,
+            )
+        }
     }
 }
 
 @Composable
-private fun ChapterFallbackMessage() {
+private fun VolumeCoverProgress(progress: Int, modifier: Modifier = Modifier) {
     val theme = WarmPageThemeValues
-    Text(stringResource(R.string.work_single_ebook_fallback), style = theme.typography.callout, color = theme.colors.textSecondary)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = theme.spacing.one, vertical = theme.spacing.half)
+            .height(12.dp),
+    ) {
+        LinearProgressIndicator(
+            progress = { progress / 100f },
+            color = theme.colors.brandAccent,
+            trackColor = theme.colors.divider.copy(alpha = 0.72f),
+            modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.Center),
+        )
+        if (progress >= 100) {
+            Surface(
+                color = theme.colors.brandAccent,
+                shape = CircleShape,
+                modifier = Modifier.align(Alignment.CenterEnd).size(12.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.CheckCircle,
+                    contentDescription = null,
+                    tint = theme.colors.onAction,
+                    modifier = Modifier.padding(1.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, trailing: String) {
+    val theme = WarmPageThemeValues
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = theme.typography.sectionTitle)
+        Spacer(Modifier.weight(1f))
+        Text(trailing, style = theme.typography.callout, color = theme.colors.textSecondary)
+    }
+}
+
+@Composable
+private fun ChapterCard(chapters: List<ReadingUnitContent>) {
+    val theme = WarmPageThemeValues
+    Surface(shape = RoundedCornerShape(theme.radii.task), color = theme.colors.surface) {
+        Column(Modifier.padding(horizontal = theme.spacing.three, vertical = theme.spacing.two)) {
+            SectionHeader(
+                stringResource(R.string.work_directory_title),
+                pluralStringResource(R.plurals.work_chapter_total, chapters.size, chapters.size),
+            )
+            chapters.forEach { ChapterRow(it) }
+        }
+    }
 }
 
 @Composable
 private fun ChapterRow(chapter: ReadingUnitContent) {
     val theme = WarmPageThemeValues
+    val stateLabel = when (chapter.readingState) {
+        ChapterReadingState.Current -> stringResource(R.string.work_chapter_current)
+        ChapterReadingState.Read -> stringResource(R.string.work_chapter_read)
+        ChapterReadingState.Unread -> stringResource(R.string.work_chapter_unread)
+    }
     Column {
-        Row(Modifier.fillMaxWidth().padding(vertical = theme.spacing.two), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth()
+                .semantics { stateDescription = stateLabel }
+                .padding(vertical = theme.spacing.two),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f)) {
                 Text(chapter.title, style = theme.typography.headline)
-                chapter.progressPercent?.let {
-                    Text(stringResource(R.string.work_volume_reading_progress, it), color = theme.colors.textSecondary)
+                if (chapter.readingState != ChapterReadingState.Unread) {
+                    Text(
+                        stateLabel,
+                        color = if (chapter.readingState == ChapterReadingState.Current) {
+                            theme.colors.actionAccent
+                        } else {
+                            theme.colors.textSecondary
+                        },
+                    )
                 }
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = theme.colors.textSecondary)
@@ -463,7 +704,6 @@ private fun WorkActionsSheet(content: WorkDetailContent, onDismiss: () -> Unit) 
             UnavailableAction(Icons.Outlined.Image, R.string.work_action_set_cover)
             UnavailableAction(Icons.Outlined.CloudDownload, R.string.work_action_download)
             UnavailableAction(Icons.Outlined.BookmarkBorder, R.string.work_action_reading_status)
-            UnavailableAction(Icons.Outlined.CheckCircle, R.string.work_action_add_shelf)
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel_action)) }
         }
     }
@@ -479,12 +719,6 @@ private fun UnavailableAction(icon: androidx.compose.ui.graphics.vector.ImageVec
         colors = ListItemDefaults.colors(containerColor = theme.colors.surface),
         modifier = Modifier.semantics { disabled() },
     )
-}
-
-@Composable
-private fun contentTabLabel(tab: WorkDetailContentTab): String = when (tab) {
-    WorkDetailContentTab.Description -> stringResource(R.string.work_tab_description)
-    WorkDetailContentTab.MediaVersions -> stringResource(R.string.work_tab_media_versions)
 }
 
 @Composable
@@ -513,4 +747,60 @@ private fun formatSizeNumber(value: Double): String = java.text.NumberFormat.get
     maximumFractionDigits = 1
     minimumFractionDigits = 0
     format(value)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShelfPickerSheet(
+    state: WorkDetailUiState,
+    onDismiss: () -> Unit,
+    onToggleShelf: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = theme.colors.surface) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.two),
+            verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+        ) {
+            Text(stringResource(R.string.work_shelf_picker_title), style = theme.typography.sectionTitle)
+            when {
+                state.isLoadingShelves -> Box(Modifier.fillMaxWidth().height(112.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                state.shelfErrorCode != null -> {
+                    Text(stringResource(R.string.work_shelf_load_failed), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_action)) }
+                }
+                state.shelves.isEmpty() -> Text(
+                    stringResource(R.string.work_shelf_empty),
+                    style = theme.typography.body,
+                    color = theme.colors.textSecondary,
+                )
+                else -> {
+                    state.shelves.forEach { shelf ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable(enabled = !state.isSavingShelves) { onToggleShelf(shelf.id) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = shelf.id in state.selectedShelfIds,
+                                onCheckedChange = { onToggleShelf(shelf.id) },
+                                enabled = !state.isSavingShelves,
+                            )
+                            Text(shelf.name, style = theme.typography.body, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Button(
+                        onClick = onSave,
+                        enabled = !state.isSavingShelves,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    ) {
+                        if (state.isSavingShelves) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Text(stringResource(R.string.work_shelf_save))
+                    }
+                }
+            }
+        }
+    }
 }

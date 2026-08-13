@@ -352,6 +352,7 @@ class KtorContentRepository(
         selectedDetailTab = selectedDetailTab,
         activeMedia = activeMedia,
         readingUnits = readingUnits,
+        readingUnitsPage = readingUnitsPage,
     )
 
     private suspend fun <T> withClient(context: ContentRequestContext, block: suspend (ApiClient) -> ApiResult<T>): ApiResult<T> {

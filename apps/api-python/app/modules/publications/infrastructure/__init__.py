@@ -1,0 +1,1 @@
+"""Publication infrastructure adapters."""

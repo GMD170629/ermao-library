@@ -9,9 +9,9 @@ import {
   activateReaderUser,
   currentReaderServerIdentity,
   emitReaderDebug,
-  getReaderRuntime
+  getReaderRuntime,
+  publicationFingerprintKey
 } from '../../../lib/reader';
-import { migrateLegacyBrowserReaderState } from '../../../lib/reader/browser-migration';
 import {
   READER_DEVICE_PREFERENCES_KEY,
   clearDeviceReaderPreferences,
@@ -213,6 +213,7 @@ function OpeningCover({ context, ready, background, color, indexProgress, downlo
 }
 
 export function ReaderV4Page({ volumeId }: { volumeId: string }) {
+  const { t: translate } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedHref = searchParams.get('href');
@@ -315,23 +316,13 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
         }
       }
       activateReaderUser(bootstrap.userId);
-      await migrateLegacyBrowserReaderState({
-        currentUserId: bootstrap.userId,
-        currentWorkId: bootstrap.mediaVersion.workId,
-        legacyEditionId: bootstrap.mediaVersion.id,
-        contentFingerprint: bootstrap.contentFingerprint,
-        localContentFingerprint: bootstrap.localContentFingerprint,
-        readerKind: bootstrap.readerType,
-        volumeId: bootstrap.volume.id
-      });
-      if (controller.signal.aborted) return;
       const clientId = await runtime.storage.getClientId();
       const localExact = await runtime.storage.getExactProgress({
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         clientId,
         volumeId: bootstrap.volume.id,
-        localContentFingerprint: bootstrap.localContentFingerprint
+        publicationFingerprint: publicationFingerprintKey(bootstrap.publicationFingerprint)
       }).catch(() => null);
       const startupResume = resolveStartupResume({
         localExact,
@@ -355,7 +346,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
         };
         emitReaderDebug('info', '启动时按时间优先恢复本机精确阅读位置', {
           volumeId: bootstrap.volume.id,
-          updatedAtEpochMillis: localResume.updatedAtEpochMillis
+          capturedAtEpochMillis: localResume.capturedAtEpochMillis
         });
       }
       const preferences = readDeviceReaderPreferences(
@@ -441,21 +432,24 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const saveLocation = useCallback((location: Parameters<ReaderV4PageLocationHandler>[0], percent: number) => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
+    if (location.kind !== 'reflowable' || !location.exactLocator) {
+      setStorageError(translate('当前阅读位置尚未形成可跨端验证的精确锚点'));
+      return;
+    }
     const write = runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       workId: bootstrap.mediaVersion.workId,
       volumeId: bootstrap.volume.id,
-      localContentFingerprint: bootstrap.localContentFingerprint,
-      contentFingerprint: bootstrap.contentFingerprint,
-      location,
-      percent,
-      locationContentFingerprint: bootstrap.locationContentFingerprint
+      baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.volume.id)?.revision
+        ?? bootstrap.serverProgressSnapshot?.revision ?? 0,
+      locator: location.exactLocator,
+      displayPercent: percent
     }).catch((reason) => {
       setStorageError(reason instanceof Error ? reason.message : '阅读进度无法写入本机');
     });
     pendingLocationWriteRef.current = write;
-  }, [runtime.progress, state.bootstrap]);
+  }, [runtime.progress, state.bootstrap, translate]);
 
   useEffect(() => {
     const handleBeforePwaUpdate = (event: Event) => {

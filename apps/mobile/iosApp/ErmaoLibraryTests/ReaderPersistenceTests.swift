@@ -21,8 +21,51 @@ final class ReaderPersistenceTests: XCTestCase {
         if let temporaryRoot { try? FileManager.default.removeItem(at: temporaryRoot) }
     }
 
+    @MainActor
     func testReaderUsesFiveHundredMillisecondTrailingSave() {
         XCTAssertEqual(IosEpubReaderSession.progressSaveDebounceMilliseconds, 500)
+    }
+
+    func testReaderPreferencesMatchWebDefaultsAndPersistPerServerUser() {
+        let suite = "reader-preferences-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "user-a", defaults: defaults)
+        let anotherUser = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "user-b", defaults: defaults)
+
+        let initial = first.load()
+        XCTAssertEqual(initial.theme, .warm)
+        XCTAssertEqual(initial.fontSize, 18)
+        XCTAssertEqual(initial.lineHeight, 1.9)
+        XCTAssertEqual(initial.spreadMode, .single)
+        XCTAssertEqual(initial.readingMode, .paged)
+
+        var changed = initial
+        changed.theme = .green
+        changed.fontSize = 24
+        first.save(changed)
+        XCTAssertEqual(first.load(), changed)
+        XCTAssertEqual(anotherUser.load(), IosReaderPreferences())
+        XCTAssertEqual(first.reset(), IosReaderPreferences())
+    }
+
+    func testPreferenceReflowObservationDoesNotBecomeUserNavigation() {
+        var gate = IosReaderPersistenceGate()
+        gate.protectRestoredLocation(.init(
+            href: "chapter.xhtml",
+            progression: 0.5,
+            totalProgression: 0.6,
+            position: 12
+        ))
+        gate.suppressPreferenceReflow()
+
+        XCTAssertFalse(gate.observeLocationChange(.init(
+            href: "chapter.xhtml",
+            progression: 0.45,
+            totalProgression: 0.6,
+            position: 12
+        )))
+        XCTAssertFalse(gate.hasLocalReadingActivity)
     }
 
     func testBootstrapLocationCannotBecomeFakeLocalExact() {
@@ -55,7 +98,7 @@ final class ReaderPersistenceTests: XCTestCase {
             identity: makeIdentity(authorizationVersion: 4, volumeID: "volume-a"),
             databaseURL: databaseURL
         )
-        let progress = decodeProgress(sourceID: "volume-a", updatedAt: 1_775_988_123_456)
+        let progress = try decodeProgress(sourceID: "volume-a", updatedAt: 1_775_988_123_456)
 
         try await store.save(progress: progress)
         let restored = try await store.load(sourceId: "volume-a")
@@ -75,7 +118,7 @@ final class ReaderPersistenceTests: XCTestCase {
             identity: makeIdentity(authorizationVersion: 4, volumeID: "volume-a"),
             databaseURL: databaseURL
         )
-        try await v4.save(progress: decodeProgress(sourceID: "volume-a", updatedAt: 1_775_988_123_456))
+        try await v4.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 1_775_988_123_456))
 
         let v5 = try IosReaderLocalDatabase(
             identity: makeIdentity(authorizationVersion: 5, volumeID: "volume-a"),
@@ -145,7 +188,7 @@ final class ReaderPersistenceTests: XCTestCase {
             identity: makeIdentity(authorizationVersion: 4, volumeID: "volume-a"),
             databaseURL: databaseURL
         )
-        try await primary.save(progress: decodeProgress(sourceID: "volume-a", updatedAt: 100))
+        try await primary.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 100))
 
         let anotherClient = try IosReaderLocalDatabase(
             identity: makeIdentity(
@@ -169,7 +212,7 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertNil(otherClientBeforeSave)
         XCTAssertNil(otherContentBeforeSave)
 
-        try await anotherContent.save(progress: decodeProgress(
+        try await anotherContent.save(progress: try decodeProgress(
             sourceID: "volume-a",
             updatedAt: 200,
             fileHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -185,8 +228,8 @@ final class ReaderPersistenceTests: XCTestCase {
             identity: makeIdentity(authorizationVersion: 4, volumeID: "volume-a"),
             databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
         )
-        try await store.save(progress: decodeProgress(sourceID: "volume-a", updatedAt: 200))
-        try await store.save(progress: decodeProgress(sourceID: "volume-a", updatedAt: 100))
+        try await store.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 200))
+        try await store.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 100))
 
         let restored = try await store.load(sourceId: "volume-a")
         XCTAssertEqual(restored?.updatedAtEpochMillis, 100)
@@ -357,7 +400,7 @@ final class ReaderPersistenceTests: XCTestCase {
         }
     }
 
-    func testUploadFailureIsDiscardedAfterExactLocalCommit() async throws {
+    func testUploadFailureKeepsDurableExactPendingMutation() async throws {
         let namespace = makeNamespace(authorizationVersion: 4)
         let database = try IosReaderLocalDatabase(
             identity: makeIdentity(namespace: namespace, volumeID: "upload-volume"),
@@ -369,16 +412,17 @@ final class ReaderPersistenceTests: XCTestCase {
             target: makeTarget(namespace: namespace, volumeID: "upload-volume"),
             syncPort: port
         )
-        let progress = decodeProgress(sourceID: "upload-volume", updatedAt: 1_775_988_523_456)
+        let progress = try decodeProgress(sourceID: "upload-volume", updatedAt: 1_775_988_523_456)
 
         try await store.save(progress: progress)
         try await store.awaitPendingUpload()
         let restored = try await store.load(sourceId: "upload-volume")
+        let state = try await store.syncState()
 
         XCTAssertEqual(restored?.updatedAtEpochMillis, progress.updatedAtEpochMillis)
         XCTAssertEqual(port.uploadCount, 1)
-        XCTAssertEqual(port.lastPercent, 50)
-        XCTAssertEqual(port.lastServerFingerprint, "server-version-a")
+        XCTAssertNotNil(state.pending)
+        XCTAssertEqual(state.pending?.capturedAtEpochMillis, progress.updatedAtEpochMillis)
         XCTAssertEqual(
             port.lastLocalContentHash,
             "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -399,10 +443,10 @@ final class ReaderPersistenceTests: XCTestCase {
             syncPort: port
         )
 
-        try await store.save(progress: decodeProgress(sourceID: "single-flight-volume", updatedAt: 100))
+        try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 100))
         await port.waitUntilFirstUploadStarts()
-        try await store.save(progress: decodeProgress(sourceID: "single-flight-volume", updatedAt: 200))
-        try await store.save(progress: decodeProgress(sourceID: "single-flight-volume", updatedAt: 300))
+        try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 200))
+        try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 300))
         port.releaseFirstUpload()
         try await store.awaitPendingUpload()
 
@@ -466,8 +510,8 @@ final class ReaderPersistenceTests: XCTestCase {
         updatedAt: Int64,
         clientID: String = "ios-installation-c",
         fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    ) -> ErmaoShared.ReaderProgress {
-        ErmaoShared.ReaderProgressJson().decode(payload: progressPayload(
+    ) throws -> ErmaoShared.ReaderProgress {
+        try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: progressPayload(
             sourceID: sourceID,
             updatedAt: updatedAt,
             clientID: clientID,
@@ -483,8 +527,7 @@ final class ReaderPersistenceTests: XCTestCase {
             namespace: namespace,
             workId: "work-a",
             volumeId: volumeID,
-            sourceFormat: .epub,
-            serverContentFingerprint: ErmaoShared.ReaderServerContentFingerprint(value: "server-version-a")
+            sourceFormat: .epub
         )
     }
 
@@ -494,7 +537,7 @@ final class ReaderPersistenceTests: XCTestCase {
         clientID: String = "ios-installation-c",
         fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ) -> String {
-        #"{"schema":"ermao.reader-progress","version":1,"sourceId":"\#(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"progression":0.5}},"contentFingerprint":{"originalFileHash":"\#(fileHash)","parserVersion":"readium-swift:3.8.0","normalizationVersion":"epub-native-sanitized-v1"}},"updatedAtEpochMillis":\#(updatedAt),"deviceId":"\#(clientID)"}"#
+        ##"{"schema":"ermao.reader-progress","version":4,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}},"contentFingerprint":{"originalFileHash":"\##(fileHash)","parserVersion":"readium-swift:3.8.0","normalizationVersion":"epub-native-sanitized-v1"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
     }
 
     private func legacyProgressURL(sourceID: String, root: URL) -> URL {
@@ -632,21 +675,26 @@ private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressSyncP
     }
 
     var uploadCount: Int { withLock { uploads.count } }
-    var lastPercent: Double? { withLock { uploads.last?.snapshot.percent } }
-    var lastServerFingerprint: String? {
-        withLock { uploads.last?.snapshot.serverContentFingerprint.value }
-    }
     var lastLocalContentHash: String? {
-        withLock { uploads.last?.snapshot.anchor?.contentFingerprint?.originalFileHash }
+        withLock { uploads.last?.mutation.locator.publication.originalFileHash }
     }
     var lastLocatorPayload: String? {
-        withLock { uploads.last?.snapshot.anchor?.engineLocator?.payload.canonicalJson }
+        withLock { uploads.last?.mutation.locator.payload.canonicalJson }
     }
 
     func push(upload: ErmaoShared.ReaderProgressUpload) async throws -> ErmaoShared.ReaderProgressPushResult {
         withLock { uploads.append(upload) }
         if let failure { throw failure }
-        return ErmaoShared.ReaderProgressPushResultAccepted(snapshot: upload.snapshot)
+        return ErmaoShared.ReaderProgressPushResultAccepted(
+            snapshot: ErmaoShared.ReaderProgressSnapshotV4(
+                sourceId: upload.target.volumeId,
+                revision: upload.mutation.baseRevision + 1,
+                locator: upload.mutation.locator,
+                displayPercent: 50,
+                receivedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
+                capturedAtEpochMillis: KotlinLong(longLong: upload.mutation.capturedAtEpochMillis)
+            )
+        )
     }
 
     private func withLock<T>(_ operation: () -> T) -> T {
@@ -665,7 +713,7 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressSyncPo
 
     func push(upload: ErmaoShared.ReaderProgressUpload) async throws -> ErmaoShared.ReaderProgressPushResult {
         let shouldBlock = withLock {
-            uploads.append(upload.snapshot.updatedAtEpochMillis)
+            uploads.append(upload.mutation.capturedAtEpochMillis)
             return uploads.count == 1
         }
         if shouldBlock {
@@ -673,7 +721,16 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressSyncPo
                 withLock { firstContinuation = continuation }
             }
         }
-        return ErmaoShared.ReaderProgressPushResultAccepted(snapshot: upload.snapshot)
+        return ErmaoShared.ReaderProgressPushResultAccepted(
+            snapshot: ErmaoShared.ReaderProgressSnapshotV4(
+                sourceId: upload.target.volumeId,
+                revision: upload.mutation.baseRevision + 1,
+                locator: upload.mutation.locator,
+                displayPercent: 50,
+                receivedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
+                capturedAtEpochMillis: KotlinLong(longLong: upload.mutation.capturedAtEpochMillis)
+            )
+        )
     }
 
     func waitUntilFirstUploadStarts() async {

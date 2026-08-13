@@ -4,11 +4,14 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
-import com.ermao.library.shared.modules.reader.domain.toServerSnapshot
+import com.ermao.library.shared.modules.reader.domain.toMutation
 
 typealias ComicReaderLocation = com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
 typealias AudioReaderLocation = com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
 typealias ContentFingerprint = com.ermao.library.shared.modules.reader.domain.ContentFingerprint
+typealias PublicationFingerprint = com.ermao.library.shared.modules.reader.domain.PublicationFingerprint
+typealias ReadiumLocatorEnvelope = com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope
+typealias ExactBlockMatch = com.ermao.library.shared.modules.reader.domain.ExactBlockMatch
 typealias EngineLocator = com.ermao.library.shared.modules.reader.domain.EngineLocator
 typealias EngineLocatorPayload = com.ermao.library.shared.modules.reader.domain.EngineLocatorPayload
 typealias ReaderEngine = com.ermao.library.shared.modules.reader.domain.ReaderEngine
@@ -21,13 +24,29 @@ typealias ReaderErrorCode = com.ermao.library.shared.modules.reader.domain.Reade
 typealias ReaderFormat = com.ermao.library.shared.modules.reader.domain.ReaderFormat
 typealias ReaderLocation = com.ermao.library.shared.modules.reader.domain.ReaderLocation
 typealias ReaderPreferences = com.ermao.library.shared.modules.reader.domain.ReaderPreferences
+typealias ReaderAppearancePreferences = com.ermao.library.shared.modules.reader.domain.ReaderAppearancePreferences
+typealias ReaderDisplayPreferences = com.ermao.library.shared.modules.reader.domain.ReaderDisplayPreferences
+typealias ReaderInteractionPreferences = com.ermao.library.shared.modules.reader.domain.ReaderInteractionPreferences
+typealias ReaderEpubPreferences = com.ermao.library.shared.modules.reader.domain.ReaderEpubPreferences
+typealias ReaderTypographyPreferences = com.ermao.library.shared.modules.reader.domain.ReaderTypographyPreferences
+typealias ReaderOptimizationPreferences = com.ermao.library.shared.modules.reader.domain.ReaderOptimizationPreferences
+typealias ReaderFontFamily = com.ermao.library.shared.modules.reader.domain.ReaderFontFamily
+typealias ReaderPageMargin = com.ermao.library.shared.modules.reader.domain.ReaderPageMargin
+typealias ReaderSpreadMode = com.ermao.library.shared.modules.reader.domain.ReaderSpreadMode
+typealias ReaderPageTurnAnimation = com.ermao.library.shared.modules.reader.domain.ReaderPageTurnAnimation
+typealias ReaderProgressStyle = com.ermao.library.shared.modules.reader.domain.ReaderProgressStyle
+typealias ReaderTapZones = com.ermao.library.shared.modules.reader.domain.ReaderTapZones
+typealias ReaderThemeMode = com.ermao.library.shared.modules.reader.domain.ReaderThemeMode
 typealias ReaderProgress = com.ermao.library.shared.modules.reader.domain.ReaderProgress
 typealias ReaderProgressSnapshotV4 = com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
+typealias ReaderProgressPresentationUpdate = com.ermao.library.shared.modules.reader.domain.ReaderProgressPresentationUpdate
+typealias ReaderChapterUnit = com.ermao.library.shared.modules.reader.domain.ReaderChapterUnit
+typealias ReaderChapterState = com.ermao.library.shared.modules.reader.domain.ReaderChapterState
+typealias ReaderChapterListMetadata = com.ermao.library.shared.modules.reader.domain.ReaderChapterListMetadata
 typealias ReaderLocalProgressIdentity = com.ermao.library.shared.modules.reader.domain.ReaderLocalProgressIdentity
-typealias ReaderPublicAnchor = com.ermao.library.shared.modules.reader.domain.ReaderPublicAnchor
 typealias ReaderProgressSyncTarget = com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
-typealias ReaderServerContentFingerprint =
-    com.ermao.library.shared.modules.reader.domain.ReaderServerContentFingerprint
+typealias ReaderProgressMutation = com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation
+typealias ReaderProgressConflict = com.ermao.library.shared.modules.reader.domain.ReaderProgressConflict
 typealias ReaderSyncNamespace = com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 typealias ReaderReadingMode = com.ermao.library.shared.modules.reader.domain.ReaderReadingMode
 typealias ReaderSession = com.ermao.library.shared.modules.reader.domain.ReaderSession
@@ -47,6 +66,15 @@ typealias ReaderProgressUpload = com.ermao.library.shared.modules.reader.applica
 typealias ReaderProgressPushResult =
     com.ermao.library.shared.modules.reader.application.ReaderProgressPushResult
 typealias ReaderProgressSyncPort = com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+typealias ReaderBookmarkSyncPort = com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
+typealias ReaderBookmarkSyncResponse = com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncResponse
+typealias ReaderBookmark = com.ermao.library.shared.modules.reader.domain.ReaderBookmark
+typealias ReaderBookmarkLocation = com.ermao.library.shared.modules.reader.domain.ReaderBookmarkLocation
+typealias ReaderBookmarkSyncTarget = com.ermao.library.shared.modules.reader.domain.ReaderBookmarkSyncTarget
+typealias ReaderProgressDurableState =
+    com.ermao.library.shared.modules.reader.application.ReaderProgressDurableState
+typealias ReaderProgressSyncStateStore =
+    com.ermao.library.shared.modules.reader.application.ReaderProgressSyncStateStore
 typealias ReaderProgressSyncingStore =
     com.ermao.library.shared.modules.reader.application.ReaderProgressSyncingStore
 typealias ReaderProgressSyncCoordinator =
@@ -56,6 +84,10 @@ typealias LocalFirstReaderProgressStore =
 typealias ReaderBootstrapRequest = com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
 typealias ReaderBootstrap = com.ermao.library.shared.modules.reader.application.ReaderBootstrap
 typealias ReaderBootstrapResult = com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
+typealias ReaderBootstrapContent =
+    com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult.Content
+typealias ReaderBootstrapFailure =
+    com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult.Failure
 typealias ReaderBootstrapGateway = com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 typealias ReaderPublicationDownload =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
@@ -88,8 +120,22 @@ typealias ReaderRestoreComicPage = com.ermao.library.shared.modules.reader.appli
 typealias ReaderRestoreAudioPosition = com.ermao.library.shared.modules.reader.application.ReaderRestoreCandidate.AudioPosition
 typealias ReaderRestoreTotalProgression = com.ermao.library.shared.modules.reader.application.ReaderRestoreCandidate.TotalProgression
 typealias ReaderProgressRestorePlan = com.ermao.library.shared.modules.reader.application.ReaderProgressRestorePlan
+typealias ReaderResumeDecision = com.ermao.library.shared.modules.reader.application.ReaderResumeDecision
+typealias ReaderResumeTarget = com.ermao.library.shared.modules.reader.application.ReaderResumeTarget
+typealias ReaderResumeSource = com.ermao.library.shared.modules.reader.application.ReaderResumeSource
 typealias ReaderTocEntry = com.ermao.library.shared.modules.reader.application.ReaderTocEntry
 typealias ReaderProgressJson = com.ermao.library.shared.modules.reader.infrastructure.ReaderProgressJson
+typealias ReaderProgressSyncStateJson =
+    com.ermao.library.shared.modules.reader.infrastructure.ReaderProgressSyncStateJson
+typealias ReaderPreferencesJson =
+    com.ermao.library.shared.modules.reader.infrastructure.ReaderPreferencesJson
+
+/** Swift cannot call the Kotlin constructor whose only parameter has a default value. */
+fun createReaderProgressJson(): ReaderProgressJson = ReaderProgressJson()
+
+fun createReaderProgressSyncStateJson(): ReaderProgressSyncStateJson = ReaderProgressSyncStateJson()
+
+fun createReaderPreferencesJson(): ReaderPreferencesJson = ReaderPreferencesJson()
 
 fun createReaderSyncNamespace(
     serverIdentity: String,
@@ -116,15 +162,21 @@ fun createEngineLocator(
     payloadJson: String,
 ): EngineLocator = EngineLocator(engine, platform, version, EngineLocatorPayload.parse(payloadJson))
 
-/** Swift-friendly canonical v4 projection; native stores need not duplicate anchor/percent mapping. */
+/** Swift-friendly exact Reader v4 mutation projection. */
 fun createReaderProgressUpload(
     target: ReaderProgressSyncTarget,
     progress: ReaderProgress,
+    baseRevision: Long,
+    mutationId: String,
 ): ReaderProgressUpload = ReaderProgressUpload(
     target = target,
-    snapshot = progress.toServerSnapshot(target.serverContentFingerprint),
-    localLocation = progress.location,
+    mutation = progress.toMutation(baseRevision, mutationId),
 )
+
+fun compareExactReadiumLocators(
+    expected: ReadiumLocatorEnvelope,
+    recaptured: ReadiumLocatorEnvelope,
+): ExactBlockMatch = com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks(expected, recaptured)
 
 /** Rehydrates a validated native snapshot without exposing ServerBaseUrl construction to Swift. */
 fun createReaderServerProfile(
@@ -164,3 +216,27 @@ fun planReaderProgressRestore(
         remoteSnapshot,
         openedSource,
     )
+
+fun decideReaderResume(
+    localProgress: ReaderProgress?,
+    remoteSnapshot: ReaderProgressSnapshotV4?,
+    openedSource: ReaderSource,
+): ReaderResumeDecision = com.ermao.library.shared.modules.reader.application.decideReaderResume(
+    localProgress,
+    remoteSnapshot,
+    openedSource,
+)
+
+fun resolveReaderChapterStates(
+    units: List<ReaderChapterUnit>,
+    currentHref: String?,
+    currentSortOrder: Int?,
+    progressPercent: Double,
+    metadata: ReaderChapterListMetadata,
+): List<ReaderChapterState> = com.ermao.library.shared.modules.reader.domain.resolveReaderChapterStates(
+    units,
+    currentHref,
+    currentSortOrder,
+    progressPercent,
+    metadata,
+)

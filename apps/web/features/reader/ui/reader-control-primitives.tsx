@@ -90,8 +90,9 @@ export function ReaderQuickActionButton({ label, ariaLabel, selected = false, ex
 
 type ReaderSegmentedControlProps<T extends string> = {
   ariaLabel: string;
+  ariaDescribedBy?: string;
   value: T;
-  options: ReadonlyArray<{ value: T; label: string; icon?: LucideIcon; ariaLabel?: string }>;
+  options: ReadonlyArray<{ value: T; label: string; icon?: LucideIcon; ariaLabel?: string; disabled?: boolean }>;
   onChange: (value: T) => void;
   dark: boolean;
   disabled?: boolean;
@@ -99,11 +100,12 @@ type ReaderSegmentedControlProps<T extends string> = {
   behavior?: 'choice' | 'tabs';
 };
 
-export function ReaderSegmentedControl<T extends string>({ ariaLabel, value, options, onChange, dark, disabled = false, className, behavior = 'choice' }: ReaderSegmentedControlProps<T>) {
+export function ReaderSegmentedControl<T extends string>({ ariaLabel, ariaDescribedBy, value, options, onChange, dark, disabled = false, className, behavior = 'choice' }: ReaderSegmentedControlProps<T>) {
   return (
     <div
       role={behavior === 'tabs' ? 'tablist' : 'group'}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       aria-disabled={disabled}
       className={cn('shuku-reader-control-border grid min-w-0 gap-1 rounded-xl border p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.055]', disabled && 'opacity-45', className)}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
@@ -119,10 +121,10 @@ export function ReaderSegmentedControl<T extends string>({ ariaLabel, value, opt
             aria-label={option.ariaLabel ?? option.label}
             aria-pressed={behavior === 'choice' ? selected : undefined}
             aria-selected={behavior === 'tabs' ? selected : undefined}
-            disabled={disabled}
+            disabled={disabled || option.disabled}
             onClick={() => onChange(option.value)}
             className={cn(
-              'flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-xs font-medium transition active:scale-[0.97]',
+              'flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-xs font-medium transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-35',
               selected
                 ? dark ? 'shuku-reader-accent-selected shadow-sm' : 'shuku-reader-accent-text bg-white shadow-sm'
                 : dark ? 'opacity-65 hover:bg-white/[0.07] hover:opacity-100' : 'opacity-60 hover:bg-white/55 hover:opacity-100'

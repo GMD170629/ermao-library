@@ -6,22 +6,29 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import androidx.core.database.sqlite.transaction
 import com.ermao.library.shared.modules.reader.ReaderProgress
+import com.ermao.library.shared.modules.reader.ReaderProgressConflict
+import com.ermao.library.shared.modules.reader.ReaderProgressDurableState
 import com.ermao.library.shared.modules.reader.ReaderProgressJson
 import com.ermao.library.shared.modules.reader.ReaderProgressStore
+import com.ermao.library.shared.modules.reader.ReaderProgressMutation
+import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
+import com.ermao.library.shared.modules.reader.ReaderProgressSyncStateJson
+import com.ermao.library.shared.modules.reader.ReaderProgressSyncStateStore
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** Exact local Reader progress only. Reader v4 has no durable network queue. */
+/** Exact progress and the latest-only Reader v4 mutation/conflict in one SQLite database. */
 internal class AndroidReaderProgressDatabase(
     context: Context,
     private val identity: ReaderLocalProgressIdentity,
     private val progressCodec: ReaderProgressJson = ReaderProgressJson(),
+    private val syncCodec: ReaderProgressSyncStateJson = ReaderProgressSyncStateJson(),
     private val legacyProgressStore: ReaderProgressStore? = AndroidReaderProgressStore(context),
     databaseName: String = DATABASE_NAME,
-) : ReaderProgressStore {
+) : ReaderProgressSyncStateStore {
     private val database = ReaderDatabaseHelper(context.applicationContext, databaseName)
     private val mutex = Mutex()
 
@@ -49,6 +56,68 @@ internal class AndroidReaderProgressDatabase(
         write(database.writableDatabase, progress)
     }
 
+    override suspend fun loadSyncState(): ReaderProgressDurableState = io {
+        readSyncState(database.readableDatabase)
+    }
+
+    override suspend fun commitProgressAndPending(
+        progress: ReaderProgress,
+        pending: ReaderProgressMutation,
+    ): Unit = io {
+        require(progress.sourceId == pending.sourceId)
+        val writable = database.writableDatabase
+        writable.transaction {
+            write(writable, progress)
+            val current = readSyncState(writable)
+            writeSyncState(
+                writable,
+                current.copy(pending = pending, conflict = null, terminalFailureCode = null),
+            )
+        }
+    }
+
+    override suspend fun acknowledge(
+        mutationId: String,
+        snapshot: ReaderProgressSnapshotV4,
+    ): Unit = io {
+        val writable = database.writableDatabase
+        writable.transaction {
+            val current = readSyncState(writable)
+            val rebased = current.pending?.let { pending ->
+                if (pending.mutationId == mutationId) null else pending.copy(baseRevision = snapshot.revision)
+            }
+            writeSyncState(
+                writable,
+                current.copy(
+                    confirmedRevision = maxOf(current.confirmedRevision, snapshot.revision),
+                    pending = rebased,
+                    conflict = null,
+                    terminalFailureCode = null,
+                ),
+            )
+        }
+    }
+
+    override suspend fun recordConflict(conflict: ReaderProgressConflict): Unit = io {
+        val writable = database.writableDatabase
+        writable.transaction {
+            val current = readSyncState(writable)
+            if (current.pending?.mutationId == conflict.pending.mutationId) {
+                writeSyncState(writable, current.copy(conflict = conflict, terminalFailureCode = null))
+            }
+        }
+    }
+
+    override suspend fun recordTerminalFailure(mutationId: String, failureCode: String): Unit = io {
+        val writable = database.writableDatabase
+        writable.transaction {
+            val current = readSyncState(writable)
+            if (current.pending?.mutationId == mutationId) {
+                writeSyncState(writable, current.copy(terminalFailureCode = failureCode))
+            }
+        }
+    }
+
     override suspend fun delete(sourceId: String) {
         require(sourceId == identity.volumeId) { "Reader progress source does not match its exact identity" }
         io {
@@ -58,6 +127,7 @@ internal class AndroidReaderProgressDatabase(
                 oldRowKeys(writable, sourceId).forEach { oldKey ->
                     writable.delete(PROGRESS_TABLE, "$PROGRESS_SOURCE_ID = ?", arrayOf(oldKey))
                 }
+                writable.delete(SYNC_TABLE, "$SYNC_OWNER_KEY = ?", arrayOf(progressStorageKey()))
             }
         }
         legacyProgressStore?.delete(sourceId)
@@ -134,6 +204,29 @@ internal class AndroidReaderProgressDatabase(
             .also { rowId -> check(rowId != -1L) { "Reader progress save failed" } }
     }
 
+    private fun readSyncState(database: SQLiteDatabase): ReaderProgressDurableState = database.query(
+        SYNC_TABLE,
+        arrayOf(SYNC_DOCUMENT),
+        "$SYNC_OWNER_KEY = ?",
+        arrayOf(progressStorageKey()),
+        null,
+        null,
+        null,
+        "1",
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) ReaderProgressDurableState()
+        else syncCodec.decode(cursor.getString(0))
+    }
+
+    private fun writeSyncState(database: SQLiteDatabase, state: ReaderProgressDurableState) {
+        val values = ContentValues().apply {
+            put(SYNC_OWNER_KEY, progressStorageKey())
+            put(SYNC_DOCUMENT, syncCodec.encode(state))
+        }
+        database.insertWithOnConflict(SYNC_TABLE, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            .also { rowId -> check(rowId != -1L) { "Reader sync state save failed" } }
+    }
+
     private fun progressStorageKey(): String = identity.stableKey
 
     private fun matchesIdentity(progress: ReaderProgress): Boolean =
@@ -177,27 +270,40 @@ internal class AndroidReaderProgressDatabase(
                     "$PROGRESS_SOURCE_ID TEXT PRIMARY KEY NOT NULL," +
                     "$PROGRESS_DOCUMENT TEXT NOT NULL)",
             )
+            database.execSQL(
+                "CREATE TABLE $SYNC_TABLE (" +
+                    "$SYNC_OWNER_KEY TEXT PRIMARY KEY NOT NULL," +
+                    "$SYNC_DOCUMENT TEXT NOT NULL)",
+            )
         }
 
         override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            require(oldVersion == 1 && newVersion == DATABASE_VERSION) {
+            require(oldVersion in 1 until DATABASE_VERSION && newVersion == DATABASE_VERSION) {
                 "Unsupported Reader progress database upgrade $oldVersion to $newVersion"
             }
             // Exact progress is intentionally untouched. Only retired sync
             // machinery is removed; key/document migration is lazy and typed.
             database.execSQL("DROP TABLE IF EXISTS $OUTBOX_TABLE")
             database.execSQL("DROP TABLE IF EXISTS $SEQUENCE_TABLE")
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS $SYNC_TABLE (" +
+                    "$SYNC_OWNER_KEY TEXT PRIMARY KEY NOT NULL," +
+                    "$SYNC_DOCUMENT TEXT NOT NULL)",
+            )
         }
     }
 
     companion object {
         internal const val DATABASE_NAME = "reader-progress.db"
-        internal const val DATABASE_VERSION = 2
+        internal const val DATABASE_VERSION = 3
         internal const val PROGRESS_TABLE = "reader_progress"
         internal const val PROGRESS_SOURCE_ID = "source_id"
         internal const val PROGRESS_DOCUMENT = "document_json"
         internal const val OUTBOX_TABLE = "reader_progress_sync"
         internal const val SEQUENCE_TABLE = "reader_progress_sequence"
+        internal const val SYNC_TABLE = "reader_progress_sync_v4"
+        internal const val SYNC_OWNER_KEY = "owner_key"
+        internal const val SYNC_DOCUMENT = "document_json"
     }
 }
 

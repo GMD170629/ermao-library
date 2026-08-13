@@ -19,6 +19,7 @@ internal data class ApiErrorWire(
     val code: String? = null,
     val details: JsonElement? = null,
     val params: JsonObject? = null,
+    val current: JsonObject? = null,
 )
 
 internal class ApiEnvelopeDecoder(
@@ -96,6 +97,7 @@ internal object ApiErrorMapper {
             parameters = error.params.orEmpty().mapNotNull { (key, value) ->
                 (value as? JsonPrimitive)?.contentOrNull?.let { key to it }
             }.toMap(),
+            details = error.current ?: error.details,
         )
     }
 

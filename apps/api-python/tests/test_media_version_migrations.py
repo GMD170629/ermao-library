@@ -5,11 +5,12 @@ from datetime import UTC, datetime, timedelta
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from sqlalchemy import MetaData, Table, insert, inspect, select
+
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.runner import _run_alembic, apply_schema, head_revision
 from app.db.sqlite import create_sqlite_engine
-from sqlalchemy import MetaData, Table, insert, inspect, select
 
 
 def _table(engine, name: str) -> Table:
@@ -214,7 +215,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
 
         apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0020_comic_page_index"
+        assert head_revision(engine) == "0021_reader_v4_exact_progress"
         upgraded_volume = _table(engine, "LibraryVolume")
         upgraded_task = _table(engine, "ImportTask")
         upgraded_folder = _table(engine, "MonitorFolder")
@@ -398,10 +399,10 @@ def test_contract_discards_conversion_without_source_volume_and_completes_upgrad
             assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
                 "orphaned-import"
             )
-            assert head_revision(engine) == "0020_comic_page_index"
+            assert head_revision(engine) == "0021_reader_v4_exact_progress"
             assert "LibraryEdition" not in inspect(connection).get_table_names()
 
         apply_schema(engine, settings)
-        assert head_revision(engine) == "0020_comic_page_index"
+        assert head_revision(engine) == "0021_reader_v4_exact_progress"
     finally:
         engine.dispose()

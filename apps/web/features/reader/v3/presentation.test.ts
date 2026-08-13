@@ -34,7 +34,7 @@ test('never presents the EPUB table of contents as chapters or physical pages', 
   });
 });
 
-test('projects a foliate location without inventing layout pages', () => {
+test('projects a reflowable location without inventing layout pages', () => {
   assert.deepEqual(locationProgress({
     kind: 'reflowable',
     format: 'txt',

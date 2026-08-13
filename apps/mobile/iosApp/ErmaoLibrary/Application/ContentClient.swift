@@ -19,6 +19,17 @@ protocol PrivateContentCacheClearing: Sendable {
     func removeNamespace(_ namespace: String) async throws
 }
 
+protocol ShelfClient: Sendable {
+    func fetchShelves(context: ContentRequestContext, workID: String) async throws -> [ShelfOption]
+    func updateShelf(context: ContentRequestContext, workID: String, shelfID: String, add: Bool) async throws
+}
+
+struct ShelfOption: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let containsWork: Bool
+}
+
 enum ContentClientError: Error, Equatable, Sendable {
     case unauthorized
     case inaccessible
@@ -181,19 +192,89 @@ struct FacetPage: Codable, Equatable, Sendable {
 
 struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
     let id: String
+    let mediaVersionID: String
     let title: String
     let formatLabel: String
+    let volumeIndex: Double?
+    let cover: CoverReference?
     let sizeLabel: String?
     let progress: Double?
     let isReadable: Bool?
     let isSelected: Bool
+
+    init(
+        id: String,
+        mediaVersionID: String,
+        title: String,
+        formatLabel: String,
+        volumeIndex: Double? = nil,
+        cover: CoverReference? = nil,
+        sizeLabel: String?,
+        progress: Double?,
+        isReadable: Bool?,
+        isSelected: Bool
+    ) {
+        self.id = id
+        self.mediaVersionID = mediaVersionID
+        self.title = title
+        self.formatLabel = formatLabel
+        self.volumeIndex = volumeIndex
+        self.cover = cover
+        self.sizeLabel = sizeLabel
+        self.progress = progress
+        self.isReadable = isReadable
+        self.isSelected = isSelected
+    }
+
+    func displayIndex(position: Int) -> String {
+        let value: String
+        if let volumeIndex, volumeIndex.isFinite, volumeIndex > 0 {
+            value = volumeIndex.rounded(.towardZero) == volumeIndex
+                ? String(Int(volumeIndex))
+                : String(volumeIndex).replacingOccurrences(
+                    of: #"\.?0+$"#,
+                    with: "",
+                    options: .regularExpression
+                )
+        } else {
+            value = String(position + 1)
+        }
+        return value.count >= 2 ? value : "0\(value)"
+    }
+}
+
+enum WorkChapterReadingState: String, Codable, Equatable, Sendable {
+    case current
+    case read
+    case unread
 }
 
 struct WorkChapter: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let title: String
     let progress: Double?
-    let isCurrent: Bool
+    let href: String?
+    let sortOrder: Int
+    let state: WorkChapterReadingState
+
+    var isCurrent: Bool { state == .current }
+
+    init(
+        id: String,
+        title: String,
+        progress: Double?,
+        isCurrent: Bool,
+        href: String? = nil,
+        sortOrder: Int = 0,
+        state: WorkChapterReadingState? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.progress = progress
+        self.href = href
+        self.sortOrder = sortOrder
+        self.state = state ?? (isCurrent ? .current : .unread)
+    }
 }
 
 struct WorkDetailContent: Codable, Equatable, Sendable {
@@ -290,5 +371,13 @@ enum ContentCompositionRoot {
             snapshotStore: LibrarySnapshotFilePayloadStore()
         )
         return SharedContentClient(repository: repository)
+    }
+}
+
+enum ShelfCompositionRoot {
+    static func makeClient(
+        cookieStore: KeychainCookiePayloadStore = KeychainCookiePayloadStore()
+    ) -> any ShelfClient {
+        SharedShelfClient(repository: IosCompositionKt.createIosShelfRepository(cookieStore: cookieStore))
     }
 }

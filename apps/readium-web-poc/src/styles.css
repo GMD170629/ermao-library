@@ -1,0 +1,115 @@
+:root {
+  color: #f4f4f0;
+  background: #000000;
+  font-family: "SFMono-Regular", "IBM Plex Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-synthesis: none;
+  --surface: #000000;
+  --surface-raised: #0b0c0a;
+  --line: #343731;
+  --muted: #8f9688;
+  --signal: #00e676;
+  --danger: #ff3b30;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { min-width: 320px; min-height: 100%; margin: 0; }
+body { overflow: hidden; background: var(--surface); }
+button, select, textarea, input { font: inherit; }
+button, select, textarea {
+  color: inherit;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+button { min-height: 34px; padding: 7px 12px; cursor: pointer; }
+button:hover:not(:disabled), button:focus-visible { border-color: var(--signal); outline: none; }
+button:disabled { color: #555a51; cursor: not-allowed; }
+button.is-active { color: #000; background: var(--signal); border-color: var(--signal); }
+
+.lab { height: 100vh; display: grid; grid-template-rows: 72px 58px minmax(0, 1fr); }
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.masthead h1 { margin: 0; font-size: clamp(21px, 2.4vw, 34px); letter-spacing: -0.06em; }
+.masthead p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+.masthead-actions { display: flex; align-items: center; gap: 10px; }
+.runtime-chip { padding: 7px 9px; color: var(--signal); border: 1px solid var(--signal); font-size: 10px; }
+
+.control-strip { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid var(--line); }
+.field { display: grid; gap: 3px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; }
+.publication-field select { width: min(300px, 25vw); min-height: 28px; padding: 4px 8px; }
+.divider { height: 28px; width: 1px; background: var(--line); margin: 0 4px; }
+.segmented { display: flex; }
+.segmented button + button { border-left: 0; }
+.range-field { display: flex; align-items: center; gap: 7px; margin-left: auto; color: var(--muted); font-size: 11px; }
+.range-field input { accent-color: var(--signal); width: 110px; }
+.range-field output { min-width: 34px; color: var(--signal); font-variant-numeric: tabular-nums; }
+
+.workspace { min-height: 0; display: grid; grid-template-columns: minmax(230px, 0.72fr) minmax(430px, 1.8fr) minmax(280px, 0.9fr); }
+.evidence-panel, .locator-panel { min-height: 0; overflow: auto; background: var(--surface-raised); }
+.evidence-panel { border-right: 1px solid var(--line); }
+.locator-panel { border-left: 1px solid var(--line); }
+.evidence-panel section, .locator-panel section { padding: 16px; border-bottom: 1px solid var(--line); }
+h2 { margin: 0 0 12px; color: var(--muted); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.12em; }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.section-heading button { min-height: 28px; padding: 4px 8px; font-size: 9px; }
+#status-led { width: 8px; height: 8px; flex: 0 0 auto; background: var(--muted); }
+#status-led[data-state="ready"] { background: var(--signal); box-shadow: 0 0 14px var(--signal); }
+#status-led[data-state="error"] { background: var(--danger); }
+.status-message { margin: 7px 0 18px; font-size: 12px; line-height: 1.5; }
+.probe-list { margin: 0; display: grid; grid-template-columns: 66px 1fr; gap: 9px 12px; font-size: 10px; }
+.probe-list dt { color: var(--muted); }
+.probe-list dd { margin: 0; font-variant-numeric: tabular-nums; }
+.probe-list dd[data-state="pass"] { color: var(--signal); }
+.probe-list dd[data-state="fail"] { color: var(--danger); }
+.manifest-output, .locator-output, #comparison {
+  margin: 0;
+  color: #b9c0b2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 9px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.manifest-output { max-height: 40vh; overflow: auto; }
+
+.reader-stage { min-width: 0; min-height: 0; position: relative; overflow: hidden; background: #161713; }
+#reader-container { width: 100%; height: 100%; min-height: 0; }
+.reader-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+.reader-empty[hidden] { display: none; }
+.reader-empty span { color: var(--signal); font-size: clamp(72px, 10vw, 150px); font-weight: 700; letter-spacing: -0.12em; opacity: 0.16; }
+.reader-empty p { margin: -18px 0 0; color: var(--muted); font-size: 11px; }
+
+.locator-panel textarea { width: 100%; min-height: 190px; padding: 10px; resize: vertical; color: #cbd2c4; font-size: 9px; line-height: 1.5; }
+.locator-panel section > button { width: 100%; margin-top: 10px; }
+.locator-output { min-height: 145px; max-height: 260px; overflow: auto; }
+#precision { display: block; margin-bottom: 9px; font-size: 11px; }
+#precision[data-precision="exact-block"] { color: var(--signal); }
+#precision[data-precision="fallback"] { color: var(--danger); }
+.comparison-block p { color: var(--muted); font-size: 9px; line-height: 1.55; }
+
+@media (max-width: 1050px) {
+  body { overflow: auto; }
+  .lab { height: auto; min-height: 100vh; grid-template-rows: auto auto auto; }
+  .masthead { min-height: 72px; }
+  .control-strip { flex-wrap: wrap; }
+  .range-field { margin-left: 0; }
+  .workspace { grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(620px, 75vh) auto; }
+  .reader-stage { grid-column: 2; grid-row: 1; }
+  .locator-panel { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .runtime-chip { display: none; }
+  .masthead p { max-width: 60vw; }
+  .workspace { display: block; }
+  .evidence-panel, .locator-panel { display: block; border: 0; }
+  .reader-stage { height: 68vh; min-height: 520px; border-block: 1px solid var(--line); }
+  .publication-field { flex: 1 1 100%; }
+  .publication-field select { width: 100%; }
+}

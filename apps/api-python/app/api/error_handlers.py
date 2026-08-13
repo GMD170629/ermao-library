@@ -72,9 +72,21 @@ async def request_validation_error_handler(
         )
         for issue in error.errors()
     ]
+    exact_locator_failure = any(
+        issue.get("type") == "reader_locator_not_exact" for issue in error.errors()
+    )
     envelope = RequestValidationErrorResponse(
         error=RequestValidationErrorBody(
-            message="请求参数校验失败",
+            code=(
+                "READER_LOCATOR_NOT_EXACT"
+                if exact_locator_failure
+                else "REQUEST_VALIDATION_ERROR"
+            ),
+            message=(
+                "Readium Locator 缺少可验证的精确正文锚点"
+                if exact_locator_failure
+                else "请求参数校验失败"
+            ),
             details=issues,
         )
     )

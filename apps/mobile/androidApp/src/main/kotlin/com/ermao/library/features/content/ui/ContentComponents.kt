@@ -55,10 +55,31 @@ fun WorkCover(
     size: CoverSize,
     modifier: Modifier = Modifier,
 ) {
+    ContentCover(
+        contentId = work.id,
+        title = work.title,
+        coverUrl = work.coverUrl,
+        repository = repository,
+        context = context,
+        size = size,
+        modifier = modifier,
+    )
+}
+
+@Composable
+fun ContentCover(
+    contentId: String,
+    title: String,
+    coverUrl: String,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    size: CoverSize,
+    modifier: Modifier = Modifier,
+) {
     val theme = WarmPageThemeValues
     val appContext = LocalContext.current.applicationContext
-    val image by produceState<ImageBitmap?>(null, work.id, work.coverUrl, size, context.namespace) {
-        value = AndroidCoverCache.load(appContext, context, work.coverUrl, repository)?.let { bytes ->
+    val image by produceState<ImageBitmap?>(null, contentId, coverUrl, size, context.namespace) {
+        value = AndroidCoverCache.load(appContext, context, coverUrl, repository)?.let { bytes ->
             withContext(Dispatchers.Default) {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
             }
@@ -73,14 +94,14 @@ fun WorkCover(
         if (image != null) {
             Image(
                 bitmap = image!!,
-                contentDescription = stringResource(R.string.cover_content_description, work.title),
+                contentDescription = stringResource(R.string.cover_content_description, title),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Icon(
                 imageVector = Icons.Outlined.Book,
-                contentDescription = stringResource(R.string.cover_content_description, work.title),
+                contentDescription = stringResource(R.string.cover_content_description, title),
                 tint = theme.colors.textTertiary,
                 modifier = Modifier.size(32.dp),
             )

@@ -4,6 +4,49 @@ import XCTest
 
 @MainActor
 final class ContentStoreTests: XCTestCase {
+    func testVolumeIndexUsesServerValueAndFallsBackToOneBasedPosition() {
+        let base = WorkVolume(
+            id: "volume-1",
+            mediaVersionID: "media-1",
+            title: "Volume",
+            formatLabel: "EPUB",
+            sizeLabel: nil,
+            progress: nil,
+            isReadable: true,
+            isSelected: false
+        )
+
+        XCTAssertEqual(base.displayIndex(position: 0), "01")
+        XCTAssertEqual(
+            WorkVolume(
+                id: "volume-3",
+                mediaVersionID: "media-1",
+                title: "Volume 3",
+                formatLabel: "EPUB",
+                volumeIndex: 3,
+                sizeLabel: nil,
+                progress: nil,
+                isReadable: true,
+                isSelected: false
+            ).displayIndex(position: 0),
+            "03"
+        )
+        XCTAssertEqual(
+            WorkVolume(
+                id: "volume-1-5",
+                mediaVersionID: "media-1",
+                title: "Volume 1.5",
+                formatLabel: "EPUB",
+                volumeIndex: 1.5,
+                sizeLabel: nil,
+                progress: nil,
+                isReadable: true,
+                isSelected: false
+            ).displayIndex(position: 0),
+            "1.5"
+        )
+    }
+
     func testLibraryScopesKeepIndependentQueriesAndFilters() async {
         let client = ContentClientStub()
         let store = LibraryStore(
@@ -251,6 +294,65 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertNil(removed)
     }
 
+    func testReaderProgressImmediatelyUpdatesVisibleWorkDetailAndChapterStates() async throws {
+        let initial = WorkDetailContent(
+            work: work("reader-work"),
+            description: nil,
+            tags: [],
+            seriesFacet: nil,
+            authorFacets: [],
+            availableMediaKinds: [.ebook],
+            selectedMediaKind: .ebook,
+            selectedVolumeID: "volume-1",
+            readingStatus: .unread,
+            volumes: [
+                WorkVolume(
+                    id: "volume-1",
+                    mediaVersionID: "media-1",
+                    title: "Volume 1",
+                    formatLabel: "EPUB",
+                    sizeLabel: nil,
+                    progress: nil,
+                    isReadable: true,
+                    isSelected: true
+                )
+            ],
+            chapters: [
+                WorkChapter(id: "chapter-1", title: "Chapter 1", progress: nil, isCurrent: false, href: "Text/all.xhtml#one", sortOrder: 1),
+                WorkChapter(id: "chapter-2", title: "Chapter 2", progress: nil, isCurrent: false, href: "Text/all.xhtml#two", sortOrder: 2),
+            ]
+        )
+        let store = WorkDetailStore(
+            context: contentContext,
+            client: ProgressContentClient(content: initial),
+            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
+            workID: "reader-work",
+            onUnauthorized: {}
+        )
+        store.load()
+        try await waitUntil {
+            if case .ready = store.state { return true }
+            return false
+        }
+
+        ReaderProgressPresentationCenter.shared.publish(
+            namespaceKey: contentContext.namespaceKey,
+            workID: "reader-work",
+            volumeID: "volume-1",
+            percent: 42,
+            currentHref: "Text/all.xhtml#two",
+            chapterTitle: "Chapter 2",
+            capturedAtEpochMillis: 1_000
+        )
+
+        guard case .ready(let content, _) = store.state else {
+            return XCTFail("Expected work detail to remain ready")
+        }
+        XCTAssertEqual(content.work.progress, 42)
+        XCTAssertEqual(content.volumes.first?.progress, 42)
+        XCTAssertEqual(content.chapters.map(\.state), [.read, .current])
+    }
+
     private var contentContext: ContentRequestContext {
         ContentRequestContext(
             profileID: "profile",
@@ -435,6 +537,29 @@ private actor ContentClientStub: ContentClient {
     func fetchWorkDetail(context: ContentRequestContext, query: WorkDetailQuery) async throws -> WorkDetailContent {
         throw ContentClientError.inaccessible
     }
+    func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
+}
+
+private actor ProgressContentClient: ContentClient {
+    let content: WorkDetailContent
+
+    init(content: WorkDetailContent) {
+        self.content = content
+    }
+
+    func fetchContinueReading(context: ContentRequestContext) async throws -> ContinueReadingItem? { nil }
+    func fetchRecentReading(context: ContentRequestContext, limit: Int) async throws -> [WorkCard] { [] }
+    func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [WorkCard] { [] }
+    func fetchWorks(context: ContentRequestContext, query: WorksQuery) async throws -> WorkPage {
+        WorkPage(works: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
+        GroupingPage(groups: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage {
+        FacetPage(facet: FacetIdentity(id: query.facetID, kind: query.kind, name: "Facet"), works: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchWorkDetail(context: ContentRequestContext, query: WorkDetailQuery) async throws -> WorkDetailContent { content }
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
 }
 
