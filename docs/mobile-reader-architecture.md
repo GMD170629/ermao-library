@@ -1,7 +1,7 @@
 # Mobile Reader Architecture
 
-Status: Reader v4 exact-progress rewrite implemented; six-direction physical-device conformance pending
-Last updated: 2026-08-13
+Status: Reader v4 cross-format exact-progress contract implemented; physical-device conformance pending
+Last updated: 2026-08-14
 
 This document is the architecture contract for the native Reader and its Reader v4 cross-platform progress integration. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
@@ -52,7 +52,16 @@ serverIdentity + userId + clientId + volumeId + PublicationFingerprint
 
 ## 4. Location model
 
-For a reflowable publication, an uploadable location contains:
+Reader v4 uses a renderer-neutral `PublicationLocation` discriminated union. All
+variants contain the structured Publication fingerprint and the complete encoded
+location is limited to 64 KiB. The variants are:
+
+- `reflowable`: a required Readium `engineLocator` with an exact DOM anchor;
+- `pdf`: a zero-based page index and required four-decimal normalized page-local progression;
+- `comic`: a zero-based page index and the canonical safe reading-order resource href;
+- `audio`: a file id, optional chapter id, and playback position in milliseconds.
+
+For a reflowable publication, the required engine locator contains:
 
 - an `href` and media type;
 - a CSS selector, fragment/CFI, or bounded uniquely verifiable text context;
@@ -63,12 +72,13 @@ For a reflowable publication, an uploadable location contains:
 Progression and position alone are not exact and cannot be uploaded. Whole-book
 `displayPercent` is never an automatic restoration candidate.
 
-The engine is always `readium`; platform is `android`, `ios`, or `web`. The
-Locator envelope is a JSON object no larger than 64 KiB. `highlight` is limited
+The reflowable engine is `readium`; platform is `android`, `ios`, or `web`.
+`highlight` is limited
 to 512 characters and `before`/`after` to 256. JSON strings containing encoded
 JSON and binary payloads are invalid at the wire boundary.
 
-PDF, comic, and audio locations keep their standard page/page-index/playback-millisecond anchors and may add an engine locator when useful.
+PDF, comic, and audio may add an engine locator for navigation assistance or
+diagnostics. It does not participate in their exact location identity.
 
 ## 5. Reader v4 server contract
 
@@ -92,11 +102,20 @@ The progress request contains:
   "mutationId": "58a3ac3c-52d0-41ed-9c85-0524b532f25b",
   "baseRevision": 17,
   "capturedAtEpochMillis": 1786500000000,
-  "locator": {"engine": "readium", "platform": "ios", "version": "readium-swift:3.11.0", "publication": {}, "payload": {}}
+  "locator": {
+    "kind": "reflowable",
+    "publication": {},
+    "engineLocator": {
+      "engine": "readium",
+      "platform": "ios",
+      "version": "readium-swift:3.11.0",
+      "payload": {}
+    }
+  }
 }
 ```
 
-The response contains revision, the exact Locator, display-only percentage, and
+The response contains revision, the exact Publication location, display-only percentage, and
 server receive time. Locator is required. A non-exact position returns
 `422 READER_LOCATOR_NOT_EXACT`.
 
@@ -108,7 +127,7 @@ idempotent.
 
 The repository saves:
 
-- the validated Locator JSON and derived display percentage;
+- the validated Publication location JSON and derived display percentage;
 - client and mutation identity;
 - client capture time for diagnostics only;
 - the current revision and server receive time;
@@ -126,7 +145,7 @@ All clients implement the same lifecycle:
 2. A 500 ms trailing debounce coalesces continuous movement.
 3. One timestamp is created.
 4. The full exact location is committed locally.
-5. The exact Locator and latest-only pending mutation commit atomically.
+5. The exact Publication location and latest-only pending mutation commit atomically.
 6. Only after local commit, one single-flight v4 PUT is attempted.
 7. Success persists the confirmed revision before clearing pending state.
 8. Network failure preserves pending state; `409` persists a conflict.
@@ -141,10 +160,12 @@ position but must not upload or label it cross-device synchronized.
 ## 8. Restoration policy
 
 An explicit deep link, chapter/page request, or bookmark always wins. Otherwise
-only a fingerprint-compatible exact Readium Locator may restore automatically.
-After `Navigator.go(locator)`, the platform recaptures the first-visible Locator.
-Success requires the same href plus matching selector, matching fragment/CFI, or
-a uniquely matching normalized text context. `go()` success alone is not proof.
+only a fingerprint-compatible exact Publication location may restore automatically.
+For reflowable content, after `Navigator.go(locator)`, the platform recaptures the
+first-visible Locator. Success requires the same href plus matching selector,
+matching fragment/CFI, or a uniquely matching normalized text context. PDF,
+comic, and audio recapture and compare their canonical morphology-specific
+identity. A navigation API's success result alone is not proof.
 
 If exact verification fails, the user can explicitly try a nearby position,
 open the chapter, or keep the local position. Progression, position, and
@@ -152,9 +173,11 @@ displayPercent are never silently adopted.
 
 ## 9. Local persistence
 
-Reader v4 was unreleased, so the Web uses a fresh `shuku-reader-v4` IndexedDB and
-native platforms use only the new exact/pending/conflict schema. No Foliate,
-legacy Reader v4, or percentage migration exists.
+Reader v4 was unreleased, so the cross-format union is a coordinated destructive
+replacement. Web clears the old exact/pending/conflict IndexedDB namespaces;
+native progress and sync codecs use document version 5 and reject version 4;
+the server data migration deletes old v4 progress and mutation receipts. No
+Foliate, legacy Reader v4, location, completion, or percentage migration exists.
 
 Publication download, bounded streaming, file SHA-256, parser fingerprinting, path/symlink containment, temporary-file validation, and atomic installation remain unchanged by progress simplification.
 
@@ -192,7 +215,7 @@ Automated contracts must cover:
 - 500 ms burst coalescing;
 - single-flight latest-slot behavior;
 - network failure preserving the latest durable pending mutation;
-- Readium Locator round trips and post-navigation exact-block verification;
+- all four Publication location round trips and morphology-specific post-navigation verification;
 - progression, position, and percentage never counting as exact;
 - mismatched publication fingerprints refusing automatic restoration;
 - PDF, comic, and audio exact positions;

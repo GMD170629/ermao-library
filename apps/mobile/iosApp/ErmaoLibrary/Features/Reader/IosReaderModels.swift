@@ -73,6 +73,7 @@ struct IosReaderFailure: LocalizedError, Equatable, Sendable {
 
 struct IosReaderProgressContract: Equatable, Sendable {
     let sourceID: String
+    let kind: String
     let resourceKey: String?
     let progression: Double?
     let totalProgression: Double?
@@ -81,12 +82,18 @@ struct IosReaderProgressContract: Equatable, Sendable {
     let quotePrefix: String?
     let quoteSuffix: String?
     let engineLocatorCanonicalJSON: String?
+    let pageIndex: Int?
+    let pageProgression: Double?
+    let resourceHref: String?
+    let fileID: String?
+    let chapterID: String?
+    let positionMillis: Int64?
     let fingerprint: IosContentFingerprint
     let updatedAtEpochMillis: Int64
     let deviceID: String
 }
 
-/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v4 documents.
+/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v5 documents.
 /// The KMP codec remains the persistence authority; this decoder lets iOS map
 /// an engine locator without turning its arbitrary JSON members into domain state.
 enum IosReaderProgressContractDecoder {
@@ -109,9 +116,9 @@ enum IosReaderProgressContractDecoder {
                 && ($0.prefix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
                 && ($0.suffix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
         } ?? true
-        let engineLocatorIsValid = document.location.engineLocator.map(\.isObject) ?? false
-        guard document.schema == "ermao.reader-progress", document.version == 4,
-              document.location.kind == "reflow",
+        let engineLocatorIsValid = document.location.engineLocator.map(\.isObject) ?? true
+        guard document.schema == "ermao.reader-progress", document.version == 5,
+              ["reflow", "pdf", "comic", "audio"].contains(document.location.kind),
               !document.sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               resourceKeyIsValid,
               progressionIsValid,
@@ -123,11 +130,32 @@ enum IosReaderProgressContractDecoder {
         else {
             throw IosReaderFailure(code: .locationRestoreFailed)
         }
+        switch document.location.kind {
+        case "reflow":
+            guard document.location.engineLocator != nil else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        case "pdf":
+            guard let pageIndex = document.location.pageIndex, pageIndex >= 0,
+                  let pageProgression = document.location.pageProgression,
+                  pageProgression.isFinite, (0 ... 1).contains(pageProgression)
+            else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        case "comic":
+            guard let pageIndex = document.location.pageIndex, pageIndex >= 0,
+                  let href = document.location.resourceHref,
+                  !href.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        case "audio":
+            guard let fileID = document.location.fileId,
+                  !fileID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let positionMillis = document.location.positionMillis, positionMillis >= 0
+            else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        default: throw IosReaderFailure(code: .locationRestoreFailed)
+        }
         let engineJSON = try document.location.engineLocator.map {
             try enginePayload($0, schemaVersion: document.version)
         }
         return IosReaderProgressContract(
             sourceID: document.sourceId,
+            kind: document.location.kind,
             resourceKey: document.location.resourceKey,
             progression: document.location.progression,
             totalProgression: document.location.totalProgression,
@@ -136,6 +164,12 @@ enum IosReaderProgressContractDecoder {
             quotePrefix: document.location.textQuote?.prefix,
             quoteSuffix: document.location.textQuote?.suffix,
             engineLocatorCanonicalJSON: engineJSON,
+            pageIndex: document.location.pageIndex,
+            pageProgression: document.location.pageProgression,
+            resourceHref: document.location.resourceHref,
+            fileID: document.location.fileId,
+            chapterID: document.location.chapterId,
+            positionMillis: document.location.positionMillis,
             fingerprint: try IosContentFingerprint(
                 originalFileHash: document.location.contentFingerprint.originalFileHash,
                 parserVersion: document.location.contentFingerprint.parserVersion,
@@ -158,7 +192,7 @@ enum IosReaderProgressContractDecoder {
     }
 
     private static func enginePayload(_ value: JSONValue, schemaVersion: Int) throws -> String {
-        guard schemaVersion == 4 else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        guard schemaVersion == 5 else { throw IosReaderFailure(code: .locationRestoreFailed) }
         guard case let .object(fields) = value,
               fields["engine"]?.stringValue == "readium",
               fields["platform"]?.stringValue == "ios",
@@ -189,6 +223,12 @@ enum IosReaderProgressContractDecoder {
         let position: Int?
         let textQuote: Quote?
         let engineLocator: JSONValue?
+        let pageIndex: Int?
+        let pageProgression: Double?
+        let resourceHref: String?
+        let fileId: String?
+        let chapterId: String?
+        let positionMillis: Int64?
         let contentFingerprint: Fingerprint
     }
 

@@ -33,6 +33,26 @@ class DownloadReaderEntryPolicyTest {
         )
     }
 
+    @Test
+    fun mobiFamilyUsesTheNativeDownloadAndReaderFlow() {
+        listOf("MOBI", "AZW", "AZW3", "PRC").forEach { format ->
+            assertEquals(
+                DownloadReaderEntryAction.OpenPreparation,
+                downloadReaderEntryAction("reflowable", format, null) { false },
+            )
+        }
+    }
+
+    @Test
+    fun unsupportedReflowableFormatsRemainOnTheStreamingValidationPath() {
+        listOf("TXT", "FB2").forEach { format ->
+            assertEquals(
+                DownloadReaderEntryAction.ValidateStreamingAccess,
+                downloadReaderEntryAction("reflowable", format, null) { false },
+            )
+        }
+    }
+
     private fun completedRecord() = AndroidDownloadRecord(
         taskId = "task",
         namespace = AndroidDownloadNamespace("server", "user", 2),

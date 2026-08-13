@@ -157,9 +157,6 @@
     <string name="work_volume_accessibility_not_started">未开始</string>
     <string name="work_volume_download_action">下载此卷</string>
     <string name="work_download_pause">暂停此卷下载</string>
-    <string name="reading_status_unread">想读</string>
-    <string name="reading_status_reading">正在阅读</string>
-    <string name="reading_status_finished">已读完</string>
     <string name="work_actions_title">图书操作</string>
     <string name="work_action_edit">编辑图书</string>
     <string name="work_action_set_cover">设置封面</string>
@@ -301,17 +298,13 @@
     <string name="reader_progress_slider">阅读进度</string>
     <string name="reader_settings_title">阅读设置</string>
     <string name="reader_font_size">字号</string>
-    <string name="reader_decrease_font_size">减小字号</string>
-    <string name="reader_increase_font_size">增大字号</string>
     <string name="reader_line_height">行高</string>
     <string name="reader_theme">主题</string>
-    <string name="reader_theme_paper">纸张</string>
     <string name="reader_theme_night">夜间</string>
     <string name="reader_theme_system">跟随系统</string>
     <string name="reader_reading_mode">阅读模式</string>
     <string name="reader_mode_paged">分页</string>
     <string name="reader_mode_scroll">连续滚动</string>
-    <string name="reader_publisher_styles">使用出版方样式</string>
     <string name="reader_bookmark">书签</string>
     <string name="reader_notes">笔记</string>
     <string name="reader_appearance">外观</string>
@@ -321,6 +314,7 @@
     <string name="reader_bookmarks_pending">本机优先 · 待同步</string>
     <string name="reader_bookmark_remove">移除书签</string>
     <string name="reader_position">位置 %1$d</string>
+    <string name="reader_comic_page">第 %1$d 页</string>
     <string name="reader_theme_day">白昼</string>
     <string name="reader_theme_warm">暖色</string>
     <string name="reader_theme_green">护眼绿</string>

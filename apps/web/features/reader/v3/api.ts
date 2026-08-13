@@ -1,4 +1,15 @@
-import { normalizeReaderPreferences, parseReadiumLocatorEnvelope, publicationFingerprintsMatch, type PublicationFingerprint, type ReaderLocation, type ReaderNavigationEntry, type ReaderSource, type ReflowableFormat } from '@shuku/reader-core';
+import {
+  normalizeReaderPreferences,
+  parseSupportedReaderSourceFormat,
+  publicationFingerprintsMatch,
+  readerFormatCapability,
+  type PublicationFingerprint,
+  type ReaderLocation,
+  type ReaderNavigationEntry,
+  type ReaderSource,
+  type ReflowableFormat,
+  type SupportedReaderSourceFormat
+} from '@shuku/reader-core';
 import { withBasePath } from '../../../lib/base-path';
 import { parseReaderV4ProgressSnapshot, v4LocationToDomain, type ReaderProgressSnapshot } from '../../../lib/reader';
 import type { ReaderBookmark } from './bookmarks';
@@ -37,6 +48,7 @@ export type ReaderUnit = Readonly<{
 
 export type ReaderPage = Readonly<{
   pageIndex: number;
+  resourceHref: string;
   title: string | null;
   mimeType: string | null;
   width: number | null;
@@ -48,7 +60,7 @@ export type ReaderBootstrap = Readonly<{
   schemaVersion: 4;
   userId: string;
   readerType: VisualReaderType;
-  sourceFormat: ReflowableFormat | null;
+  sourceFormat: SupportedReaderSourceFormat;
   contentFingerprint: string;
   publicationFingerprint: PublicationFingerprint;
   book: Readonly<{ id: string; title: string; author: string | null; coverUrl: string | null }>;
@@ -68,7 +80,12 @@ export type ReaderBootstrap = Readonly<{
   serverPreferences: Readonly<{ settings: import('@shuku/reader-core').ReaderPreferences; updatedAt: string | null }>;
 }>;
 
-type ReaderErrorResponse = Readonly<{ error?: Readonly<{ message?: string }>; detail?: string }>;
+export class ReaderBootstrapError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'ReaderBootstrapError';
+  }
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -88,10 +105,6 @@ function numberValue(value: unknown, fallback = 0): number {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function sourceFormat(value: unknown): ReflowableFormat | null {
-  return value === 'epub' || value === 'mobi' || value === 'azw' || value === 'azw3' || value === 'prc' || value === 'fb2' || value === 'txt' ? value : null;
 }
 
 function visualReaderType(value: unknown): VisualReaderType | null {
@@ -146,14 +159,16 @@ function serverNavigation(units: ReaderUnit[]): ReaderNavigationEntry[] {
 }
 
 function mapPages(units: ReaderUnit[]): ReaderPage[] {
-  return units.map((unit) => ({
-    pageIndex: Math.max(1, numberValue(unit.metadata.pageIndex, unit.index + 1)),
+  return units.flatMap((unit) => unit.href ? [{
+    // The server contract is zero-based; the Web comic presentation is one-based.
+    pageIndex: Math.max(0, numberValue(unit.metadata.pageIndex, unit.index)) + 1,
+    resourceHref: unit.href,
     title: unit.title || null,
     mimeType: nullableString(unit.metadata.mimeType),
     width: nullableNumber(unit.metadata.width),
     height: nullableNumber(unit.metadata.height),
     size: nullableNumber(unit.metadata.size)
-  }));
+  }] : []);
 }
 
 export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal): Promise<ReaderBootstrap> {
@@ -161,8 +176,12 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   const payload: unknown = await response.json().catch(() => null);
   const envelope = record(payload);
   if (!response.ok || envelope.ok !== true) {
-    const error = record(payload) as ReaderErrorResponse;
-    throw new Error(error.error?.message ?? error.detail ?? `读取阅读器启动信息失败（${response.status}）`);
+    const error = record(envelope.error);
+    const code = stringValue(error.code, `READER_BOOTSTRAP_HTTP_${response.status}`);
+    throw new ReaderBootstrapError(
+      code,
+      stringValue(error.message) || stringValue(envelope.detail) || `读取阅读器启动信息失败（${response.status}）`
+    );
   }
   const data = record(envelope.data);
   if (data.schemaVersion !== 4) throw new Error('当前客户端不支持该阅读协议');
@@ -173,8 +192,11 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   const workId = stringValue(mediaVersion.workId).trim();
   const mediaKind = mediaVersion.mediaKind;
   if (!readerType || !volume || !workId || (mediaKind !== 'EBOOK' && mediaKind !== 'COMIC' && mediaKind !== 'AUDIOBOOK')) throw new Error('阅读器启动信息不完整');
-  const format = sourceFormat(data.sourceFormat);
-  if (readerType === 'reflowable' && !format) throw new Error('可重排卷册缺少源格式');
+  const format = parseSupportedReaderSourceFormat(data.sourceFormat);
+  if (!format) throw new ReaderBootstrapError('VOLUME_FORMAT_UNSUPPORTED', '当前文件格式不受阅读器支持');
+  if (readerFormatCapability(format).readerKind !== readerType) {
+    throw new ReaderBootstrapError('READER_FORMAT_MORPHOLOGY_MISMATCH', '阅读器格式与排版形态不匹配');
+  }
   const units = mapUnits(data.units);
   const publicationAccess = record(data.publication);
   const files = (Array.isArray(data.files) ? data.files : []).flatMap((raw) => {
@@ -187,10 +209,10 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   if (!fileUrl) throw new Error('阅读器启动信息缺少内容文件');
   const capabilities = record(data.capabilities);
   const fingerprint = publicationFingerprint(data.publicationFingerprint);
-  if (readerType === 'reflowable' && !fingerprint) throw new Error('阅读器启动信息缺少 Publication 指纹');
+  if (!fingerprint) throw new Error('阅读器启动信息缺少 Publication 指纹');
   const contentFingerprint = fingerprint
     ? [fingerprint.originalFileHash, fingerprint.parser, fingerprint.normalization].join('\u0000')
-    : 'non-reflowable';
+    : '';
   const serverProgressSnapshot = data.progressSnapshot === null || data.progressSnapshot === undefined
     ? null
     : parseReaderV4ProgressSnapshot(data.progressSnapshot);
@@ -204,8 +226,8 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
   }
   const source: ReaderSource = readerType === 'reflowable'
-    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format ?? 'epub', contentUrl: withBasePath(fileUrl), contentFingerprint, ...(fingerprint ? { publicationFingerprint: fingerprint } : {}), ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
-    : { workId, volumeId: volume.id, kind: readerType, contentUrl: withBasePath(fileUrl), contentFingerprint, totalPages: volume.pageCount };
+    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format as ReflowableFormat, contentUrl: withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint, ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
+    : { workId, volumeId: volume.id, kind: readerType, contentUrl: withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint ?? undefined, totalPages: volume.pageCount };
   const locationMatchesPublication = Boolean(serverProgressSnapshot && fingerprint
     && publicationFingerprintsMatch(serverProgressSnapshot.locator.publication, fingerprint));
   return {
@@ -214,9 +236,7 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     readerType,
     sourceFormat: format,
     contentFingerprint,
-    publicationFingerprint: fingerprint ?? {
-      originalFileHash: '0'.repeat(64), parser: 'non-reflowable', normalization: 'non-reflowable-v1'
-    },
+    publicationFingerprint: fingerprint,
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名作品'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
     mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind, completed: mediaVersion.completed === true },
     volume,
@@ -245,7 +265,7 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     initialLocation: v4LocationToDomain(
       locationMatchesPublication ? serverProgressSnapshot?.locator ?? null : null,
       volume.id,
-      format
+      readerType === 'reflowable' ? format as ReflowableFormat : null
     ),
     serverPreferences: { settings: normalizeReaderPreferences({}), updatedAt: null }
   };

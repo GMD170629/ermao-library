@@ -34,6 +34,7 @@ import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.features.downloads.application.DownloadCenterViewModel
 import com.ermao.library.features.downloads.application.DownloadedWorkViewModel
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
+import com.ermao.library.features.downloads.model.isSupportedNativeReflowable
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
 import androidx.compose.foundation.layout.Arrangement
@@ -328,7 +329,7 @@ private fun OfflineDownloadsShell(
             state = workState,
             onBack = { selectedWorkId = null },
             onOpenVolume = { record ->
-                if (record.readerType.equals("reflowable", true) && record.format.equals("EPUB", true)) {
+                if (isSupportedNativeReflowable(record.readerType, record.format)) {
                     appContext.startActivity(
                         com.ermao.library.features.reader.presentation.ReaderActivity.createManagedDownloadIntent(
                             context = appContext,
@@ -339,6 +340,7 @@ private fun OfflineDownloadsShell(
                             localReference = checkNotNull(record.localReference),
                             serverContentFingerprint = record.contentFingerprint,
                             expectedBytes = record.expectedBytes,
+                            sourceFormat = record.format,
                         ),
                     )
                 } else {

@@ -2,6 +2,24 @@
 // AUTO-GENERATED from the Reader v4 FastAPI OpenAPI contract.
 // Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.
 
+export type AudioExactLocation_Input = {
+  kind: "audio";
+  publication: PublicationFingerprint;
+  fileId: string;
+  chapterId?: string | null;
+  positionMillis: number;
+  engineLocator?: OpaqueReadiumEngineLocator_Input | null;
+};
+
+export type AudioExactLocation_Output = {
+  kind: "audio";
+  publication: PublicationFingerprint;
+  fileId: string;
+  chapterId?: string | null;
+  positionMillis: number;
+  engineLocator?: OpaqueReadiumEngineLocator_Output | null;
+};
+
 export type AudioLocation = {
   kind: "audio";
   fileId: string;
@@ -9,25 +27,59 @@ export type AudioLocation = {
   positionMs: number;
 };
 
+export type ComicExactLocation_Input = {
+  kind: "comic";
+  publication: PublicationFingerprint;
+  pageIndex: number;
+  resourceHref: string;
+  engineLocator?: OpaqueReadiumEngineLocator_Input | null;
+};
+
+export type ComicExactLocation_Output = {
+  kind: "comic";
+  publication: PublicationFingerprint;
+  pageIndex: number;
+  resourceHref: string;
+  engineLocator?: OpaqueReadiumEngineLocator_Output | null;
+};
+
 export type ComicLocation = {
   kind: "comic";
   pageIndex: number;
 };
 
-export type LocatorEnvelope_Input = {
+export type OpaqueReadiumEngineLocator_Input = {
   engine: "readium";
   platform: "android" | "ios" | "web";
   version: string;
-  publication: PublicationFingerprint;
-  payload: ReadiumLocatorPayload_Input;
+  payload: {
+    [key: string]: ReaderJsonValue_Input | null | undefined;
+  };
 };
 
-export type LocatorEnvelope_Output = {
+export type OpaqueReadiumEngineLocator_Output = {
   engine: "readium";
   platform: "android" | "ios" | "web";
   version: string;
+  payload: {
+    [key: string]: ReaderJsonValue_Output | null | undefined;
+  };
+};
+
+export type PdfExactLocation_Input = {
+  kind: "pdf";
   publication: PublicationFingerprint;
-  payload: ReadiumLocatorPayload_Output;
+  pageIndex: number;
+  pageProgression: number;
+  engineLocator?: OpaqueReadiumEngineLocator_Input | null;
+};
+
+export type PdfExactLocation_Output = {
+  kind: "pdf";
+  publication: PublicationFingerprint;
+  pageIndex: number;
+  pageProgression: number;
+  engineLocator?: OpaqueReadiumEngineLocator_Output | null;
 };
 
 export type PdfLocation = {
@@ -74,8 +126,9 @@ export type ReaderBootstrapData = {
   schemaVersion?: 4;
   userId: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
-  sourceFormat?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
+  sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
   publicationFingerprint: PublicationFingerprint;
+  contentFingerprint: string;
   book: ReaderBookSummary;
   mediaVersion: ReaderMediaVersionSummary;
   volume: ReaderVolumeSummary;
@@ -155,7 +208,7 @@ export type ReaderProgressPut = {
   mutationId: string;
   baseRevision: number;
   capturedAtEpochMillis: number;
-  locator: LocatorEnvelope_Input;
+  locator: ReflowableExactLocation_Input | PdfExactLocation_Input | ComicExactLocation_Input | AudioExactLocation_Input;
 };
 
 export type ReaderProgressResponse = {
@@ -166,7 +219,7 @@ export type ReaderProgressResponse = {
 export type ReaderProgressSnapshot = {
   schemaVersion?: 4;
   revision: number;
-  locator: LocatorEnvelope_Output;
+  locator: ReflowableExactLocation_Output | PdfExactLocation_Output | ComicExactLocation_Output | AudioExactLocation_Output;
   displayPercent: number;
   receivedAtEpochMillis: number;
   capturedAtEpochMillis?: number | null;
@@ -223,6 +276,20 @@ export type ReaderVolumeSummary = {
   lastReadAt?: string | null;
 };
 
+export type ReadiumEngineLocator_Input = {
+  engine: "readium";
+  platform: "android" | "ios" | "web";
+  version: string;
+  payload: ReadiumLocatorPayload_Input;
+};
+
+export type ReadiumEngineLocator_Output = {
+  engine: "readium";
+  platform: "android" | "ios" | "web";
+  version: string;
+  payload: ReadiumLocatorPayload_Output;
+};
+
 export type ReadiumLocatorLocations_Input = {
   cssSelector?: string | null;
   fragments?: Array<string>;
@@ -269,4 +336,16 @@ export type ReflowLocation = {
   kind: "reflow";
   resourceKey: string;
   progression?: number | null;
+};
+
+export type ReflowableExactLocation_Input = {
+  kind: "reflowable";
+  publication: PublicationFingerprint;
+  engineLocator: ReadiumEngineLocator_Input;
+};
+
+export type ReflowableExactLocation_Output = {
+  kind: "reflowable";
+  publication: PublicationFingerprint;
+  engineLocator: ReadiumEngineLocator_Output;
 };

@@ -218,8 +218,10 @@ actor ManagedDownloadStore {
         let manifest = try loadManifest(namespace: namespace)
         guard let record = manifest.records.first(where: { $0.id == recordID }),
               record.namespace == namespace,
-              record.readerType == .reflowable,
-              record.format.caseInsensitiveCompare("EPUB") == .orderedSame,
+              ManagedReaderAccessPolicy.supportsNativeReader(
+                  readerType: record.readerType,
+                  format: record.format
+              ),
               let serverContentFingerprint = record.contentFingerprint,
               !serverContentFingerprint.isEmpty,
               let fileURL = fileURL(for: record)
@@ -230,6 +232,7 @@ actor ManagedDownloadStore {
             displayTitle: record.workTitle,
             workID: record.workID,
             volumeID: record.volumeID,
+            sourceFormat: record.format,
             serverContentFingerprint: serverContentFingerprint
         )
     }

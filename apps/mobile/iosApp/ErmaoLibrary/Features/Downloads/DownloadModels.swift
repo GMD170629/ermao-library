@@ -235,6 +235,13 @@ struct ReaderHandoff: Hashable, Sendable {
 }
 
 enum ManagedReaderAccessPolicy {
+    static func supportsNativeReader(readerType: ManagedDownloadReaderType, format: String) -> Bool {
+        readerType == .reflowable &&
+            ["EPUB", "MOBI", "AZW", "AZW3", "PRC"].contains(
+                format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            )
+    }
+
     static func verifiedLocalHandoff(
         record: ManagedDownloadRecord?,
         volumeID: String

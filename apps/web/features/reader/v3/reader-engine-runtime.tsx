@@ -73,6 +73,11 @@ function novelErrorMessage(code: string | undefined, translate: (source: string)
   if (code === 'NOVEL_ENCODING_UNCERTAIN') return translate('无法确定 TXT 文件的文字编码。');
   if (code === 'NOVEL_RESOURCE_FAILED') return translate('小说文件加载失败，请检查网络后重试。');
   if (code === 'NOVEL_SECURITY_REJECTED') return translate('文件包含不安全的内容，已停止打开。');
+  if (code === 'VOLUME_FORMAT_UNSUPPORTED') return translate('当前文件格式尚未开放阅读支持。');
+  if (code === 'READER_FORMAT_MORPHOLOGY_MISMATCH') return translate('文件格式与阅读器类型不匹配。');
+  if (code === 'PDF_ENCRYPTED' || code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
+  if (code === 'PDF_INVALID') return translate('PDF 文件已损坏或格式无效。');
+  if (code === 'COMIC_INDEX_INVALID') return translate('漫画页面索引无效或尚未准备完成。');
   return null;
 }
 
@@ -165,6 +170,7 @@ export function ReaderEngineRuntime({
           onEndOfVolume: openNextVolume,
           initialPages: bootstrap.pages.map((page) => ({
             pageIndex: page.pageIndex,
+            resourceHref: page.resourceHref,
             title: page.title ?? undefined,
             mimeType: page.mimeType ?? undefined,
             width: page.width ?? undefined,
@@ -272,6 +278,7 @@ export function ReaderEngineRuntime({
 
   useEffect(() => {
     const controller = new AbortController();
+    const format = bootstrap.source.kind === 'reflowable' ? bootstrap.source.sourceFormat : null;
     bookmarkSyncReadyRef.current = false;
     let localBookmarks: ReaderBookmark[] = [];
     try {
@@ -281,7 +288,7 @@ export function ReaderEngineRuntime({
     } catch {
       setBookmarks([]);
     }
-    fetchReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, bootstrap.sourceFormat, controller.signal)
+    fetchReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, format, controller.signal)
       .then((serverBookmarks) => {
         setBookmarks((current) => {
           const next = mergeReaderBookmarks(current, serverBookmarks);
@@ -292,7 +299,7 @@ export function ReaderEngineRuntime({
           }
           bookmarkSyncReadyRef.current = true;
           if (JSON.stringify(next) !== JSON.stringify(serverBookmarks)) {
-            void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, bootstrap.sourceFormat, next).catch(() => undefined);
+            void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, format, next).catch(() => undefined);
           }
           return next;
         });
@@ -301,7 +308,7 @@ export function ReaderEngineRuntime({
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) bookmarkSyncReadyRef.current = true;
       });
     return () => controller.abort();
-  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.sourceFormat, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.source, bootstrap.volume.id]);
 
   const persistBookmarks = useCallback((update: (current: ReaderBookmark[]) => ReaderBookmark[]) => {
     setBookmarks((current) => {
@@ -312,11 +319,12 @@ export function ReaderEngineRuntime({
         // The visible state still works when private browsing blocks storage.
       }
       if (bookmarkSyncReadyRef.current) {
-        void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, bootstrap.sourceFormat, next).catch(() => undefined);
+        const format = bootstrap.source.kind === 'reflowable' ? bootstrap.source.sourceFormat : null;
+        void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, format, next).catch(() => undefined);
       }
       return next;
     });
-  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.sourceFormat, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.source, bootstrap.volume.id]);
 
   const currentBookmarkLabel = useMemo(() => {
     if (currentLocation?.kind === 'comic') {

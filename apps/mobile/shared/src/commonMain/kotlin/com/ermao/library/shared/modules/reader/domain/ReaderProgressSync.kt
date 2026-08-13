@@ -58,12 +58,27 @@ data class ReaderProgressSyncTarget(
 data class ReaderProgressSnapshotV4(
     val sourceId: String,
     val revision: Long,
-    val locator: ReadiumLocatorEnvelope,
+    val locator: PublicationLocation,
     val displayPercent: Double,
     val receivedAtEpochMillis: Long,
     /** Original client capture time; absent on older Reader v4 servers. */
     val capturedAtEpochMillis: Long? = null,
 ) {
+    constructor(
+        sourceId: String,
+        revision: Long,
+        locator: ReadiumLocatorEnvelope,
+        displayPercent: Double,
+        receivedAtEpochMillis: Long,
+        capturedAtEpochMillis: Long? = null,
+    ) : this(
+        sourceId,
+        revision,
+        ReflowablePublicationLocation(locator.publication, locator.asEngineLocator()),
+        displayPercent,
+        receivedAtEpochMillis,
+        capturedAtEpochMillis,
+    )
     init {
         require(sourceId.isNotBlank()) { "Reader snapshot source id is blank" }
         require(revision > 0) { "Reader snapshot revision must be positive" }
@@ -86,8 +101,23 @@ data class ReaderProgressMutation(
     val mutationId: String,
     val baseRevision: Long,
     val capturedAtEpochMillis: Long,
-    val locator: ReadiumLocatorEnvelope,
+    val locator: PublicationLocation,
 ) {
+    constructor(
+        sourceId: String,
+        clientId: String,
+        mutationId: String,
+        baseRevision: Long,
+        capturedAtEpochMillis: Long,
+        locator: ReadiumLocatorEnvelope,
+    ) : this(
+        sourceId,
+        clientId,
+        mutationId,
+        baseRevision,
+        capturedAtEpochMillis,
+        ReflowablePublicationLocation(locator.publication, locator.asEngineLocator()),
+    )
     init {
         require(sourceId.isNotBlank()) { "Reader mutation source id is blank" }
         require(clientId.isNotBlank()) { "Reader mutation client id is blank" }
@@ -107,12 +137,37 @@ data class ReaderProgressConflict(
     }
 }
 
-fun ReaderProgress.exactLocatorEnvelope(): ReadiumLocatorEnvelope {
-    val reflow = location as? ReflowReaderLocation
-        ?: throw IllegalArgumentException("Reader v4 exact sync currently requires a reflowable Readium location")
-    return ReadiumLocatorEnvelope.from(reflow)
-        ?: throw IllegalArgumentException("Reader progress does not contain an exact Readium block locator")
+fun ReaderProgress.exactPublicationLocation(): PublicationLocation = when (val exact = location) {
+    is ReflowReaderLocation -> ReflowablePublicationLocation(
+        publication = PublicationFingerprint.from(exact.contentFingerprint),
+        engineLocator = exact.engineLocator
+            ?: throw IllegalArgumentException("Reflowable progress does not contain an engine locator"),
+    )
+    is PdfReaderLocation -> PdfPublicationLocation(
+        publication = PublicationFingerprint.from(exact.contentFingerprint),
+        pageIndex = exact.pageIndex,
+        pageProgression = exact.pageProgression,
+        engineLocator = exact.engineLocator,
+    )
+    is ComicReaderLocation -> ComicPublicationLocation(
+        publication = PublicationFingerprint.from(exact.contentFingerprint),
+        resourceHref = exact.resourceHref,
+        pageIndex = exact.pageIndex,
+        engineLocator = exact.engineLocator,
+    )
+    is AudioReaderLocation -> AudioPublicationLocation(
+        publication = PublicationFingerprint.from(exact.contentFingerprint),
+        fileId = exact.fileId,
+        chapterId = exact.chapterId,
+        positionMillis = exact.positionMillis,
+        engineLocator = exact.engineLocator,
+    )
 }
+
+@Deprecated("Use exactPublicationLocation", ReplaceWith("exactPublicationLocation()"))
+fun ReaderProgress.exactLocatorEnvelope(): ReadiumLocatorEnvelope =
+    (exactPublicationLocation() as? ReflowablePublicationLocation)?.readiumEnvelope
+        ?: throw IllegalArgumentException("Reader progress is not reflowable")
 
 fun ReaderProgress.toMutation(
     baseRevision: Long,
@@ -123,7 +178,7 @@ fun ReaderProgress.toMutation(
     mutationId = mutationId,
     baseRevision = baseRevision,
     capturedAtEpochMillis = updatedAtEpochMillis,
-    locator = exactLocatorEnvelope(),
+    locator = exactPublicationLocation(),
 )
 
 private fun lengthPrefixed(vararg values: String): String = buildString {

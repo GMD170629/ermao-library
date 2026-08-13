@@ -1,8 +1,8 @@
 package com.ermao.library.features.reader.presentation
 
-import android.app.Activity
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -62,7 +62,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -74,6 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ermao.library.R
 import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
+import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
@@ -144,7 +144,10 @@ internal fun ReaderScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
-                        onNavigatorContainerReady()
+                        // FragmentManager can only attach after AndroidView has inserted this
+                        // container into the Activity hierarchy. The factory callback runs too
+                        // early and races fast local MOBI opens.
+                        post(onNavigatorContainerReady)
                     }
                 },
             )
@@ -296,12 +299,14 @@ private fun ReaderControlOverlay(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.reader_close))
                 }
                 Text(title, Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.titleMedium)
-                val activeBookmark = currentBookmark(bookmarks, location)
-                IconButton(onClick = { controller?.toggleCurrentBookmark() }, enabled = location != null) {
-                    Icon(
-                        if (activeBookmark) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                        stringResource(R.string.reader_bookmark),
-                    )
+                if (controller?.capabilities?.supportsBookmarks == true) {
+                    val activeBookmark = currentBookmark(bookmarks, location)
+                    IconButton(onClick = { controller.toggleCurrentBookmark() }, enabled = location != null) {
+                        Icon(
+                            if (activeBookmark) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            stringResource(R.string.reader_bookmark),
+                        )
+                    }
                 }
             }
         }
@@ -329,7 +334,12 @@ private fun ReaderBottomConsole(
     modifier: Modifier = Modifier,
 ) {
     val colors = WarmPageThemeValues.colors
-    val totalProgression = (currentLocation as? ReflowReaderLocation)?.totalProgression ?: 0.0
+    val totalProgression = when (currentLocation) {
+        is ReflowReaderLocation -> currentLocation.totalProgression ?: 0.0
+        is ComicReaderLocation -> currentLocation.pageIndex.toDouble() /
+            controller?.tableOfContents.orEmpty().lastIndex.coerceAtLeast(1)
+        else -> 0.0
+    }
     var sliderProgress by remember { mutableFloatStateOf(totalProgression.toFloat()) }
     var dragging by remember { mutableStateOf(false) }
     LaunchedEffect(totalProgression, dragging) { if (!dragging) sliderProgress = totalProgression.toFloat() }
@@ -370,8 +380,14 @@ private fun ReaderBottomConsole(
             HorizontalDivider(color = colors.divider)
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 ReaderNavAction(Icons.AutoMirrored.Filled.MenuBook, R.string.reader_table_of_contents, READER_CONTENTS_TEST_TAG) { onPanel(ReaderPanel.Contents) }
-                ReaderNavAction(Icons.AutoMirrored.Filled.Notes, R.string.reader_notes, "reader-notes") { onPanel(ReaderPanel.Notes) }
-                ReaderNavAction(Icons.Default.Palette, R.string.reader_appearance, "reader-appearance") { onPanel(ReaderPanel.Appearance) }
+                if (controller?.capabilities?.supportsBookmarks == true ||
+                    controller?.capabilities?.supportsAnnotations == true
+                ) {
+                    ReaderNavAction(Icons.AutoMirrored.Filled.Notes, R.string.reader_notes, "reader-notes") { onPanel(ReaderPanel.Notes) }
+                }
+                if (controller?.capabilities?.supportsTheme == true) {
+                    ReaderNavAction(Icons.Default.Palette, R.string.reader_appearance, "reader-appearance") { onPanel(ReaderPanel.Appearance) }
+                }
                 ReaderNavAction(Icons.Default.Settings, R.string.reader_settings, READER_SETTINGS_TEST_TAG) { onPanel(ReaderPanel.Settings) }
             }
         }
@@ -396,8 +412,10 @@ private fun RowScope.ReaderNavAction(
 @Composable
 private fun progressLabel(preferences: ReaderPreferences, location: ReaderLocation?, progress: Float): String {
     val percent = stringResource(R.string.reader_progress_percent, (progress * 100).toInt())
-    val position = (location as? ReflowReaderLocation)?.position?.let {
-        stringResource(R.string.reader_position, it)
+    val position = when (location) {
+        is ReflowReaderLocation -> location.position?.let { stringResource(R.string.reader_position, it) }
+        is ComicReaderLocation -> stringResource(R.string.reader_comic_page, location.pageIndex + 1)
+        else -> null
     } ?: percent
     return when (preferences.display.progressStyle) {
         ReaderProgressStyle.Hidden -> ""
@@ -588,8 +606,15 @@ private fun ReaderContentsSheet(
     Column(Modifier.verticalScroll(scroll)) {
         if (flattened.isEmpty()) Text(stringResource(R.string.reader_contents_empty), Modifier.padding(vertical = 24.dp))
         flattened.forEach { entry ->
-            val selected = (currentLocation as? ReflowReaderLocation)?.resourceKey ==
-                (entry.entry.location as? ReflowReaderLocation)?.resourceKey
+            val entryLocation = entry.entry.location
+            val selected = when {
+                currentLocation is ReflowReaderLocation && entryLocation is ReflowReaderLocation ->
+                    currentLocation.resourceKey == entryLocation.resourceKey
+                currentLocation is ComicReaderLocation && entryLocation is ComicReaderLocation ->
+                    currentLocation.resourceHref == entryLocation.resourceHref &&
+                        currentLocation.pageIndex == entryLocation.pageIndex
+                else -> false
+            }
             TextButton(
                 { onSelect(entry.entry.location) },
                 Modifier.fillMaxWidth().padding(start = (entry.depth * 16).dp),
@@ -719,7 +744,7 @@ private fun currentBookmark(bookmarks: List<ReaderBookmark>, location: ReaderLoc
 
 @Composable
 private fun KeepScreenAwake(enabled: Boolean) {
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     DisposableEffect(activity, enabled) {
         if (enabled) activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

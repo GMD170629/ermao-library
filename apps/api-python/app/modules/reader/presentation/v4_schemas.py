@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -27,7 +28,10 @@ class ReaderWireModel(BaseModel):
 
 
 ReaderFormat = Literal["reflowable", "comic", "pdf", "audio"]
-ReflowableFormat = Literal["epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"]
+ReaderSourceFormat = Literal[
+    "epub", "mobi", "azw", "azw3", "prc", "txt", "cbz", "pdf",
+    "audio", "audiobook", "m4b", "m4a", "mp3",
+]
 if TYPE_CHECKING:
     ReaderJsonValue: TypeAlias = (
         str
@@ -173,11 +177,10 @@ class ReadiumLocatorPayload(ReadiumExtensionModel):
         return self
 
 
-class LocatorEnvelope(ReaderWireModel):
+class ReadiumEngineLocator(ReaderWireModel):
     engine: Literal["readium"]
     platform: Literal["android", "ios", "web"]
     version: str = Field(min_length=1, max_length=256)
-    publication: PublicationFingerprint
     payload: ReadiumLocatorPayload
 
     @field_validator("version")
@@ -187,16 +190,114 @@ class LocatorEnvelope(ReaderWireModel):
             raise ValueError("Readium Navigator version must not be blank")
         return value
 
-    @model_validator(mode="after")
-    def require_bounded_envelope(self) -> LocatorEnvelope:
-        encoded = json.dumps(
-            self.model_dump(by_alias=True, exclude_none=True),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        if len(encoded) > _MAX_LOCATOR_ENVELOPE_BYTES:
-            raise ValueError("Locator envelope exceeds 64 KiB")
-        return self
+
+class OpaqueReadiumEngineLocator(ReaderWireModel):
+    engine: Literal["readium"]
+    platform: Literal["android", "ios", "web"]
+    version: str = Field(min_length=1, max_length=256)
+    payload: dict[str, ReaderJsonValue]
+
+    @field_validator("version")
+    @classmethod
+    def require_non_blank_version(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Readium Navigator version must not be blank")
+        return value
+
+
+class ReflowableExactLocation(ReaderWireModel):
+    kind: Literal["reflowable"]
+    publication: PublicationFingerprint
+    engine_locator: ReadiumEngineLocator = Field(alias="engineLocator")
+
+
+class PdfExactLocation(ReaderWireModel):
+    kind: Literal["pdf"]
+    publication: PublicationFingerprint
+    page_index: int = Field(alias="pageIndex", ge=0)
+    page_progression: float = Field(alias="pageProgression", ge=0, le=1)
+    engine_locator: OpaqueReadiumEngineLocator | None = Field(
+        default=None, alias="engineLocator", exclude_if=lambda value: value is None
+    )
+
+    @field_validator("page_progression")
+    @classmethod
+    def require_canonical_page_progression(cls, value: float) -> float:
+        if value != round(value * 10_000) / 10_000:
+            raise ValueError("PDF page progression must be quantized to four decimals")
+        return value
+
+
+class ComicExactLocation(ReaderWireModel):
+    kind: Literal["comic"]
+    publication: PublicationFingerprint
+    page_index: int = Field(alias="pageIndex", ge=0)
+    resource_href: str = Field(alias="resourceHref", min_length=1, max_length=8192)
+    engine_locator: OpaqueReadiumEngineLocator | None = Field(
+        default=None, alias="engineLocator", exclude_if=lambda value: value is None
+    )
+
+    @field_validator("resource_href")
+    @classmethod
+    def require_canonical_resource_href(cls, value: str) -> str:
+        _require_publication_relative_href(value)
+        return value
+
+
+class AudioExactLocation(ReaderWireModel):
+    kind: Literal["audio"]
+    publication: PublicationFingerprint
+    file_id: str = Field(alias="fileId", min_length=1, max_length=191)
+    chapter_id: str | None = Field(
+        default=None,
+        alias="chapterId",
+        min_length=1,
+        max_length=191,
+        exclude_if=lambda value: value is None,
+    )
+    position_millis: int = Field(alias="positionMillis", ge=0)
+    engine_locator: OpaqueReadiumEngineLocator | None = Field(
+        default=None, alias="engineLocator", exclude_if=lambda value: value is None
+    )
+
+    @field_validator("file_id", "chapter_id")
+    @classmethod
+    def require_non_blank_identity(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Audio location identities must not be blank")
+        return value
+
+
+ExactReaderLocation: TypeAlias = Annotated[
+    ReflowableExactLocation
+    | PdfExactLocation
+    | ComicExactLocation
+    | AudioExactLocation,
+    Field(discriminator="kind"),
+]
+
+
+def _require_publication_relative_href(value: str) -> None:
+    if not value.strip() or "\\" in value:
+        raise ValueError("Publication resource href must be canonical")
+    parsed_href = urlsplit(value)
+    if (
+        parsed_href.scheme
+        or parsed_href.netloc
+        or parsed_href.path.startswith("/")
+        or ".." in parsed_href.path.replace("\\", "/").split("/")
+    ):
+        raise ValueError("Publication resource href must be publication-relative")
+
+
+def _require_bounded_exact_location(location: ExactReaderLocation) -> None:
+    encoded = json.dumps(
+        location.model_dump(by_alias=True, exclude_none=True),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) > _MAX_LOCATOR_ENVELOPE_BYTES:
+        raise ValueError("Exact Reader location exceeds 64 KiB")
 
 
 class ReaderProgressPut(ReaderWireModel):
@@ -207,7 +308,24 @@ class ReaderProgressPut(ReaderWireModel):
     captured_at_epoch_millis: int = Field(
         alias="capturedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
     )
-    locator: LocatorEnvelope
+    locator: ExactReaderLocation
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_null_location_fields(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        request = cast(Mapping[object, object], value)
+        raw_locator = request.get("locator")
+        if not isinstance(raw_locator, Mapping):
+            return value
+        locator = cast(Mapping[object, object], raw_locator)
+        for optional_field in ("engineLocator", "chapterId"):
+            if optional_field in locator and locator[optional_field] is None:
+                raise ValueError(
+                    f"Reader location {optional_field} must be omitted instead of null"
+                )
+        return value
 
     @field_validator("client_id")
     @classmethod
@@ -215,6 +333,11 @@ class ReaderProgressPut(ReaderWireModel):
         if not value.strip():
             raise ValueError("Reader clientId must not be blank")
         return value
+
+    @model_validator(mode="after")
+    def require_bounded_locator(self) -> ReaderProgressPut:
+        _require_bounded_exact_location(self.locator)
+        return self
 
 
 # Bookmarks retain their independent collection contract until their revisioned
@@ -329,13 +452,17 @@ class ReaderPublicationAccess(ReaderWireModel):
 class ReaderProgressSnapshot(ReaderWireModel):
     schema_version: Literal[4] = Field(4, alias="schemaVersion")
     revision: int = Field(ge=1)
-    locator: LocatorEnvelope
+    locator: ExactReaderLocation
     display_percent: float = Field(alias="displayPercent", ge=0, le=100)
     received_at_epoch_millis: int = Field(
         alias="receivedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
     )
     captured_at_epoch_millis: int | None = Field(
-        default=None, alias="capturedAtEpochMillis", ge=0, le=_MAX_UTC_EPOCH_MILLIS
+        default=None,
+        alias="capturedAtEpochMillis",
+        ge=0,
+        le=_MAX_UTC_EPOCH_MILLIS,
+        exclude_if=lambda value: value is None,
     )
 
 
@@ -343,9 +470,12 @@ class ReaderBootstrapData(ReaderWireModel):
     schema_version: Literal[4] = Field(4, alias="schemaVersion")
     user_id: str = Field(alias="userId")
     reader_type: ReaderFormat = Field(alias="readerType")
-    source_format: ReflowableFormat | None = Field(default=None, alias="sourceFormat")
+    source_format: ReaderSourceFormat = Field(alias="sourceFormat")
     publication_fingerprint: PublicationFingerprint = Field(
         alias="publicationFingerprint"
+    )
+    content_fingerprint: str = Field(
+        alias="contentFingerprint", pattern=r"^sha256:[a-f0-9]{64}$"
     )
     book: ReaderBookSummary
     media_version: ReaderMediaVersionSummary = Field(alias="mediaVersion")

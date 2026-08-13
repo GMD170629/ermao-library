@@ -146,14 +146,40 @@ def _save_reader_progress_v4(client, volume_id: str, legacy_payload: dict):
         or 1
     )
     if reader_type == "comic":
-        href = f"page-{page}"
-        media_type = "image/jpeg"
+        page_index = page - 1
+        locator = {
+            "kind": "comic",
+            "publication": fingerprint,
+            "pageIndex": page_index,
+            "resourceHref": bootstrap_data["units"][page_index]["href"],
+        }
     elif reader_type == "pdf":
-        href = f"page-{page}"
-        media_type = "application/pdf"
+        locator = {
+            "kind": "pdf",
+            "publication": fingerprint,
+            "pageIndex": page - 1,
+            "pageProgression": 0,
+        }
     else:
-        href = f"part{page:05}.html"
-        media_type = "application/xhtml+xml"
+        locator = {
+            "kind": "reflowable",
+            "publication": fingerprint,
+            "engineLocator": {
+                "engine": "readium",
+                "platform": "web",
+                "version": "compat-test:1",
+                "payload": {
+                    "href": f"part{page:05}.html",
+                    "type": "application/xhtml+xml",
+                    "locations": {
+                        "fragments": [f"compat-{page}"],
+                        "totalProgression": (
+                            float(legacy_payload.get("percent") or 0) / 100
+                        ),
+                    },
+                },
+            },
+        }
     sequence = next(_reader_progress_sequence)
     return client.put(
         f"/api/reader/v4/volumes/{target_volume_id}/progress",
@@ -165,22 +191,7 @@ def _save_reader_progress_v4(client, volume_id: str, legacy_payload: dict):
             if bootstrap_data["progressSnapshot"]
             else 0,
             "capturedAtEpochMillis": 1_700_000_000_000 + sequence,
-            "locator": {
-                "engine": "readium",
-                "platform": "web",
-                "version": "compat-test:1",
-                "publication": fingerprint,
-                "payload": {
-                    "href": href,
-                    "type": media_type,
-                    "locations": {
-                        "fragments": [f"compat-{page}"],
-                        "totalProgression": (
-                            float(legacy_payload.get("percent") or 0) / 100
-                        ),
-                    },
-                },
-            },
+            "locator": locator,
         },
     )
 
@@ -6951,7 +6962,12 @@ def test_imported_pdf_supports_stream_bootstrap_and_v4_progress(
         },
     )
     assert saved.status_code == 200
-    assert saved.json()["data"]["locator"]["payload"]["type"] == ("application/pdf")
+    assert saved.json()["data"]["locator"] == {
+        "kind": "pdf",
+        "publication": data["publicationFingerprint"],
+        "pageIndex": 0,
+        "pageProgression": 0.0,
+    }
     resumed = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap").json()["data"]
     assert resumed["progressSnapshot"]["locator"] == saved.json()["data"]["locator"]
     assert resumed["progressSnapshot"]["displayPercent"] == 0

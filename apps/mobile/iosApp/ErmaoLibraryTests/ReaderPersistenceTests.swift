@@ -1,4 +1,4 @@
-import CryptoKit
+﻿import CryptoKit
 import Foundation
 import SQLite3
 import XCTest
@@ -23,7 +23,7 @@ final class ReaderPersistenceTests: XCTestCase {
 
     @MainActor
     func testReaderUsesFiveHundredMillisecondTrailingSave() {
-        XCTAssertEqual(IosEpubReaderSession.progressSaveDebounceMilliseconds, 500)
+        XCTAssertEqual(IosReflowableReaderSession.progressSaveDebounceMilliseconds, 500)
     }
 
     func testReaderPreferencesMatchWebDefaultsAndPersistPerServerUser() {
@@ -235,7 +235,7 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(restored?.updatedAtEpochMillis, 100)
     }
 
-    func testLegacyR4SQLiteMigratesExactBeforeDroppingSyncTables() async throws {
+    func testLegacyR4SQLiteIsDiscardedWithSyncTables() async throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         let namespace = makeNamespace(authorizationVersion: 4)
         try createLegacyR4Database(
@@ -251,7 +251,7 @@ final class ReaderPersistenceTests: XCTestCase {
         )
         let migrated = try await store.load(sourceId: "legacy-r4-volume")
 
-        XCTAssertEqual(migrated?.updatedAtEpochMillis, 1_775_988_323_456)
+        XCTAssertNil(migrated)
         XCTAssertTrue(try tableExists("reader_local_exact", databaseURL: databaseURL))
         XCTAssertFalse(try tableExists("reader_progress", databaseURL: databaseURL))
         XCTAssertFalse(try tableExists("reader_outbox", databaseURL: databaseURL))
@@ -262,10 +262,10 @@ final class ReaderPersistenceTests: XCTestCase {
             databaseURL: databaseURL
         )
         let afterReauthentication = try await reauthenticated.load(sourceId: "legacy-r4-volume")
-        XCTAssertEqual(afterReauthentication?.updatedAtEpochMillis, 1_775_988_323_456)
+        XCTAssertNil(afterReauthentication)
     }
 
-    func testIncompleteExactKeyMigratesOnlyMatchingClientAndContentThenDeletesOldRow() async throws {
+    func testIncompleteExactKeyIsDiscardedAtTheUnionBoundary() async throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         let oldOwnerKey = "8:server-a6:user-a"
         try createIncompleteExactDatabase(
@@ -281,7 +281,7 @@ final class ReaderPersistenceTests: XCTestCase {
         )
         let migrated = try await store.load(sourceId: "preview-volume")
 
-        XCTAssertEqual(migrated?.updatedAtEpochMillis, 444)
+        XCTAssertNil(migrated)
         XCTAssertFalse(try exactRowExists(
             ownerKey: oldOwnerKey,
             sourceID: "preview-volume",
@@ -289,7 +289,7 @@ final class ReaderPersistenceTests: XCTestCase {
         ))
     }
 
-    func testIncompleteExactKeyFromAnotherClientIsNotAdoptedOrDeleted() async throws {
+    func testIncompleteExactKeyFromAnotherClientIsDiscarded() async throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         let oldOwnerKey = "8:server-a6:user-a"
         try createIncompleteExactDatabase(
@@ -310,14 +310,14 @@ final class ReaderPersistenceTests: XCTestCase {
         let migrated = try await store.load(sourceId: "preview-volume")
 
         XCTAssertNil(migrated)
-        XCTAssertTrue(try exactRowExists(
+        XCTAssertFalse(try exactRowExists(
             ownerKey: oldOwnerKey,
             sourceID: "preview-volume",
             databaseURL: databaseURL
         ))
     }
 
-    func testIncompleteExactKeyFromAnotherContentVersionIsNotAdoptedOrDeleted() async throws {
+    func testIncompleteExactKeyFromAnotherContentVersionIsDiscarded() async throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         let oldOwnerKey = "8:server-a6:user-a"
         try createIncompleteExactDatabase(
@@ -338,14 +338,14 @@ final class ReaderPersistenceTests: XCTestCase {
         let migrated = try await store.load(sourceId: "preview-volume")
 
         XCTAssertNil(migrated)
-        XCTAssertTrue(try exactRowExists(
+        XCTAssertFalse(try exactRowExists(
             ownerKey: oldOwnerKey,
             sourceID: "preview-volume",
             databaseURL: databaseURL
         ))
     }
 
-    func testUnrecognizedLegacyR4ExactTableIsRetained() throws {
+    func testUnrecognizedLegacyR4ExactTableIsDiscarded() throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         try createLegacyR4Database(
             at: databaseURL,
@@ -359,10 +359,10 @@ final class ReaderPersistenceTests: XCTestCase {
             databaseURL: databaseURL
         )
 
-        XCTAssertTrue(try tableExists("reader_progress", databaseURL: databaseURL))
+        XCTAssertFalse(try tableExists("reader_progress", databaseURL: databaseURL))
     }
 
-    func testLegacyProgressFileMigratesThenDeletesDocument() async throws {
+    func testLegacyProgressFileIsDiscarded() async throws {
         let legacyRoot = temporaryRoot.appendingPathComponent("Progress", isDirectory: true)
         try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
         let legacyURL = legacyProgressURL(sourceID: "legacy-volume", root: legacyRoot)
@@ -376,11 +376,11 @@ final class ReaderPersistenceTests: XCTestCase {
 
         let migrated = try await store.load(sourceId: "legacy-volume")
 
-        XCTAssertEqual(migrated?.sourceId, "legacy-volume")
+        XCTAssertNil(migrated)
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
     }
 
-    func testInvalidLegacyProgressFileIsNeverDeleted() async throws {
+    func testInvalidLegacyProgressFileIsDiscarded() async throws {
         let legacyRoot = temporaryRoot.appendingPathComponent("Progress", isDirectory: true)
         try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
         let legacyURL = legacyProgressURL(sourceID: "expected-volume", root: legacyRoot)
@@ -392,12 +392,8 @@ final class ReaderPersistenceTests: XCTestCase {
             legacyProgressRoot: legacyRoot
         )
 
-        do {
-            _ = try await store.load(sourceId: "expected-volume")
-            XCTFail("Invalid legacy progress must fail migration")
-        } catch {
-            XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
-        }
+        XCTAssertNil(try await store.load(sourceId: "expected-volume"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
     }
 
     func testUploadFailureKeepsDurableExactPendingMutation() async throws {
@@ -537,7 +533,7 @@ final class ReaderPersistenceTests: XCTestCase {
         clientID: String = "ios-installation-c",
         fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":4,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}},"contentFingerprint":{"originalFileHash":"\##(fileHash)","parserVersion":"readium-swift:3.8.0","normalizationVersion":"epub-native-sanitized-v1"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
+        ##"{"schema":"ermao.reader-progress","version":5,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}},"contentFingerprint":{"originalFileHash":"\##(fileHash)","parserVersion":"readium-swift:3.8.0","normalizationVersion":"epub-native-sanitized-v1"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
     }
 
     private func legacyProgressURL(sourceID: String, root: URL) -> URL {

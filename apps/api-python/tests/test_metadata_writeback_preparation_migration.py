@@ -38,7 +38,7 @@ def test_writeback_preparation_upgrade_is_reversible_and_restart_safe(
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
 
         inspector = inspect(engine)
-        assert head_revision(engine) == "0021_reader_v4_exact_progress"
+        assert head_revision(engine) == "0023_publication_full_hash_identity"
         assert {
             "id",
             "operationId",

@@ -84,7 +84,7 @@ function openDatabase() {
   if (databasePromise) return databasePromise;
   databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(READER_PROGRESS_DB_NAME, READER_DB_SCHEMA_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
       if (!database.objectStoreNames.contains(PREFERENCES_STORE)) database.createObjectStore(PREFERENCES_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(EXACT_PROGRESS_STORE)) database.createObjectStore(EXACT_PROGRESS_STORE, { keyPath: 'key' });
@@ -98,6 +98,11 @@ function openDatabase() {
       if (!database.objectStoreNames.contains(BOOK_FILES_STORE)) {
         const store = database.createObjectStore(BOOK_FILES_STORE, { keyPath: 'key' });
         store.createIndex('by-user-volume', 'userVolumeKey', { unique: false });
+      }
+      if (event.oldVersion > 0 && event.oldVersion < 2) {
+        [EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, CONFLICT_STORE].forEach((name) => {
+          if (database.objectStoreNames.contains(name)) request.transaction?.objectStore(name).clear();
+        });
       }
     };
     request.onsuccess = () => {

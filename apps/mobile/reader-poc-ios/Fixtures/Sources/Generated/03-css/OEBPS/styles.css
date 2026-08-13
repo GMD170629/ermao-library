@@ -1,7 +1,0 @@
-html { -webkit-text-size-adjust: 100%; }
-body { margin: 5%; color: #2d2926; background: #fffdf8; font-family: serif; line-height: 1.7; }
-h1 { font-size: 1.65em; margin: 0 0 1.2em; }
-p { margin: 0.8em 0; }
-a { color: #8b3d2f; }
-.css-proof { margin-left: 37px; text-indent: 2em; color: rgb(32, 78, 121); }
-.callout { border-left: 5px solid #b4533f; padding: 13px; }

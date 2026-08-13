@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
-import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime, type AudioProgressLocation } from '../../lib/reader';
+import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime, publicationFingerprintKey } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
@@ -147,17 +147,23 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       ? bootstrap.totalDurationMs
       : absolutePositionForTrack(bootstrap.tracks, trackIndex, positionMs);
     const location = audioLocation(track, chapter, positionMs, bootstrap.volume.id);
-    const domainLocation: AudioProgressLocation = { kind: 'audio', ...location };
+    const exactLocation = {
+      kind: 'audio' as const,
+      publication: bootstrap.publicationFingerprint,
+      fileId: location.fileId,
+      ...(location.chapterId ? { chapterId: location.chapterId } : {}),
+      positionMillis: Math.max(0, Math.round(location.positionMs))
+    };
     lastProgressEnqueueRef.current = Date.now();
     return runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       workId: bootstrap.mediaVersion.workId,
       volumeId: bootstrap.volume.id,
-      localContentFingerprint: bootstrap.localContentFingerprint,
-      contentFingerprint: bootstrap.contentFingerprint,
-      location: domainLocation,
-      percent: audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed)
+      baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.volume.id)?.revision
+        ?? bootstrap.progressRevision,
+      locator: exactLocation,
+      displayPercent: audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed)
     }).then(() => flush ? runtime.progress.flushNow() : undefined).catch(() => undefined);
   }, [runtime.progress]);
 
@@ -340,9 +346,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           userId: bootstrap.userId,
           clientId,
           volumeId: bootstrap.volume.id,
-          localContentFingerprint: bootstrap.localContentFingerprint
+          publicationFingerprint: publicationFingerprintKey(bootstrap.publicationFingerprint)
         }).catch(() => null);
-        const localAudioLocation = localExact?.location;
+        const localAudioLocation = localExact?.locator.kind === 'audio' ? localExact.locator : null;
         if (
           localAudioLocation?.kind === 'audio'
           && (
@@ -354,12 +360,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             ...bootstrap,
             resumeLocation: {
               type: 'audio',
-              volumeId: localAudioLocation.volumeId,
+              volumeId: bootstrap.volume.id,
               fileId: localAudioLocation.fileId,
-              chapterId: localAudioLocation.chapterId,
-              positionMs: localAudioLocation.positionMs
+              chapterId: localAudioLocation.chapterId ?? null,
+              positionMs: localAudioLocation.positionMillis
             },
-            progressPercent: localExact?.percent ?? bootstrap.progressPercent
+            progressPercent: localExact?.displayPercent ?? bootstrap.progressPercent
           };
         }
         bootstrapRef.current = bootstrap;

@@ -97,6 +97,7 @@ import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
+import com.ermao.library.features.downloads.model.isSupportedNativeReflowable
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -244,7 +245,7 @@ private fun WorkDetailBody(
                     when {
                         volume.readerType.equals("reflowable", true) &&
                             downloadRecordsByVolume[volume.id]?.isReadable != true -> R.string.work_reader_download_required
-                        !volume.readerType.equals("reflowable", true) || !volume.format.equals("EPUB", true) ->
+                        !isSupportedNativeReflowable(volume.readerType, volume.format) ->
                             R.string.work_reader_renderer_pending
                         else -> null
                     }

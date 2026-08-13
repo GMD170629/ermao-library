@@ -5,16 +5,21 @@ It deliberately contains schemas and fixtures rather than a shared runtime.
 Python, TypeScript, Kotlin, and Swift validate untrusted JSON at their own
 boundaries and map it into renderer-neutral domain values.
 
-`reader-v4.schema.json` enforces the structural definition of an exact locator:
-an `href` plus a CSS selector, fragment/CFI, or bounded text anchor. Runtime
-validation must additionally prove text uniqueness and, after navigation,
-recapture the first visible locator and compare the resolved block. A successful
-Navigator `go()` call is never sufficient proof of exact restoration.
+`reader-v4.schema.json` defines a discriminated exact-location union. Reflowable
+content requires a Readium resource plus CSS selector, fragment/CFI, or bounded
+text anchor. PDF uses a zero-based page index plus normalized page-local
+progression. Comics use a zero-based page index plus canonical resource href.
+Audio uses file/chapter identity and playback milliseconds. An engine locator is
+optional for fixed-layout and audio locations, but required for reflowable
+content. Runtime validation additionally proves that every referenced resource
+belongs to the fingerprinted Publication.
 
 `displayPercent`, resource progression, logical position, and total progression
 are presentation or diagnostic values. They must never be used for automatic
 cross-device restoration.
 
-The canonical fixtures are consumed by each platform's contract tests. Adding
-or changing a field requires updating the schema, all fixtures, and all four
-boundary validators in the same change.
+Reader v4 was unreleased when this morphology union replaced the former
+all-Readium envelope. Old v4 locations and pending/conflict state are invalid;
+there is no dual-read or migration fallback. The canonical fixtures are consumed
+by each platform's contract tests. Adding or changing a field requires updating
+the schema, all fixtures, and all four boundary validators in the same change.

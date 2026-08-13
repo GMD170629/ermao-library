@@ -23,7 +23,13 @@ internal class AndroidReaderProgressStore(
         val file = progressFile(sourceId)
         if (!file.exists()) return@withContext null
         require(file.isFile && !Files.isSymbolicLink(file.toPath())) { "Reader progress path is invalid" }
-        codec.decode(file.readText(Charsets.UTF_8)).also { progress ->
+        val progress = try {
+            codec.decode(file.readText(Charsets.UTF_8))
+        } catch (_: IllegalArgumentException) {
+            Files.deleteIfExists(file.toPath())
+            return@withContext null
+        }
+        progress.also {
             require(progress.sourceId == sourceId) { "Reader progress identity does not match its storage key" }
         }
     }

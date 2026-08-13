@@ -27,3 +27,13 @@ test('does not admit generic video or DRM containers', () => {
     assert.equal(supported.includes(extension), false);
   }
 });
+
+test('exposes only the P2 reader formats and rejects unsupported archive aliases', () => {
+  const supported: readonly string[] = allImportExtensions;
+  for (const extension of ['.epub', '.mobi', '.azw', '.azw3', '.prc', '.txt', '.cbz', '.pdf']) {
+    assert.equal(supported.includes(extension), true);
+  }
+  for (const extension of ['.fb2', '.zip', '.cbr', '.rar']) {
+    assert.equal(supported.includes(extension), false);
+  }
+});

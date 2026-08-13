@@ -4,7 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -17,6 +19,7 @@ from app.models.library import (
     LibraryWork,
     ReaderProgressMutation,
 )
+from app.modules.reader.presentation.v4_schemas import ReaderProgressPut
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _FIXTURES = _REPOSITORY_ROOT / "packages" / "reader-contracts" / "fixtures"
@@ -26,6 +29,31 @@ def _fixture(name: str) -> dict[str, object]:
     parsed = json.loads((_FIXTURES / name).read_text(encoding="utf-8"))
     assert isinstance(parsed, dict)
     return parsed
+
+
+def test_all_morphology_fixtures_match_the_python_boundary() -> None:
+    adapter = TypeAdapter(ReaderProgressPut)
+    assert {
+        adapter.validate_python(_fixture(name)).locator.kind
+        for name in (
+            "exact-reflowable-request.json",
+            "exact-pdf-request.json",
+            "exact-comic-request.json",
+            "exact-audio-request.json",
+        )
+    } == {"reflowable", "pdf", "comic", "audio"}
+
+
+def test_former_all_readium_v4_envelope_is_rejected() -> None:
+    payload = _fixture("exact-reflowable-request.json")
+    location = payload["locator"]
+    assert isinstance(location, dict)
+    engine = location.pop("engineLocator")
+    assert isinstance(engine, dict)
+    location.update(engine)
+
+    with pytest.raises(ValidationError):
+        TypeAdapter(ReaderProgressPut).validate_python(payload)
 
 
 def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
@@ -108,7 +136,7 @@ def test_shared_exact_fixture_round_trips_and_is_idempotent(
     first = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
     replay = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
 
-    assert first.status_code == 200
+    assert first.status_code == 200, first.json()
     assert replay.status_code == 200
     assert replay.json() == first.json()
     assert first.json()["data"]["revision"] == 1
@@ -144,7 +172,9 @@ def test_exact_locator_resource_must_belong_to_the_normalized_publication(
     payload = _fixture("exact-reflowable-request.json")
     payload["baseRevision"] = 0
     payload["locator"]["publication"] = bootstrap["publicationFingerprint"]
-    payload["locator"]["payload"]["href"] = "not-in-reading-order.xhtml"
+    payload["locator"]["engineLocator"]["payload"]["href"] = (
+        "not-in-reading-order.xhtml"
+    )
 
     response = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
 
@@ -168,11 +198,11 @@ def test_stale_revision_returns_current_exact_snapshot_without_overwrite(
     stale["mutationId"] = "08f57563-4ceb-46bf-a79f-2ca21e5f5ef4"
     stale["baseRevision"] = 0
     stale["locator"]["publication"] = bootstrap["publicationFingerprint"]
-    stale["locator"]["payload"]["locations"]["totalProgression"] = 0.9
+    stale["locator"]["engineLocator"]["payload"]["locations"]["totalProgression"] = 0.9
 
     conflict = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=stale)
 
-    assert accepted.status_code == 200
+    assert accepted.status_code == 200, accepted.json()
     assert conflict.status_code == 409
     assert conflict.json()["error"] == {
         "message": "另一设备已更新阅读位置",

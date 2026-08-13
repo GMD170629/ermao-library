@@ -16,6 +16,7 @@ import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
 import com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
+import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.PublicationFingerprint
 import kotlinx.coroutines.CancellationException
@@ -74,7 +75,7 @@ class KtorReaderBootstrapGateway internal constructor(
             when (val result = client.streamAuthenticatedDownload(
                 apiPath = download.apiPath,
                 maximumBytes = download.expectedSizeBytes,
-                allowedMimeTypes = EPUB_MIME_TYPES,
+                allowedMimeTypes = download.sourceFormat.allowedMimeTypes,
                 writeChunk = sink::write,
             )) {
                 is ApiResult.Failure -> {
@@ -85,7 +86,7 @@ class KtorReaderBootstrapGateway internal constructor(
                     )
                 }
                 is ApiResult.Success -> {
-                    if (result.value.mimeType !in EPUB_MIME_TYPES) {
+                    if (!download.sourceFormat.acceptsMimeType(result.value.mimeType)) {
                         sink.abort()
                         PublicationDownloadResult.Failure("DOWNLOAD_CONTENT_TYPE_INVALID", false)
                     } else {
@@ -105,7 +106,10 @@ class KtorReaderBootstrapGateway internal constructor(
     }
 
     private fun ReaderBootstrapWire.toDomain(request: ReaderBootstrapRequest): ReaderBootstrapResult {
-        if (schemaVersion != READER_SERVER_SCHEMA_VERSION || readerType != "reflowable" || sourceFormat != "epub") {
+        val exactSourceFormat = ReaderSourceFormat.fromWireValue(sourceFormat)
+        if (schemaVersion != READER_SERVER_SCHEMA_VERSION || exactSourceFormat == null ||
+            readerType != exactSourceFormat.readerType
+        ) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_UNSUPPORTED", recoverable = false)
         }
         if (userId != request.namespace.userId) {
@@ -114,18 +118,29 @@ class KtorReaderBootstrapGateway internal constructor(
         if (volume.id != request.volumeId || mediaVersion.workId != book.id) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
         }
-        val publicationFile = files.singleOrNull { file ->
+        if (!volume.format.equals(exactSourceFormat.wireValue, ignoreCase = true) ||
+            !contentFingerprint.matches(CONTENT_FINGERPRINT_PATTERN)
+        ) {
+            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", recoverable = false)
+        }
+        if (fileUrl != "/api/volumes/${volume.id}/file") {
+            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
+        }
+        val publicationFile = files
+            .sortedWith(compareBy<ReaderBootstrapFileWire>({ it.sortOrder }, { it.id }))
+            .firstOrNull { file ->
             file.id.isNotBlank() &&
-                file.kind.equals("EPUB", ignoreCase = true) &&
-                file.mimeType.lowercase() in EPUB_MIME_TYPES &&
+                file.kind.equals(exactSourceFormat.fileKind, ignoreCase = true) &&
+                exactSourceFormat.acceptsMimeType(file.mimeType) &&
+                file.url.startsWith("/api/") && !file.url.contains('#') &&
                 file.sizeBytes > 0
-        } ?: return ReaderBootstrapResult.Failure("READER_EPUB_FILE_MISSING", recoverable = false)
+        } ?: return ReaderBootstrapResult.Failure("READER_PUBLICATION_FILE_MISSING", recoverable = false)
         val target = try {
             ReaderProgressSyncTarget(
                 namespace = request.namespace,
                 workId = book.id,
                 volumeId = volume.id,
-                sourceFormat = ReaderFormat.Epub,
+                sourceFormat = exactSourceFormat.readerFormat,
             )
         } catch (_: IllegalArgumentException) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
@@ -139,6 +154,22 @@ class KtorReaderBootstrapGateway internal constructor(
         } catch (_: IllegalArgumentException) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
         }
+        val comicPages = if (exactSourceFormat == ReaderSourceFormat.Cbz) {
+            try {
+                units.sortedBy(ReaderBootstrapUnitWire::sortOrder).mapIndexed { index, unit ->
+                    require(unit.unitType == "page" && unit.href != null && unit.mediaType != null)
+                    com.ermao.library.shared.modules.reader.application.ReaderComicPage(
+                        pageIndex = index,
+                        resourceHref = unit.href,
+                        mediaType = unit.mediaType,
+                        width = unit.width,
+                        height = unit.height,
+                    )
+                }.also { require(it.isNotEmpty()) }
+            } catch (_: IllegalArgumentException) {
+                return ReaderBootstrapResult.Failure("READER_COMIC_INDEX_INVALID", false)
+            }
+        } else emptyList()
         val remoteSnapshot = progressSnapshot?.let { snapshot ->
             val snapshotSchema = (snapshot["schemaVersion"] as? JsonPrimitive)?.longOrNull
             if (snapshotSchema != READER_SERVER_SCHEMA_VERSION.toLong()) {
@@ -160,13 +191,16 @@ class KtorReaderBootstrapGateway internal constructor(
                     workId = book.id,
                     volumeId = volume.id,
                     apiPath = fileUrl,
+                    sourceFormat = exactSourceFormat,
                     mimeType = publicationFile.mimeType.lowercase(),
                     expectedSizeBytes = publicationFile.sizeBytes,
                     expectedOriginalFileHash = publicationFile.contentHash,
                     publicationFingerprint = exactPublicationFingerprint,
                 ),
                 remoteSnapshot = remoteSnapshot,
-                artifactVersion = exactPublicationFingerprint.stableKey,
+                artifactVersion = contentFingerprint,
+                comicPages = comicPages,
+                pageCount = volume.pageCount,
             ),
         )
     }
@@ -197,9 +231,20 @@ class KtorReaderBootstrapGateway internal constructor(
     private companion object {
         const val READER_SERVER_SCHEMA_VERSION = 4
         const val HEX = "0123456789ABCDEF"
-        val EPUB_MIME_TYPES = setOf("application/epub+zip", "application/octet-stream")
+        val CONTENT_FINGERPRINT_PATTERN = Regex("^sha256:[a-f0-9]{64}$")
     }
 }
+
+private val ReaderSourceFormat.readerType: String
+    get() = when (readerFormat) {
+        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Epub,
+        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Mobi,
+        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Text,
+        -> "reflowable"
+        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Comic -> "comic"
+        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Pdf -> "pdf"
+        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Audio -> "audio"
+    }
 
 @Serializable
 private data class ReaderBootstrapWire(
@@ -207,17 +252,28 @@ private data class ReaderBootstrapWire(
     val userId: String,
     val readerType: String,
     val sourceFormat: String? = null,
+    val contentFingerprint: String,
     val publicationFingerprint: PublicationFingerprintWire,
     val book: ReaderBootstrapBookWire,
     val mediaVersion: ReaderBootstrapMediaVersionWire,
     val volume: ReaderBootstrapVolumeWire,
     val availableVolumes: List<JsonObject>,
     val files: List<ReaderBootstrapFileWire>,
-    val units: List<JsonObject>,
+    val units: List<ReaderBootstrapUnitWire>,
     val fileUrl: String,
     val capabilities: JsonObject,
     val publication: ReaderPublicationAccessWire? = null,
     val progressSnapshot: JsonObject? = null,
+)
+
+@Serializable
+private data class ReaderBootstrapUnitWire(
+    val unitType: String,
+    val href: String? = null,
+    val mediaType: String? = null,
+    val sortOrder: Int,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 @Serializable
@@ -240,7 +296,12 @@ private data class ReaderBootstrapBookWire(val id: String, val title: String, va
 private data class ReaderBootstrapMediaVersionWire(val id: String, val workId: String, val mediaKind: String, val completed: Boolean)
 
 @Serializable
-private data class ReaderBootstrapVolumeWire(val id: String, val title: String)
+private data class ReaderBootstrapVolumeWire(
+    val id: String,
+    val title: String,
+    val format: String,
+    val pageCount: Int? = null,
+)
 
 @Serializable
 private data class ReaderBootstrapFileWire(

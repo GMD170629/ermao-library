@@ -1,12 +1,13 @@
-import type {
-  PdfLocation,
-  ReaderAdapter,
-  ReaderAdapterOpenContext,
-  ReaderAdapterOperationContext,
-  ReaderCapabilities,
-  ReaderCommand,
-  ReaderCommandAck,
-  ReaderPreferences
+import {
+  quantizePageProgression,
+  type PdfLocation,
+  type ReaderAdapter,
+  type ReaderAdapterOpenContext,
+  type ReaderAdapterOperationContext,
+  type ReaderCapabilities,
+  type ReaderCommand,
+  type ReaderCommandAck,
+  type ReaderPreferences
 } from '@shuku/reader-core';
 import { effectiveReaderPageWidth } from '../page-width';
 import type {
@@ -134,6 +135,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private preferences: ReaderPreferences | null = null;
   private openContext: ReaderAdapterOpenContext | null = null;
   private pageNumber = 1;
+  private pageProgression = 0;
   private pageCount = 0;
   private lastDirection: 1 | -1 = 1;
   private renderEpoch = 0;
@@ -161,9 +163,16 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.scrollFrame = null;
       const candidates = Array.from(this.continuousSlots.values());
       const index = continuousItemAtReadingLine(candidates, this.container.scrollTop, this.container.clientHeight);
-      const page = Number(candidates[index]?.dataset.pdfContinuousSlot);
-      if (!Number.isFinite(page) || page === this.pageNumber) return;
+      const slot = candidates[index];
+      const page = Number(slot?.dataset.pdfContinuousSlot);
+      if (!slot || !Number.isFinite(page)) return;
+      const readingLine = this.container.scrollTop + this.container.clientHeight * 0.25;
+      const pageProgression = quantizePageProgression(
+        (readingLine - slot.offsetTop) / Math.max(1, slot.offsetHeight)
+      );
+      if (page === this.pageNumber && pageProgression === this.pageProgression) return;
       this.pageNumber = clampPage(page, this.pageCount);
+      this.pageProgression = pageProgression;
       this.emitLocation();
       this.continuousRenderController?.abort();
       const controller = new AbortController();
@@ -213,6 +222,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.openContext = context;
     this.preferences = pagedPdfPreferences(context.preferences);
     this.pageNumber = context.initialLocation?.kind === 'pdf' ? Math.max(1, context.initialLocation.pageNumber) : 1;
+    this.pageProgression = context.initialLocation?.kind === 'pdf'
+      ? quantizePageProgression(context.initialLocation.pageProgression ?? 0)
+      : 0;
     this.status = 'loading';
     this.error = undefined;
     this.container.dataset.readerEngine = 'pdf-v3';
@@ -241,13 +253,18 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
         enableXfa: false
       });
       this.loadingTask = loadingTask;
-      loadingTask.onPassword = (updatePassword: (password: string) => void, reason: number) => {
+      loadingTask.onPassword = () => {
         if (!this.isActive(generation, context.signal)) return;
-        this.passwordCallback = updatePassword;
-        this.passwordReason = reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD ? 'incorrect-password' : 'need-password';
-        this.status = 'password';
+        this.passwordCallback = null;
+        this.passwordReason = undefined;
+        this.status = 'error';
+        this.error = '加密或密码保护的 PDF 暂不支持阅读';
         this.emitView();
-        this.emit({ type: 'password-required', reason: this.passwordReason }, context.operation);
+        this.emit({
+          type: 'error',
+          error: { code: 'PDF_ENCRYPTED', message: this.error, recoverable: false }
+        }, context.operation);
+        void loadingTask.destroy();
       };
       const document = await loadingTask.promise;
       this.assertActive(generation, context.signal);
@@ -338,6 +355,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       forceRender = true;
     } else {
       let target = this.pageNumber;
+      let targetProgression = 0;
       if (command.type === 'next') target += 1;
       else if (command.type === 'previous') target -= 1;
       else if (command.type === 'first') target = 1;
@@ -347,18 +365,20 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       else if (command.type === 'go-to-location') {
         if (command.location.kind !== 'pdf') return this.failOperation(context, 'location-kind-mismatch');
         target = command.location.pageNumber;
+        targetProgression = quantizePageProgression(command.location.pageProgression ?? 0);
       } else if (command.type === 'retry') {
         this.continuousFailures.delete(this.pageNumber);
         this.releasePage(this.pageNumber);
       }
       const clamped = clampPage(target, this.pageCount);
-      if (clamped === this.pageNumber && command.type !== 'retry') {
+      if (clamped === this.pageNumber && targetProgression === this.pageProgression && command.type !== 'retry') {
         if (command.type === 'next') this.emitLocation(context.operation);
         return this.failOperation(context, command.type === 'next' ? 'end-of-document' : command.type === 'previous' ? 'start-of-document' : 'no-op');
       }
       this.lastDirection = clamped >= this.pageNumber ? 1 : -1;
       pageChanged = clamped !== this.pageNumber;
       this.pageNumber = clamped;
+      this.pageProgression = targetProgression;
     }
 
     this.emit({ type: 'activity' }, context.operation);
@@ -367,7 +387,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     try {
       await this.queueRender(this.currentGeneration(), context.signal, forceRender);
       if (pageChanged && this.preferences.pdf.flow === 'paged') this.container.scrollTop = 0;
-      if (pageChanged && this.preferences.pdf.flow === 'continuous') this.scrollToContinuousPage(this.pageNumber);
+      if ((pageChanged || command.type === 'go-to-location') && this.preferences.pdf.flow === 'continuous') {
+        this.scrollToContinuousPage(this.pageNumber, this.pageProgression);
+      }
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
@@ -482,7 +504,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.assertRenderActive(generation, epoch, signal);
     this.reconcileContinuousSlots();
     this.restoreContinuousAnchor(anchor);
-    if (!hadSlots) this.scrollToContinuousPage(this.pageNumber);
+    if (!hadSlots) this.scrollToContinuousPage(this.pageNumber, this.pageProgression);
   }
 
   private ensureContinuousSlots() {
@@ -572,9 +594,15 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     );
   }
 
-  private scrollToContinuousPage(page: number) {
+  private scrollToContinuousPage(page: number, progression = 0) {
     const slot = this.continuousSlots.get(page);
-    if (slot) this.container.scrollTop = Math.max(0, slot.offsetTop);
+    if (slot) {
+      this.container.scrollTop = Math.max(
+        0,
+        slot.offsetTop + quantizePageProgression(progression) * Math.max(1, slot.offsetHeight)
+          - this.container.clientHeight * 0.25
+      );
+    }
   }
 
   private queueRender(generation: number, signal: AbortSignal, force = false) {
@@ -791,7 +819,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   }
 
   private location(): PdfLocation {
-    return { kind: 'pdf', pageNumber: this.pageNumber };
+    return { kind: 'pdf', pageNumber: this.pageNumber, pageProgression: this.pageProgression };
   }
 
   private neighborPage() {
@@ -916,6 +944,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.openContext = null;
     this.preferences = null;
     this.pageNumber = 1;
+    this.pageProgression = 0;
     this.pageCount = 0;
     this.cropBoxes.clear();
     this.continuousSlots.clear();

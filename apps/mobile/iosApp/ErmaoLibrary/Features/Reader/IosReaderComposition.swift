@@ -32,6 +32,7 @@ struct IosReaderDownloadArtifact: Sendable {
     let displayTitle: String
     let workID: String
     let volumeID: String
+    let sourceFormat: String
     let serverContentFingerprint: String
 }
 
@@ -47,6 +48,7 @@ final class IosReaderComposition: ObservableObject {
     private let managedStore: IosManagedPublicationStore
     private let deviceIdentity: IosReaderDeviceIdentity
     private let downloadArtifacts: any IosReaderDownloadArtifactProviding
+    private let pdfPageCounts = IosPdfPageCountStore()
 
     init(
         cookieStore: KeychainCookiePayloadStore,
@@ -62,7 +64,7 @@ final class IosReaderComposition: ObservableObject {
         IosReaderBootstrapHost(request: request, composition: self)
     }
 
-    fileprivate func bootstrap(_ request: IosReaderLaunchRequest) async throws -> IosEpubReaderSession {
+    fileprivate func bootstrap(_ request: IosReaderLaunchRequest) async throws -> IosReaderSession {
         let namespace = ErmaoShared.PublicKt.createReaderSyncNamespace(
             serverIdentity: request.context.serverIdentity,
             userId: request.context.userID,
@@ -77,6 +79,7 @@ final class IosReaderComposition: ObservableObject {
             acceptsInsecureTls: request.context.acceptsInsecureTLS
         )
         let gateway = IosCompositionKt.createIosReaderBootstrapGateway(cookieStore: cookieStore)
+        let launchArtifact: IosReaderDownloadArtifact?
         if let recordID = request.managedDownloadRecordID {
             guard let artifact = try await downloadArtifacts.verifiedReaderArtifact(
                 recordID: recordID,
@@ -84,17 +87,9 @@ final class IosReaderComposition: ObservableObject {
             ), artifact.sourceID == request.volumeID else {
                 throw IosReaderFailure(code: .resourceMissing)
             }
-            _ = try await managedStore.importEPUB(
-                from: artifact.fileURL,
-                sourceID: artifact.sourceID,
-                displayTitle: artifact.displayTitle,
-                workID: artifact.workID,
-                volumeID: artifact.volumeID
-            )
-            try await managedStore.bindServerContentFingerprint(
-                sourceID: artifact.sourceID,
-                value: artifact.serverContentFingerprint
-            )
+            launchArtifact = artifact
+        } else {
+            launchArtifact = nil
         }
         let bootstrapRequest = ErmaoShared.ReaderBootstrapRequest(
             profile: profile,
@@ -113,21 +108,54 @@ final class IosReaderComposition: ObservableObject {
         }
         let onlineBootstrap = (result as? ErmaoShared.ReaderBootstrapResultContent)?.value
         let target: ErmaoShared.ReaderProgressSyncTarget
+        let exactSourceFormat: ErmaoShared.ReaderSourceFormat
         let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
         let source: ErmaoShared.ReaderSource
         let bookmarkContentFingerprint: String
         if let onlineBootstrap {
             target = onlineBootstrap.target
+            exactSourceFormat = onlineBootstrap.publication.sourceFormat
+            guard Self.hasCompleteReaderEngine(for: exactSourceFormat) else {
+                throw IosReaderFailure(code: .unsupportedFormat)
+            }
             remoteSnapshot = onlineBootstrap.remoteSnapshot
             bookmarkContentFingerprint = onlineBootstrap.artifactVersion
-            do {
-                let existing = try await managedStore.resolve(sourceID: request.volumeID)
-                if existing.serverContentFingerprint == onlineBootstrap.artifactVersion {
-                    source = Self.sharedSource(existing)
-                } else {
-                    source = try await download(bootstrap: onlineBootstrap, gateway: gateway)
+            if let launchArtifact {
+                guard launchArtifact.serverContentFingerprint == onlineBootstrap.artifactVersion,
+                      let artifactFormat = IosManagedPublicationStore.sourceFormat(
+                          launchArtifact.sourceFormat
+                      ),
+                      artifactFormat == onlineBootstrap.publication.sourceFormat
+                else {
+                    throw IosReaderFailure(code: .corruptFile)
                 }
-            } catch {
+                _ = try await managedStore.importPublication(
+                    from: launchArtifact.fileURL,
+                    sourceID: launchArtifact.sourceID,
+                    displayTitle: launchArtifact.displayTitle,
+                    sourceFormat: artifactFormat,
+                    workID: launchArtifact.workID,
+                    volumeID: launchArtifact.volumeID,
+                    expectedOriginalFileHash: onlineBootstrap.publication.publicationFingerprint.originalFileHash,
+                    parserVersion: onlineBootstrap.publication.publicationFingerprint.parser,
+                    normalizationVersion: onlineBootstrap.publication.publicationFingerprint.normalization
+                )
+                try await managedStore.bindServerContentFingerprint(
+                    sourceID: launchArtifact.sourceID,
+                    value: launchArtifact.serverContentFingerprint
+                )
+            }
+            let existing = try? await managedStore.resolve(sourceID: request.volumeID)
+            if let existing,
+               existing.serverContentFingerprint == onlineBootstrap.artifactVersion,
+               existing.sourceFormat == onlineBootstrap.publication.sourceFormat,
+               existing.fingerprint.originalFileHash.caseInsensitiveCompare(
+                   onlineBootstrap.publication.publicationFingerprint.originalFileHash
+               ) == .orderedSame,
+               existing.fingerprint.parserVersion == onlineBootstrap.publication.publicationFingerprint.parser,
+               existing.fingerprint.normalizationVersion == onlineBootstrap.publication.publicationFingerprint.normalization {
+                source = Self.sharedSource(existing)
+            } else {
                 source = try await download(bootstrap: onlineBootstrap, gateway: gateway)
             }
             try await managedStore.bindServerContentFingerprint(
@@ -145,14 +173,22 @@ final class IosReaderComposition: ObservableObject {
                 namespace: namespace,
                 workId: request.workID,
                 volumeId: request.volumeID,
-                sourceFormat: .epub
+                sourceFormat: existing.sourceFormat.readerFormat
             )
+            exactSourceFormat = existing.sourceFormat
+            guard Self.hasCompleteReaderEngine(for: exactSourceFormat) else {
+                throw IosReaderFailure(code: .unsupportedFormat)
+            }
             remoteSnapshot = nil
             bookmarkContentFingerprint = existing.serverContentFingerprint!
             source = Self.sharedSource(existing)
         }
 
-        guard source.sourceId == target.volumeId else {
+        guard source.sourceId == target.volumeId,
+              source.sourceFormat == exactSourceFormat,
+              source.format == target.sourceFormat,
+              exactSourceFormat.readerFormat == target.sourceFormat
+        else {
             throw IosReaderFailure(code: .corruptFile)
         }
         let localIdentity = ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
@@ -187,9 +223,76 @@ final class IosReaderComposition: ObservableObject {
             cookieStore: cookieStore,
             profile: profile
         )
-        return IosEpubReaderSession(
+        if exactSourceFormat == .cbz {
+            let pages: [IosCbzPage]
+            if let onlineBootstrap {
+                guard !onlineBootstrap.comicPages.isEmpty else {
+                    throw IosReaderFailure(code: .corruptFile)
+                }
+                pages = onlineBootstrap.comicPages.map {
+                    IosCbzPage(
+                        pageIndex: Int($0.pageIndex),
+                        resourceHref: $0.resourceHref,
+                        mediaType: $0.mediaType,
+                        width: $0.width.map { Int($0.intValue) },
+                        height: $0.height.map { Int($0.intValue) }
+                    )
+                }
+            } else {
+                let managed = try await managedStore.resolve(sourceID: source.sourceId)
+                pages = try IosCbzArchiveIndex(fileURL: managed.fileURL).pages
+            }
+            return .comic(IosComicReaderSession(
+                sourceID: source.sourceId,
+                displayTitle: source.displayTitle,
+                pages: pages,
+                managedStore: managedStore,
+                progressStore: progressStore,
+                remoteSnapshot: remoteSnapshot,
+                namespaceKey: request.context.namespaceKey,
+                workID: request.workID,
+                publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
+                deviceIdentity: deviceIdentity
+            ))
+        }
+        if exactSourceFormat == .pdf {
+            let canonicalPageCount: Int
+            if let onlineBootstrap {
+                guard let value = onlineBootstrap.pageCount?.intValue, value > 0 else {
+                    throw IosReaderFailure(code: .corruptFile)
+                }
+                canonicalPageCount = value
+                pdfPageCounts.save(
+                    pageCount: value,
+                    sourceID: source.sourceId,
+                    fingerprint: IosContentFingerprint(shared: source.contentFingerprint)
+                )
+            } else {
+                guard let value = pdfPageCounts.load(
+                    sourceID: source.sourceId,
+                    fingerprint: IosContentFingerprint(shared: source.contentFingerprint)
+                ) else {
+                    throw IosReaderFailure(code: .resourceMissing)
+                }
+                canonicalPageCount = value
+            }
+            return .pdf(IosPdfReaderSession(
+                sourceID: source.sourceId,
+                displayTitle: source.displayTitle,
+                canonicalPageCount: canonicalPageCount,
+                managedStore: managedStore,
+                progressStore: progressStore,
+                remoteSnapshot: remoteSnapshot,
+                namespaceKey: request.context.namespaceKey,
+                workID: request.workID,
+                publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
+                deviceIdentity: deviceIdentity
+            ))
+        }
+        return .reflowable(IosReflowableReaderSession(
             sourceID: source.sourceId,
             displayTitle: source.displayTitle,
+            sourceFormat: exactSourceFormat,
             preferences: preferencesStore.load(),
             managedStore: managedStore,
             progressStore: progressStore,
@@ -206,22 +309,33 @@ final class IosReaderComposition: ObservableObject {
             workID: request.workID,
             publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
             deviceIdentity: deviceIdentity
-        )
+        ))
     }
 
     private static func sharedSource(_ existing: IosManagedPublication) -> ErmaoShared.ReaderSource {
         ErmaoShared.LocalReaderSource(
             sourceId: existing.sourceID,
             displayTitle: existing.displayTitle,
-            format: .epub,
+            format: existing.sourceFormat.readerFormat,
             contentFingerprint: ErmaoShared.ContentFingerprint(
                 originalFileHash: existing.fingerprint.originalFileHash,
                 parserVersion: existing.fingerprint.parserVersion,
                 normalizationVersion: existing.fingerprint.normalizationVersion
             ),
             workId: existing.workID,
-            volumeId: existing.volumeID
+            volumeId: existing.volumeID,
+            sourceFormat: existing.sourceFormat
         )
+    }
+
+    /// Keep download/validation capability separate from actual reader capability.
+    private static func hasCompleteReaderEngine(for sourceFormat: ErmaoShared.ReaderSourceFormat) -> Bool {
+        switch sourceFormat {
+        case .epub, .mobi, .azw, .azw3, .prc, .txt, .cbz, .pdf:
+            true
+        default:
+            false
+        }
     }
 
     private func download(
@@ -241,10 +355,17 @@ final class IosReaderComposition: ObservableObject {
 }
 
 @MainActor
+enum IosReaderSession {
+    case reflowable(IosReflowableReaderSession)
+    case comic(IosComicReaderSession)
+    case pdf(IosPdfReaderSession)
+}
+
+@MainActor
 final class IosReaderBootstrapHost: ObservableObject {
     enum State {
         case loading
-        case ready(IosEpubReaderSession)
+        case ready(IosReaderSession)
         case failure(IosReaderFailureCode)
     }
 
@@ -285,7 +406,11 @@ struct IosReaderBootstrapView: View {
             case .loading:
                 ProgressView("reader.download.preparing")
             case .ready(let session):
-                IosEpubReaderView(session: session)
+                switch session {
+                case .reflowable(let value): IosReflowableReaderView(session: value)
+                case .comic(let value): IosComicReaderView(session: value)
+                case .pdf(let value): IosPdfReaderView(session: value)
+                }
             case .failure(let code):
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle").font(.largeTitle)

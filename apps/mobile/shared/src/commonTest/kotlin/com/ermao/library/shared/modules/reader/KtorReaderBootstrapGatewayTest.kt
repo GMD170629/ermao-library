@@ -26,12 +26,13 @@ class KtorReaderBootstrapGatewayTest {
         val content = assertIs<Content>(gateway(VALID_BOOTSTRAP).load(request())).value
 
         assertEquals(
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|readium:epub|epub-v1",
+            "sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad",
             content.artifactVersion,
         )
         assertEquals("/api/volumes/volume-1/file", content.publication.apiPath)
         assertEquals(1_234, content.publication.expectedSizeBytes)
         assertEquals("readium:epub", content.publication.publicationFingerprint.parser)
+        assertEquals(ReaderSourceFormat.Epub, content.publication.sourceFormat)
         assertEquals(18, content.remoteSnapshot?.revision)
         assertEquals(2_222, content.remoteSnapshot?.receivedAtEpochMillis)
         assertEquals(ReaderEnginePlatform.Ios, content.remoteSnapshot?.locator?.platform)
@@ -58,6 +59,74 @@ class KtorReaderBootstrapGatewayTest {
         assertEquals("READER_BOOTSTRAP_USER_MISMATCH", failure.failureCode)
     }
 
+    @Test
+    fun mapsEveryMobiFamilySourceToTheMobiReader() = runBlocking {
+        listOf(
+            Triple("mobi", "MOBI", "application/x-mobipocket-ebook"),
+            Triple("azw", "AZW", "application/vnd.amazon.ebook"),
+            Triple("azw3", "AZW3", "application/vnd.amazon.ebook"),
+            Triple("prc", "PRC", "application/x-mobipocket-ebook"),
+        ).forEach { (wireFormat, kind, mimeType) ->
+            val response = VALID_BOOTSTRAP
+                .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"$wireFormat\"")
+                .replace("\"format\":\"epub\"", "\"format\":\"$wireFormat\"")
+                .replace("\"kind\":\"EPUB\"", "\"kind\":\"$kind\"")
+                .replace("\"mimeType\":\"application/epub+zip\"", "\"mimeType\":\"$mimeType\"")
+
+            val content = assertIs<Content>(gateway(response).load(request())).value
+
+            assertEquals(ReaderFormat.Mobi, content.target.sourceFormat)
+            assertEquals(wireFormat, content.publication.sourceFormat.wireValue)
+        }
+    }
+
+    @Test
+    fun mapsP2FormatsOnlyWhenReaderTypeFileKindAndMimeMatch() = runBlocking {
+        listOf(
+            P2Format("txt", "reflowable", "TXT", "text/plain", ReaderFormat.Text),
+            P2Format("cbz", "comic", "CBZ", "application/vnd.comicbook+zip", ReaderFormat.Comic),
+            P2Format("pdf", "pdf", "PDF", "application/pdf", ReaderFormat.Pdf),
+        ).forEach { format ->
+            val response = VALID_BOOTSTRAP
+                .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"${format.readerType}\"")
+                .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"${format.sourceFormat}\"")
+                .replace("\"format\":\"epub\"", "\"format\":\"${format.sourceFormat}\"")
+                .replace("\"kind\":\"EPUB\"", "\"kind\":\"${format.kind}\"")
+                .replace("\"mimeType\":\"application/epub+zip\"", "\"mimeType\":\"${format.mimeType}\"")
+                .let { value ->
+                    if (format.sourceFormat == "cbz") value.replace(
+                        "\"units\":[]",
+                        "\"units\":[{\"unitType\":\"page\",\"href\":\"pages/001.jpg\",\"mediaType\":\"image/jpeg\",\"sortOrder\":0,\"width\":1200,\"height\":1800}]",
+                    ) else value
+                }
+
+            val content = assertIs<Content>(gateway(response).load(request())).value
+            assertEquals(format.readerFormat, content.target.sourceFormat)
+            assertEquals(format.sourceFormat, content.publication.sourceFormat.wireValue)
+            if (format.sourceFormat == "cbz") {
+                assertEquals("pages/001.jpg", content.comicPages.single().resourceHref)
+            }
+        }
+    }
+
+    @Test
+    fun rejectsUnsupportedAndMismatchedPublicationFiles() = runBlocking {
+        val unsupported = VALID_BOOTSTRAP.replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"fb2\"")
+        assertEquals(
+            "READER_BOOTSTRAP_UNSUPPORTED",
+            assertIs<Failure>(gateway(unsupported).load(request())).failureCode,
+        )
+
+        val mismatched = VALID_BOOTSTRAP.replace(
+            "\"mimeType\":\"application/epub+zip\"",
+            "\"mimeType\":\"application/x-mobipocket-ebook\"",
+        )
+        assertEquals(
+            "READER_PUBLICATION_FILE_MISSING",
+            assertIs<Failure>(gateway(mismatched).load(request())).failureCode,
+        )
+    }
+
     private fun gateway(body: String) = KtorReaderBootstrapGateway(
         createClient = { profile ->
             val engine = MockEngine {
@@ -72,6 +141,14 @@ class KtorReaderBootstrapGatewayTest {
         },
     )
 
+    private data class P2Format(
+        val sourceFormat: String,
+        val readerType: String,
+        val kind: String,
+        val mimeType: String,
+        val readerFormat: ReaderFormat,
+    )
+
     private fun request() = ReaderBootstrapRequest(profile(), ReaderSyncNamespace("server-1", "user-1", 3), "volume-1")
 
     private fun profile(): ServerProfile {
@@ -83,12 +160,12 @@ class KtorReaderBootstrapGatewayTest {
         val VALID_BOOTSTRAP = """
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
-              "publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"book":{"id":"work-1","title":"Book"},
+              "publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"contentFingerprint":"sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad","book":{"id":"work-1","title":"Book"},
               "mediaVersion":{"id":"media-1","workId":"work-1","mediaKind":"EBOOK","completed":true},
-              "volume":{"id":"volume-1","title":"Volume"},"availableVolumes":[],
+              "volume":{"id":"volume-1","title":"Volume","format":"epub"},"availableVolumes":[],
               "files":[{"id":"file-1","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","contentHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sortOrder":0}],
               "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},"publication":{"manifestUrl":"/api/reader/v4/volumes/volume-1/publication/manifest.json","positionsUrl":"/api/reader/v4/volumes/volume-1/publication/positions.json"},
-              "progressSnapshot":{"schemaVersion":4,"revision":18,"locator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
+              "progressSnapshot":{"schemaVersion":4,"revision":18,"locator":{"kind":"reflowable","publication":{"originalFileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
             }
         """.trimIndent()
     }

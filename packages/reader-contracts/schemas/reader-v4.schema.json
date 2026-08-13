@@ -9,22 +9,9 @@
       "additionalProperties": false,
       "required": ["originalFileHash", "parser", "normalization"],
       "properties": {
-        "originalFileHash": {
-          "type": "string",
-          "pattern": "^(sha256:)?[a-fA-F0-9]{64}$"
-        },
-        "parser": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256,
-          "pattern": "\\S"
-        },
-        "normalization": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256,
-          "pattern": "\\S"
-        }
+        "originalFileHash": {"type": "string", "pattern": "^(sha256:)?[a-fA-F0-9]{64}$"},
+        "parser": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
+        "normalization": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"}
       }
     },
     "locatorText": {
@@ -41,11 +28,7 @@
       "additionalProperties": true,
       "properties": {
         "cssSelector": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "\\S"},
-        "fragments": {
-          "type": "array",
-          "maxItems": 16,
-          "items": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "\\S"}
-        },
+        "fragments": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "\\S"}},
         "progression": {"type": "number", "minimum": 0, "maximum": 1},
         "totalProgression": {"type": "number", "minimum": 0, "maximum": 1},
         "position": {"type": "integer", "minimum": 1}
@@ -63,108 +46,105 @@
         "text": {"$ref": "#/$defs/locatorText"}
       },
       "anyOf": [
-        {
-          "properties": {
-            "locations": {
-              "required": ["cssSelector"]
-            }
-          }
-        },
-        {
-          "properties": {
-            "locations": {
-              "required": ["fragments"],
-              "properties": {"fragments": {"minItems": 1}}
-            }
-          }
-        },
-        {
-          "required": ["text"],
-          "properties": {
-            "text": {"required": ["highlight"]}
-          }
-        }
+        {"properties": {"locations": {"required": ["cssSelector"]}}},
+        {"properties": {"locations": {"required": ["fragments"], "properties": {"fragments": {"minItems": 1}}}}},
+        {"required": ["text"], "properties": {"text": {"required": ["highlight"]}}}
       ]
     },
-    "locatorEnvelope": {
+    "engineLocator": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "platform", "version", "publication", "payload"],
+      "required": ["engine", "platform", "version", "payload"],
       "properties": {
         "engine": {"const": "readium"},
         "platform": {"enum": ["web", "android", "ios"]},
-        "version": {"type": "string", "minLength": 1, "maxLength": 256},
-        "publication": {"$ref": "#/$defs/publicationFingerprint"},
-        "payload": {"$ref": "#/$defs/readiumLocator"}
+        "version": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
+        "payload": {"type": "object"}
       }
+    },
+    "reflowableLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "publication", "engineLocator"],
+      "properties": {
+        "kind": {"const": "reflowable"},
+        "publication": {"$ref": "#/$defs/publicationFingerprint"},
+        "engineLocator": {"allOf": [{"$ref": "#/$defs/engineLocator"}, {"properties": {"payload": {"$ref": "#/$defs/readiumLocator"}}}]}
+      }
+    },
+    "pdfLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "publication", "pageIndex", "pageProgression"],
+      "properties": {
+        "kind": {"const": "pdf"},
+        "publication": {"$ref": "#/$defs/publicationFingerprint"},
+        "pageIndex": {"type": "integer", "minimum": 0},
+        "pageProgression": {"type": "number", "minimum": 0, "maximum": 1, "multipleOf": 0.0001},
+        "engineLocator": {"$ref": "#/$defs/engineLocator"}
+      }
+    },
+    "comicLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "publication", "pageIndex", "resourceHref"],
+      "properties": {
+        "kind": {"const": "comic"},
+        "publication": {"$ref": "#/$defs/publicationFingerprint"},
+        "pageIndex": {"type": "integer", "minimum": 0},
+        "resourceHref": {"type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"},
+        "engineLocator": {"$ref": "#/$defs/engineLocator"}
+      }
+    },
+    "audioLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "publication", "fileId", "positionMillis"],
+      "properties": {
+        "kind": {"const": "audio"},
+        "publication": {"$ref": "#/$defs/publicationFingerprint"},
+        "fileId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
+        "chapterId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
+        "positionMillis": {"type": "integer", "minimum": 0},
+        "engineLocator": {"$ref": "#/$defs/engineLocator"}
+      }
+    },
+    "exactLocation": {
+      "oneOf": [
+        {"$ref": "#/$defs/reflowableLocation"},
+        {"$ref": "#/$defs/pdfLocation"},
+        {"$ref": "#/$defs/comicLocation"},
+        {"$ref": "#/$defs/audioLocation"}
+      ]
     },
     "progressSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "schemaVersion",
-        "revision",
-        "locator",
-        "displayPercent",
-        "receivedAtEpochMillis"
-      ],
+      "required": ["schemaVersion", "revision", "locator", "displayPercent", "receivedAtEpochMillis"],
       "properties": {
         "schemaVersion": {"const": 4},
         "revision": {"type": "integer", "minimum": 1},
-        "locator": {"$ref": "#/$defs/locatorEnvelope"},
+        "locator": {"$ref": "#/$defs/exactLocation"},
         "displayPercent": {"type": "number", "minimum": 0, "maximum": 100},
-        "receivedAtEpochMillis": {"type": "integer", "minimum": 0}
+        "receivedAtEpochMillis": {"type": "integer", "minimum": 0},
+        "capturedAtEpochMillis": {"type": "integer", "minimum": 0}
       }
     },
     "progressPutRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "schemaVersion",
-        "clientId",
-        "mutationId",
-        "baseRevision",
-        "capturedAtEpochMillis",
-        "locator"
-      ],
+      "required": ["schemaVersion", "clientId", "mutationId", "baseRevision", "capturedAtEpochMillis", "locator"],
       "properties": {
         "schemaVersion": {"const": 4},
         "clientId": {"type": "string", "minLength": 1, "maxLength": 256},
-        "mutationId": {
-          "type": "string",
-          "format": "uuid"
-        },
+        "mutationId": {"type": "string", "format": "uuid"},
         "baseRevision": {"type": "integer", "minimum": 0},
         "capturedAtEpochMillis": {"type": "integer", "minimum": 0},
-        "locator": {"$ref": "#/$defs/locatorEnvelope"}
+        "locator": {"$ref": "#/$defs/exactLocation"}
       }
     },
-    "progressConflict": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["error"],
-      "properties": {
-        "error": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["message", "code", "current"],
-          "properties": {
-            "message": {"type": "string", "minLength": 1, "maxLength": 4096},
-            "code": {"const": "READER_PROGRESS_CONFLICT"},
-            "current": {"$ref": "#/$defs/progressSnapshot"}
-          }
-        }
-      }
-    },
-    "progressSuccess": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["ok", "data"],
-      "properties": {
-        "ok": {"const": true},
-        "data": {"$ref": "#/$defs/progressSnapshot"}
-      }
-    }
+    "progressConflict": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["message", "code", "current"], "properties": {"message": {"type": "string", "minLength": 1, "maxLength": 4096}, "code": {"const": "READER_PROGRESS_CONFLICT"}, "current": {"$ref": "#/$defs/progressSnapshot"}}}}},
+    "progressSuccess": {"type": "object", "additionalProperties": false, "required": ["ok", "data"], "properties": {"ok": {"const": true}, "data": {"$ref": "#/$defs/progressSnapshot"}}}
   },
   "oneOf": [
     {"$ref": "#/$defs/progressPutRequest"},

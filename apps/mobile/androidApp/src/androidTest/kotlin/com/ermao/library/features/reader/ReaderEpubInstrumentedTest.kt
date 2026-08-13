@@ -11,13 +11,18 @@ import androidx.lifecycle.Lifecycle
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
-import com.ermao.library.shared.modules.reader.ContentFingerprint
+import com.ermao.library.shared.modules.reader.EngineLocator
+import com.ermao.library.shared.modules.reader.EngineLocatorPayload
+import com.ermao.library.shared.modules.reader.ReaderEngine
+import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
+import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderAppearancePreferences
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
+import com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.TextQuote
 import java.util.UUID
@@ -158,8 +163,12 @@ class ReaderEpubInstrumentedTest {
                 assertTrue(controller.goTo(controller.tableOfContents.last().location))
             }
             waitUntil(scenario, "saved chapter location") {
-                currentLocationOrNull(it)?.resourceKey?.contains("chapter2.xhtml") == true
+                currentLocationOrNull(it)?.let { location ->
+                    location.resourceKey?.contains("chapter2.xhtml") == true &&
+                        ReadiumLocatorEnvelope.from(location) != null
+                } == true
             }
+            waitUntilValue("saved chapter rendering") { renderedText(scenario).contains("第二章") }
             val locationBeforeLifecycleChanges = currentLocation(scenario)
 
             scenario.moveToState(Lifecycle.State.CREATED)
@@ -213,19 +222,24 @@ class ReaderEpubInstrumentedTest {
     }
 
     @Test
-    fun restoresByTextQuoteWhenTheSavedResourceNoLongerExists() = runBlocking {
+    fun rejectsSavedProgressWhenTheExactResourceNoLongerExists() = runBlocking {
+        val removedResource = "legacy/removed-chapter.xhtml"
         progressStore.save(
             ReaderProgress(
                 sourceId = sourceId,
                 location = ReflowReaderLocation(
-                    resourceKey = "legacy/removed-chapter.xhtml",
+                    resourceKey = removedResource,
                     progression = 0.5,
                     textQuote = TextQuote(exact = "这是第二章，用于验证下一页或目录跳转后的阅读器状态。"),
-                    contentFingerprint = ContentFingerprint(
-                        originalFileHash = source.contentFingerprint.originalFileHash,
-                        parserVersion = "readium-kotlin:legacy",
-                        normalizationVersion = "epub-native-legacy",
+                    engineLocator = EngineLocator(
+                        engine = ReaderEngine.Readium,
+                        platform = ReaderEnginePlatform.Android,
+                        version = "readium-kotlin:3.3.0",
+                        payload = EngineLocatorPayload.parse(
+                            """{"href":"$removedResource","type":"application/xhtml+xml","locations":{"cssSelector":"body","progression":0.5},"text":{"highlight":"这是第二章，用于验证下一页或目录跳转后的阅读器状态。"}}""",
+                        ),
                     ),
+                    contentFingerprint = source.contentFingerprint,
                 ),
                 updatedAtEpochMillis = 1L,
                 deviceId = "legacy-test-device",
@@ -234,10 +248,10 @@ class ReaderEpubInstrumentedTest {
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             waitForReader(scenario)
-            waitUntil(scenario, "text quote restoration") {
-                currentLocationOrNull(it)?.resourceKey?.contains("chapter2.xhtml") == true
+            waitUntil(scenario, "missing exact resource warning") {
+                it.controllerForTesting?.restoreWarning?.value?.code == ReaderErrorCode.LocationRestoreFailed
             }
-            assertTrue(renderedText(scenario).contains("第二章"))
+            assertFalse(currentLocation(scenario).resourceKey.orEmpty().contains("chapter2.xhtml"))
         }
     }
 
@@ -253,14 +267,24 @@ class ReaderEpubInstrumentedTest {
         condition: (ReaderActivity) -> Boolean,
     ) {
         val deadline = SystemClock.uptimeMillis() + TEST_TIMEOUT_MILLIS
+        val diagnostic = AtomicReference("activity unavailable")
         while (SystemClock.uptimeMillis() < deadline) {
             instrumentation.waitForIdleSync()
             val matched = AtomicReference(false)
-            scenario.onActivity { matched.set(condition(it)) }
+            scenario.onActivity { activity ->
+                matched.set(condition(activity))
+                val location = currentLocationOrNull(activity)
+                diagnostic.set(
+                    "orientation=${activity.resources.configuration.orientation}, " +
+                        "resource=${location?.resourceKey}, " +
+                        "exact=${location?.let(ReadiumLocatorEnvelope::from) != null}, " +
+                        "warning=${activity.controllerForTesting?.restoreWarning?.value?.code}",
+                )
+            }
             if (matched.get()) return
             SystemClock.sleep(POLL_MILLIS)
         }
-        throw AssertionError("Timed out waiting for $label")
+        throw AssertionError("Timed out waiting for $label; ${diagnostic.get()}")
     }
 
     private fun waitUntilValue(label: String, condition: () -> Boolean) {

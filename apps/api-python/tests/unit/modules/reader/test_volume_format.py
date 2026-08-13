@@ -6,7 +6,7 @@ from app.modules.reader.domain.volume_format import (
 
 
 @pytest.mark.parametrize(
-    "volume_format", ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"]
+    "volume_format", ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"]
 )
 def test_all_native_reflowable_formats_are_directly_readable(
     volume_format: str,
@@ -19,7 +19,7 @@ def test_all_native_reflowable_formats_are_directly_readable(
     [
         ("PDF", ReaderType.PDF),
         ("CBZ", ReaderType.COMIC),
-        ("ZIP", ReaderType.COMIC),
+        ("CBZ", ReaderType.COMIC),
         ("M4B", ReaderType.AUDIO),
         ("M4A", ReaderType.AUDIO),
         ("MP3", ReaderType.AUDIO),
@@ -30,3 +30,10 @@ def test_fixed_layout_and_audio_formats_are_directly_readable(
     reader_type: ReaderType,
 ) -> None:
     assert reader_type_for_volume_format(volume_format) == reader_type
+
+
+@pytest.mark.parametrize("volume_format", ["FB2", "ZIP", "CBR", "RAR", "COMIC"])
+def test_formats_without_a_p2_native_adapter_are_not_advertised(
+    volume_format: str,
+) -> None:
+    assert reader_type_for_volume_format(volume_format) is None

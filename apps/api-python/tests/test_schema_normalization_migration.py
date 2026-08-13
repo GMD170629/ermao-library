@@ -185,7 +185,7 @@ def test_0004_produces_identical_schema_from_distinct_0003_shapes(
 
         for engine in (canonical, legacy):
             _upgrade(engine, "head")
-            assert head_revision(engine) == "0021_reader_v4_exact_progress"
+            assert head_revision(engine) == "0023_publication_full_hash_identity"
 
         assert _schema_fingerprint(canonical) == _schema_fingerprint(legacy)
     finally:

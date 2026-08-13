@@ -7,7 +7,6 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -81,17 +80,23 @@ class AndroidShellSmokeTest {
 
     @Test
     fun eachRootTabOwnsAVisibleNavigationDestination() {
+        val application = InstrumentationRegistry.getInstrumentation()
+            .targetContext
+            .applicationContext as ErmaoLibraryApplication
         composeRule.setContent {
             WarmPageTheme(darkTheme = false) {
                 MainShell(
                     session = authenticatedSession(),
-                    contentRepository = createAndroidContentRepository(InstrumentationRegistry.getInstrumentation().targetContext),
+                    contentRepository = application.contentRepository,
                     personalSettingsRepository = createAndroidPersonalSettingsRepository(
                         InstrumentationRegistry.getInstrumentation().targetContext,
                     ),
                     administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(
                         InstrumentationRegistry.getInstrumentation().targetContext,
                     ),
+                    downloadCatalog = application.downloadCatalog,
+                    downloadFiles = application.downloadFiles,
+                    sharedDownloadCatalog = application.sharedDownloadCatalog,
                     localeController = AndroidXAppLocaleController(),
                     onSessionUnauthorized = {},
                     onRefreshSession = {},
@@ -102,14 +107,13 @@ class AndroidShellSmokeTest {
         }
 
         composeRule.onNodeWithTag("tab-home").assertIsDisplayed()
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
         listOf(
-            R.string.tab_library to "library",
-            R.string.tab_shelves to "shelves",
-            R.string.tab_me to "me",
-            R.string.tab_home to "home",
-        ).forEach { (labelResource, tab) ->
-            composeRule.onNodeWithText(context.getString(labelResource)).performClick()
+            "library",
+            "shelves",
+            "me",
+            "home",
+        ).forEach { tab ->
+            composeRule.onNodeWithTag("tab-select-$tab").performClick()
             composeRule.onNodeWithTag("tab-$tab").assertIsDisplayed()
         }
     }

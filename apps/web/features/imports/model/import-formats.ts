@@ -1,3 +1,5 @@
+import { READER_FORMAT_CAPABILITIES } from '@shuku/reader-core';
+
 export const commonAudiobookExtensions = [
   '.m4b', '.m4a', '.m4r', '.mp3', '.mp2', '.aac', '.flac', '.wav', '.wave',
   '.rf64', '.w64', '.ogg', '.oga', '.opus', '.weba'
@@ -11,8 +13,8 @@ export const compatibilityAudiobookExtensions = [
 ] as const;
 
 export const importFormatGroups = [
-  { id: 'ebook', formats: ['.epub', '.mobi', '.azw', '.azw3', '.prc', '.fb2', '.txt'] },
-  { id: 'document-comic', formats: ['.pdf', '.cbz', '.zip', '.cbr', '.rar'] },
+  { id: 'ebook', formats: READER_FORMAT_CAPABILITIES.filter((entry) => entry.readerKind === 'reflowable').map((entry) => entry.extension) },
+  { id: 'document-comic', formats: READER_FORMAT_CAPABILITIES.filter((entry) => entry.readerKind !== 'reflowable').map((entry) => entry.extension) },
   { id: 'common-audio', formats: commonAudiobookExtensions },
   { id: 'compatibility-audio', formats: compatibilityAudiobookExtensions }
 ] as const;

@@ -2,7 +2,7 @@ package com.ermao.library.features.reader.infrastructure
 
 import android.content.res.Configuration
 import android.content.res.Resources
-import android.graphics.Color as AndroidColor
+import androidx.core.graphics.toColorInt
 import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderPageMargin
 import com.ermao.library.shared.modules.reader.ReaderPreferences
@@ -77,7 +77,7 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
         },
     )
 
-    private fun color(value: String): Color = Color(AndroidColor.parseColor(value))
+    private fun color(value: String): Color = Color(value.toColorInt())
 
     private val ReaderTheme.colors: ThemeColors
         get() = when (this) {

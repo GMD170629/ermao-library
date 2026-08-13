@@ -148,6 +148,26 @@ def test_open_comic_archive_rejects_invalid_rar(tmp_path: Path) -> None:
         open_comic_archive(archive)
 
 
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [("../escape.png", b"image")],
+        [("Page.PNG", b"image"), ("page.png", b"image")],
+    ],
+)
+def test_cbz_inspection_rejects_unsafe_or_duplicate_paths(
+    tmp_path: Path,
+    entries: list[tuple[str, bytes]],
+) -> None:
+    archive = tmp_path / "unsafe.cbz"
+    with zipfile.ZipFile(archive, "w") as output:
+        for name, content in entries:
+            output.writestr(name, content)
+
+    with pytest.raises(ComicArchiveInvalidError):
+        inspect_comic_archive(archive)
+
+
 class _RejectedRarArchive:
     def __init__(self, *, password: bool, volumes: list[str]) -> None:
         self._password = password

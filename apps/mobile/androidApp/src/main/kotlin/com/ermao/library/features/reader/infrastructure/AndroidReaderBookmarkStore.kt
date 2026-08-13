@@ -1,6 +1,7 @@
 package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
+import androidx.core.content.edit
 import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,7 +40,9 @@ internal class AndroidReaderBookmarkStore(
         ?: AndroidReaderBookmarkState()
 
     fun save(state: AndroidReaderBookmarkState) {
-        check(preferences.edit().putString(key, encode(state)).commit()) {
+        val encodedState = encode(state)
+        preferences.edit(commit = true) { putString(key, encodedState) }
+        check(preferences.getString(key, null) == encodedState) {
             "Unable to atomically save reader bookmarks"
         }
     }

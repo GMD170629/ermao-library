@@ -2,6 +2,7 @@ package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
+import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.domain.PublicationFingerprint
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -24,6 +25,7 @@ data class ReaderPublicationDownload(
     val workId: String,
     val volumeId: String,
     val apiPath: String,
+    val sourceFormat: ReaderSourceFormat,
     val mimeType: String,
     val expectedSizeBytes: Long,
     val expectedOriginalFileHash: String?,
@@ -35,6 +37,7 @@ data class ReaderPublicationDownload(
         require(workId.isNotBlank())
         require(volumeId.isNotBlank())
         require(apiPath.startsWith("/api/") && !apiPath.contains('#'))
+        require(sourceFormat.acceptsMimeType(mimeType)) { "Reader publication MIME type does not match its source format" }
         require(expectedSizeBytes > 0)
         require(expectedOriginalFileHash == null || expectedOriginalFileHash.matches(SHA256_PATTERN))
         require(
@@ -57,12 +60,40 @@ data class ReaderBootstrap(
     val remoteSnapshot: ReaderProgressSnapshotV4?,
     /** Download artifact version from bootstrap; never part of a progress PUT. */
     val artifactVersion: String,
+    val comicPages: List<ReaderComicPage> = emptyList(),
+    val pageCount: Int? = null,
 ) {
     init {
-        require(artifactVersion.isNotBlank())
+        require(artifactVersion.matches(SHA256_PATTERN)) { "Reader artifact version must be a SHA-256 key" }
         require(remoteSnapshot == null || remoteSnapshot.sourceId == target.volumeId) {
             "Reader bootstrap snapshot belongs to another volume"
         }
+        require(comicPages.isEmpty() || publication.sourceFormat == ReaderSourceFormat.Cbz)
+        require(pageCount == null || pageCount > 0) { "Reader page count must be positive" }
+        require(comicPages.map(ReaderComicPage::pageIndex) == comicPages.indices.toList()) {
+            "Comic pages are not canonical and contiguous"
+        }
+    }
+
+    private companion object {
+        val SHA256_PATTERN = Regex("^sha256:[0-9a-f]{64}$")
+    }
+}
+
+data class ReaderComicPage(
+    val pageIndex: Int,
+    val resourceHref: String,
+    val mediaType: String,
+    val width: Int? = null,
+    val height: Int? = null,
+) {
+    init {
+        require(pageIndex >= 0)
+        require(resourceHref.isNotBlank() && !resourceHref.startsWith('/') && '\\' !in resourceHref)
+        require(resourceHref.split('/').none { it.isBlank() || it == "." || it == ".." })
+        require(mediaType in setOf("image/jpeg", "image/png", "image/gif", "image/webp"))
+        require(width == null || width > 0)
+        require(height == null || height > 0)
     }
 }
 

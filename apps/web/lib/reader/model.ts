@@ -1,13 +1,13 @@
 import {
   READER_SCHEMA_VERSION,
   type PublicationFingerprint,
-  type ReadiumLocatorEnvelope,
+  type PublicationLocation,
   type ReaderLocation,
   type ReaderPreferences
 } from '@shuku/reader-core';
 
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v4';
-export const READER_DB_SCHEMA_VERSION = 1;
+export const READER_DB_SCHEMA_VERSION = 2;
 export const READER_PROGRESS_DEBOUNCE_MS = 500;
 
 export type AudioProgressLocation = Readonly<{ kind: 'audio'; volumeId: string; fileId: string; chapterId: string | null; positionMs: number }>;
@@ -33,8 +33,7 @@ export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
   key: string;
   schemaVersion: 1;
   workId: string;
-  locator?: ReadiumLocatorEnvelope;
-  location?: AudioProgressLocation;
+  locator: PublicationLocation;
   displayPercent: number | null;
   /** Compatibility alias for non-Reader audio presentation only. */
   percent?: number | null;
@@ -46,7 +45,7 @@ export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
 
 export type ReaderProgressConflict = Readonly<{
   revision: number;
-  locator: ReadiumLocatorEnvelope;
+  locator: PublicationLocation;
   displayPercent: number;
   receivedAtEpochMillis: number;
   capturedAtEpochMillis?: number;
@@ -63,7 +62,7 @@ export type PendingProgressMutation = Readonly<{
   mutationId: string;
   baseRevision: number;
   capturedAtEpochMillis: number;
-  locator: ReadiumLocatorEnvelope;
+  locator: PublicationLocation;
   displayPercent: number | null;
 }>;
 
@@ -84,16 +83,11 @@ export type ExactProgressSaveInput = Readonly<{
   workId: string;
   volumeId: string;
   baseRevision: number;
-  locator: ReadiumLocatorEnvelope;
+  locator: PublicationLocation;
   displayPercent: number | null;
 }>;
 
-export type AudioProgressSaveInput = Readonly<{
-  serverIdentity: string; userId: string; workId: string; volumeId: string;
-  localContentFingerprint: string; contentFingerprint: string;
-  location: AudioProgressLocation; percent: number | null;
-}>;
-export type ProgressSaveInput = ExactProgressSaveInput | AudioProgressSaveInput;
+export type ProgressSaveInput = ExactProgressSaveInput;
 
 export type ReaderProgressPut = Readonly<{
   schemaVersion: 4;
@@ -101,13 +95,13 @@ export type ReaderProgressPut = Readonly<{
   mutationId: string;
   baseRevision: number;
   capturedAtEpochMillis: number;
-  locator: ReadiumLocatorEnvelope;
+  locator: PublicationLocation;
 }>;
 
 export type ReaderProgressSnapshot = Readonly<{
   schemaVersion: 4;
   revision: number;
-  locator: ReadiumLocatorEnvelope;
+  locator: PublicationLocation;
   displayPercent: number;
   receivedAtEpochMillis: number;
   capturedAtEpochMillis?: number;

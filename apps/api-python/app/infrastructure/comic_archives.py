@@ -5,6 +5,7 @@ from __future__ import annotations
 import mimetypes
 import re
 import shutil
+import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,10 @@ from app.modules.imports.application.import_support import (
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
 
 MAX_COMIC_INFO_BYTES = 1024 * 1024
+MAX_CBZ_ENTRIES = 10_000
+MAX_CBZ_ENTRY_BYTES = 256 * 1024 * 1024
+MAX_CBZ_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024
+MAX_CBZ_COMPRESSION_RATIO = 1_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +48,9 @@ class ComicArchiveEntry:
     file_size: int
     checksum: int | None
     directory: bool
+    compressed_size: int
+    encrypted: bool
+    unix_mode: int
 
     def is_dir(self) -> bool:
         return self.directory
@@ -165,11 +173,16 @@ class ComicArchive:
 
     @staticmethod
     def _entry(info: zipfile.ZipInfo | rarfile.RarInfo) -> ComicArchiveEntry:
+        flag_bits = int(getattr(info, "flag_bits", 0))
+        external_attr = int(getattr(info, "external_attr", 0))
         return ComicArchiveEntry(
             filename=info.filename,
             file_size=int(info.file_size),
             checksum=int(info.CRC) if info.CRC is not None else None,
             directory=info.is_dir(),
+            compressed_size=int(getattr(info, "compress_size", info.file_size)),
+            encrypted=bool(flag_bits & 0x1),
+            unix_mode=(external_attr >> 16) & 0xFFFF,
         )
 
 
@@ -182,10 +195,11 @@ def inspect_comic_archive(
 ) -> ComicArchiveInspection:
     fmt = path.suffix.lower().removeprefix(".")
     with open_comic_archive(path) as archive:
+        all_entries = archive.infolist()
+        if fmt == "cbz":
+            _validate_cbz_entries(all_entries)
         entries = [
-            info
-            for info in archive.infolist()
-            if not info.is_dir() and _safe_entry_name(info.filename)
+            info for info in all_entries if not info.is_dir() and _safe_entry_name(info.filename)
         ]
         images = [
             info
@@ -263,6 +277,39 @@ def inspect_comic_archive(
             "comicInfo": comic_info,
             "rawMetadata": raw_metadata,
         }
+
+
+def _validate_cbz_entries(entries: list[ComicArchiveEntry]) -> None:
+    """Fail closed before indexing a CBZ whose ZIP metadata is unsafe."""
+
+    if len(entries) > MAX_CBZ_ENTRIES:
+        raise ComicArchiveInvalidError("CBZ archive contains too many entries")
+    names: set[str] = set()
+    total_size = 0
+    for entry in entries:
+        if entry.encrypted:
+            raise ComicArchiveEncryptedError("Encrypted CBZ archives are unsupported")
+        if not _safe_entry_name(entry.filename):
+            raise ComicArchiveInvalidError("CBZ archive contains an unsafe path")
+        canonical_name = entry.filename.replace("\\", "/").casefold()
+        if canonical_name in names:
+            raise ComicArchiveInvalidError("CBZ archive contains duplicate paths")
+        names.add(canonical_name)
+        if entry.unix_mode and stat.S_ISLNK(entry.unix_mode):
+            raise ComicArchiveInvalidError("CBZ archive contains a symbolic link")
+        if entry.file_size > MAX_CBZ_ENTRY_BYTES:
+            raise ComicArchiveInvalidError("CBZ archive entry exceeds the size limit")
+        total_size += entry.file_size
+        if total_size > MAX_CBZ_UNCOMPRESSED_BYTES:
+            raise ComicArchiveInvalidError("CBZ archive exceeds the expansion limit")
+        unsafe_ratio = (
+            entry.file_size > 0 and entry.compressed_size == 0
+        ) or (
+            entry.compressed_size > 0
+            and entry.file_size / entry.compressed_size > MAX_CBZ_COMPRESSION_RATIO
+        )
+        if unsafe_ratio:
+            raise ComicArchiveInvalidError("CBZ archive compression ratio is unsafe")
 
 
 def extract_comic_cover(

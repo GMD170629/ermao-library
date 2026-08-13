@@ -242,6 +242,6 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                     "positionMs": 45000,
                 },
             }
-            assert head_revision(engine) == "0021_reader_v4_exact_progress"
+            assert head_revision(engine) == "0023_publication_full_hash_identity"
     finally:
         engine.dispose()

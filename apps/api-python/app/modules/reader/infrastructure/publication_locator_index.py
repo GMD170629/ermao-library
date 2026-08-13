@@ -15,7 +15,12 @@ from app.modules.reader.application.content_fingerprint import (
 )
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
+    ReaderAudioExactLocationDto,
+    ReaderComicExactLocationDto,
+    ReaderExactLocationDto,
+    ReaderPdfExactLocationDto,
     ReaderPublicationFingerprintDto,
+    ReaderReflowableExactLocationDto,
 )
 from app.modules.reader.application.ports import ReaderVolumeRepository
 
@@ -45,18 +50,18 @@ class NormalizedPublicationLocatorIndex:
         *,
         volume_id: str,
         access_scope: ReaderAccessScope,
-        href: str,
-        media_type: str,
+        location: ReaderExactLocationDto,
     ) -> ReaderPublicationFingerprintDto | None:
-        publication = self._manifest(volume_id=volume_id, access_scope=access_scope)
-        if publication is not None:
-            if not any(
-                link.href == href and link.media_type == media_type
+        if isinstance(location, ReaderReflowableExactLocationDto):
+            publication = self._manifest(volume_id=volume_id, access_scope=access_scope)
+            if publication is None or not any(
+                link.href == location.resource_href
+                and link.media_type == location.media_type
                 for link in (*publication.reading_order, *publication.resources)
             ):
                 return None
             return _publication_fingerprint(publication)
-        if not self._is_indexed_resource(volume_id, href, media_type):
+        if not self._is_indexed_location(volume_id, location):
             return None
         return self._indexed_fingerprint(volume_id)
 
@@ -72,40 +77,51 @@ class NormalizedPublicationLocatorIndex:
             [asdict(file) for file in files],
         )
 
-    def _is_indexed_resource(
+    def _is_indexed_location(
         self,
         volume_id: str,
-        href: str,
-        media_type: str,
+        location: ReaderExactLocationDto,
     ) -> bool:
         context = self._reader_repository.get_context(volume_id)
         if context is None:
             return False
-        normalized_format = context.volume.format.lower()
-        if normalized_format in _AUDIO_FORMATS:
-            return any(
-                file.id == href and file.mime_type == media_type
-                for file in self._reader_repository.list_files(volume_id)
-            )
-        page_number = _canonical_page_number(href)
-        if page_number is None:
-            return False
-        if normalized_format == "pdf":
+        if isinstance(location, ReaderPdfExactLocationDto):
             return (
-                media_type == "application/pdf"
+                context.volume.format.lower() == "pdf"
                 and context.volume.page_count is not None
-                and page_number <= context.volume.page_count
+                and location.page_index < context.volume.page_count
             )
-        if normalized_format not in _COMIC_FORMATS:
-            return False
-        page_units = [
-            unit
-            for unit in self._reader_repository.list_units(volume_id)
-            if unit.unit_type == "page"
-        ]
-        if page_number > len(page_units):
-            return False
-        return page_units[page_number - 1].media_type == media_type
+        if isinstance(location, ReaderComicExactLocationDto):
+            if context.volume.format.lower() not in _COMIC_FORMATS:
+                return False
+            page_units = [
+                unit
+                for unit in self._reader_repository.list_units(volume_id)
+                if unit.unit_type == "page"
+            ]
+            return (
+                location.page_index < len(page_units)
+                and page_units[location.page_index].href == location.resource_href
+            )
+        if isinstance(location, ReaderAudioExactLocationDto):
+            if context.volume.format.lower() not in _AUDIO_FORMATS:
+                return False
+            files = self._reader_repository.list_files(volume_id)
+            target = next((file for file in files if file.id == location.file_id), None)
+            if target is None or not target.mime_type.lower().startswith("audio/"):
+                return False
+            if (
+                target.duration_ms is not None
+                and location.position_millis > target.duration_ms
+            ):
+                return False
+            if location.chapter_id is None:
+                return True
+            return any(
+                unit.id == location.chapter_id and unit.file_id == location.file_id
+                for unit in self._reader_repository.list_units(volume_id)
+            )
+        return False
 
     def _manifest(
         self,
@@ -135,17 +151,6 @@ _AUDIO_FORMATS = frozenset(
 )
 _COMIC_FORMATS = frozenset({"cbz", "cbr", "zip", "rar"})
 _INDEXED_FORMATS = _AUDIO_FORMATS | _COMIC_FORMATS | {"pdf"}
-
-
-def _canonical_page_number(href: str) -> int | None:
-    prefix = "page-"
-    if not href.startswith(prefix):
-        return None
-    raw_number = href.removeprefix(prefix)
-    if not raw_number.isascii() or not raw_number.isdecimal():
-        return None
-    page_number = int(raw_number)
-    return page_number if page_number >= 1 else None
 
 
 def _publication_fingerprint(

@@ -102,6 +102,7 @@ import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSin
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.model.DownloadReaderEntryAction
 import com.ermao.library.features.downloads.model.downloadReaderEntryAction
+import com.ermao.library.features.downloads.model.isSupportedNativeReflowable
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
 import com.ermao.library.shared.core.network.AndroidEncryptedCookieVault
@@ -325,6 +326,7 @@ fun MainShell(
                 val selected = tab == selectedTab
                 val presentation = tab.presentation
                 item(
+                    modifier = Modifier.testTag("tab-select-${tab.stableValue}"),
                     selected = selected,
                     onClick = {
                         if (selected) {
@@ -341,7 +343,6 @@ fun MainShell(
                                 presentation.unselectedIcon
                             },
                             contentDescription = null,
-                            modifier = Modifier.testTag("tab-select-${tab.stableValue}"),
                         )
                     },
                     label = { Text(stringResource(presentation.labelResource)) },
@@ -501,6 +502,7 @@ fun MainShell(
                         onOpenKindleQueue = { meBackStack.add(AdministrativeSettingsRoute.KindleQueue) },
                         onOpenAdministration = { meBackStack.add(AdministrativeSettingsRoute.Root) },
                         onRetry = meViewModel::retryLoad,
+                        modifier = Modifier.testTag("tab-me"),
                     )
                 }
                 entry<MeRoute.Profile> {
@@ -579,7 +581,7 @@ fun MainShell(
                         state = downloadedWorkState,
                         onBack = { meBackStack.removeLastOrNull() },
                         onOpenVolume = { volume ->
-                            if (volume.readerType.equals("reflowable", true) && volume.format.equals("EPUB", true)) {
+                            if (isSupportedNativeReflowable(volume.readerType, volume.format)) {
                                 appContext.startActivity(
                                     ReaderActivity.createManagedDownloadIntent(
                                         context = appContext,
@@ -590,6 +592,7 @@ fun MainShell(
                                         localReference = checkNotNull(volume.localReference),
                                         serverContentFingerprint = volume.contentFingerprint,
                                         expectedBytes = volume.expectedBytes,
+                                        sourceFormat = volume.format,
                                     ),
                                 )
                             } else {
@@ -831,7 +834,7 @@ private fun AndroidReaderAccessOutcome.toNativeReaderIntent(
     volumeId: String,
 ): android.content.Intent? {
     val artifact = this as? AndroidReaderAccessOutcome.LocalArtifact ?: return null
-    if (!artifact.readerType.equals("reflowable", true) || !artifact.format.equals("EPUB", true)) return null
+    if (!isSupportedNativeReflowable(artifact.readerType, artifact.format)) return null
     return ReaderActivity.createManagedDownloadIntent(
         context = context,
         profileId = profileId,
@@ -841,6 +844,7 @@ private fun AndroidReaderAccessOutcome.toNativeReaderIntent(
         localReference = artifact.localReference,
         serverContentFingerprint = artifact.contentFingerprint,
         expectedBytes = artifact.expectedBytes,
+        sourceFormat = artifact.format,
     )
 }
 

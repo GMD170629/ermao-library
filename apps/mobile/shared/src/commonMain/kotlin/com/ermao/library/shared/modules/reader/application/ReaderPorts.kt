@@ -9,6 +9,17 @@ import com.ermao.library.shared.modules.reader.domain.ReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.domain.exactLocatorEnvelope
 import com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks
+import com.ermao.library.shared.modules.reader.domain.AudioPublicationLocation
+import com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
+import com.ermao.library.shared.modules.reader.domain.ComicPublicationLocation
+import com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
+import com.ermao.library.shared.modules.reader.domain.ExactLocationMatch
+import com.ermao.library.shared.modules.reader.domain.PdfPublicationLocation
+import com.ermao.library.shared.modules.reader.domain.PdfReaderLocation
+import com.ermao.library.shared.modules.reader.domain.PublicationLocation
+import com.ermao.library.shared.modules.reader.domain.ReflowablePublicationLocation
+import com.ermao.library.shared.modules.reader.domain.compareExactPublicationLocations
+import com.ermao.library.shared.modules.reader.domain.exactPublicationLocation
 import kotlinx.coroutines.flow.StateFlow
 
 interface ReaderProgressStore {
@@ -85,9 +96,9 @@ sealed interface ReaderRestoreCandidate {
 
     data class Position(val position: Int) : ReaderRestoreCandidate
 
-    data class PdfPage(val pageNumber: Int) : ReaderRestoreCandidate
+    data class PdfPage(val pageIndex: Int, val pageProgression: Double) : ReaderRestoreCandidate
 
-    data class ComicPage(val pageIndex: Int) : ReaderRestoreCandidate
+    data class ComicPage(val resourceHref: String, val pageIndex: Int) : ReaderRestoreCandidate
 
     data class AudioPosition(val fileId: String, val chapterId: String?, val positionMillis: Long) :
         ReaderRestoreCandidate
@@ -147,7 +158,7 @@ fun decideReaderResume(
     val validLocal = localProgress?.takeIf {
         it.sourceId == openedSource.sourceId &&
             it.location.contentFingerprint == openedSource.contentFingerprint &&
-            runCatching { it.exactLocatorEnvelope() }.isSuccess
+            runCatching { it.exactPublicationLocation() }.isSuccess
     }
     val validRemote = remoteSnapshot?.takeIf {
         it.sourceId == openedSource.sourceId &&
@@ -173,10 +184,10 @@ fun decideReaderResume(
     }
     if (localTarget == null) return ReaderResumeDecision(remoteTarget, null)
     if (remoteTarget == null) return ReaderResumeDecision(localTarget, null)
-    val sameAnchor = compareExactReadiumBlocks(
-        validLocal.exactLocatorEnvelope(),
+    val sameAnchor = compareExactPublicationLocations(
+        validLocal.exactPublicationLocation(),
         validRemote.locator,
-    ) == com.ermao.library.shared.modules.reader.domain.ExactBlockMatch.Exact
+    ) == ExactLocationMatch.Exact
     val selected = if (localTarget.capturedAtEpochMillis > remoteTarget.capturedAtEpochMillis) {
         localTarget
     } else {
@@ -212,7 +223,7 @@ fun planReaderProgressRestore(
         ReaderProgressRestorePlan(
             null,
             selected.remoteSnapshot,
-            listOf(ReaderRestoreCandidate.PublicEngineLocator(selected.remoteSnapshot.locator.asEngineLocator())),
+            restoreCandidates(selected.remoteSnapshot),
             usesLocalExact = false,
         )
     } else {
@@ -221,15 +232,32 @@ fun planReaderProgressRestore(
 }
 
 fun restoreCandidates(snapshot: ReaderProgressSnapshotV4): List<ReaderRestoreCandidate> =
-    listOf(ReaderRestoreCandidate.PublicEngineLocator(snapshot.locator.asEngineLocator()))
+    when (val location = snapshot.locator) {
+        is ReflowablePublicationLocation -> listOf(ReaderRestoreCandidate.PublicEngineLocator(location.engineLocator))
+        is PdfPublicationLocation -> listOf(ReaderRestoreCandidate.PdfPage(location.pageIndex, location.pageProgression))
+        is ComicPublicationLocation -> listOf(ReaderRestoreCandidate.ComicPage(location.resourceHref, location.pageIndex))
+        is AudioPublicationLocation -> listOf(
+            ReaderRestoreCandidate.AudioPosition(location.fileId, location.chapterId, location.positionMillis),
+        )
+    }
 
 fun restoreCandidates(
     savedLocation: ReaderLocation,
     openedSource: ReaderSource,
 ): List<ReaderRestoreCandidate> {
-    val reflow = savedLocation as? com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
-        ?: return emptyList()
-    if (reflow.contentFingerprint != openedSource.contentFingerprint) return emptyList()
-    if (com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope.from(reflow) == null) return emptyList()
-    return listOf(ReaderRestoreCandidate.ExactEngineLocation(reflow))
+    if (savedLocation.contentFingerprint != openedSource.contentFingerprint) return emptyList()
+    return when (savedLocation) {
+        is ReflowReaderLocation -> if (
+            com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope.from(savedLocation) != null
+        ) listOf(ReaderRestoreCandidate.ExactEngineLocation(savedLocation)) else emptyList()
+        is PdfReaderLocation -> listOf(ReaderRestoreCandidate.PdfPage(savedLocation.pageIndex, savedLocation.pageProgression))
+        is ComicReaderLocation -> listOf(ReaderRestoreCandidate.ComicPage(savedLocation.resourceHref, savedLocation.pageIndex))
+        is AudioReaderLocation -> listOf(
+            ReaderRestoreCandidate.AudioPosition(
+                savedLocation.fileId,
+                savedLocation.chapterId,
+                savedLocation.positionMillis,
+            ),
+        )
+    }
 }

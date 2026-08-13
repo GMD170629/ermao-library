@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   compareExactReadiumLocators,
   isExactReadiumLocatorEnvelope,
+  parsePublicationLocation,
   parseReadiumLocatorEnvelope,
   type ReadiumLocatorEnvelope
 } from '@shuku/reader-core';
@@ -10,7 +11,9 @@ import exactRequest from '../../../../packages/reader-contracts/fixtures/exact-r
 import progressionOnly from '../../../../packages/reader-contracts/fixtures/progression-only-invalid.json';
 import { parseReaderV4ProgressSnapshot, v4LocationToDomain } from './progress-wire';
 
-const exact = exactRequest.locator as ReadiumLocatorEnvelope;
+const wire = parsePublicationLocation(exactRequest.locator);
+if (!wire || wire.kind !== 'reflowable') throw new Error('invalid exact fixture');
+const exact = { ...wire.engineLocator, publication: wire.publication } satisfies ReadiumLocatorEnvelope;
 
 test('accepts the canonical cross-language exact locator fixture', () => {
   assert.equal(isExactReadiumLocatorEnvelope(exact), true);
@@ -56,7 +59,7 @@ test('requires href plus the same selector, fragment, or normalized text after n
 });
 
 test('parses only exact v4 snapshots and never restores from display percent', () => {
-  const snapshot = parseReaderV4ProgressSnapshot({ schemaVersion: 4, revision: 18, locator: exact, displayPercent: 32.7, receivedAtEpochMillis: 1786500000100, capturedAtEpochMillis: 1786499999000 });
+  const snapshot = parseReaderV4ProgressSnapshot({ schemaVersion: 4, revision: 18, locator: wire, displayPercent: 32.7, receivedAtEpochMillis: 1786500000100, capturedAtEpochMillis: 1786499999000 });
   assert.equal(snapshot?.revision, 18);
   assert.equal(snapshot?.capturedAtEpochMillis, 1786499999000);
   assert.equal(v4LocationToDomain(snapshot?.locator ?? null, 'volume-1', 'mobi')?.kind, 'reflowable');

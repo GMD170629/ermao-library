@@ -22,9 +22,9 @@ final class IosReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unc
     }
 
     func save(progress: ErmaoShared.ReaderProgress) async throws {
-        guard progress.sourceId == target.volumeId,
-              progress.location is ErmaoShared.ReflowReaderLocation
-        else { throw IosReaderFailure(code: .persistenceFailed) }
+        guard progress.sourceId == target.volumeId else {
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
 
         let state = try await database.loadSyncState()
         let baseRevision = state.conflict?.server.revision ?? state.confirmedRevision

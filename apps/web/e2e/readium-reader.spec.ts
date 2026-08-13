@@ -20,9 +20,13 @@ const chapterTwo = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html x
 
 function exactLocator(cssSelector: string, highlight: string, progression = 0, href = 'chapter1.xhtml', position = 1) {
   return {
-    engine: 'readium', platform: 'web', version: 'readium-ts:2.8.2', publication: publicationFingerprint,
-    payload: { href, type: 'application/xhtml+xml', locations: { cssSelector, fragments: [cssSelector.slice(1)], progression, position }, text: { highlight } }
-  };
+    kind: 'reflowable',
+    publication: publicationFingerprint,
+    engineLocator: {
+      engine: 'readium', platform: 'web', version: 'readium-ts:2.8.2',
+      payload: { href, type: 'application/xhtml+xml', locations: { cssSelector, fragments: [cssSelector.slice(1)], progression, position }, text: { highlight } }
+    }
+  } as const;
 }
 
 function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legacyPercent = 0) {
@@ -90,9 +94,10 @@ test('Readium opens EPUB through RWPM and uploads an exact first-visible locator
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.engine).toBe('readium'); expect(write.locator.publication).toEqual(publicationFingerprint);
-  expect(write.locator.payload.href).toBe('chapter1.xhtml');
-  expect(write.locator.payload.locations.cssSelector || write.locator.payload.locations.fragments?.length || write.locator.payload.text?.highlight).toBeTruthy();
+  expect(write.locator.engineLocator.engine).toBe('readium'); expect(write.locator.publication).toEqual(publicationFingerprint);
+  expect(write.locator.kind).toBe('reflowable');
+  expect(write.locator.engineLocator.payload.href).toBe('chapter1.xhtml');
+  expect(write.locator.engineLocator.payload.locations.cssSelector || write.locator.engineLocator.payload.locations.fragments?.length || write.locator.engineLocator.payload.text?.highlight).toBeTruthy();
 });
 
 test('Readium progress advances while paging inside the same chapter', async ({ page }) => {
@@ -422,9 +427,9 @@ test('Readium restore is accepted only after re-capturing the same exact DOM blo
   await expect(frame.contentFrame().locator('#chapter-two')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.payload.href).toBe(target.payload.href);
-  expect(write.locator.payload.locations.cssSelector).toBe(target.payload.locations.cssSelector);
-  expect(write.locator.payload.text?.highlight).toBe(target.payload.text.highlight);
+  expect(write.locator.engineLocator.payload.href).toBe(target.engineLocator.payload.href);
+  expect(write.locator.engineLocator.payload.locations.cssSelector).toBe(target.engineLocator.payload.locations.cssSelector);
+  expect(write.locator.engineLocator.payload.text?.highlight).toBe(target.engineLocator.payload.text.highlight);
   await expect(page.getByText('无法精确恢复到另一设备的位置')).toHaveCount(0);
 });
 
@@ -433,8 +438,8 @@ test('whole-publication percentage is display-only and never an automatic restor
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.payload.locations.cssSelector).toBeTruthy();
-  expect(write.locator.payload.locations.progression).not.toBe(0.88);
+  expect(write.locator.engineLocator.payload.locations.cssSelector).toBeTruthy();
+  expect(write.locator.engineLocator.payload.locations.progression).not.toBe(0.88);
 });
 
 test('Readium settings expose unsupported pagination controls without accepting ineffective choices', async ({ page }) => {

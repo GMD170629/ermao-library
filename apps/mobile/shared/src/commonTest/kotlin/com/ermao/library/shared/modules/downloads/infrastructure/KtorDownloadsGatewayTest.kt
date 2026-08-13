@@ -42,7 +42,10 @@ class KtorDownloadsGatewayTest {
 
         val result = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume"))
         assertEquals("work", result.bootstrap.descriptor.identity.workId)
-        assertEquals("fingerprint", result.bootstrap.descriptor.identity.contentFingerprint)
+        assertEquals(
+            "sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad",
+            result.bootstrap.descriptor.identity.contentFingerprint,
+        )
         assertEquals("media", result.bootstrap.descriptor.mediaVersionId)
         assertEquals("EBOOK", result.bootstrap.descriptor.mediaKind)
         assertEquals(2, result.bootstrap.descriptor.volumeSortOrder)
@@ -61,6 +64,33 @@ class KtorDownloadsGatewayTest {
         }
 
         assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "volume"))
+        Unit
+    }
+
+    @Test
+    fun bootstrapMapsMobiFamilyAndRejectsTxt() = runBlocking {
+        val mobi = BOOTSTRAP
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"azw3\"")
+            .replace("\"format\":\"EPUB\"", "\"format\":\"AZW3\"")
+            .replace("\"kind\":\"EPUB\"", "\"kind\":\"AZW3\"")
+            .replace("application/epub+zip", "application/vnd.amazon.ebook")
+        val mobiGateway = gateway {
+            respond(mobi, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(mobiGateway.load(context, "volume"))
+            .bootstrap.descriptor
+        assertEquals("AZW3", descriptor.format)
+        assertEquals("application/vnd.amazon.ebook", descriptor.source.mimeType)
+
+        val txt = BOOTSTRAP
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"txt\"")
+            .replace("\"format\":\"EPUB\"", "\"format\":\"TXT\"")
+            .replace("\"kind\":\"EPUB\"", "\"kind\":\"TXT\"")
+            .replace("application/epub+zip", "text/plain")
+        val txtGateway = gateway {
+            respond(txt, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        assertIs<DownloadBootstrapResult.Failure>(txtGateway.load(context, "volume"))
         Unit
     }
 
@@ -205,6 +235,6 @@ class KtorDownloadsGatewayTest {
     }
 
     private companion object {
-        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","contentFingerprint":"fingerprint","book":{"id":"work","title":"Book","author":"Author","coverUrl":"/api/works/work/cover"},"mediaVersion":{"id":"media","workId":"work","mediaKind":"EBOOK","completed":false},"volume":{"id":"volume","mediaVersionId":"media","title":"Volume","volumeIndex":1.5,"sortOrder":2,"format":"EPUB","readerType":"reflowable"},"files":[{"id":"file","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":6,"url":"/api/files/file"}],"fileUrl":"/api/volumes/volume/file"}}"""
+        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"contentFingerprint":"sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad","book":{"id":"work","title":"Book","author":"Author","coverUrl":"/api/works/work/cover"},"mediaVersion":{"id":"media","workId":"work","mediaKind":"EBOOK","completed":false},"volume":{"id":"volume","mediaVersionId":"media","title":"Volume","volumeIndex":1.5,"sortOrder":2,"format":"EPUB","readerType":"reflowable"},"files":[{"id":"file","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":6,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file"}}"""
     }
 }

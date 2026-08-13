@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
@@ -13,15 +14,26 @@ from app.modules.reader.application.content_fingerprint import (
     publication_fingerprint_key,
 )
 from app.modules.reader.application.dto import (
+    ExactReaderLocationKind,
     ReaderAccessScope,
+    ReaderAudioExactLocationDto,
     ReaderBookmarkDto,
     ReaderBootstrapDto,
+    ReaderComicExactLocationDto,
+    ReaderExactLocationDto,
     ReaderExternalProgressDto,
+    ReaderFileDto,
     ReaderLocationKind,
+    ReaderPdfExactLocationDto,
     ReaderProgressDto,
     ReaderReadingStatus,
+    ReaderReflowableExactLocationDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
+)
+from app.modules.reader.application.exact_location import (
+    exact_location_kind,
+    exact_location_publication,
 )
 from app.modules.reader.application.ports import (
     ReaderClock,
@@ -34,6 +46,9 @@ from app.modules.reader.domain.volume_format import (
     ReaderType,
     reader_type_for_volume_format,
 )
+from app.contracts.media_capabilities import capability_for_format
+
+_SHA256_PATTERN = re.compile(r"^(?:sha256:)?[a-fA-F0-9]{64}$")
 
 
 class ReaderVolumeNotFound(Exception):
@@ -57,8 +72,8 @@ class ReaderFingerprintMismatch(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ReaderLocationFormatMismatch(Exception):
-    expected: ReaderLocationKind
-    received: ReaderLocationKind
+    expected: ReaderLocationKind | ExactReaderLocationKind
+    received: ReaderLocationKind | ExactReaderLocationKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,14 +105,7 @@ class SaveProgressCommand:
     client_id: str
     mutation_id: str
     base_revision: int
-    publication_original_file_hash: str
-    publication_parser: str
-    publication_normalization: str
-    locator_json: str
-    locator_href: str
-    locator_media_type: str
-    locator_progression: float | None
-    locator_total_progression: float | None
+    location: ReaderExactLocationDto
     captured_at_epoch_millis: int
 
 
@@ -172,6 +180,18 @@ class VolumeReaderService:
         if all(volume.id != volume_id for volume in available_volumes):
             raise ReaderVolumeNotFound
         files = self._repository.list_files(volume_id)
+        capability = capability_for_format(context.volume.format)
+        if capability is None or (
+            capability.requires_full_hash
+            and (
+                len(files) != 1
+                or files[0].full_hash is None
+                or _SHA256_PATTERN.fullmatch(files[0].full_hash) is None
+            )
+        ):
+            # Exact cross-platform restoration is unsafe until preparation has
+            # established the immutable source identity.
+            raise ReaderVolumeFormatUnsupported
         units = self._repository.list_units(volume_id)
         progresses = self._repository.list_progresses(
             user_id, [volume.id for volume in available_volumes]
@@ -222,22 +242,27 @@ class VolumeReaderService:
         reader_type = reader_type_for_volume_format(context.volume.format)
         if reader_type is None:
             raise ReaderVolumeFormatUnsupported
-        _require_matching_locator_media_type(reader_type, command.locator_media_type)
+        received_kind = exact_location_kind(command.location)
+        if received_kind != reader_type.value:
+            raise ReaderLocationFormatMismatch(
+                expected=reader_type.value,
+                received=received_kind,
+            )
         expected_publication = self._publication_locator_index.validate(
             volume_id=command.volume_id,
             access_scope=command.access_scope,
-            href=command.locator_href,
-            media_type=command.locator_media_type,
+            location=command.location,
         )
         if expected_publication is None:
             raise ReaderLocatorResourceMismatch(
-                href=command.locator_href,
-                media_type=command.locator_media_type,
+                href=_location_reference(command.location),
+                media_type=reader_type.value,
             )
+        received = exact_location_publication(command.location)
         received_publication = (
-            command.publication_original_file_hash.lower(),
-            command.publication_parser,
-            command.publication_normalization,
+            received.original_file_hash.lower(),
+            received.parser,
+            received.normalization,
         )
         expected_identity = (
             expected_publication.original_file_hash.lower(),
@@ -269,9 +294,9 @@ class VolumeReaderService:
         display_percent = _derive_display_percent(
             current=current,
             units=self._repository.list_units(command.volume_id),
-            href=command.locator_href,
-            progression=command.locator_progression,
-            total_progression=command.locator_total_progression,
+            files=self._repository.list_files(command.volume_id),
+            page_count=context.volume.page_count,
+            location=command.location,
         )
         try:
             progress = self._repository.save_exact_progress(
@@ -279,7 +304,7 @@ class VolumeReaderService:
                 context=context,
                 reader_type=reader_type.value,
                 display_percent=display_percent,
-                locator_json=command.locator_json,
+                location=command.location,
                 content_fingerprint=fingerprint_key,
                 client_id=command.client_id,
                 mutation_id=command.mutation_id,
@@ -541,29 +566,57 @@ def _derive_display_percent(
     *,
     current: ReaderProgressDto | None,
     units: list[ReaderUnitDto],
-    href: str,
-    progression: float | None,
-    total_progression: float | None,
+    files: list[ReaderFileDto],
+    page_count: int | None,
+    location: ReaderExactLocationDto,
 ) -> float:
     """Derive a presentation-only percentage without affecting restoration."""
 
-    if total_progression is not None:
-        return round(total_progression * 100, 6)
-    normalized_href = href.partition("#")[0]
-    located_index: int | None = None
-    for index, unit in enumerate(units):
-        unit_href = unit.href
-        if unit_href.partition("#")[0] == normalized_href:
-            located_index = index
-            break
-    if located_index is not None and units:
-        within_resource = progression or 0
-        return round((located_index + within_resource) / len(units) * 100, 6)
+    if isinstance(location, ReaderReflowableExactLocationDto):
+        if location.total_progression is not None:
+            return round(location.total_progression * 100, 6)
+        normalized_href = location.resource_href.partition("#")[0]
+        for index, unit in enumerate(units):
+            if unit.href.partition("#")[0] == normalized_href and units:
+                within_resource = location.resource_progression or 0
+                return round((index + within_resource) / len(units) * 100, 6)
+        if location.resource_progression is not None:
+            return round(location.resource_progression * 100, 6)
+    elif isinstance(location, ReaderPdfExactLocationDto) and page_count:
+        return round(
+            min(1.0, (location.page_index + location.page_progression) / page_count)
+            * 100,
+            6,
+        )
+    elif isinstance(location, ReaderComicExactLocationDto) and page_count:
+        if page_count == 1:
+            return 100
+        return round(location.page_index / (page_count - 1) * 100, 6)
+    elif isinstance(location, ReaderAudioExactLocationDto):
+        known_files = [file for file in files if file.duration_ms is not None]
+        if known_files and len(known_files) == len(files):
+            total_duration = sum(file.duration_ms or 0 for file in files)
+            elapsed = 0
+            for file in files:
+                if file.id == location.file_id:
+                    elapsed += location.position_millis
+                    break
+                elapsed += file.duration_ms or 0
+            if total_duration > 0:
+                return round(min(1.0, elapsed / total_duration) * 100, 6)
     if current is not None:
         return current.percent
-    if progression is not None:
-        return round(progression * 100, 6)
     return 0
+
+
+def _location_reference(location: ReaderExactLocationDto) -> str:
+    if isinstance(location, ReaderReflowableExactLocationDto):
+        return location.resource_href
+    if isinstance(location, ReaderPdfExactLocationDto):
+        return f"page-{location.page_index + 1}"
+    if isinstance(location, ReaderComicExactLocationDto):
+        return location.resource_href
+    return location.file_id
 
 
 def _page_from_references(references: tuple[str, ...]) -> int | None:

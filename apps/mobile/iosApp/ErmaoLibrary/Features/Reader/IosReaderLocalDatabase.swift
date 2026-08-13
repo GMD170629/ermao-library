@@ -90,17 +90,10 @@ private struct SendableProgressSnapshot: @unchecked Sendable { let value: ErmaoS
 private struct SendableProgressConflict: @unchecked Sendable { let value: ErmaoShared.ReaderProgressConflict }
 
 private actor IosReaderLocalDatabaseWorker {
-    private struct LegacyR4Row {
-        let namespaceKey: String
-        let sourceID: String
-        let document: String
-    }
-
     private static let maximumDocumentBytes = 1_048_576
     private static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private let ownerKey: String
-    private let namespace: ErmaoShared.ReaderSyncNamespace
     private let clientID: String
     private let sourceID: String
     private let localFingerprint: ErmaoShared.ContentFingerprint
@@ -120,7 +113,6 @@ private actor IosReaderLocalDatabaseWorker {
     ) throws {
         guard !identity.stableKey.isEmpty else { throw IosReaderFailure(code: .persistenceFailed) }
         ownerKey = identity.stableKey
-        namespace = identity.namespace_
         clientID = identity.clientId
         sourceID = identity.volumeId
         localFingerprint = identity.localContentFingerprint
@@ -174,7 +166,13 @@ private actor IosReaderLocalDatabaseWorker {
             "SELECT progress_document FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
             bindings: [.text(ownerKey), .text(sourceID)]
         ) {
-            let progress = try decodeProgress(payload, expectedSourceID: sourceID)
+            let progress: ErmaoShared.ReaderProgress
+            do {
+                progress = try decodeProgress(payload, expectedSourceID: sourceID)
+            } catch {
+                try discardCurrentContractState()
+                return SendableOptionalReaderProgress(value: nil)
+            }
             try requireIdentity(progress)
             return SendableOptionalReaderProgress(value: progress)
         }
@@ -309,8 +307,7 @@ private actor IosReaderLocalDatabaseWorker {
                 )
                 """
             )
-            try migrateIncompleteExactIdentity()
-            try migrateLegacyR4Schema()
+            try discardIncompatibleReaderStateIfNeeded()
             try fileManager.setAttributes(
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: databaseURL.path
@@ -320,6 +317,35 @@ private actor IosReaderLocalDatabaseWorker {
             if let database { sqlite3_close(database) }
             database = nil
             throw IosReaderFailure(code: .persistenceFailed)
+        }
+    }
+
+    private func discardIncompatibleReaderStateIfNeeded() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS reader_contract_metadata (
+                singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+                contract_version INTEGER NOT NULL
+            )
+            """
+        )
+        let version = try scalarText(
+            "SELECT CAST(contract_version AS TEXT) FROM reader_contract_metadata WHERE singleton = 1",
+            bindings: []
+        )
+        guard version != "5" else { return }
+        try withTransaction {
+            try execute("DELETE FROM reader_local_exact")
+            try execute("DELETE FROM reader_progress_sync_v4")
+            try execute("DROP TABLE IF EXISTS reader_progress")
+            try discardObsoleteSyncTables()
+            try run(
+                """
+                INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 5)
+                ON CONFLICT(singleton) DO UPDATE SET contract_version = excluded.contract_version
+                """,
+                bindings: []
+            )
         }
     }
 
@@ -362,8 +388,18 @@ private actor IosReaderLocalDatabaseWorker {
                 terminalFailureCode: nil
             )
         }
-        try requireDocumentSize(payload)
-        return syncCodec.decode(payload: payload)
+        do {
+            try requireDocumentSize(payload)
+            return try syncCodec.decode(payload: payload)
+        } catch {
+            try discardCurrentContractState()
+            return ErmaoShared.ReaderProgressDurableState(
+                confirmedRevision: 0,
+                pending: nil,
+                conflict: nil,
+                terminalFailureCode: nil
+            )
+        }
     }
 
     private func writeSyncState(_ state: ErmaoShared.ReaderProgressDurableState) throws {
@@ -378,128 +414,23 @@ private actor IosReaderLocalDatabaseWorker {
         )
     }
 
-    /// Migrates the short-lived v4 preview owner key (server + user) only
-    /// when its exact document proves the same client and local publication.
-    /// Another installation or content version is never adopted implicitly.
-    private func migrateIncompleteExactIdentity() throws {
-        let incompleteOwnerKey = Self.lengthPrefixed(namespace.serverIdentity, namespace.userId)
-        guard incompleteOwnerKey != ownerKey,
-              let payload = try scalarText(
-                  "SELECT progress_document FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-                  bindings: [.text(incompleteOwnerKey), .text(sourceID)]
-              )
-        else { return }
-        let progress = try decodeProgress(payload, expectedSourceID: sourceID)
-        guard matchesIdentity(progress) else { return }
-        try withTransaction {
-            try saveProgress(progress, ownerKey: ownerKey, preferNewer: true)
-            try run(
-                "DELETE FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-                bindings: [.text(incompleteOwnerKey), .text(sourceID)]
-            )
-        }
-    }
-
-    /// R4 previously stored exact progress together with a durable outbox keyed
-    /// by a namespace containing authorizationVersion. Exact documents are moved
-    /// first. Obsolete sync tables are removed only in the same successful
-    /// transaction. An unrecognizable exact row keeps the legacy table intact.
-    private func migrateLegacyR4Schema() throws {
-        guard try tableExists("reader_progress") else {
-            try discardObsoleteSyncTables()
-            return
-        }
-        let rows = try legacyR4Rows()
-        var migratedEveryExactRow = true
-        try withTransaction {
-            for row in rows {
-                guard let scope = Self.scope(fromLegacyNamespaceKey: row.namespaceKey),
-                      let progress = try? decodeProgress(row.document, expectedSourceID: row.sourceID)
-                else {
-                    migratedEveryExactRow = false
-                    continue
-                }
-                let fingerprint = progress.location.contentFingerprint
-                let migratedOwnerKey = Self.lengthPrefixed(
-                    scope.serverIdentity,
-                    scope.userID,
-                    progress.deviceId,
-                    row.sourceID,
-                    fingerprint.originalFileHash,
-                    fingerprint.parserVersion,
-                    fingerprint.normalizationVersion
-                )
-                guard migratedOwnerKey == ownerKey else {
-                    migratedEveryExactRow = false
-                    continue
-                }
-                try saveProgress(progress, ownerKey: ownerKey, preferNewer: true)
-            }
-            if migratedEveryExactRow { try execute("DROP TABLE reader_progress") }
-            try discardObsoleteSyncTables()
-        }
-    }
-
     private func discardObsoleteSyncTables() throws {
         try execute("DROP TABLE IF EXISTS reader_outbox")
         try execute("DROP TABLE IF EXISTS reader_sequence_counters")
     }
 
-    private func legacyR4Rows() throws -> [LegacyR4Row] {
-        let statement = try prepare(
-            "SELECT namespace_key, source_id, progress_document FROM reader_progress"
+    private func discardCurrentContractState() throws {
+        try run(
+            "DELETE FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
+            bindings: [.text(ownerKey), .text(sourceID)]
         )
-        defer { sqlite3_finalize(statement) }
-        var rows: [LegacyR4Row] = []
-        while true {
-            switch sqlite3_step(statement) {
-            case SQLITE_ROW:
-                guard let namespaceBytes = sqlite3_column_text(statement, 0),
-                      let sourceBytes = sqlite3_column_text(statement, 1),
-                      let documentBytes = sqlite3_column_text(statement, 2)
-                else { throw databaseFailure() }
-                rows.append(LegacyR4Row(
-                    namespaceKey: String(cString: namespaceBytes),
-                    sourceID: String(cString: sourceBytes),
-                    document: String(cString: documentBytes)
-                ))
-            case SQLITE_DONE:
-                return rows
-            default:
-                throw databaseFailure()
-            }
-        }
+        try run(
+            "DELETE FROM reader_progress_sync_v4 WHERE owner_key = ?",
+            bindings: [.text(ownerKey)]
+        )
     }
 
-    private static func scope(fromLegacyNamespaceKey value: String) -> (serverIdentity: String, userID: String)? {
-        guard let values = parseLengthPrefixed(value), values.count == 3 else { return nil }
-        return (values[0], values[1])
-    }
-
-    private static func parseLengthPrefixed(_ value: String) -> [String]? {
-        let utf16 = value as NSString
-        var cursor = 0
-        var result: [String] = []
-        while cursor < utf16.length {
-            let colon = utf16.range(of: ":", range: NSRange(location: cursor, length: utf16.length - cursor))
-            guard colon.location != NSNotFound,
-                  let length = Int(utf16.substring(with: NSRange(location: cursor, length: colon.location - cursor))),
-                  length >= 0,
-                  colon.location + 1 + length <= utf16.length
-            else { return nil }
-            let start = colon.location + 1
-            result.append(utf16.substring(with: NSRange(location: start, length: length)))
-            cursor = start + length
-        }
-        return result
-    }
-
-    private static func lengthPrefixed(_ values: String...) -> String {
-        values.map { "\(($0 as NSString).length):\($0)" }.joined()
-    }
-
-    /// R3 stored one KMP ReaderProgressJson document per opaque source key.
-    /// Import is lazy and deletion occurs only after the SQLite commit succeeds.
+    /// The pre-union file namespace is deliberately discarded, never imported.
     private func migrateLegacyProgressFile(sourceID: String) throws -> ErmaoShared.ReaderProgress? {
         let legacyURL = legacyProgressURL(sourceID)
         guard fileManager.fileExists(atPath: legacyURL.path) else { return nil }
@@ -511,11 +442,8 @@ private actor IosReaderLocalDatabaseWorker {
               values.isSymbolicLink != true,
               (values.fileSize ?? 0) <= Self.maximumDocumentBytes
         else { throw IosReaderFailure(code: .persistenceFailed) }
-        let payload = try String(contentsOf: legacyURL, encoding: .utf8)
-        let progress = try decodeProgress(payload, expectedSourceID: sourceID)
-        try withTransaction { try saveProgress(progress, ownerKey: ownerKey, preferNewer: false) }
         try fileManager.removeItem(at: legacyURL)
-        return progress
+        return nil
     }
 
     private func decodeProgress(
@@ -560,13 +488,6 @@ private actor IosReaderLocalDatabaseWorker {
         guard value.utf8.count <= Self.maximumDocumentBytes else {
             throw IosReaderFailure(code: .persistenceFailed)
         }
-    }
-
-    private func tableExists(_ name: String) throws -> Bool {
-        try scalarText(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            bindings: [.text(name)]
-        ) != nil
     }
 
     private func withTransaction<T>(_ operation: () throws -> T) throws -> T {

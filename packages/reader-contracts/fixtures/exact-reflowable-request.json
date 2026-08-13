@@ -5,27 +5,26 @@
   "baseRevision": 17,
   "capturedAtEpochMillis": 1786500000000,
   "locator": {
-    "engine": "readium",
-    "platform": "web",
-    "version": "readium-ts:2.8.2",
+    "kind": "reflowable",
     "publication": {
       "originalFileHash": "sha256:f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678",
       "parser": "libmobi:0.12@85dcfe",
       "normalization": "ermao-mobi-core-v1"
     },
-    "payload": {
-      "href": "part00000.html",
-      "type": "application/xhtml+xml",
-      "locations": {
-        "cssSelector": "#chapter-title",
-        "fragments": ["chapter-title"],
-        "progression": 0.42,
-        "position": 17
-      },
-      "text": {
-        "before": "前文",
-        "highlight": "天地玄黄，宇宙洪荒",
-        "after": "后文"
+    "engineLocator": {
+      "engine": "readium",
+      "platform": "web",
+      "version": "readium-ts:2.8.2",
+      "payload": {
+        "href": "part00000.html",
+        "type": "text/html",
+        "locations": {
+          "cssSelector": "#chapter-title",
+          "fragments": ["chapter-title"],
+          "progression": 0.42,
+          "position": 17
+        },
+        "text": {"before": "前文", "highlight": "天地玄黄，宇宙洪荒", "after": "后文"}
       }
     }
   }

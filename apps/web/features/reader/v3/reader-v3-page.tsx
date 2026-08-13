@@ -10,6 +10,7 @@ import {
   currentReaderServerIdentity,
   emitReaderDebug,
   getReaderRuntime,
+  publicationLocationFromDomain,
   publicationFingerprintKey
 } from '../../../lib/reader';
 import {
@@ -21,7 +22,7 @@ import {
 import { withBasePath } from '../../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../lib/pwa/update-coordination';
 import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '../reader-theme';
-import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
+import { fetchReaderBootstrap, ReaderBootstrapError, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
 import { resolveRequestedEpubHref } from './epub-direct-target';
 import { resolveStartupResume } from './local-resume';
@@ -37,7 +38,8 @@ function requireReflowableSourceFormat(bootstrap: ReaderBootstrap) {
   if (bootstrap.readerType !== 'reflowable' || !bootstrap.sourceFormat) {
     throw new Error('小说阅读器启动信息缺少源格式');
   }
-  return bootstrap.sourceFormat;
+  if (bootstrap.source.kind !== 'reflowable') throw new Error('REFLOWABLE_SOURCE_FORMAT_MISSING');
+  return bootstrap.source.sourceFormat;
 }
 
 type OpeningContext = {
@@ -380,11 +382,21 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       dispatch({ type: 'ready', requestId, bootstrap, preferences });
     })().catch((reason) => {
       if (controller.signal.aborted) return;
-      dispatch({ type: 'error', requestId, error: reason instanceof Error ? reason.message : '读取阅读器启动信息失败' });
+      const bootstrapMessage = reason instanceof ReaderBootstrapError
+        ? ({
+            VOLUME_FORMAT_UNSUPPORTED: '当前文件格式尚未开放阅读支持',
+            READER_FORMAT_MORPHOLOGY_MISMATCH: '文件格式与阅读器类型不匹配',
+            PUBLICATION_PROCESSING: '内容仍在准备中，请稍后重试',
+            PUBLICATION_CORRUPT: '文件已损坏，无法打开',
+            PUBLICATION_DRM: '受 DRM 保护的文件无法打开',
+            PUBLICATION_FAILED: '内容准备失败，请重新导入'
+          } as const)[reason.code]
+        : undefined;
+      dispatch({ type: 'error', requestId, error: bootstrapMessage ? translate(bootstrapMessage) : reason instanceof Error ? reason.message : translate('读取阅读器启动信息失败') });
     });
 
     return () => controller.abort();
-  }, [requestedHref, requestedPage, retry, runtime.storage, volumeId]);
+  }, [requestedHref, requestedPage, retry, runtime.storage, translate, volumeId]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
     const bootstrap = state.bootstrap;
@@ -432,7 +444,8 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const saveLocation = useCallback((location: Parameters<ReaderV4PageLocationHandler>[0], percent: number) => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
-    if (location.kind !== 'reflowable' || !location.exactLocator) {
+    const exactLocation = publicationLocationFromDomain(location, bootstrap.publicationFingerprint);
+    if (!exactLocation) {
       setStorageError(translate('当前阅读位置尚未形成可跨端验证的精确锚点'));
       return;
     }
@@ -443,7 +456,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       volumeId: bootstrap.volume.id,
       baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.volume.id)?.revision
         ?? bootstrap.serverProgressSnapshot?.revision ?? 0,
-      locator: location.exactLocator,
+      locator: exactLocation,
       displayPercent: percent
     }).catch((reason) => {
       setStorageError(reason instanceof Error ? reason.message : '阅读进度无法写入本机');

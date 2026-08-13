@@ -125,7 +125,7 @@ class ReaderProgressSyncTest {
         "android-client",
     )
 
-    private fun snapshot(locator: ReadiumLocatorEnvelope, revision: Long) = ReaderProgressSnapshotV4(
+    private fun snapshot(locator: PublicationLocation, revision: Long) = ReaderProgressSnapshotV4(
         "volume-1",
         revision,
         locator,

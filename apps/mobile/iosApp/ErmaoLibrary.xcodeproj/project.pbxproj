@@ -72,6 +72,18 @@
 		B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08500000000000000000085 /* IosPublicationDownloadSink.swift */; };
 		B08600000000000000000086 /* IosReaderComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08600000000000000000086 /* IosReaderComposition.swift */; };
 		B08800000000000000000088 /* IosMobiCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08800000000000000000088 /* IosMobiCore.swift */; };
+		B15700000000000000000157 /* IosMobiContentSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15700000000000000000157 /* IosMobiContentSanitizer.swift */; };
+		B15800000000000000000158 /* IosMobiLazyContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15800000000000000000158 /* IosMobiLazyContainer.swift */; };
+		B15900000000000000000159 /* IosMobiPublicationFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15900000000000000000159 /* IosMobiPublicationFactory.swift */; };
+		B17600000000000000000176 /* IosTxtPublicationFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17600000000000000000176 /* IosTxtPublicationFactory.swift */; };
+		B18000000000000000000180 /* IosCbzPublicationFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18000000000000000000180 /* IosCbzPublicationFactory.swift */; };
+		B18100000000000000000181 /* IosComicReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18100000000000000000181 /* IosComicReaderSession.swift */; };
+		B18200000000000000000182 /* IosComicReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18200000000000000000182 /* IosComicReaderView.swift */; };
+		B18300000000000000000183 /* CbzPublicationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18300000000000000000183 /* CbzPublicationTests.swift */; };
+		B18400000000000000000184 /* IosPdfReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18400000000000000000184 /* IosPdfReaderSession.swift */; };
+		B18500000000000000000185 /* IosPdfReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18500000000000000000185 /* IosPdfReaderView.swift */; };
+		B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18600000000000000000186 /* IosPdfPageCountStore.swift */; };
+		B18700000000000000000187 /* PdfReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18700000000000000000187 /* PdfReaderTests.swift */; };
 		B08700000000000000000087 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F08700000000000000000087 /* libsqlite3.tbd */; };
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
 		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
@@ -89,6 +101,7 @@
 		B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08200000000000000000082 /* ReaderPersistenceTests.swift */; };
 		B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08300000000000000000083 /* ReaderSecurityTests.swift */; };
 		B08900000000000000000089 /* MobiCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08900000000000000000089 /* MobiCoreTests.swift */; };
+		B16000000000000000000160 /* MobiPublicationFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F16000000000000000000160 /* MobiPublicationFactoryTests.swift */; };
 		B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09000000000000000000090 /* 01-basic-mobi6.mobi */; };
 		B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */; };
 		B09200000000000000000092 /* negative-synthetic-drm-header.mobi in Resources */ = {isa = PBXBuildFile; fileRef = F09200000000000000000092 /* negative-synthetic-drm-header.mobi */; };
@@ -116,6 +129,7 @@
 		BR0100000000000000000001 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = PR0100000000000000000001 /* ReadiumShared */; };
 		BR0200000000000000000002 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0200000000000000000002 /* ReadiumStreamer */; };
 		BR0300000000000000000003 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = PR0300000000000000000003 /* ReadiumNavigator */; };
+		BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */; };
 		BR0400000000000000000004 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = PR0400000000000000000004 /* SwiftSoup */; };
 		BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0500000000000000000005 /* ErmaoMobiCore */; };
 		A17400000000000000000174 /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17400000000000000000174 /* DownloadModels.swift */; };
@@ -209,6 +223,18 @@
 		F08500000000000000000085 /* IosPublicationDownloadSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPublicationDownloadSink.swift; sourceTree = "<group>"; };
 		F08600000000000000000086 /* IosReaderComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderComposition.swift; sourceTree = "<group>"; };
 		F08800000000000000000088 /* IosMobiCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiCore.swift; sourceTree = "<group>"; };
+		F15700000000000000000157 /* IosMobiContentSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiContentSanitizer.swift; sourceTree = "<group>"; };
+		F15800000000000000000158 /* IosMobiLazyContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiLazyContainer.swift; sourceTree = "<group>"; };
+		F15900000000000000000159 /* IosMobiPublicationFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiPublicationFactory.swift; sourceTree = "<group>"; };
+		F17600000000000000000176 /* IosTxtPublicationFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosTxtPublicationFactory.swift; sourceTree = "<group>"; };
+		F18000000000000000000180 /* IosCbzPublicationFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosCbzPublicationFactory.swift; sourceTree = "<group>"; };
+		F18100000000000000000181 /* IosComicReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosComicReaderSession.swift; sourceTree = "<group>"; };
+		F18200000000000000000182 /* IosComicReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosComicReaderView.swift; sourceTree = "<group>"; };
+		F18300000000000000000183 /* CbzPublicationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CbzPublicationTests.swift; sourceTree = "<group>"; };
+		F18400000000000000000184 /* IosPdfReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfReaderSession.swift; sourceTree = "<group>"; };
+		F18500000000000000000185 /* IosPdfReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfReaderView.swift; sourceTree = "<group>"; };
+		F18600000000000000000186 /* IosPdfPageCountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfPageCountStore.swift; sourceTree = "<group>"; };
+		F18700000000000000000187 /* PdfReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PdfReaderTests.swift; sourceTree = "<group>"; };
 		F08700000000000000000087 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -227,6 +253,7 @@
 		F08200000000000000000082 /* ReaderPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPersistenceTests.swift; sourceTree = "<group>"; };
 		F08300000000000000000083 /* ReaderSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSecurityTests.swift; sourceTree = "<group>"; };
 		F08900000000000000000089 /* MobiCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiCoreTests.swift; sourceTree = "<group>"; };
+		F16000000000000000000160 /* MobiPublicationFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobiPublicationFactoryTests.swift; sourceTree = "<group>"; };
 		F09000000000000000000090 /* 01-basic-mobi6.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "01-basic-mobi6.mobi"; path = "../../../test-data/library/mobi/01-basic-mobi6.mobi"; sourceTree = SOURCE_ROOT; };
 		F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "11-upstream-huff-cdic.mobi"; path = "../../../test-data/library/mobi/11-upstream-huff-cdic.mobi"; sourceTree = SOURCE_ROOT; };
 		F09200000000000000000092 /* negative-synthetic-drm-header.mobi */ = {isa = PBXFileReference; lastKnownFileType = file; name = "negative-synthetic-drm-header.mobi"; path = "../../../test-data/library/mobi/negative-synthetic-drm-header.mobi"; sourceTree = SOURCE_ROOT; };
@@ -271,6 +298,7 @@
 				BR0100000000000000000001 /* ReadiumShared in Frameworks */,
 				BR0200000000000000000002 /* ReadiumStreamer in Frameworks */,
 				BR0300000000000000000003 /* ReadiumNavigator in Frameworks */,
+				BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */,
 				BR0400000000000000000004 /* SwiftSoup in Frameworks */,
 				BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */,
 				B08700000000000000000087 /* libsqlite3.tbd in Frameworks */,
@@ -332,6 +360,9 @@
 				F08200000000000000000082 /* ReaderPersistenceTests.swift */,
 				F08300000000000000000083 /* ReaderSecurityTests.swift */,
 				F08900000000000000000089 /* MobiCoreTests.swift */,
+				F16000000000000000000160 /* MobiPublicationFactoryTests.swift */,
+				F18300000000000000000183 /* CbzPublicationTests.swift */,
+				F18700000000000000000187 /* PdfReaderTests.swift */,
 				E13800000000000000000138 /* DownloadStoreTests.swift */,
 				F09000000000000000000090 /* 01-basic-mobi6.mobi */,
 				F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */,
@@ -542,6 +573,16 @@
 				F08500000000000000000085 /* IosPublicationDownloadSink.swift */,
 				F08600000000000000000086 /* IosReaderComposition.swift */,
 				F08800000000000000000088 /* IosMobiCore.swift */,
+				F15700000000000000000157 /* IosMobiContentSanitizer.swift */,
+				F15800000000000000000158 /* IosMobiLazyContainer.swift */,
+				F15900000000000000000159 /* IosMobiPublicationFactory.swift */,
+				F17600000000000000000176 /* IosTxtPublicationFactory.swift */,
+				F18000000000000000000180 /* IosCbzPublicationFactory.swift */,
+				F18100000000000000000181 /* IosComicReaderSession.swift */,
+				F18200000000000000000182 /* IosComicReaderView.swift */,
+				F18400000000000000000184 /* IosPdfReaderSession.swift */,
+				F18500000000000000000185 /* IosPdfReaderView.swift */,
+				F18600000000000000000186 /* IosPdfPageCountStore.swift */,
 			);
 			path = Reader;
 			sourceTree = "<group>";
@@ -597,6 +638,7 @@
 				PR0100000000000000000001 /* ReadiumShared */,
 				PR0200000000000000000002 /* ReadiumStreamer */,
 				PR0300000000000000000003 /* ReadiumNavigator */,
+				PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */,
 				PR0400000000000000000004 /* SwiftSoup */,
 				PR0500000000000000000005 /* ErmaoMobiCore */,
 			);
@@ -834,6 +876,16 @@
 				B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */,
 				B08600000000000000000086 /* IosReaderComposition.swift in Sources */,
 				B08800000000000000000088 /* IosMobiCore.swift in Sources */,
+				B15700000000000000000157 /* IosMobiContentSanitizer.swift in Sources */,
+				B15800000000000000000158 /* IosMobiLazyContainer.swift in Sources */,
+				B15900000000000000000159 /* IosMobiPublicationFactory.swift in Sources */,
+				B17600000000000000000176 /* IosTxtPublicationFactory.swift in Sources */,
+				B18000000000000000000180 /* IosCbzPublicationFactory.swift in Sources */,
+				B18100000000000000000181 /* IosComicReaderSession.swift in Sources */,
+				B18200000000000000000182 /* IosComicReaderView.swift in Sources */,
+				B18400000000000000000184 /* IosPdfReaderSession.swift in Sources */,
+				B18500000000000000000185 /* IosPdfReaderView.swift in Sources */,
+				B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */,
 				A17400000000000000000174 /* DownloadModels.swift in Sources */,
 				A17500000000000000000175 /* DownloadCenterStore.swift in Sources */,
 				A17600000000000000000176 /* DownloadCenterView.swift in Sources */,
@@ -857,6 +909,9 @@
 				B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */,
 				B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */,
 				B08900000000000000000089 /* MobiCoreTests.swift in Sources */,
+				B16000000000000000000160 /* MobiPublicationFactoryTests.swift in Sources */,
+				B18300000000000000000183 /* CbzPublicationTests.swift in Sources */,
+				B18700000000000000000187 /* PdfReaderTests.swift in Sources */,
 				A13800000000000000000138 /* DownloadStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1150,6 +1205,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
 			productName = ReadiumNavigator;
+		};
+		PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			productName = ReadiumAdapterGCDWebServer;
 		};
 		PR0400000000000000000004 /* SwiftSoup */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import XCTest
 @preconcurrency import ErmaoShared
 @preconcurrency import ReadiumShared
@@ -18,7 +18,7 @@ final class ReaderProgressContractTests: XCTestCase {
         let encoded = try codec.encode(progress: progress)
         let decoded = try IosReaderProgressContractDecoder.decode(encoded)
 
-        XCTAssertTrue(encoded.contains(#""version":4"#))
+        XCTAssertTrue(encoded.contains(#""version":5"#))
         XCTAssertTrue(encoded.contains(#""engine":"readium""#))
         XCTAssertTrue(encoded.contains(#""payload":{"href""#))
         XCTAssertFalse(encoded.contains(#""payload":"{"#))
@@ -30,7 +30,7 @@ final class ReaderProgressContractTests: XCTestCase {
 
     func testLegacyV1AndProgressionOnlyLocatorsAreRejected() {
         let codec = ErmaoShared.PublicKt.createReaderProgressJson()
-        let legacy = exactProgressPayload().replacingOccurrences(of: #""version":4"#, with: #""version":1"#)
+        let legacy = exactProgressPayload().replacingOccurrences(of: #""version":5"#, with: #""version":1"#)
         let approximate = exactProgressPayload().replacingOccurrences(
             of: ##""locations":{"cssSelector":"#paragraph-17","progression":0.375}"##,
             with: #""locations":{"progression":0.375}"#
@@ -122,6 +122,6 @@ final class ReaderProgressContractTests: XCTestCase {
         updatedAt: Int64 = 1_775_988_123_456,
         deviceID: String = "ios-installation-a"
     ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":4,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"readium:epub","normalizationVersion":"epub-v1"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
+        ##"{"schema":"ermao.reader-progress","version":5,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"readium:epub","normalizationVersion":"epub-v1"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
     }
 }

@@ -149,21 +149,64 @@ def _exact_locator(
     if total_progression is not None:
         locations["totalProgression"] = total_progression
     return {
-        "engine": "readium",
-        "platform": platform,
-        "version": "readium-test:1",
+        "kind": "reflowable",
         "publication": bootstrap["publicationFingerprint"],
-        "payload": {
-            "href": href,
-            "type": media_type,
-            "locations": locations,
-            "text": {
-                "before": "前文",
-                "highlight": "跨端锚点",
-                "after": "后文",
+        "engineLocator": {
+            "engine": "readium",
+            "platform": platform,
+            "version": "readium-test:1",
+            "payload": {
+                "href": href,
+                "type": media_type,
+                "locations": locations,
+                "text": {
+                    "before": "前文",
+                    "highlight": "跨端锚点",
+                    "after": "后文",
+                },
             },
         },
     }
+
+
+def _exact_pdf_locator(
+    bootstrap: dict[str, object], *, page_index: int, page_progression: float
+) -> dict[str, object]:
+    return {
+        "kind": "pdf",
+        "publication": bootstrap["publicationFingerprint"],
+        "pageIndex": page_index,
+        "pageProgression": page_progression,
+    }
+
+
+def _exact_comic_locator(
+    bootstrap: dict[str, object], *, page_index: int, resource_href: str
+) -> dict[str, object]:
+    return {
+        "kind": "comic",
+        "publication": bootstrap["publicationFingerprint"],
+        "pageIndex": page_index,
+        "resourceHref": resource_href,
+    }
+
+
+def _exact_audio_locator(
+    bootstrap: dict[str, object],
+    *,
+    file_id: str,
+    chapter_id: str | None,
+    position_millis: int,
+) -> dict[str, object]:
+    locator: dict[str, object] = {
+        "kind": "audio",
+        "publication": bootstrap["publicationFingerprint"],
+        "fileId": file_id,
+        "positionMillis": position_millis,
+    }
+    if chapter_id is not None:
+        locator["chapterId"] = chapter_id
+    return locator
 
 
 def _progress_payload(
@@ -204,6 +247,14 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     }
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
+    fingerprint = bootstrap["publicationFingerprint"]
+    fingerprint_payload = (
+        f"{fingerprint['originalFileHash'].lower()}\0"
+        f"{fingerprint['parser']}\0{fingerprint['normalization']}"
+    )
+    assert bootstrap["contentFingerprint"] == (
+        f"sha256:{hashlib.sha256(fingerprint_payload.encode()).hexdigest()}"
+    )
 
     mutation_id = str(uuid4())
     progress_response = client.put(
@@ -224,8 +275,11 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert progress["revision"] == 1
     assert progress["displayPercent"] == 50
     assert progress["capturedAtEpochMillis"] == 1_700_000_001_000
-    assert progress["locator"]["engine"] == "readium"
-    assert progress["locator"]["payload"]["href"] == "OEBPS/chapter1.xhtml"
+    assert progress["locator"]["kind"] == "reflowable"
+    assert progress["locator"]["engineLocator"]["engine"] == "readium"
+    assert progress["locator"]["engineLocator"]["payload"]["href"] == (
+        "OEBPS/chapter1.xhtml"
+    )
     stored = db_session.query(LibraryReadingProgress).one()
     assert stored.user_id == user.id
     assert stored.volume_id == volume.id
@@ -272,6 +326,32 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert repeated.json()["data"] == progress
 
 
+def test_reader_v4_first_exact_save_replaces_status_only_revision_zero_row(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    finished = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/reading-status",
+        json={"status": "FINISHED"},
+    )
+    assert finished.status_code == 200
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+    saved = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(bootstrap, base_revision=0),
+    )
+
+    assert saved.status_code == 200, saved.json()
+    assert saved.json()["data"]["revision"] == 1
+    progress = db_session.query(LibraryReadingProgress).one()
+    assert progress.location_type == "reflowable"
+    assert progress.revision == 1
+
+
 def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     client: TestClient,
     db_session: Session,
@@ -287,35 +367,35 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
         "data"
     ]
+    assert bootstrap["sourceFormat"] == "pdf"
+
+    nullable_locator = _exact_pdf_locator(
+        bootstrap, page_index=2, page_progression=0.25
+    )
+    nullable_locator["engineLocator"] = None
+    explicit_null = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(bootstrap, locator=nullable_locator),
+    )
+    assert explicit_null.status_code == 422
 
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
         json=_progress_payload(
             bootstrap,
-            locator=_exact_locator(
-                bootstrap,
-                href="page-3",
-                media_type="application/pdf",
-                progression=0.25,
-                total_progression=0.25,
-            ),
+            locator=_exact_pdf_locator(bootstrap, page_index=2, page_progression=0.25),
         ),
     )
 
     assert response.status_code == 200
+    assert "engineLocator" not in response.json()["data"]["locator"]
 
     out_of_range = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
         json=_progress_payload(
             bootstrap,
             base_revision=1,
-            locator=_exact_locator(
-                bootstrap,
-                href="page-13",
-                media_type="application/pdf",
-                progression=0.25,
-                total_progression=0.25,
-            ),
+            locator=_exact_pdf_locator(bootstrap, page_index=12, page_progression=0.25),
         ),
     )
     assert out_of_range.status_code == 422
@@ -354,15 +434,14 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
         "data"
     ]
+    assert bootstrap["sourceFormat"] == "cbz"
 
     accepted = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
         json=_progress_payload(
             bootstrap,
-            locator=_exact_locator(
-                bootstrap,
-                href="page-2",
-                media_type="image/jpeg",
+            locator=_exact_comic_locator(
+                bootstrap, page_index=1, resource_href="images/0002.jpg"
             ),
         ),
     )
@@ -370,10 +449,8 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
         f"/api/reader/v4/volumes/{volume.id}/progress",
         json=_progress_payload(
             bootstrap,
-            locator=_exact_locator(
-                bootstrap,
-                href="page-2",
-                media_type="image/png",
+            locator=_exact_comic_locator(
+                bootstrap, page_index=1, resource_href="images/not-page-2.png"
             ),
         ),
     )
@@ -383,6 +460,70 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     assert wrong_media_type.json()["error"]["code"] == (
         "READER_LOCATOR_RESOURCE_INVALID"
     )
+
+
+def test_reader_v4_validates_audio_file_chapter_and_position(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    volume.format = "MP3"
+    volume.duration_ms = 60_000
+    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    file.kind = "AUDIO"
+    file.mime_type = "audio/mpeg"
+    file.duration_ms = 60_000
+    chapter = LibraryReadingUnit(
+        id="audio-chapter-1",
+        volume_id=volume.id,
+        file_id=file.id,
+        unit_type="chapter",
+        title="Chapter 1",
+        href="",
+        media_type="audio/mpeg",
+        sort_order=0,
+        start_ms=0,
+        end_ms=60_000,
+        duration_ms=60_000,
+        metadata_json="{}",
+    )
+    db_session.add(chapter)
+    db_session.commit()
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+
+    accepted = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(
+            bootstrap,
+            locator=_exact_audio_locator(
+                bootstrap,
+                file_id=file.id,
+                chapter_id=chapter.id,
+                position_millis=42_000,
+            ),
+        ),
+    )
+    out_of_range = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(
+            bootstrap,
+            locator=_exact_audio_locator(
+                bootstrap,
+                file_id=file.id,
+                chapter_id=chapter.id,
+                position_millis=60_001,
+            ),
+        ),
+    )
+
+    assert accepted.status_code == 200, accepted.json()
+    assert accepted.json()["data"]["locator"]["kind"] == "audio"
+    assert accepted.json()["data"]["displayPercent"] == 70
+    assert out_of_range.status_code == 422
+    assert out_of_range.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
 
 
 def test_reader_v4_rejects_position_only_reflow_anchor(
@@ -396,7 +537,7 @@ def test_reader_v4_rejects_position_only_reflow_anchor(
     ]
 
     locator = _exact_locator(bootstrap)
-    locator["payload"] = {
+    locator["engineLocator"]["payload"] = {
         "href": "chapter-1.xhtml",
         "type": "application/xhtml+xml",
         "locations": {"position": 1},
@@ -434,13 +575,15 @@ def test_reader_v4_rejects_progress_without_locator(
 @pytest.mark.parametrize(
     "mutate_locator",
     [
-        lambda locator: locator.update({"engine": "foliate"}),
-        lambda locator: locator.update({"platform": "desktop"}),
+        lambda locator: locator["engineLocator"].update({"engine": "foliate"}),
+        lambda locator: locator["engineLocator"].update({"platform": "desktop"}),
         lambda locator: locator["publication"].update(
             {"originalFileHash": "sha256:not-a-digest"}
         ),
-        lambda locator: locator["payload"].update({"href": ""}),
-        lambda locator: locator["payload"]["text"].update({"highlight": "x" * 513}),
+        lambda locator: locator["engineLocator"]["payload"].update({"href": ""}),
+        lambda locator: locator["engineLocator"]["payload"]["text"].update(
+            {"highlight": "x" * 513}
+        ),
         lambda locator: locator.update({"extra": True}),
     ],
 )
@@ -486,7 +629,7 @@ def test_reader_v4_rejects_locator_media_type_that_does_not_match_volume(
     )
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == ("READER_LOCATOR_MEDIA_TYPE_MISMATCH")
+    assert response.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
     assert db_session.query(LibraryReadingProgress).count() == 0
 
 
@@ -1125,16 +1268,9 @@ def test_reader_v4_openapi_requires_no_edition_or_user_identity(
         "locator",
     }
     components = schema["components"]["schemas"]
-    locator_reference = components[request_name]["properties"]["locator"]["$ref"]
-    locator_component = components[locator_reference.rsplit("/", 1)[-1]]
-    assert set(locator_component["required"]) == {
-        "engine",
-        "platform",
-        "version",
-        "publication",
-        "payload",
-    }
-    assert locator_component["properties"]["engine"]["const"] == "readium"
+    locator_schema = components[request_name]["properties"]["locator"]
+    assert locator_schema["discriminator"]["propertyName"] == "kind"
+    assert len(locator_schema["oneOf"]) == 4
 
 
 @pytest.mark.parametrize(

@@ -1,9 +1,9 @@
 import {
-  hasExactReadiumAnchor,
-  parseReadiumLocatorEnvelope,
+  parsePublicationLocation,
   publicationFingerprintsMatch,
+  quantizePageProgression,
   type PublicationFingerprint,
-  type ReadiumLocatorEnvelope,
+  type PublicationLocation,
   type ReaderLocation,
   type ReflowableFormat
 } from '@shuku/reader-core';
@@ -25,10 +25,10 @@ export function parseReaderV4ProgressSnapshot(value: unknown): ReaderProgressSna
   const displayPercent = normalizedPercent(finiteNumber(item.displayPercent) ?? null);
   const receivedAtEpochMillis = finiteNumber(item.receivedAtEpochMillis);
   const capturedAtEpochMillis = finiteNumber(item.capturedAtEpochMillis);
-  const locator = parseReadiumLocatorEnvelope(item.locator);
+  const locator = parsePublicationLocation(item.locator);
   if (item.schemaVersion !== 4 || revision === undefined || revision < 1 || !Number.isInteger(revision)
     || displayPercent === null || receivedAtEpochMillis === undefined || receivedAtEpochMillis < 0
-    || !locator || !hasExactReadiumAnchor(locator.payload)) return null;
+    || !locator) return null;
   return {
     schemaVersion: 4,
     revision,
@@ -40,7 +40,7 @@ export function parseReaderV4ProgressSnapshot(value: unknown): ReaderProgressSna
 }
 
 export function remoteLocationMatchesPublication(
-  locator: ReadiumLocatorEnvelope | null,
+  locator: PublicationLocation | null,
   publicationFingerprint: PublicationFingerprint | undefined
 ) {
   return Boolean(locator && publicationFingerprintsMatch(locator.publication, publicationFingerprint));
@@ -48,35 +48,76 @@ export function remoteLocationMatchesPublication(
 
 /** Maps only an exact Readium payload. No progression or percentage fallback exists. */
 export function v4LocationToDomain(
-  locator: ReadiumLocatorEnvelope | null,
-  _volumeId: string,
+  locator: PublicationLocation | null,
+  volumeId: string,
   format: ReflowableFormat | null
 ): ReaderLocation | null {
-  if (!locator || !format || !hasExactReadiumAnchor(locator.payload)) return null;
-  const locations = locator.payload.locations;
+  if (!locator) return null;
+  if (locator.kind === 'pdf') {
+    return { kind: 'pdf', pageNumber: locator.pageIndex + 1, pageProgression: locator.pageProgression };
+  }
+  if (locator.kind === 'comic') {
+    return { kind: 'comic', volumeId, pageIndex: locator.pageIndex + 1, resourceHref: locator.resourceHref };
+  }
+  if (locator.kind !== 'reflowable' || !format) return null;
+  const envelope = { ...locator.engineLocator, publication: locator.publication };
+  const locations = locator.engineLocator.payload.locations;
   const fragments = Array.isArray(locations.fragments) ? locations.fragments : [];
   const cfi = fragments.find((fragment) => fragment.startsWith('epubcfi('));
-  const highlight = locator.payload.text?.highlight;
+  const highlight = locator.engineLocator.payload.text?.highlight;
   return {
     kind: 'reflowable',
     format,
-    href: locator.payload.href,
+    href: locator.engineLocator.payload.href,
     ...(cfi ? { cfi } : {}),
     ...(typeof locations.progression === 'number' ? { resourceProgression: locations.progression } : {}),
     ...(typeof locations.position === 'number' ? { position: locations.position } : {}),
     ...(highlight ? {
       textQuote: {
         exact: highlight,
-        ...(locator.payload.text?.before ? { prefix: locator.payload.text.before } : {}),
-        ...(locator.payload.text?.after ? { suffix: locator.payload.text.after } : {})
+        ...(locator.engineLocator.payload.text?.before ? { prefix: locator.engineLocator.payload.text.before } : {}),
+        ...(locator.engineLocator.payload.text?.after ? { suffix: locator.engineLocator.payload.text.after } : {})
       }
     } : {}),
-    exactLocator: locator
+    exactLocator: envelope
   };
 }
 
-export function exactLocatorFromDomain(location: ReaderLocation): ReadiumLocatorEnvelope | null {
+export function exactLocatorFromDomain(location: ReaderLocation): PublicationLocation | null {
   return location.kind === 'reflowable' && location.exactLocator
-    ? parseReadiumLocatorEnvelope(location.exactLocator)
+    ? parsePublicationLocation({
+        kind: 'reflowable',
+        publication: location.exactLocator.publication,
+        engineLocator: {
+          engine: location.exactLocator.engine,
+          platform: location.exactLocator.platform,
+          version: location.exactLocator.version,
+          payload: location.exactLocator.payload
+        }
+      })
     : null;
+}
+
+export function publicationLocationFromDomain(
+  location: ReaderLocation,
+  publication: PublicationFingerprint
+): PublicationLocation | null {
+  if (location.kind === 'reflowable') return exactLocatorFromDomain(location);
+  if (location.kind === 'pdf') {
+    return parsePublicationLocation({
+      kind: 'pdf',
+      publication,
+      pageIndex: location.pageNumber - 1,
+      pageProgression: quantizePageProgression(location.pageProgression ?? 0)
+    });
+  }
+  if (location.kind === 'comic' && location.resourceHref) {
+    return parsePublicationLocation({
+      kind: 'comic',
+      publication,
+      pageIndex: location.pageIndex - 1,
+      resourceHref: location.resourceHref
+    });
+  }
+  return null;
 }

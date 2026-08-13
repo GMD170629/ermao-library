@@ -6,11 +6,11 @@ func localizedReaderOption(_ key: String, bundle: Bundle = .main) -> String {
     bundle.localizedString(forKey: key, value: key, table: nil)
 }
 
-struct IosEpubReaderView: View {
+struct IosReflowableReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @ObservedObject var session: IosEpubReaderSession
+    @ObservedObject var session: IosReflowableReaderSession
     @State private var activePanel: ReaderPanel?
     @State private var closingFailure = false
     @State private var sliderValue = 0.0
@@ -331,7 +331,7 @@ private struct ReaderClockView: View {
 
 private struct ReaderTOCSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var session: IosEpubReaderSession
+    @ObservedObject var session: IosReflowableReaderSession
 
     var body: some View {
         NavigationStack {
@@ -368,7 +368,7 @@ private struct ReaderTOCSheet: View {
 
 private struct ReaderNotesSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var session: IosEpubReaderSession
+    @ObservedObject var session: IosReflowableReaderSession
     @State private var tab = 0
 
     var body: some View {
@@ -422,7 +422,7 @@ private struct ReaderNotesSheet: View {
 
 private struct ReaderAppearanceSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var session: IosEpubReaderSession
+    @ObservedObject var session: IosReflowableReaderSession
 
     var body: some View {
         NavigationStack {
@@ -491,7 +491,7 @@ private struct ReaderAppearanceSheet: View {
 
 private struct ReaderSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var session: IosEpubReaderSession
+    @ObservedObject var session: IosReflowableReaderSession
 
     var body: some View {
         NavigationStack {

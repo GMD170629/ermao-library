@@ -219,21 +219,37 @@ class KtorDownloadsGateway(
         require(mediaKind.isCompatibleWith(readerType)) { "Bootstrap media kind is inconsistent" }
         val files = this["files"] as? JsonArray ?: throw IllegalArgumentException("Bootstrap files are missing")
         val fileUrl = requiredString("fileUrl")
+        require(fileUrl.isSafeMediaApiPath()) { "Bootstrap file URL is invalid" }
         val volumeFormat = volume.requiredString("format")
         val sourceFiles = files.map { it as? JsonObject ?: throw IllegalArgumentException("Bootstrap file is invalid") }
+        val expectedKind = if (readerType == DownloadReaderType.Reflowable) {
+            val sourceFormat = requiredString("sourceFormat").trim().lowercase()
+            require(sourceFormat in DOWNLOADABLE_REFLOWABLE_FORMATS) { "Unsupported reflowable source format" }
+            require(volumeFormat.equals(sourceFormat, ignoreCase = true)) { "Bootstrap source format is inconsistent" }
+            sourceFormat.uppercase()
+        } else {
+            volumeFormat.uppercase()
+        }
         val sourceFile = sourceFiles
-            .singleOrNull { it.requiredString("kind").equals(volumeFormat, ignoreCase = true) }
-            ?: sourceFiles.singleOrNull { it.requiredString("url") == fileUrl }
+            .sortedWith(compareBy<JsonObject>({ it.requiredNonNegativeInt("sortOrder") }, { it.requiredString("id") }))
+            .firstOrNull { it.requiredString("kind").equals(expectedKind, ignoreCase = true) }
             ?: throw IllegalArgumentException("Bootstrap publication file is missing")
         require(sourceFile.requiredString("url").isSafeMediaApiPath()) { "Bootstrap publication URL is invalid" }
         val sourceSize = sourceFile.requiredLong("sizeBytes")
-        val sourceMime = sourceFile.requiredString("mimeType")
+        val sourceMime = sourceFile.requiredString("mimeType").lowercase()
+        if (readerType == DownloadReaderType.Reflowable) {
+            require(sourceMime in allowedReflowableMimeTypes(expectedKind)) {
+                "Bootstrap publication MIME type is inconsistent"
+            }
+        }
+        val contentFingerprint = requiredString("contentFingerprint")
+        require(contentFingerprint.matches(CONTENT_FINGERPRINT)) { "Bootstrap content fingerprint is invalid" }
         return DownloadDescriptor(
             identity = DownloadIdentity(
                 namespace = context.namespace,
                 workId = work.requiredString("id"),
                 volumeId = expectedVolumeId,
-                contentFingerprint = requiredString("contentFingerprint"),
+                contentFingerprint = contentFingerprint,
             ),
             workTitle = work.requiredString("title"),
             workAuthor = work.optionalString("author"),
@@ -302,7 +318,20 @@ class KtorDownloadsGateway(
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
+        val DOWNLOADABLE_REFLOWABLE_FORMATS = setOf("epub", "mobi", "azw", "azw3", "prc")
+        val CONTENT_FINGERPRINT = Regex("^sha256:[0-9a-f]{64}$")
     }
+}
+
+private fun allowedReflowableMimeTypes(kind: String): Set<String> = when (kind) {
+    "EPUB" -> setOf("application/epub+zip", "application/octet-stream")
+    "MOBI", "PRC" -> setOf("application/x-mobipocket-ebook", "application/octet-stream")
+    "AZW", "AZW3" -> setOf(
+        "application/vnd.amazon.ebook",
+        "application/x-mobipocket-ebook",
+        "application/octet-stream",
+    )
+    else -> emptySet()
 }
 
 fun parseDownloadReaderType(value: String): DownloadReaderType = when (value.trim().lowercase()) {

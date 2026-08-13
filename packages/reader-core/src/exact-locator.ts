@@ -82,7 +82,7 @@ function utf8Length(value: unknown): number {
   }
 }
 
-function parseFingerprint(value: unknown): PublicationFingerprint | null {
+export function parsePublicationFingerprint(value: unknown): PublicationFingerprint | null {
   const item = record(value);
   if (!item) return null;
   const originalFileHash = nonEmptyString(item.originalFileHash);
@@ -147,7 +147,7 @@ export function parseReadiumLocatorEnvelope(value: unknown): ReadiumLocatorEnvel
     ? item.platform
     : null;
   const version = nonEmptyString(item.version);
-  const publication = parseFingerprint(item.publication);
+  const publication = parsePublicationFingerprint(item.publication);
   const payload = record(item.payload);
   if (!platform || !version || codePointLength(version) > 256 || !publication || !payload) return null;
   const href = nonEmptyString(payload.href);

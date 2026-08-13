@@ -18,10 +18,20 @@ from app.core.authorization import authorization_context, can_access_volume
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.reader.application.content_fingerprint import (
+    publication_fingerprint_key,
+)
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
+    ReaderAudioExactLocationDto,
     ReaderBookmarkDto,
+    ReaderComicExactLocationDto,
+    ReaderEngineLocatorDto,
+    ReaderExactLocationDto,
+    ReaderPdfExactLocationDto,
     ReaderProgressDto,
+    ReaderPublicationFingerprintDto,
+    ReaderReflowableExactLocationDto,
     ReaderVolumeDto,
 )
 from app.modules.reader.application.volume_reader import (
@@ -44,7 +54,11 @@ from app.modules.reader.domain.volume_format import (
     reader_type_for_volume_format,
 )
 from app.modules.reader.presentation.v4_schemas import (
-    LocatorEnvelope,
+    AudioExactLocation,
+    ComicExactLocation,
+    ExactReaderLocation,
+    OpaqueReadiumEngineLocator,
+    PdfExactLocation,
     PublicationFingerprint,
     ReaderBookmark,
     ReaderBookmarksData,
@@ -74,7 +88,10 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderUnitSummary,
     ReaderValidationError,
     ReaderVolumeSummary,
-    ReflowableFormat,
+    ReadiumEngineLocator,
+    ReadiumLocatorPayload,
+    ReflowableExactLocation,
+    ReaderSourceFormat,
 )
 
 router = APIRouter(
@@ -84,11 +101,9 @@ router = APIRouter(
 )
 
 _LOCATION_ADAPTER: TypeAdapter[ReaderLocation] = TypeAdapter(ReaderLocation)
-_LOCATOR_ADAPTER: TypeAdapter[LocatorEnvelope] = TypeAdapter(LocatorEnvelope)
 _METADATA_ADAPTER = TypeAdapter(dict[str, ReaderJsonValue])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
-_REFLOWABLE_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"})
 _PUBLICATION_SERVER_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt"})
 
 
@@ -156,20 +171,141 @@ def _location_json(location: ReaderLocation | None) -> str | None:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _locator(raw_json: str | None) -> LocatorEnvelope | None:
-    if not raw_json:
-        return None
-    try:
-        return _LOCATOR_ADAPTER.validate_json(raw_json)
-    except ValidationError:
-        return None
+def _fingerprint_dto(value: PublicationFingerprint) -> ReaderPublicationFingerprintDto:
+    return ReaderPublicationFingerprintDto(
+        original_file_hash=value.original_file_hash,
+        parser=value.parser,
+        normalization=value.normalization,
+    )
 
 
-def _locator_json(locator: LocatorEnvelope) -> str:
-    return json.dumps(
-        locator.model_dump(by_alias=True, exclude_none=True),
-        ensure_ascii=False,
-        separators=(",", ":"),
+def _engine_dto(
+    value: ReadiumEngineLocator | OpaqueReadiumEngineLocator,
+) -> ReaderEngineLocatorDto:
+    return ReaderEngineLocatorDto(
+        platform=value.platform,
+        version=value.version,
+        payload_json=json.dumps(
+            value.payload.model_dump(by_alias=True, exclude_none=True)
+            if isinstance(value.payload, ReadiumLocatorPayload)
+            else value.payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
+    publication = _fingerprint_dto(value.publication)
+    if isinstance(value, ReflowableExactLocation):
+        payload = value.engine_locator.payload
+        return ReaderReflowableExactLocationDto(
+            publication=publication,
+            resource_href=payload.href,
+            media_type=payload.type,
+            resource_progression=payload.locations.progression,
+            total_progression=payload.locations.total_progression,
+            engine_locator=_engine_dto(value.engine_locator),
+        )
+    if isinstance(value, PdfExactLocation):
+        return ReaderPdfExactLocationDto(
+            publication=publication,
+            page_index=value.page_index,
+            page_progression=value.page_progression,
+            engine_locator=(
+                _engine_dto(value.engine_locator)
+                if value.engine_locator is not None
+                else None
+            ),
+        )
+    if isinstance(value, ComicExactLocation):
+        return ReaderComicExactLocationDto(
+            publication=publication,
+            page_index=value.page_index,
+            resource_href=value.resource_href,
+            engine_locator=(
+                _engine_dto(value.engine_locator)
+                if value.engine_locator is not None
+                else None
+            ),
+        )
+    return ReaderAudioExactLocationDto(
+        publication=publication,
+        file_id=value.file_id,
+        chapter_id=value.chapter_id,
+        position_millis=value.position_millis,
+        engine_locator=(
+            _engine_dto(value.engine_locator)
+            if value.engine_locator is not None
+            else None
+        ),
+    )
+
+
+def _publication_model(
+    value: ReaderPublicationFingerprintDto,
+) -> PublicationFingerprint:
+    return PublicationFingerprint(
+        originalFileHash=value.original_file_hash,
+        parser=value.parser,
+        normalization=value.normalization,
+    )
+
+
+def _opaque_engine_model(
+    value: ReaderEngineLocatorDto | None,
+) -> OpaqueReadiumEngineLocator | None:
+    if value is None:
+        return None
+    payload = json.loads(value.payload_json)
+    if not isinstance(payload, dict):
+        raise TypeError("Stored Readium engine payload is not an object")
+    return OpaqueReadiumEngineLocator(
+        engine="readium",
+        platform=value.platform,
+        version=value.version,
+        payload=payload,
+    )
+
+
+def _exact_location_model(value: ReaderExactLocationDto) -> ExactReaderLocation:
+    publication = _publication_model(value.publication)
+    if isinstance(value, ReaderReflowableExactLocationDto):
+        return ReflowableExactLocation(
+            kind="reflowable",
+            publication=publication,
+            engineLocator=ReadiumEngineLocator(
+                engine="readium",
+                platform=value.engine_locator.platform,
+                version=value.engine_locator.version,
+                payload=ReadiumLocatorPayload.model_validate_json(
+                    value.engine_locator.payload_json
+                ),
+            ),
+        )
+    if isinstance(value, ReaderPdfExactLocationDto):
+        return PdfExactLocation(
+            kind="pdf",
+            publication=publication,
+            pageIndex=value.page_index,
+            pageProgression=value.page_progression,
+            engineLocator=_opaque_engine_model(value.engine_locator),
+        )
+    if isinstance(value, ReaderComicExactLocationDto):
+        return ComicExactLocation(
+            kind="comic",
+            publication=publication,
+            pageIndex=value.page_index,
+            resourceHref=value.resource_href,
+            engineLocator=_opaque_engine_model(value.engine_locator),
+        )
+    return AudioExactLocation(
+        kind="audio",
+        publication=publication,
+        fileId=value.file_id,
+        chapterId=value.chapter_id,
+        positionMillis=value.position_millis,
+        engineLocator=_opaque_engine_model(value.engine_locator),
     )
 
 
@@ -211,13 +347,12 @@ def _volume_summary(
 def _progress_snapshot(
     progress: ReaderProgressDto,
 ) -> ReaderProgressSnapshot:
-    locator = _locator(progress.location_json)
-    if locator is None or progress.revision < 1:
+    if progress.exact_location is None or progress.revision < 1:
         raise ValueError("Exact Reader v4 progress requires a revisioned Locator")
     return ReaderProgressSnapshot(
         schemaVersion=4,
         revision=progress.revision,
-        locator=locator,
+        locator=_exact_location_model(progress.exact_location),
         displayPercent=progress.percent,
         receivedAtEpochMillis=_epoch_millis(progress.updated_at),
         capturedAtEpochMillis=_epoch_millis(progress.progressed_at),
@@ -319,20 +454,20 @@ def reader_bootstrap_v4(
     reader_type = _reader_type(context.volume.format)
     progress = bootstrap.progress_by_volume_id.get(volume_id)
     capabilities = capabilities_for_reader_type(reader_type)
-    source_format: ReflowableFormat | None = None
     normalized_format = context.volume.format.lower()
-    if normalized_format in _REFLOWABLE_FORMATS:
-        source_format = cast(ReflowableFormat, normalized_format)
     return ReaderBootstrapResponse(
         data=ReaderBootstrapData(
             schemaVersion=4,
             userId=user.id,
             readerType=reader_type.value,
-            sourceFormat=source_format,
+            sourceFormat=cast(ReaderSourceFormat, normalized_format),
             publicationFingerprint=PublicationFingerprint(
                 originalFileHash=bootstrap.publication_fingerprint.original_file_hash,
                 parser=bootstrap.publication_fingerprint.parser,
                 normalization=bootstrap.publication_fingerprint.normalization,
+            ),
+            contentFingerprint=publication_fingerprint_key(
+                bootstrap.publication_fingerprint
             ),
             book=ReaderBookSummary(
                 id=context.work.id,
@@ -491,7 +626,6 @@ def save_progress_v4(
     user = _current_user(db, request, settings)
     if not can_access_volume(db, user, volume_id):
         raise _not_found()
-    locator_json = _locator_json(payload.locator)
     try:
         progress = _service(db, settings).save_progress(
             SaveProgressCommand(
@@ -501,18 +635,7 @@ def save_progress_v4(
                 client_id=payload.client_id,
                 mutation_id=str(payload.mutation_id),
                 base_revision=payload.base_revision,
-                publication_original_file_hash=(
-                    payload.locator.publication.original_file_hash
-                ),
-                publication_parser=payload.locator.publication.parser,
-                publication_normalization=(payload.locator.publication.normalization),
-                locator_json=locator_json,
-                locator_href=payload.locator.payload.href,
-                locator_media_type=payload.locator.payload.type,
-                locator_progression=payload.locator.payload.locations.progression,
-                locator_total_progression=(
-                    payload.locator.payload.locations.total_progression
-                ),
+                location=_exact_location_dto(payload.locator),
                 captured_at_epoch_millis=payload.captured_at_epoch_millis,
             )
         )

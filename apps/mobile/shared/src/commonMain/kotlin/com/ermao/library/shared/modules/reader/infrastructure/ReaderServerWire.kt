@@ -1,7 +1,7 @@
 package com.ermao.library.shared.modules.reader.infrastructure
 
 import com.ermao.library.shared.modules.reader.application.ReaderProgressUpload
-import com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope
+import com.ermao.library.shared.modules.reader.domain.PublicationLocation
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -38,7 +38,7 @@ class ReaderServerWireMapper(
         return ReaderProgressSnapshotV4(
             sourceId = expectedSourceId,
             revision = root.requiredLong("revision"),
-            locator = ReadiumLocatorEnvelope.parse(locator.toString()),
+            locator = PublicationLocation.parse(locator.toString()),
             displayPercent = root.requiredDouble("displayPercent"),
             receivedAtEpochMillis = root.requiredLong("receivedAtEpochMillis"),
             capturedAtEpochMillis = root.optionalLong("capturedAtEpochMillis"),

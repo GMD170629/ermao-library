@@ -1,4 +1,4 @@
-import { hasExactReadiumAnchor, parseReadiumLocatorEnvelope } from '@shuku/reader-core';
+import { isExactPublicationLocation, parsePublicationLocation } from '@shuku/reader-core';
 import { emitReaderDebug } from './debug';
 import {
   READER_PROGRESS_DEBOUNCE_MS,
@@ -55,20 +55,12 @@ export class ReaderProgressSyncCoordinator {
   deactivateUser() { void this.flushNow({ timeoutMs: this.exitUploadTimeoutMs }); this.activeUserId = null; }
 
   enqueue(input: ProgressSaveInput) {
-    if ('location' in input) return this.saveAudioExact(input);
-    const locator = parseReadiumLocatorEnvelope(input.locator);
-    if (!locator || !hasExactReadiumAnchor(locator.payload)) return Promise.reject(new Error('READER_LOCATOR_NOT_EXACT'));
+    const locator = parsePublicationLocation(input.locator);
+    if (!locator || !isExactPublicationLocation(locator)) return Promise.reject(new Error('READER_LOCATOR_NOT_EXACT'));
     if (this.activeUserId && this.activeUserId !== input.userId) return Promise.reject(new Error('Progress owner does not match active user'));
     this.activeUserId = input.userId; this.pendingInput = { ...input, locator }; this.clearTimer();
     this.timer = setTimeout(() => { this.timer = null; void this.commitPending(); }, Math.max(0, this.debounceMs));
     return new Promise<ExactProgressRecord>((resolve, reject) => this.waiters.push({ resolve, reject }));
-  }
-
-  private async saveAudioExact(input: Extract<ProgressSaveInput, { location: unknown }>) {
-    const clientId = await this.storage.getClientId();
-    const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, volumeId: input.volumeId, localContentFingerprint: input.localContentFingerprint } as const;
-    const capturedAtEpochMillis = this.now();
-    return this.storage.putExactProgress({ ...identity, key: exactProgressKey(identity), schemaVersion: 1, workId: input.workId, location: input.location, displayPercent: normalizedPercent(input.percent), percent: normalizedPercent(input.percent), revision: 0, capturedAtEpochMillis, updatedAtEpochMillis: capturedAtEpochMillis });
   }
 
   async flushNow(options: { timeoutMs?: number } = {}) {

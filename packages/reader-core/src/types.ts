@@ -44,11 +44,13 @@ export type ComicLocation = {
   kind: 'comic';
   volumeId: string;
   pageIndex: number;
+  resourceHref?: string;
 };
 
 export type PdfLocation = {
   kind: 'pdf';
   pageNumber: number;
+  pageProgression?: number;
 };
 
 export type ReaderLocation = ReflowableLocation | LegacyEpubLocation | ComicLocation | PdfLocation;

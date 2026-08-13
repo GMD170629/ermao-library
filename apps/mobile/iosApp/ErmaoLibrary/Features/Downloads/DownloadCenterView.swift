@@ -204,7 +204,10 @@ struct ReaderDownloadTransitionView: View {
         guard !didEnterReader else { return }
         didEnterReader = true
         if handoff.readerType == .reflowable,
-           handoff.format.caseInsensitiveCompare("EPUB") == .orderedSame {
+           ManagedReaderAccessPolicy.supportsNativeReader(
+               readerType: handoff.readerType,
+               format: handoff.format
+           ) {
             guard readerComposition != nil else {
                 phase = .failure("READER_TYPE_UNAVAILABLE")
                 return

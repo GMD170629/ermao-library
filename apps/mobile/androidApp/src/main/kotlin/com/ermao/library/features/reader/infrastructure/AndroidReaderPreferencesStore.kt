@@ -1,6 +1,7 @@
 package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
+import androidx.core.content.edit
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderPreferencesJson
 import java.security.MessageDigest
@@ -19,7 +20,9 @@ internal class AndroidReaderPreferencesStore(
         ?: ReaderPreferences()
 
     fun save(value: ReaderPreferences) {
-        check(preferences.edit().putString(key, codec.encode(value)).commit()) {
+        val encodedPreferences = codec.encode(value)
+        preferences.edit(commit = true) { putString(key, encodedPreferences) }
+        check(preferences.getString(key, null) == encodedPreferences) {
             "Reader preferences could not be saved"
         }
     }

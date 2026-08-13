@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+@preconcurrency import ErmaoShared
 
 struct IosManagedPublication: Sendable, Equatable {
     let sourceID: String
@@ -10,6 +11,7 @@ struct IosManagedPublication: Sendable, Equatable {
     let workID: String?
     let volumeID: String?
     let serverContentFingerprint: String?
+    let sourceFormat: ErmaoShared.ReaderSourceFormat
 }
 
 actor IosManagedPublicationStore {
@@ -47,10 +49,36 @@ actor IosManagedPublicationStore {
         workID: String? = nil,
         volumeID: String? = nil,
         expectedOriginalFileHash: String? = nil
-    ) throws -> IosManagedPublication {
+    ) async throws -> IosManagedPublication {
+        try await importPublication(
+            from: sourceURL,
+            sourceID: sourceID,
+            displayTitle: displayTitle,
+            sourceFormat: .epub,
+            workID: workID,
+            volumeID: volumeID,
+            expectedOriginalFileHash: expectedOriginalFileHash,
+            parserVersion: Self.parserVersion,
+            normalizationVersion: Self.normalizationVersion
+        )
+    }
+
+    func importPublication(
+        from sourceURL: URL,
+        sourceID: String,
+        displayTitle: String,
+        sourceFormat: ErmaoShared.ReaderSourceFormat,
+        workID: String? = nil,
+        volumeID: String? = nil,
+        expectedOriginalFileHash: String? = nil,
+        parserVersion: String,
+        normalizationVersion: String
+    ) async throws -> IosManagedPublication {
         guard !sourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !displayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              sourceURL.pathExtension.lowercased() == "epub"
+              Self.pathExtension(for: sourceFormat) == sourceURL.pathExtension.lowercased(),
+              !parserVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !normalizationVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             throw IosReaderFailure(code: .unsupportedFormat)
         }
@@ -63,7 +91,8 @@ actor IosManagedPublicationStore {
         }
 
         let key = opaqueKey(sourceID)
-        let destination = root.appendingPathComponent(key).appendingPathExtension("epub")
+        let destination = root.appendingPathComponent(key)
+            .appendingPathExtension(Self.pathExtension(for: sourceFormat))
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
         let staging = root.appendingPathComponent(".\(key).\(UUID().uuidString).partial")
         try requireContained(destination)
@@ -94,13 +123,21 @@ actor IosManagedPublicationStore {
         }
         try output.synchronize()
         let originalFileHash = "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard expectedOriginalFileHash == nil || expectedOriginalFileHash == originalFileHash else {
+        guard expectedOriginalFileHash == nil || expectedOriginalFileHash?.caseInsensitiveCompare(
+            originalFileHash
+        ) == .orderedSame else {
             throw IosReaderFailure(code: .corruptFile)
         }
+        try await validatePublication(
+            at: staging,
+            sourceFormat: sourceFormat,
+            parserVersion: parserVersion,
+            normalizationVersion: normalizationVersion
+        )
         let fingerprint = try IosContentFingerprint(
             originalFileHash: originalFileHash,
-            parserVersion: Self.parserVersion,
-            normalizationVersion: Self.normalizationVersion
+            parserVersion: parserVersion,
+            normalizationVersion: normalizationVersion
         )
         let metadata = Metadata(
             sourceID: sourceID,
@@ -109,7 +146,8 @@ actor IosManagedPublicationStore {
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil
+            serverContentFingerprint: nil,
+            sourceFormat: sourceFormat.wireValue
         )
         try install(staging: staging, destination: destination)
         do {
@@ -127,7 +165,8 @@ actor IosManagedPublicationStore {
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil
+            serverContentFingerprint: nil,
+            sourceFormat: sourceFormat
         )
     }
 
@@ -157,19 +196,31 @@ actor IosManagedPublicationStore {
         expectedOriginalFileHash: String?,
         parserVersion: String,
         normalizationVersion: String,
+        sourceFormat: ErmaoShared.ReaderSourceFormat,
         workID: String,
         volumeID: String
-    ) throws -> IosManagedPublication {
+    ) async throws -> IosManagedPublication {
         try requireContained(staging)
         guard byteCount == expectedSize,
               byteCount <= Self.maximumPublicationBytes,
-              expectedOriginalFileHash == nil || expectedOriginalFileHash == originalFileHash
+              expectedOriginalFileHash == nil || expectedOriginalFileHash?.caseInsensitiveCompare(
+                  originalFileHash
+              ) == .orderedSame
         else { throw IosReaderFailure(code: .corruptFile) }
         let stagingValues = try staging.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard stagingValues.isRegularFile == true,
               stagingValues.isSymbolicLink != true,
               Int64(stagingValues.fileSize ?? -1) == byteCount
         else { throw IosReaderFailure(code: .corruptFile) }
+        guard try hash(of: staging).caseInsensitiveCompare(originalFileHash) == .orderedSame else {
+            throw IosReaderFailure(code: .corruptFile)
+        }
+        try await validatePublication(
+            at: staging,
+            sourceFormat: sourceFormat,
+            parserVersion: parserVersion,
+            normalizationVersion: normalizationVersion
+        )
 
         let fingerprint = try IosContentFingerprint(
             originalFileHash: originalFileHash,
@@ -177,7 +228,8 @@ actor IosManagedPublicationStore {
             normalizationVersion: normalizationVersion
         )
         let key = opaqueKey(sourceID)
-        let destination = root.appendingPathComponent(key).appendingPathExtension("epub")
+        let destination = root.appendingPathComponent(key)
+            .appendingPathExtension(Self.pathExtension(for: sourceFormat))
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
         try requireContained(destination)
         try requireContained(metadataURL)
@@ -188,7 +240,8 @@ actor IosManagedPublicationStore {
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil
+            serverContentFingerprint: nil,
+            sourceFormat: sourceFormat.wireValue
         )
         try install(staging: staging, destination: destination)
         do {
@@ -206,7 +259,8 @@ actor IosManagedPublicationStore {
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil
+            serverContentFingerprint: nil,
+            sourceFormat: sourceFormat
         )
     }
 
@@ -238,7 +292,8 @@ actor IosManagedPublicationStore {
             fingerprint: existing.fingerprint,
             workID: existing.workID,
             volumeID: existing.volumeID,
-            serverContentFingerprint: value
+            serverContentFingerprint: value,
+            sourceFormat: existing.sourceFormat
         )
         try JSONEncoder().encode(updated).write(
             to: metadataURL,
@@ -248,9 +303,7 @@ actor IosManagedPublicationStore {
 
     func resolve(sourceID: String) throws -> IosManagedPublication {
         let key = opaqueKey(sourceID)
-        let publicationURL = root.appendingPathComponent(key).appendingPathExtension("epub")
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
-        try requireContained(publicationURL)
         try requireContained(metadataURL)
         let metadataValues = try metadataURL.resourceValues(
             forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
@@ -264,6 +317,12 @@ actor IosManagedPublicationStore {
         guard metadata.sourceID == sourceID else {
             throw IosReaderFailure(code: .corruptFile)
         }
+        guard let sourceFormat = Self.sourceFormat(metadata.sourceFormat) else {
+            throw IosReaderFailure(code: .corruptFile)
+        }
+        let publicationURL = root.appendingPathComponent(key)
+            .appendingPathExtension(Self.pathExtension(for: sourceFormat))
+        try requireContained(publicationURL)
         let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
               Int64(values.fileSize ?? -1) == metadata.byteCount,
@@ -282,7 +341,8 @@ actor IosManagedPublicationStore {
             fingerprint: metadata.fingerprint,
             workID: metadata.workID,
             volumeID: metadata.volumeID,
-            serverContentFingerprint: metadata.serverContentFingerprint
+            serverContentFingerprint: metadata.serverContentFingerprint,
+            sourceFormat: sourceFormat
         )
     }
 
@@ -290,6 +350,10 @@ actor IosManagedPublicationStore {
         let key = opaqueKey(sourceID)
         for url in [
             root.appendingPathComponent(key).appendingPathExtension("epub"),
+            root.appendingPathComponent(key).appendingPathExtension("mobi"),
+            root.appendingPathComponent(key).appendingPathExtension("azw"),
+            root.appendingPathComponent(key).appendingPathExtension("azw3"),
+            root.appendingPathComponent(key).appendingPathExtension("prc"),
             root.appendingPathComponent(key).appendingPathExtension("json"),
         ] where fileManager.fileExists(atPath: url.path) {
             try requireContained(url)
@@ -329,6 +393,84 @@ actor IosManagedPublicationStore {
         return "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    private func validatePublication(
+        at url: URL,
+        sourceFormat: ErmaoShared.ReaderSourceFormat,
+        parserVersion: String,
+        normalizationVersion: String
+    ) async throws {
+        switch sourceFormat {
+        case .epub:
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let header = try handle.read(upToCount: 58) ?? Data()
+            guard Self.hasValidEpubMimetypeEntry(header)
+            else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+        case .mobi, .azw, .azw3, .prc:
+            guard parserVersion == IosMobiBook.parserIdentifier,
+                  normalizationVersion == IosMobiBook.normalizationIdentifier
+            else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            do {
+                let book = try IosMobiBook.open(fileURL: url)
+                do {
+                    let info = try await book.info()
+                    await book.close()
+                    guard info.resourceCount > 0, info.readingOrderCount > 0 else {
+                        throw IosReaderFailure(code: .corruptFile)
+                    }
+                } catch {
+                    await book.close()
+                    throw error
+                }
+            } catch let error as IosMobiCoreError {
+                switch error.status {
+                case .drmProtected:
+                    throw IosReaderFailure(code: .drmProtected)
+                case .unsupported, .noContent:
+                    throw IosReaderFailure(code: .unsupportedFormat)
+                case .limitExceeded, .outOfMemory:
+                    throw IosReaderFailure(code: .outOfMemoryRisk)
+                case .fileNotFound, .notFound:
+                    throw IosReaderFailure(code: .resourceMissing)
+                case .io:
+                    throw IosReaderFailure(code: .engineError)
+                default:
+                    throw IosReaderFailure(code: .corruptFile)
+                }
+            }
+        case .txt:
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            guard data.count <= 64 * 1_024 * 1_024,
+                  !data.contains(0),
+                  Self.decodeText(data) != nil
+            else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+        case .pdf:
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            guard try handle.read(upToCount: 5) == Data("%PDF-".utf8) else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+        case .cbz:
+            do {
+                _ = try IosCbzArchiveIndex(fileURL: url)
+            } catch IosCbzError.limitExceeded {
+                throw IosReaderFailure(code: .outOfMemoryRisk)
+            } catch IosCbzError.encrypted {
+                throw IosReaderFailure(code: .drmProtected)
+            } catch {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+        default:
+            throw IosReaderFailure(code: .unsupportedFormat)
+        }
+    }
+
     private struct Metadata: Codable {
         let sourceID: String
         let displayTitle: String
@@ -337,5 +479,52 @@ actor IosManagedPublicationStore {
         let workID: String?
         let volumeID: String?
         let serverContentFingerprint: String?
+        let sourceFormat: String
+    }
+
+    private static func hasValidEpubMimetypeEntry(_ header: Data) -> Bool {
+        guard header.count >= 58,
+              Array(header[0 ..< 4]) == [0x50, 0x4B, 0x03, 0x04]
+        else { return false }
+        let compression = UInt16(header[8]) | UInt16(header[9]) << 8
+        let nameLength = UInt16(header[26]) | UInt16(header[27]) << 8
+        let extraLength = UInt16(header[28]) | UInt16(header[29]) << 8
+        guard compression == 0, nameLength == 8, extraLength == 0,
+              String(data: header[30 ..< 38], encoding: .ascii) == "mimetype",
+              String(data: header[38 ..< 58], encoding: .ascii) == "application/epub+zip"
+        else { return false }
+        return true
+    }
+
+    private static func pathExtension(for sourceFormat: ErmaoShared.ReaderSourceFormat) -> String {
+        sourceFormat.wireValue
+    }
+
+    static func sourceFormat(_ wireValue: String) -> ErmaoShared.ReaderSourceFormat? {
+        switch wireValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "epub": .epub
+        case "mobi": .mobi
+        case "azw": .azw
+        case "azw3": .azw3
+        case "prc": .prc
+        case "txt": .txt
+        case "cbz": .cbz
+        case "pdf": .pdf
+        default: nil
+        }
+    }
+
+    private static func decodeText(_ data: Data) -> String? {
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            return String(data: data.dropFirst(3), encoding: .utf8)
+        }
+        if data.starts(with: [0xFF, 0xFE]) {
+            return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+        }
+        if data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
+        }
+        return String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .gb_18030_2000)
     }
 }

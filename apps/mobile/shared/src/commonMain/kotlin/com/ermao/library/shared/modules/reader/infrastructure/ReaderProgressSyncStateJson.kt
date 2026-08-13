@@ -1,7 +1,7 @@
 package com.ermao.library.shared.modules.reader.infrastructure
 
 import com.ermao.library.shared.modules.reader.application.ReaderProgressDurableState
-import com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope
+import com.ermao.library.shared.modules.reader.domain.PublicationLocation
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressConflict
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
@@ -69,13 +69,13 @@ class ReaderProgressSyncStateJson(
         mutationId = requiredString("mutationId"),
         baseRevision = requiredLong("baseRevision"),
         capturedAtEpochMillis = requiredLong("capturedAtEpochMillis"),
-        locator = ReadiumLocatorEnvelope.parse(requiredObject("locator").toString()),
+        locator = PublicationLocation.parse(requiredObject("locator").toString()),
     )
 
     private fun JsonObject.toSnapshot(sourceId: String): ReaderProgressSnapshotV4 = ReaderProgressSnapshotV4(
         sourceId = sourceId,
         revision = requiredLong("revision"),
-        locator = ReadiumLocatorEnvelope.parse(requiredObject("locator").toString()),
+        locator = PublicationLocation.parse(requiredObject("locator").toString()),
         displayPercent = requiredDouble("displayPercent"),
         receivedAtEpochMillis = requiredLong("receivedAtEpochMillis"),
         capturedAtEpochMillis = optionalLong("capturedAtEpochMillis"),
@@ -83,7 +83,7 @@ class ReaderProgressSyncStateJson(
 
     companion object {
         private const val SCHEMA = "ermao.reader-progress-sync"
-        private const val VERSION = 4
+        private const val VERSION = 5
     }
 }
 

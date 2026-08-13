@@ -116,24 +116,26 @@ data class ReflowReaderLocation(
 
 data class PdfReaderLocation(
     val pageIndex: Int,
-    val pageProgression: Double? = null,
+    val pageProgression: Double,
     override val contentFingerprint: ContentFingerprint,
     val engineLocator: EngineLocator? = null,
 ) : ReaderLocation {
     init {
         require(pageIndex >= 0) { "PDF page index is negative" }
-        require(pageProgression == null || pageProgression.isFinite() && pageProgression in PROGRESSION_RANGE) {
+        require(pageProgression.isFinite() && pageProgression in PROGRESSION_RANGE) {
             "PDF page progression is outside 0..1"
         }
     }
 }
 
 data class ComicReaderLocation(
+    val resourceHref: String,
     val pageIndex: Int,
     override val contentFingerprint: ContentFingerprint,
     val engineLocator: EngineLocator? = null,
 ) : ReaderLocation {
     init {
+        require(resourceHref.isNotBlank()) { "Comic resource href is blank" }
         require(pageIndex >= 0) { "Comic page index is negative" }
     }
 }
@@ -173,6 +175,9 @@ data class ReaderProgress(
             require(ReadiumLocatorEnvelope.from(location) != null) {
                 "Reflow Reader progress requires an exact Readium block locator"
             }
+        }
+        if (location is PdfReaderLocation || location is ComicReaderLocation) {
+            require(percent != null) { "Paged Reader progress requires a display percent" }
         }
     }
 }

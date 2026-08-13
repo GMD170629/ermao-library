@@ -32,6 +32,7 @@ from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderBookmarkDto,
     ReaderEpubSourceDto,
+    ReaderExactLocationDto,
     ReaderFileDto,
     ReaderMediaVersionDto,
     ReaderProgressDto,
@@ -41,6 +42,11 @@ from app.modules.reader.application.dto import (
     ReaderVolumeContextDto,
     ReaderVolumeDto,
     ReaderWorkDto,
+)
+from app.modules.reader.application.exact_location import exact_location_kind
+from app.modules.reader.infrastructure.exact_location_codec import (
+    decode_exact_location,
+    encode_exact_location,
 )
 
 
@@ -69,6 +75,11 @@ def _progress_dto(progress: LibraryReadingProgress) -> ReaderProgressDto:
         reader_type=progress.reader_type,
         percent=progress.percent,
         location_json=progress.location_json,
+        exact_location=(
+            decode_exact_location(progress.location_json)
+            if progress.revision >= 1
+            else None
+        ),
         content_fingerprint=progress.content_fingerprint,
         mutation_id=progress.mutation_id,
         client_id=progress.client_id,
@@ -82,13 +93,19 @@ def _progress_dto(progress: LibraryReadingProgress) -> ReaderProgressDto:
 
 
 def _mutation_progress_dto(mutation: ReaderProgressMutation) -> ReaderProgressDto:
+    exact_location = decode_exact_location(mutation.locator_json)
     return ReaderProgressDto(
         id=mutation.id,
         user_id=mutation.user_id,
         volume_id=mutation.volume_id,
-        reader_type="readium",
+        reader_type=(
+            exact_location_kind(exact_location)
+            if exact_location is not None
+            else "unknown"
+        ),
         percent=mutation.display_percent,
         location_json=mutation.locator_json,
+        exact_location=exact_location,
         content_fingerprint=mutation.content_fingerprint,
         mutation_id=mutation.mutation_id,
         client_id=mutation.client_id,
@@ -422,7 +439,7 @@ class SqlAlchemyReaderVolumeRepository:
         context: ReaderVolumeContextDto,
         reader_type: str,
         display_percent: float,
-        locator_json: str,
+        location: ReaderExactLocationDto,
         content_fingerprint: str,
         client_id: str,
         mutation_id: str,
@@ -431,6 +448,8 @@ class SqlAlchemyReaderVolumeRepository:
         progressed_at: datetime,
         now: datetime,
     ) -> ReaderProgressDto | None:
+        locator_json = encode_exact_location(location)
+        location_kind = exact_location_kind(location)
         if base_revision == 0:
             insert_statement = sqlite_insert(LibraryReadingProgress).values(
                 id=cuid(),
@@ -442,7 +461,7 @@ class SqlAlchemyReaderVolumeRepository:
                 percent=display_percent,
                 extra="{}",
                 schemaVersion=4,
-                locationType="readium",
+                locationType=location_kind,
                 locationJson=locator_json,
                 contentFingerprint=content_fingerprint,
                 mutationId=mutation_id,
@@ -456,11 +475,28 @@ class SqlAlchemyReaderVolumeRepository:
                 revision=next_revision,
             )
             progress = self._session.scalar(
-                insert_statement.on_conflict_do_nothing(
+                insert_statement.on_conflict_do_update(
                     index_elements=[
                         LibraryReadingProgress.user_id,
                         LibraryReadingProgress.volume_id,
-                    ]
+                    ],
+                    set_={
+                        "readerType": reader_type,
+                        "percent": display_percent,
+                        "schemaVersion": 4,
+                        "locationType": location_kind,
+                        "locationJson": locator_json,
+                        "contentFingerprint": content_fingerprint,
+                        "mutationId": mutation_id,
+                        "clientId": client_id,
+                        "clientSequence": None,
+                        "progressedAt": progressed_at,
+                        "sourceProtocol": "SHUKU_READER_V4",
+                        "sourceDeviceName": None,
+                        "updatedAt": now,
+                        "revision": next_revision,
+                    },
+                    where=LibraryReadingProgress.revision == 0,
                 ).returning(LibraryReadingProgress)
             )
         else:
@@ -475,7 +511,7 @@ class SqlAlchemyReaderVolumeRepository:
                     reader_type=reader_type,
                     percent=display_percent,
                     schema_version=4,
-                    location_type="readium",
+                    location_type=location_kind,
                     location_json=locator_json,
                     content_fingerprint=content_fingerprint,
                     mutation_id=mutation_id,

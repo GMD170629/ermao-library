@@ -319,7 +319,6 @@ class LibraryFile(Base):
     __table_args__ = (
         Index("LibraryFile_path_key", "path", unique=True),
         Index("LibraryFile_filePathHash_key", "filePathHash", unique=True),
-        Index("LibraryFile_fullHash_key", "fullHash", unique=True),
         Index("LibraryFile_volumeId_sortOrder_idx", "volumeId", "sortOrder"),
         Index("LibraryFile_fingerprint_idx", "fingerprint"),
         Index("LibraryFile_fullHash_idx", "fullHash"),

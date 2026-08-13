@@ -1,7 +1,7 @@
-# ADR 0011: Readium exact cross-platform progress
+# ADR 0011: Cross-format exact Reader progress
 
 Status: Accepted; Android conformance and six-direction physical-device evidence remain release gates
-Date: 2026-08-13
+Date: 2026-08-14
 
 ## Context
 
@@ -19,33 +19,40 @@ exchange still require independent evidence.
 
 ## Decision
 
-Reader v4 defines exact reflowable continuation as the same DOM block or unique
-text anchor in the same Publication resource.
+Reader v4 defines a renderer-neutral `PublicationLocation` discriminated union.
+Its variants are `reflowable`, `pdf`, `comic`, and `audio`; every variant carries
+the same exact `PublicationFingerprint`.
 
-An exact position is a Readium Locator envelope containing:
+Exact reflowable continuation is the same DOM block or unique text anchor in the
+same Publication resource. Its required Readium engine locator contains:
 
 - `engine=readium` and `platform=web|android|ios`;
 - the Navigator version for diagnostics;
-- an exact `PublicationFingerprint` composed of original file SHA-256, content
-  parser identifier, and normalization identifier;
 - a JSON-object Readium Locator payload, never a JSON string containing JSON;
 - an `href` plus a CSS selector, fragment/CFI, or bounded uniquely verifiable
   text anchor.
 
-The envelope is limited to 64 KiB. `highlight` is limited to 512 characters and
+PDF identity is a zero-based canonical page index plus a required page-local
+progression normalized to four decimals. Comic identity is a zero-based page
+index plus the canonical safe reading-order resource href. Audio identity is a
+file id, optional chapter id, and playback milliseconds. Their optional engine
+locators aid navigation and diagnostics but do not participate in identity.
+
+The complete Publication location is limited to 64 KiB. `highlight` is limited to 512 characters and
 `before`/`after` to 256 characters each. Progression, logical position, and
 whole-publication percentage are diagnostic or presentation values and are not
 exact anchors.
 
-The three fingerprint fields must match before an automatic remote navigation
+The fingerprint is composed of original file SHA-256, content parser identifier,
+and normalization identifier. All three fields must match before an automatic remote navigation
 is attempted. A parser or normalization change invalidates the old Locator; it
 does not enable percentage restoration. Navigator versions do not participate
 in content identity.
 
-After `Navigator.go(locator)`, the destination recaptures its first-visible
-Locator. Exact restoration succeeds only when `href` matches and selector,
-fragment/CFI, or uniquely normalized text resolves to the same block. A
-successful `go()` result alone is not proof.
+After navigation, the destination recaptures its location and compares the
+morphology-specific canonical identity. For reflowable content, `href` and the
+selector, fragment/CFI, or uniquely normalized text must resolve to the same
+block. A successful navigation API result alone is not proof.
 
 Reader v4 writes use `baseRevision` and a UUID `mutationId`. Revision is
 monotonic per user and volume, idempotent replays return the original result,
@@ -53,7 +60,7 @@ and a stale base revision returns `409 READER_PROGRESS_CONFLICT` with the curren
 server snapshot. The server never silently resolves a conflict and never
 applies a forward-only rule. Client capture time is diagnostic only.
 
-Each client atomically persists its exact Locator and latest-only pending
+Each client atomically persists its exact Publication location and latest-only pending
 mutation before networking. Network loss, process termination, and foreground
 transitions preserve pending work. A conflict is durable until the user chooses
 the local position, the remote position, or cancel. The server-confirmed
@@ -73,9 +80,11 @@ virtual href/DOM normalization on all platforms; no hidden EPUB is generated.
 
 ## Consequences
 
-Reader v4's earlier Foliate engine, percentage-only progress, server content
-token, arrival-order overwrite, non-durable upload, outbox migration, and
-percentage fallback contracts are removed rather than migrated.
+Reader v4's earlier untagged Locator envelope, Foliate engine, percentage-only
+progress, server content token, arrival-order overwrite, non-durable upload,
+outbox migration, and percentage fallback contracts are removed rather than
+migrated. Because v4 was unreleased, old server progress and mutation receipts
+are deleted and old client exact/pending/conflict documents are rejected.
 
 `displayPercent` remains available for progress bars, library display, and
 statistics. It must never be consumed by automatic continuation code.
@@ -84,10 +93,8 @@ When exact restoration fails, the client reports that outcome and may offer
 explicit nearby-position or chapter navigation. Such user-directed navigation
 is never reported as exact synchronization.
 
-PDF exactness is a canonical page plus normalized page-local position. CBZ
-exactness is a canonical page resource/index. Their anchors use the same
-fingerprint, revision, durability, and post-navigation verification rules but
-do not claim DOM-block semantics.
+PDF, comic/CBZ, and audio anchors use the same fingerprint, revision, durability,
+and post-navigation verification rules but do not claim DOM-block semantics.
 
 Production enablement is per format and platform. Android conformance, physical
 iOS evidence, malicious-publication tests, libmobi safety/license gates, and all

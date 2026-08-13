@@ -2,6 +2,7 @@ import { comicVisualSpreadPages } from '../../../../lib/comic-reading-order';
 
 export type ComicPageMeta = {
   pageIndex: number;
+  resourceHref?: string;
   title?: string;
   mimeType?: string;
   width?: number | null;

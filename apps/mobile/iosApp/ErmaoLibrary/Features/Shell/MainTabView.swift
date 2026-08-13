@@ -432,7 +432,10 @@ struct MainTabView: View {
         fallbackTab: TabPresentation
     ) {
         if handoff.readerType == .reflowable,
-           handoff.format.caseInsensitiveCompare("EPUB") == .orderedSame,
+           ManagedReaderAccessPolicy.supportsNativeReader(
+               readerType: handoff.readerType,
+               format: handoff.format
+           ),
            readerComposition != nil {
             let recordID: String?
             if case .verifiedLocal(let value) = handoff.source {
@@ -518,7 +521,10 @@ struct OfflineShellView: View {
             DownloadCenterView(store: downloads) { handoff in
                 // Offline access only reaches already verified records in DownloadCenterView.
                 if handoff.readerType == .reflowable,
-                   handoff.format.caseInsensitiveCompare("EPUB") == .orderedSame,
+                   ManagedReaderAccessPolicy.supportsNativeReader(
+                       readerType: handoff.readerType,
+                       format: handoff.format
+                   ),
                    readerComposition != nil,
                    let offlineContext,
                    case .verifiedLocal(let recordID) = handoff.source {

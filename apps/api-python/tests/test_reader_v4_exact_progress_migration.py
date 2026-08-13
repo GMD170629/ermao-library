@@ -27,11 +27,10 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
         }
 
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert head_revision(engine) == "0021_reader_v4_exact_progress"
+        assert head_revision(engine) == "0023_publication_full_hash_identity"
         inspector = inspect(engine)
         assert "revision" in {
-            column["name"]
-            for column in inspector.get_columns("LibraryReadingProgress")
+            column["name"] for column in inspector.get_columns("LibraryReadingProgress")
         }
         assert "ReaderProgressMutation" in inspector.get_table_names()
         assert {
@@ -47,13 +46,11 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
             "capturedAt",
             "receivedAt",
         } == {
-            column["name"]
-            for column in inspector.get_columns("ReaderProgressMutation")
+            column["name"] for column in inspector.get_columns("ReaderProgressMutation")
         }
 
         _run_alembic(
-            engine,
-            lambda config: command.downgrade(config, "0020_comic_page_index"),
+            engine, lambda config: command.downgrade(config, "0020_comic_page_index")
         )
         downgraded = inspect(engine)
         assert "ReaderProgressMutation" not in downgraded.get_table_names()
@@ -63,6 +60,6 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
         }
 
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert head_revision(engine) == "0021_reader_v4_exact_progress"
+        assert head_revision(engine) == "0023_publication_full_hash_identity"
     finally:
         engine.dispose()

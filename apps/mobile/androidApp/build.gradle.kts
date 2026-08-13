@@ -49,6 +49,15 @@ android {
         assets.directories.add(
             rootProject.layout.projectDirectory.dir("../../test-data/library/epub").asFile.absolutePath,
         )
+        assets.directories.add(
+            rootProject.layout.projectDirectory.dir("../../test-data/library/mobi").asFile.absolutePath,
+        )
+        assets.directories.add(
+            rootProject.layout.projectDirectory.dir("../../test-data/library/comics").asFile.absolutePath,
+        )
+        assets.directories.add(
+            rootProject.layout.projectDirectory.dir("../../test-data/library/pdf").asFile.absolutePath,
+        )
     }
 
     packaging {
@@ -123,6 +132,7 @@ dependencies {
     implementation(libs.readium.shared)
     implementation(libs.readium.streamer)
     implementation(libs.readium.navigator)
+    implementation(libs.readium.adapter.pdfium)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)

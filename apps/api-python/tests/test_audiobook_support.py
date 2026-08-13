@@ -1161,15 +1161,10 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
         "schemaVersion": 4,
         "clientId": "audio-player",
         "locator": {
-            "engine": "readium",
-            "platform": "web",
-            "version": "audio-test:1",
+            "kind": "audio",
             "publication": bootstrap["publicationFingerprint"],
-            "payload": {
-                "href": final_track["id"],
-                "type": "audio/mpeg",
-                "locations": {"fragments": [bootstrap["units"][-1]["id"]]},
-            },
+            "fileId": final_track["id"],
+            "positionMillis": 0,
         },
     }
     seek = client.put(
@@ -1199,13 +1194,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
             "capturedAtEpochMillis": 1_700_000_002_000,
             "locator": {
                 **common["locator"],
-                "payload": {
-                    **common["locator"]["payload"],
-                    "locations": {
-                        "fragments": [bootstrap["units"][-1]["id"]],
-                        "totalProgression": 1,
-                    },
-                },
+                "positionMillis": final_track["durationMs"],
             },
         },
     )
@@ -1227,14 +1216,8 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
             "capturedAtEpochMillis": 1_700_000_003_000,
             "locator": {
                 **common["locator"],
-                "payload": {
-                    "href": first_track["id"],
-                    "type": "audio/mpeg",
-                    "locations": {
-                        "fragments": [bootstrap["units"][0]["id"]],
-                        "totalProgression": 0.1,
-                    },
-                },
+                "fileId": first_track["id"],
+                "positionMillis": first_track["durationMs"] // 10,
             },
         },
     )

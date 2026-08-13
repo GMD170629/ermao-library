@@ -28,6 +28,7 @@ from app.modules.imports.application.import_support import (
     _prepared_default_cover,
     _source_group_key,
     _work_merge_key,
+    _content_hash,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -280,6 +281,7 @@ def _import_reflowable_source(
 
     source_path = options.source_file_path.resolve()
     source_stat = source_path.stat()
+    full_hash = _content_hash(source_path)
     source_format = ext.removeprefix(".").upper()
     metadata = services.inspect_reflowable_book(source_path, source_format)
     embedded_title = (
@@ -389,7 +391,8 @@ def _import_reflowable_source(
             "volumeId": volume["id"],
             "path": str(source_path),
             "filePathHash": _hash_text(str(source_path)),
-            "hashStatus": "PARTIAL_PENDING",
+            "fullHash": full_hash,
+            "hashStatus": "COMPLETED",
             "kind": source_format,
             "mimeType": mime_type,
             "sizeBytes": file_size,

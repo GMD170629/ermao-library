@@ -163,9 +163,6 @@
     <string name="work_volume_accessibility_not_started">Not started</string>
     <string name="work_volume_download_action">Download this volume</string>
     <string name="work_download_pause">Pause this download</string>
-    <string name="reading_status_unread">Want to read</string>
-    <string name="reading_status_reading">Reading</string>
-    <string name="reading_status_finished">Finished</string>
     <string name="work_actions_title">Book Actions</string>
     <string name="work_action_edit">Edit book</string>
     <string name="work_action_set_cover">Set cover</string>
@@ -308,17 +305,13 @@
     <string name="reader_progress_slider">Reading progress</string>
     <string name="reader_settings_title">Reading settings</string>
     <string name="reader_font_size">Font size</string>
-    <string name="reader_decrease_font_size">Decrease font size</string>
-    <string name="reader_increase_font_size">Increase font size</string>
     <string name="reader_line_height">Line height</string>
     <string name="reader_theme">Theme</string>
-    <string name="reader_theme_paper">Paper</string>
     <string name="reader_theme_night">Night</string>
     <string name="reader_theme_system">System</string>
     <string name="reader_reading_mode">Reading mode</string>
     <string name="reader_mode_paged">Paged</string>
     <string name="reader_mode_scroll">Continuous scroll</string>
-    <string name="reader_publisher_styles">Use publisher styles</string>
     <string name="reader_bookmark">Bookmark</string>
     <string name="reader_notes">Notes</string>
     <string name="reader_appearance">Appearance</string>
@@ -328,6 +321,7 @@
     <string name="reader_bookmarks_pending">Device first · Pending sync</string>
     <string name="reader_bookmark_remove">Remove bookmark</string>
     <string name="reader_position">Position %1$d</string>
+    <string name="reader_comic_page">Page %1$d</string>
     <string name="reader_theme_day">Day</string>
     <string name="reader_theme_warm">Warm</string>
     <string name="reader_theme_green">Eye comfort</string>

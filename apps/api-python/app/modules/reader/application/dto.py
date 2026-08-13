@@ -8,6 +8,7 @@ from typing import Literal
 
 ReaderReadingStatus = Literal["UNREAD", "FINISHED"]
 ReaderLocationKind = Literal["reflow", "comic", "pdf", "audio"]
+ExactReaderLocationKind = Literal["reflowable", "comic", "pdf", "audio"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +97,63 @@ class ReaderUnitDto:
 
 
 @dataclass(frozen=True, slots=True)
+class ReaderPublicationFingerprintDto:
+    original_file_hash: str
+    parser: str
+    normalization: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderEngineLocatorDto:
+    platform: Literal["android", "ios", "web"]
+    version: str
+    payload_json: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderReflowableExactLocationDto:
+    publication: ReaderPublicationFingerprintDto
+    resource_href: str
+    media_type: str
+    resource_progression: float | None
+    total_progression: float | None
+    engine_locator: ReaderEngineLocatorDto
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderPdfExactLocationDto:
+    publication: ReaderPublicationFingerprintDto
+    page_index: int
+    page_progression: float
+    engine_locator: ReaderEngineLocatorDto | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderComicExactLocationDto:
+    publication: ReaderPublicationFingerprintDto
+    page_index: int
+    resource_href: str
+    engine_locator: ReaderEngineLocatorDto | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderAudioExactLocationDto:
+    publication: ReaderPublicationFingerprintDto
+    file_id: str
+    chapter_id: str | None
+    position_millis: int
+    engine_locator: ReaderEngineLocatorDto | None = None
+
+
+ReaderExactLocationDto = (
+    ReaderReflowableExactLocationDto
+    | ReaderPdfExactLocationDto
+    | ReaderComicExactLocationDto
+    | ReaderAudioExactLocationDto
+)
+
+
+@dataclass(frozen=True, slots=True)
 class ReaderProgressDto:
     id: str
     user_id: str
@@ -103,6 +161,7 @@ class ReaderProgressDto:
     reader_type: str
     percent: float
     location_json: str | None
+    exact_location: ReaderExactLocationDto | None
     content_fingerprint: str | None
     mutation_id: str | None
     client_id: str | None
@@ -112,13 +171,6 @@ class ReaderProgressDto:
     source_device_name: str | None
     updated_at: datetime
     revision: int
-
-
-@dataclass(frozen=True, slots=True)
-class ReaderPublicationFingerprintDto:
-    original_file_hash: str
-    parser: str
-    normalization: str
 
 
 @dataclass(frozen=True, slots=True)

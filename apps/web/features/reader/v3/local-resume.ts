@@ -13,7 +13,7 @@ export function resolveStartupResume(input: {
   hasDirectTarget: boolean;
 }): StartupResumeDecision {
   if (input.hasDirectTarget) return { location: input.serverLocation, percent: input.serverPercent, source: 'direct-target', localExact: null };
-  const localLocation = input.localExact?.locator && input.context.readerKind === 'reflowable'
+  const localLocation = input.localExact?.locator
     ? v4LocationToDomain(input.localExact.locator, input.localExact.volumeId, input.context.sourceFormat ?? null)
     : null;
   const localWins = Boolean(input.localExact?.locator && localLocation

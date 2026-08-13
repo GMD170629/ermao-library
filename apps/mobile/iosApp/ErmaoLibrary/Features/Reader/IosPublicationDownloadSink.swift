@@ -96,23 +96,25 @@ private actor IosPublicationDownloadWorker {
                 byteCount: byteCount,
                 originalFileHash: hash,
                 expectedSize: download.expectedSizeBytes,
-                expectedOriginalFileHash: download.expectedOriginalFileHash,
+                expectedOriginalFileHash: download.publicationFingerprint.originalFileHash,
                 parserVersion: download.publicationFingerprint.parser,
                 normalizationVersion: download.publicationFingerprint.normalization,
+                sourceFormat: download.sourceFormat,
                 workID: download.workId,
                 volumeID: download.volumeId
             )
             return ErmaoShared.LocalReaderSource(
                 sourceId: managed.sourceID,
                 displayTitle: managed.displayTitle,
-                format: .epub,
+                format: managed.sourceFormat.readerFormat,
                 contentFingerprint: ErmaoShared.ContentFingerprint(
                     originalFileHash: managed.fingerprint.originalFileHash,
                     parserVersion: managed.fingerprint.parserVersion,
                     normalizationVersion: managed.fingerprint.normalizationVersion
                 ),
                 workId: managed.workID,
-                volumeId: managed.volumeID
+                volumeId: managed.volumeID,
+                sourceFormat: managed.sourceFormat
             )
         } catch {
             try? await store.abortDownload(staging: staging)

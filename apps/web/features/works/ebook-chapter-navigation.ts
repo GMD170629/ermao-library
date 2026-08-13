@@ -6,7 +6,6 @@ const REFLOWABLE_EBOOK_FORMATS = new Set<ReadingFormat>([
   'AZW',
   'AZW3',
   'PRC',
-  'FB2',
   'TXT'
 ]);
 
@@ -38,7 +37,6 @@ export function chapterDeepLinkHref(
   if ((format === 'MOBI' || format === 'PRC') && /^filepos:\d+$/iu.test(target)) return target;
   if ((format === 'AZW' || format === 'AZW3')
     && /^kindle:pos:fid:[0-9a-v]+:off:[0-9a-v]+$/iu.test(target)) return target;
-  if (format === 'FB2' && /^\d+(?:#\d+)?$/u.test(target)) return target;
   if (format === 'TXT' && /^txt-section:\d+$/u.test(target)) return target;
   return null;
 }

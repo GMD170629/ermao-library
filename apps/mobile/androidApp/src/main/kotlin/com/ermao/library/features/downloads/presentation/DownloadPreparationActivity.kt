@@ -95,6 +95,7 @@ class DownloadPreparationActivity : AppCompatActivity() {
                                 localReference = artifact.localReference,
                                 serverContentFingerprint = artifact.contentFingerprint,
                                 expectedBytes = artifact.expectedBytes,
+                                sourceFormat = artifact.format,
                             ),
                         )
                         finish()

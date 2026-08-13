@@ -279,7 +279,7 @@ private final class IosReaderBookmarkRemote: @unchecked Sendable {
     }
 
     func replace(_ bookmarks: [IosReaderBookmarkRecord]) async throws -> ErmaoShared.ReaderBookmarkSyncResponse {
-        let outgoing = bookmarks.map(IosEpubReaderSession.sharedBookmark)
+        let outgoing = bookmarks.map(IosReflowableReaderSession.sharedBookmark)
         return try await port.replace(target: target, bookmarks: outgoing)
     }
 }
@@ -366,7 +366,7 @@ struct IosReaderPersistenceGate: Equatable, Sendable {
 }
 
 @MainActor
-final class IosEpubReaderSession: NSObject, ObservableObject {
+final class IosReflowableReaderSession: NSObject, ObservableObject {
     static let progressSaveDebounceMilliseconds = 500
     @Published private(set) var phase: IosReaderSessionPhase = .opening
     @Published private(set) var navigator: EPUBNavigatorViewController?
@@ -385,6 +385,7 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
 
     let sourceID: String
     let displayTitle: String
+    let sourceFormat: ErmaoShared.ReaderSourceFormat
     let capabilities = IosReaderCapabilities()
 
     private let managedStore: IosManagedPublicationStore
@@ -400,6 +401,7 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
     private let workID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
     private var publication: Publication?
+    private var openedPublication: IosOpenedReadiumPublication?
     private var managedPublication: IosManagedPublication?
     private var pendingSave: Task<Void, Never>?
     private var bookmarkSyncTask: Task<Void, Never>?
@@ -410,6 +412,7 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
     init(
         sourceID: String,
         displayTitle: String,
+        sourceFormat: ErmaoShared.ReaderSourceFormat = .epub,
         preferences: IosReaderPreferences = IosReaderPreferences(),
         managedStore: IosManagedPublicationStore,
         progressStore: IosReaderProgressStore,
@@ -427,6 +430,7 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
     ) {
         self.sourceID = sourceID
         self.displayTitle = displayTitle
+        self.sourceFormat = sourceFormat
         self.preferences = preferences
         self.managedStore = managedStore
         self.progressStore = progressStore
@@ -460,7 +464,12 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
         phase = .opening
         do {
             let managed = try await managedStore.resolve(sourceID: sourceID)
-            let publication = try await runtime.open(managed)
+            guard managed.sourceFormat == sourceFormat else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            let openedPublication = try await runtime.open(managed)
+            let publication = openedPublication.publication
+            self.openedPublication = openedPublication
             let saved = try await progressStore.load(sourceId: sourceID)
             let initial = await restore(
                 local: saved,
@@ -492,8 +501,14 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
             startBookmarkSynchronization()
             if let initial { reflectLocation(initial) }
         } catch let failure as IosReaderFailure {
+            await openedPublication?.close()
+            openedPublication = nil
+            publication = nil
             phase = .failed(failure.code)
         } catch {
+            await openedPublication?.close()
+            openedPublication = nil
+            publication = nil
             phase = .failed(.engineError)
         }
     }
@@ -712,7 +727,8 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
         }
         navigator?.delegate = nil
         navigator = nil
-        publication?.close()
+        await openedPublication?.close()
+        openedPublication = nil
         publication = nil
         phase = .closed
     }
@@ -735,10 +751,11 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
         let openedSource = ErmaoShared.LocalReaderSource(
             sourceId: managed.sourceID,
             displayTitle: managed.displayTitle,
-            format: .epub,
+            format: managed.sourceFormat.readerFormat,
             contentFingerprint: managed.fingerprint.shared,
             workId: managed.workID,
-            volumeId: managed.volumeID
+            volumeId: managed.volumeID,
+            sourceFormat: managed.sourceFormat
         )
         let decision = ErmaoShared.PublicKt.decideReaderResume(
             localProgress: local,
@@ -1016,7 +1033,7 @@ final class IosEpubReaderSession: NSObject, ObservableObject {
     }
 }
 
-extension IosEpubReaderSession: EPUBNavigatorDelegate {
+extension IosReflowableReaderSession: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         locationChanged(locator)
     }

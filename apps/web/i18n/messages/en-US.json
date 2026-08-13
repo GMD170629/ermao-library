@@ -1118,7 +1118,6 @@
   "可以输入、粘贴或从目录树选择；保存时会验证路径。": "Type or paste a path, or choose one from the directory tree. The path is validated when you save.",
   "可以修改基本信息并查看自动收录条件；图书由规则自动管理。": "You can modify basic information and see the conditions for automatic recording; books are automatically managed by rules.",
   "可以在图书详情的“更多操作”中选择“发送到 Kindle”。": "You can choose \" Send to Kindle \" in \" More Operations \" for book details.",
-  "可重排卷册缺少源格式": "Reflowable volume is missing its source format",
   "空": "Empty",
   "空合集可以安全删除，不会影响任何书架。": "An empty collection can be deleted without affecting any shelves.",
   "控制第三方阅读器是否可以通过 OPDS 访问书库。": "Control whether third-party readers can access the library through OPDS.",
@@ -2862,5 +2861,19 @@
   "zip|archive|corrupt|invalid|损坏": "Zip|archive|currupt|invalid|",
   "Readium 暂不支持可配置翻页动画，此设置当前不生效。": "Readium does not currently support configurable page-turn animation. This setting has no effect.",
   "Readium 使用原生触摸滑动，当前无法关闭。": "Readium uses native touch swiping, which cannot currently be disabled.",
-  "滚动模式暂未适配，当前使用分页阅读。": "Scrolling is not available yet. Paginated reading is currently used."
+  "滚动模式暂未适配，当前使用分页阅读。": "Scrolling is not available yet. Paginated reading is currently used.",
+  "当前文件格式不受阅读器支持": "This file format is not supported by the reader",
+  "当前文件格式尚未开放阅读支持": "Reading support is not yet available for this file format",
+  "当前文件格式尚未开放阅读支持。": "Reading support is not yet available for this file format.",
+  "加密或密码保护的 PDF 暂不支持阅读": "Encrypted or password-protected PDFs are not supported",
+  "加密或密码保护的 PDF 暂不支持阅读。": "Encrypted or password-protected PDFs are not supported.",
+  "漫画页面索引无效或尚未准备完成。": "The comic page index is invalid or not ready yet.",
+  "内容仍在准备中，请稍后重试": "The content is still being prepared. Try again later",
+  "内容准备失败，请重新导入": "Content preparation failed. Import the file again",
+  "受 DRM 保护的文件无法打开": "DRM-protected files cannot be opened",
+  "文件格式与阅读器类型不匹配": "The file format does not match the reader type",
+  "文件格式与阅读器类型不匹配。": "The file format does not match the reader type.",
+  "文件已损坏，无法打开": "The file is corrupted and cannot be opened",
+  "阅读器格式与排版形态不匹配": "The reader format does not match the publication layout",
+  "PDF 文件已损坏或格式无效。": "The PDF is corrupted or invalid."
 }

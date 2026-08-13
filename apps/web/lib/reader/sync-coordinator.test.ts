@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import exactRequest from '../../../../packages/reader-contracts/fixtures/exact-reflowable-request.json';
-import { type ReadiumLocatorEnvelope } from '@shuku/reader-core';
+import { parsePublicationLocation } from '@shuku/reader-core';
 import { MemoryReaderStorage } from './memory-storage';
 import { ReaderProgressConflictError } from './model';
 import { ReaderProgressSyncCoordinator } from './sync-coordinator';
 
-const locator = exactRequest.locator as ReadiumLocatorEnvelope;
+const locator = parsePublicationLocation(exactRequest.locator);
+if (!locator) throw new Error('invalid exact fixture');
 const input = { serverIdentity: 'https://library.example', userId: 'user-1', workId: 'work-1', volumeId: 'volume-1', baseRevision: 17, locator, displayPercent: 42 } as const;
 
 test('atomically persists the latest exact locator before uploading the canonical request', async () => {

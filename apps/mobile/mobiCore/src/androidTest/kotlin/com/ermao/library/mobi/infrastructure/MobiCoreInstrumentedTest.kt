@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import kotlin.system.measureTimeMillis
 import org.junit.Assert.assertNotNull
@@ -118,6 +119,48 @@ class MobiCoreInstrumentedTest {
     }
 
     @Test
+    fun productionPublicationKeepsOneLazyHandleAndSupportsBoundedRanges() = runBlocking {
+        val opened = MobiReadiumPublicationFactory().open(copyAsset("10-long-chapter.azw3"))
+        try {
+            val link = opened.publication.readingOrder.single()
+            val resource = requireNotNull(opened.publication.get(link))
+            val length = requireNotNull(resource.length().getOrNull())
+            assertTrue(length > MOBI_CORE_MAX_READ_BYTES)
+
+            val boundaryRange =
+                (MOBI_CORE_MAX_READ_BYTES - 31L)..(MOBI_CORE_MAX_READ_BYTES + 31L)
+            val bytes = requireNotNull(resource.read(boundaryRange).getOrNull())
+            assertEquals(boundaryRange.last - boundaryRange.first + 1L, bytes.size.toLong())
+            assertTrue(bytes.toString(Charsets.UTF_8).isNotEmpty())
+        } finally {
+            opened.close()
+            opened.close()
+        }
+
+        val closedRead = opened.publication.get(opened.publication.readingOrder.single())
+            ?.read(0L..15L)
+            ?.failureOrNull()
+        assertNotNull(closedRead)
+    }
+
+    @Test
+    fun productionPublicationMapsMetadataCoverDirectionAndHierarchicalToc() {
+        MobiReadiumPublicationFactory().open(copyAsset("07-complex-toc.azw3")).use { opened ->
+            assertTrue(opened.publication.metadata.title?.isNotBlank() == true)
+            assertTrue(opened.publication.readingOrder.isNotEmpty())
+            assertTrue(opened.publication.tableOfContents.isNotEmpty())
+            assertTrue(maximumTocDepth(opened.publication.tableOfContents) >= 3)
+            assertTrue(opened.resources.none { evidence -> evidence.byteCount < 0L })
+        }
+
+        MobiReadiumPublicationFactory().open(copyAsset("11-upstream-huff-cdic.mobi")).use { opened ->
+            assertTrue(opened.publication.resources.any { "cover" in it.rels })
+            assertTrue(opened.publication.metadata.authors.isNotEmpty())
+            assertTrue(opened.publication.metadata.publishers.isNotEmpty())
+        }
+    }
+
+    @Test
     fun negativeCorpusReturnsStableStatusCodes() {
         val expectations = mapOf(
             "negative-synthetic-drm-header.mobi" to MobiCoreStatus.DrmProtected,
@@ -133,6 +176,23 @@ class MobiCoreInstrumentedTest {
             val failure = runCatching { MobiCoreBook.open(copyAsset(fixtureName)) }.exceptionOrNull()
             assertTrue(failure is MobiCoreException)
             assertTrue((failure as MobiCoreException).status == expectedStatus)
+        }
+    }
+
+    @Test
+    fun productionFactoryTranslatesNativeFailuresToStableKinds() {
+        val expectations = mapOf(
+            "negative-synthetic-drm-header.mobi" to MobiPublicationErrorKind.DrmProtected,
+            "negative-truncated.mobi" to MobiPublicationErrorKind.Corrupt,
+            "negative-synthetic-kfx.kfx" to MobiPublicationErrorKind.Unsupported,
+        )
+        expectations.forEach { (fixtureName, expectedKind) ->
+            val failure = runCatching {
+                MobiReadiumPublicationFactory().open(copyAsset(fixtureName))
+            }.exceptionOrNull()
+            assertTrue(failure is MobiPublicationOpenException)
+            assertEquals(expectedKind, (failure as MobiPublicationOpenException).kind)
+            assertTrue(failure.message?.contains(fixtureName) != true)
         }
     }
 
@@ -152,6 +212,9 @@ class MobiCoreInstrumentedTest {
                 ?.toLongOrNull()
                 ?: -1L
         }
+
+    private fun maximumTocDepth(links: List<org.readium.r2.shared.publication.Link>): Int =
+        links.maxOfOrNull { link -> 1 + maximumTocDepth(link.children) } ?: 0
 
     private fun snapshot(book: MobiCoreBook): String = buildString {
         val info = book.info()

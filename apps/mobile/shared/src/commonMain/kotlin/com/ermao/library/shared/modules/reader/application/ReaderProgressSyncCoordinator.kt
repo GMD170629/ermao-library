@@ -4,6 +4,11 @@ import com.ermao.library.shared.modules.reader.domain.ReaderProgress
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressConflict
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.toMutation
+import com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
+import com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
+import com.ermao.library.shared.modules.reader.domain.PdfReaderLocation
+import com.ermao.library.shared.modules.reader.domain.ReaderFormat
+import com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -24,6 +29,7 @@ class ReaderProgressSyncCoordinator(
 
     suspend fun saveLocalAndSubmit(target: ReaderProgressSyncTarget, progress: ReaderProgress) {
         require(progress.sourceId == target.volumeId) { "Reader progress source does not match its volume" }
+        require(target.sourceFormat.accepts(progress)) { "Reader progress morphology does not match its source format" }
         val state = stateStore.loadSyncState()
         val baseRevision = state.conflict?.server?.revision ?: state.confirmedRevision
         val pending = progress.toMutation(baseRevision, createMutationId())
@@ -82,6 +88,13 @@ class ReaderProgressSyncCoordinator(
             mutex.withLock { worker = null }
         }
     }
+}
+
+private fun ReaderFormat.accepts(progress: ReaderProgress): Boolean = when (this) {
+    ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text -> progress.location is ReflowReaderLocation
+    ReaderFormat.Pdf -> progress.location is PdfReaderLocation
+    ReaderFormat.Comic -> progress.location is ComicReaderLocation
+    ReaderFormat.Audio -> progress.location is AudioReaderLocation
 }
 
 class LocalFirstReaderProgressStore(

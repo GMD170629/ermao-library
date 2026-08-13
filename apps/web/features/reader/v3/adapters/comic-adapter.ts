@@ -745,7 +745,10 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     return {
       kind: 'comic',
       volumeId,
-      pageIndex: this.currentPage
+      pageIndex: this.currentPage,
+      ...(this.pageMeta.get(this.currentPage)?.resourceHref
+        ? { resourceHref: this.pageMeta.get(this.currentPage)?.resourceHref }
+        : {})
     };
   }
 

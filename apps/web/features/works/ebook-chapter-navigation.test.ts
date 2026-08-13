@@ -7,13 +7,13 @@ import {
 } from './ebook-chapter-navigation';
 
 test('isReflowableEbookFormat accepts known reflowable ebook formats', () => {
-  for (const format of ['EPUB', 'MOBI', 'AZW', 'AZW3', 'PRC', 'FB2', 'TXT'] as const) {
+  for (const format of ['EPUB', 'MOBI', 'AZW', 'AZW3', 'PRC', 'TXT'] as const) {
     assert.equal(isReflowableEbookFormat(format), true);
   }
 });
 
 test('isReflowableEbookFormat rejects comic, pdf, audio, and unknown values', () => {
-  for (const format of ['COMIC', 'PDF', 'AUDIO', '', null, undefined, 'DOCX']) {
+  for (const format of ['COMIC', 'PDF', 'AUDIO', 'FB2', '', null, undefined, 'DOCX']) {
     assert.equal(isReflowableEbookFormat(format), false);
   }
 });
@@ -34,8 +34,8 @@ test('chapterDeepLinkHref keeps EPUB hrefs including fragments', () => {
   assert.equal(chapterDeepLinkHref('EPUB', 'Text/all.xhtml#section-2'), 'Text/all.xhtml#section-2');
 });
 
-test('chapterDeepLinkHref keeps exact FB2 and TXT engine targets', () => {
-  assert.equal(chapterDeepLinkHref('FB2', '2#1'), '2#1');
+test('chapterDeepLinkHref keeps exact TXT engine targets and rejects FB2', () => {
+  assert.equal(chapterDeepLinkHref('FB2', '2#1'), null);
   assert.equal(chapterDeepLinkHref('TXT', 'txt-section:1'), 'txt-section:1');
   assert.equal(chapterDeepLinkHref('FB2', 'fb2-section:0'), null);
   assert.equal(chapterDeepLinkHref('FB2', '#'), null);

@@ -6,6 +6,13 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressDatabase
 import com.ermao.library.shared.modules.reader.ContentFingerprint
+import com.ermao.library.shared.modules.reader.EngineLocator
+import com.ermao.library.shared.modules.reader.EngineLocatorPayload
+import com.ermao.library.shared.modules.reader.AudioReaderLocation
+import com.ermao.library.shared.modules.reader.ComicReaderLocation
+import com.ermao.library.shared.modules.reader.PdfReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderEngine
+import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressJson
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
@@ -53,7 +60,7 @@ class ReaderR4PersistenceInstrumentedTest {
     }
 
     @Test
-    fun v1DatabaseUpgradePreservesExactAndDropsRetiredSyncTables() = runBlocking {
+    fun preUnionDatabaseUpgradeDiscardsExactAndRetiredSyncTables() = runBlocking {
         val namespace = ReaderSyncNamespace("server", "user", 4)
         createV1Database(namespace, progress(7_000))
 
@@ -64,7 +71,7 @@ class ReaderR4PersistenceInstrumentedTest {
             databaseName = databaseName,
         )
 
-        assertEquals(progress(7_000), upgraded.load("volume-1"))
+        assertEquals(null, upgraded.load("volume-1"))
         upgraded.close()
 
         val readable = SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READONLY)
@@ -115,7 +122,30 @@ class ReaderR4PersistenceInstrumentedTest {
     }
 
     @Test
-    fun earlyV4KeyMigratesOnlyAfterExactIdentityMatches() = runBlocking {
+    fun publicationLocationMorphologiesRoundTripThroughSQLite() = runBlocking {
+        val database = AndroidReaderProgressDatabase(
+            context,
+            identity(ReaderSyncNamespace("server", "user", 1)),
+            legacyProgressStore = null,
+            databaseName = databaseName,
+        )
+        val locations = listOf(
+            progress(1_000).location,
+            PdfReaderLocation(3, 0.375, fingerprint(), engineLocator()),
+            ComicReaderLocation("images/page-004.jpg", 3, fingerprint(), engineLocator()),
+            AudioReaderLocation("track-1", "chapter-2", 45_000, fingerprint(), engineLocator()),
+        )
+
+        locations.forEachIndexed { index, location ->
+            val expected = ReaderProgress("volume-1", location, index.toLong() + 2_000, "android-client", 25.0)
+            database.save(expected)
+            assertEquals(expected, database.load("volume-1"))
+        }
+        database.close()
+    }
+
+    @Test
+    fun earlyV4KeyIsDiscardedAtThePublicationLocationBoundary() = runBlocking {
         val namespace = ReaderSyncNamespace("server", "user", 2)
         createEarlyV4Database(namespace, progress(5_000))
 
@@ -134,7 +164,7 @@ class ReaderR4PersistenceInstrumentedTest {
             legacyProgressStore = null,
             databaseName = databaseName,
         )
-        assertEquals(progress(5_000), matching.load("volume-1"))
+        assertEquals(null, matching.load("volume-1"))
         matching.close()
     }
 
@@ -184,10 +214,27 @@ class ReaderR4PersistenceInstrumentedTest {
             "chapter.xhtml",
             0.5,
             0.5,
+            engineLocator = EngineLocator(
+                engine = ReaderEngine.Readium,
+                platform = ReaderEnginePlatform.Android,
+                version = "readium-kotlin:3.3.0",
+                payload = EngineLocatorPayload.parse(
+                    """{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"body","progression":0.5,"totalProgression":0.5}}""",
+                ),
+            ),
             contentFingerprint = fingerprint(),
         ),
         timestamp,
         "android-client",
+    )
+
+    private fun engineLocator() = EngineLocator(
+        engine = ReaderEngine.Readium,
+        platform = ReaderEnginePlatform.Android,
+        version = "readium-kotlin:3.3.0",
+        payload = EngineLocatorPayload.parse(
+            """{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"body"}}""",
+        ),
     )
 
     private fun identity(namespace: ReaderSyncNamespace) = ReaderLocalProgressIdentity(

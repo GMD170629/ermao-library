@@ -23,14 +23,13 @@ export function latestScopedProgress(
 
 export function localProgressProjection(mutation: ExactProgressRecord | null) {
   if (!mutation) return null;
-  const location = mutation.location;
-  if (!location && mutation.locator) {
+  const location = mutation.locator;
+  if (location.kind === 'reflowable') {
     return {
       percent: mutation.displayPercent,
-      currentHref: mutation.locator.payload.href,
-      position: mutation.locator.payload.locations.position ?? null
+      currentHref: location.engineLocator.payload.href,
+      position: location.engineLocator.payload.locations.position ?? null
     };
   }
-  if (!location) return { percent: mutation.displayPercent };
   return { percent: mutation.displayPercent };
 }

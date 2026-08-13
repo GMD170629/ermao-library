@@ -53,6 +53,7 @@ data class PreparedDownloadArtifact(
     val localReference: String,
     val contentFingerprint: String,
     val expectedBytes: Long,
+    val format: String,
 )
 
 class DownloadPreparationViewModel(
@@ -205,6 +206,7 @@ class DownloadPreparationViewModel(
                 localReference = artifact.localReference,
                 contentFingerprint = artifact.identity.contentFingerprint,
                 expectedBytes = artifact.verifiedBytes,
+                format = artifact.descriptor.format,
             ),
         )
     }
