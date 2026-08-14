@@ -196,13 +196,22 @@ def write_epub_fixture(path: Path):
         )
         archive.writestr(
             "OEBPS/nav.xhtml",
-            '<html><body><nav epub:type="toc"><a href="one.xhtml">第一节</a><a href="two.xhtml">第二节</a></nav></body></html>',
+            """<html xmlns="http://www.w3.org/1999/xhtml"
+            xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title>
+            </head><body><nav epub:type="toc"><ol>
+            <li><a href="one.xhtml">第一节</a></li>
+            <li><a href="two.xhtml">第二节</a></li>
+            </ol></nav></body></html>""",
         )
         archive.writestr(
-            "OEBPS/one.xhtml", "<html><body><h1>fallback</h1></body></html>"
+            "OEBPS/one.xhtml",
+            "<html><head><title>第一节</title></head>"
+            "<body><h1>fallback</h1></body></html>",
         )
         archive.writestr(
-            "OEBPS/two.xhtml", "<html><body><h1>fallback</h1></body></html>"
+            "OEBPS/two.xhtml",
+            "<html><head><title>第二节</title></head>"
+            "<body><h1>fallback</h1></body></html>",
         )
         archive.writestr("OEBPS/cover.jpg", b"fake-jpeg")
 
@@ -225,7 +234,11 @@ def write_epub_cover_reference_fixture(
             <item id="cover" href="{cover_href}" media-type="image/jpeg" properties="cover-image"/>
             </manifest><spine><itemref idref="c1"/></spine></package>""",
         )
-        archive.writestr("OEBPS/one.xhtml", "<html><body><h1>正文</h1></body></html>")
+        archive.writestr(
+            "OEBPS/one.xhtml",
+            "<html><head><title>正文</title></head>"
+            "<body><h1>正文</h1></body></html>",
+        )
         if cover_entry:
             archive.writestr(cover_entry, b"optional-cover")
 
@@ -481,9 +494,14 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
 
     assert result.import_status == "completed"
     assert result.type == "ebook"
+    assert result.total_units == 0
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryMediaVersion") == 1
-    assert _count(db_session, "LibraryReadingUnit") == 2
+    assert _count(db_session, "LibraryReadingUnit") == 0
+    assert (
+        db_session.execute(text("SELECT chapterCount FROM LibraryVolume")).scalar()
+        is None
+    )
     assert _count(db_session, "ImportTask") == 1
     assert _count(db_session, "OrganizeJob") == 0
     assert (
@@ -1414,7 +1432,7 @@ def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
         .mappings()
         .first()
     )
-    assert first_volume["chapterCount"] == 1
+    assert first_volume["chapterCount"] is None
     assert first_volume["sizeBytes"] > 0
     volumes = (
         db_session.execute(
@@ -1427,9 +1445,24 @@ def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
         .all()
     )
     assert [dict(volume) for volume in volumes] == [
-        {"title": "第 1 卷", "volumeIndex": 1, "sortOrder": 1000, "chapterCount": 1},
-        {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
-        {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10001, "chapterCount": 1},
+        {
+            "title": "第 1 卷",
+            "volumeIndex": 1,
+            "sortOrder": 1000,
+            "chapterCount": None,
+        },
+        {
+            "title": "第 10 卷",
+            "volumeIndex": 10,
+            "sortOrder": 10000,
+            "chapterCount": None,
+        },
+        {
+            "title": "第 10 卷",
+            "volumeIndex": 10,
+            "sortOrder": 10001,
+            "chapterCount": None,
+        },
     ]
 
 
@@ -2416,28 +2449,14 @@ def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_exte
         gateway.shutdown()
 
 
-def test_parse_epub_nav_uses_toc_block_and_preserves_raw_opf_metadata(tmp_path):
+def test_parse_epub_import_metadata_excludes_navigation(tmp_path):
     epub = tmp_path / "nav.epub"
     write_epub_nav_fixture(epub)
 
     metadata = parse_epub_metadata(epub)
 
-    assert metadata["chapters"] == [
-        {
-            "title": "第一节",
-            "href": "OEBPS/chapters/one.xhtml",
-            "idref": "c1",
-            "mediaType": "application/xhtml+xml",
-            "sortOrder": 1,
-        },
-        {
-            "title": "第二节",
-            "href": "OEBPS/chapters/two.xhtml#p2",
-            "idref": "c2",
-            "mediaType": "application/xhtml+xml",
-            "sortOrder": 2,
-        },
-    ]
+    assert "chapters" not in metadata
+    assert "chapterCount" not in metadata
     assert metadata["isbn"] == "9787111111115"
     assert metadata["publisher"] == "测试出版社"
     assert metadata["subjects"] == ["悬疑", "推理"]
@@ -2472,48 +2491,6 @@ def test_parse_epub_metadata_does_not_extract_isbn_from_uuid(tmp_path):
     assert metadata["identifier"] == "B00T238N28"
 
 
-def test_parse_epub_ncx_titles_take_priority_over_headings(tmp_path):
-    epub = tmp_path / "ncx.epub"
-    write_epub_ncx_fixture(epub)
-
-    metadata = parse_epub_metadata(epub)
-
-    assert metadata["chapters"] == [
-        {
-            "title": "序幕 苏格兰",
-            "href": "OEBPS/Text/chapter01.xhtml#start",
-            "idref": "c1",
-            "mediaType": "application/xhtml+xml",
-            "sortOrder": 1,
-        },
-        {
-            "title": "食人树",
-            "href": "OEBPS/Text/chapter02.xhtml",
-            "idref": "c2",
-            "mediaType": "application/xhtml+xml",
-            "sortOrder": 2,
-        },
-    ]
-
-
-def test_parse_epub_without_toc_uses_headings_then_numbered_titles(tmp_path):
-    headed = tmp_path / "headed.epub"
-    write_epub_without_toc_fixture(headed, "<h1>第一节</h1>", "<h2>第二节</h2>")
-    headed_metadata = parse_epub_metadata(headed)
-    assert [chapter["title"] for chapter in headed_metadata["chapters"]] == [
-        "第一节",
-        "第二节",
-    ]
-
-    untitled = tmp_path / "untitled.epub"
-    write_epub_without_toc_fixture(untitled, "<p>content</p>", "<p>content</p>")
-    untitled_metadata = parse_epub_metadata(untitled)
-    assert [chapter["title"] for chapter in untitled_metadata["chapters"]] == [
-        "第 1 章",
-        "第 2 章",
-    ]
-
-
 def test_import_epub_with_missing_declared_cover_persists_default_cover(
     db_session, test_settings, tmp_path
 ):
@@ -2534,7 +2511,7 @@ def test_import_epub_with_missing_declared_cover_persists_default_cover(
     )
 
     assert result.import_status == "completed"
-    assert result.total_units == 1
+    assert result.total_units == 0
     volume_resource = (
         db_session.execute(
             text("SELECT importStatus, coverPath, coverStatus FROM LibraryVolume")
@@ -2638,9 +2615,7 @@ def test_import_comic_persists_page_units_and_detects_duplicate(
     )
     file_row = (
         db_session.execute(
-            text(
-                "SELECT fullHash, hashStatus, pageIndexVersion FROM LibraryFile"
-            )
+            text("SELECT fullHash, hashStatus, pageIndexVersion FROM LibraryFile")
         )
         .mappings()
         .first()
@@ -2961,9 +2936,7 @@ def test_global_import_preferences_filter_extensions_and_patterns(
 
     projection = load_raw_import_preferences_projection(db_session)
     db_session.close()
-    preferences = prepare_import_preferences(
-        projection, legacy_stable_delay_ms=None
-    )
+    preferences = prepare_import_preferences(projection, legacy_stable_delay_ms=None)
     assert preferences.allowed_extensions == (".epub", ".txt", ".pdf")
     assert not preferences.stability_check_enabled
     assert preferences.stability_check_seconds == 300
@@ -2984,9 +2957,7 @@ def test_global_import_preferences_filter_extensions_and_patterns(
 def test_missing_import_preferences_keep_every_supported_extension_enabled(db_session):
     projection = load_raw_import_preferences_projection(db_session)
     db_session.close()
-    preferences = prepare_import_preferences(
-        projection, legacy_stable_delay_ms=None
-    )
+    preferences = prepare_import_preferences(projection, legacy_stable_delay_ms=None)
     assert preferences.allowed_extensions == SUPPORTED_IMPORT_EXTENSIONS
     assert ".cbr" in preferences.allowed_extensions
     assert ".rar" in preferences.allowed_extensions
@@ -3030,7 +3001,9 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
     )
     assert raw_volume["format"] == "TXT"
     assert not raw_volume["hidden"]
-    assert raw_volume["chapterCount"] == 2
+    assert raw_volume["chapterCount"] is None
+    assert raw_result.total_units == 0
+    assert db_session.scalar(select(func.count()).select_from(LibraryReadingUnit)) == 0
     assert Path(raw_file["path"]) == source.resolve()
     assert raw_file["kind"] == "TXT"
 
@@ -3125,6 +3098,9 @@ def test_native_reflowable_sources_do_not_require_automatic_conversion(
     assert volume is not None
     assert volume.format == source_format
     assert volume.hidden is False
+    assert volume.chapter_count is None
+    assert imported.total_units == 0
+    assert db_session.scalar(select(func.count()).select_from(LibraryReadingUnit)) == 0
     assert book_file.kind == source_format
     assert book_file.mime_type == mime_type
     assert json.loads(metadata.raw_json)["readable"] is True
@@ -3328,18 +3304,29 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     )
     volume = db_session.get(LibraryVolume, imported.volume_id)
     work = db_session.get(LibraryWork, imported.work_id)
-    for unit in db_session.scalars(
-        select(LibraryReadingUnit).where(
-            LibraryReadingUnit.volume_id == imported.volume_id
-        )
-    ).all():
-        db_session.delete(unit)
+    book_file = db_session.scalars(
+        select(LibraryFile).where(LibraryFile.volume_id == imported.volume_id)
+    ).one()
     assert volume is not None
     assert work is not None
-    volume.chapter_count = 0
+    original_hash = book_file.full_hash
+    db_session.add(
+        LibraryReadingUnit(
+            id="stale-import-navigation",
+            volume_id=volume.id,
+            file_id=book_file.id,
+            unit_type="chapter",
+            title="旧目录",
+            href="legacy.xhtml",
+            sort_order=0,
+            metadata_json="{}",
+        )
+    )
+    volume.chapter_count = 1
     work.title = source.stem
     work.author = "未知作者"
     db_session.commit()
+    source.write_text(source.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
     refreshed = import_managed_book(
         db_session,
@@ -3354,7 +3341,10 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     assert refreshed.duplicate is True
     assert refreshed.merge_reason == "refreshed-native-metadata"
     assert volume.format == "FB2"
-    assert volume.chapter_count == 2
+    assert volume.chapter_count is None
+    db_session.refresh(book_file)
+    assert book_file.full_hash != original_hash
+    assert book_file.size_bytes == source.stat().st_size
     assert work.title == "真实标题"
     assert work.author == "测试作者"
     assert (
@@ -3379,7 +3369,7 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
                 )
             ).all()
         )
-        == 2
+        == 0
     )
 
 

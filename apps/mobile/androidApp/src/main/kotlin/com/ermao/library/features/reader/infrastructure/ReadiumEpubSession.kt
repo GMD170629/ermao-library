@@ -9,6 +9,7 @@ import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderBookmarkLocation
 import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
+import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.domain.mergeReaderBookmarks
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderLocation
@@ -17,6 +18,7 @@ import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.ReaderResumeTarget
+import com.ermao.library.shared.modules.reader.ReaderResumeSource
 import com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope
 import com.ermao.library.shared.modules.reader.ReflowablePublicationLocation
 import com.ermao.library.shared.modules.reader.ExactBlockMatch
@@ -110,6 +112,7 @@ internal class ReadiumEpubSession(
     private val locatorMapper: ReadiumLocatorMapper,
     private val preferencesMapper: ReadiumPreferencesMapper,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
+    private val progressCoordinator: com.ermao.library.shared.modules.reader.ReaderProgressSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
     private val persistPreferences: (ReaderPreferences) -> Unit = {},
     private val bookmarkStore: AndroidReaderBookmarkStore? = null,
@@ -161,6 +164,7 @@ internal class ReadiumEpubSession(
     private var resumeTarget: ResumeTarget? = null
     private var returningToResumeTarget = false
     private var suppressNextPreferenceLocation = false
+    private var currentPageUnreadable = false
     private var prepared = false
 
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
@@ -194,7 +198,7 @@ internal class ReadiumEpubSession(
         } else if (source.format == ReaderFormat.Text) {
             val expected = source.contentFingerprint
             if (expected.parserVersion != "shuku-txt-parser-v1" ||
-                expected.normalizationVersion != "shuku-txt-publication-v1"
+                expected.normalizationVersion != "shuku-txt-publication-v2"
             ) {
                 throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile))
             }
@@ -204,24 +208,24 @@ internal class ReadiumEpubSession(
                 throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile), cause = error)
             }
         } else {
-        val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
-            throw ReaderOpenFailure(
-                ReaderError(ReaderErrorCode.CorruptFile),
-                diagnostic = ReadiumOpeningDiagnostic.AssetRetrieval(error),
-            )
-        }
-        readium.publicationOpener.open(
-            asset = asset,
-            allowUserInteraction = false,
-            onCreatePublication = {
-                container = EpubContentSecurityPolicy.apply(container)
-            },
-        ).getOrElse { error ->
-            throw ReaderOpenFailure(
-                ReaderError(ReaderErrorCode.ParseFailed),
-                diagnostic = ReadiumOpeningDiagnostic.PublicationOpening(error),
-            )
-        }
+            val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
+                throw ReaderOpenFailure(
+                    ReaderError(ReaderErrorCode.CorruptFile),
+                    diagnostic = ReadiumOpeningDiagnostic.AssetRetrieval(error),
+                )
+            }
+            readium.publicationOpener.open(
+                asset = asset,
+                allowUserInteraction = false,
+                onCreatePublication = {
+                    container = EpubContentSecurityPolicy.apply(container)
+                },
+            ).getOrElse { error ->
+                throw ReaderOpenFailure(
+                    ReaderError(ReaderErrorCode.ParseFailed),
+                    diagnostic = ReadiumOpeningDiagnostic.PublicationOpening(error),
+                )
+            }
         }
         if (openedPublication.isRestricted) {
             openedPublication.close()
@@ -232,6 +236,7 @@ internal class ReadiumEpubSession(
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
         }
         publication = openedPublication
+        progressCoordinator?.beginSession(remoteSnapshot)
         publicationPositions = openedPublication.positions()
         bookmarkStore?.load()?.let { state ->
             bookmarkRecords = state.bookmarks
@@ -287,6 +292,25 @@ internal class ReadiumEpubSession(
         checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
         bookmarkScope = scope
+        progressCoordinator?.let { coordinator ->
+            scope.launch {
+                coordinator.remoteProgressNotices.collectLatest { notice ->
+                    val snapshot = notice?.snapshot
+                    if (snapshot == null) {
+                        if (!returningToResumeTarget) hideResumeNotice()
+                    } else {
+                        val target = ReaderResumeTarget(
+                            source = ReaderResumeSource.Server,
+                            capturedAtEpochMillis = snapshot.effectiveCapturedAtEpochMillis,
+                            displayPercent = snapshot.displayPercent,
+                            remoteSnapshot = snapshot,
+                        ).toResumeTarget(checkNotNull(publication))
+                        resumeTarget = target
+                        _resumeNotice.value = target?.notice
+                    }
+                }
+            }
+        }
         locationJob = scope.launch {
             checkNotNull(navigator).currentLocator.collectLatest { locator ->
                 val mapped = locatorMapper.toDomain(locator, source.contentFingerprint)
@@ -294,6 +318,7 @@ internal class ReadiumEpubSession(
                 delay(LOCAL_SAVE_DEBOUNCE_MILLIS)
                 val exactLocation = captureFirstVisibleExactLocation() ?: mapped
                 _currentLocation.value = exactLocation
+                currentPageUnreadable = isUnreadablePage(exactLocation)
                 expectedRestoreEnvelope?.let { expected ->
                     val explicitReturn = returningToResumeTarget
                     val recaptured = exactLocation.engineLocator
@@ -310,7 +335,21 @@ internal class ReadiumEpubSession(
                             if (returningToResumeTarget) {
                                 returningToResumeTarget = false
                                 _resumeNotice.value = null
+                                val verifiedTarget = resumeTarget
                                 resumeTarget = null
+                                val coordinator = progressCoordinator
+                                val snapshot = verifiedTarget?.snapshot
+                                if (coordinator != null && snapshot != null) {
+                                    val verified = ReaderProgress(
+                                        source.sourceId,
+                                        exactLocation,
+                                        nowEpochMillis(),
+                                        deviceIdentity.stableDeviceId(),
+                                    )
+                                    coordinator.acceptVerifiedRemoteProgress(verified, snapshot)
+                                    lastPersistedLocation = exactLocation
+                                    return@collectLatest
+                                }
                             }
                             if (!explicitReturn) return@collectLatest
                         }
@@ -348,9 +387,9 @@ internal class ReadiumEpubSession(
                     return@collectLatest
                 }
                 if (_resumeNotice.value != null && !returningToResumeTarget) {
-                    dismissResumeNotice()
+                    hideResumeNotice()
                 }
-                persist(exactLocation)
+                if (!currentPageUnreadable) persist(exactLocation)
             }
         }
         if (bookmarkStore != null && bookmarkSyncPort != null && bookmarkSyncTarget != null) {
@@ -372,7 +411,7 @@ internal class ReadiumEpubSession(
     override fun goTo(location: ReaderLocation): Boolean {
         dismissResumeNotice()
         val openedPublication = publication ?: return false
-        val target = locatorMapper.exactEngineLocator(location, source.contentFingerprint)
+        val target = locatorMapper.exactEngineLocator(location)
             ?.takeIf { locator -> openedPublication.contains(locator) }
             ?: locatorMapper.resourceProgressionLocator(location, openedPublication)
             ?: return false
@@ -393,6 +432,11 @@ internal class ReadiumEpubSession(
 
     override fun dismissResumeNotice() {
         if (returningToResumeTarget) return
+        progressCoordinator?.dismissRemoteProgressNotice()
+        hideResumeNotice()
+    }
+
+    private fun hideResumeNotice() {
         _resumeNotice.value = null
         _resumeActionFailed.value = false
         resumeTarget = null
@@ -404,15 +448,7 @@ internal class ReadiumEpubSession(
         returningToResumeTarget = true
         expectedRestoreEnvelope = target.envelope
         restoreObservationCount = 0
-        val movedExactly = navigator?.go(target.locator, animated = true) ?: false
-        val moved = movedExactly || publication?.let { openedPublication ->
-            locatorMapper.resourceProgressionLocator(
-                resourceKey = target.locator.href.toString(),
-                progression = target.locator.locations.progression,
-                position = target.locator.locations.position,
-                publication = openedPublication,
-            )?.let { fallback -> navigator?.go(fallback, animated = true) }
-        } == true
+        val moved = navigator?.go(target.locator, animated = true) ?: false
         if (!moved) {
             returningToResumeTarget = false
             expectedRestoreEnvelope = null
@@ -430,6 +466,7 @@ internal class ReadiumEpubSession(
     }
 
     override fun toggleCurrentBookmark() {
+        if (currentPageUnreadable) return
         val location = _currentLocation.value as? ReflowReaderLocation ?: return
         val resourceKey = location.resourceKey ?: return
         val id = bookmarkId(resourceKey, location.totalProgression ?: location.progression ?: 0.0)
@@ -571,8 +608,20 @@ internal class ReadiumEpubSession(
             }.getOrNull() ?: return@withLock
             progressStore.save(exactProgress)
             lastPersistedLocation = location
-            publishPresentationUpdate(location, exactProgress.updatedAtEpochMillis)
+            publishPresentationUpdate(exactProgress)
         }
+    }
+
+    private suspend fun isUnreadablePage(location: ReflowReaderLocation): Boolean {
+        val openedPublication = publication ?: return false
+        val target = location.resourceKey?.substringBefore('#') ?: return false
+        val link = openedPublication.readingOrder.firstOrNull {
+            it.href.toString().substringBefore('#') == target ||
+                openedPublication.url(it).toString().substringBefore('#') == target
+        } ?: return false
+        val resource = openedPublication.get(link) ?: return false
+        val content = resource.read().getOrElse { return false }
+        return content.containsSequence(UNREADABLE_PAGE_MARKER)
     }
 
     private suspend fun captureFirstVisibleExactLocation(): ReflowReaderLocation? {
@@ -594,8 +643,8 @@ internal class ReadiumEpubSession(
         return location.takeIf { ReadiumLocatorEnvelope.from(it) != null }
     }
 
-    private fun publishPresentationUpdate(location: ReaderLocation, capturedAtEpochMillis: Long) {
-        val reflow = location as? ReflowReaderLocation ?: return
+    private fun publishPresentationUpdate(progress: ReaderProgress) {
+        val reflow = progress.location as? ReflowReaderLocation ?: return
         val namespaceKey = presentationNamespaceKey ?: return
         val workId = source.workId ?: return
         val volumeId = source.volumeId ?: source.sourceId
@@ -605,14 +654,13 @@ internal class ReadiumEpubSession(
             (it.location as? ReflowReaderLocation)?.resourceKey == href
         }?.title
         publishProgressUpdate(
-            ReaderProgressPresentationUpdate(
+            createReaderProgressPresentationUpdate(
                 namespaceKey = namespaceKey,
                 workId = workId,
                 volumeId = volumeId,
                 percent = percent,
-                currentHref = href,
+                progress = progress,
                 chapterTitle = chapterTitle,
-                capturedAtEpochMillis = capturedAtEpochMillis,
             ),
         )
     }
@@ -629,6 +677,7 @@ internal class ReadiumEpubSession(
             notice = ReaderResumeNotice(capturedAtEpochMillis, displayPercent, locator.title),
             locator = locator,
             envelope = envelope,
+            snapshot = remoteSnapshot,
         )
     }
 
@@ -644,10 +693,10 @@ internal class ReadiumEpubSession(
         openedPublication: Publication,
     ): Locator? = when (candidate) {
         is ReaderRestoreExactLocalLocation ->
-            locatorMapper.exactEngineLocator(candidate.location, source.contentFingerprint)
+            locatorMapper.exactEngineLocator(candidate.location)
                 ?.takeIf { openedPublication.contains(it) }
         is ReaderRestoreExactEngineLocation ->
-            locatorMapper.exactEngineLocator(candidate.location, source.contentFingerprint)
+            locatorMapper.exactEngineLocator(candidate.location)
                 ?.takeIf { openedPublication.contains(it) }
         is ReaderRestorePublicEngineLocator ->
             locatorMapper.publicEngineLocator(candidate.locator)
@@ -695,13 +744,23 @@ internal class ReadiumEpubSession(
     private companion object {
         const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L
         const val RESTORE_STABLE_OBSERVATIONS = 3
+        val UNREADABLE_PAGE_MARKER =
+            "data-shuku-resource-error=\"RESOURCE_UNREADABLE\"".encodeToByteArray()
     }
 
     private data class ResumeTarget(
         val notice: ReaderResumeNotice,
         val locator: Locator,
         val envelope: ReadiumLocatorEnvelope,
+        val snapshot: ReaderProgressSnapshotV4?,
     )
+}
+
+private fun ByteArray.containsSequence(needle: ByteArray): Boolean {
+    if (needle.isEmpty() || size < needle.size) return false
+    return (0..size - needle.size).any { offset ->
+        needle.indices.all { index -> this[offset + index] == needle[index] }
+    }
 }
 
 internal typealias ReadiumReflowableSession = ReadiumEpubSession

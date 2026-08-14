@@ -34,7 +34,7 @@ def test_comic_page_index_version_upgrade_is_restart_safe_and_reversible(
             index["name"]: tuple(index["column_names"])
             for index in inspector.get_indexes("LibraryFile")
         }
-        assert head_revision(engine) == "0023_publication_full_hash_identity"
+        assert head_revision(engine) == "0026_publication_render_cache"
         assert columns["pageIndexVersion"]["nullable"] is False
         assert str(columns["pageIndexVersion"]["default"]).strip("'\"") == "0"
         assert indexes["LibraryFile_kind_pageIndexVersion_id_idx"] == (
@@ -55,6 +55,6 @@ def test_comic_page_index_version_upgrade_is_restart_safe_and_reversible(
         }
 
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert head_revision(engine) == "0023_publication_full_hash_identity"
+        assert head_revision(engine) == "0026_publication_render_cache"
     finally:
         engine.dispose()

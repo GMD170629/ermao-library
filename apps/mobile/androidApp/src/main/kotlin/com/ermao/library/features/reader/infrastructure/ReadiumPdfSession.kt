@@ -13,9 +13,12 @@ import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.ReaderProgressStore
+import com.ermao.library.shared.modules.reader.ReaderProgressSyncCoordinator
+import com.ermao.library.shared.modules.reader.PdfPublicationLocation
 import com.ermao.library.shared.modules.reader.ReaderRestoreExactLocalLocation
 import com.ermao.library.shared.modules.reader.ReaderRestorePdfPage
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
+import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
 import java.io.FileNotFoundException
@@ -48,6 +51,7 @@ internal class ReadiumPdfSession(
     private val deviceIdentity: AndroidReaderDeviceIdentity,
     private val readium: AndroidReadiumRuntime,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
+    private val progressCoordinator: ReaderProgressSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
     private val persistPreferences: (ReaderPreferences) -> Unit = {},
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
@@ -74,8 +78,10 @@ internal class ReadiumPdfSession(
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
     private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
     override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
-    override val resumeNotice: StateFlow<ReaderResumeNotice?> = MutableStateFlow(null)
-    override val resumeActionFailed: StateFlow<Boolean> = MutableStateFlow(false)
+    private val _resumeNotice = MutableStateFlow<ReaderResumeNotice?>(null)
+    override val resumeNotice: StateFlow<ReaderResumeNotice?> = _resumeNotice.asStateFlow()
+    private val _resumeActionFailed = MutableStateFlow(false)
+    override val resumeActionFailed: StateFlow<Boolean> = _resumeActionFailed.asStateFlow()
     override val bookmarks: StateFlow<List<ReaderBookmark>> = MutableStateFlow(emptyList())
     override val bookmarkSyncPending: StateFlow<Boolean> = MutableStateFlow(false)
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
@@ -87,6 +93,7 @@ internal class ReadiumPdfSession(
     private var locationJob: Job? = null
     private var lastPersistedLocation: PdfReaderLocation? = null
     private var expectedRestorePage: Int? = null
+    private var remoteTarget: ReaderProgressSnapshotV4? = null
     private var awaitingInitialObservation = true
     private var prepared = false
     private val saveMutex = Mutex()
@@ -167,6 +174,23 @@ internal class ReadiumPdfSession(
     override fun bind(scope: CoroutineScope) {
         val currentNavigator = checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
+        progressCoordinator?.let { coordinator ->
+            scope.launch {
+                coordinator.remoteProgressNotices.collectLatest { notice ->
+                    val snapshot = notice?.snapshot
+                    val location = snapshot?.locator as? PdfPublicationLocation
+                    remoteTarget = snapshot?.takeIf { location?.pageIndex?.let(::isValidPage) == true }
+                    _resumeNotice.value = remoteTarget?.let {
+                        ReaderResumeNotice(
+                            it.effectiveCapturedAtEpochMillis,
+                            it.displayPercent,
+                            null,
+                            location!!.pageIndex + 1,
+                        )
+                    }
+                }
+            }
+        }
         locationJob = scope.launch {
             currentNavigator.currentLocator.collectLatest { locator ->
                 val page = locator.pageIndex()?.takeIf(::isValidPage) ?: run {
@@ -181,6 +205,18 @@ internal class ReadiumPdfSession(
                         _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
                         return@collectLatest
                     }
+                }
+                val target = remoteTarget
+                val targetLocation = target?.locator as? PdfPublicationLocation
+                if (targetLocation?.pageIndex == page) {
+                    progressCoordinator?.acceptVerifiedRemoteProgress(
+                        ReaderProgress(source.sourceId, location, nowEpochMillis(), deviceIdentity.stableDeviceId()),
+                        target,
+                    )
+                    remoteTarget = null
+                    _resumeNotice.value = null
+                    lastPersistedLocation = location
+                    return@collectLatest
                 }
                 if (awaitingInitialObservation) {
                     awaitingInitialObservation = false
@@ -208,8 +244,18 @@ internal class ReadiumPdfSession(
         return goTo(page.toLocation())
     }
 
-    override fun dismissResumeNotice() = Unit
-    override fun returnToResumeNotice(): Boolean = false
+    override fun dismissResumeNotice() {
+        remoteTarget = null
+        _resumeNotice.value = null
+        _resumeActionFailed.value = false
+        progressCoordinator?.dismissRemoteProgressNotice()
+    }
+    override fun returnToResumeNotice(): Boolean {
+        val location = (remoteTarget?.locator as? PdfPublicationLocation)?.pageIndex?.toLocation() ?: return false
+        val moved = goTo(location)
+        if (!moved) _resumeActionFailed.value = true
+        return moved
+    }
     override fun updatePreferences(updated: ReaderPreferences) {
         if (_preferences.value == updated) return
         _preferences.value = updated
@@ -247,18 +293,18 @@ internal class ReadiumPdfSession(
         val capturedAt = nowEpochMillis()
         val percent = if (expectedPageCount == 1) 100.0 else
             location.pageIndex.toDouble() / (expectedPageCount - 1) * 100.0
-        progressStore.save(ReaderProgress(source.sourceId, location, capturedAt, deviceIdentity.stableDeviceId(), percent))
+        val progress = ReaderProgress(source.sourceId, location, capturedAt, deviceIdentity.stableDeviceId(), percent)
+        progressStore.save(progress)
         lastPersistedLocation = location
         val namespace = presentationNamespaceKey ?: return@withLock
         val workId = source.workId ?: return@withLock
-        publishProgressUpdate(ReaderProgressPresentationUpdate(
+        publishProgressUpdate(createReaderProgressPresentationUpdate(
             namespaceKey = namespace,
             workId = workId,
             volumeId = source.volumeId ?: source.sourceId,
             percent = percent,
-            currentHref = "page:${location.pageIndex + 1}",
+            progress = progress,
             chapterTitle = null,
-            capturedAtEpochMillis = capturedAt,
         ))
     }
 

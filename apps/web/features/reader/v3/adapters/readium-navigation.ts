@@ -54,6 +54,45 @@ export function findReadiumPublicationResource<T extends { href: string }>(
   return items.find((item) => candidates.some((candidate) => samePublicationResource(item.href, candidate))) ?? null;
 }
 
+export type ReadiumStartupTarget<T> = Readonly<{
+  position: T;
+  fragment: string;
+}>;
+
+function readiumStartupTarget<T extends { href: string }>(
+  readingOrder: readonly { href: string }[],
+  positions: readonly T[],
+  href: string | null | undefined
+): ReadiumStartupTarget<T> | null {
+  if (!href?.trim()) return null;
+  const resource = findReadiumPublicationResource(readingOrder, [href]);
+  if (!resource) return null;
+  const position = positions.find((candidate) => samePublicationResource(candidate.href, resource.href));
+  if (!position) return null;
+  return { position, fragment: hrefFragment(href).slice(1) };
+}
+
+/**
+ * Resolves both the publication's logical start and the actual startup target.
+ * A caller-supplied chapter href is an explicit navigation intent and therefore
+ * takes precedence over the first TOC entry while retaining its anchor.
+ */
+export function resolveReadiumStartupTargets<T extends { href: string }>(
+  readingOrder: readonly { href: string }[],
+  positions: readonly T[],
+  publicationStartHref: string | null | undefined,
+  requestedHref: string | null | undefined
+): Readonly<{
+  start: ReadiumStartupTarget<T> | null;
+  initial: ReadiumStartupTarget<T> | null;
+}> {
+  const firstPosition = positions[0];
+  const start = readiumStartupTarget(readingOrder, positions, publicationStartHref)
+    ?? (firstPosition ? { position: firstPosition, fragment: '' } : null);
+  const initial = readiumStartupTarget(readingOrder, positions, requestedHref) ?? start;
+  return { start, initial };
+}
+
 function readingOrderIndex(publication: Publication, href: string) {
   return publication.readingOrder.items.findIndex((item) => samePublicationResource(item.href, href));
 }

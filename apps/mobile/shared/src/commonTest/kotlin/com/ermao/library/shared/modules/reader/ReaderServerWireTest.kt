@@ -31,12 +31,13 @@ class ReaderServerWireTest {
     @Test
     fun canonicalFlatSnapshotIsStrictlyDecoded() {
         val root = Json.parseToJsonElement(
-            """{"schemaVersion":4,"revision":18,"locator":$PUBLICATION_LOCATION,"displayPercent":32.7,"receivedAtEpochMillis":1786500000100,"capturedAtEpochMillis":1786499999000}""",
+            """{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":$PUBLICATION_LOCATION,"displayPercent":32.7,"receivedAtEpochMillis":1786500000100,"capturedAtEpochMillis":1786499999000}""",
         ).jsonObject
 
         val snapshot = ReaderServerWireMapper().decodeSnapshot(root, "volume-1")
 
         assertEquals(18, snapshot.revision)
+        assertEquals("ios-client", snapshot.clientId)
         assertEquals(32.7, snapshot.displayPercent)
         assertEquals(ReaderEnginePlatform.Android, snapshot.locator.platform)
         assertEquals(1_786_499_999_000, snapshot.capturedAtEpochMillis)
@@ -72,7 +73,7 @@ class ReaderServerWireTest {
     private companion object {
         const val ORIGINAL_HASH = "f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678"
         val PUBLICATION_LOCATION = reflowable(LOCATOR)
-        const val LOCATOR = """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"$ORIGINAL_HASH","parser":"libmobi:0.12@85dcfe","normalization":"ermao-mobi-core-v1"},"payload":{"href":"part00000.html","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title","fragments":["chapter-title"],"progression":0.42,"position":17},"text":{"highlight":"天地玄黄，宇宙洪荒"}}}"""
+        const val LOCATOR = """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"$ORIGINAL_HASH","parser":"libmobi:0.12@85dcfe","normalization":"ermao-mobi-core-v1+shuku-locator-dom-v2"},"payload":{"href":"part00000.html","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title","fragments":["chapter-title"],"progression":0.42,"position":17},"text":{"highlight":"天地玄黄，宇宙洪荒"}}}"""
     }
 }
 

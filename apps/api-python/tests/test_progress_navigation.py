@@ -13,7 +13,7 @@ ANCHORED_UNITS = [
 def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource():
     progress = {
         "percent": 12,
-        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium-epub:1","normalization":"shuku-epub-v1"},"payload":{"href":"text/all.xhtml","type":"application/xhtml+xml","locations":{"fragments":["chapter-2"]}}}',
+        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"text/all.xhtml","type":"application/xhtml+xml","locations":{"fragments":["chapter-2"]}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
@@ -51,7 +51,7 @@ def test_progress_navigation_projects_exact_readium_location_for_chapter_detail(
 def test_progress_navigation_does_not_guess_ambiguous_resource_only_href():
     progress = {
         "percent": 0,
-        "locationJson": '{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","parser":"readium-epub:1","normalization":"shuku-epub-v1"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
+        "locationJson": '{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
@@ -74,7 +74,7 @@ def test_progress_navigation_does_not_estimate_mobi_chapter_from_unmatched_exact
     ]
     progress = {
         "percent": 11.201454819672687,
-        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parser":"libmobi:0.12@test","normalization":"ermao-mobi-core-v1"},"payload":{"href":"missing.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#missing"}}}',
+        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parser":"libmobi:0.12@test","normalization":"ermao-mobi-core-v1+shuku-locator-dom-v2"},"payload":{"href":"missing.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#missing"}}}',
     }
 
     navigation = progress_navigation(progress, units)
@@ -122,10 +122,69 @@ def test_progress_navigation_ignores_removed_legacy_extra_fields():
 def test_progress_navigation_does_not_override_unmatched_href_with_percent():
     progress = {
         "percent": 50,
-        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","parser":"readium-epub:1","normalization":"shuku-epub-v1"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
+        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
 
     assert navigation["currentHref"] == "Text/all.xhtml"
     assert navigation["currentChapterSortOrder"] is None
+
+
+def test_progress_navigation_uses_exact_reading_order_position_for_split_resources():
+    progress = {
+        "percent": 15.2,
+        "locationJson": '{"kind":"reflowable","publication":{"originalFileHash":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"engineLocator":{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","payload":{"href":"text/part0008_split_001.html","locations":{"position":11,"progression":0.5}}}}',
+    }
+    units = [
+        {
+            "href": "text/part0003.html",
+            "title": "第一部",
+            "sortOrder": 1,
+            "metadataJson": {"readingOrderPosition": 3},
+        },
+        {
+            "href": "text/part0008_split_000.html",
+            "title": "第四部 事件",
+            "sortOrder": 4,
+            "metadataJson": {"readingOrderPosition": 10},
+        },
+        {
+            "href": "text/part0009.html",
+            "title": "第五部",
+            "sortOrder": 5,
+            "metadataJson": {"readingOrderPosition": 13},
+        },
+    ]
+
+    navigation = progress_navigation(progress, units)
+
+    assert navigation["currentChapterIndex"] == 1
+    assert navigation["currentChapterTitle"] == "第四部 事件"
+    assert navigation["currentChapterSortOrder"] == 4
+
+
+def test_progress_navigation_does_not_guess_between_anchors_at_one_position():
+    progress = {
+        "percent": 15.2,
+        "locationJson": '{"engine":"readium","payload":{"href":"text/all.xhtml","locations":{"position":4}}}',
+    }
+    units = [
+        {
+            "href": "text/all.xhtml#one",
+            "title": "第一章",
+            "sortOrder": 0,
+            "metadataJson": {"readingOrderPosition": 4},
+        },
+        {
+            "href": "text/all.xhtml#two",
+            "title": "第二章",
+            "sortOrder": 1,
+            "metadataJson": {"readingOrderPosition": 4},
+        },
+    ]
+
+    navigation = progress_navigation(progress, units)
+
+    assert navigation["currentChapterIndex"] is None
+    assert navigation["currentChapterTitle"] is None

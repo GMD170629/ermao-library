@@ -9,7 +9,7 @@
     "publication": {
       "originalFileHash": "sha256:f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678",
       "parser": "libmobi:0.12@85dcfe",
-      "normalization": "ermao-mobi-core-v1"
+      "normalization": "ermao-mobi-core-v1+shuku-locator-dom-v2"
     },
     "engineLocator": {
       "engine": "readium",
@@ -17,7 +17,7 @@
       "version": "readium-ts:2.8.2",
       "payload": {
         "href": "part00000.html",
-        "type": "text/html",
+        "type": "application/xhtml+xml",
         "locations": {
           "cssSelector": "#chapter-title",
           "fragments": ["chapter-title"],

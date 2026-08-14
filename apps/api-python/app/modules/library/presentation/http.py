@@ -11,12 +11,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import time_ns
-from typing import Annotated, Any, Never
+from typing import Annotated, Any, Never, cast
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import inspect, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
@@ -55,6 +55,7 @@ from app.bootstrap.media import media_streaming
 from app.bootstrap.metadata import (
     load_metadata_writeback_projection,
 )
+from app.bootstrap.publications import ensure_publication_navigation
 from app.bootstrap.shelf import shelf_store
 from app.bootstrap.system import (
     prepare_system_event,
@@ -201,6 +202,7 @@ from app.modules.library.presentation.views import (
     _preferred_work_cover_path,
     _require_work_manager,
     _resolve_detail_tab,
+    _selected_detail_volume_id,
     _visible_work_or_none,
     _work_detail_summary_view,
     _work_reading_units_view,
@@ -227,6 +229,16 @@ from app.modules.metadata.public import (
     MetadataWritebackProjection,
     PreparedWritebackIntent,
     prepare_metadata_writeback_intents,
+)
+from app.modules.publications.application.ensure_navigation import (
+    EnsurePublicationNavigationOutcome,
+    PublicationNavigationSourceChangedError,
+)
+from app.modules.publications.application.ports import PublicationAccessScope
+from app.modules.publications.domain.model import (
+    PublicationCorruptError,
+    PublicationNotFoundError,
+    PublicationUnsupportedError,
 )
 from app.modules.system.presentation.mappers import (
     serialize_system_event as _serialize_system_event,
@@ -324,6 +336,68 @@ def _now() -> datetime:
 
 def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
+
+
+def _publication_access_scope(db: Session, user: User) -> PublicationAccessScope:
+    context = authorization_context(db, user)
+    return PublicationAccessScope(
+        is_admin=context.is_admin,
+        can_view_manual_imports=context.can_view_manual_imports,
+        monitor_folder_ids=tuple(context.monitor_folder_ids),
+    )
+
+
+def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
+    factory: object = request.app.state.session_factory
+    if not isinstance(factory, sessionmaker):
+        raise TypeError("application session factory is unavailable")
+    return cast(sessionmaker[Session], factory)
+
+
+def _ensure_detail_navigation(
+    *,
+    db: Session,
+    request: Request,
+    settings: Settings,
+    user: User,
+    volume_id: str,
+) -> tuple[bool, int | None]:
+    scope = _publication_access_scope(db, user)
+    try:
+        result = ensure_publication_navigation(
+            _runtime_session_factory(request),
+            settings,
+        ).execute(volume_id=volume_id, access_scope=scope)
+    except (
+        OSError,
+        PublicationCorruptError,
+        PublicationNotFoundError,
+        PublicationNavigationSourceChangedError,
+        PublicationUnsupportedError,
+    ) as error:
+        logger.warning(
+            "publication_navigation_generation outcome=unavailable volume_id=%s "
+            "error_type=%s",
+            volume_id,
+            type(error).__name__,
+        )
+        return True, None
+    if result.outcome == EnsurePublicationNavigationOutcome.UNSUPPORTED:
+        return False, None
+    return True, result.chapter_count
+
+
+def _set_book_chapter_count(
+    book: dict[str, Any],
+    *,
+    volume_id: str,
+    chapter_count: int | None,
+) -> None:
+    for media_version in book.get("mediaVersions", []):
+        for volume in media_version.get("volumes", []):
+            if str(volume.get("id")) == volume_id:
+                volume["chapterCount"] = chapter_count
+                return
 
 
 def _system_auth(db: Session, request: Request, settings: Settings):
@@ -1152,11 +1226,48 @@ def get_work(
         {"id": facet.id, "kind": facet.kind, "name": facet.name}
         for facet in facet_references.authors
     ]
+    selected_tab = (
+        _resolve_detail_tab(
+            db,
+            user.id,
+            work_id,
+            book.get("detailTabs", []),
+            detailTab,
+        )
+        if navigation_requested
+        else str(book.get("selectedDetailTab") or "STRUCTURE")
+    )
+    navigation_tab = selected_tab
+    if navigation_tab == "STRUCTURE":
+        navigation_tab = next(
+            (
+                str(tab.get("key"))
+                for tab in book.get("detailTabs", [])
+                if str(tab.get("key")) != "STRUCTURE"
+            ),
+            "STRUCTURE",
+        )
+    selected_volume_id = _selected_detail_volume_id(
+        book,
+        navigation_tab,
+        volumeId,
+    )
+    if selected_volume_id is not None:
+        navigation_attempted, chapter_count = _ensure_detail_navigation(
+            db=db,
+            request=request,
+            settings=settings,
+            user=user,
+            volume_id=selected_volume_id,
+        )
+        if navigation_attempted:
+            _set_book_chapter_count(
+                book,
+                volume_id=selected_volume_id,
+                chapter_count=chapter_count,
+            )
     if not navigation_requested:
         return WorkDetailSummaryResponse(data={"book": _work_detail_summary_view(book)})
-    selected_tab = _resolve_detail_tab(
-        db, user.id, work_id, book.get("detailTabs", []), detailTab
-    )
     book["selectedDetailTab"] = selected_tab
     active_media, navigation = _active_media_view(
         db,
@@ -1215,6 +1326,27 @@ def get_work_volume_reading_units(
         return auth_error
     if not _visible_work_or_none(db, user, work_id):
         _raise_library_error("作品不存在", status_code=404)
+    volume_belongs_to_work = db.scalar(
+        select(LibraryVolume.id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(
+            LibraryVolume.id == volume_id,
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.hidden.is_(False),
+        )
+    )
+    if volume_belongs_to_work is None or not can_access_volume(db, user, volume_id):
+        _raise_library_error("卷册不存在", status_code=404)
+    _ensure_detail_navigation(
+        db=db,
+        request=request,
+        settings=settings,
+        user=user,
+        volume_id=volume_id,
+    )
     result = _work_reading_units_view(
         db,
         user=user,

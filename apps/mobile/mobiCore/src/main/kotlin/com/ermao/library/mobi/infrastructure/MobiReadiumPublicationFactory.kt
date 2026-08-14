@@ -22,6 +22,9 @@ import org.readium.r2.shared.util.mediatype.MediaType
 import org.readium.r2.shared.util.resource.Resource
 import org.readium.r2.shared.util.resource.SingleResourceContainer
 
+const val MOBI_PUBLICATION_NORMALIZATION_IDENTIFIER =
+    "ermao-mobi-core-v1+shuku-locator-dom-v2"
+
 /**
  * Creates a Readium reflowable Publication backed by one live `MobiCoreBook`.
  *
@@ -117,7 +120,7 @@ class MobiReadiumPublicationFactory {
                 publication = publication,
                 originalFileHash = originalHash,
                 parser = MobiCoreBook.parserIdentifier,
-                normalization = MobiCoreBook.normalizationIdentifier,
+                normalization = MOBI_PUBLICATION_NORMALIZATION_IDENTIFIER,
                 resources = resources.map(::MobiResourceEvidence),
                 readingOrderHrefs = readingOrder.map { it.href.toString() },
             )

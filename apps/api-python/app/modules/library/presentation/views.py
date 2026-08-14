@@ -1054,23 +1054,13 @@ def _work_view(
     }
 
 
-def _active_media_view(
-    db: Session,
+def _selected_detail_volume_id(
     book: dict[str, Any],
     selected_tab: str,
-    user_id: str,
     requested_volume_id: str | None,
-    unit_page: int,
-    unit_page_size: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    page_size = min(200, max(1, unit_page_size))
-    empty_navigation = {
-        "readingUnits": [],
-        "volumeSections": [],
-        "readingUnitsPage": _empty_reading_units_page(page_size),
-    }
+) -> str | None:
     if selected_tab == "STRUCTURE":
-        return None, empty_navigation
+        return None
     media_version = next(
         (
             item
@@ -1080,7 +1070,7 @@ def _active_media_view(
         None,
     )
     if media_version is None:
-        return None, empty_navigation
+        return None
     volumes = list(media_version.get("volumes") or [])
     selected_volume = next(
         (
@@ -1105,9 +1095,48 @@ def _active_media_view(
         )
         or (volumes[0] if volumes else None)
     )
+    return str(selected_volume["id"]) if selected_volume is not None else None
+
+
+def _active_media_view(
+    db: Session,
+    book: dict[str, Any],
+    selected_tab: str,
+    user_id: str,
+    requested_volume_id: str | None,
+    unit_page: int,
+    unit_page_size: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    page_size = min(200, max(1, unit_page_size))
+    empty_navigation = {
+        "readingUnits": [],
+        "volumeSections": [],
+        "readingUnitsPage": _empty_reading_units_page(page_size),
+    }
+    volume_id = _selected_detail_volume_id(
+        book,
+        selected_tab,
+        requested_volume_id,
+    )
+    if volume_id is None:
+        return None, empty_navigation
+    media_version = next(
+        (
+            item
+            for item in book.get("mediaVersions", [])
+            if item.get("mediaKind") == selected_tab
+        ),
+        None,
+    )
+    if media_version is None:
+        return None, empty_navigation
+    volumes = list(media_version.get("volumes") or [])
+    selected_volume = next(
+        (volume for volume in volumes if str(volume.get("id")) == volume_id),
+        None,
+    )
     if selected_volume is None:
         return None, empty_navigation
-    volume_id = str(selected_volume["id"])
     unit_rows = db.scalars(
         select(LibraryReadingUnit)
         .where(LibraryReadingUnit.volume_id == volume_id)
@@ -1116,7 +1145,6 @@ def _active_media_view(
     total = len(unit_rows)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, unit_page), total_pages)
-    selected_rows = unit_rows[(page - 1) * page_size : page * page_size]
     all_reading_units = [_reading_unit_view(unit) for unit in unit_rows]
     reading_units = all_reading_units[(page - 1) * page_size : page * page_size]
     progress = db.scalar(
@@ -1345,6 +1373,7 @@ def _work_reading_units_view(
         ),
         "currentHref": navigation.get("currentHref"),
         "currentChapterIndex": navigation.get("currentChapterIndex"),
+        "currentChapterTitle": navigation.get("currentChapterTitle"),
         "currentChapterSortOrder": navigation.get("currentChapterSortOrder"),
         "currentPageNumber": navigation.get("currentPageNumber"),
     }

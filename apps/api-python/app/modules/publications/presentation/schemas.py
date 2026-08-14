@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel
@@ -80,3 +80,9 @@ class PublicationResourceResponse(Response):
     """Opaque publication resource whose concrete media type comes from its manifest."""
 
     media_type = "application/octet-stream"
+
+
+class PublicationRenderArtifactResponse(FileResponse):
+    """Deterministic EPUB render artifact."""
+
+    media_type = "application/epub+zip"

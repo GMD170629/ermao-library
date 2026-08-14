@@ -1,12 +1,36 @@
 package com.ermao.library.features.reader.infrastructure
 
-import kotlin.test.assertFalse
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.Test
 
 class EpubContentSecurityPolicyTest {
     @Test
-    fun removesExecutableAndRemotePublicationContentButKeepsSafeExternalLinks() {
+    fun locatorProjectionMatchesV2GoldenSemantics() {
+        val markup = """<?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Projection</title></head>
+            <body><h1 id="chapter-title">&#22825;&#22320;&#29572;&#40644;</h1><form>
+            <p id="target">Cafe&#769;   &#23431;&#23449;&#27946;&#33618;</p>
+            <p>duplicate text</p><p>duplicate text</p></form><iframe src="remote"></iframe></body></html>
+        """.trimIndent()
+
+        assertEquals(
+            listOf(
+                mapOf("path" to "/body[1]", "localName" to "body"),
+                mapOf("path" to "/body[1]/h1[1]", "localName" to "h1", "id" to "chapter-title", "text" to "天地玄黄"),
+                mapOf("path" to "/body[1]/form[1]", "localName" to "form"),
+                mapOf("path" to "/body[1]/form[1]/p[1]", "localName" to "p", "id" to "target", "text" to "Café 宇宙洪荒"),
+                mapOf("path" to "/body[1]/form[1]/p[2]", "localName" to "p", "text" to "duplicate text"),
+                mapOf("path" to "/body[1]/form[1]/p[3]", "localName" to "p", "text" to "duplicate text"),
+                mapOf("path" to "/body[1]/iframe[1]", "localName" to "iframe"),
+            ),
+            EpubContentSecurityPolicy.locatorBodyProjection(markup.encodeToByteArray()),
+        )
+    }
+
+    @Test
+    fun decoratesOnlyHeadAndPreservesAuthorBody() {
         val input = """
             <html><head>
               <meta http-equiv="refresh" content="0;https://attacker.invalid" />
@@ -21,13 +45,69 @@ class EpubContentSecurityPolicyTest {
             </body></html>
         """.trimIndent()
 
-        val output = EpubContentSecurityPolicy.sanitizeHtml(input.toByteArray()).toString(Charsets.UTF_8)
+        val body = input.substringAfter("<body").substringBefore("</body>")
+        val output = EpubContentSecurityPolicy.decorateHtml(input.toByteArray()).toString(Charsets.UTF_8)
 
-        assertFalse(output.contains("<script"))
-        assertFalse(output.contains("<iframe"))
-        assertFalse(output.contains("onload="))
-        assertFalse(output.contains("javascript:"))
-        assertFalse(output.contains("attacker.invalid"))
+        assertEquals(body, output.substringAfter("<body").substringBefore("</body>"))
+        assertTrue(output.contains("<script"))
+        assertTrue(output.contains("<iframe"))
+        assertTrue(output.contains("onload="))
+        assertTrue(output.contains("javascript:"))
         assertTrue(output.contains("href=\"https://example.com\""))
+        assertTrue(output.contains("data-shuku-security-profile=\"android-v2\""))
+        assertTrue(output.contains("script-src https://readium_assets"))
+        assertTrue(!output.contains("http-equiv=\"refresh\""))
+    }
+
+    @Test
+    fun standardEpubDoctypeAndNonbreakingSpaceRemainReadable() {
+        val markup = """<?xml version="1.0"?>
+            <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+              "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+            <html xmlns="http://www.w3.org/1999/xhtml"><head><title>EPUB</title></head>
+            <body><h1 id="chapter">Chapter&nbsp;One</h1></body></html>
+        """.trimIndent()
+
+        val projection = EpubContentSecurityPolicy.locatorBodyProjection(markup.encodeToByteArray())
+        val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
+
+        assertEquals("Chapter One", projection.last()["text"])
+        assertTrue(decorated.contains("<!DOCTYPE html PUBLIC"))
+        assertTrue(decorated.contains("Chapter&nbsp;One"))
+    }
+
+    @Test
+    fun rejectsMalformedOrMissingHeadWithoutBlankFallback() {
+        assertFailsWith<IllegalArgumentException> {
+            EpubContentSecurityPolicy.decorateHtml("<html><body><p>Text</p></body></html>".toByteArray())
+        }
+        assertFailsWith<Exception> {
+            EpubContentSecurityPolicy.decorateHtml("<html><head></head><body><p>Text</body></html>".toByteArray())
+        }
+        assertFailsWith<IllegalArgumentException> {
+            EpubContentSecurityPolicy.decorateHtml(
+                """<!DOCTYPE html SYSTEM "https://attacker.invalid/book.dtd">
+                    <html><head></head><body><p>Text</p></body></html>
+                """.trimIndent().toByteArray(),
+            )
+        }
+    }
+
+    @Test
+    fun fakeHeadInsideCommentAndCdataCannotCaptureSecurityDecoration() {
+        val markup = """<?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <!-- <head><script>fake()</script></head> -->
+            <head><title>Real</title></head>
+            <body><script><![CDATA["<head>fake</head>"]]></script><p>Body</p></body>
+            </html>
+        """.trimIndent()
+
+        val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
+        val profileIndex = decorated.indexOf("data-shuku-security-profile=\"android-v2\"")
+
+        assertTrue(profileIndex > decorated.indexOf("<!-- <head>"))
+        assertTrue(profileIndex < decorated.indexOf("<title>Real</title>"))
+        assertTrue(decorated.contains("<![CDATA[\"<head>fake</head>\"]]>"))
     }
 }

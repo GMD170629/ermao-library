@@ -38,6 +38,7 @@ _INDEX_NONE = 2**32 - 1
 _MAX_READ_BYTES = 256 * 1024
 _MAX_RESOURCE_BYTES = 64 * 1024 * 1024
 _MOBI_FORMATS = frozenset({"mobi", "azw", "azw3", "prc"})
+MOBI_NORMALIZATION_IDENTIFIER = "ermao-mobi-core-v1+shuku-locator-dom-v2"
 
 
 class _BookInfo(ctypes.Structure):
@@ -444,7 +445,7 @@ def _snapshot(
             fingerprint=PublicationFingerprint(
                 original_file_hash=canonical_original_hash,
                 parser=core.parser_identifier,
-                normalization=core.normalization_identifier,
+                normalization=MOBI_NORMALIZATION_IDENTIFIER,
             ),
             reading_order=reading_order,
             resources=resources,

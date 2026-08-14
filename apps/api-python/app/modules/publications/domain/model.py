@@ -17,6 +17,18 @@ class PublicationCorruptError(Exception):
     """The source cannot safely produce a normalized publication."""
 
 
+class PublicationSecurityError(PublicationCorruptError):
+    """The source contains an active construct which must not be rendered."""
+
+
+class PublicationMarkupError(PublicationCorruptError):
+    """One publication markup resource is malformed but may be recoverable."""
+
+
+class PublicationStructureError(PublicationCorruptError):
+    """The publication package cannot provide a usable reading order."""
+
+
 class PublicationResourceNotFoundError(Exception):
     """The requested resource is not in the validated publication index."""
 

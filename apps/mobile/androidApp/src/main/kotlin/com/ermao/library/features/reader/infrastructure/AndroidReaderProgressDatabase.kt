@@ -6,7 +6,6 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import androidx.core.database.sqlite.transaction
 import com.ermao.library.shared.modules.reader.ReaderProgress
-import com.ermao.library.shared.modules.reader.ReaderProgressConflict
 import com.ermao.library.shared.modules.reader.ReaderProgressDurableState
 import com.ermao.library.shared.modules.reader.ReaderProgressJson
 import com.ermao.library.shared.modules.reader.ReaderProgressStore
@@ -20,7 +19,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** Exact progress and the latest-only Reader v4 mutation/conflict in one SQLite database. */
+/** Exact progress and the latest-only Reader v4 pending mutation in one SQLite database. */
 internal class AndroidReaderProgressDatabase(
     context: Context,
     private val identity: ReaderLocalProgressIdentity,
@@ -62,7 +61,7 @@ internal class AndroidReaderProgressDatabase(
             val current = readSyncState(writable)
             writeSyncState(
                 writable,
-                current.copy(pending = pending, conflict = null, terminalFailureCode = null),
+                current.copy(pending = pending, terminalFailureCode = null),
             )
         }
     }
@@ -82,20 +81,40 @@ internal class AndroidReaderProgressDatabase(
                 current.copy(
                     confirmedRevision = maxOf(current.confirmedRevision, snapshot.revision),
                     pending = rebased,
-                    conflict = null,
                     terminalFailureCode = null,
                 ),
             )
         }
     }
 
-    override suspend fun recordConflict(conflict: ReaderProgressConflict): Unit = io {
+    override suspend fun discardPendingAfterConflict(mutationId: String, serverRevision: Long): Unit = io {
         val writable = database.writableDatabase
         writable.transaction {
             val current = readSyncState(writable)
-            if (current.pending?.mutationId == conflict.pending.mutationId) {
-                writeSyncState(writable, current.copy(conflict = conflict, terminalFailureCode = null))
+            if (current.pending?.mutationId == mutationId) {
+                writeSyncState(
+                    writable,
+                    current.copy(
+                        confirmedRevision = maxOf(current.confirmedRevision, serverRevision),
+                        pending = null,
+                        terminalFailureCode = null,
+                    ),
+                )
             }
+        }
+    }
+
+    override suspend fun acceptRemoteProgress(
+        progress: ReaderProgress,
+        snapshot: ReaderProgressSnapshotV4,
+    ): Unit = io {
+        val writable = database.writableDatabase
+        writable.transaction {
+            write(writable, progress)
+            writeSyncState(
+                writable,
+                ReaderProgressDurableState(confirmedRevision = snapshot.revision),
+            )
         }
     }
 
@@ -178,8 +197,7 @@ internal class AndroidReaderProgressDatabase(
 
     private fun matchesIdentity(progress: ReaderProgress): Boolean =
         progress.sourceId == identity.volumeId &&
-            progress.deviceId == identity.clientId &&
-            progress.location.contentFingerprint == identity.localContentFingerprint
+            progress.deviceId == identity.clientId
 
     private suspend fun <T> io(block: () -> T): T = mutex.withLock {
         withContext(Dispatchers.IO) { block() }
@@ -223,7 +241,7 @@ internal class AndroidReaderProgressDatabase(
 
     companion object {
         internal const val DATABASE_NAME = "reader-progress.db"
-        internal const val DATABASE_VERSION = 4
+        internal const val DATABASE_VERSION = 5
         internal const val PROGRESS_TABLE = "reader_progress"
         internal const val PROGRESS_SOURCE_ID = "source_id"
         internal const val PROGRESS_DOCUMENT = "document_json"

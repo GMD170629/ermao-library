@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.net.ConnectivityManager
+import android.net.Network
 import android.view.MotionEvent
 import android.view.KeyEvent
 import androidx.activity.addCallback
@@ -50,6 +52,15 @@ import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncCoordinator
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncingStore
+import com.ermao.library.shared.modules.reader.ReaderProgressQueryPort
+import com.ermao.library.shared.modules.reader.application.ReaderProgressQueryResult as ProgressQueryResult
+import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
+import com.ermao.library.shared.modules.reader.ReaderProgress
+import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
+import com.ermao.library.shared.modules.reader.decidePendingVsServerStartup
+import com.ermao.library.shared.modules.reader.compareExactReaderProgress
+import com.ermao.library.shared.modules.reader.ExactLocationMatch
+import com.ermao.library.shared.modules.reader.application.PendingVsServerDecision
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReaderTapZones
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapContent
@@ -62,6 +73,9 @@ import com.ermao.library.shared.modules.auth.domain.AppSession
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.image.ImageNavigatorFragment
 import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
@@ -90,6 +104,17 @@ class ReaderActivity : AppCompatActivity() {
     private var openJob: Job? = null
     private var syncingProgressStore: ReaderProgressSyncingStore? = null
     private var progressCoordinator: ReaderProgressSyncCoordinator? = null
+    private var progressQueryPort: ReaderProgressQueryPort? = null
+    private var progressSyncTarget: ReaderProgressSyncTarget? = null
+    private var progressClientId: String? = null
+    private var progressEtag: String? = null
+    private var startupConflict by mutableStateOf<AndroidStartupConflict?>(null)
+    private var networkCallbackRegistered = false
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            lifecycleScope.launch { checkRemoteProgress() }
+        }
+    }
 
     internal val controllerForTesting: ReaderScreenController?
         get() = controller
@@ -157,6 +182,28 @@ class ReaderActivity : AppCompatActivity() {
                     attachNavigatorIfReady()
                 },
             )
+            startupConflict?.let { conflict ->
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = {},
+                    title = { androidx.compose.material3.Text(getString(com.ermao.library.R.string.reader_startup_conflict_title)) },
+                    text = { androidx.compose.material3.Text(getString(com.ermao.library.R.string.reader_startup_conflict_message)) },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = { useStartupLocal(conflict) }) {
+                            androidx.compose.material3.Text(getString(com.ermao.library.R.string.reader_startup_use_local))
+                        }
+                    },
+                    dismissButton = {
+                        androidx.compose.foundation.layout.Row {
+                            androidx.compose.material3.TextButton(onClick = { useStartupCloud(conflict) }) {
+                                androidx.compose.material3.Text(getString(com.ermao.library.R.string.reader_startup_use_cloud))
+                            }
+                            androidx.compose.material3.TextButton(onClick = ::closeReader) {
+                                androidx.compose.material3.Text(getString(android.R.string.cancel))
+                            }
+                        }
+                    },
+                )
+            }
         }
 
         if (source != null) {
@@ -167,6 +214,14 @@ class ReaderActivity : AppCompatActivity() {
     override fun onResumeFragments() {
         super.onResumeFragments()
         attachNavigatorIfReady()
+        lifecycleScope.launch { checkRemoteProgress() }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
+            .onSuccess { networkCallbackRegistered = true }
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -223,6 +278,10 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        if (networkCallbackRegistered) {
+            runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
+            networkCallbackRegistered = false
+        }
         if (!closing && !isChangingConfigurations) session?.let { readerSession ->
             lifecycleScope.launch {
                 readerSession.flush()
@@ -230,6 +289,70 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
         super.onStop()
+    }
+
+    private suspend fun checkRemoteProgress() {
+        val query = progressQueryPort ?: return
+        val target = progressSyncTarget ?: return
+        val coordinator = progressCoordinator ?: return
+        val clientId = progressClientId ?: return
+        when (val result = query.load(target, progressEtag)) {
+            is ProgressQueryResult.Current -> {
+                progressEtag = result.etag ?: progressEtag
+                val snapshot = result.snapshot ?: return
+                coordinator.observeRemoteProgress(
+                    snapshot,
+                    clientId,
+                    syncingProgressStore?.load(target.volumeId),
+                )
+            }
+            is ProgressQueryResult.Unchanged -> progressEtag = result.etag ?: progressEtag
+            is ProgressQueryResult.Failure -> Unit
+        }
+    }
+
+    private fun useStartupLocal(conflict: AndroidStartupConflict) {
+        lifecycleScope.launch {
+            val reader = awaitReaderController() ?: return@launch
+            if (!reader.goTo(conflict.localProgress.location)) return@launch
+            withTimeoutOrNull(5_000) {
+                reader.currentLocation.filterNotNull().first { current ->
+                    compareExactReaderProgress(
+                        conflict.localProgress,
+                        ReaderProgress(
+                            conflict.localProgress.sourceId,
+                            current,
+                            System.currentTimeMillis(),
+                            progressClientId ?: return@first false,
+                        ),
+                    ) == ExactLocationMatch.Exact
+                }
+            } ?: return@launch
+            startupConflict = null
+        }
+    }
+
+    private fun useStartupCloud(conflict: AndroidStartupConflict) {
+        lifecycleScope.launch {
+            val reader = awaitReaderController() ?: return@launch
+            val current = withTimeoutOrNull(5_000) {
+                reader.currentLocation.filterNotNull().first()
+            } ?: return@launch
+            val verified = ReaderProgress(
+                conflict.localProgress.sourceId,
+                current,
+                System.currentTimeMillis(),
+                progressClientId ?: return@launch,
+            )
+            runCatching {
+                conflict.coordinator.acceptVerifiedRemoteProgress(verified, conflict.serverSnapshot)
+            }.onSuccess { startupConflict = null }
+        }
+    }
+
+    private suspend fun awaitReaderController(): ReaderScreenController? = withTimeoutOrNull(5_000) {
+        while (controller == null) delay(25)
+        controller
     }
 
     override fun onDestroy() {
@@ -284,13 +407,20 @@ class ReaderActivity : AppCompatActivity() {
                     ReaderLocalProgressIdentity(
                         namespace = namespace,
                         clientId = clientId,
+                        workId = result.bootstrap.target.workId,
                         volumeId = source.sourceId,
-                        localContentFingerprint = source.contentFingerprint,
                     ),
                 )
+                val startupDecision = decidePendingVsServerStartup(
+                    database.load(source.sourceId),
+                    database.loadSyncState(),
+                    result.bootstrap.remoteSnapshot,
+                    source,
+                )
+                val progressServer = createAndroidReaderProgressSyncPort(applicationContext, authenticated.profile)
                 val coordinator = ReaderProgressSyncCoordinator(
                     stateStore = database,
-                    server = createAndroidReaderProgressSyncPort(applicationContext, authenticated.profile),
+                    server = progressServer,
                     scope = lifecycleScope,
                 )
                 val syncingStore = LocalFirstReaderProgressStore(
@@ -299,12 +429,36 @@ class ReaderActivity : AppCompatActivity() {
                     coordinator = coordinator,
                 )
                 progressCoordinator = coordinator
+                coordinator.beginSession(result.bootstrap.remoteSnapshot)
+                progressQueryPort = progressServer
+                progressSyncTarget = result.bootstrap.target
+                progressClientId = clientId
+                progressEtag = result.bootstrap.remoteSnapshot?.revision?.let { "\"reader-progress-$it\"" }
+                    ?: "\"reader-progress-0\""
+                var startupRemoteSnapshot = result.bootstrap.remoteSnapshot
+                when (startupDecision) {
+                    is PendingVsServerDecision.UseServer -> if (startupDecision.discardPending) {
+                        database.loadSyncState().pending?.let {
+                            coordinator.discardStartupPending(it.mutationId, startupDecision.snapshot?.revision ?: 0)
+                        }
+                    }
+                    is PendingVsServerDecision.UseLocalPending -> {
+                        startupRemoteSnapshot = null
+                        coordinator.retryPending(result.bootstrap.target)
+                    }
+                    is PendingVsServerDecision.RequiresChoice -> startupConflict = AndroidStartupConflict(
+                        startupDecision.progress,
+                        startupDecision.server,
+                        coordinator,
+                    )
+                }
                 syncingProgressStore = syncingStore
                 readerTitle = source.displayTitle
                 session = createSession(
                     source,
                     syncingStore,
-                    result.bootstrap.remoteSnapshot,
+                    startupRemoteSnapshot,
+                    coordinator,
                     preferencesStore,
                     AndroidReaderBookmarkStore(
                         applicationContext,
@@ -398,18 +552,49 @@ class ReaderActivity : AppCompatActivity() {
                     val clientId = AndroidReaderDeviceIdentity(applicationContext).stableDeviceId()
                     val database = AndroidReaderProgressDatabase(
                         applicationContext,
-                        ReaderLocalProgressIdentity(namespace, clientId, source.sourceId, source.contentFingerprint),
+                        ReaderLocalProgressIdentity(namespace, clientId, bootstrap.value.target.workId, source.sourceId),
                     )
+                    val startupDecision = decidePendingVsServerStartup(
+                        database.load(source.sourceId),
+                        database.loadSyncState(),
+                        bootstrap.value.remoteSnapshot,
+                        source,
+                    )
+                    val progressServer = createAndroidReaderProgressSyncPort(applicationContext, activeSession.profile)
                     val coordinator = ReaderProgressSyncCoordinator(
                         stateStore = database,
-                        server = createAndroidReaderProgressSyncPort(applicationContext, activeSession.profile),
+                        server = progressServer,
                         scope = lifecycleScope,
                     )
                     val syncingStore = LocalFirstReaderProgressStore(database, bootstrap.value.target, coordinator)
                     progressCoordinator = coordinator
+                    coordinator.beginSession(bootstrap.value.remoteSnapshot)
+                    progressQueryPort = progressServer
+                    progressSyncTarget = bootstrap.value.target
+                    progressClientId = clientId
+                    progressEtag = bootstrap.value.remoteSnapshot?.revision?.let { "\"reader-progress-$it\"" }
+                        ?: "\"reader-progress-0\""
+                    when (startupDecision) {
+                        is PendingVsServerDecision.UseServer -> if (startupDecision.discardPending) {
+                            database.loadSyncState().pending?.let {
+                                coordinator.discardStartupPending(it.mutationId, startupDecision.snapshot?.revision ?: 0)
+                            }
+                        }
+                        is PendingVsServerDecision.UseLocalPending -> {
+                            remoteSnapshot = null
+                            coordinator.retryPending(bootstrap.value.target)
+                        }
+                        is PendingVsServerDecision.RequiresChoice -> startupConflict = AndroidStartupConflict(
+                            startupDecision.progress,
+                            startupDecision.server,
+                            coordinator,
+                        )
+                    }
                     syncingProgressStore = syncingStore
                     progressStore = syncingStore
-                    remoteSnapshot = bootstrap.value.remoteSnapshot
+                    if (startupDecision !is PendingVsServerDecision.UseLocalPending) {
+                        remoteSnapshot = bootstrap.value.remoteSnapshot
+                    }
                     comicPages = bootstrap.value.comicPages
                     pageCount = bootstrap.value.pageCount
                     bookmarkSyncPort = createAndroidReaderBookmarkSyncPort(applicationContext, activeSession.profile)
@@ -419,7 +604,19 @@ class ReaderActivity : AppCompatActivity() {
                         showOpenError(ReaderErrorCode.ResourceMissing)
                         return
                     }
-                    progressStore = AndroidReaderProgressStore(applicationContext)
+                    progressStore = AndroidReaderProgressDatabase(
+                        applicationContext,
+                        ReaderLocalProgressIdentity(
+                            namespace = ReaderSyncNamespace(
+                                activeSession.identity.namespace.serverIdentity,
+                                activeSession.identity.namespace.userId,
+                                activeSession.identity.namespace.authorizationVersion,
+                            ),
+                            clientId = AndroidReaderDeviceIdentity(applicationContext).stableDeviceId(),
+                            workId = request.workId,
+                            volumeId = source.sourceId,
+                        ),
+                    )
                 }
             }
         } else {
@@ -430,6 +627,7 @@ class ReaderActivity : AppCompatActivity() {
             source,
             progressStore,
             remoteSnapshot,
+            progressCoordinator,
             preferencesStore,
             AndroidReaderBookmarkStore(
                 applicationContext,
@@ -482,6 +680,7 @@ class ReaderActivity : AppCompatActivity() {
         source: LocalReaderSource,
         progressStore: ReaderProgressStore,
         remoteSnapshot: com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4? = null,
+        progressCoordinator: ReaderProgressSyncCoordinator? = null,
         preferencesStore: AndroidReaderPreferencesStore? = null,
         bookmarkStore: AndroidReaderBookmarkStore? = null,
         bookmarkSyncPort: ReaderBookmarkSyncPort? = null,
@@ -508,6 +707,7 @@ class ReaderActivity : AppCompatActivity() {
                 deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
                 readium = AndroidReadiumRuntime(applicationContext),
                 remoteSnapshot = remoteSnapshot,
+                progressCoordinator = progressCoordinator,
                 initialPreferences = preferencesStore?.load() ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
                 persistPreferences = { preferences -> preferencesStore?.save(preferences) },
                 presentationNamespaceKey = namespaceKey,
@@ -526,6 +726,7 @@ class ReaderActivity : AppCompatActivity() {
                 deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
                 readium = AndroidReadiumRuntime(applicationContext),
                 remoteSnapshot = remoteSnapshot,
+                progressCoordinator = progressCoordinator,
                 initialPreferences = preferencesStore?.load() ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
                 persistPreferences = { preferences -> preferencesStore?.save(preferences) },
                 presentationNamespaceKey = namespaceKey,
@@ -542,6 +743,7 @@ class ReaderActivity : AppCompatActivity() {
             locatorMapper = ReadiumLocatorMapper(),
             preferencesMapper = ReadiumPreferencesMapper(resources),
             remoteSnapshot = remoteSnapshot,
+            progressCoordinator = progressCoordinator,
             initialPreferences = preferencesStore?.load() ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
             persistPreferences = { preferences -> preferencesStore?.save(preferences) },
             bookmarkStore = bookmarkStore,
@@ -589,6 +791,7 @@ class ReaderActivity : AppCompatActivity() {
         navigatorBound = true
         controller = session
         opening = false
+        lifecycleScope.launch { checkRemoteProgress() }
     }
 
     private fun closeReader() {
@@ -767,6 +970,12 @@ class ReaderActivity : AppCompatActivity() {
         val authenticated: AppSession.Authenticated?,
     )
 }
+
+private data class AndroidStartupConflict(
+    val localProgress: ReaderProgress,
+    val serverSnapshot: ReaderProgressSnapshotV4,
+    val coordinator: ReaderProgressSyncCoordinator,
+)
 
 private fun String.isSupportedManagedSourceFormat(): Boolean =
     trim().uppercase() in setOf("EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT", "CBZ", "PDF")

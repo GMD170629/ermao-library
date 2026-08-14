@@ -322,6 +322,7 @@ export async function fetchEbookChapterDetail(
     },
     currentHref: nullableString(data.currentHref),
     currentChapterIndex: nullableNumber(data.currentChapterIndex),
+    currentChapterTitle: nullableString(data.currentChapterTitle),
     currentChapterSortOrder: nullableNumber(data.currentChapterSortOrder),
     currentPageNumber: nullableNumber(data.currentPageNumber),
     progress: Math.max(0, Math.min(100, finiteNumber(data.progress)))

@@ -14,6 +14,7 @@ from app.models.auth import User
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
 )
@@ -42,15 +43,19 @@ def _write_epub(path: Path) -> str:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr(
             "META-INF/container.xml",
-            '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>',
+            "<container><rootfiles>"
+            '<rootfile full-path="OEBPS/content.opf"/>'
+            "</rootfiles></container>",
         )
         archive.writestr(
             "OEBPS/content.opf",
             """<package xmlns:dc="http://purl.org/dc/elements/1.1/">
             <metadata><dc:title>跨端出版物</dc:title><dc:creator>测试作者</dc:creator>
             <dc:language>zh-CN</dc:language></metadata><manifest>
-            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
-            <item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"
+            properties="nav"/>
+            <item id="chapter" href="Text/chapter.xhtml"
+            media-type="application/xhtml+xml"/>
             <item id="style" href="Styles/book.css" media-type="text/css"/>
             </manifest><spine><itemref idref="chapter"/></spine></package>""",
         )
@@ -58,7 +63,9 @@ def _write_epub(path: Path) -> str:
             "OEBPS/nav.xhtml",
             """<html xmlns="http://www.w3.org/1999/xhtml"
             xmlns:epub="http://www.idpf.org/2007/ops"><body>
-            <nav epub:type="toc"><ol><li><a href="Text/chapter.xhtml#anchor">第一章</a></li></ol></nav>
+            <nav epub:type="toc"><ol><li>
+            <a href="Text/chapter.xhtml#anchor">第一章</a>
+            </li></ol></nav>
             </body></html>""",
         )
         archive.writestr(
@@ -209,7 +216,7 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     }
     runtime = manifest["https://shuku.app/reader/runtime"]
     assert runtime["parser"] == "epub-package:1"
-    assert runtime["normalization"] == "shuku-epub-raw-v1"
+    assert runtime["normalization"] == "shuku-epub-locator-dom-v2"
     assert runtime["originalFileHash"].startswith("sha256:")
     assert len(runtime["originalFileHash"]) == 71
 
@@ -219,6 +226,7 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     assert resource_response.status_code == 200
     assert resource_response.headers["cache-control"] == "private, max-age=60"
     assert "default-src 'none'" in resource_response.headers["content-security-policy"]
+    assert 'data-shuku-security-profile="web-v2"' in resource_response.text
     assert "天地玄黄" in resource_response.text
 
     head_response = client.head(
@@ -248,6 +256,105 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
             }
         ],
     }
+
+
+def test_work_detail_and_reader_manifest_share_publication_navigation(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    volume = _seed_epub(db_session, test_settings)
+    assert db_session.query(LibraryReadingUnit).count() == 0
+
+    detail_response = client.get("/api/works/work-publication")
+    units_response = client.get(
+        f"/api/works/work-publication/volumes/{volume.id}/reading-units"
+    )
+    manifest_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
+
+    assert detail_response.status_code == 200
+    detail_volume = detail_response.json()["data"]["book"]["mediaVersions"][0][
+        "volumes"
+    ][0]
+    assert detail_volume["chapterCount"] == 1
+    assert units_response.status_code == 200
+    units = units_response.json()["data"]["units"]
+    assert [(unit["title"], unit["href"]) for unit in units] == [
+        ("第一章", "OEBPS/Text/chapter.xhtml#anchor")
+    ]
+    assert all(unit["id"].startswith("pubnav_") for unit in units)
+    assert manifest_response.status_code == 200
+    toc = manifest_response.json()["toc"]
+    assert [(entry["title"], entry["href"]) for entry in toc] == [
+        (unit["title"], unit["href"]) for unit in units
+    ]
+
+
+def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    volume = _seed_epub(db_session, test_settings)
+    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_path = test_settings.resolved_storage_root / source.path
+    source_path.write_bytes(b"not-an-epub")
+    source.full_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source.fingerprint = f"sha256:{source.full_hash}"
+    db_session.add(
+        LibraryReadingUnit(
+            id="stale-publication-chapter",
+            volume_id=volume.id,
+            file_id=source.id,
+            unit_type="chapter",
+            title="过期章节",
+            href="stale.xhtml",
+            sort_order=0,
+            metadata_json="{}",
+        )
+    )
+    volume.chapter_count = 1
+    db_session.commit()
+
+    detail_response = client.get("/api/works/work-publication")
+    units_response = client.get(
+        f"/api/works/work-publication/volumes/{volume.id}/reading-units"
+    )
+
+    assert detail_response.status_code == 200
+    detail_volume = detail_response.json()["data"]["book"]["mediaVersions"][0][
+        "volumes"
+    ][0]
+    assert detail_volume["chapterCount"] is None
+    assert units_response.status_code == 200
+    assert units_response.json()["data"]["units"] == []
+    db_session.expire_all()
+    assert db_session.get(LibraryReadingUnit, "stale-publication-chapter") is None
+
+
+def test_reader_bootstrap_reports_invalid_publication_structure(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    volume = _seed_epub(db_session, test_settings)
+    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_path = test_settings.resolved_storage_root / source.path
+    source_path.write_bytes(b"not-an-epub")
+    source.full_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source.fingerprint = f"sha256:{source.full_hash}"
+    source.size_bytes = source_path.stat().st_size
+    db_session.commit()
+
+    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PUBLICATION_STRUCTURE_INVALID"
 
 
 def test_epub_publication_rejects_unindexed_and_traversal_resources(
@@ -332,7 +439,7 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     assert runtime == {
         "originalFileHash": f"sha256:{source_hash}",
         "parser": "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add",
-        "normalization": "ermao-mobi-core-v1",
+        "normalization": "ermao-mobi-core-v1+shuku-locator-dom-v2",
         "positionPageLength": 1024,
     }
     resource_response = client.get(
@@ -355,21 +462,40 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     manifest_response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
     )
+    units_response = client.get(
+        f"/api/works/work-txt-publication/volumes/{volume.id}/reading-units"
+    )
 
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
-    assert bootstrap["publication"] == {
-        "manifestUrl": (
-            f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
-        ),
-        "positionsUrl": (
-            f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
-        ),
-    }
+    publication_access = bootstrap["publication"]
+    assert publication_access["manifestUrl"] == (
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
+    assert publication_access["positionsUrl"] == (
+        f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+    )
+    render_access = publication_access["renderArtifact"]
+    assert render_access["schemaVersion"] == 1
+    assert render_access["url"] == (
+        f"/api/reader/v4/volumes/{volume.id}/publication/render.epub"
+    )
+    assert render_access["mimeType"] == "application/epub+zip"
+    assert render_access["sizeBytes"] > 0
+    assert render_access["contentHash"].startswith("sha256:")
+
+    render_response = client.get(render_access["url"])
+    assert render_response.status_code == 200
+    assert render_response.headers["content-type"].startswith("application/epub+zip")
+    assert len(render_response.content) == render_access["sizeBytes"]
+    assert (
+        f"sha256:{hashlib.sha256(render_response.content).hexdigest()}"
+        == render_access["contentHash"]
+    )
     assert bootstrap["publicationFingerprint"] == {
         "originalFileHash": bootstrap["files"][0]["contentHash"],
         "parser": "shuku-txt-parser-v1",
-        "normalization": "shuku-txt-publication-v1",
+        "normalization": "shuku-txt-publication-v2",
     }
 
     assert manifest_response.status_code == 200
@@ -384,7 +510,7 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
         {
             "href": "text/chapter-0001.xhtml",
             "type": "application/xhtml+xml",
-            "title": "正文",
+            "title": "确定性文本出版物 1",
         },
         {
             "href": "text/chapter-0002.xhtml",
@@ -400,17 +526,24 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     assert manifest["https://shuku.app/reader/runtime"] == {
         "originalFileHash": bootstrap["publicationFingerprint"]["originalFileHash"],
         "parser": "shuku-txt-parser-v1",
-        "normalization": "shuku-txt-publication-v1",
+        "normalization": "shuku-txt-publication-v2",
         "positionPageLength": 1024,
     }
+    assert units_response.status_code == 200
+    units = units_response.json()["data"]["units"]
+    assert [(unit["title"], unit["href"]) for unit in units] == [
+        (entry["title"], entry["href"]) for entry in manifest["toc"]
+    ]
+    assert all(unit["metadataJson"]["exactNavigation"] is True for unit in units)
+    assert all(unit["metadataJson"]["hrefBase"] == "publication-root" for unit in units)
 
     resource_response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/publication/text/chapter-0002.xhtml"
     )
     assert resource_response.status_code == 200
     assert resource_response.headers["content-type"].startswith("application/xhtml+xml")
-    assert 'id="heading-0002"' in resource_response.text
-    assert 'id="block-0002-000001"' in resource_response.text
+    assert 'id="heading-000001"' in resource_response.text
+    assert 'id="block-000001"' in resource_response.text
     assert "天地 &amp; &lt;宇宙&gt;" in resource_response.text
 
     positions_response = client.get(

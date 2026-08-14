@@ -9,6 +9,7 @@ from app.modules.publications.public import (
     PublicationCorruptError,
     PublicationNotFoundError,
     PublicationUnsupportedError,
+    ResolvePublicationSourceIdentity,
 )
 from app.modules.reader.application.content_fingerprint import (
     build_publication_fingerprint,
@@ -30,9 +31,11 @@ class NormalizedPublicationLocatorIndex:
         self,
         publications: OpenPublication,
         reader_repository: ReaderVolumeRepository,
+        source_identity: ResolvePublicationSourceIdentity,
     ) -> None:
         self._publications = publications
         self._reader_repository = reader_repository
+        self._source_identity = source_identity
 
     def fingerprint(
         self,
@@ -43,6 +46,12 @@ class NormalizedPublicationLocatorIndex:
         publication = self._manifest(volume_id=volume_id, access_scope=access_scope)
         if publication is not None:
             return _publication_fingerprint(publication)
+        source_fingerprint = self._source_fingerprint(
+            volume_id=volume_id,
+            access_scope=access_scope,
+        )
+        if source_fingerprint is not None:
+            return source_fingerprint
         return self._indexed_fingerprint(volume_id)
 
     def validate(
@@ -56,7 +65,8 @@ class NormalizedPublicationLocatorIndex:
             publication = self._manifest(volume_id=volume_id, access_scope=access_scope)
             if publication is None or not any(
                 link.href == location.resource_href
-                and link.media_type == location.media_type
+                and _is_reflowable_markup(link.media_type)
+                and _is_reflowable_markup(location.media_type)
                 for link in (*publication.reading_order, *publication.resources)
             ):
                 return None
@@ -75,6 +85,39 @@ class NormalizedPublicationLocatorIndex:
         return build_publication_fingerprint(
             asdict(context.volume),
             [asdict(file) for file in files],
+        )
+
+    def _source_fingerprint(
+        self,
+        *,
+        volume_id: str,
+        access_scope: ReaderAccessScope,
+    ) -> ReaderPublicationFingerprintDto | None:
+        context = self._reader_repository.get_context(volume_id)
+        if context is None or context.volume.format.lower() not in _SOURCE_HASH_FORMATS:
+            return None
+        try:
+            identity = self._source_identity.execute(
+                volume_id=volume_id,
+                access_scope=PublicationAccessScope(
+                    is_admin=access_scope.is_admin,
+                    can_view_manual_imports=access_scope.can_view_manual_imports,
+                    monitor_folder_ids=access_scope.monitor_folder_ids,
+                ),
+            )
+        except (PublicationCorruptError, PublicationNotFoundError):
+            return None
+        if context.volume.format.lower() != identity.source_format:
+            return None
+        files = self._reader_repository.list_files(volume_id)
+        contract = build_publication_fingerprint(
+            asdict(context.volume),
+            [asdict(file) for file in files],
+        )
+        return ReaderPublicationFingerprintDto(
+            original_file_hash=identity.original_file_hash,
+            parser=contract.parser,
+            normalization=contract.normalization,
         )
 
     def _is_indexed_location(
@@ -149,8 +192,19 @@ class NormalizedPublicationLocatorIndex:
 _AUDIO_FORMATS = frozenset(
     {"audio", "audiobook", "mp3", "m4b", "m4a", "flac", "ogg", "opus", "wav"}
 )
+
+
+def _is_reflowable_markup(media_type: str) -> bool:
+    return media_type.partition(";")[0].strip().lower() in {
+        "application/xhtml+xml",
+        "text/html",
+        "text/plain",
+    }
+
+
 _COMIC_FORMATS = frozenset({"cbz", "cbr", "zip", "rar"})
 _INDEXED_FORMATS = _AUDIO_FORMATS | _COMIC_FORMATS | {"pdf"}
+_SOURCE_HASH_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt", "fb2"})
 
 
 def _publication_fingerprint(

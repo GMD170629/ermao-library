@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 @preconcurrency import ReadiumShared
 import XCTest
@@ -61,7 +62,10 @@ final class MobiPublicationFactoryTests: XCTestCase {
             result.publication.resources.first { $0.rels.contains(.cover) }?.href,
             "images/cover.jpg"
         )
-        let firstResource = try XCTUnwrap(result.publication.get("text/chapter.xhtml"))
+        let firstLink = try XCTUnwrap(
+            result.publication.readingOrder.first { $0.href == "text/chapter.xhtml" }
+        )
+        let firstResource = try XCTUnwrap(result.publication.get(firstLink))
         let estimatedLength = try await firstResource.estimatedLength().get()
         XCTAssertNotNil(estimatedLength)
         let initialReadRequests = await book.readRequests()
@@ -79,7 +83,10 @@ final class MobiPublicationFactoryTests: XCTestCase {
             book: book,
             contentFingerprint: "streaming-fixture"
         )
-        let resource = try XCTUnwrap(result.publication.get("assets/large.bin"))
+        let resourceLink = try XCTUnwrap(
+            result.publication.resources.first { $0.href == "assets/large.bin" }
+        )
+        let resource = try XCTUnwrap(result.publication.get(resourceLink))
 
         let data = try await resource.read().get()
         XCTAssertEqual(data.count, IosMobiBook.maximumReadBytes * 2 + 31)
@@ -107,12 +114,12 @@ final class MobiPublicationFactoryTests: XCTestCase {
         await result.close()
     }
 
-    func testMarkupAndCssBlockExecutableAndExternalContent() async throws {
+    func testLegacyValidMarkupHeadIsDecoratedWithoutChangingAuthorBodyOrCss() async throws {
         let book = FixedMobiBook.fixture(
             markup: """
-            <html><head></head><body onload="steal()">
+            <html xmlns="http://www.w3.org/1999/xhtml"><head></head><body onload="steal()">
             <script src="https://evil.example/a.js">steal()</script>
-            <img src="https://evil.example/cover.jpg"><a href="chapter2.xhtml">Local</a>
+            <img src="https://evil.example/cover.jpg"/><a href="chapter2.xhtml">Local</a>
             <p style="background:url(https://evil.example/tracker.png)">Text</p>
             </body></html>
             """,
@@ -126,18 +133,26 @@ final class MobiPublicationFactoryTests: XCTestCase {
             book: book,
             contentFingerprint: "sanitizer-fixture"
         )
-        let markupResource = try XCTUnwrap(result.publication.get("text/chapter.xhtml"))
-        let cssResource = try XCTUnwrap(result.publication.get("styles/book.css"))
+        let markupLink = try XCTUnwrap(
+            result.publication.readingOrder.first { $0.href == "text/chapter.xhtml" }
+        )
+        let cssLink = try XCTUnwrap(
+            result.publication.resources.first { $0.href == "styles/book.css" }
+        )
+        let markupResource = try XCTUnwrap(result.publication.get(markupLink))
+        let cssResource = try XCTUnwrap(result.publication.get(cssLink))
 
-        let markup = try XCTUnwrap(String(data: try await markupResource.read().get(), encoding: .utf8))
-        let css = try XCTUnwrap(String(data: try await cssResource.read().get(), encoding: .utf8))
+        let markupData = try await markupResource.read().get()
+        let cssData = try await cssResource.read().get()
+        let markup = try XCTUnwrap(String(data: markupData, encoding: .utf8))
+        let css = try XCTUnwrap(String(data: cssData, encoding: .utf8))
         XCTAssertTrue(markup.contains("Content-Security-Policy"))
-        XCTAssertFalse(markup.localizedCaseInsensitiveContains("<script"))
-        XCTAssertFalse(markup.localizedCaseInsensitiveContains("onload="))
-        XCTAssertFalse(markup.contains("https://evil.example"))
+        XCTAssertTrue(markup.localizedCaseInsensitiveContains("<script"))
+        XCTAssertTrue(markup.localizedCaseInsensitiveContains("onload="))
+        XCTAssertTrue(markup.contains("https://evil.example"))
         XCTAssertTrue(markup.contains("href=\"chapter2.xhtml\""))
-        XCTAssertFalse(css.contains("https://evil.example"))
-        XCTAssertFalse(css.contains("//evil.example"))
+        XCTAssertTrue(css.contains("https://evil.example"))
+        XCTAssertTrue(css.contains("//evil.example"))
         XCTAssertTrue(css.contains("../images/local.png"))
 
         await result.close()
@@ -188,39 +203,58 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
     }
 
-    func testManagedStorePersistsExactSourceFormatAndServerFingerprint() async throws {
-        let fixture = try XCTUnwrap(
-            Bundle(for: Self.self).url(forResource: "test", withExtension: "azw3")
-        )
+    func testManagedStorePersistsSidecarEpubWithOriginalMobiFingerprint() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("managed-mobi-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try IosManagedPublicationStore(root: root)
+        let sidecar = Data([
+            0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+            0x14, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+        ]) + Data("mimetypeapplication/epub+zip".utf8)
+        let artifactHash = "sha256:" + SHA256.hash(data: sidecar)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let originalHash = "sha256:" + String(repeating: "a", count: 64)
+        let staging = try await store.prepareDownload(
+            sourceID: "volume-azw3",
+            expectedSize: Int64(sidecar.count)
+        )
+        try sidecar.write(to: staging)
 
-        let imported = try await store.importPublication(
-            from: fixture,
+        let imported = try await store.commitDownload(
+            staging: staging,
             sourceID: "volume-azw3",
             displayTitle: "AZW3 fixture",
-            sourceFormat: .azw3,
-            workID: "work-azw3",
-            volumeID: "volume-azw3",
+            byteCount: Int64(sidecar.count),
+            artifactContentHash: artifactHash,
+            expectedSize: Int64(sidecar.count),
+            expectedContentHash: artifactHash,
+            originalFileHash: originalHash,
             parserVersion: IosMobiBook.parserIdentifier,
-            normalizationVersion: IosMobiBook.normalizationIdentifier
+            normalizationVersion: IosMobiPublicationIdentity.normalizationIdentifier,
+            sourceFormat: .epub,
+            workID: "work-azw3",
+            volumeID: "volume-azw3"
         )
-        XCTAssertEqual(imported.sourceFormat, .azw3)
-        XCTAssertEqual(imported.fileURL.pathExtension, "azw3")
+        XCTAssertEqual(imported.sourceFormat, .epub)
+        XCTAssertEqual(imported.fileURL.pathExtension, "epub")
+        XCTAssertEqual(imported.artifactContentHash, artifactHash)
+        XCTAssertEqual(imported.fingerprint.originalFileHash, originalHash)
 
         try await store.bindServerContentFingerprint(
             sourceID: imported.sourceID,
             value: "opaque-content-key"
         )
         let restored = try await store.resolve(sourceID: imported.sourceID)
-        XCTAssertEqual(restored.sourceFormat, .azw3)
+        XCTAssertEqual(restored.sourceFormat, .epub)
         XCTAssertEqual(restored.serverContentFingerprint, "opaque-content-key")
         XCTAssertEqual(restored.fingerprint.parserVersion, IosMobiBook.parserIdentifier)
         XCTAssertEqual(
             restored.fingerprint.normalizationVersion,
-            IosMobiBook.normalizationIdentifier
+            IosMobiPublicationIdentity.normalizationIdentifier
         )
     }
 }

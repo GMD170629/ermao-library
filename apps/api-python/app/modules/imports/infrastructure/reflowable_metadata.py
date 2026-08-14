@@ -4,40 +4,25 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import html
-import json
 import re
 import struct
 from dataclasses import replace
 from pathlib import Path
 
-# lxml does not publish PEP 561 type metadata; values are validated at this adapter boundary.
+# lxml does not publish PEP 561 type metadata; values are validated at this
+# adapter boundary.
 from lxml import etree  # type: ignore[import-untyped]
 
 from app.modules.imports.application.reflowable_types import (
     EmbeddedBookCover,
     ReflowableBookMetadata,
-    ReflowableChapter,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
 from app.services.text_conversion import ConversionFailure, detect_txt_encoding
 
 _KINDLE_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
-_MAX_CHAPTERS = 2_000
 _MAX_COVER_BYTES = 20 * 1024 * 1024
-_TXT_SECTION_CHARACTERS = 128 * 1024
-_CHAPTER_PATTERN = re.compile(
-    r"^(?:(?:第[零〇一二三四五六七八九十百千万两\d]{1,12}[章节卷回部篇集])|"
-    r"(?:序章|序言|楔子|引子|前言|后记|尾声|番外(?:\s*[零〇一二三四五六七八九十百千万两\d]+)?)|"
-    r"(?:(?:chapter|book|part|volume)\s+(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten)))"
-    r"(?:[\s:：、.．-]+.{0,80})?$",
-    re.IGNORECASE,
-)
-_HEADING_TAG_PATTERN = re.compile(
-    r"<(?:h[1-6]|title|p|div|center|b)[^>]*>(.*?)</(?:h[1-6]|title|p|div|center|b)>",
-    re.IGNORECASE | re.DOTALL,
-)
 
 
 class ReflowableMetadataError(ValueError):
@@ -76,7 +61,6 @@ def _inspect_txt(path: Path) -> ReflowableBookMetadata:
         text = path.read_text(encoding=encoding, errors="strict")
     except (OSError, UnicodeError, ConversionFailure) as exc:
         raise ReflowableMetadataError("Unable to inspect TXT metadata") from exc
-    chapters = _txt_chapters(text)
     return ReflowableBookMetadata(
         title=None,
         authors=(),
@@ -87,14 +71,10 @@ def _inspect_txt(path: Path) -> ReflowableBookMetadata:
         isbn=None,
         description=None,
         subjects=(),
-        chapters=chapters,
         cover=None,
         raw_metadata={
             "sourceFormat": "TXT",
             "inputEncoding": encoding,
-            "chapterSource": "txt_sections" if chapters else "none",
-            "navigationCount": len(chapters),
-            "navigationFingerprint": _navigation_fingerprint(chapters),
         },
     )
 
@@ -144,7 +124,6 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         series_index = float(series_index_raw) if series_index_raw else None
     except ValueError:
         series_index = None
-    chapters = _fb2_chapters(root)
     cover = _fb2_cover(root, title_info)
     return ReflowableBookMetadata(
         title=_clean(title),
@@ -156,13 +135,9 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         isbn=_clean(isbn),
         description=_clean(description, limit=4_000),
         subjects=subjects,
-        chapters=chapters,
         cover=cover,
         raw_metadata={
             "sourceFormat": "FB2",
-            "chapterSource": "fb2_sections",
-            "navigationCount": len(chapters),
-            "navigationFingerprint": _navigation_fingerprint(chapters),
             "coverEmbedded": cover is not None,
             "seriesName": series_name,
             "seriesIndex": series_index_raw,
@@ -222,17 +197,7 @@ def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
         cleaned for value in exth.get(105, ()) if (cleaned := _clean(value)) is not None
     )
     cover = _kindle_cover(records, resource_start, exth)
-    text, text_byte_length, compression = _kindle_text(records, header, encoding)
-    chapters = (
-        _kindle_navigation_chapters(text, text_byte_length, version) if text else ()
-    )
-    chapter_source = (
-        "kindle_pos"
-        if chapters and chapters[0].href.startswith("kindle:pos:")
-        else "mobi_filepos"
-        if chapters
-        else "none"
-    )
+    compression = struct.unpack_from(">H", header, 0)[0]
     return ReflowableBookMetadata(
         title=_clean(html.unescape(title or path.stem)),
         authors=authors,
@@ -243,16 +208,12 @@ def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
         isbn=_clean(isbn),
         description=_clean(html.unescape(description or ""), limit=4_000),
         subjects=subjects,
-        chapters=chapters,
         cover=cover,
         raw_metadata={
             "sourceFormat": source_format,
             "mobiVersion": version,
             "compression": compression,
             "recordCount": len(records),
-            "chapterSource": chapter_source,
-            "navigationCount": len(chapters),
-            "navigationFingerprint": _navigation_fingerprint(chapters),
             "coverEmbedded": cover is not None,
             "seriesName": series_name,
             "seriesIndex": series_index_raw if has_structured_series else None,
@@ -358,240 +319,6 @@ def _sidecar_cover(path: Path) -> EmbeddedBookCover | None:
         except OSError:
             continue
     return None
-
-
-def _kindle_text(
-    records: tuple[bytes, ...], header: bytes, encoding: str
-) -> tuple[str, int, int]:
-    compression = struct.unpack_from(">H", header, 0)[0]
-    count = min(struct.unpack_from(">H", header, 8)[0], max(0, len(records) - 1))
-    if compression not in {1, 2}:
-        return "", 0, compression
-    trailing_flags = _uint(header, 240) if len(header) >= 244 else 0
-    chunks: list[bytes] = []
-    for record in records[1 : count + 1]:
-        source = _remove_palmdoc_trailing_data(record, trailing_flags)
-        data = source if compression == 1 else _decompress_palmdoc(source)
-        chunks.append(data)
-    content = b"".join(chunks)
-    declared_length = _uint(header, 4) if len(header) >= 8 else len(content)
-    if 0 < declared_length < len(content):
-        content = content[:declared_length]
-    return _decode(content, encoding), len(content), compression
-
-
-def _remove_palmdoc_trailing_data(content: bytes, flags: int) -> bytes:
-    result = content
-    for _ in range((flags >> 1).bit_count()):
-        length = _var_length_from_end(result)
-        if length <= 0 or length > len(result):
-            return b""
-        result = result[:-length]
-    if flags & 1 and result:
-        length = (result[-1] & 0b11) + 1
-        if length > len(result):
-            return b""
-        result = result[:-length]
-    return result
-
-
-def _var_length_from_end(content: bytes) -> int:
-    value = 0
-    for byte in content[-4:]:
-        if byte & 0x80:
-            value = 0
-        value = (value << 7) | (byte & 0x7F)
-    return value
-
-
-def _decompress_palmdoc(content: bytes) -> bytes:
-    output = bytearray()
-    index = 0
-    while index < len(content):
-        byte = content[index]
-        index += 1
-        if byte == 0 or 9 <= byte <= 0x7F:
-            output.append(byte)
-        elif byte <= 8:
-            output.extend(content[index : index + byte])
-            index += byte
-        elif byte <= 0xBF and index < len(content):
-            pair = (byte << 8) | content[index]
-            index += 1
-            distance = (pair & 0x3FFF) >> 3
-            length = (pair & 7) + 3
-            if distance <= 0 or distance > len(output):
-                continue
-            for _ in range(length):
-                output.append(output[-distance])
-        else:
-            output.extend((32, byte ^ 0x80))
-    return bytes(output)
-
-
-def _kindle_navigation_chapters(
-    markup: str, text_byte_length: int, mobi_version: int
-) -> tuple[ReflowableChapter, ...]:
-    if mobi_version >= 8:
-        kindle_chapters = _kindle_pos_chapters(markup)
-        if kindle_chapters:
-            return kindle_chapters
-    return _mobi_filepos_chapters(markup, text_byte_length)
-
-
-def _kindle_pos_chapters(markup: str) -> tuple[ReflowableChapter, ...]:
-    anchor_pattern = re.compile(
-        r"<a\b[^>]*\bhref\s*=\s*(['\"])(kindle:pos:fid:[0-9a-v]+:off:[0-9a-v]+)\1[^>]*>(.*?)</a>",
-        re.IGNORECASE | re.DOTALL,
-    )
-    result: list[ReflowableChapter] = []
-    seen_targets: set[str] = set()
-    for match in anchor_pattern.finditer(markup):
-        href = match.group(2)
-        title = _clean(html.unescape(re.sub(r"<[^>]+>", " ", match.group(3))))
-        if not title or not _CHAPTER_PATTERN.fullmatch(title) or href in seen_targets:
-            continue
-        level = 1 if title.startswith(chr(0x7B2C)) and chr(0x8282) in title[:16] else 0
-        result.append(_chapter("kindle", title, href, level))
-        seen_targets.add(href)
-        if len(result) >= _MAX_CHAPTERS:
-            break
-    return tuple(result)
-
-
-def _mobi_filepos_chapters(
-    markup: str, text_byte_length: int
-) -> tuple[ReflowableChapter, ...]:
-    anchor_pattern = re.compile(
-        r"<a\b[^>]*\bfilepos\s*=\s*(['\"]?)(\d+)\1[^>]*>(.*?)</a>",
-        re.IGNORECASE | re.DOTALL,
-    )
-    result: list[ReflowableChapter] = []
-    seen_targets: set[str] = set()
-    for match in anchor_pattern.finditer(markup):
-        filepos = match.group(2)
-        if int(filepos) < 0 or int(filepos) >= text_byte_length:
-            continue
-        title = _clean(html.unescape(re.sub(r"<[^>]+>", " ", match.group(3))))
-        if not title or not _CHAPTER_PATTERN.fullmatch(title):
-            continue
-        href = f"filepos:{filepos}"
-        if href in seen_targets:
-            continue
-        level = 1 if title.startswith(chr(0x7B2C)) and chr(0x8282) in title[:16] else 0
-        result.append(_chapter("mobi", title, href, level))
-        seen_targets.add(href)
-        if len(result) >= _MAX_CHAPTERS:
-            break
-    return tuple(result)
-
-
-def _txt_chapters(text: str) -> tuple[ReflowableChapter, ...]:
-    normalized = re.sub(r"\r\n?", "\n", text).lstrip("\ufeff").strip()
-    if not normalized:
-        return ()
-    sections: list[tuple[str, str]] = []
-    title = "正文"
-    body: list[str] = []
-
-    def flush() -> None:
-        value = "\n".join(body).strip()
-        if value:
-            sections.extend(_hard_split_txt(title, value))
-        body.clear()
-
-    for line in normalized.split("\n"):
-        candidate = line.strip()
-        if _CHAPTER_PATTERN.fullmatch(candidate):
-            flush()
-            title = candidate
-        else:
-            body.append(line)
-    flush()
-    if not sections:
-        sections = _hard_split_txt("正文", normalized)
-    return tuple(
-        _chapter("txt", section_title, f"txt-section:{index}", 0)
-        for index, (section_title, _) in enumerate(sections[:_MAX_CHAPTERS])
-    )
-
-
-def _hard_split_txt(title: str, text: str) -> list[tuple[str, str]]:
-    chunks: list[tuple[str, str]] = []
-    remaining = text.strip()
-    part = 1
-    while len(remaining) > _TXT_SECTION_CHARACTERS:
-        candidate = remaining[:_TXT_SECTION_CHARACTERS]
-        paragraph = candidate.rfind("\n\n")
-        split_at = (
-            paragraph
-            if paragraph >= _TXT_SECTION_CHARACTERS // 2
-            else _TXT_SECTION_CHARACTERS
-        )
-        chunks.append((f"{title} ({part})", remaining[:split_at].strip()))
-        remaining = remaining[split_at:].strip()
-        part += 1
-    if remaining:
-        chunks.append((title if part == 1 else f"{title} ({part})", remaining))
-    return chunks
-
-
-def _fb2_chapters(root: etree._Element) -> tuple[ReflowableChapter, ...]:
-    result: list[ReflowableChapter] = []
-    bodies = [node for node in root if _local_name(node) == "body"]
-    if not bodies:
-        return ()
-    for section_index, section in enumerate(
-        node for node in bodies[0] if _local_name(node) == "section"
-    ):
-        title_node = next(
-            (node for node in section if _local_name(node) == "title"), None
-        )
-        title = _element_text(title_node)
-        if title:
-            href = str(section_index)
-            result.append(_chapter("fb2", _clean(title) or title, href, 0))
-        nested_index = 0
-        for child in section:
-            if _local_name(child) != "section":
-                continue
-            title_node = next(
-                (node for node in child if _local_name(node) == "title"), None
-            )
-            title = _element_text(title_node)
-            if not title:
-                nested_index += 1
-                continue
-            href = f"{section_index}#{nested_index}"
-            result.append(_chapter("fb2", _clean(title) or title, href, 1))
-            nested_index += 1
-            if len(result) >= _MAX_CHAPTERS:
-                return tuple(result)
-    return tuple(result)
-
-
-def _chapter(
-    source_format: str, title: str, href: str, level: int
-) -> ReflowableChapter:
-    digest = hashlib.sha256(f"{source_format}\0{href}".encode()).hexdigest()[:24]
-    return ReflowableChapter(title, href, level, f"{source_format}:{digest}")
-
-
-def _navigation_fingerprint(chapters: tuple[ReflowableChapter, ...]) -> str | None:
-    if not chapters:
-        return None
-    canonical = [
-        {
-            "href": chapter.href,
-            "level": chapter.level,
-            "navigationKey": chapter.navigation_key,
-            "title": chapter.title,
-        }
-        for chapter in chapters
-    ]
-    return hashlib.sha256(
-        json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode()
-    ).hexdigest()
 
 
 def _fb2_cover(

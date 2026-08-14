@@ -14,6 +14,10 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     @Published private(set) var pageIndex = 0
     @Published private(set) var presentationError: IosReaderFailureCode?
     @Published private(set) var restoreWarning: IosReaderFailureCode?
+    @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+    @Published private(set) var startupConflict: IosReaderStartupConflict?
+    @Published private(set) var startupCancelled = false
+    @Published private(set) var startupActionFailed = false
     @Published var controlsVisible = false
 
     let sourceID: String
@@ -21,7 +25,8 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     let pages: [IosCbzPage]
 
     private let managedStore: IosManagedPublicationStore
-    private let progressStore: IosReaderProgressStore
+    private let progressStore: any ErmaoShared.ReaderProgressSyncingStore
+    private let progressCoordination: IosReaderProgressSessionCoordination?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
     private let workID: String
@@ -32,6 +37,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     private var pendingSave: Task<Void, Never>?
     private var expectedRestoredPage: IosCbzPage?
     private var hasReadingActivity = false
+    private var suppressNextPersistence = false
     private var didOpen = false
 
     init(
@@ -39,8 +45,10 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         displayTitle: String,
         pages: [IosCbzPage],
         managedStore: IosManagedPublicationStore,
-        progressStore: IosReaderProgressStore,
+        progressStore: any ErmaoShared.ReaderProgressSyncingStore,
+        progressCoordination: IosReaderProgressSessionCoordination? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?,
+        startupConflict: IosReaderStartupConflict? = nil,
         namespaceKey: String,
         workID: String,
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void,
@@ -51,14 +59,18 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         self.pages = pages
         self.managedStore = managedStore
         self.progressStore = progressStore
+        self.progressCoordination = progressCoordination
         self.remoteSnapshot = remoteSnapshot
+        self.startupConflict = startupConflict
         self.namespaceKey = namespaceKey
         self.workID = workID
         self.publishProgressUpdate = publishProgressUpdate
         self.deviceIdentity = deviceIdentity
     }
 
-    deinit { pendingSave?.cancel() }
+    deinit {
+        pendingSave?.cancel()
+    }
 
     var pageCount: Int { pages.count }
     var progress: Double { pages.count <= 1 ? 1 : Double(pageIndex) / Double(pages.count - 1) }
@@ -85,8 +97,13 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             managedPublication = managed
             openedPublication = opened
             self.navigator = navigator
+            progressCoordination?.noticeHandler = { [weak self] snapshot in
+                guard snapshot?.locator is ErmaoShared.ComicPublicationLocation else { return }
+                self?.remoteProgressSnapshot = snapshot
+            }
             pageIndex = initialPage?.pageIndex ?? 0
             phase = .reading
+            await progressCoordination?.checkForRemoteProgress()
         } catch let failure as IosReaderFailure {
             await openedPublication?.close()
             openedPublication = nil
@@ -117,6 +134,60 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     func showControls() { controlsVisible = true }
     func dismissPresentationError() { presentationError = nil }
     func dismissRestoreWarning() { restoreWarning = nil }
+    func dismissRemoteProgressNotice() {
+        progressCoordination?.dismissRemoteNotice()
+        remoteProgressSnapshot = nil
+    }
+
+    func goToRemoteProgress() async {
+        guard let snapshot = remoteProgressSnapshot,
+              let remote = snapshot.locator as? ErmaoShared.ComicPublicationLocation,
+              pages.indices.contains(Int(remote.pageIndex))
+        else { return }
+        let expected = pages[Int(remote.pageIndex)]
+        suppressNextPersistence = true
+        await goToPage(expected.pageIndex)
+        guard pageIndex == expected.pageIndex else { suppressNextPersistence = false; return }
+        guard let progress = makeProgress(page: expected) else { return }
+        try? await progressCoordination?.acceptVerifiedRemote(progress: progress, snapshot: snapshot)
+        remoteProgressSnapshot = nil
+    }
+
+    func continueStartupAtLocalPosition() async {
+        guard let conflict = startupConflict,
+              let local = conflict.progress.location as? ErmaoShared.ComicReaderLocation,
+              pages.indices.contains(Int(local.pageIndex))
+        else { startupActionFailed = true; return }
+        suppressNextPersistence = true
+        await goToPage(Int(local.pageIndex))
+        guard pageIndex == Int(local.pageIndex) else {
+            suppressNextPersistence = false
+            startupActionFailed = true
+            return
+        }
+        do {
+            try await progressCoordination?.continueStartupWithLocal(
+                progress: conflict.progress,
+                serverRevision: conflict.server.revision
+            )
+            startupConflict = nil
+        } catch { startupActionFailed = true }
+    }
+
+    func useCloudStartupPosition() async {
+        guard let conflict = startupConflict,
+              let remote = conflict.server.locator as? ErmaoShared.ComicPublicationLocation,
+              pageIndex == Int(remote.pageIndex),
+              let progress = makeProgress(page: pages[pageIndex])
+        else { startupActionFailed = true; return }
+        do {
+            try await progressCoordination?.useServerForStartup(conflict)
+            try await progressCoordination?.acceptVerifiedRemote(progress: progress, snapshot: conflict.server)
+            startupConflict = nil
+        } catch { startupActionFailed = true }
+    }
+
+    func cancelStartupConflict() { startupCancelled = true }
 
     func enterBackground() async {
         phase = .background
@@ -126,7 +197,10 @@ final class IosComicReaderSession: NSObject, ObservableObject {
 
     func becomeActive() {
         if phase == .background { phase = .reading }
-        Task { try? await progressStore.retryPendingUpload() }
+        Task {
+            try? await progressStore.retryPendingUpload()
+            await progressCoordination?.checkForRemoteProgress()
+        }
     }
 
     func close() async throws {
@@ -247,6 +321,10 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             return
         }
         pageIndex = page.pageIndex
+        if suppressNextPersistence {
+            suppressNextPersistence = false
+            return
+        }
         hasReadingActivity = true
         pendingSave?.cancel()
         pendingSave = Task { [weak self] in
@@ -259,9 +337,26 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     private func persistCurrentPage() async throws {
         guard hasReadingActivity,
               phase == .reading || phase == .background || phase == .closing,
-              let managedPublication, let locator = navigator?.currentLocation,
+              let locator = navigator?.currentLocation,
               let page = page(for: locator)
         else { return }
+        guard let progress = makeProgress(page: page) else { return }
+        let percent = progress.percent?.doubleValue ?? 0
+        try await progressStore.save(progress: progress)
+        await progressCoordination?.refreshAfterSave()
+        remoteProgressSnapshot = progressCoordination?.remoteSnapshot
+        publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
+            namespaceKey: namespaceKey,
+            workId: workID,
+            volumeId: sourceID,
+            percent: percent,
+            progress: progress,
+            chapterTitle: nil
+        ))
+    }
+
+    private func makeProgress(page: IosCbzPage) -> ErmaoShared.ReaderProgress? {
+        guard let managedPublication else { return nil }
         let location = ErmaoShared.ComicReaderLocation(
             resourceHref: page.resourceHref,
             pageIndex: Int32(page.pageIndex),
@@ -270,23 +365,13 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         )
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         let percent = pages.count <= 1 ? 100 : Double(page.pageIndex) / Double(pages.count - 1) * 100
-        let progress = ErmaoShared.ReaderProgress(
+        return ErmaoShared.ReaderProgress(
             sourceId: sourceID,
             location: location,
             updatedAtEpochMillis: timestamp,
             deviceId: deviceIdentity.stableDeviceId(),
             percent: KotlinDouble(double: percent)
         )
-        try await progressStore.save(progress: progress)
-        publishProgressUpdate(ErmaoShared.ReaderProgressPresentationUpdate(
-            namespaceKey: namespaceKey,
-            workId: workID,
-            volumeId: sourceID,
-            percent: percent,
-            currentHref: page.resourceHref,
-            chapterTitle: nil,
-            capturedAtEpochMillis: timestamp
-        ))
     }
 }
 

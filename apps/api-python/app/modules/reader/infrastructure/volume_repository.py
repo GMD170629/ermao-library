@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime
 
 from sqlalchemy import case, delete, false, or_, select, update
@@ -11,10 +9,6 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.contracts.epub_navigation import (
-    EPUB_HREF_BASE_METADATA_KEY,
-    EPUB_PUBLICATION_ROOT_HREF_BASE,
-)
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.auth import ReaderBookmark
 from app.models.common import cuid
@@ -31,13 +25,11 @@ from app.models.library import (
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderBookmarkDto,
-    ReaderEpubSourceDto,
     ReaderExactLocationDto,
     ReaderFileDto,
     ReaderMediaVersionDto,
     ReaderProgressDto,
     ReaderReadingStatus,
-    ReaderRecoveredEpubChapterDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
     ReaderVolumeDto,
@@ -146,28 +138,6 @@ def _bookmark_dto(bookmark: ReaderBookmark) -> ReaderBookmarkDto:
             bookmark.created_at,
         ),
     )
-
-
-def _epub_navigation_metadata(
-    existing_metadata_json: str | None,
-    idref: str | None,
-) -> str:
-    metadata: dict[str, object] = {}
-    if existing_metadata_json:
-        try:
-            loaded: object = json.loads(existing_metadata_json)
-        except json.JSONDecodeError:
-            loaded = None
-        if isinstance(loaded, dict):
-            metadata = {str(key): value for key, value in loaded.items()}
-    metadata.update(
-        {
-            "idref": idref,
-            "recovered": True,
-            EPUB_HREF_BASE_METADATA_KEY: EPUB_PUBLICATION_ROOT_HREF_BASE,
-        }
-    )
-    return json.dumps(metadata, ensure_ascii=False)
 
 
 class SqlAlchemyReaderVolumeRepository:
@@ -286,117 +256,6 @@ class SqlAlchemyReaderVolumeRepository:
             )
             for unit in units
         ]
-
-    def get_epub_source(self, volume_id: str) -> ReaderEpubSourceDto | None:
-        source = self._session.scalar(
-            select(LibraryFile)
-            .where(
-                LibraryFile.volume_id == volume_id,
-                LibraryFile.kind == "EPUB",
-            )
-            .order_by(LibraryFile.sort_order, LibraryFile.created_at, LibraryFile.id)
-        )
-        return (
-            ReaderEpubSourceDto(file_id=source.id, path=source.path)
-            if source is not None
-            else None
-        )
-
-    def epub_navigation_needs_repair(self, volume_id: str) -> bool:
-        metadata_values = self._session.scalars(
-            select(LibraryReadingUnit.metadata_json).where(
-                LibraryReadingUnit.volume_id == volume_id,
-                LibraryReadingUnit.unit_type == "chapter",
-            )
-        ).all()
-        if not metadata_values:
-            return True
-        for metadata_json in metadata_values:
-            try:
-                metadata = json.loads(metadata_json)
-            except (TypeError, json.JSONDecodeError):
-                return True
-            if not isinstance(metadata, dict) or (
-                metadata.get(EPUB_HREF_BASE_METADATA_KEY)
-                != EPUB_PUBLICATION_ROOT_HREF_BASE
-            ):
-                return True
-        return False
-
-    def replace_epub_navigation_units(
-        self,
-        *,
-        volume_id: str,
-        file_id: str,
-        chapters: tuple[ReaderRecoveredEpubChapterDto, ...],
-        now: datetime,
-    ) -> None:
-        existing_units = {
-            unit.sort_order: unit
-            for unit in self._session.scalars(
-                select(LibraryReadingUnit).where(
-                    LibraryReadingUnit.volume_id == volume_id,
-                    LibraryReadingUnit.unit_type == "chapter",
-                )
-            ).all()
-        }
-        recovered_sort_orders = {chapter.sort_order for chapter in chapters}
-        rows: list[dict[str, object]] = []
-        for chapter in chapters:
-            existing = existing_units.get(chapter.sort_order)
-            metadata = _epub_navigation_metadata(
-                existing.metadata_json if existing is not None else None,
-                chapter.idref,
-            )
-            digest = hashlib.sha256(
-                f"{volume_id}\0{chapter.sort_order}\0{chapter.href}".encode()
-            ).hexdigest()[:32]
-            rows.append(
-                {
-                    "id": existing.id
-                    if existing is not None
-                    else f"recovered_{digest}",
-                    "volumeId": volume_id,
-                    "fileId": file_id,
-                    "unitType": "chapter",
-                    "title": chapter.title,
-                    "href": chapter.href,
-                    "mediaType": chapter.media_type,
-                    "sortOrder": chapter.sort_order,
-                    "metadataJson": metadata,
-                    "createdAt": now,
-                    "updatedAt": now,
-                }
-            )
-        for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
-            insert_statement = sqlite_insert(LibraryReadingUnit).values(list(chunk))
-            self._session.execute(
-                insert_statement.on_conflict_do_update(
-                    index_elements=["volumeId", "unitType", "sortOrder"],
-                    set_={
-                        "fileId": insert_statement.excluded["fileId"],
-                        "title": insert_statement.excluded.title,
-                        "href": insert_statement.excluded.href,
-                        "mediaType": insert_statement.excluded["mediaType"],
-                        "metadataJson": insert_statement.excluded["metadataJson"],
-                        "updatedAt": insert_statement.excluded["updatedAt"],
-                    },
-                )
-            )
-        stale_units = delete(LibraryReadingUnit).where(
-            LibraryReadingUnit.volume_id == volume_id,
-            LibraryReadingUnit.unit_type == "chapter",
-        )
-        if recovered_sort_orders:
-            stale_units = stale_units.where(
-                LibraryReadingUnit.sort_order.not_in(recovered_sort_orders)
-            )
-        self._session.execute(stale_units)
-        self._session.execute(
-            update(LibraryVolume)
-            .where(LibraryVolume.id == volume_id)
-            .values(chapter_count=len(chapters), updated_at=now)
-        )
 
     def get_progress(self, user_id: str, volume_id: str) -> ReaderProgressDto | None:
         progress = self._session.scalar(
@@ -630,6 +489,9 @@ class SqlAlchemyReaderVolumeRepository:
                     "readerType": progress_insert.excluded["readerType"],
                     "percent": progress_insert.excluded.percent,
                     "schemaVersion": progress_insert.excluded["schemaVersion"],
+                    "contentFingerprint": progress_insert.excluded[
+                        "contentFingerprint"
+                    ],
                     "updatedAt": progress_insert.excluded["updatedAt"],
                 },
             )

@@ -24,11 +24,13 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Pride and Prejudice"].exists)
         let readerButton = app.buttons["Continue Reading"]
         XCTAssertTrue(readerButton.exists)
-        XCTAssertFalse(readerButton.isEnabled)
+        XCTAssertTrue(readerButton.isEnabled)
 
         XCTAssertTrue(app.staticTexts["About This Work"].exists)
         XCTAssertTrue(app.staticTexts["Contents"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Chapter 1"].exists)
+        XCTAssertTrue(app.staticTexts["Currently Reading"].exists)
+        XCTAssertTrue(app.staticTexts["Unread"].exists)
         XCTAssertTrue(app.buttons["Add to Shelf"].exists)
         attachScreenshot(named: "work-detail-final-single-volume", app: app)
 
@@ -62,7 +64,8 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["E-book"].exists)
         XCTAssertTrue(app.staticTexts["Contents"].exists)
         XCTAssertTrue(app.staticTexts["Chapter 1"].exists)
-        XCTAssertFalse(app.staticTexts["Unread"].exists)
+        XCTAssertTrue(app.staticTexts["Currently Reading"].exists)
+        XCTAssertTrue(app.staticTexts["Unread"].exists)
         attachScreenshot(named: "work-detail-direct-chapters", app: app)
     }
 
@@ -80,13 +83,15 @@ final class ContentDiscoveryUITests: XCTestCase {
 
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["All Volumes"].exists)
-        XCTAssertTrue(app.buttons["work.volume.volume-1"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["work.volume.volume-2"].exists)
-        XCTAssertTrue(app.buttons["work.volume.volume-3"].exists)
-        XCTAssertEqual(app.buttons["work.volume.volume-1"].value as? String, "Reading progress 34%")
+        let volumeOne = app.otherElements["work.volume.volume-1"]
+        let volumeTwo = app.otherElements["work.volume.volume-2"]
+        XCTAssertTrue(volumeOne.waitForExistence(timeout: 5))
+        XCTAssertTrue(volumeTwo.exists)
+        XCTAssertTrue(app.otherElements["work.volume.volume-3"].exists)
+        XCTAssertEqual(volumeOne.value as? String, "34% read")
 
-        app.buttons["work.volume.volume-2"].tap()
-        XCTAssertTrue(app.buttons["work.volume.volume-2"].isSelected)
+        volumeTwo.tap()
+        XCTAssertTrue(volumeTwo.isSelected)
         attachScreenshot(named: "work-detail-final-volume-rail", app: app)
     }
 

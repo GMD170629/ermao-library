@@ -461,6 +461,7 @@ struct WorkCollectionView: View {
         .appCanvas()
         .task {
             store.setSort(kind == .recentReading ? .recentRead : .recentAdded)
+            store.reloadIfNeeded()
         }
     }
 

@@ -40,6 +40,12 @@ protocol IosReaderDownloadArtifactProviding: Sendable {
     func verifiedReaderArtifact(recordID: String, namespace: String) async throws -> IosReaderDownloadArtifact?
 }
 
+struct IosReaderStartupConflict {
+    let progress: ErmaoShared.ReaderProgress
+    let mutation: ErmaoShared.ReaderProgressMutation
+    let server: ErmaoShared.ReaderProgressSnapshotV4
+}
+
 extension ManagedDownloadStore: IosReaderDownloadArtifactProviding {}
 
 @MainActor
@@ -121,29 +127,27 @@ final class IosReaderComposition: ObservableObject {
             remoteSnapshot = onlineBootstrap.remoteSnapshot
             bookmarkContentFingerprint = onlineBootstrap.artifactVersion
             if let launchArtifact {
-                guard launchArtifact.serverContentFingerprint == onlineBootstrap.artifactVersion,
-                      let artifactFormat = IosManagedPublicationStore.sourceFormat(
-                          launchArtifact.sourceFormat
-                      ),
-                      artifactFormat == onlineBootstrap.publication.sourceFormat
-                else {
-                    throw IosReaderFailure(code: .corruptFile)
+                if launchArtifact.serverContentFingerprint == onlineBootstrap.artifactVersion,
+                   let artifactFormat = IosManagedPublicationStore.sourceFormat(
+                       launchArtifact.sourceFormat
+                   ),
+                   artifactFormat == onlineBootstrap.publication.sourceFormat {
+                    _ = try await managedStore.importPublication(
+                        from: launchArtifact.fileURL,
+                        sourceID: launchArtifact.sourceID,
+                        displayTitle: launchArtifact.displayTitle,
+                        sourceFormat: artifactFormat,
+                        workID: launchArtifact.workID,
+                        volumeID: launchArtifact.volumeID,
+                        expectedOriginalFileHash: onlineBootstrap.publication.publicationFingerprint.originalFileHash,
+                        parserVersion: onlineBootstrap.publication.publicationFingerprint.parser,
+                        normalizationVersion: onlineBootstrap.publication.publicationFingerprint.normalization
+                    )
+                    try await managedStore.bindServerContentFingerprint(
+                        sourceID: launchArtifact.sourceID,
+                        value: launchArtifact.serverContentFingerprint
+                    )
                 }
-                _ = try await managedStore.importPublication(
-                    from: launchArtifact.fileURL,
-                    sourceID: launchArtifact.sourceID,
-                    displayTitle: launchArtifact.displayTitle,
-                    sourceFormat: artifactFormat,
-                    workID: launchArtifact.workID,
-                    volumeID: launchArtifact.volumeID,
-                    expectedOriginalFileHash: onlineBootstrap.publication.publicationFingerprint.originalFileHash,
-                    parserVersion: onlineBootstrap.publication.publicationFingerprint.parser,
-                    normalizationVersion: onlineBootstrap.publication.publicationFingerprint.normalization
-                )
-                try await managedStore.bindServerContentFingerprint(
-                    sourceID: launchArtifact.sourceID,
-                    value: launchArtifact.serverContentFingerprint
-                )
             }
             let existing = try? await managedStore.resolve(sourceID: request.volumeID)
             if let existing,
@@ -194,21 +198,61 @@ final class IosReaderComposition: ObservableObject {
         let localIdentity = ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
             namespace: namespace,
             clientId: deviceIdentity.stableDeviceId(),
-            volumeId: target.volumeId,
-            localContentFingerprint: source.contentFingerprint
+            workId: target.workId,
+            volumeId: target.volumeId
         )
         let database = try IosReaderLocalDatabase(
             identity: localIdentity
         )
-        let syncPort = IosCompositionKt.createIosReaderProgressSyncPort(
+        let serverPort = IosCompositionKt.createIosReaderProgressSyncPort(
             cookieStore: cookieStore,
             profile: profile
         )
-        let progressStore = IosReaderProgressStore(
+        let progressRuntime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
+            stateStore: database,
+            target: target,
+            server: serverPort
+        )
+        let progressStore = progressRuntime.store
+        let localProgress = try await database.load(sourceId: source.sourceId)
+        let durableState = try await database.loadSyncState()
+        let startupDecision = ErmaoShared.PublicKt.decidePendingVsServerStartup(
+            localProgress: localProgress,
+            durableState: durableState,
+            remoteSnapshot: remoteSnapshot,
+            openedSource: source
+        )
+        var sessionRemoteSnapshot = remoteSnapshot
+        var startupConflict: IosReaderStartupConflict?
+        var shouldRetryStartupPending = false
+        if let useServer = startupDecision as? ErmaoShared.PendingVsServerDecisionUseServer,
+           useServer.discardPending,
+           let pending = durableState.pending {
+            try await database.discardPendingAfterConflict(
+                mutationId: pending.mutationId,
+                serverRevision: useServer.snapshot?.revision ?? durableState.confirmedRevision
+            )
+        } else if startupDecision is ErmaoShared.PendingVsServerDecisionUseLocalPending {
+            sessionRemoteSnapshot = nil
+            shouldRetryStartupPending = true
+        } else if let choice = startupDecision as? ErmaoShared.PendingVsServerDecisionRequiresChoice {
+            startupConflict = IosReaderStartupConflict(
+                progress: choice.progress,
+                mutation: choice.mutation,
+                server: choice.server
+            )
+        }
+        let progressCoordination = IosReaderProgressSessionCoordination(
+            runtime: progressRuntime,
             database: database,
             target: target,
-            syncPort: syncPort
+            server: serverPort,
+            clientID: localIdentity.clientId,
+            bootstrapSnapshot: remoteSnapshot
         )
+        if shouldRetryStartupPending {
+            try? await progressStore.retryPendingUpload()
+        }
         let preferencesStore = IosReaderPreferencesStore(
             serverIdentity: request.context.serverIdentity,
             userID: request.context.userID
@@ -248,7 +292,9 @@ final class IosReaderComposition: ObservableObject {
                 pages: pages,
                 managedStore: managedStore,
                 progressStore: progressStore,
-                remoteSnapshot: remoteSnapshot,
+                progressCoordination: progressCoordination,
+                remoteSnapshot: sessionRemoteSnapshot,
+                startupConflict: startupConflict,
                 namespaceKey: request.context.namespaceKey,
                 workID: request.workID,
                 publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
@@ -282,7 +328,9 @@ final class IosReaderComposition: ObservableObject {
                 canonicalPageCount: canonicalPageCount,
                 managedStore: managedStore,
                 progressStore: progressStore,
-                remoteSnapshot: remoteSnapshot,
+                progressCoordination: progressCoordination,
+                remoteSnapshot: sessionRemoteSnapshot,
+                startupConflict: startupConflict,
                 namespaceKey: request.context.namespaceKey,
                 workID: request.workID,
                 publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
@@ -296,6 +344,7 @@ final class IosReaderComposition: ObservableObject {
             preferences: preferencesStore.load(),
             managedStore: managedStore,
             progressStore: progressStore,
+            progressCoordination: progressCoordination,
             preferencesStore: preferencesStore,
             bookmarkStore: bookmarkStore,
             bookmarkSyncPort: bookmarkSyncPort,
@@ -304,7 +353,8 @@ final class IosReaderComposition: ObservableObject {
                 volumeId: source.sourceId,
                 contentFingerprint: bookmarkContentFingerprint
             ),
-            remoteSnapshot: remoteSnapshot,
+            remoteSnapshot: sessionRemoteSnapshot,
+            startupConflict: startupConflict,
             namespaceKey: request.context.namespaceKey,
             workID: request.workID,
             publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },

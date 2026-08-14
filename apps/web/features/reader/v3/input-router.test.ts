@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectReaderFramePointer, ReaderKeyboardNavigationController, readerFramePointerIntent, readerKeyIntent, readerPinchZoom, readerPointerIntent, readerPointerIntentInViewport, readerSwipeIntent } from './input-router';
+import { isReaderKeyboardControlTarget, projectReaderFramePointer, ReaderKeyboardNavigationController, readerFramePointerIntent, readerKeyIntent, readerPinchZoom, readerPointerIntent, readerPointerIntentInViewport, readerSwipeIntent } from './input-router';
 
 function deferred() {
   let resolve!: () => void;
@@ -23,6 +23,20 @@ test('maps keyboard navigation for both reading directions', () => {
   assert.equal(readerKeyIntent({ key: 'ArrowRight', shiftKey: false }, 'ltr', { keyboardPageTurn: false }), null);
   assert.equal(readerKeyIntent({ key: 'Escape', shiftKey: false }, 'ltr', { keyboardPageTurn: false }), 'escape');
   assert.equal(readerKeyIntent({ key: 'AudioVolumeUp', shiftKey: false }, 'ltr', { keyboardPageTurn: false, volumeKeyPageTurn: true }), 'previous');
+});
+
+test('keeps page keys working after toolbar focus while preserving native controls', () => {
+  const toolbarButton = {
+    closest: (selector: string) => selector.includes('button') ? toolbarButton : null
+  } as unknown as EventTarget;
+  const textInput = {
+    closest: (selector: string) => selector.includes('input') ? textInput : null
+  } as unknown as EventTarget;
+
+  assert.equal(isReaderKeyboardControlTarget(toolbarButton, 'ArrowRight'), false);
+  assert.equal(isReaderKeyboardControlTarget(toolbarButton, 'PageDown'), false);
+  assert.equal(isReaderKeyboardControlTarget(toolbarButton, ' '), true);
+  assert.equal(isReaderKeyboardControlTarget(textInput, 'ArrowRight'), true);
 });
 
 test('bounds key auto-repeat to one rendered turn and stops it on keyup', async () => {

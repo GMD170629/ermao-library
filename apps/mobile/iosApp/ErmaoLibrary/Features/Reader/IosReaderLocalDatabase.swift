@@ -7,8 +7,8 @@ import SQLite3
 ///
 /// The owner key deliberately excludes authorizationVersion so a successful
 /// reauthentication cannot hide the position stored on this installation.
-/// Exact progress, the latest pending mutation, and conflicts share one DB.
-final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressStore, @unchecked Sendable {
+/// Exact progress and the latest pending mutation share one DB.
+final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressSyncStateStore, @unchecked Sendable {
     private let worker: IosReaderLocalDatabaseWorker
 
     init(
@@ -51,16 +51,29 @@ final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressStore, @unchecked 
         )
     }
 
-    func acknowledge(mutationID: String, snapshot: ErmaoShared.ReaderProgressSnapshotV4) async throws {
-        try await worker.acknowledge(mutationID: mutationID, snapshot: SendableProgressSnapshot(value: snapshot))
+    func acknowledge(mutationId: String, snapshot: ErmaoShared.ReaderProgressSnapshotV4) async throws {
+        try await worker.acknowledge(mutationID: mutationId, snapshot: SendableProgressSnapshot(value: snapshot))
     }
 
-    func recordConflict(_ conflict: ErmaoShared.ReaderProgressConflict) async throws {
-        try await worker.recordConflict(SendableProgressConflict(value: conflict))
+    func discardPendingAfterConflict(mutationId: String, serverRevision: Int64) async throws {
+        try await worker.discardPendingAfterConflict(
+            mutationID: mutationId,
+            serverRevision: serverRevision
+        )
     }
 
-    func recordTerminalFailure(mutationID: String, code: String) async throws {
-        try await worker.recordTerminalFailure(mutationID: mutationID, code: code)
+    func acceptRemoteProgress(
+        progress: ErmaoShared.ReaderProgress,
+        snapshot: ErmaoShared.ReaderProgressSnapshotV4
+    ) async throws {
+        try await worker.acceptRemoteProgress(
+            SendableReaderProgress(progress),
+            snapshot: SendableProgressSnapshot(value: snapshot)
+        )
+    }
+
+    func recordTerminalFailure(mutationId: String, failureCode: String) async throws {
+        try await worker.recordTerminalFailure(mutationID: mutationId, code: failureCode)
     }
 }
 
@@ -87,7 +100,6 @@ private struct SendableOptionalReaderProgress: @unchecked Sendable {
 private struct SendableSyncState: @unchecked Sendable { let value: ErmaoShared.ReaderProgressDurableState }
 private struct SendableProgressMutation: @unchecked Sendable { let value: ErmaoShared.ReaderProgressMutation }
 private struct SendableProgressSnapshot: @unchecked Sendable { let value: ErmaoShared.ReaderProgressSnapshotV4 }
-private struct SendableProgressConflict: @unchecked Sendable { let value: ErmaoShared.ReaderProgressConflict }
 
 private actor IosReaderLocalDatabaseWorker {
     private static let maximumDocumentBytes = 1_048_576
@@ -96,7 +108,6 @@ private actor IosReaderLocalDatabaseWorker {
     private let ownerKey: String
     private let clientID: String
     private let sourceID: String
-    private let localFingerprint: ErmaoShared.ContentFingerprint
     private let legacyProgressRoot: URL
     private let databaseURL: URL
     private let fileManager: FileManager
@@ -115,7 +126,6 @@ private actor IosReaderLocalDatabaseWorker {
         ownerKey = identity.stableKey
         clientID = identity.clientId
         sourceID = identity.volumeId
-        localFingerprint = identity.localContentFingerprint
         let manager = fileManager.value
         self.fileManager = manager
 
@@ -207,7 +217,6 @@ private actor IosReaderLocalDatabaseWorker {
             try writeSyncState(ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: current.confirmedRevision,
                 pending: pending.value,
-                conflict: nil,
                 terminalFailureCode: nil
             ))
         }
@@ -233,21 +242,36 @@ private actor IosReaderLocalDatabaseWorker {
             try writeSyncState(ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: max(current.confirmedRevision, snapshot.value.revision),
                 pending: pending,
-                conflict: nil,
                 terminalFailureCode: nil
             ))
         }
     }
 
-    func recordConflict(_ transfer: SendableProgressConflict) throws {
+    func discardPendingAfterConflict(mutationID: String, serverRevision: Int64) throws {
         try initializeIfNeeded()
         try withTransaction {
             let current = try readSyncState()
-            guard current.pending?.mutationId == transfer.value.pending.mutationId else { return }
+            guard current.pending?.mutationId == mutationID else { return }
             try writeSyncState(ErmaoShared.ReaderProgressDurableState(
-                confirmedRevision: current.confirmedRevision,
-                pending: current.pending,
-                conflict: transfer.value,
+                confirmedRevision: max(current.confirmedRevision, serverRevision),
+                pending: nil,
+                terminalFailureCode: nil
+            ))
+        }
+    }
+
+    func acceptRemoteProgress(
+        _ progressTransfer: SendableReaderProgress,
+        snapshot: SendableProgressSnapshot
+    ) throws {
+        try initializeIfNeeded()
+        let progress = progressTransfer.value
+        try requireIdentity(progress)
+        try withTransaction {
+            try saveProgress(progress, ownerKey: ownerKey, preferNewer: false)
+            try writeSyncState(ErmaoShared.ReaderProgressDurableState(
+                confirmedRevision: snapshot.value.revision,
+                pending: nil,
                 terminalFailureCode: nil
             ))
         }
@@ -261,7 +285,6 @@ private actor IosReaderLocalDatabaseWorker {
             try writeSyncState(ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: current.confirmedRevision,
                 pending: current.pending,
-                conflict: current.conflict,
                 terminalFailureCode: code
             ))
         }
@@ -333,7 +356,7 @@ private actor IosReaderLocalDatabaseWorker {
             "SELECT CAST(contract_version AS TEXT) FROM reader_contract_metadata WHERE singleton = 1",
             bindings: []
         )
-        guard version != "5" else { return }
+        guard version != "6" else { return }
         try withTransaction {
             try execute("DELETE FROM reader_local_exact")
             try execute("DELETE FROM reader_progress_sync_v4")
@@ -341,7 +364,7 @@ private actor IosReaderLocalDatabaseWorker {
             try discardObsoleteSyncTables()
             try run(
                 """
-                INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 5)
+                INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 6)
                 ON CONFLICT(singleton) DO UPDATE SET contract_version = excluded.contract_version
                 """,
                 bindings: []
@@ -384,19 +407,17 @@ private actor IosReaderLocalDatabaseWorker {
             return ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: 0,
                 pending: nil,
-                conflict: nil,
                 terminalFailureCode: nil
             )
         }
         do {
             try requireDocumentSize(payload)
-            return try syncCodec.decode(payload: payload)
+            return syncCodec.decode(payload: payload)
         } catch {
             try discardCurrentContractState()
             return ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: 0,
                 pending: nil,
-                conflict: nil,
                 terminalFailureCode: nil
             )
         }
@@ -465,10 +486,7 @@ private actor IosReaderLocalDatabaseWorker {
     }
 
     private func matchesIdentity(_ progress: ErmaoShared.ReaderProgress) -> Bool {
-        progress.deviceId == clientID &&
-            progress.location.contentFingerprint.originalFileHash == localFingerprint.originalFileHash &&
-            progress.location.contentFingerprint.parserVersion == localFingerprint.parserVersion &&
-            progress.location.contentFingerprint.normalizationVersion == localFingerprint.normalizationVersion
+        progress.deviceId == clientID
     }
 
     private func legacyProgressURL(_ sourceID: String) -> URL {

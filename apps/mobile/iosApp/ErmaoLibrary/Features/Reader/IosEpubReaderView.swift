@@ -31,6 +31,7 @@ struct IosReflowableReaderView: View {
             }
         }
         .animation(.easeInOut(duration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18), value: session.controlsVisible)
+        .accessibilityElement(children: .combine)
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .statusBarHidden(!session.controlsVisible)
         .task {
@@ -45,6 +46,9 @@ struct IosReflowableReaderView: View {
         .onChange(of: session.preferences) { _ in
             session.applyPreferences()
             updateIdleTimer()
+        }
+        .onChange(of: session.startupCancelled) { cancelled in
+            if cancelled { dismiss() }
         }
         .onChange(of: colorScheme) { _ in
             if session.preferences.themeMode == .system { session.applyPreferences() }
@@ -80,6 +84,27 @@ struct IosReflowableReaderView: View {
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
         } message: { Text(session.presentationError?.localizedDescription ?? "") }
+        .alert(
+            String(localized: "reader.startup.conflict.title"),
+            isPresented: Binding(
+                get: { session.startupConflict != nil },
+                set: { _ in }
+            )
+        ) {
+            Button("reader.startup.conflict.local") {
+                Task { await session.continueStartupAtLocalPosition() }
+            }
+            Button("reader.startup.conflict.cloud") {
+                Task { await session.useCloudStartupPosition() }
+            }
+            Button("common.cancel", role: .cancel) { session.cancelStartupConflict() }
+        } message: {
+            Text(
+                session.startupActionFailed
+                    ? "reader.startup.conflict.failed"
+                    : "reader.startup.conflict.message"
+            )
+        }
     }
 
     private var resumeNotice: some View {
@@ -138,10 +163,10 @@ struct IosReflowableReaderView: View {
         let position = trimmedChapter.flatMap { $0.isEmpty ? nil : $0 }
             ?? String(format: "%d%%", Int(prompt.percent.rounded()))
         return String(
-            format: String(localized: "reader.resume.prompt.format"),
+            format: String(localized: "reader.remote.notice.format"),
             locale: .current,
-            time,
-            position
+            position,
+            time
         )
     }
 

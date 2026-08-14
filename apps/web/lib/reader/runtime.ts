@@ -2,6 +2,7 @@ import { IndexedDbReaderStorage } from './storage';
 import { ReaderPreferenceRepository } from './preferences';
 import {
   ReaderProgressConflictError,
+  type ProgressQueryTransport,
   type ProgressSyncTransport
 } from './model';
 import { parseReaderV4ProgressSnapshot } from './progress-wire';
@@ -40,6 +41,26 @@ const progressTransport: ProgressSyncTransport = async (upload, signal) => {
   return snapshot;
 };
 
+const progressQueryTransport: ProgressQueryTransport = async (volumeId, etag, signal) => {
+  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/progress`, {
+    method: 'GET',
+    headers: etag ? { 'If-None-Match': etag } : undefined,
+    credentials: 'same-origin',
+    cache: 'no-store',
+    signal
+  });
+  const nextEtag = response.headers.get('ETag');
+  if (response.status === 304) return { kind: 'unchanged', etag: nextEtag ?? etag };
+  const payload: unknown = await response.json().catch(() => null);
+  const root = record(payload);
+  if (!response.ok || root.ok !== true) throw new Error(`阅读进度检查失败（${response.status}）`);
+  const data = record(root.data);
+  if (data.progressSnapshot === null) return { kind: 'current', snapshot: null, etag: nextEtag };
+  const snapshot = parseReaderV4ProgressSnapshot(data.progressSnapshot);
+  if (!snapshot) throw new Error('服务端返回了无效的 Reader v4 进度快照');
+  return { kind: 'current', snapshot, etag: nextEtag };
+};
+
 export type ReaderRuntime = {
   storage: IndexedDbReaderStorage;
   preferences: ReaderPreferenceRepository;
@@ -54,7 +75,7 @@ export function getReaderRuntime(): ReaderRuntime {
   runtime = {
     storage,
     preferences: new ReaderPreferenceRepository(storage),
-    progress: new ReaderProgressSyncCoordinator(storage, progressTransport)
+    progress: new ReaderProgressSyncCoordinator(storage, progressTransport, { queryTransport: progressQueryTransport })
   };
   return runtime;
 }

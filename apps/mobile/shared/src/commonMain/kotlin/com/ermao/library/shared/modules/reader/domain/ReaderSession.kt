@@ -41,8 +41,5 @@ data class ReaderSession(
         require((phase == ReaderSessionPhase.Failed) == (error != null)) {
             "Only a failed Reader session carries an error"
         }
-        require(currentLocation == null || currentLocation.contentFingerprint == source.contentFingerprint) {
-            "Reader location fingerprint does not match the source"
-        }
     }
 }

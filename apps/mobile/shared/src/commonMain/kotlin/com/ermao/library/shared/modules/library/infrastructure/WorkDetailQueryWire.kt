@@ -200,6 +200,7 @@ data class ReadingUnitWire(
 data class ReadingUnitMetadataWire(
     val exactNavigation: Boolean? = null,
     val level: Int? = null,
+    val path: List<Int>? = null,
     val navigationKey: String? = null,
     val zipEntryName: String? = null,
     val idref: String? = null,
@@ -211,6 +212,7 @@ data class ReadingUnitMetadataWire(
     val sourceFileName: String? = null,
     val hrefBase: String? = null,
     val recovered: Boolean? = null,
+    val readingOrderPosition: Int? = null,
 )
 
 @Serializable
@@ -379,8 +381,21 @@ internal fun ReadingUnitWire.toDomain(): ReadingUnit = ReadingUnit(
 )
 
 private fun ReadingUnitMetadataWire.toDomain(): ReadingUnitMetadata = ReadingUnitMetadata(
-    exactNavigation, level, navigationKey, zipEntryName, idref, linear, properties, volumeIndex,
-    trackIndex, pageNumber, sourceFileName, hrefBase, recovered,
+    exactNavigation = exactNavigation,
+    level = level,
+    path = path,
+    navigationKey = navigationKey,
+    zipEntryName = zipEntryName,
+    idref = idref,
+    linear = linear,
+    properties = properties,
+    volumeIndex = volumeIndex,
+    trackIndex = trackIndex,
+    pageNumber = pageNumber,
+    sourceFileName = sourceFileName,
+    hrefBase = hrefBase,
+    recovered = recovered,
+    readingOrderPosition = readingOrderPosition,
 )
 
 private fun ReadingUnitsPageWire.toDomain(): ReadingUnitsPage {

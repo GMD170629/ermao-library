@@ -22,6 +22,7 @@ from app.modules.reader.domain.progress import (
     progress_percent_with_navigation,
     raw_progress_percent,
     reader_unit_index,
+    reader_unit_index_at_position,
 )
 from app.modules.reader.domain.volume_progress import (
     MediaKind,
@@ -50,4 +51,5 @@ __all__ = [
     "progress_percent_with_navigation",
     "raw_progress_percent",
     "reader_unit_index",
+    "reader_unit_index_at_position",
 ]

@@ -204,6 +204,15 @@ fun compareExactReadiumBlocks(
     return ExactBlockMatch.AnchorMismatch
 }
 
+/** Progress anchors remain valid when the publication bytes or parser version change. */
+fun compareExactProgressReadiumBlocks(
+    expected: ReadiumLocatorEnvelope,
+    recaptured: ReadiumLocatorEnvelope,
+): ExactBlockMatch = compareExactReadiumBlocks(
+    expected,
+    recaptured.copy(publication = expected.publication),
+)
+
 fun EngineLocatorPayload.hasExactReadiumBlockAnchor(): Boolean = toExactAnchorOrNull() != null
 
 private fun EngineLocatorPayload.toExactAnchorOrNull(): ReadiumExactAnchor? {

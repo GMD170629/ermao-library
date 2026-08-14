@@ -42,7 +42,10 @@ internal class TxtReadiumPublicationFactory(
         val containers: List<Container<Resource>> = normalized.resources.map { resource ->
             SingleResourceContainer(
                 requireNotNull(Url(resource.href)),
-                StringResource(resource.xhtml),
+                StringResource(
+                    EpubContentSecurityPolicy.decorateHtml(resource.xhtml.toByteArray())
+                        .toString(Charsets.UTF_8),
+                ),
             )
         } + listOf(SingleResourceContainer(
             requireNotNull(Url(normalized.stylesheetHref)),

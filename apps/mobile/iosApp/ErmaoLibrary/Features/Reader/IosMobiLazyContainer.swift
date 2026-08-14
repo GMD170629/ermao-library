@@ -88,7 +88,7 @@ struct IosMobiResourceDescriptor: Equatable, Sendable {
     let category: IosMobiResourceCategory
     let decodedLength: UInt64
 
-    var requiresSanitization: Bool {
+    var requiresSecurityDecoration: Bool {
         category == .markup || category == .flow || mediaType.lowercased() == "text/css"
     }
 }
@@ -129,7 +129,7 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
     init(
         descriptors: [IosMobiResourceDescriptor],
         lifetime: IosMobiPublicationLifetime,
-        sanitizer: IosMobiContentSanitizer
+        securityAdapter: IosPublicationSecurityAdapter
     ) throws {
         var resources: [String: IosMobiLazyResource] = [:]
         var entries: Set<AnyURL> = []
@@ -143,7 +143,7 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
             resources[descriptor.href] = IosMobiLazyResource(
                 descriptor: descriptor,
                 lifetime: lifetime,
-                sanitizer: sanitizer
+                securityAdapter: securityAdapter
             )
             entries.insert(url)
         }
@@ -167,27 +167,27 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
 
 }
 
-actor IosMobiLazyResource: Resource {
-    nonisolated let sourceURL: AbsoluteURL? = nil
+final class IosMobiLazyResource: Resource, @unchecked Sendable {
+    let sourceURL: AbsoluteURL? = nil
 
-    private static let maximumSanitizedResourceBytes = 64 * 1024 * 1024
+    private static let maximumDecoratedResourceBytes = 64 * 1024 * 1024
 
     private let descriptor: IosMobiResourceDescriptor
     private let lifetime: IosMobiPublicationLifetime
-    private let sanitizer: IosMobiContentSanitizer
+    private let securityAdapter: IosPublicationSecurityAdapter
 
     init(
         descriptor: IosMobiResourceDescriptor,
         lifetime: IosMobiPublicationLifetime,
-        sanitizer: IosMobiContentSanitizer
+        securityAdapter: IosPublicationSecurityAdapter
     ) {
         self.descriptor = descriptor
         self.lifetime = lifetime
-        self.sanitizer = sanitizer
+        self.securityAdapter = securityAdapter
     }
 
     func estimatedLength() async -> ReadResult<UInt64?> {
-        // This is intentionally only a hint. Sanitized markup can change length, but
+        // This is intentionally only a hint. Head decoration can change length, but
         // calculating it here would materialize every chapter when positions are built.
         return .success(descriptor.decodedLength)
     }
@@ -200,8 +200,8 @@ actor IosMobiLazyResource: Resource {
         range: Range<UInt64>?,
         consume: @escaping (Data) -> Void
     ) async -> ReadResult<Void> {
-        if descriptor.requiresSanitization {
-            return await sanitizedData().map { data in
+        if descriptor.requiresSecurityDecoration {
+            return await decoratedData().map { data in
                 let length = UInt64(data.count)
                 let selected = Self.clamped(range, to: length)
                 if !selected.isEmpty {
@@ -213,8 +213,8 @@ actor IosMobiLazyResource: Resource {
         return await streamRaw(range: range, consume: consume)
     }
 
-    private func sanitizedData() async -> ReadResult<Data> {
-        guard descriptor.decodedLength <= UInt64(Self.maximumSanitizedResourceBytes) else {
+    private func decoratedData() async -> ReadResult<Data> {
+        guard descriptor.decodedLength <= UInt64(Self.maximumDecoratedResourceBytes) else {
             return .failure(
                 .decoding("MOBI markup resource exceeds the safe transformation limit")
             )
@@ -225,7 +225,7 @@ actor IosMobiLazyResource: Resource {
         return streamed.flatMap { _ -> ReadResult<Data> in
             do {
                 return .success(
-                    try sanitizer.sanitize(data: raw, mediaType: descriptor.mediaType)
+                    try securityAdapter.decorate(data: raw, mediaType: descriptor.mediaType)
                 )
             } catch {
                 return .failure(.decoding("Unsafe or invalid MOBI text resource", cause: error))

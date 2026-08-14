@@ -185,6 +185,25 @@ fun compareExactPublicationLocations(
     }
 }
 
+/** Exact progress comparison deliberately ignores publication fingerprint changes. */
+fun compareExactProgressLocations(
+    expected: PublicationLocation,
+    actual: PublicationLocation,
+): ExactLocationMatch = compareExactPublicationLocations(
+    expected,
+    when (actual) {
+        is ReflowablePublicationLocation -> actual.copy(publication = expected.publication)
+        is PdfPublicationLocation -> PdfPublicationLocation(
+            publication = expected.publication,
+            pageIndex = actual.pageIndex,
+            pageProgression = actual.pageProgression,
+            engineLocator = actual.engineLocator,
+        )
+        is ComicPublicationLocation -> actual.copy(publication = expected.publication)
+        is AudioPublicationLocation -> actual.copy(publication = expected.publication)
+    },
+)
+
 private fun PublicationLocation.toJson(): JsonObject = buildJsonObject {
     put("kind", when (this@toJson) {
         is ReflowablePublicationLocation -> "reflowable"

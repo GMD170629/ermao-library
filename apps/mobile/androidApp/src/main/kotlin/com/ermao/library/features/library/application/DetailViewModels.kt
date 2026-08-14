@@ -22,11 +22,10 @@ import com.ermao.library.shared.modules.library.FacetQuery
 import com.ermao.library.shared.modules.library.FacetSort
 import com.ermao.library.shared.modules.library.WorkDetailQuery
 import com.ermao.library.shared.modules.library.domain.MediaKind
-import com.ermao.library.shared.modules.reader.ReaderChapterListMetadata
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
-import com.ermao.library.shared.modules.reader.resolveReaderChapterStates
+import com.ermao.library.shared.modules.reader.resolveReaderChapterStatesFromLocation
 import com.ermao.library.shared.modules.shelf.application.ShelfRepository
 import com.ermao.library.shared.modules.shelf.domain.ShelfMembership
 import com.ermao.library.shared.modules.shelf.domain.ShelfMembershipChange
@@ -181,15 +180,16 @@ class WorkDetailViewModel(
     private val mutableUiState = MutableStateFlow(WorkDetailUiState())
     val uiState: StateFlow<WorkDetailUiState> = mutableUiState.asStateFlow()
     private var loadGeneration: Int = 0
-    private var latestProgressUpdate: ReaderProgressPresentationUpdate? = null
+    private val latestProgressUpdatesByVolumeId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
 
     init {
         viewModelScope.launch {
             (appContext as ErmaoLibraryApplication).readerProgressPresentationCenter.updates.collect { update ->
                 if (update.namespaceKey == context.presentationKey() && update.workId == workId) {
-                    latestProgressUpdate = update
+                    latestProgressUpdatesByVolumeId[update.volumeId] = update
                     mutableUiState.update { state ->
-                        val content = state.content?.applying(update) ?: return@update state
+                        val content = state.content?.applying(update, state.selectedVolumeId) ?: return@update state
+                        if (content === state.content) return@update state
                         AndroidContentSnapshotCache.saveDetail(appContext, context, workId, content)
                         state.copy(content = content)
                     }
@@ -323,15 +323,19 @@ class WorkDetailViewModel(
                 when (val result = repository.loadWorkDetail(context, WorkDetailQuery(workId, requestedKind, volumeId))) {
                     is ContentResult.Content -> {
                         if (generation != loadGeneration) return@launch
-                        val uiContent = latestProgressUpdate?.let { result.value.toUiContent().applying(it) }
-                            ?: result.value.toUiContent()
-                        AndroidContentSnapshotCache.saveDetail(appContext, context, workId, uiContent)
-                        val selectedKind = mediaKind ?: uiContent.selectedMediaKind ?: uiContent.media.firstOrNull()?.kind
-                        val selectedVolume = uiContent.media.firstOrNull { it.kind == selectedKind }
+                        val baseContent = result.value.toUiContent()
+                        val selectedKind = mediaKind ?: baseContent.selectedMediaKind ?: baseContent.media.firstOrNull()?.kind
+                        val selectedVolume = baseContent.media.firstOrNull { it.kind == selectedKind }
                             ?.volumes?.firstOrNull { it.id == volumeId }
-                            ?: uiContent.media.firstOrNull { it.kind == selectedKind }?.volumes?.firstOrNull { it.selected }
-                            ?: uiContent.media.firstOrNull { it.kind == selectedKind }
+                            ?: baseContent.media.firstOrNull { it.kind == selectedKind }?.volumes?.firstOrNull { it.selected }
+                            ?: baseContent.media.firstOrNull { it.kind == selectedKind }
                             ?.volumes?.firstOrNull()
+                        val selectedVolumeId = selectedVolume?.id
+                        val uiContent = selectedVolumeId
+                            ?.let(latestProgressUpdatesByVolumeId::get)
+                            ?.let { baseContent.applying(it, selectedVolumeId) }
+                            ?: baseContent
+                        AndroidContentSnapshotCache.saveDetail(appContext, context, workId, uiContent)
                         val shelfState = mutableUiState.value
                         mutableUiState.value = WorkDetailUiState(
                             isLoading = false,
@@ -384,15 +388,22 @@ class WorkDetailViewModel(
 private fun ContentRequestContext.presentationKey(): String =
     "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
 
-private fun WorkDetailContent.applying(update: ReaderProgressPresentationUpdate): WorkDetailContent {
-    if (work.id != update.workId) return this
-    val units = readingUnits.map { ReaderChapterUnit(it.href, it.sortOrder) }
-    val states = resolveReaderChapterStates(
+internal fun WorkDetailContent.applying(
+    update: ReaderProgressPresentationUpdate,
+    selectedVolumeId: String?,
+): WorkDetailContent {
+    if (work.id != update.workId || selectedVolumeId != update.volumeId) return this
+    val units = readingUnits.map {
+        ReaderChapterUnit(
+            href = it.href,
+            sortOrder = it.sortOrder,
+            readingOrderPosition = it.readingOrderPosition,
+        )
+    }
+    val states = resolveReaderChapterStatesFromLocation(
         units = units,
-        currentHref = update.currentHref,
-        currentSortOrder = null,
+        location = update.location,
         progressPercent = update.percent,
-        metadata = ReaderChapterListMetadata(pageSize = maxOf(1, units.size)),
     )
     return copy(
         work = work.copy(progressPercent = update.percent.toInt().coerceIn(0, 100)),

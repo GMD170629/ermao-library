@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Book
+import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDownload
@@ -79,6 +81,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -214,7 +217,6 @@ private fun WorkDetailBody(
         verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
     ) {
         item { IdentityHeader(content, repository, context, onOpenFacet) }
-        item { ReadingSummary(content) }
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
@@ -326,7 +328,7 @@ private fun IdentityHeader(
             Modifier.width(112.dp),
         )
         Column(
-            Modifier.weight(1f).height(168.dp),
+            Modifier.weight(1f).heightIn(min = 168.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(content.work.title, style = theme.typography.title)
@@ -334,21 +336,22 @@ private fun IdentityHeader(
                 content.authorFacetId?.let { onOpenFacet(LibraryScope.Authors, it) }
             }
             val format = content.media.firstOrNull()?.volumes?.firstOrNull()?.format?.takeIf(String::isNotBlank)
-            if (format != null || content.tags.isNotEmpty()) {
+            val chips = (listOfNotNull(format?.lowercase()) + content.tags).distinctBy { it.lowercase() }
+            if (chips.isNotEmpty()) {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
                 ) {
-                    format?.let { TagLabel(it.lowercase()) }
-                    content.tags.forEach { tag -> TagLabel(tag) }
+                    chips.forEach { tag -> TagLabel(tag) }
                 }
             }
             content.seriesName?.let { series ->
-                Spacer(Modifier.weight(1f))
                 FacetLink(series, content.seriesId != null, accent = true, underline = true) {
                     content.seriesId?.let { onOpenFacet(LibraryScope.Series, it) }
                 }
             }
+            Spacer(Modifier.weight(1f))
+            ReadingSummary(content)
         }
     }
 }
@@ -393,13 +396,22 @@ private fun TagLabel(tag: String) {
 private fun ReadingSummary(content: WorkDetailContent) {
     val theme = WarmPageThemeValues
     val progress = content.work.progressPercent ?: 0
+    if (progress <= 0) return
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.work_reading_progress), style = theme.typography.callout, color = theme.colors.textSecondary)
             Text("  $progress%", style = theme.typography.headline)
             Spacer(Modifier.weight(1f))
             content.readingUnits.firstOrNull { it.readingState == ChapterReadingState.Current }?.title?.let { title ->
-                Text(stringResource(R.string.work_reading_position, title), style = theme.typography.callout, color = theme.colors.textSecondary)
+                Text(
+                    stringResource(R.string.work_reading_position, title),
+                    modifier = Modifier.weight(1f),
+                    style = theme.typography.callout,
+                    color = theme.colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                )
             }
         }
         LinearProgressIndicator(
@@ -415,7 +427,13 @@ private fun ReadingSummary(content: WorkDetailContent) {
 private fun DescriptionContent(content: WorkDetailContent) {
     val theme = WarmPageThemeValues
     var expanded by remember { mutableStateOf(false) }
-    Surface(shape = RoundedCornerShape(theme.radii.task), color = theme.colors.surface) {
+    Surface(
+        shape = RoundedCornerShape(theme.radii.task),
+        color = theme.colors.surface,
+        border = BorderStroke(1.dp, theme.colors.divider.copy(alpha = 0.75f)),
+        tonalElevation = 1.dp,
+        shadowElevation = 4.dp,
+    ) {
         Column(Modifier.padding(theme.spacing.three), verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
             Text(stringResource(R.string.work_description_title), style = theme.typography.sectionTitle)
             Text(
@@ -642,7 +660,13 @@ private fun SectionHeader(title: String, trailing: String) {
 @Composable
 private fun ChapterCard(chapters: List<ReadingUnitContent>) {
     val theme = WarmPageThemeValues
-    Surface(shape = RoundedCornerShape(theme.radii.task), color = theme.colors.surface) {
+    Surface(
+        shape = RoundedCornerShape(theme.radii.task),
+        color = theme.colors.surface,
+        border = BorderStroke(1.dp, theme.colors.divider.copy(alpha = 0.75f)),
+        tonalElevation = 1.dp,
+        shadowElevation = 4.dp,
+    ) {
         Column(Modifier.padding(horizontal = theme.spacing.three, vertical = theme.spacing.two)) {
             SectionHeader(
                 stringResource(R.string.work_directory_title),
@@ -661,27 +685,53 @@ private fun ChapterRow(chapter: ReadingUnitContent) {
         ChapterReadingState.Read -> stringResource(R.string.work_chapter_read)
         ChapterReadingState.Unread -> stringResource(R.string.work_chapter_unread)
     }
+    val isCurrent = chapter.readingState == ChapterReadingState.Current
     Column {
         Row(
             Modifier.fillMaxWidth()
                 .semantics { stateDescription = stateLabel }
-                .padding(vertical = theme.spacing.two),
+                .background(
+                    color = if (isCurrent) theme.colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent,
+                    shape = RoundedCornerShape(theme.radii.control),
+                )
+                .padding(horizontal = theme.spacing.one, vertical = theme.spacing.two),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
         ) {
+            Box(
+                Modifier.width(3.dp).height(32.dp).background(
+                    color = if (isCurrent) theme.colors.brandAccent else androidx.compose.ui.graphics.Color.Transparent,
+                    shape = RoundedCornerShape(2.dp),
+                ),
+            )
             Column(Modifier.weight(1f)) {
-                Text(chapter.title, style = theme.typography.headline)
-                if (chapter.readingState != ChapterReadingState.Unread) {
+                Text(
+                    chapter.title,
+                    style = theme.typography.headline,
+                    color = if (isCurrent) theme.colors.actionAccent else theme.colors.textPrimary,
+                )
+                chapter.progressPercent?.let { progress ->
                     Text(
-                        stateLabel,
-                        color = if (chapter.readingState == ChapterReadingState.Current) {
-                            theme.colors.actionAccent
-                        } else {
-                            theme.colors.textSecondary
-                        },
+                        "$progress%",
+                        style = theme.typography.caption,
+                        color = theme.colors.textSecondary,
                     )
                 }
             }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = theme.colors.textSecondary)
+            Text(
+                stateLabel,
+                style = theme.typography.label,
+                color = if (isCurrent) theme.colors.actionAccent else theme.colors.textSecondary,
+            )
+            Icon(
+                imageVector = when (chapter.readingState) {
+                    ChapterReadingState.Current -> Icons.Outlined.BarChart
+                    ChapterReadingState.Read -> Icons.Outlined.CheckCircle
+                    ChapterReadingState.Unread -> Icons.AutoMirrored.Filled.KeyboardArrowRight
+                },
+                contentDescription = null,
+                tint = if (isCurrent) theme.colors.brandAccent else theme.colors.textTertiary,
+            )
         }
         HorizontalDivider(color = theme.colors.divider)
     }

@@ -13,12 +13,19 @@ data class NormalizedTxtPublication(
     val stylesheet: String = TXT_STYLESHEET,
 )
 
+const val TXT_PARSER_IDENTIFIER = "shuku-txt-parser-v1"
+const val TXT_PUBLICATION_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v2"
+
 /** Deterministic TXT -> EPUB-profile resources shared by every native platform. */
 class TxtPublicationNormalizer {
     fun normalize(decodedText: String, publicationTitle: String): NormalizedTxtPublication {
         require(publicationTitle.isNotBlank()) { "TXT publication title is blank" }
         require('\u0000' !in decodedText) { "TXT publication contains NUL" }
-        val normalized = decodedText.replace("\r\n", "\n").replace('\r', '\n')
+        val normalized = decodedText
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace('\u2028', '\n')
+            .replace('\u2029', '\n')
         require(normalized.isNotBlank()) { "TXT publication is empty" }
         val lines = normalized.split('\n').map(String::trimEnd)
         val starts = lines.indices.filter { isChapterHeading(lines[it]) }

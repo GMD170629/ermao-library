@@ -19,11 +19,12 @@ data class ReaderSyncNamespace(
 data class ReaderLocalProgressIdentity(
     val namespace: ReaderSyncNamespace,
     val clientId: String,
+    val workId: String,
     val volumeId: String,
-    val localContentFingerprint: ContentFingerprint,
 ) {
     init {
         require(clientId.isNotBlank()) { "Reader local client id is blank" }
+        require(workId.isNotBlank()) { "Reader local work id is blank" }
         require(volumeId.isNotBlank()) { "Reader local volume id is blank" }
     }
 
@@ -32,10 +33,8 @@ data class ReaderLocalProgressIdentity(
             namespace.serverIdentity,
             namespace.userId,
             clientId,
+            workId,
             volumeId,
-            localContentFingerprint.originalFileHash,
-            localContentFingerprint.parserVersion,
-            localContentFingerprint.normalizationVersion,
         )
 }
 
@@ -57,6 +56,7 @@ data class ReaderProgressSyncTarget(
 /** Exact Reader v4 server state. Percent is a display projection only. */
 data class ReaderProgressSnapshotV4(
     val sourceId: String,
+    val clientId: String,
     val revision: Long,
     val locator: PublicationLocation,
     val displayPercent: Double,
@@ -66,6 +66,7 @@ data class ReaderProgressSnapshotV4(
 ) {
     constructor(
         sourceId: String,
+        clientId: String,
         revision: Long,
         locator: ReadiumLocatorEnvelope,
         displayPercent: Double,
@@ -73,6 +74,7 @@ data class ReaderProgressSnapshotV4(
         capturedAtEpochMillis: Long? = null,
     ) : this(
         sourceId,
+        clientId,
         revision,
         ReflowablePublicationLocation(locator.publication, locator.asEngineLocator()),
         displayPercent,
@@ -81,6 +83,7 @@ data class ReaderProgressSnapshotV4(
     )
     init {
         require(sourceId.isNotBlank()) { "Reader snapshot source id is blank" }
+        require(clientId.isNotBlank()) { "Reader snapshot client id is blank" }
         require(revision > 0) { "Reader snapshot revision must be positive" }
         require(displayPercent.isFinite() && displayPercent in 0.0..100.0) {
             "Reader display percent is outside 0..100"
@@ -93,6 +96,14 @@ data class ReaderProgressSnapshotV4(
 
     val effectiveCapturedAtEpochMillis: Long
         get() = capturedAtEpochMillis ?: receivedAtEpochMillis
+}
+
+/** Session-only presentation state. It is reconstructed from bootstrap/progress GET after restart. */
+data class ReaderRemoteProgressNotice(
+    val snapshot: ReaderProgressSnapshotV4,
+) {
+    val revision: Long get() = snapshot.revision
+    val sourceClientId: String get() = snapshot.clientId
 }
 
 data class ReaderProgressMutation(
@@ -124,16 +135,6 @@ data class ReaderProgressMutation(
         require(mutationId.isNotBlank()) { "Reader mutation id is blank" }
         require(baseRevision >= 0) { "Reader mutation base revision is negative" }
         require(capturedAtEpochMillis >= 0) { "Reader mutation timestamp is negative" }
-    }
-}
-
-data class ReaderProgressConflict(
-    val pending: ReaderProgressMutation,
-    val server: ReaderProgressSnapshotV4,
-) {
-    init {
-        require(pending.sourceId == server.sourceId) { "Reader conflict source ids differ" }
-        require(pending.baseRevision < server.revision) { "Reader conflict does not contain a newer server revision" }
     }
 }
 

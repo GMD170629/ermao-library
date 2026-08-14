@@ -120,6 +120,8 @@ def _seed_library(db_session) -> None:
             id=f"file-{volume_id}",
             volume_id=volume_id,
             path=f"library/{folder_id}/{volume_id}.epub",
+            fingerprint=f"sha256:{'a' * 64}",
+            full_hash="a" * 64,
             hash_status="COMPLETED",
             mtime_ms=1,
             kind="EPUB",
@@ -428,9 +430,7 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     assert shelf.status_code == 201
     bootstrap = client.get("/api/reader/v4/volumes/volume-a/bootstrap")
     assert bootstrap.status_code == 200
-    content_fingerprint = bootstrap.json()["data"]["publicationFingerprint"][
-        "originalFileHash"
-    ]
+    content_fingerprint = bootstrap.json()["data"]["contentFingerprint"]
     bookmark = client.put(
         "/api/reader/v4/volumes/volume-a/bookmarks",
         json={

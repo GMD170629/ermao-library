@@ -23,7 +23,10 @@ def resolve_publication_source(raw_path: str, storage_root: Path) -> Path:
 
 def publication_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
+    try:
+        with path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError as error:
+        raise PublicationCorruptError("publication source cannot be read") from error
     return digest.hexdigest()

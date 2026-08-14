@@ -29,20 +29,23 @@ from app.modules.publications.infrastructure.source_files import (
 )
 
 TXT_PARSER_IDENTIFIER = "shuku-txt-parser-v1"
-TXT_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v1"
+TXT_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v2"
 MAX_TXT_SOURCE_BYTES = 64 * 1024 * 1024
-_CHAPTER_HEADING = re.compile(
-    r"^(?:\u7b2c[0-9\uff10-\uff19\u4e00\u4e8c\u4e09\u56db\u4e94\u516d"
-    r"\u4e03\u516b\u4e5d\u5341\u767e\u5343\u4e07\u96f6\u3007\u4e24]+"
-    r"[\u7ae0\u56de\u5377\u8282\u90e8\u7bc7]"
-    r"(?:\s*[:：.、-]?\s+.+)?|"
-    r"(?:chapter|part|book|section)\s+[0-9ivxlcdm]+"
-    r"(?:\s*[:：.、-]?\s+.+)?)$",
+_CHINESE_CHAPTER = re.compile(
+    r"^\u7b2c[0-9\u3007\u96f6\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03"
+    r"\u516b\u4e5d\u5341\u767e\u5343\u4e07\u4e24]+"
+    r"[\u7ae0\u8282\u56de\u5377\u7bc7\u90e8](?:[ \u3000:：].*)?$"
+)
+_LATIN_CHAPTER = re.compile(
+    r"^(?:chapter|part|book)[ \t]+[0-9ivxlcdm]+(?:[ .:：-].*)?$",
     re.IGNORECASE,
 )
-_STYLESHEET_HREF = "styles/book.css"
-_DEFAULT_CHAPTER_TITLE = "\u6b63\u6587"
-_STYLESHEET = b"""html { writing-mode: horizontal-tb; }\nbody { margin: 0; padding: 1em; }\nh1 { break-before: page; }\np { margin: 0 0 1em; white-space: pre-wrap; }\n"""
+_STYLESHEET_HREF = "text/reader.css"
+_STYLESHEET = b"""html { color-scheme: light dark; }
+body { margin: 0; padding: 1rem; line-height: 1.6; overflow-wrap: anywhere; }
+h1 { font-size: 1.35em; margin: 1.5em 0 1em; }
+p { margin: 0 0 1em; white-space: normal; }
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,56 +87,88 @@ def _decode_txt(content: bytes) -> str:
 def _normalized_lines(content: str) -> tuple[str, ...]:
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")
     normalized = normalized.replace("\u2028", "\n").replace("\u2029", "\n")
-    return tuple(normalized.split("\n"))
+    if not normalized.strip():
+        raise PublicationCorruptError("TXT source is empty")
+    return tuple(line.rstrip() for line in normalized.split("\n"))
 
 
-def _chapters(lines: tuple[str, ...]) -> tuple[_TxtChapter, ...]:
+def _is_chapter_heading(line: str) -> bool:
+    value = line.strip()
+    return 2 <= len(value) <= 96 and bool(
+        _CHINESE_CHAPTER.fullmatch(value) or _LATIN_CHAPTER.fullmatch(value)
+    )
+
+
+def _chapters(
+    lines: tuple[str, ...], publication_title: str
+) -> tuple[_TxtChapter, ...]:
+    starts = [index for index, line in enumerate(lines) if _is_chapter_heading(line)]
+    if not starts:
+        ranges = [(0, len(lines))]
+    else:
+        effective_starts = starts
+        if any(line.strip() for line in lines[: starts[0]]):
+            effective_starts = [0, *starts]
+        ranges = [
+            (
+                start,
+                effective_starts[index + 1]
+                if index + 1 < len(effective_starts)
+                else len(lines),
+            )
+            for index, start in enumerate(effective_starts)
+        ]
     chapters: list[_TxtChapter] = []
-    current_title = _DEFAULT_CHAPTER_TITLE
-    current_lines: list[str] = []
-    for line in lines:
-        heading = line.strip()
-        if heading and _CHAPTER_HEADING.fullmatch(heading):
-            if current_lines or chapters:
-                chapters.append(
-                    _TxtChapter(title=current_title, lines=tuple(current_lines))
-                )
-            current_title = heading
-            current_lines = []
-            continue
-        current_lines.append(line)
-    if current_lines or not chapters:
-        chapters.append(_TxtChapter(title=current_title, lines=tuple(current_lines)))
+    for chapter_index, (start, end) in enumerate(ranges, start=1):
+        chapter_lines = lines[start:end]
+        first = chapter_lines[0] if chapter_lines else ""
+        has_heading = _is_chapter_heading(first)
+        title = (
+            first.strip()
+            if has_heading
+            else publication_title
+            if len(ranges) == 1
+            else f"{publication_title} {chapter_index}"
+        )
+        chapters.append(
+            _TxtChapter(
+                title=title,
+                lines=chapter_lines[1:] if has_heading else chapter_lines,
+            )
+        )
     return tuple(chapters)
 
 
-def _chapter_xhtml(chapter: _TxtChapter, chapter_index: int) -> bytes:
-    blocks: list[str] = []
-    block_index = 0
-    if chapter.title != _DEFAULT_CHAPTER_TITLE:
-        blocks.append(
-            f'<h1 id="heading-{chapter_index:04d}">{html.escape(chapter.title)}</h1>'
-        )
+def _escape_xml(value: str) -> str:
+    return html.escape(value, quote=True).replace("&#x27;", "&apos;")
+
+
+def _chapter_xhtml(chapter: _TxtChapter) -> bytes:
+    paragraph_lines: list[list[str]] = []
+    current: list[str] = []
     for line in chapter.lines:
         if not line.strip():
-            continue
-        block_index += 1
-        block_id = f"block-{chapter_index:04d}-{block_index:06d}"
-        blocks.append(f'<p id="{block_id}">{html.escape(line)}</p>')
-    if not blocks:
-        blocks.append(f'<p id="block-{chapter_index:04d}-000001"></p>')
-    body = "\n".join(blocks)
-    document = (
-        '<?xml version="1.0" encoding="utf-8"?>\n'
-        '<html xmlns="http://www.w3.org/1999/xhtml" lang="und">\n'
-        "<head>\n"
-        f"<title>{html.escape(chapter.title)}</title>\n"
-        '<link rel="stylesheet" type="text/css" href="../styles/book.css"/>\n'
-        "</head>\n<body>\n"
-        f"{body}\n"
-        "</body>\n</html>\n"
+            if current:
+                paragraph_lines.append(current)
+                current = []
+        else:
+            current.append(line)
+    if current:
+        paragraph_lines.append(current)
+    paragraphs = "\n".join(
+        f'<p id="block-{index:06d}">'
+        + "<br/>".join(_escape_xml(line) for line in block)
+        + "</p>"
+        for index, block in enumerate(paragraph_lines, start=1)
     )
-    return document.encode("utf-8")
+    document = f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="und">
+<head><meta charset="utf-8"/><title>{_escape_xml(chapter.title)}</title>
+<link rel="stylesheet" type="text/css" href="reader.css"/></head>
+<body><h1 id="heading-000001">{_escape_xml(chapter.title)}</h1>
+{paragraphs}
+</body></html>"""
+    return document.encode()
 
 
 def _resource_href(raw_href: str) -> str:
@@ -168,7 +203,7 @@ def _snapshot(
         content = source_path.read_bytes()
     except OSError as error:
         raise PublicationCorruptError("TXT source is unavailable") from error
-    chapters = _chapters(_normalized_lines(_decode_txt(content)))
+    chapters = _chapters(_normalized_lines(_decode_txt(content)), title)
     resources: dict[str, tuple[str, bytes]] = {
         _STYLESHEET_HREF: ("text/css", _STYLESHEET)
     }
@@ -178,7 +213,7 @@ def _snapshot(
         href = f"text/chapter-{chapter_index:04d}.xhtml"
         resources[href] = (
             "application/xhtml+xml",
-            _chapter_xhtml(chapter, chapter_index),
+            _chapter_xhtml(chapter),
         )
         reading_order.append(
             PublicationLink(
@@ -187,14 +222,9 @@ def _snapshot(
                 title=chapter.title,
             )
         )
-        fragment = (
-            f"heading-{chapter_index:04d}"
-            if chapter.title != _DEFAULT_CHAPTER_TITLE
-            else f"block-{chapter_index:04d}-000001"
-        )
         toc.append(
             PublicationTocEntry(
-                href=f"{href}#{fragment}",
+                href=f"{href}#heading-000001",
                 title=chapter.title,
             )
         )

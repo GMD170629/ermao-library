@@ -17,6 +17,7 @@ dependencies = [
   "email-validator>=2.2.0",
   "Pillow>=11.3.0",
   "ebooklib>=0.18",
+  "html5lib>=1.1",
   "lxml>=5.2.0",
   "mutagen>=1.47.0",
   "pypdfium2>=4.30.0",

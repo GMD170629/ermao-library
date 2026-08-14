@@ -253,8 +253,14 @@ final class LibraryStore: ObservableObject {
 
     func setSort(_ sort: LibrarySort) {
         guard selectedScope == .works else { return }
+        guard current.sort != sort else { return }
         discoveryRuntime.updateSort(scope: .works, sort: sharedSort(sort))
         updateCurrent { $0.sort = sort }
+        reload()
+    }
+
+    func reloadIfNeeded() {
+        guard case .idle = current.results else { return }
         reload()
     }
 
@@ -814,7 +820,7 @@ final class WorkDetailStore: ObservableObject {
     private var requestGeneration = UUID()
     private var activeMediaKind: LibraryMediaKind?
     private var activeVolumeID: String?
-    private var latestProgressUpdate: ErmaoShared.ReaderProgressPresentationUpdate?
+    private var latestProgressUpdatesByVolumeID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
     init(context: ContentRequestContext, client: any ContentClient, cache: LibraryCacheStore, workID: String, onUnauthorized: @escaping @MainActor () -> Void) {
@@ -848,6 +854,8 @@ final class WorkDetailStore: ObservableObject {
                     query: WorkDetailQuery(workID: workID, mediaKind: mediaKind, volumeID: volumeID)
                 )
                 guard requestGeneration == generation else { return }
+                let latestProgressUpdate = value.selectedVolumeID
+                    .flatMap { latestProgressUpdatesByVolumeID[$0] }
                 let presented = latestProgressUpdate.map { value.applying($0) } ?? value
                 state = .ready(presented, isCached: false)
                 do { try await cache.save(presented, namespace: context.namespaceKey, key: key) }
@@ -863,7 +871,10 @@ final class WorkDetailStore: ObservableObject {
                 }
                 do {
                     if let cached = try await cache.load(WorkDetailContent.self, namespace: context.namespaceKey, key: key) {
-                        state = .ready(latestProgressUpdate.map { cached.applying($0) } ?? cached, isCached: true)
+                        let latestProgressUpdate = cached.selectedVolumeID
+                            .flatMap { latestProgressUpdatesByVolumeID[$0] }
+                        let presented = latestProgressUpdate.map { cached.applying($0) } ?? cached
+                        state = .ready(presented, isCached: true)
                     } else { state = .failure }
                 } catch { cacheIssue = .readFailed; state = .failure }
             }
@@ -881,9 +892,11 @@ final class WorkDetailStore: ObservableObject {
     }
 
     private func apply(_ update: ErmaoShared.ReaderProgressPresentationUpdate) {
-        guard update.capturedAtEpochMillis >= (latestProgressUpdate?.capturedAtEpochMillis ?? -1) else { return }
-        latestProgressUpdate = update
+        let previous = latestProgressUpdatesByVolumeID[update.volumeId]
+        guard update.capturedAtEpochMillis >= (previous?.capturedAtEpochMillis ?? -1) else { return }
+        latestProgressUpdatesByVolumeID[update.volumeId] = update
         guard case .ready(let content, let isCached) = state else { return }
+        guard content.selectedVolumeID == update.volumeId else { return }
         let presented = content.applying(update)
         state = .ready(presented, isCached: isCached)
         let key = "work|\(workID)|\(activeMediaKind?.rawValue ?? "default")|\(activeVolumeID ?? "default")"
@@ -896,7 +909,10 @@ final class WorkDetailStore: ObservableObject {
 
 private extension WorkDetailContent {
     func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate) -> WorkDetailContent {
-        guard work.id == update.workId, volumes.contains(where: { $0.id == update.volumeId }) else { return self }
+        guard work.id == update.workId,
+              selectedVolumeID == update.volumeId,
+              volumes.contains(where: { $0.id == update.volumeId })
+        else { return self }
         let updatedWork = WorkCard(
             id: work.id,
             title: work.title,
@@ -920,18 +936,19 @@ private extension WorkDetailContent {
                 isSelected: volume.isSelected
             )
         }
-        let states = ErmaoShared.PublicKt.resolveReaderChapterStates(
-            units: chapters.map {
-                ErmaoShared.ReaderChapterUnit(href: $0.href, sortOrder: Int32($0.sortOrder))
-            },
-            currentHref: update.currentHref,
-            currentSortOrder: nil,
-            progressPercent: update.percent,
-            metadata: ErmaoShared.ReaderChapterListMetadata(
-                page: 1,
-                pageSize: Int32(max(1, chapters.count)),
-                currentIndex: nil
+        let readerChapterUnits: [ErmaoShared.ReaderChapterUnit] = chapters.map {
+            ErmaoShared.ReaderChapterUnit(
+                href: $0.href,
+                sortOrder: Int32($0.sortOrder),
+                readingOrderPosition: $0.readingOrderPosition.map {
+                    KotlinInt(int: Int32($0))
+                }
             )
+        }
+        let states = ErmaoShared.PublicKt.resolveReaderChapterStatesFromLocation(
+            units: readerChapterUnits,
+            location: update.location,
+            progressPercent: update.percent
         )
         let updatedChapters = chapters.enumerated().map { index, chapter in
             let state: WorkChapterReadingState = switch states[index] {
@@ -946,6 +963,7 @@ private extension WorkDetailContent {
                 isCurrent: state == .current,
                 href: chapter.href,
                 sortOrder: chapter.sortOrder,
+                readingOrderPosition: chapter.readingOrderPosition,
                 state: state
             )
         }

@@ -41,10 +41,10 @@ function readerOpenError(reason: unknown) {
 }
 
 /**
- * Serializes navigation intents without allocating their operation token early.
+ * Serializes engine intents without allocating their operation token early.
  * Reset invalidates work that has not started when an adapter session closes.
  */
-export class ReaderNavigationIntentQueue {
+class SerializedReaderIntentQueue {
   private generation = 0;
   private tail: Promise<void> = Promise.resolve();
 
@@ -64,6 +64,63 @@ export class ReaderNavigationIntentQueue {
   reset() {
     this.generation += 1;
     this.tail = Promise.resolve();
+  }
+}
+
+export class ReaderNavigationIntentQueue extends SerializedReaderIntentQueue {}
+
+/**
+ * Readium preference submissions are not cancellable. Keep one active request
+ * and coalesce pending slider/toggle changes to the latest requested snapshot.
+ */
+export class ReaderPreferenceIntentQueue {
+  private generation = 0;
+  private running = false;
+  private pending: {
+    generation: number;
+    run: () => Promise<boolean>;
+    resolve: (accepted: boolean) => void;
+    reject: (reason: unknown) => void;
+  } | null = null;
+
+  enqueue(run: () => Promise<boolean>) {
+    const generation = this.generation;
+    return new Promise<boolean>((resolve, reject) => {
+      this.pending?.resolve(false);
+      this.pending = { generation, run, resolve, reject };
+      void this.drain();
+    });
+  }
+
+  reset() {
+    this.generation += 1;
+    this.pending?.resolve(false);
+    this.pending = null;
+  }
+
+  private async drain() {
+    if (this.running) return;
+    this.running = true;
+    try {
+      while (this.pending) {
+        const current = this.pending;
+        this.pending = null;
+        if (current.generation !== this.generation) {
+          current.resolve(false);
+          continue;
+        }
+        try {
+          const accepted = await current.run();
+          current.resolve(
+            current.generation === this.generation ? accepted : false
+          );
+        } catch (reason) {
+          current.reject(reason);
+        }
+      }
+    } finally {
+      this.running = false;
+    }
   }
 }
 
@@ -103,6 +160,7 @@ export function useReaderSession({
   const controllersRef = useRef(new Map<ReaderOperationKind, AbortController>());
   const activeControllersRef = useRef(new Set<AbortController>());
   const navigationQueueRef = useRef(new ReaderNavigationIntentQueue());
+  const preferenceQueueRef = useRef(new ReaderPreferenceIntentQueue());
   const openedAdapterRef = useRef<ReaderAdapter | null>(null);
   const appliedPreferencesRef = useRef<ReaderPreferences>(initialPreferencesRef.current);
   const callbacksRef = useRef({ onLocationChange, onExternalLink, onPasswordRequired });
@@ -112,9 +170,11 @@ export function useReaderSession({
   }, [onExternalLink, onLocationChange, onPasswordRequired]);
 
   const beginOperation = useCallback((kind: ReaderOperationKind) => {
-    // Navigation is an intent queue: rapid key/tap input must advance once per
-    // intent. Other operation classes are latest-wins and cancel their prior work.
-    if (kind !== 'navigation') controllersRef.current.get(kind)?.abort();
+    // Navigation and preferences are serialized by their intent queues. Other
+    // operation classes are latest-wins and cancel their prior work.
+    if (kind !== 'navigation' && kind !== 'preferences') {
+      controllersRef.current.get(kind)?.abort();
+    }
     const controller = new AbortController();
     controllersRef.current.set(kind, controller);
     activeControllersRef.current.add(controller);
@@ -142,6 +202,7 @@ export function useReaderSession({
   useEffect(() => {
     if (!adapter || openedAdapterRef.current === adapter) return undefined;
     const navigationQueue = navigationQueueRef.current;
+    const preferenceQueue = preferenceQueueRef.current;
     const activeControllers = activeControllersRef.current;
     const controllers = controllersRef.current;
     openedAdapterRef.current = adapter;
@@ -193,6 +254,7 @@ export function useReaderSession({
     return () => {
       unsubscribe();
       navigationQueue.reset();
+      preferenceQueue.reset();
       activeControllers.forEach((controller) => controller.abort());
       activeControllers.clear();
       controllers.clear();
@@ -204,21 +266,45 @@ export function useReaderSession({
 
   useEffect(() => {
     if (!adapter || openedAdapterRef.current !== adapter || appliedPreferencesRef.current === preferences) return;
-    appliedPreferencesRef.current = preferences;
-    const context = beginOperation('preferences');
-    dispatch({ type: 'preferences/replace', operation: context.operation, preferences });
-    void adapter.applyPreferences(preferences, context).catch((reason) => {
-      if (context.signal.aborted) return;
+    const requestedPreferences = preferences;
+    void preferenceQueueRef.current.enqueue(async () => {
+      if (!adapter || openedAdapterRef.current !== adapter) return false;
+      const context = beginOperation('preferences');
       dispatch({
-        type: 'session/fail',
+        type: 'preferences/replace',
         operation: context.operation,
-        error: {
-          code: 'PREFERENCES_APPLY_FAILED',
-          message: reason instanceof Error ? reason.message : '阅读设置应用失败',
-          recoverable: true
-        }
+        preferences: requestedPreferences
       });
-    }).finally(() => finishOperation('preferences', context.controller));
+      try {
+        const acknowledgement = await adapter.applyPreferences(
+          requestedPreferences,
+          context
+        );
+        if (context.signal.aborted) return false;
+        dispatch({ type: 'operation/complete', operation: context.operation });
+        if (acknowledgement.accepted) {
+          appliedPreferencesRef.current = requestedPreferences;
+        } else {
+          emitReaderDebug('warning', '阅读设置应用失败', {
+            operation: context.operation,
+            reason: acknowledgement.reason,
+            contentPreserved: true
+          });
+        }
+        return acknowledgement.accepted;
+      } catch (reason) {
+        if (context.signal.aborted) return false;
+        dispatch({ type: 'operation/complete', operation: context.operation });
+        emitReaderDebug('warning', '阅读设置应用失败', {
+          operation: context.operation,
+          reason: reason instanceof Error ? reason.message : String(reason),
+          contentPreserved: true
+        });
+        return false;
+      } finally {
+        finishOperation('preferences', context.controller);
+      }
+    });
   }, [adapter, beginOperation, finishOperation, preferences]);
 
   const executeNow = useCallback(async (command: ReaderCommand, kind: 'navigation' | 'render') => {

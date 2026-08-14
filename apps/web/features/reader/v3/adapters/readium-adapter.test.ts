@@ -5,6 +5,7 @@ import {
   closestReadiumPosition,
   findReadiumPublicationResource,
   isAllowedReadiumExternalHref,
+  resolveReadiumStartupTargets,
   readiumTotalProgression,
   readiumNavigationEntries,
   resolveReadiumHref
@@ -73,6 +74,27 @@ test('Readium TOC jumps match a publication-root href before a misleading curren
 
   assert.equal(resolved, 'text/text/part0009.html#chapter');
   assert.equal(findReadiumPublicationResource(items, [candidate, resolved])?.href, 'text/part0009.html');
+});
+
+test('Readium startup gives an explicit chapter target priority over the publication start', () => {
+  const readingOrder = [
+    { href: 'text/preface.xhtml' },
+    { href: 'text/part0009.html' }
+  ];
+  const positions = [
+    locator('text/preface.xhtml', 0),
+    locator('text/part0009.html', 0.72)
+  ];
+
+  assert.deepEqual(resolveReadiumStartupTargets(
+    readingOrder,
+    positions,
+    'text/preface.xhtml',
+    'text/part0009.html#chapter-six'
+  ), {
+    start: { position: positions[0], fragment: '' },
+    initial: { position: positions[1], fragment: 'chapter-six' }
+  });
 });
 
 test('Readium external navigation only allows explicit safe schemes', () => {

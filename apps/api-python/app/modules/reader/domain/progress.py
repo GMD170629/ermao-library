@@ -61,6 +61,45 @@ def reader_unit_index(current_href: Any, units: list[dict[str, Any]]) -> int | N
     return resource_matches[0] if len(resource_matches) == 1 else None
 
 
+def _unit_reading_order_position(unit: dict[str, Any]) -> int | None:
+    metadata = _parse_json(unit.get("metadataJson"), {})
+    if not isinstance(metadata, dict):
+        return None
+    position = number_or_none(metadata.get("readingOrderPosition"))
+    return position if position is not None and position >= 1 else None
+
+
+def reader_unit_index_at_position(
+    current_position: Any,
+    units: list[dict[str, Any]],
+) -> int | None:
+    """Resolve the TOC range containing an exact Publication position.
+
+    A position identifies a reading-order resource, not an anchor inside that
+    resource. When multiple TOC entries start at the same position, selecting
+    any one of them would be a guess, so the chapter remains unresolved.
+    """
+
+    position = number_or_none(current_position)
+    if position is None or position < 1:
+        return None
+    candidates = [
+        (index, unit_position)
+        for index, unit in enumerate(units)
+        if (unit_position := _unit_reading_order_position(unit)) is not None
+        and unit_position <= position
+    ]
+    if not candidates:
+        return None
+    nearest_position = max(unit_position for _, unit_position in candidates)
+    nearest_indexes = [
+        index
+        for index, unit_position in candidates
+        if unit_position == nearest_position
+    ]
+    return nearest_indexes[0] if len(nearest_indexes) == 1 else None
+
+
 def progress_location(progress: dict[str, Any] | None) -> dict[str, Any]:
     if not progress:
         return {}
@@ -68,12 +107,35 @@ def progress_location(progress: dict[str, Any] | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _current_page_number(location: dict[str, Any]) -> int | None:
+    if location.get("kind") in {"comic", "pdf"}:
+        page_index = number_or_none(location.get("pageIndex"))
+        return page_index + 1 if page_index is not None else None
+    if location.get("type") == "comic":
+        return number_or_none(location.get("pageIndex"))
+    if location.get("type") == "pdf":
+        return number_or_none(location.get("pageNumber"))
+    return None
+
+
 def progress_navigation(
     progress: dict[str, Any] | None,
     units: list[dict[str, Any]],
 ) -> dict[str, Any]:
     location = progress_location(progress)
-    payload = location.get("payload") if location.get("engine") == "readium" else None
+    engine_locator = location.get("engineLocator")
+    engine_locator = (
+        engine_locator
+        if isinstance(engine_locator, dict)
+        else location
+        if location.get("engine") == "readium"
+        else {}
+    )
+    payload = (
+        engine_locator.get("payload")
+        if engine_locator.get("engine") == "readium"
+        else None
+    )
     payload = payload if isinstance(payload, dict) else {}
     current_href = payload.get("href")
     locations = payload.get("locations")
@@ -89,6 +151,8 @@ def progress_navigation(
     ):
         current_href = f"{current_href}#{fragments[0].lstrip('#')}"
     unit_index = reader_unit_index(current_href, units)
+    if unit_index is None:
+        unit_index = reader_unit_index_at_position(locations.get("position"), units)
     unit = units[unit_index] if unit_index is not None else None
     resolved_href = (
         unit.get("href")
@@ -106,13 +170,7 @@ def progress_navigation(
         "currentChapterSortOrder": number_or_none(unit.get("sortOrder"))
         if unit
         else None,
-        "currentPageNumber": number_or_none(
-            location.get("pageIndex")
-            if location.get("type") == "comic"
-            else location.get("pageNumber")
-            if location.get("type") == "pdf"
-            else None
-        ),
+        "currentPageNumber": _current_page_number(location),
         "progressEstimated": False,
     }
 

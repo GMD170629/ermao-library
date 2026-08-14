@@ -36,9 +36,11 @@ def test_api_lifespan_does_not_yield_when_data_migration_barrier_is_incomplete(
         observe_worker_start,
     )
 
-    with pytest.raises(RuntimeError, match="remains pending"):
-        with TestClient(main_module.create_app(settings)):
-            pass
+    with (
+        pytest.raises(RuntimeError, match="remains pending"),
+        TestClient(main_module.create_app(settings)),
+    ):
+        pass
 
     assert worker_started is False
 
@@ -57,7 +59,6 @@ def test_api_lifespan_verifies_barrier_before_starting_runtime_workers(
     def observe_worker_start(*unused: object) -> None:
         del unused
         calls.append("worker")
-        return None
 
     monkeypatch.setattr(
         main_module,
@@ -89,12 +90,6 @@ def test_api_lifespan_verifies_barrier_before_starting_runtime_workers(
         "stop",
         lambda unused_self: None,
     )
-    monkeypatch.setattr(
-        main_module,
-        "start_reader_navigation_maintenance_worker",
-        lambda *unused: None,
-    )
-
     with TestClient(main_module.create_app(settings)):
         assert calls[:2] == ["verify", "worker"]
 

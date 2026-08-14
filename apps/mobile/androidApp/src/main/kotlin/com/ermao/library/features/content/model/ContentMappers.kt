@@ -69,7 +69,13 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent {
         .sortedBy { unit -> unit.sortOrder }
     val page = readingUnitsPage
     val chapterStates = resolveReaderChapterStates(
-        units = units.map { ReaderChapterUnit(it.href, it.sortOrder) },
+        units = units.map {
+            ReaderChapterUnit(
+                href = it.href,
+                sortOrder = it.sortOrder,
+                readingOrderPosition = it.metadata.readingOrderPosition,
+            )
+        },
         currentHref = activeMedia?.currentHref,
         currentSortOrder = activeMedia?.currentChapterSortOrder,
         progressPercent = activeMedia?.progress?.coerceIn(0.0, 100.0) ?: if (completed) 100.0 else 0.0,
@@ -123,6 +129,7 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent {
                     ?.takeIf { chapterStates[index] == ReaderChapterState.Current },
                 href = unit.href,
                 sortOrder = unit.sortOrder,
+                readingOrderPosition = unit.metadata.readingOrderPosition,
                 readingState = when (chapterStates[index]) {
                     ReaderChapterState.Current -> ChapterReadingState.Current
                     ReaderChapterState.Read -> ChapterReadingState.Read

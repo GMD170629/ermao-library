@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
-import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime, publicationFingerprintKey } from '../../lib/reader';
+import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
@@ -345,8 +345,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           serverIdentity: currentReaderServerIdentity(),
           userId: bootstrap.userId,
           clientId,
-          volumeId: bootstrap.volume.id,
-          publicationFingerprint: publicationFingerprintKey(bootstrap.publicationFingerprint)
+          workId: bootstrap.mediaVersion.workId,
+          volumeId: bootstrap.volume.id
         }).catch(() => null);
         const localAudioLocation = localExact?.locator.kind === 'audio' ? localExact.locator : null;
         if (

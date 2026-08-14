@@ -219,15 +219,27 @@ export type ReaderProgressResponse = {
 export type ReaderProgressSnapshot = {
   schemaVersion?: 4;
   revision: number;
+  clientId: string;
   locator: ReflowableExactLocation_Output | PdfExactLocation_Output | ComicExactLocation_Output | AudioExactLocation_Output;
   displayPercent: number;
   receivedAtEpochMillis: number;
   capturedAtEpochMillis?: number | null;
 };
 
+export type ReaderProgressStateData = {
+  schemaVersion?: 4;
+  progressSnapshot: ReaderProgressSnapshot | null;
+};
+
+export type ReaderProgressStateResponse = {
+  ok?: true;
+  data: ReaderProgressStateData;
+};
+
 export type ReaderPublicationAccess = {
   manifestUrl: string;
   positionsUrl: string;
+  renderArtifact?: ReaderRenderArtifact | null;
 };
 
 export type ReaderReadingStatusData = {
@@ -243,6 +255,14 @@ export type ReaderReadingStatusPut = {
 export type ReaderReadingStatusResponse = {
   ok?: true;
   data: ReaderReadingStatusData;
+};
+
+export type ReaderRenderArtifact = {
+  schemaVersion?: 1;
+  url: string;
+  mimeType: "application/epub+zip";
+  sizeBytes: number;
+  contentHash: string;
 };
 
 export type ReaderUnitSummary = {

@@ -18,8 +18,8 @@ import com.ermao.library.shared.modules.administrativesettings.infrastructure.Kt
 import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
-import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
@@ -81,7 +81,7 @@ fun createAndroidReaderServerGateway(context: Context): ReaderServerGateway =
 fun createAndroidReaderProgressSyncPort(
     context: Context,
     profile: ServerProfile,
-): ReaderProgressSyncPort =
+): ReaderProgressServerPort =
     KtorReaderProgressSyncPort(
         clients = ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
         profile = profile,

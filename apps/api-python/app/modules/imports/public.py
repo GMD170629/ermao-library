@@ -10,7 +10,6 @@ from app.modules.imports.application.deletion import (
     PreparedImportDeletion,
 )
 from app.modules.imports.application.dto import (
-    EpubNavigationChapterDTO,
     ImportOptions,
     ImportResult,
     ImportTaskDTO,
@@ -22,7 +21,6 @@ from app.modules.imports.application.enqueue import (
     PreparedImportEnqueue,
 )
 from app.modules.imports.application.file_types import is_supported_import_filename
-from app.modules.imports.application.import_epub import inspect_epub_navigation
 from app.modules.imports.application.import_support import parse_series_volume_info
 from app.modules.imports.application.monitor_paths import (
     MonitorPathError,
@@ -48,17 +46,16 @@ from app.modules.imports.application.save_uploaded_files import (
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
-    "EpubNavigationChapterDTO",
+    "ImportEnqueueProjection",
     "ImportFileQuarantineError",
     "ImportOptions",
-    "ImportEnqueueProjection",
     "ImportResult",
-    "PreparedImportEnqueue",
-    "PreparedImportDeletion",
     "ImportTaskDTO",
     "ImportUnitOfWork",
     "MonitorPathError",
     "ParsedReleaseTitle",
+    "PreparedImportDeletion",
+    "PreparedImportEnqueue",
     "SaveUploadedFiles",
     "SaveUploadedFilesCommand",
     "SavedUploadFile",
@@ -68,7 +65,6 @@ __all__ = [
     "UploadPublicationError",
     "UploadSource",
     "commit_import_checkpoint",
-    "inspect_epub_navigation",
     "is_inside_path",
     "is_supported_import_filename",
     "monitor_directory_tree_node",

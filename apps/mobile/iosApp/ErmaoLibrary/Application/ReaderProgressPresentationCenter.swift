@@ -21,18 +21,16 @@ final class ReaderProgressPresentationCenter {
         workID: String,
         volumeID: String,
         percent: Double,
-        currentHref: String,
-        chapterTitle: String?,
-        capturedAtEpochMillis: Int64
+        progress: ErmaoShared.ReaderProgress,
+        chapterTitle: String?
     ) {
-        publish(ErmaoShared.ReaderProgressPresentationUpdate(
+        publish(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
             workId: workID,
             volumeId: volumeID,
             percent: percent,
-            currentHref: currentHref,
-            chapterTitle: chapterTitle,
-            capturedAtEpochMillis: capturedAtEpochMillis
+            progress: progress,
+            chapterTitle: chapterTitle
         ))
     }
 }

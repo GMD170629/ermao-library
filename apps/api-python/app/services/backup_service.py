@@ -271,7 +271,12 @@ def create_backup(
             "reader-bookmarks",
             "cover-cache-index",
         ],
-        "excludes": ["reader-content-files", "cover-image-files", "library-files/"],
+        "excludes": [
+            "reader-content-files",
+            "publication-render-cache",
+            "cover-image-files",
+            "library-files/",
+        ],
         "counts": counts,
     }
     settings_export = {

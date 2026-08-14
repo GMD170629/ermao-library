@@ -1,24 +1,34 @@
-import { isExactPublicationLocation, parsePublicationLocation } from '@shuku/reader-core';
+import { isExactPublicationLocation, parsePublicationLocation, type PublicationLocation } from '@shuku/reader-core';
 import { emitReaderDebug } from './debug';
 import {
   READER_PROGRESS_DEBOUNCE_MS,
   ReaderProgressConflictError,
   exactProgressKey,
   normalizedPercent,
-  publicationFingerprintKey,
+  progressLocationsMatch,
   syncStateKey,
   type ExactProgressRecord,
   type ExactProgressSaveInput,
   type PendingProgressMutation,
   type ProgressSaveInput,
+  type ProgressQueryTransport,
   type ProgressSyncTransport,
   type ProgressUpload,
+  type RemoteProgressNotice,
   type ReaderProgressSnapshot
 } from './model';
 import type { ReaderStorage } from './storage';
 
-type Options = { debounceMs?: number; now?: () => number; exitUploadTimeoutMs?: number };
+type Options = { debounceMs?: number; now?: () => number; exitUploadTimeoutMs?: number; queryTransport?: ProgressQueryTransport };
 type Waiter = { resolve: (record: ExactProgressRecord) => void; reject: (reason: unknown) => void };
+type SessionProgressState = {
+  revision: number;
+  clientId: string;
+  current: PublicationLocation | null;
+  etag: string | null;
+  notice: RemoteProgressNotice | null;
+};
+type NoticeListener = (volumeId: string, notice: RemoteProgressNotice | null) => void;
 export const READER_PROGRESS_CHANGED_EVENT = 'shuku:reader-progress-changed';
 
 function id() {
@@ -32,6 +42,7 @@ export class ReaderProgressSyncCoordinator {
   private readonly debounceMs: number;
   private readonly now: () => number;
   private readonly exitUploadTimeoutMs: number;
+  private readonly queryTransport: ProgressQueryTransport | null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private pendingInput: ExactProgressSaveInput | null = null;
   private waiters: Waiter[] = [];
@@ -39,14 +50,18 @@ export class ReaderProgressSyncCoordinator {
   private readonly uploadSlots = new Map<string, PendingProgressMutation>();
   private uploadPromise: Promise<void> | null = null;
   private abort: AbortController | null = null;
+  private activeUploadKey: string | null = null;
   private activeUserId: string | null = null;
   private started = false;
   private readonly latest = new Map<string, ReaderProgressSnapshot>();
+  private readonly sessions = new Map<string, SessionProgressState>();
+  private readonly noticeListeners = new Set<NoticeListener>();
 
   constructor(private readonly storage: ReaderStorage, private readonly transport: ProgressSyncTransport, options: Options = {}) {
     this.debounceMs = options.debounceMs ?? READER_PROGRESS_DEBOUNCE_MS;
     this.now = options.now ?? Date.now;
     this.exitUploadTimeoutMs = options.exitUploadTimeoutMs ?? 2_500;
+    this.queryTransport = options.queryTransport ?? null;
   }
 
   start() { if (this.started) return; this.started = true; if (typeof window !== 'undefined') { window.addEventListener('online', this.handleOnline); window.addEventListener('pagehide', this.handleExit); document.addEventListener('visibilitychange', this.handleVisibility); } }
@@ -71,46 +86,82 @@ export class ReaderProgressSyncCoordinator {
   }
   getLatestServerSnapshot(volumeId: string) { return this.latest.get(volumeId) ?? null; }
 
-  async getConflict(serverIdentity: string, userId: string, volumeId: string) {
+  subscribeRemoteProgress(listener: NoticeListener) {
+    this.noticeListeners.add(listener);
+    return () => { this.noticeListeners.delete(listener); };
+  }
+
+  beginSession(volumeId: string, clientId: string, snapshot: ReaderProgressSnapshot | null, current: PublicationLocation | null) {
+    if (snapshot) this.latest.set(volumeId, snapshot);
+    this.sessions.set(volumeId, {
+      revision: snapshot?.revision ?? 0,
+      clientId,
+      current,
+      etag: snapshot ? `"reader-progress-${snapshot.revision}"` : '"reader-progress-0"',
+      notice: null
+    });
+    this.emitNotice(volumeId, null);
+  }
+
+  endSession(volumeId: string) { this.sessions.delete(volumeId); }
+
+  dismissRemoteProgress(volumeId: string) {
+    const session = this.sessions.get(volumeId);
+    if (!session) return;
+    session.notice = null;
+    this.emitNotice(volumeId, null);
+  }
+
+  async checkRemoteProgress(volumeId: string) {
+    const session = this.sessions.get(volumeId);
+    if (!session || !this.queryTransport) return null;
+    const controller = new AbortController();
+    const result = await this.queryTransport(volumeId, session.etag, controller.signal);
+    session.etag = result.etag ?? session.etag;
+    if (result.kind === 'unchanged' || !result.snapshot) return session.notice;
+    return this.observeRemote(volumeId, result.snapshot);
+  }
+
+  async continueStartupWithLocal(pending: PendingProgressMutation, serverRevision: number) {
+    const rebased = { ...pending, mutationId: id(), baseRevision: serverRevision, capturedAtEpochMillis: this.now() };
+    await this.storage.putPendingProgress(rebased);
+    this.queueUpload(rebased);
+  }
+
+  async acceptVerifiedRemote(input: {
+    serverIdentity: string; userId: string; workId: string; volumeId: string;
+    pendingKey: string; snapshot: ReaderProgressSnapshot;
+  }) {
     const clientId = await this.storage.getClientId();
-    return this.storage.getProgressConflict(syncStateKey({ serverIdentity, userId, clientId, volumeId }));
-  }
-
-  /** User chose “continue this device”; no automatic conflict overwrite is allowed. */
-  async resolveConflictWithLocal(serverIdentity: string, userId: string, volumeId: string) {
-    const conflict = await this.getConflict(serverIdentity, userId, volumeId);
-    if (!conflict) return false;
-    const mutation: PendingProgressMutation = {
-      ...conflict.localMutation,
-      mutationId: id(),
-      baseRevision: conflict.revision,
-      capturedAtEpochMillis: this.now()
-    };
-    await this.storage.deleteProgressConflict(conflict.key);
-    await this.storage.putPendingProgress(mutation);
-    this.queueUpload(mutation);
-    return true;
-  }
-
-  /** User chose the other device after the adapter verified exact-block navigation. */
-  async resolveConflictWithRemote(serverIdentity: string, userId: string, volumeId: string) {
-    const conflict = await this.getConflict(serverIdentity, userId, volumeId);
-    if (!conflict) return null;
-    const fingerprint = publicationFingerprintKey(conflict.locator.publication);
-    const identity = { serverIdentity, userId, clientId: conflict.clientId, volumeId, publicationFingerprint: fingerprint } as const;
-    await this.storage.putExactProgress({
+    const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId } as const;
+    const exact: ExactProgressRecord = {
       ...identity,
       key: exactProgressKey(identity),
       schemaVersion: 1,
-      workId: conflict.workId,
-      locator: conflict.locator,
-      displayPercent: conflict.displayPercent,
-      revision: conflict.revision,
-      capturedAtEpochMillis: conflict.capturedAtEpochMillis ?? conflict.receivedAtEpochMillis
-    });
-    await this.storage.deletePendingProgress(conflict.key);
-    await this.storage.deleteProgressConflict(conflict.key);
-    return conflict.locator;
+      workId: input.workId,
+      locator: input.snapshot.locator,
+      displayPercent: input.snapshot.displayPercent,
+      revision: input.snapshot.revision,
+      capturedAtEpochMillis: input.snapshot.capturedAtEpochMillis ?? input.snapshot.receivedAtEpochMillis
+    };
+    const supersededWaiters = this.pendingInput?.volumeId === input.volumeId ? this.waiters : [];
+    if (supersededWaiters.length > 0) {
+      this.pendingInput = null;
+      this.waiters = [];
+      this.clearTimer();
+    }
+    this.uploadSlots.delete(input.pendingKey);
+    if (this.activeUploadKey === input.pendingKey) this.abort?.abort();
+    await this.storage.putExactAndDeletePending(exact, input.pendingKey);
+    supersededWaiters.forEach(({ resolve }) => resolve(exact));
+    const session = this.sessions.get(input.volumeId);
+    if (session) {
+      session.revision = input.snapshot.revision;
+      session.current = input.snapshot.locator;
+      session.notice = null;
+    }
+    this.emitNotice(input.volumeId, null);
+    return exact;
   }
 
   private readonly handleOnline = () => { if (this.activeUserId) void this.storage.listPendingProgress(this.activeUserId).then((items) => items.forEach((item) => this.queueUpload(item))); };
@@ -124,12 +175,36 @@ export class ReaderProgressSyncCoordinator {
     if (!input) return Promise.resolve(null);
     const capturedAtEpochMillis = this.now();
     this.commitPromise = this.storage.getClientId().then(async (clientId) => {
-      const fingerprint = publicationFingerprintKey(input.locator.publication);
-      const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, volumeId: input.volumeId, publicationFingerprint: fingerprint };
+      const session = this.sessions.get(input.volumeId);
+      if (session?.notice && session.current
+        && progressLocationsMatch(session.current, input.locator)) {
+        const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId } as const;
+        const unchanged: ExactProgressRecord = {
+          ...identity,
+          key: exactProgressKey(identity),
+          schemaVersion: 1,
+          workId: input.workId,
+          locator: input.locator,
+          displayPercent: normalizedPercent(input.displayPercent),
+          revision: session.revision,
+          capturedAtEpochMillis
+        };
+        waiters.forEach(({ resolve }) => resolve(unchanged));
+        return unchanged;
+      }
+      const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId };
       const key = syncStateKey(identity);
-      const mutation: PendingProgressMutation = { key, schemaVersion: 1, serverIdentity: input.serverIdentity, userId: input.userId, workId: input.workId, volumeId: input.volumeId, clientId, mutationId: id(), baseRevision: input.baseRevision, capturedAtEpochMillis, locator: input.locator, displayPercent: normalizedPercent(input.displayPercent) };
-      const exact: ExactProgressRecord = { ...identity, key: exactProgressKey(identity), schemaVersion: 1, workId: input.workId, locator: input.locator, displayPercent: mutation.displayPercent, revision: input.baseRevision, capturedAtEpochMillis };
+      const baseRevision = Math.max(input.baseRevision, session?.revision ?? 0);
+      const mutation: PendingProgressMutation = { key, schemaVersion: 1, serverIdentity: input.serverIdentity, userId: input.userId, workId: input.workId, volumeId: input.volumeId, clientId, mutationId: id(), baseRevision, capturedAtEpochMillis, locator: input.locator, displayPercent: normalizedPercent(input.displayPercent) };
+      const exact: ExactProgressRecord = { ...identity, key: exactProgressKey(identity), schemaVersion: 1, workId: input.workId, locator: input.locator, displayPercent: mutation.displayPercent, revision: baseRevision, capturedAtEpochMillis };
       await this.storage.putExactAndPending(exact, mutation);
+      if (session) {
+        session.current = input.locator;
+        if (session.notice) {
+          session.notice = null;
+          this.emitNotice(input.volumeId, null);
+        }
+      }
       waiters.forEach(({ resolve }) => resolve(exact));
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(READER_PROGRESS_CHANGED_EVENT, { detail: exact }));
       this.queueUpload(mutation);
@@ -143,18 +218,52 @@ export class ReaderProgressSyncCoordinator {
     while (this.uploadSlots.size) {
       const mutation = [...this.uploadSlots.values()].sort((left, right) => left.capturedAtEpochMillis - right.capturedAtEpochMillis)[0];
       if (!mutation) return;
-      this.uploadSlots.delete(mutation.key); const controller = new AbortController(); this.abort = controller;
+      this.uploadSlots.delete(mutation.key); const controller = new AbortController(); this.abort = controller; this.activeUploadKey = mutation.key;
       const upload: ProgressUpload = { volumeId: mutation.volumeId, request: { schemaVersion: 4, clientId: mutation.clientId, mutationId: mutation.mutationId, baseRevision: mutation.baseRevision, capturedAtEpochMillis: mutation.capturedAtEpochMillis, locator: mutation.locator } };
       try {
         const snapshot = await this.transport(upload, controller.signal); this.latest.set(mutation.volumeId, snapshot);
-        await this.storage.deletePendingProgress(mutation.key, mutation.mutationId); await this.storage.deleteProgressConflict(mutation.key);
+        const session = this.sessions.get(mutation.volumeId);
+        if (session) {
+          session.revision = Math.max(session.revision, snapshot.revision);
+          session.etag = `"reader-progress-${snapshot.revision}"`;
+        }
+        await this.storage.deletePendingProgress(mutation.key, mutation.mutationId);
       } catch (reason) {
         if (reason instanceof ReaderProgressConflictError) {
-          await this.storage.putProgressConflict({ ...reason.conflict, key: mutation.key, schemaVersion: 1, serverIdentity: mutation.serverIdentity, userId: mutation.userId, workId: mutation.workId, volumeId: mutation.volumeId, clientId: mutation.clientId, localMutation: mutation });
+          await this.storage.deletePendingProgress(mutation.key, mutation.mutationId);
+          this.latest.set(mutation.volumeId, { schemaVersion: 4, ...reason.conflict });
+          this.observeRemote(mutation.volumeId, { schemaVersion: 4, ...reason.conflict }, mutation.locator);
           emitReaderDebug('warning', '阅读进度存在跨设备冲突', { volumeId: mutation.volumeId, revision: reason.conflict.revision });
         } else if (!controller.signal.aborted) emitReaderDebug('warning', '阅读进度已保留，将在联网后重试', { volumeId: mutation.volumeId });
-      } finally { if (this.abort === controller) this.abort = null; }
+      } finally { if (this.abort === controller) this.abort = null; if (this.activeUploadKey === mutation.key) this.activeUploadKey = null; }
     }
+  }
+
+  private observeRemote(volumeId: string, snapshot: ReaderProgressSnapshot, currentOverride?: PublicationLocation) {
+    const session = this.sessions.get(volumeId);
+    if (!session || snapshot.revision <= session.revision) return session?.notice ?? null;
+    session.revision = snapshot.revision;
+    session.etag = `"reader-progress-${snapshot.revision}"`;
+    this.latest.set(volumeId, snapshot);
+    const current = currentOverride ?? session.current;
+    if (snapshot.clientId === session.clientId
+      || (current && progressLocationsMatch(current, snapshot.locator))) {
+      return session.notice;
+    }
+    session.notice = {
+      revision: snapshot.revision,
+      sourceClientId: snapshot.clientId,
+      locator: snapshot.locator,
+      displayPercent: snapshot.displayPercent,
+      receivedAtEpochMillis: snapshot.receivedAtEpochMillis,
+      ...(snapshot.capturedAtEpochMillis === undefined ? {} : { capturedAtEpochMillis: snapshot.capturedAtEpochMillis })
+    };
+    this.emitNotice(volumeId, session.notice);
+    return session.notice;
+  }
+
+  private emitNotice(volumeId: string, notice: RemoteProgressNotice | null) {
+    this.noticeListeners.forEach((listener) => listener(volumeId, notice));
   }
 }
 

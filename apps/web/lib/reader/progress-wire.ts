@@ -1,6 +1,5 @@
 import {
   parsePublicationLocation,
-  publicationFingerprintsMatch,
   quantizePageProgression,
   type PublicationFingerprint,
   type PublicationLocation,
@@ -22,28 +21,23 @@ function finiteNumber(value: unknown): number | undefined {
 export function parseReaderV4ProgressSnapshot(value: unknown): ReaderProgressSnapshot | null {
   const item = record(value);
   const revision = finiteNumber(item.revision);
+  const clientId = typeof item.clientId === 'string' && item.clientId.trim() ? item.clientId : null;
   const displayPercent = normalizedPercent(finiteNumber(item.displayPercent) ?? null);
   const receivedAtEpochMillis = finiteNumber(item.receivedAtEpochMillis);
   const capturedAtEpochMillis = finiteNumber(item.capturedAtEpochMillis);
   const locator = parsePublicationLocation(item.locator);
-  if (item.schemaVersion !== 4 || revision === undefined || revision < 1 || !Number.isInteger(revision)
+  if (item.schemaVersion !== 4 || !clientId || revision === undefined || revision < 1 || !Number.isInteger(revision)
     || displayPercent === null || receivedAtEpochMillis === undefined || receivedAtEpochMillis < 0
     || !locator) return null;
   return {
     schemaVersion: 4,
+    clientId,
     revision,
     locator,
     displayPercent,
     receivedAtEpochMillis,
     ...(capturedAtEpochMillis !== undefined && capturedAtEpochMillis >= 0 ? { capturedAtEpochMillis } : {})
   };
-}
-
-export function remoteLocationMatchesPublication(
-  locator: PublicationLocation | null,
-  publicationFingerprint: PublicationFingerprint | undefined
-) {
-  return Boolean(locator && publicationFingerprintsMatch(locator.publication, publicationFingerprint));
 }
 
 /** Maps only an exact Readium payload. No progression or percentage fallback exists. */

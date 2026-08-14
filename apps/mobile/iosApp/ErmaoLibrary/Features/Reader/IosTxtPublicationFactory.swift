@@ -12,7 +12,7 @@ enum IosTxtPublicationError: Error, Sendable {
 struct IosTxtPublicationFactory: Sendable {
     func open(_ managed: IosManagedPublication) throws -> Publication {
         guard managed.fingerprint.parserVersion == "shuku-txt-parser-v1",
-              managed.fingerprint.normalizationVersion == "shuku-txt-publication-v1"
+              managed.fingerprint.normalizationVersion == "shuku-txt-publication-v2"
         else { throw IosTxtPublicationError.invalidFingerprint }
         let data = try Data(contentsOf: managed.fileURL, options: [.mappedIfSafe])
         guard data.count <= 64 * 1_024 * 1_024,
@@ -27,7 +27,9 @@ struct IosTxtPublicationFactory: Sendable {
         var resources: [String: Data] = [:]
         var readingOrder: [Link] = []
         for resource in normalized.resources {
-            resources[resource.href] = Data(resource.xhtml.utf8)
+            resources[resource.href] = try IosPublicationSecurityPolicy.decorate(
+                data: Data(resource.xhtml.utf8)
+            )
             readingOrder.append(
                 Link(href: resource.href, mediaType: .xhtml, title: resource.title)
             )
@@ -71,7 +73,7 @@ struct IosTxtPublicationFactory: Sendable {
             return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
         }
         return String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .gb_18030_2000)
+            ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
     }
 }
 
@@ -99,8 +101,8 @@ private final class IosTxtContainer: Container, @unchecked Sendable {
     func close() {}
 }
 
-private actor IosTxtResource: Resource {
-    nonisolated let sourceURL: AbsoluteURL? = nil
+private final class IosTxtResource: Resource, @unchecked Sendable {
+    let sourceURL: AbsoluteURL? = nil
     private let data: Data
 
     init(data: Data) { self.data = data }

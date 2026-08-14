@@ -1,7 +1,6 @@
 package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.ReaderProgress
-import com.ermao.library.shared.modules.reader.domain.ReaderProgressConflict
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
@@ -35,10 +34,26 @@ fun interface ReaderProgressSyncPort {
     suspend fun push(upload: ReaderProgressUpload): ReaderProgressPushResult
 }
 
+sealed interface ReaderProgressQueryResult {
+    data class Current(val snapshot: ReaderProgressSnapshotV4?, val etag: String?) : ReaderProgressQueryResult
+    data class Unchanged(val etag: String?) : ReaderProgressQueryResult
+    data class Failure(val failureCode: String, val recoverable: Boolean) : ReaderProgressQueryResult
+}
+
+fun interface ReaderProgressQueryPort {
+    suspend fun load(target: ReaderProgressSyncTarget, etag: String?): ReaderProgressQueryResult
+}
+
+interface ReaderProgressServerPort : ReaderProgressSyncPort, ReaderProgressQueryPort
+
+/** Device directory integration point. A null result is presented as “other device”. */
+fun interface ReaderDeviceLabelResolver {
+    fun resolve(clientId: String): String?
+}
+
 data class ReaderProgressDurableState(
     val confirmedRevision: Long = 0,
     val pending: ReaderProgressMutation? = null,
-    val conflict: ReaderProgressConflict? = null,
     val terminalFailureCode: String? = null,
 ) {
     init {
@@ -55,7 +70,11 @@ interface ReaderProgressSyncStateStore : ReaderProgressStore {
 
     suspend fun acknowledge(mutationId: String, snapshot: ReaderProgressSnapshotV4)
 
-    suspend fun recordConflict(conflict: ReaderProgressConflict)
+    /** Drops only the rejected mutation and adopts the newer server revision atomically. */
+    suspend fun discardPendingAfterConflict(mutationId: String, serverRevision: Long)
+
+    /** Called only after the Navigator has post-verified the remote exact location. */
+    suspend fun acceptRemoteProgress(progress: ReaderProgress, snapshot: ReaderProgressSnapshotV4)
 
     suspend fun recordTerminalFailure(mutationId: String, failureCode: String)
 }

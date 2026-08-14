@@ -38,6 +38,10 @@ class PublicationSourceRepository(Protocol):
     ) -> PublicationSource | None: ...
 
 
+class PublicationSourceHasher(Protocol):
+    def sha256(self, source: PublicationSource) -> str: ...
+
+
 class PublicationAdapter(Protocol):
     def open(self, source: PublicationSource) -> NormalizedPublication: ...
 

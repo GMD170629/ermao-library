@@ -7,6 +7,7 @@ struct IosManagedPublication: Sendable, Equatable {
     let displayTitle: String
     let fileURL: URL
     let byteCount: Int64
+    let artifactContentHash: String
     let fingerprint: IosContentFingerprint
     let workID: String?
     let volumeID: String?
@@ -15,8 +16,8 @@ struct IosManagedPublication: Sendable, Equatable {
 }
 
 actor IosManagedPublicationStore {
-    static let parserVersion = "readium-swift:3.8.0"
-    static let normalizationVersion = "epub-native-sanitized-v1"
+    static let parserVersion = "epub-package:1"
+    static let normalizationVersion = "shuku-epub-locator-dom-v2"
     static let maximumPublicationBytes: Int64 = 512 * 1_024 * 1_024
 
     private let root: URL
@@ -143,6 +144,7 @@ actor IosManagedPublicationStore {
             sourceID: sourceID,
             displayTitle: displayTitle,
             byteCount: byteCount,
+            artifactContentHash: originalFileHash,
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
@@ -162,6 +164,7 @@ actor IosManagedPublicationStore {
             displayTitle: displayTitle,
             fileURL: destination,
             byteCount: byteCount,
+            artifactContentHash: originalFileHash,
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
@@ -191,9 +194,10 @@ actor IosManagedPublicationStore {
         sourceID: String,
         displayTitle: String,
         byteCount: Int64,
-        originalFileHash: String,
+        artifactContentHash: String,
         expectedSize: Int64,
-        expectedOriginalFileHash: String?,
+        expectedContentHash: String?,
+        originalFileHash: String,
         parserVersion: String,
         normalizationVersion: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
@@ -203,8 +207,8 @@ actor IosManagedPublicationStore {
         try requireContained(staging)
         guard byteCount == expectedSize,
               byteCount <= Self.maximumPublicationBytes,
-              expectedOriginalFileHash == nil || expectedOriginalFileHash?.caseInsensitiveCompare(
-                  originalFileHash
+              expectedContentHash == nil || expectedContentHash?.caseInsensitiveCompare(
+                  artifactContentHash
               ) == .orderedSame
         else { throw IosReaderFailure(code: .corruptFile) }
         let stagingValues = try staging.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -212,7 +216,7 @@ actor IosManagedPublicationStore {
               stagingValues.isSymbolicLink != true,
               Int64(stagingValues.fileSize ?? -1) == byteCount
         else { throw IosReaderFailure(code: .corruptFile) }
-        guard try hash(of: staging).caseInsensitiveCompare(originalFileHash) == .orderedSame else {
+        guard try hash(of: staging).caseInsensitiveCompare(artifactContentHash) == .orderedSame else {
             throw IosReaderFailure(code: .corruptFile)
         }
         try await validatePublication(
@@ -237,6 +241,7 @@ actor IosManagedPublicationStore {
             sourceID: sourceID,
             displayTitle: displayTitle,
             byteCount: byteCount,
+            artifactContentHash: artifactContentHash,
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
@@ -256,6 +261,7 @@ actor IosManagedPublicationStore {
             displayTitle: displayTitle,
             fileURL: destination,
             byteCount: byteCount,
+            artifactContentHash: artifactContentHash,
             fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
@@ -289,6 +295,7 @@ actor IosManagedPublicationStore {
             sourceID: existing.sourceID,
             displayTitle: existing.displayTitle,
             byteCount: existing.byteCount,
+            artifactContentHash: existing.artifactContentHash,
             fingerprint: existing.fingerprint,
             workID: existing.workID,
             volumeID: existing.volumeID,
@@ -330,7 +337,8 @@ actor IosManagedPublicationStore {
         else {
             throw IosReaderFailure(code: .corruptFile)
         }
-        guard try hash(of: publicationURL) == metadata.fingerprint.originalFileHash else {
+        let artifactContentHash = metadata.artifactContentHash ?? metadata.fingerprint.originalFileHash
+        guard try hash(of: publicationURL).caseInsensitiveCompare(artifactContentHash) == .orderedSame else {
             throw IosReaderFailure(code: .corruptFile)
         }
         return IosManagedPublication(
@@ -338,6 +346,7 @@ actor IosManagedPublicationStore {
             displayTitle: metadata.displayTitle,
             fileURL: publicationURL,
             byteCount: metadata.byteCount,
+            artifactContentHash: artifactContentHash,
             fingerprint: metadata.fingerprint,
             workID: metadata.workID,
             volumeID: metadata.volumeID,
@@ -410,7 +419,7 @@ actor IosManagedPublicationStore {
             }
         case .mobi, .azw, .azw3, .prc:
             guard parserVersion == IosMobiBook.parserIdentifier,
-                  normalizationVersion == IosMobiBook.normalizationIdentifier
+                  normalizationVersion == IosMobiPublicationIdentity.normalizationIdentifier
             else {
                 throw IosReaderFailure(code: .corruptFile)
             }
@@ -475,6 +484,7 @@ actor IosManagedPublicationStore {
         let sourceID: String
         let displayTitle: String
         let byteCount: Int64
+        let artifactContentHash: String?
         let fingerprint: IosContentFingerprint
         let workID: String?
         let volumeID: String?
@@ -525,6 +535,6 @@ actor IosManagedPublicationStore {
             return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
         }
         return String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .gb_18030_2000)
+            ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
     }
 }

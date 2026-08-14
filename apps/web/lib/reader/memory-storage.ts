@@ -2,10 +2,10 @@ import { READER_SCHEMA_VERSION, type ReaderPreferences } from '@shuku/reader-cor
 import {
   exactProgressKey,
   preferenceKey,
+  syncStateKey,
   type ExactProgressIdentity,
   type ExactProgressRecord,
   type PendingProgressMutation,
-  type PersistedProgressConflict,
   type ReaderPreferenceSnapshot,
   type ReaderSyncDiagnostic
 } from './model';
@@ -18,7 +18,6 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderBookCache {
   private readonly preferences = new Map<string, ReaderPreferenceSnapshot>();
   private readonly exactProgress = new Map<string, ExactProgressRecord>();
   private readonly pending = new Map<string, PendingProgressMutation>();
-  private readonly conflicts = new Map<string, PersistedProgressConflict>();
   private readonly diagnostics: ReaderSyncDiagnostic[] = [];
   private readonly bookFiles = new Map<string, CachedReaderBookFile>();
   private clientId = createId('web');
@@ -29,17 +28,48 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderBookCache {
   async putPreference(userId: string, workId: string, preferences: ReaderPreferences, updatedAt = Date.now()) { const value = { key: preferenceKey(userId, workId), userId, workId, schemaVersion: READER_SCHEMA_VERSION, preferences, updatedAt }; this.preferences.set(value.key, value); return value; }
   async deletePreference(userId: string, workId: string) { this.preferences.delete(preferenceKey(userId, workId)); }
   async getClientId() { return this.clientId; }
-  async getExactProgress(identity: ExactProgressIdentity) { return this.exactProgress.get(exactProgressKey(identity)) ?? null; }
+  async getExactProgress(identity: ExactProgressIdentity) {
+    const key = exactProgressKey(identity);
+    const current = this.exactProgress.get(key);
+    if (current) return current;
+    const legacy = [...this.exactProgress.values()]
+      .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
+        && candidate.userId === identity.userId
+        && candidate.clientId === identity.clientId
+        && candidate.workId === identity.workId
+        && candidate.volumeId === identity.volumeId)
+      .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
+    if (!legacy) return null;
+    const migrated = { ...legacy, ...identity, key };
+    this.exactProgress.set(key, migrated);
+    if (legacy.key !== key) this.exactProgress.delete(legacy.key);
+    return migrated;
+  }
   async putExactProgress(progress: ExactProgressRecord) { this.exactProgress.set(progress.key, progress); return progress; }
   async putExactAndPending(progress: ExactProgressRecord, mutation: PendingProgressMutation) { this.exactProgress.set(progress.key, progress); this.pending.set(mutation.key, mutation); }
   async putPendingProgress(mutation: PendingProgressMutation) { this.pending.set(mutation.key, mutation); }
   async getPendingProgress(key: string) { return this.pending.get(key) ?? null; }
+  async getPendingProgressForIdentity(identity: ExactProgressIdentity) {
+    const key = syncStateKey(identity);
+    const current = this.pending.get(key);
+    if (current) return current;
+    const legacy = [...this.pending.values()]
+      .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
+        && candidate.userId === identity.userId
+        && candidate.clientId === identity.clientId
+        && candidate.workId === identity.workId
+        && candidate.volumeId === identity.volumeId)
+      .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
+    if (!legacy) return null;
+    const migrated = { ...legacy, key };
+    this.pending.set(key, migrated);
+    if (legacy.key !== key) this.pending.delete(legacy.key);
+    return migrated;
+  }
   async listPendingProgress(userId: string) { return [...this.pending.values()].filter((item) => item.userId === userId); }
   async deletePendingProgress(key: string, mutationId?: string) { const current = this.pending.get(key); if (!mutationId || current?.mutationId === mutationId) this.pending.delete(key); }
-  async putProgressConflict(conflict: PersistedProgressConflict) { this.conflicts.set(conflict.key, conflict); }
-  async getProgressConflict(key: string) { return this.conflicts.get(key) ?? null; }
-  async deleteProgressConflict(key: string) { this.conflicts.delete(key); }
+  async putExactAndDeletePending(progress: ExactProgressRecord, pendingKey: string) { this.exactProgress.set(progress.key, progress); this.pending.delete(pendingKey); }
   async addDiagnostic(diagnostic: Omit<ReaderSyncDiagnostic, 'id' | 'createdAt'>, now = Date.now()) { const value = { ...diagnostic, id: createId('diagnostic'), createdAt: now }; this.diagnostics.push(value); return value; }
   async listDiagnostics(limit = 100) { return [...this.diagnostics].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit); }
-  async clearAll() { this.preferences.clear(); this.exactProgress.clear(); this.pending.clear(); this.conflicts.clear(); this.diagnostics.length = 0; this.bookFiles.clear(); this.clientId = createId('web'); }
+  async clearAll() { this.preferences.clear(); this.exactProgress.clear(); this.pending.clear(); this.diagnostics.length = 0; this.bookFiles.clear(); this.clientId = createId('web'); }
 }

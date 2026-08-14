@@ -178,6 +178,7 @@ def test_work_reading_units_query_returns_only_requested_navigation(client, db_s
         "progress",
         "currentHref",
         "currentChapterIndex",
+        "currentChapterTitle",
         "currentChapterSortOrder",
         "currentPageNumber",
     }
@@ -205,7 +206,7 @@ def test_work_reading_units_query_projects_exact_readium_chapter_location(
             extra="{}",
             schema_version=4,
             location_type="reflowable",
-            location_json='{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"shuku-txt-parser-v1","normalization":"shuku-txt-publication-v1"},"payload":{"href":"002.jpg","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-2"},"text":{"highlight":"第二章"}}}',
+            location_json='{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"shuku-txt-parser-v1","normalization":"shuku-txt-publication-v2"},"payload":{"href":"002.jpg","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-2"},"text":{"highlight":"第二章"}}}',
         )
     )
     db_session.commit()

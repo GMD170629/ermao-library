@@ -43,11 +43,12 @@ The complete Publication location is limited to 64 KiB. `highlight` is limited t
 whole-publication percentage are diagnostic or presentation values and are not
 exact anchors.
 
-The fingerprint is composed of original file SHA-256, content parser identifier,
-and normalization identifier. All three fields must match before an automatic remote navigation
-is attempted. A parser or normalization change invalidates the old Locator; it
-does not enable percentage restoration. Navigator versions do not participate
-in content identity.
+Reading progress is owned by the server-authorized `workId + volumeId`.
+Original file SHA-256, content parser identifier, and normalization identifier
+remain attached to the Publication location for download verification and
+diagnostics, but they do not participate in progress ownership, validation,
+conflict detection, or restoration. A file or parser change does not create a
+new progress slot.
 
 After navigation, the destination recaptures its location and compares the
 morphology-specific canonical identity. For reflowable content, `href` and the
@@ -62,21 +63,37 @@ applies a forward-only rule. Client capture time is diagnostic only.
 
 Each client atomically persists its exact Publication location and latest-only pending
 mutation before networking. Network loss, process termination, and foreground
-transitions preserve pending work. A conflict is durable until the user chooses
-the local position, the remote position, or cancel. The server-confirmed
-revision is persisted before pending work is cleared.
+transitions preserve pending work. Online startup always refreshes bootstrap and
+uses the latest server position unless a durable local pending mutation exists.
+When that pending mutation and the server diverge, the user must choose local,
+cloud, or cancel before Reader opens.
+
+After Reader opens, lifecycle checks use the revision ETag progress endpoint.
+A newer revision from another client becomes a session-only, non-modal notice.
+It never moves the Navigator automatically. Accepting it requires exact
+post-navigation verification. Continuing to a genuinely different exact block
+rebases a new mutation onto that remote revision; the rejected stale mutation is
+not replayed. Dismissing a notice ignores only that revision for the current
+session. The server-confirmed revision is persisted before pending work is cleared.
 
 The language-neutral contract and fixtures live in
 `packages/reader-contracts`. Python, TypeScript, Kotlin, and Swift each validate
 untrusted JSON at their boundary and map it into renderer-neutral domain values.
 Readium SDK types remain platform adapter details.
 
-For EPUB, the first production Publication adapter serves raw package resources
-without DOM rewriting and uses `epub-package:1` plus
-`shuku-epub-raw-v1`. Any later sanitization or URI rewrite that changes the DOM
-must introduce a shared normalization revision and equivalent platform output.
-MOBI-family publications use the single pinned `ermao_mobi_*` ABI and identical
-virtual href/DOM normalization on all platforms; no hidden EPUB is generated.
+Reflowable content identity uses Locator DOM Projection v2 before Navigator
+decoration. It contains ordered reading resources plus the complete `body`
+element tree, author IDs and normalized locator-block text. It excludes `head`,
+platform CSP and Readium runtime nodes. Equal fingerprints mean equal
+projections, not byte-identical live WebView DOMs.
+
+EPUB preserves the validated author body and uses `epub-package:1` plus
+`shuku-epub-locator-dom-v2`. MOBI-family publications use the single pinned
+`ermao_mobi_*` ABI and `ermao-mobi-core-v1+shuku-locator-dom-v2`; no hidden EPUB
+is generated. TXT uses `shuku-txt-parser-v1` plus
+`shuku-txt-publication-v2`, with the checked-in KMP chapter and XHTML rules as
+the semantic source of truth. Platform security adapters may decorate `head`
+but must never delete, reparent or reserialize body content.
 
 ## Consequences
 
@@ -84,17 +101,22 @@ Reader v4's earlier untagged Locator envelope, Foliate engine, percentage-only
 progress, server content token, arrival-order overwrite, non-durable upload,
 outbox migration, and percentage fallback contracts are removed rather than
 migrated. Because v4 was unreleased, old server progress and mutation receipts
-are deleted and old client exact/pending/conflict documents are rejected.
+are deleted and old client exact/pending/conflict documents are rejected. Durable
+conflict documents are not part of the replacement contract: startup decisions
+are modal and session remote notices are ephemeral.
 
 `displayPercent` remains available for progress bars, library display, and
 statistics. It must never be consumed by automatic continuation code.
 
-When exact restoration fails, the client reports that outcome and may offer
+When exact restoration fails after applying the saved position to the current
+work and volume, the client reports that outcome and may offer
 explicit nearby-position or chapter navigation. Such user-directed navigation
 is never reported as exact synchronization.
 
-PDF, comic/CBZ, and audio anchors use the same fingerprint, revision, durability,
-and post-navigation verification rules but do not claim DOM-block semantics.
+PDF, comic/CBZ, and audio anchors use the same work/volume ownership, revision,
+durability, and post-navigation verification rules but do not claim DOM-block
+semantics. Their Publication fingerprints remain artifact-verification and
+diagnostic data, not progress identity.
 
 Production enablement is per format and platform. Android conformance, physical
 iOS evidence, malicious-publication tests, libmobi safety/license gates, and all

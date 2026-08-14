@@ -2,7 +2,6 @@ import Foundation
 import PDFKit
 @preconcurrency import ReadiumShared
 @preconcurrency import ReadiumStreamer
-import SwiftSoup
 
 @MainActor
 struct IosOpenedReadiumPublication {
@@ -35,7 +34,7 @@ final class IosReadiumRuntime {
                 pdfFactory: DefaultPDFDocumentFactory()
             ),
             contentProtections: [],
-            onCreatePublication: sanitizeEpubPublication
+            onCreatePublication: secureEpubPublication
         )
     }
 
@@ -135,7 +134,7 @@ final class IosReadiumRuntime {
         _ managed: IosManagedPublication
     ) async throws -> IosOpenedReadiumPublication {
         guard managed.fingerprint.parserVersion == IosMobiBook.parserIdentifier,
-              managed.fingerprint.normalizationVersion == IosMobiBook.normalizationIdentifier,
+              managed.fingerprint.normalizationVersion == IosMobiPublicationIdentity.normalizationIdentifier,
               let contentFingerprint = managed.serverContentFingerprint
         else {
             throw IosReaderFailure(code: .corruptFile)
@@ -181,91 +180,26 @@ final class IosReadiumRuntime {
             .corruptFile
         }
     }
+
 }
 
 // Readium resolves container resources on background executors. Keeping this transform
 // outside the @MainActor runtime prevents its resource mapper from inheriting main-actor isolation.
-private func sanitizeEpubPublication(
+private func secureEpubPublication(
     _: inout Manifest,
     container: inout Container,
     _: inout PublicationServicesBuilder
 ) async {
     container = container.map { href, resource in
-        guard IosEpubContentSanitizer.isMarkup(href.string) else { return resource }
-        return resource.mapAsString { markup in
-            IosEpubContentSanitizer.sanitize(markup, resource: href.string)
-        }
-    }
-}
-
-enum IosEpubContentSanitizer {
-    private static let maximumMarkupBytes = 8 * 1_024 * 1_024
-    private static let urlAttributes = ["href", "src", "srcset", "poster", "action", "formaction", "xlink:href"]
-
-    static func isMarkup(_ resource: String) -> Bool {
-        let resource = resource.lowercased()
-            .split(whereSeparator: { $0 == "#" || $0 == "?" })
-            .first.map(String.init) ?? resource
-        return resource.hasSuffix(".html") || resource.hasSuffix(".htm") || resource.hasSuffix(".xhtml")
-    }
-
-    static func sanitize(_ markup: String, resource: String) -> String {
-        guard markup.utf8.count <= maximumMarkupBytes else {
-            return "<html><body></body></html>"
-        }
-        do {
-            let document = try SwiftSoup.parse(markup, resource)
-            try document.select("script, iframe, frame, frameset, object, embed, applet, form, base, foreignobject").remove()
-            for meta in try document.select("meta[http-equiv]").array() {
-                if try meta.attr("http-equiv").lowercased() == "refresh" { try meta.remove() }
-            }
-            for element in try document.getAllElements().array() {
-                if let attributes = element.getAttributes() {
-                    for attribute in attributes.asList() where attribute.getKey().lowercased().hasPrefix("on") {
-                        try element.removeAttr(attribute.getKey())
-                    }
-                }
-                for name in urlAttributes {
-                    let value = try element.attr(name).trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !value.isEmpty else { continue }
-                    if !isAllowedURL(value, tagName: element.tagNameNormal(), attribute: name) {
-                        try element.removeAttr(name)
-                    }
-                }
-                let inlineStyle = try element.attr("style")
-                if containsRemoteCSS(inlineStyle) {
-                    try element.removeAttr("style")
+        guard IosPublicationSecurityPolicy.isMarkup(href.string) else { return resource }
+        return TransformingResource(resource) { result in
+            result.flatMap { data in
+                do {
+                    return .success(try IosPublicationSecurityPolicy.decorate(data: data))
+                } catch {
+                    return .failure(.decoding("Unsafe or invalid EPUB resource", cause: error))
                 }
             }
-            for style in try document.select("style").array() {
-                if containsRemoteCSS(try style.html()) {
-                    try style.remove()
-                }
-            }
-            return try document.outerHtml()
-        } catch {
-            return "<html><body></body></html>"
         }
-    }
-
-    private static func isAllowedURL(_ value: String, tagName: String, attribute: String) -> Bool {
-        let normalized = value.lowercased()
-        if normalized.hasPrefix("#") { return true }
-        if normalized.hasPrefix("//") { return false }
-        if let colon = normalized.firstIndex(of: ":") {
-            let scheme = String(normalized[..<colon])
-            return tagName == "a" && attribute == "href" && (scheme == "http" || scheme == "https")
-        }
-        return !normalized.contains("\\")
-    }
-
-    private static func containsRemoteCSS(_ css: String) -> Bool {
-        let compact = css.lowercased().filter {
-            !$0.isWhitespace && $0 != "\"" && $0 != "'"
-        }
-        return compact.contains("@import")
-            || compact.contains("url(http:")
-            || compact.contains("url(https:")
-            || compact.contains("url(//")
     }
 }

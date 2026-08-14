@@ -429,9 +429,14 @@
     <string name="work_reader_download_required">可重排格式必须完成下载后才能打开。</string>
     <string name="work_reader_renderer_pending">PDF 和漫画支持在线流式读取，但此版本尚未提供原生渲染器。</string>
     <string name="work_download_failed_inline">下载失败，请点击下载操作重试。</string>
-    <string name="reader_resume_prompt">你于 %1$s 阅读至 %2$s。</string>
-    <string name="reader_resume_return">返回上次位置</string>
+    <string name="reader_resume_prompt">其他设备已阅读至 %2$s · %1$s</string>
+    <string name="reader_page_number">第 %1$d 页</string>
+    <string name="reader_resume_return">跳转至最新位置</string>
     <string name="reader_resume_return_failed">无法返回该阅读位置。</string>
+    <string name="reader_startup_conflict_title">选择阅读位置</string>
+    <string name="reader_startup_conflict_message">本机有尚未同步的阅读位置，同时云端进度已更新。请选择本次从哪里继续。</string>
+    <string name="reader_startup_use_local">继续本机位置</string>
+    <string name="reader_startup_use_cloud">使用云端位置</string>
     <string name="reader_resume_dismiss">关闭历史阅读位置提示</string>
     <string name="work_chapter_current">正在阅读</string>
     <string name="work_chapter_read">已读</string>

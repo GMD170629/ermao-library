@@ -2,6 +2,8 @@ package com.ermao.library.shared.modules.reader
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class ReaderChapterStateTest {
     private val anchored = listOf(
@@ -64,6 +66,165 @@ class ReaderChapterStateTest {
                 100.0,
                 ReaderChapterListMetadata(pageSize = 3),
             ),
+        )
+    }
+
+    @Test
+    fun fullPublicationLocationUsesTheMatchingFragment() {
+        val location = reflowableLocation(
+            href = "Text/all.xhtml",
+            fragments = listOf("runtime-marker", "chapter-2"),
+            position = 4,
+        )
+
+        assertEquals(
+            listOf(ReaderChapterState.Read, ReaderChapterState.Current, ReaderChapterState.Unread),
+            resolveReaderChapterStatesFromLocation(anchored, location, 42.0),
+        )
+    }
+
+    @Test
+    fun uniqueResourceMatchIsSafeWhenRuntimeFragmentDiffers() {
+        val units = listOf(
+            ReaderChapterUnit("Text/one.xhtml#toc-anchor", 0, 1),
+            ReaderChapterUnit("Text/two.xhtml#toc-anchor", 1, 2),
+        )
+
+        assertEquals(
+            listOf(ReaderChapterState.Read, ReaderChapterState.Current),
+            resolveReaderChapterStatesFromLocation(
+                units,
+                reflowableLocation("text/two.xhtml", listOf("runtime-anchor"), 2),
+                50.0,
+            ),
+        )
+    }
+
+    @Test
+    fun readingOrderPositionResolvesSplitResourceRange() {
+        val units = listOf(
+            ReaderChapterUnit("text/part0003.html", 1, 3),
+            ReaderChapterUnit("text/part0008_split_000.html", 4, 10),
+            ReaderChapterUnit("text/part0009.html", 5, 13),
+        )
+
+        assertEquals(
+            listOf(ReaderChapterState.Read, ReaderChapterState.Current, ReaderChapterState.Unread),
+            resolveReaderChapterStatesFromLocation(
+                units,
+                reflowableLocation("text/part0008_split_001.html", listOf("visible"), 11),
+                15.2,
+            ),
+        )
+    }
+
+    @Test
+    fun duplicateAnchorAndDuplicatePositionNeverGuess() {
+        val duplicateAnchors = listOf(
+            ReaderChapterUnit("text/all.xhtml#same", 0, 4),
+            ReaderChapterUnit("text/all.xhtml#same", 1, 4),
+        )
+        val duplicatePositions = listOf(
+            ReaderChapterUnit("text/all.xhtml#one", 0, 4),
+            ReaderChapterUnit("text/all.xhtml#two", 1, 4),
+        )
+
+        assertEquals(
+            List(2) { ReaderChapterState.Unread },
+            resolveReaderChapterStatesFromLocation(
+                duplicateAnchors,
+                reflowableLocation("text/all.xhtml", listOf("same"), 4),
+                50.0,
+            ),
+        )
+        assertEquals(
+            List(2) { ReaderChapterState.Unread },
+            resolveReaderChapterStatesFromLocation(
+                duplicatePositions,
+                reflowableLocation("text/all.xhtml", listOf("unmatched"), 4),
+                50.0,
+            ),
+        )
+    }
+
+    @Test
+    fun nonReflowableLocationsNeverSelectAChapter() {
+        val units = listOf(ReaderChapterUnit("chapter.xhtml", 0, 1))
+        val locations = listOf<PublicationLocation>(
+            PdfPublicationLocation(FINGERPRINT, pageIndex = 0, pageProgression = 0.25),
+            ComicPublicationLocation(FINGERPRINT, resourceHref = "page-1.jpg", pageIndex = 0),
+            AudioPublicationLocation(FINGERPRINT, fileId = "track-1", positionMillis = 5_000),
+        )
+
+        locations.forEach { location ->
+            assertEquals(
+                listOf(ReaderChapterState.Unread),
+                resolveReaderChapterStatesFromLocation(units, location, 50.0),
+            )
+        }
+    }
+
+    @Test
+    fun presentationUpdateFactoryCarriesTheCompletePublicationLocation() {
+        val engineLocator = reflowableEngineLocator(
+            href = "Text/all.xhtml",
+            fragments = listOf("chapter-2", "epubcfi(/6/4)"),
+            position = 4,
+        )
+        val progress = ReaderProgress(
+            sourceId = "reader-source",
+            location = ReflowReaderLocation(
+                engineLocator = engineLocator,
+                contentFingerprint = FINGERPRINT.toContentFingerprint(),
+            ),
+            updatedAtEpochMillis = 123_456,
+            deviceId = "device-1",
+        )
+
+        val update = createReaderProgressPresentationUpdate(
+            namespaceKey = "server:user",
+            workId = "work-1",
+            volumeId = "volume-1",
+            percent = 42.0,
+            progress = progress,
+            chapterTitle = "第二章",
+        )
+
+        val location = assertIs<ReflowablePublicationLocation>(update.location)
+        assertEquals(123_456, update.capturedAtEpochMillis)
+        assertEquals(engineLocator, location.engineLocator)
+        assertTrue(location.canonicalJson().contains("chapter-2"))
+        assertTrue(location.canonicalJson().contains("epubcfi(/6/4)"))
+    }
+
+    private fun reflowableLocation(
+        href: String,
+        fragments: List<String>,
+        position: Int,
+    ): ReflowablePublicationLocation = ReflowablePublicationLocation(
+        FINGERPRINT,
+        reflowableEngineLocator(href, fragments, position),
+    )
+
+    private fun reflowableEngineLocator(
+        href: String,
+        fragments: List<String>,
+        position: Int,
+    ): EngineLocator {
+        val fragmentsJson = fragments.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+        return createEngineLocator(
+            ReaderEngine.Readium,
+            ReaderEnginePlatform.Android,
+            "readium-kotlin:test",
+            """{"href":"$href","type":"application/xhtml+xml","locations":{"cssSelector":"body","fragments":$fragmentsJson,"position":$position}}""",
+        )
+    }
+
+    private companion object {
+        val FINGERPRINT = PublicationFingerprint(
+            originalFileHash = "sha256:" + "a".repeat(64),
+            parser = "test-parser:1",
+            normalization = "test-normalization:1",
         )
     }
 }

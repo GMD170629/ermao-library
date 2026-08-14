@@ -22,6 +22,7 @@ import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
 import { bookActionIds, type BookActionId } from './model/book-action-menu';
 import { CHAPTER_DETAIL_PAGE_SIZE, singleVolumeEbook, type EbookChapterDetail } from './model/chapter-detail';
+import { currentPositionLabel } from './model/current-position-label';
 import { structureFileLabel } from './model/structure-file-label';
 import { structureVolumeList, structureVolumeShowsFileDetails } from './model/structure-volume-list';
 import { volumeActionAvailability, type VolumeActionId } from './model/volume-action-menu';
@@ -89,13 +90,6 @@ function consumptionCopy(readerType: ReaderType) {
   if (readerType === 'audio') return { progress: '收听进度', position: '当前收听', start: '开始听', resume: '继续听', status: '收听状态' } as const;
   if (readerType === 'comic') return { progress: '阅读进度', position: '当前卷册', start: '开始看', resume: '继续看', status: '阅读状态' } as const;
   return { progress: '阅读进度', position: '当前位置', start: '开始阅读', resume: '继续阅读', status: '阅读状态' } as const;
-}
-
-function currentPositionLabel(volume: VolumeResource, translate: (source: string, values?: Record<string, string | number>) => string): string {
-  if (volume.readerType === 'audio' && volume.durationMs) return formatDuration(volume.durationMs * volume.progress / 100);
-  if ((volume.readerType === 'comic' || volume.readerType === 'pdf') && volume.pageCount) return translate('第 {value0} 页', { value0: Math.max(1, Math.ceil(volume.pageCount * volume.progress / 100)) });
-  if (volume.chapterCount) return translate('第 {value0} 章', { value0: Math.max(1, Math.ceil(volume.chapterCount * volume.progress / 100)) });
-  return volume.title;
 }
 
 function VolumeWallCard({
@@ -1006,7 +1000,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               </div>
               <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
                 <span className="font-medium text-stone-700">{t(activeCopy.position)}</span>
-                <span data-i18n-skip className="text-stone-800">{currentPositionLabel(selectedVolume, t)}</span>
+                <span data-i18n-skip className="text-stone-800">{currentPositionLabel(selectedVolume, chapterDetail, t)}</span>
               </div>
             </div> : null}
             {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}

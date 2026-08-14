@@ -31,29 +31,52 @@ composition root -> presentation + application + adapters
 
 Shared Reader domain code must not import UI, Android/iOS, Readium, Foliate, browser, filesystem, HTTP, or database types. Engine-specific locators are validated JSON objects kept behind adapters. Other capabilities use only Reader public APIs.
 
-## 3. Content identity
+## 3. Publication diagnostics and progress identity
 
-Reader v4 has one exact Publication identity:
+Reader v4 retains these Publication diagnostics:
 
 - original source file SHA-256;
 - parser identifier which generated the Publication content structure;
 - normalization identifier which generated stable reading order, hrefs, and DOM.
 
-Navigator SDK versions are diagnostic metadata and are not content identity.
-All three fingerprint fields must match before automatic remote restoration.
+Navigator SDK versions are also diagnostic metadata. None of these fingerprint
+fields participates in reading-progress ownership or validation. Progress is
+owned by the server-authorized `workId + volumeId`; a file, parser, or
+normalization change does not create a new progress slot or block restoration.
 
-The exact local record identity is:
+For EPUB, MOBI-family, and TXT, matching content identity means that all clients
+read the same deterministic server-generated EPUB render artifact and produce the
+same Locator DOM Projection v2, not byte-identical runtime DOM. The
+projection includes reading-order href/media type and the complete author body
+element tree, `id` values, nth-of-type paths, and normalized locator-block text.
+It ignores head decoration, comments, attribute ordering, non-`id` attributes,
+and Navigator runtime nodes. The production identifiers are:
+
+- EPUB: `epub-package:1 / shuku-epub-locator-dom-v2`;
+- MOBI family: pinned libmobi parser / `ermao-mobi-core-v1+shuku-locator-dom-v2`;
+- TXT: `shuku-txt-parser-v1 / shuku-txt-publication-v2`.
+
+The original library file is immutable. Strict XML content is preserved; ordinary
+markup failures use server-side WHATWG HTML5 recovery and deterministic XHTML
+serialization. Unrecoverable body resources retain their href as explicit marked
+error pages. They do not invalidate legal Nav/NCX chapters or the rest of the book.
+Only exploit-capable constructs are security rejections. Platform adapters enforce
+CSP and resource policy but do not independently normalize author markup.
+
+The exact local progress record identity is:
 
 ```text
-serverIdentity + userId + clientId + volumeId + PublicationFingerprint
+serverIdentity + userId + clientId + workId + volumeId
 ```
 
-`authorizationVersion` is deliberately absent. Reauthentication does not hide a valid position for the same client and local publication. A different account, client, server, volume, or local content interpretation cannot reuse that exact record.
+`authorizationVersion` is deliberately absent. Reauthentication does not hide a
+valid position for the same client, work, and volume. A different account,
+client, server, work, or volume cannot reuse that exact record.
 
 ## 4. Location model
 
 Reader v4 uses a renderer-neutral `PublicationLocation` discriminated union. All
-variants contain the structured Publication fingerprint and the complete encoded
+variants retain the structured Publication fingerprint as diagnostic metadata, and the complete encoded
 location is limited to 64 KiB. The variants are:
 
 - `reflowable`: a required Readium `engineLocator` with an exact DOM anchor;
@@ -86,6 +109,8 @@ First-party clients use only:
 
 ```text
 GET /api/reader/v4/volumes/{volumeId}/bootstrap
+GET /api/reader/v4/volumes/{volumeId}/publication/render.epub
+GET /api/reader/v4/volumes/{volumeId}/progress
 PUT /api/reader/v4/volumes/{volumeId}/progress
 PUT /api/reader/v4/volumes/{volumeId}/reading-status
 GET|PUT /api/reader/v4/volumes/{volumeId}/bookmarks
@@ -115,9 +140,14 @@ The progress request contains:
 }
 ```
 
-The response contains revision, the exact Publication location, display-only percentage, and
-server receive time. Locator is required. A non-exact position returns
+The response contains revision, source `clientId`, the exact Publication location,
+display-only percentage, and server receive time. Locator is required. A non-exact position returns
 `422 READER_LOCATOR_NOT_EXACT`.
+
+The lightweight progress GET returns the current snapshot or `null`. It emits a
+revision ETag and accepts `If-None-Match`; unchanged state returns `304`. It is
+used only while a Reader session is open and is checked after opening, on
+foreground entry, and on network recovery. There is no polling, WebSocket, or SSE.
 
 ## 6. Server persistence
 
@@ -135,7 +165,8 @@ The repository saves:
 
 A stale `baseRevision` returns `409 READER_PROGRESS_CONFLICT` with the current
 snapshot. The server never silently overwrites or applies a forward-only rule.
-Fingerprint mismatch is a validation failure, not a percentage fallback.
+The authorized work and volume are the progress identity. Publication fingerprint
+differences never reject a progress read or write.
 
 ## 7. Local save and upload
 
@@ -148,19 +179,38 @@ All clients implement the same lifecycle:
 5. The exact Publication location and latest-only pending mutation commit atomically.
 6. Only after local commit, one single-flight v4 PUT is attempted.
 7. Success persists the confirmed revision before clearing pending state.
-8. Network failure preserves pending state; `409` persists a conflict.
+8. Network failure preserves pending state; `409` drops the rejected mutation and
+   raises an ephemeral remote-progress notice for the open session.
 
 Each platform retries durable pending work on network recovery, foreground entry,
 and Reader exit. During an in-flight request, one durable latest slot retains
-only the newest stable Locator. Pending and conflict state survive termination.
+only the newest stable Locator. Pending state survives termination. A `409`
+mutation is never immediately replayed: only the next genuinely different exact
+location creates a replacement mutation based on the newest server revision.
+Preference reflow and repeated capture of the same block are not movement.
 
 When no exact anchor is available, the client may save a platform-local engine
 position but must not upload or label it cross-device synchronized.
 
-## 8. Restoration policy
+## 8. Startup and session restoration policy
 
-An explicit deep link, chapter/page request, or bookmark always wins. Otherwise
-only a fingerprint-compatible exact Publication location may restore automatically.
+An explicit deep link, chapter/page request, or bookmark always wins. Online
+Reader entry fetches a fresh bootstrap and ignores confirmed local history. With
+no pending mutation, the server's exact location for the same work and volume
+restores automatically. A valid pending mutation at the server's current
+revision resumes locally and uploads normally. If the server revision advanced
+past the pending mutation's base revision, a blocking local/cloud/cancel decision
+is required before opening. A pending state for another work or volume is discarded. If
+bootstrap is unavailable offline, a local exact/pending position may open only
+with already available local content.
+
+Once Reader is open, a newer snapshot from another `clientId` that differs from
+the current exact position is shown as a non-modal notice. It does not steal focus
+or block reading. The user may dismiss it, or navigate to it; navigation is accepted
+only after the same morphology-specific exact verification described below. If the
+user instead continues reading to a different exact position, that real movement
+rebases and overwrites the remote revision.
+
 For reflowable content, after `Navigator.go(locator)`, the platform recaptures the
 first-visible Locator. Success requires the same href plus matching selector,
 matching fragment/CFI, or a uniquely matching normalized text context. PDF,
@@ -179,7 +229,9 @@ native progress and sync codecs use document version 5 and reject version 4;
 the server data migration deletes old v4 progress and mutation receipts. No
 Foliate, legacy Reader v4, location, completion, or percentage migration exists.
 
-Publication download, bounded streaming, file SHA-256, parser fingerprinting, path/symlink containment, temporary-file validation, and atomic installation remain unchanged by progress simplification.
+Publication download keeps the original file hash as progress diagnostics and verifies
+the render artifact with its separate SHA-256. Render artifacts are disposable cache,
+published atomically, and never participate in library backup, export or metadata writeback.
 
 ## 10. Platform adapters
 
@@ -189,7 +241,12 @@ Web uses Readium TS. Its version-locked same-origin iframe bridge is isolated
 behind the adapter until the toolkit exposes a public first-visible-block API;
 failure to read the frame fails closed and disables exact sync.
 
-Native publication downloads reuse authenticated cookie storage, stream into an app-private staging file, validate declared and actual size, optional SHA-256, MIME/publication type, and atomically install the result. Redirect, traversal, symlink, empty-body, overflow, truncation, cancellation, and oversized-error cases fail closed.
+Native publication downloads reuse authenticated cookie storage, prefer the Reader v4
+render artifact for supported reflowable formats, stream into an app-private staging
+file, validate declared and actual size, artifact SHA-256, MIME/publication type, and
+atomically install the result. They open Readium after package opening and do not
+preflight the complete reading order. Redirect, traversal, symlink, empty-body,
+overflow, truncation, cancellation, and oversized-error cases fail closed.
 
 Reader v4 bootstrap is also the authoritative Download Center catalog source. A completed
 artifact persists the real `mediaVersion.id`, `mediaVersion.mediaKind`, server-completed
@@ -211,16 +268,23 @@ publication-completion dependency.
 Automated contracts must cover:
 
 - mutation idempotency and monotonic revision;
-- stale base revision producing a durable conflict;
+- stale base revision producing a session remote notice without immediate replay;
+- startup pending-versus-server local/cloud/cancel decisions;
+- progress GET null/200/304, revision ETag, same-client and same-anchor suppression;
+- accepting a remote position only after exact post-navigation verification;
+- the next genuinely different exact location rebasing onto the remote revision;
 - 500 ms burst coalescing;
 - single-flight latest-slot behavior;
 - network failure preserving the latest durable pending mutation;
 - all four Publication location round trips and morphology-specific post-navigation verification;
 - progression, position, and percentage never counting as exact;
-- mismatched publication fingerprints refusing automatic restoration;
+- identical work/volume progress surviving Publication fingerprint changes;
 - PDF, comic, and audio exact positions;
 - v1–v3 `410 Gone` and first-party v4-only paths;
-- process-death recovery for pending and conflict state.
+- process-death recovery for pending state and fresh session reconstruction from bootstrap.
+- Nav-to-NCX fallback, invalid navigation-node filtering, and body failure independence;
+- deterministic render hashes, concurrent generation, source CAS and temporary-file cleanup;
+- marked pages retaining previous/next/contents navigation without progress or bookmarks.
 
 Android acceptance includes building and deploying the debug APK to the dedicated test emulator, cold launching it, and running relevant instrumentation. iOS acceptance must use an `iosArm64`/`iphoneos` build and a connected physical iPhone or iPad. Simulator evidence is prohibited. Linux KMP compilation is useful static evidence but is not iOS runtime acceptance.
 
@@ -267,8 +331,9 @@ WenKai serves Kaiti. The files add approximately 35 MB uncompressed. iOS
 Readium declares these bundled WOFF2 files through its public custom-font API.
 Readium Kotlin 3.3 does not expose the equivalent public declaration API, so
 Android packages the assets for forward compatibility but keeps the font-family
-control disabled; reflection, private scripts, and EPUB DOM modification are
-prohibited.
+control disabled; reflection and private scripts are prohibited. Security
+adaptation may modify only the document head as defined above; body mutation or
+re-serialization is prohibited.
 
 Bookmarks use the existing Reader v4 collection wire schema. Local state is
 isolated by `serverIdentity + userId + volumeId + contentFingerprint`, retains
@@ -287,8 +352,8 @@ The center reading zone, accessibility actions, and keyboard Escape affordance
 remain responsible for revealing controls; loading and recovery UI must not
 force the controls open.
 
-Local and Reader v4 exact positions are compared only when their publication
-fingerprints match. Positions with the same semantic Readium anchor restore
+Local and Reader v4 exact positions are scoped by work and volume rather than
+Publication fingerprint. Positions with the same semantic Readium anchor restore
 silently. Different positions are ordered by their actual captured timestamp,
 with the server winning an exact timestamp tie. The newer position is restored
 automatically and the older position is offered in a non-modal themed notice.
@@ -300,10 +365,13 @@ Navigator initialization and preference reflow emissions are not user progress
 and must never be persisted as new reading activity.
 
 After every successful local progress transaction the Reader publishes the
-shared `ReaderProgressPresentationUpdate` contract at application scope. An
-open Work Detail projection applies a matching namespace/work/volume update
-immediately, including overall progress, volume progress, and chapter state,
-then refreshes the server representation without replacing newer local state.
+shared `ReaderProgressPresentationUpdate` contract at application scope. The
+event carries the complete, validated `PublicationLocation`; platform shells
+must not replace it with a resource-only href, synthetic page key, percentage,
+or chapter title. An open Work Detail projection applies a matching
+namespace/work/volume update immediately, including overall progress, volume
+progress, and chapter state, then refreshes the server representation without
+replacing newer local state.
 Work Detail also performs a non-blocking refresh whenever it becomes active.
 Chapter state is derived from exact href/fragment first, then the server's
 global chapter index and sort order. Duplicate titles are never navigation

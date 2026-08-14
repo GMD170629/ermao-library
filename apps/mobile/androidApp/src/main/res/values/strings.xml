@@ -438,9 +438,14 @@
     <string name="work_reader_download_required">Reflowable books must finish downloading before they can be opened.</string>
     <string name="work_reader_renderer_pending">PDF and comics can stream online; the native renderer is not available in this build.</string>
     <string name="work_download_failed_inline">Download failed. Tap the download action to retry.</string>
-    <string name="reader_resume_prompt">You read to %2$s at %1$s.</string>
-    <string name="reader_resume_return">Return to previous position</string>
+    <string name="reader_resume_prompt">Another device read to %2$s · %1$s</string>
+    <string name="reader_page_number">Page %1$d</string>
+    <string name="reader_resume_return">Go to latest position</string>
     <string name="reader_resume_return_failed">Couldn’t return to that position.</string>
+    <string name="reader_startup_conflict_title">Choose reading position</string>
+    <string name="reader_startup_conflict_message">This device has an unsynced reading position and the cloud position has also changed. Choose where to continue.</string>
+    <string name="reader_startup_use_local">Continue from this device</string>
+    <string name="reader_startup_use_cloud">Use cloud position</string>
     <string name="reader_resume_dismiss">Dismiss previous reading position</string>
     <string name="work_chapter_current">Currently reading</string>
     <string name="work_chapter_read">Read</string>

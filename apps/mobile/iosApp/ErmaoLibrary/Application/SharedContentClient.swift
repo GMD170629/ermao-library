@@ -200,10 +200,15 @@ actor SharedContentClient: ContentClient {
             ? value.activeMedia?.units ?? []
             : value.readingUnits
         let chapterUnits = readingUnits.filter { $0.volumeId == selectedVolumeID }
+        let readerChapterUnits: [ErmaoShared.ReaderChapterUnit] = chapterUnits.map {
+            ErmaoShared.ReaderChapterUnit(
+                href: $0.href,
+                sortOrder: Int32($0.sortOrder),
+                readingOrderPosition: $0.metadata.readingOrderPosition
+            )
+        }
         let chapterStates = ErmaoShared.PublicKt.resolveReaderChapterStates(
-            units: chapterUnits.map {
-                ErmaoShared.ReaderChapterUnit(href: $0.href, sortOrder: Int32($0.sortOrder))
-            },
+            units: readerChapterUnits,
             currentHref: value.activeMedia?.currentHref,
             currentSortOrder: value.activeMedia?.currentChapterSortOrder,
             progressPercent: currentChapterProgress,
@@ -229,6 +234,7 @@ actor SharedContentClient: ContentClient {
                 isCurrent: state == .current,
                 href: unit.href,
                 sortOrder: Int(unit.sortOrder),
+                readingOrderPosition: unit.metadata.readingOrderPosition.map { Int($0.intValue) },
                 state: state
             )
         }

@@ -29,8 +29,19 @@ class ReaderWireModel(BaseModel):
 
 ReaderFormat = Literal["reflowable", "comic", "pdf", "audio"]
 ReaderSourceFormat = Literal[
-    "epub", "mobi", "azw", "azw3", "prc", "txt", "cbz", "pdf",
-    "audio", "audiobook", "m4b", "m4a", "mp3",
+    "epub",
+    "mobi",
+    "azw",
+    "azw3",
+    "prc",
+    "txt",
+    "cbz",
+    "pdf",
+    "audio",
+    "audiobook",
+    "m4b",
+    "m4a",
+    "mp3",
 ]
 if TYPE_CHECKING:
     ReaderJsonValue: TypeAlias = (
@@ -447,11 +458,24 @@ class ReaderCapabilities(ReaderWireModel):
 class ReaderPublicationAccess(ReaderWireModel):
     manifest_url: str = Field(alias="manifestUrl")
     positions_url: str = Field(alias="positionsUrl")
+    render_artifact: ReaderRenderArtifact | None = Field(
+        default=None,
+        alias="renderArtifact",
+    )
+
+
+class ReaderRenderArtifact(ReaderWireModel):
+    schema_version: Literal[1] = Field(1, alias="schemaVersion")
+    url: str
+    mime_type: Literal["application/epub+zip"] = Field(alias="mimeType")
+    size_bytes: int = Field(alias="sizeBytes", gt=0)
+    content_hash: str = Field(alias="contentHash", pattern=r"^sha256:[a-f0-9]{64}$")
 
 
 class ReaderProgressSnapshot(ReaderWireModel):
     schema_version: Literal[4] = Field(4, alias="schemaVersion")
     revision: int = Field(ge=1)
+    client_id: str = Field(alias="clientId", min_length=1, max_length=256)
     locator: ExactReaderLocation
     display_percent: float = Field(alias="displayPercent", ge=0, le=100)
     received_at_epoch_millis: int = Field(
@@ -499,6 +523,16 @@ class ReaderBootstrapResponse(ReaderWireModel):
 class ReaderProgressResponse(ReaderWireModel):
     ok: Literal[True] = True
     data: ReaderProgressSnapshot
+
+
+class ReaderProgressStateData(ReaderWireModel):
+    schema_version: Literal[4] = Field(4, alias="schemaVersion")
+    progress_snapshot: ReaderProgressSnapshot | None = Field(alias="progressSnapshot")
+
+
+class ReaderProgressStateResponse(ReaderWireModel):
+    ok: Literal[True] = True
+    data: ReaderProgressStateData
 
 
 class ReaderReadingStatusPut(ReaderWireModel):

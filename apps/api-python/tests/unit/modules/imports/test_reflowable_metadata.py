@@ -32,7 +32,9 @@ def test_reflowable_covers_are_isolated_by_volume(tmp_path: Path) -> None:
     assert Path(str(second)).parent.name == "volume-2"
 
 
-def test_txt_inspection_detects_chapters_and_language(tmp_path: Path) -> None:
+def test_txt_inspection_reads_metadata_without_generating_navigation(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "测试小说.txt"
     source.write_text(
         "第一章 开始\n正文。\n第二章 继续\n正文。\n后记\n结束。",
@@ -43,17 +45,8 @@ def test_txt_inspection_detects_chapters_and_language(tmp_path: Path) -> None:
 
     assert metadata.title is None
     assert metadata.language == "zh-CN"
-    assert [chapter.title for chapter in metadata.chapters] == [
-        "第一章 开始",
-        "第二章 继续",
-        "后记",
-    ]
-    assert [chapter.href for chapter in metadata.chapters] == [
-        "txt-section:0",
-        "txt-section:1",
-        "txt-section:2",
-    ]
-    assert all(chapter.navigation_key for chapter in metadata.chapters)
+    assert "navigationCount" not in metadata.raw_metadata
+    assert "navigationFingerprint" not in metadata.raw_metadata
 
 
 def test_txt_inspection_uses_matching_sidecar_cover(tmp_path: Path) -> None:
@@ -94,13 +87,12 @@ def test_fb2_inspection_reads_metadata_sections_and_cover(tmp_path: Path) -> Non
     assert metadata.series_index == 1
     assert metadata.authors == ("东野圭吾",)
     assert metadata.publisher == "测试出版社"
-    assert [chapter.title for chapter in metadata.chapters] == ["第一章", "第二章"]
-    assert [chapter.href for chapter in metadata.chapters] == ["0", "1"]
+    assert "navigationCount" not in metadata.raw_metadata
     assert metadata.cover is not None
     assert metadata.cover.media_type == "image/png"
 
 
-def test_mobi_inspection_only_publishes_valid_filepos_navigation(
+def test_mobi_inspection_reads_metadata_without_generating_navigation(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "book.mobi"
@@ -112,17 +104,9 @@ def test_mobi_inspection_only_publishes_valid_filepos_navigation(
     assert metadata.authors == ("东野圭吾",)
     assert metadata.publisher == "测试出版社"
     assert metadata.language == "zh-CN"
-    assert [chapter.title for chapter in metadata.chapters] == [
-        "第一节",
-        "第二节",
-    ]
-    assert [chapter.href for chapter in metadata.chapters] == [
-        "filepos:0000000010",
-        "filepos:0000000040",
-    ]
-    assert metadata.raw_metadata["chapterSource"] == "mobi_filepos"
-    assert metadata.raw_metadata["navigationCount"] == 2
-    assert metadata.raw_metadata["navigationFingerprint"]
+    assert "chapterSource" not in metadata.raw_metadata
+    assert "navigationCount" not in metadata.raw_metadata
+    assert "navigationFingerprint" not in metadata.raw_metadata
     assert metadata.cover is not None
     assert metadata.cover.media_type == "image/jpeg"
 

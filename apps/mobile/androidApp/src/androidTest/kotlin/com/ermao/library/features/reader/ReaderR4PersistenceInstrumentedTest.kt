@@ -82,7 +82,7 @@ class ReaderR4PersistenceInstrumentedTest {
     }
 
     @Test
-    fun exactRowsAreIsolatedByClientAndLocalFingerprint() = runBlocking {
+    fun exactRowsAreIsolatedByClientAndWorkVolumeIdentity() = runBlocking {
         val namespace = ReaderSyncNamespace("server", "user", 1)
         val first = AndroidReaderProgressDatabase(
             context,
@@ -102,14 +102,14 @@ class ReaderR4PersistenceInstrumentedTest {
         assertEquals(null, anotherClient.load("volume-1"))
         anotherClient.close()
 
-        val anotherContent = AndroidReaderProgressDatabase(
+        val anotherWork = AndroidReaderProgressDatabase(
             context,
-            identity(namespace).copy(localContentFingerprint = fingerprint('b')),
+            identity(namespace).copy(workId = "work-2"),
             legacyProgressStore = null,
             databaseName = databaseName,
         )
-        assertEquals(null, anotherContent.load("volume-1"))
-        anotherContent.close()
+        assertEquals(null, anotherWork.load("volume-1"))
+        anotherWork.close()
 
         val original = AndroidReaderProgressDatabase(
             context,
@@ -240,8 +240,8 @@ class ReaderR4PersistenceInstrumentedTest {
     private fun identity(namespace: ReaderSyncNamespace) = ReaderLocalProgressIdentity(
         namespace,
         "android-client",
+        "work-1",
         "volume-1",
-        fingerprint(),
     )
 
     private fun fingerprint(character: Char = 'a') = ContentFingerprint(

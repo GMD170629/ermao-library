@@ -2,13 +2,13 @@
 
 from sqlalchemy.orm import Session
 
-from app.bootstrap.publications import open_publication
+from app.bootstrap.publications import (
+    open_publication,
+    resolve_publication_source_identity,
+)
 from app.core.config import Settings
 from app.modules.reader.application.volume_reader import VolumeReaderService
 from app.modules.reader.infrastructure.clock import SystemReaderClock
-from app.modules.reader.infrastructure.epub_navigation_recovery import (
-    FileReaderEpubNavigationParser,
-)
 from app.modules.reader.infrastructure.publication_locator_index import (
     NormalizedPublicationLocatorIndex,
 )
@@ -22,11 +22,11 @@ def reader_volume_service(session: Session, settings: Settings) -> VolumeReaderS
     return VolumeReaderService(
         repository,
         session,
-        FileReaderEpubNavigationParser(settings.resolved_storage_root),
         SystemReaderClock(),
         NormalizedPublicationLocatorIndex(
             open_publication(session, settings),
             repository,
+            resolve_publication_source_identity(session, settings),
         ),
     )
 

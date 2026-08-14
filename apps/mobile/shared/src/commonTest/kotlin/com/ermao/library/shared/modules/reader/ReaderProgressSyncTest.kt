@@ -59,11 +59,21 @@ class ReaderProgressSyncTest {
     }
 
     @Test
-    fun conflictIsDurableAndStopsAutomaticOverwrite() = runBlocking {
+    fun conflictDropsRejectedMutationAndWaitsForRealMovement() = runBlocking {
         val store = FakeStore()
         val coordinator = ReaderProgressSyncCoordinator(
             store,
-            server = { upload -> ReaderProgressPushResult.Conflict(snapshot(upload.mutation.locator, 5)) },
+            server = {
+                ReaderProgressPushResult.Conflict(
+                    snapshot(
+                        ReflowablePublicationLocation(
+                            PublicationFingerprint.from(fingerprint()),
+                            remoteEnvelope().asEngineLocator(),
+                        ),
+                        5,
+                    ),
+                )
+            },
             scope = CoroutineScope(coroutineContext),
             createMutationId = { MUTATION_ID },
         )
@@ -71,9 +81,13 @@ class ReaderProgressSyncTest {
         coordinator.saveLocalAndSubmit(target(), progress(1))
         coordinator.awaitIdle()
 
-        assertEquals(5, store.state.conflict?.server?.revision)
-        assertNotNull(store.state.pending)
-        Unit
+        assertEquals(5, store.state.confirmedRevision)
+        assertNull(store.state.pending)
+        assertEquals(5, coordinator.remoteProgressNotice()?.revision)
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        coordinator.awaitIdle()
+        assertNull(store.state.pending)
     }
 
     @Test
@@ -127,6 +141,7 @@ class ReaderProgressSyncTest {
 
     private fun snapshot(locator: PublicationLocation, revision: Long) = ReaderProgressSnapshotV4(
         "volume-1",
+        "ios-client",
         revision,
         locator,
         50.0,
@@ -134,10 +149,18 @@ class ReaderProgressSyncTest {
     )
 
     private fun envelope() = ReadiumLocatorEnvelope.parse(
-        """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"${"a".repeat(64)}","parser":"readium:epub","normalization":"epub-v1"},"payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p1"},"text":{"highlight":"anchor"}}}""",
+        """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"${"a".repeat(64)}","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p1"},"text":{"highlight":"anchor"}}}""",
     )
 
-    private fun fingerprint() = ContentFingerprint("sha256:" + "a".repeat(64), "readium:epub", "epub-v1")
+    private fun remoteEnvelope() = ReadiumLocatorEnvelope.parse(
+        """{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"${"a".repeat(64)}","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#remote"},"text":{"highlight":"remote anchor"}}}""",
+    )
+
+    private fun fingerprint() = ContentFingerprint(
+        "sha256:" + "a".repeat(64),
+        "epub-package:1",
+        "shuku-epub-locator-dom-v2",
+    )
 
     private class FakeStore(private val committed: () -> Unit = {}) : ReaderProgressSyncStateStore {
         var value: ReaderProgress? = null
@@ -149,7 +172,7 @@ class ReaderProgressSyncTest {
         override suspend fun loadSyncState() = state
         override suspend fun commitProgressAndPending(progress: ReaderProgress, pending: ReaderProgressMutation) {
             value = progress
-            state = state.copy(pending = pending, conflict = null, terminalFailureCode = null)
+            state = state.copy(pending = pending, terminalFailureCode = null)
             committed()
         }
         override suspend fun acknowledge(mutationId: String, snapshot: ReaderProgressSnapshotV4) {
@@ -159,8 +182,14 @@ class ReaderProgressSyncTest {
                 pending = if (pending?.mutationId == mutationId) null else pending?.copy(baseRevision = snapshot.revision),
             )
         }
-        override suspend fun recordConflict(conflict: ReaderProgressConflict) {
-            state = state.copy(conflict = conflict)
+        override suspend fun discardPendingAfterConflict(mutationId: String, serverRevision: Long) {
+            if (state.pending?.mutationId == mutationId) {
+                state = state.copy(confirmedRevision = serverRevision, pending = null)
+            }
+        }
+        override suspend fun acceptRemoteProgress(progress: ReaderProgress, snapshot: ReaderProgressSnapshotV4) {
+            value = progress
+            state = ReaderProgressDurableState(confirmedRevision = snapshot.revision)
         }
         override suspend fun recordTerminalFailure(mutationId: String, failureCode: String) {
             state = state.copy(terminalFailureCode = failureCode)

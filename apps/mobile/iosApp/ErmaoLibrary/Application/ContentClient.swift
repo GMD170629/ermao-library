@@ -255,6 +255,7 @@ struct WorkChapter: Identifiable, Codable, Equatable, Sendable {
     let progress: Double?
     let href: String?
     let sortOrder: Int
+    let readingOrderPosition: Int?
     let state: WorkChapterReadingState
 
     var isCurrent: Bool { state == .current }
@@ -266,6 +267,7 @@ struct WorkChapter: Identifiable, Codable, Equatable, Sendable {
         isCurrent: Bool,
         href: String? = nil,
         sortOrder: Int = 0,
+        readingOrderPosition: Int? = nil,
         state: WorkChapterReadingState? = nil
     ) {
         self.id = id
@@ -273,6 +275,7 @@ struct WorkChapter: Identifiable, Codable, Equatable, Sendable {
         self.progress = progress
         self.href = href
         self.sortOrder = sortOrder
+        self.readingOrderPosition = readingOrderPosition
         self.state = state ?? (isCurrent ? .current : .unread)
     }
 }

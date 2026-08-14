@@ -2,9 +2,7 @@ package com.ermao.library.shared.modules.reader.infrastructure
 
 import com.ermao.library.shared.modules.reader.application.ReaderProgressDurableState
 import com.ermao.library.shared.modules.reader.domain.PublicationLocation
-import com.ermao.library.shared.modules.reader.domain.ReaderProgressConflict
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation
-import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -21,7 +19,6 @@ class ReaderProgressSyncStateJson(
         put("version", VERSION)
         put("confirmedRevision", state.confirmedRevision)
         state.pending?.let { put("pending", it.toJson()) }
-        state.conflict?.let { put("conflict", it.server.toJson()) }
         state.terminalFailureCode?.let { put("terminalFailureCode", it) }
     }.toString()
 
@@ -32,16 +29,9 @@ class ReaderProgressSyncStateJson(
             throw ReaderServerWireException("Reader sync state schema is unsupported")
         }
         val pending = (root["pending"] as? JsonObject)?.toMutation()
-        val conflict = (root["conflict"] as? JsonObject)?.let { server ->
-            ReaderProgressConflict(
-                pending ?: throw ReaderServerWireException("Reader conflict is missing its pending mutation"),
-                server.toSnapshot(pending.sourceId),
-            )
-        }
         return ReaderProgressDurableState(
             confirmedRevision = root.requiredLong("confirmedRevision"),
             pending = pending,
-            conflict = conflict,
             terminalFailureCode = root.optionalString("terminalFailureCode"),
         )
     }
@@ -55,14 +45,6 @@ class ReaderProgressSyncStateJson(
         put("locator", json.parseToJsonElement(locator.canonicalJson()))
     }
 
-    private fun ReaderProgressSnapshotV4.toJson(): JsonObject = buildJsonObject {
-        put("revision", revision)
-        put("locator", json.parseToJsonElement(locator.canonicalJson()))
-        put("displayPercent", displayPercent)
-        put("receivedAtEpochMillis", receivedAtEpochMillis)
-        capturedAtEpochMillis?.let { put("capturedAtEpochMillis", it) }
-    }
-
     private fun JsonObject.toMutation(): ReaderProgressMutation = ReaderProgressMutation(
         sourceId = requiredString("sourceId"),
         clientId = requiredString("clientId"),
@@ -72,18 +54,9 @@ class ReaderProgressSyncStateJson(
         locator = PublicationLocation.parse(requiredObject("locator").toString()),
     )
 
-    private fun JsonObject.toSnapshot(sourceId: String): ReaderProgressSnapshotV4 = ReaderProgressSnapshotV4(
-        sourceId = sourceId,
-        revision = requiredLong("revision"),
-        locator = PublicationLocation.parse(requiredObject("locator").toString()),
-        displayPercent = requiredDouble("displayPercent"),
-        receivedAtEpochMillis = requiredLong("receivedAtEpochMillis"),
-        capturedAtEpochMillis = optionalLong("capturedAtEpochMillis"),
-    )
-
     companion object {
         private const val SCHEMA = "ermao.reader-progress-sync"
-        private const val VERSION = 5
+        private const val VERSION = 6
     }
 }
 
@@ -94,11 +67,6 @@ private fun JsonObject.requiredString(name: String): String = optionalString(nam
     ?: throw ReaderServerWireException("Reader sync state field $name is missing")
 
 private fun JsonObject.requiredLong(name: String): Long = (this[name] as? JsonPrimitive)?.longOrNull
-    ?: throw ReaderServerWireException("Reader sync state field $name is missing")
-
-private fun JsonObject.optionalLong(name: String): Long? = (this[name] as? JsonPrimitive)?.longOrNull
-
-private fun JsonObject.requiredDouble(name: String): Double = (this[name] as? JsonPrimitive)?.doubleOrNull
     ?: throw ReaderServerWireException("Reader sync state field $name is missing")
 
 private fun JsonObject.requiredObject(name: String): JsonObject = this[name] as? JsonObject

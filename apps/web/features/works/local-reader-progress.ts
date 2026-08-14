@@ -4,7 +4,6 @@ export type LocalProgressScope = {
   userId: string;
   workId: string;
   volumeId: string;
-  contentFingerprint: string;
 };
 
 export function latestScopedProgress(
@@ -16,7 +15,6 @@ export function latestScopedProgress(
       mutation.userId === scope.userId
       && mutation.workId === scope.workId
       && mutation.volumeId === scope.volumeId
-      && (mutation.localContentFingerprint ?? mutation.publicationFingerprint) === scope.contentFingerprint
     ))
     .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0] ?? null;
 }

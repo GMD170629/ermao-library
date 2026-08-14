@@ -37,7 +37,7 @@ import {
 import type { ReaderBookmark } from './v3/bookmarks';
 import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
 import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
-import { hasActiveTextSelection, isReaderControlTarget, ReaderKeyboardNavigationController, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
+import { hasActiveTextSelection, isReaderControlTarget, isReaderKeyboardControlTarget, ReaderKeyboardNavigationController, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import {
   MOBILE_READER_VIEWPORT_MAXIMUM,
   READER_PAGE_WIDTH_MINIMUM,
@@ -584,7 +584,11 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
         handleInputIntentRef.current(intent);
         return;
       }
-      if (isInteractionBlocked() || shouldIgnoreReaderInteraction(event.target)) return;
+      if (
+        isInteractionBlocked()
+        || isReaderKeyboardControlTarget(event.target, event.key)
+        || hasActiveTextSelection(window.getSelection())
+      ) return;
       event.preventDefault();
       keyboardNavigation.keyDown(event, () => handleInputIntentRef.current(intent));
     }

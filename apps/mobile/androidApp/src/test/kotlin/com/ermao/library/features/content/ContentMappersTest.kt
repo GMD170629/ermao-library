@@ -60,7 +60,23 @@ class ContentMappersTest {
             width = null,
             height = null,
             sizeBytes = null,
-            metadata = ReadingUnitMetadata(null, null, null, null, null, null, null, null, null, null, null, null, null),
+            metadata = ReadingUnitMetadata(
+                exactNavigation = null,
+                level = null,
+                path = null,
+                navigationKey = null,
+                zipEntryName = null,
+                idref = null,
+                linear = null,
+                properties = null,
+                volumeIndex = null,
+                trackIndex = null,
+                pageNumber = null,
+                sourceFileName = null,
+                hrefBase = null,
+                recovered = null,
+                readingOrderPosition = 7,
+            ),
             createdAt = null,
             updatedAt = null,
         )
@@ -109,6 +125,8 @@ class ContentMappersTest {
             ),
         )
 
-        assertEquals(listOf("Chapter 1"), detail.toUiContent().readingUnits.map { it.title })
+        val mappedUnit = detail.toUiContent().readingUnits.single()
+        assertEquals("Chapter 1", mappedUnit.title)
+        assertEquals(7, mappedUnit.readingOrderPosition)
     }
 }

@@ -12,6 +12,7 @@ internal data class ReaderResumeNotice(
     val capturedAtEpochMillis: Long,
     val percent: Double,
     val chapterLabel: String?,
+    val pageNumber: Int? = null,
 )
 
 internal interface ReaderScreenController {

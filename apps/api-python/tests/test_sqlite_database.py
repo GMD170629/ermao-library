@@ -68,6 +68,8 @@ EXPECTED_TABLES = {
     "OrganizePolicy",
     "OrganizeRun",
     "PasswordResetToken",
+    "PublicationNavigationCache",
+    "PublicationRenderCache",
     "ReaderBookPreference",
     "ReaderBookmark",
     "ReaderPreference",
@@ -538,7 +540,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0023_publication_full_hash_identity"
+            assert _alembic_version(connection) == "0026_publication_render_cache"
             inspector = inspect(connection)
             assert "LibraryWork_hidden_createdAt_id_idx" in {
                 index["name"] for index in inspector.get_indexes("LibraryWork")

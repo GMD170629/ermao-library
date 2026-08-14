@@ -27,6 +27,15 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.longOrNull
 
+private val REFLOWABLE_SIDECAR_SOURCE_FORMATS = setOf(
+    ReaderSourceFormat.Epub,
+    ReaderSourceFormat.Mobi,
+    ReaderSourceFormat.Azw,
+    ReaderSourceFormat.Azw3,
+    ReaderSourceFormat.Prc,
+    ReaderSourceFormat.Txt,
+)
+
 class KtorReaderBootstrapGateway internal constructor(
     private val createClient: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
     private val json: Json = Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = true },
@@ -135,21 +144,37 @@ class KtorReaderBootstrapGateway internal constructor(
                 file.url.startsWith("/api/") && !file.url.contains('#') &&
                 file.sizeBytes > 0
         } ?: return ReaderBootstrapResult.Failure("READER_PUBLICATION_FILE_MISSING", recoverable = false)
-        val target = try {
-            ReaderProgressSyncTarget(
-                namespace = request.namespace,
-                workId = book.id,
-                volumeId = volume.id,
-                sourceFormat = exactSourceFormat.readerFormat,
-            )
-        } catch (_: IllegalArgumentException) {
-            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
-        }
         val exactPublicationFingerprint = try {
             PublicationFingerprint(
                 originalFileHash = publicationFingerprint.originalFileHash,
                 parser = publicationFingerprint.parser,
                 normalization = publicationFingerprint.normalization,
+            )
+        } catch (_: IllegalArgumentException) {
+            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
+        }
+        val renderArtifact = publication?.renderArtifact?.takeIf {
+            exactSourceFormat in REFLOWABLE_SIDECAR_SOURCE_FORMATS &&
+                it.schemaVersion == 1 &&
+                it.url == "/api/reader/v4/volumes/${volume.id}/publication/render.epub" &&
+                it.mimeType == "application/epub+zip" &&
+                it.sizeBytes > 0 &&
+                it.contentHash.matches(CONTENT_FINGERPRINT_PATTERN)
+        }
+        if (
+            exactSourceFormat in REFLOWABLE_SIDECAR_SOURCE_FORMATS &&
+            publication?.renderArtifact != null &&
+            renderArtifact == null
+        ) {
+            return ReaderBootstrapResult.Failure("READER_RENDER_ARTIFACT_INVALID", false)
+        }
+        val downloadSourceFormat = if (renderArtifact != null) ReaderSourceFormat.Epub else exactSourceFormat
+        val target = try {
+            ReaderProgressSyncTarget(
+                namespace = request.namespace,
+                workId = book.id,
+                volumeId = volume.id,
+                sourceFormat = downloadSourceFormat.readerFormat,
             )
         } catch (_: IllegalArgumentException) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
@@ -190,15 +215,16 @@ class KtorReaderBootstrapGateway internal constructor(
                     displayTitle = volume.title.ifBlank { book.title },
                     workId = book.id,
                     volumeId = volume.id,
-                    apiPath = fileUrl,
-                    sourceFormat = exactSourceFormat,
-                    mimeType = publicationFile.mimeType.lowercase(),
-                    expectedSizeBytes = publicationFile.sizeBytes,
-                    expectedOriginalFileHash = publicationFile.contentHash,
+                    apiPath = renderArtifact?.url ?: fileUrl,
+                    originalSourceFormat = exactSourceFormat,
+                    sourceFormat = downloadSourceFormat,
+                    mimeType = renderArtifact?.mimeType ?: publicationFile.mimeType.lowercase(),
+                    expectedSizeBytes = renderArtifact?.sizeBytes ?: publicationFile.sizeBytes,
+                    expectedContentHash = renderArtifact?.contentHash ?: publicationFile.contentHash,
                     publicationFingerprint = exactPublicationFingerprint,
                 ),
                 remoteSnapshot = remoteSnapshot,
-                artifactVersion = contentFingerprint,
+                artifactVersion = renderArtifact?.contentHash ?: contentFingerprint,
                 comicPages = comicPages,
                 pageCount = volume.pageCount,
             ),
@@ -287,6 +313,16 @@ private data class PublicationFingerprintWire(
 private data class ReaderPublicationAccessWire(
     val manifestUrl: String,
     val positionsUrl: String,
+    val renderArtifact: ReaderRenderArtifactWire? = null,
+)
+
+@Serializable
+private data class ReaderRenderArtifactWire(
+    val schemaVersion: Int,
+    val url: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val contentHash: String,
 )
 
 @Serializable

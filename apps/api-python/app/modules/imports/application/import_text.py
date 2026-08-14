@@ -20,6 +20,7 @@ from app.modules.imports.application.identity_resolution import (
 from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
+    _content_hash,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -28,7 +29,6 @@ from app.modules.imports.application.import_support import (
     _prepared_default_cover,
     _source_group_key,
     _work_merge_key,
-    _content_hash,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -62,14 +62,12 @@ def refresh_existing_reflowable_source(
     existing: ImportResult,
     unit_of_work: ImportUnitOfWork,
 ) -> ImportResult:
-    """Reinspect a source and deterministically replace its exact navigation."""
+    """Refresh source metadata and invalidate navigation when content changes."""
 
     source_format = source_path.suffix.removeprefix(".").upper()
     if source_format not in REFLOWABLE_MIME_TYPES:
         return existing
     metadata = services.inspect_reflowable_book(source_path, source_format)
-    if not metadata.chapters and metadata.cover is None and metadata.title is None:
-        return existing
     file_rows = queries.list_library_files_by_paths([str(source_path.resolve())])
     if not file_rows:
         return existing
@@ -88,7 +86,7 @@ def refresh_existing_reflowable_source(
                     existing.media_version_id
                 )
                 * 1000,
-                "chapterCount": len(metadata.chapters),
+                "chapterCount": None,
                 "coverPath": None,
                 "createdAt": _now(),
                 "updatedAt": _now(),
@@ -96,22 +94,33 @@ def refresh_existing_reflowable_source(
         )
     volume_id = str(volume["id"])
     file_id = str(file_row["id"])
+    source_stat = source_path.stat()
+    full_hash = _content_hash(source_path)
+    content_changed = (
+        file_row.get("fullHash") != full_hash
+        or int(file_row.get("sizeBytes") or -1) != source_stat.st_size
+        or int(file_row.get("mtimeMs") or -1) != int(source_stat.st_mtime * 1000)
+    )
     if not file_row.get("volumeId"):
         store.update_library_file(
             file_id,
             columns={"volumeId": volume_id, "updatedAt": _now()},
         )
+    if content_changed:
+        store.update_library_file(
+            file_id,
+            columns={
+                "fullHash": full_hash,
+                "hashStatus": "COMPLETED",
+                "sizeBytes": source_stat.st_size,
+                "mtimeMs": int(source_stat.st_mtime * 1000),
+                "updatedAt": _now(),
+            },
+        )
     for unit in queries.list_reflowable_chapters_for_volume(volume_id):
         unit_id = unit.get("id")
         if unit_id:
             store.delete_library_reading_unit(str(unit_id))
-    _insert_reflowable_chapters(
-        store,
-        volume_id,
-        file_id,
-        source_format,
-        metadata,
-    )
     store.insert_library_metadata(
         columns={
             "id": _id(),
@@ -136,7 +145,7 @@ def refresh_existing_reflowable_source(
         "publishedAt": metadata.published_at,
         "identifier": metadata.identifier,
         "isbn": metadata.isbn,
-        "chapterCount": len(metadata.chapters),
+        "chapterCount": None,
         "updatedAt": _now(),
     }
     if cover_path:
@@ -146,11 +155,7 @@ def refresh_existing_reflowable_source(
         )
     store.update_library_volume(
         volume_id,
-        columns={
-            **volume_values,
-            "chapterCount": len(metadata.chapters),
-            "updatedAt": _now(),
-        },
+        columns=volume_values,
     )
     work = queries.get_work_by_id(existing.work_id) or {}
     current_title = str(work.get("title") or existing.title)
@@ -189,46 +194,12 @@ def refresh_existing_reflowable_source(
         selected_title,
         existing.type,
         existing.format,
-        len(metadata.chapters),
+        0,
         existing.import_status,
         True,
         existing.merged,
         "refreshed-native-metadata",
     )
-
-
-def _insert_reflowable_chapters(
-    store: LibraryImportStore,
-    volume_id: str,
-    file_id: str,
-    source_format: str,
-    metadata: ReflowableBookMetadata,
-) -> None:
-    mime_type = REFLOWABLE_MIME_TYPES[source_format]
-    for index, chapter in enumerate(metadata.chapters):
-        store.insert_library_reading_unit(
-            columns={
-                "id": _id(),
-                "volumeId": volume_id,
-                "fileId": file_id,
-                "unitType": "chapter",
-                "title": chapter.title,
-                "href": chapter.href,
-                "mediaType": mime_type,
-                "sortOrder": index,
-                "metadataJson": json.dumps(
-                    {
-                        "exactNavigation": True,
-                        "level": chapter.level,
-                        "navigationKey": chapter.navigation_key,
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            }
-        )
 
 
 def _reflowable_metadata_json(
@@ -238,7 +209,12 @@ def _reflowable_metadata_json(
 ) -> str:
     return json.dumps(
         {
-            **metadata.raw_metadata,
+            **{
+                key: value
+                for key, value in metadata.raw_metadata.items()
+                if key
+                not in {"chapterSource", "navigationCount", "navigationFingerprint"}
+            },
             "sourceFormat": source_format,
             "sourcePath": str(source_path),
             "readable": True,
@@ -250,15 +226,6 @@ def _reflowable_metadata_json(
             "isbn": metadata.isbn,
             "description": metadata.description,
             "subjects": metadata.subjects,
-            "chapters": [
-                {
-                    "title": chapter.title,
-                    "href": chapter.href,
-                    "level": chapter.level,
-                    "navigationKey": chapter.navigation_key,
-                }
-                for chapter in metadata.chapters
-            ],
             "coverEmbedded": metadata.cover is not None,
         },
         ensure_ascii=False,
@@ -376,7 +343,7 @@ def _import_reflowable_source(
             "identifier": metadata.identifier,
             "isbn": metadata.isbn,
             "sizeBytes": file_size,
-            "chapterCount": len(metadata.chapters),
+            "chapterCount": None,
             "coverPath": None,
             "coverStatus": "PENDING",
             "importStatus": "COMPLETED",
@@ -385,7 +352,7 @@ def _import_reflowable_source(
             "updatedAt": _now(),
         }
     )
-    file = store.insert_library_file(
+    store.insert_library_file(
         columns={
             "id": _id(),
             "volumeId": volume["id"],
@@ -401,13 +368,6 @@ def _import_reflowable_source(
             "createdAt": _now(),
             "updatedAt": _now(),
         }
-    )
-    _insert_reflowable_chapters(
-        store,
-        str(volume["id"]),
-        str(file["id"]),
-        source_format,
-        metadata,
     )
     store.insert_library_metadata(
         columns={
@@ -459,7 +419,7 @@ def _import_reflowable_source(
         str(work["title"]),
         _classification_result_type(classification),
         source_format.lower(),
-        len(metadata.chapters),
+        0,
         "completed",
         False,
         not created,

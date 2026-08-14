@@ -63,6 +63,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
         val temporary = File(publicationRoot, ".${target.name}.${System.nanoTime()}.tmp")
         val digest = MessageDigest.getInstance("SHA-256")
         var written = 0L
+        lateinit var artifactContentHash: String
         try {
             FileOutputStream(temporary).use { output ->
                 val buffer = ByteArray(COPY_BUFFER_BYTES)
@@ -77,8 +78,10 @@ internal class AndroidReaderPublicationStore(context: Context) {
                 output.fd.sync()
             }
             require(written > 0) { "Reader publication is empty" }
+            artifactContentHash = digest.digestToFingerprint()
             validatePublication(temporary, sourceFormat, publicationFingerprint)
             atomicReplace(temporary, target)
+            writeArtifactHash(sourceId, artifactContentHash, sourceFormat)
         } finally {
             temporary.delete()
         }
@@ -88,7 +91,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
             displayTitle = displayTitle,
             format = sourceFormat.readerFormat,
             contentFingerprint = ContentFingerprint(
-                originalFileHash = digest.digestToFingerprint(),
+                originalFileHash = publicationFingerprint?.originalFileHash ?: artifactContentHash,
                 parserVersion = publicationFingerprint?.parser ?: sourceFormat.defaultParser,
                 normalizationVersion = publicationFingerprint?.normalization ?: sourceFormat.defaultNormalization,
             ),
@@ -129,6 +132,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
 
     suspend fun resolveVerified(source: LocalReaderSource): File = withContext(Dispatchers.IO) {
         val target = resolve(source)
+        val sourceFormat = source.sourceFormat ?: ReaderSourceFormat.Epub
         val digest = MessageDigest.getInstance("SHA-256")
         target.inputStream().use { input ->
             val buffer = ByteArray(COPY_BUFFER_BYTES)
@@ -138,7 +142,10 @@ internal class AndroidReaderPublicationStore(context: Context) {
                 digest.update(buffer, 0, count)
             }
         }
-        require(digest.digestToFingerprint() == source.contentFingerprint.originalFileHash) {
+        val computedHash = digest.digestToFingerprint()
+        val expectedHash = readArtifactHash(source.sourceId, sourceFormat)
+            ?: source.contentFingerprint.originalFileHash
+        require(computedHash.equals(expectedHash, ignoreCase = true)) {
             "Reader publication fingerprint does not match the launch contract"
         }
         target
@@ -146,7 +153,10 @@ internal class AndroidReaderPublicationStore(context: Context) {
 
     suspend fun delete(sourceId: String): Unit = withContext(Dispatchers.IO) {
         require(sourceId.isNotBlank()) { "Reader source id is blank" }
-        ReaderSourceFormat.entries.forEach { Files.deleteIfExists(targetFile(sourceId, it).toPath()) }
+        ReaderSourceFormat.entries.forEach {
+            Files.deleteIfExists(targetFile(sourceId, it).toPath())
+            Files.deleteIfExists(artifactHashFile(sourceId, it).toPath())
+        }
     }
 
     private fun targetFile(sourceId: String, sourceFormat: ReaderSourceFormat): File =
@@ -196,19 +206,20 @@ internal class AndroidReaderPublicationStore(context: Context) {
                 }
                 output = null
                 val computedHash = digest.digestToFingerprint()
-                download.expectedOriginalFileHash?.let { expectedHash ->
+                download.expectedContentHash?.let { expectedHash ->
                     check(computedHash.equals(expectedHash, ignoreCase = true)) {
                         "Reader publication hash does not match bootstrap"
                     }
                 }
                 validatePublication(temporary, download.sourceFormat, download.publicationFingerprint)
                 atomicReplace(temporary, target)
+                writeArtifactHash(download.sourceId, computedHash, download.sourceFormat)
                 LocalReaderSource(
                     sourceId = download.sourceId,
                     displayTitle = download.displayTitle,
                     format = download.sourceFormat.readerFormat,
                     contentFingerprint = ContentFingerprint(
-                        computedHash,
+                        download.publicationFingerprint.originalFileHash,
                         download.publicationFingerprint.parser,
                         download.publicationFingerprint.normalization,
                     ),
@@ -230,6 +241,35 @@ internal class AndroidReaderPublicationStore(context: Context) {
             output = null
             temporary.delete()
         }
+    }
+
+    private fun artifactHashFile(sourceId: String, sourceFormat: ReaderSourceFormat): File =
+        File(publicationRoot, sha256(sourceId) + "." + sourceFormat.wireValue + ".sha256")
+
+    private fun writeArtifactHash(
+        sourceId: String,
+        contentHash: String,
+        sourceFormat: ReaderSourceFormat,
+    ) {
+        require(contentHash.matches(SHA256_PATTERN)) { "Reader artifact hash is invalid" }
+        val destination = artifactHashFile(sourceId, sourceFormat)
+        val temporary = File(publicationRoot, ".${destination.name}.${System.nanoTime()}.tmp")
+        try {
+            temporary.writeText(contentHash, Charsets.US_ASCII)
+            FileOutputStream(temporary, true).use { it.fd.sync() }
+            atomicReplace(temporary, destination)
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private fun readArtifactHash(
+        sourceId: String,
+        sourceFormat: ReaderSourceFormat,
+    ): String? {
+        val file = artifactHashFile(sourceId, sourceFormat)
+        if (!file.isFile || Files.isSymbolicLink(file.toPath()) || file.length() > 80) return null
+        return file.readText(Charsets.US_ASCII).trim().takeIf { it.matches(SHA256_PATTERN) }
     }
 
     private fun validateEpubArchive(file: File) {
@@ -319,7 +359,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
 
     companion object {
         const val EPUB_PARSER_VERSION = "epub-package:1"
-        const val EPUB_NORMALIZATION_VERSION = "shuku-epub-raw-v1"
+        const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v2"
         @Deprecated("Use EPUB_PARSER_VERSION")
         const val READIUM_PARSER_VERSION = EPUB_PARSER_VERSION
         private const val PUBLICATION_DIRECTORY = "reader-publications"
@@ -335,6 +375,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
         private const val EPUB_MIME_TYPE = "application/epub+zip"
         private val PDF_HEADER = "%PDF-".toByteArray(Charsets.US_ASCII)
         private val COMIC_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp")
+        private val SHA256_PATTERN = Regex("^sha256:[0-9a-f]{64}$")
         private val SUPPORTED_LOCAL_FORMATS = setOf(
             ReaderFormat.Epub,
             ReaderFormat.Mobi,
@@ -356,9 +397,9 @@ private val ReaderSourceFormat.defaultParser: String
 
 private val ReaderSourceFormat.defaultNormalization: String
     get() = when (this) {
-        ReaderSourceFormat.Epub -> "shuku-epub-raw-v1"
-        ReaderSourceFormat.Txt -> "shuku-txt-publication-v1"
+        ReaderSourceFormat.Epub -> "shuku-epub-locator-dom-v2"
+        ReaderSourceFormat.Txt -> "shuku-txt-publication-v2"
         ReaderSourceFormat.Cbz -> "shuku-comic-pages-v1"
         ReaderSourceFormat.Pdf -> "shuku-pdf-pages-v1"
-        else -> "ermao-mobi-core-v1"
+        else -> "ermao-mobi-core-v1+shuku-locator-dom-v2"
     }

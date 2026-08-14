@@ -11,14 +11,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote
 
-from app.contracts.epub_navigation import (
-    EPUB_HREF_BASE_METADATA_KEY,
-    EPUB_PUBLICATION_ROOT_HREF_BASE,
-)
 from app.modules.imports.application.commands import release_import_transaction
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
-    EpubNavigationChapterDTO,
     ImportOptions,
     ImportResult,
     ImportRuntimeConfig,
@@ -32,12 +27,10 @@ from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
     _content_hash,
-    _decode_xml_text,
     _ensure_work,
     _extract_isbn,
     _file_resource_key,
     _finalize_work_cover,
-    _first_text,
     _hash_text,
     _id,
     _insert_identity_metadata,
@@ -212,7 +205,7 @@ def _import_epub(
                     "identifier": metadata.get("identifier"),
                     "isbn": metadata.get("isbn"),
                     "sizeBytes": file_size,
-                    "chapterCount": metadata["chapterCount"],
+                    "chapterCount": None,
                     "coverPath": None,
                     "coverStatus": "PENDING",
                     "importStatus": "PARSING",
@@ -234,7 +227,7 @@ def _import_epub(
                     metadata,
                     volume["id"],
                 )
-            file = store.insert_library_file(
+            store.insert_library_file(
                 columns={
                     "id": _id(),
                     "volumeId": volume["id"],
@@ -251,29 +244,6 @@ def _import_epub(
                     "updatedAt": _now(),
                 }
             )
-            for chapter in metadata["chapters"]:
-                store.insert_library_reading_unit(
-                    columns={
-                        "id": _id(),
-                        "volumeId": volume["id"],
-                        "fileId": file["id"],
-                        "unitType": "chapter",
-                        "title": chapter["title"],
-                        "href": chapter["href"],
-                        "mediaType": chapter.get("mediaType"),
-                        "sortOrder": chapter["sortOrder"],
-                        "metadataJson": json.dumps(
-                            {
-                                "idref": chapter.get("idref"),
-                                "volumeIndex": volume_info.series_index,
-                                EPUB_HREF_BASE_METADATA_KEY: EPUB_PUBLICATION_ROOT_HREF_BASE,
-                            },
-                            ensure_ascii=False,
-                        ),
-                        "createdAt": _now(),
-                        "updatedAt": _now(),
-                    }
-                )
             store.insert_library_metadata(
                 columns={
                     "id": _id(),
@@ -293,7 +263,6 @@ def _import_epub(
                 volume["id"],
                 columns={
                     "coverPath": stored_cover_path,
-                    "chapterCount": metadata["chapterCount"],
                     "updatedAt": _now(),
                 },
             )
@@ -301,7 +270,7 @@ def _import_epub(
                 volume["id"],
                 columns={
                     "sizeBytes": file_size,
-                    "chapterCount": metadata["chapterCount"],
+                    "chapterCount": None,
                     "coverPath": media_version_cover_path,
                     "coverStatus": services.cover_status(media_version_cover_path),
                     "importStatus": "COMPLETED",
@@ -325,7 +294,7 @@ def _import_epub(
                 work["title"],
                 _classification_result_type(classification),
                 "epub",
-                metadata["chapterCount"],
+                0,
                 "completed",
                 False,
                 (not created) or (not created_media_version),
@@ -385,7 +354,7 @@ def _import_epub(
                 "identifier": metadata.get("identifier"),
                 "isbn": metadata.get("isbn"),
                 "sizeBytes": file_size,
-                "chapterCount": metadata["chapterCount"],
+                "chapterCount": None,
                 "coverPath": stored_cover_path,
                 "coverStatus": services.cover_status(stored_cover_path),
                 "importStatus": "PARSING",
@@ -394,7 +363,7 @@ def _import_epub(
                 "updatedAt": _now(),
             }
         )
-        file = store.insert_library_file(
+        store.insert_library_file(
             columns={
                 "id": _id(),
                 "volumeId": volume["id"],
@@ -411,28 +380,6 @@ def _import_epub(
                 "updatedAt": _now(),
             }
         )
-        for chapter in metadata["chapters"]:
-            store.insert_library_reading_unit(
-                columns={
-                    "id": _id(),
-                    "volumeId": volume["id"],
-                    "fileId": file["id"],
-                    "unitType": "chapter",
-                    "title": chapter["title"],
-                    "href": chapter["href"],
-                    "mediaType": chapter.get("mediaType"),
-                    "sortOrder": chapter["sortOrder"],
-                    "metadataJson": json.dumps(
-                        {
-                            "idref": chapter.get("idref"),
-                            EPUB_HREF_BASE_METADATA_KEY: EPUB_PUBLICATION_ROOT_HREF_BASE,
-                        },
-                        ensure_ascii=False,
-                    ),
-                    "createdAt": _now(),
-                    "updatedAt": _now(),
-                }
-            )
         store.insert_library_metadata(
             columns={
                 "id": _id(),
@@ -470,7 +417,7 @@ def _import_epub(
             work["title"],
             _classification_result_type(classification),
             "epub",
-            metadata["chapterCount"],
+            0,
             "completed",
             False,
             not created,
@@ -497,8 +444,6 @@ def parse_epub_metadata(path: Path) -> dict[str, Any]:
         author = publication.author or "未知作者"
         identifiers = _texts(opf_xml, "identifier")
         manifest = _opf_items(opf_xml)
-        spine = _opf_itemrefs(opf_xml)
-        chapters = _epub_chapters(archive, opf_path, opf_xml, manifest, spine)
         cover = _epub_cover(manifest, opf_xml)
         raw_metadata = {
             "opfPath": opf_path,
@@ -530,8 +475,6 @@ def parse_epub_metadata(path: Path) -> dict[str, Any]:
             "fixedLayout": fixed_layout,
             "coverPath": cover.get("href") if cover else None,
             "coverMediaType": cover.get("mediaType") if cover else None,
-            "chapterCount": len(chapters),
-            "chapters": chapters,
             "opfPath": opf_path,
             "rawMetadata": raw_metadata,
             "publicationMetadata": publication,
@@ -590,41 +533,6 @@ def _epub_is_fixed_layout(opf_xml: str) -> bool:
     )
 
 
-def inspect_epub_navigation(path: Path) -> tuple[EpubNavigationChapterDTO, ...]:
-    """Return validated, publication-root-relative EPUB navigation entries."""
-    metadata = parse_epub_metadata(path)
-    chapters = metadata.get("chapters")
-    if not isinstance(chapters, list):
-        return ()
-    result: list[EpubNavigationChapterDTO] = []
-    for chapter in chapters:
-        if not isinstance(chapter, dict):
-            continue
-        title = chapter.get("title")
-        href = chapter.get("href")
-        sort_order = chapter.get("sortOrder")
-        if (
-            not isinstance(title, str)
-            or not title.strip()
-            or not isinstance(href, str)
-            or not href.strip()
-            or not isinstance(sort_order, int)
-        ):
-            continue
-        idref = chapter.get("idref")
-        media_type = chapter.get("mediaType")
-        result.append(
-            EpubNavigationChapterDTO(
-                title=title,
-                href=href,
-                sort_order=sort_order,
-                idref=idref if isinstance(idref, str) else None,
-                media_type=media_type if isinstance(media_type, str) else None,
-            )
-        )
-    return tuple(result)
-
-
 def _opf_items(opf_xml: str) -> list[dict[str, str]]:
     return [
         {
@@ -635,175 +543,6 @@ def _opf_items(opf_xml: str) -> list[dict[str, str]]:
         }
         for attrs in _attrs(opf_xml, "item")
     ]
-
-
-def _opf_itemrefs(opf_xml: str) -> list[dict[str, str]]:
-    return [{"idref": attrs.get("idref")} for attrs in _attrs(opf_xml, "itemref")]
-
-
-def _epub_chapters(
-    archive: zipfile.ZipFile,
-    opf_path: str,
-    opf_xml: str,
-    manifest: list[dict[str, str]],
-    spine: list[dict[str, str]],
-) -> list[dict[str, Any]]:
-    href_items = {
-        _normalize_epub_path(item.get("href") or ""): item
-        for item in manifest
-        if item.get("href")
-    }
-    spine_attrs = _attrs(opf_xml, "spine")
-    ncx_id = (spine_attrs[0] if spine_attrs else {}).get("toc")
-    ncx = next((item for item in manifest if item.get("id") == ncx_id), None) or next(
-        (
-            item
-            for item in manifest
-            if "ncx" in str(item.get("mediaType") or "").lower()
-        ),
-        None,
-    )
-    if ncx and ncx.get("href"):
-        chapters = _parse_ncx(
-            _read_zip_text_optional(archive, _epub_zip_path(opf_path, ncx["href"])),
-            opf_path,
-            _epub_zip_path(opf_path, ncx["href"]),
-            href_items,
-        )
-        if chapters:
-            return chapters
-    nav = next(
-        (
-            item
-            for item in manifest
-            if "nav" in str(item.get("properties") or "").split()
-        ),
-        None,
-    )
-    if nav and nav.get("href"):
-        chapters = _parse_nav(
-            _read_zip_text_optional(archive, _epub_zip_path(opf_path, nav["href"])),
-            opf_path,
-            _epub_zip_path(opf_path, nav["href"]),
-            href_items,
-        )
-        if chapters:
-            return chapters
-    chapters = []
-    by_id = {item.get("id"): item for item in manifest}
-    for index, ref in enumerate(spine, start=1):
-        item = by_id.get(ref.get("idref"))
-        if item and item.get("href"):
-            title = (
-                _chapter_heading(archive, opf_path, item["href"]) or f"第 {index} 章"
-            )
-            chapters.append(
-                {
-                    "title": title,
-                    "href": _epub_publication_href(opf_path, item["href"]),
-                    "idref": ref.get("idref"),
-                    "mediaType": item.get("mediaType"),
-                    "sortOrder": index,
-                }
-            )
-    return chapters
-
-
-def _parse_ncx(
-    xml: str | None, opf_path: str, ncx_path: str, href_items: dict[str, dict[str, str]]
-) -> list[dict[str, Any]]:
-    if not xml:
-        return []
-    entries = []
-    for index, block in enumerate(
-        re.findall(r"<navPoint\b[\s\S]*?</navPoint>", xml, re.IGNORECASE), start=1
-    ):
-        title = _first_text(block, "text") or ""
-        src = (_attrs(block, "content")[0] if _attrs(block, "content") else {}).get(
-            "src", ""
-        )
-        chapter = _chapter_from_toc(title, src, index, opf_path, ncx_path, href_items)
-        if chapter:
-            entries.append(chapter)
-    return entries
-
-
-def _parse_nav(
-    xml: str | None, opf_path: str, nav_path: str, href_items: dict[str, dict[str, str]]
-) -> list[dict[str, Any]]:
-    if not xml:
-        return []
-    entries = []
-    nav_blocks = list(
-        re.finditer(r"<nav\b([^>]*)>([\s\S]*?)</nav>", xml, re.IGNORECASE)
-    )
-    toc_block = next(
-        (
-            match.group(2)
-            for match in nav_blocks
-            if re.search(
-                r"\b(?:epub:)?type\s*=\s*['\"][^'\"]*\btoc\b",
-                match.group(1),
-                re.IGNORECASE,
-            )
-            or re.search(
-                r"\brole\s*=\s*['\"]doc-toc['\"]", match.group(1), re.IGNORECASE
-            )
-        ),
-        nav_blocks[0].group(2) if nav_blocks else xml,
-    )
-    for index, match in enumerate(
-        re.finditer(r"<a\b([^>]*)>([\s\S]*?)</a>", toc_block, re.IGNORECASE), start=1
-    ):
-        title = _decode_xml_text(match.group(2))
-        href = (
-            _attrs(f"<a{match.group(1)}>", "a")[0]
-            if _attrs(f"<a{match.group(1)}>", "a")
-            else {}
-        ).get("href", "")
-        chapter = _chapter_from_toc(title, href, index, opf_path, nav_path, href_items)
-        if chapter:
-            entries.append(chapter)
-    return entries
-
-
-def _chapter_from_toc(
-    title: str,
-    href: str,
-    index: int,
-    opf_path: str,
-    toc_path: str,
-    href_items: dict[str, dict[str, str]],
-) -> dict[str, Any] | None:
-    if not title or not href:
-        return None
-    path_part, _, fragment = href.partition("#")
-    absolute = _normalize_epub_path(str(PurePosixPath(toc_path).parent / path_part))
-    relative = _normalize_epub_path(
-        os.path.relpath(absolute, str(PurePosixPath(opf_path).parent)).replace(
-            "\\", "/"
-        )
-    )
-    full_href = f"{absolute}#{fragment}" if fragment else absolute
-    item = href_items.get(_normalize_epub_path(relative))
-    return {
-        "title": title,
-        "href": full_href,
-        "idref": item.get("id") if item else None,
-        "mediaType": item.get("mediaType") if item else None,
-        "sortOrder": index,
-    }
-
-
-def _chapter_heading(archive: zipfile.ZipFile, opf_path: str, href: str) -> str | None:
-    markup = _read_zip_text_optional(archive, _epub_zip_path(opf_path, href))
-    if not markup:
-        return None
-    for tag in ["h1", "h2", "h3", "title"]:
-        value = _first_text(markup, tag)
-        if value:
-            return value
-    return None
 
 
 def _epub_cover(manifest: list[dict[str, str]], opf_xml: str) -> dict[str, str] | None:
@@ -846,21 +585,8 @@ def _epub_zip_path(opf_path: str, href: str) -> str:
     return _normalize_epub_path(str(PurePosixPath(opf_path).parent / path))
 
 
-def _epub_publication_href(base_path: str, href: str) -> str:
-    path, separator, fragment = href.partition("#")
-    absolute = _normalize_epub_path(str(PurePosixPath(base_path).parent / path))
-    return f"{absolute}#{fragment}" if separator else absolute
-
-
 def _normalize_epub_path(value: str) -> str:
     return str(PurePosixPath(value.replace("\\", "/"))).lstrip("./")
-
-
-def _read_zip_text_optional(archive: zipfile.ZipFile, entry: str) -> str | None:
-    try:
-        return archive.read(entry).decode("utf-8", "replace")
-    except KeyError:
-        return None
 
 
 def _resolve_epub_archive_entry(archive: zipfile.ZipFile, entry: str) -> str | None:

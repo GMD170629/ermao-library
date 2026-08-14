@@ -8,13 +8,11 @@ from typing import Protocol
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderBookmarkDto,
-    ReaderEpubSourceDto,
     ReaderExactLocationDto,
     ReaderFileDto,
     ReaderProgressDto,
     ReaderPublicationFingerprintDto,
     ReaderReadingStatus,
-    ReaderRecoveredEpubChapterDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
     ReaderVolumeDto,
@@ -31,19 +29,6 @@ class ReaderVolumeRepository(Protocol):
     def list_files(self, volume_id: str) -> list[ReaderFileDto]: ...
 
     def list_units(self, volume_id: str) -> list[ReaderUnitDto]: ...
-
-    def get_epub_source(self, volume_id: str) -> ReaderEpubSourceDto | None: ...
-
-    def epub_navigation_needs_repair(self, volume_id: str) -> bool: ...
-
-    def replace_epub_navigation_units(
-        self,
-        *,
-        volume_id: str,
-        file_id: str,
-        chapters: tuple[ReaderRecoveredEpubChapterDto, ...],
-        now: datetime,
-    ) -> None: ...
 
     def get_progress(
         self, user_id: str, volume_id: str
@@ -122,10 +107,6 @@ class ReaderUnitOfWork(Protocol):
     def commit(self) -> None: ...
 
     def rollback(self) -> None: ...
-
-
-class ReaderEpubNavigationParser(Protocol):
-    def parse(self, source_path: str) -> tuple[ReaderRecoveredEpubChapterDto, ...]: ...
 
 
 class ReaderClock(Protocol):

@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from app.modules.reader.application.content_fingerprint import (
     build_publication_fingerprint,
-    build_volume_content_fingerprint,
     publication_fingerprint_key,
 )
 from app.modules.reader.application.dto import (
@@ -33,11 +31,9 @@ from app.modules.reader.application.dto import (
 )
 from app.modules.reader.application.exact_location import (
     exact_location_kind,
-    exact_location_publication,
 )
 from app.modules.reader.application.ports import (
     ReaderClock,
-    ReaderEpubNavigationParser,
     ReaderPublicationLocatorIndex,
     ReaderUnitOfWork,
     ReaderVolumeRepository,
@@ -46,9 +42,6 @@ from app.modules.reader.domain.volume_format import (
     ReaderType,
     reader_type_for_volume_format,
 )
-from app.contracts.media_capabilities import capability_for_format
-
-_SHA256_PATTERN = re.compile(r"^(?:sha256:)?[a-fA-F0-9]{64}$")
 
 
 class ReaderVolumeNotFound(Exception):
@@ -57,11 +50,6 @@ class ReaderVolumeNotFound(Exception):
 
 class ReaderVolumeFormatUnsupported(Exception):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class ReaderEpubNavigationParseError(Exception):
-    source_path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,13 +137,11 @@ class VolumeReaderService:
         self,
         repository: ReaderVolumeRepository,
         unit_of_work: ReaderUnitOfWork,
-        epub_navigation_parser: ReaderEpubNavigationParser,
         clock: ReaderClock,
         publication_locator_index: ReaderPublicationLocatorIndex,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
-        self._epub_navigation_parser = epub_navigation_parser
         self._clock = clock
         self._publication_locator_index = publication_locator_index
 
@@ -180,18 +166,6 @@ class VolumeReaderService:
         if all(volume.id != volume_id for volume in available_volumes):
             raise ReaderVolumeNotFound
         files = self._repository.list_files(volume_id)
-        capability = capability_for_format(context.volume.format)
-        if capability is None or (
-            capability.requires_full_hash
-            and (
-                len(files) != 1
-                or files[0].full_hash is None
-                or _SHA256_PATTERN.fullmatch(files[0].full_hash) is None
-            )
-        ):
-            # Exact cross-platform restoration is unsafe until preparation has
-            # established the immutable source identity.
-            raise ReaderVolumeFormatUnsupported
         units = self._repository.list_units(volume_id)
         progresses = self._repository.list_progresses(
             user_id, [volume.id for volume in available_volumes]
@@ -205,13 +179,7 @@ class VolumeReaderService:
         ) or build_publication_fingerprint(
             asdict(context.volume), [asdict(file) for file in files]
         )
-        fingerprint_key = publication_fingerprint_key(publication_fingerprint)
         selected_progress = progress_by_volume_id.get(volume_id)
-        fingerprint_mismatch = bool(
-            selected_progress
-            and selected_progress.content_fingerprint
-            and selected_progress.content_fingerprint != fingerprint_key
-        )
         selected_media_volumes = [
             volume
             for volume in available_volumes
@@ -230,12 +198,27 @@ class VolumeReaderService:
             progress_by_volume_id=progress_by_volume_id,
             publication_fingerprint=publication_fingerprint,
             resume_location_json=(
-                None
-                if fingerprint_mismatch or selected_progress is None
-                else selected_progress.location_json
+                selected_progress.location_json
+                if selected_progress is not None
+                else None
             ),
             media_completed=media_completed,
         )
+
+    def load_progress(
+        self,
+        *,
+        user_id: str,
+        volume_id: str,
+        access_scope: ReaderAccessScope,
+    ) -> ReaderProgressDto | None:
+        context = self._require_visible_context(volume_id, access_scope)
+        if reader_type_for_volume_format(context.volume.format) is None:
+            raise ReaderVolumeFormatUnsupported
+        progress = self._repository.get_progress(user_id, volume_id)
+        if progress is None or progress.revision < 1 or progress.exact_location is None:
+            return None
+        return progress
 
     def save_progress(self, command: SaveProgressCommand) -> ReaderProgressDto:
         context = self._require_visible_context(command.volume_id, command.access_scope)
@@ -248,33 +231,20 @@ class VolumeReaderService:
                 expected=reader_type.value,
                 received=received_kind,
             )
-        expected_publication = self._publication_locator_index.validate(
+        publication = self._publication_locator_index.validate(
             volume_id=command.volume_id,
             access_scope=command.access_scope,
             location=command.location,
         )
-        if expected_publication is None:
+        if publication is None:
             raise ReaderLocatorResourceMismatch(
                 href=_location_reference(command.location),
                 media_type=reader_type.value,
             )
-        received = exact_location_publication(command.location)
-        received_publication = (
-            received.original_file_hash.lower(),
-            received.parser,
-            received.normalization,
+        progress_identity = _progress_identity_key(
+            context.work.id,
+            context.volume.id,
         )
-        expected_identity = (
-            expected_publication.original_file_hash.lower(),
-            expected_publication.parser,
-            expected_publication.normalization,
-        )
-        if received_publication != expected_identity:
-            raise ReaderFingerprintMismatch(
-                expected=publication_fingerprint_key(expected_publication),
-                received="|".join(received_publication),
-            )
-        fingerprint_key = publication_fingerprint_key(expected_publication)
         now = _aware_utc(self._clock.now())
         progressed_at = datetime.fromtimestamp(
             command.captured_at_epoch_millis / 1000,
@@ -305,7 +275,7 @@ class VolumeReaderService:
                 reader_type=reader_type.value,
                 display_percent=display_percent,
                 location=command.location,
-                content_fingerprint=fingerprint_key,
+                content_fingerprint=progress_identity,
                 client_id=command.client_id,
                 mutation_id=command.mutation_id,
                 base_revision=command.base_revision,
@@ -341,9 +311,9 @@ class VolumeReaderService:
         reader_type = reader_type_for_volume_format(context.volume.format)
         if reader_type is None:
             raise ReaderVolumeFormatUnsupported
-        fingerprint = build_volume_content_fingerprint(
-            asdict(context.volume),
-            [asdict(file) for file in self._repository.list_files(command.volume_id)],
+        progress_identity = _progress_identity_key(
+            context.work.id,
+            context.volume.id,
         )
         try:
             progress = self._repository.set_reading_status(
@@ -351,7 +321,7 @@ class VolumeReaderService:
                 context=context,
                 reader_type=reader_type.value,
                 status=command.status,
-                content_fingerprint=fingerprint,
+                content_fingerprint=progress_identity,
                 now=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
@@ -384,9 +354,9 @@ class VolumeReaderService:
         existing = self._repository.get_progress(command.user_id, command.volume_id)
         if existing is not None and _aware_utc(existing.progressed_at) > modified_at:
             raise ReaderProgressDateConflict(_external_progress_dto(existing))
-        files = self._repository.list_files(command.volume_id)
-        fingerprint = build_volume_content_fingerprint(
-            asdict(context.volume), [asdict(file) for file in files]
+        progress_identity = _progress_identity_key(
+            context.work.id,
+            context.volume.id,
         )
         location_json = _external_location_json(
             reader_type=reader_type.value,
@@ -416,7 +386,7 @@ class VolumeReaderService:
                 reader_type=reader_type.value,
                 percent=command.progression * 100,
                 location_json=location_json,
-                content_fingerprint=fingerprint,
+                content_fingerprint=progress_identity,
                 mutation_id=mutation_id,
                 client_id=command.device_id,
                 client_sequence=int(modified_at.timestamp() * 1000),
@@ -497,24 +467,26 @@ class VolumeReaderService:
         context = self._repository.get_context(volume_id)
         if context is None:
             raise ReaderVolumeNotFound
+        files = self._repository.list_files(volume_id)
         publication = self._publication_locator_index.fingerprint(
             volume_id=volume_id,
             access_scope=access_scope,
+        ) or build_publication_fingerprint(
+            asdict(context.volume),
+            [asdict(file) for file in files],
         )
-        expected = (
-            f"{publication.original_file_hash}\0{publication.parser}"
-            f"\0{publication.normalization}"
-            if publication is not None
-            else build_volume_content_fingerprint(
-                asdict(context.volume),
-                [asdict(file) for file in self._repository.list_files(volume_id)],
-            )
-        )
+        expected = publication_fingerprint_key(publication)
         if expected != received_fingerprint:
             raise ReaderFingerprintMismatch(
                 expected=expected,
                 received=received_fingerprint,
             )
+
+
+def _progress_identity_key(work_id: str, volume_id: str) -> str:
+    """Stable progress ownership independent of publication bytes or parser versions."""
+
+    return f"work:{len(work_id)}:{work_id}|volume:{len(volume_id)}:{volume_id}"
 
 
 def _aware_utc(value: datetime) -> datetime:

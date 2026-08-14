@@ -426,7 +426,6 @@ class SessionImportOrchestrationServices:
                 isbn=None,
                 description=None,
                 subjects=(),
-                chapters=(),
                 cover=None,
                 raw_metadata={
                     "sourceFormat": source_format,

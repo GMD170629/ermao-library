@@ -130,7 +130,6 @@
 		BR0200000000000000000002 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0200000000000000000002 /* ReadiumStreamer */; };
 		BR0300000000000000000003 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = PR0300000000000000000003 /* ReadiumNavigator */; };
 		BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */; };
-		BR0400000000000000000004 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = PR0400000000000000000004 /* SwiftSoup */; };
 		BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0500000000000000000005 /* ErmaoMobiCore */; };
 		A17400000000000000000174 /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17400000000000000000174 /* DownloadModels.swift */; };
 		A17500000000000000000175 /* DownloadCenterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17500000000000000000175 /* DownloadCenterStore.swift */; };
@@ -299,7 +298,6 @@
 				BR0200000000000000000002 /* ReadiumStreamer in Frameworks */,
 				BR0300000000000000000003 /* ReadiumNavigator in Frameworks */,
 				BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */,
-				BR0400000000000000000004 /* SwiftSoup in Frameworks */,
 				BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */,
 				B08700000000000000000087 /* libsqlite3.tbd in Frameworks */,
 			);
@@ -639,7 +637,6 @@
 				PR0200000000000000000002 /* ReadiumStreamer */,
 				PR0300000000000000000003 /* ReadiumNavigator */,
 				PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */,
-				PR0400000000000000000004 /* SwiftSoup */,
 				PR0500000000000000000005 /* ErmaoMobiCore */,
 			);
 			productName = ErmaoLibrary;
@@ -717,7 +714,6 @@
 			mainGroup = G00000000000000000000000;
 			packageReferences = (
 				PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */,
-				PK0200000000000000000002 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 				PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */,
 			);
 			productRefGroup = G20100000000000000000201 /* Products */;
@@ -1180,14 +1176,6 @@
 				revision = f7d10d2bf5876408feae14d634416f69d1473fd8;
 			};
 		};
-		PK0200000000000000000002 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/scinfu/SwiftSoup.git";
-			requirement = {
-				kind = exactVersion;
-				version = 2.13.7;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1210,11 +1198,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
 			productName = ReadiumAdapterGCDWebServer;
-		};
-		PR0400000000000000000004 /* SwiftSoup */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = PK0200000000000000000002 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
-			productName = SwiftSoup;
 		};
 		PR0500000000000000000005 /* ErmaoMobiCore */ = {
 			isa = XCSwiftPackageProductDependency;

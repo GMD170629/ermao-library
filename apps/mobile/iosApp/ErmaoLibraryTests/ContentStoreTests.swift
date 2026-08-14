@@ -1,5 +1,7 @@
 import Foundation
 import XCTest
+@preconcurrency import class ErmaoShared.PublicKt
+@preconcurrency import class ErmaoShared.ReaderProgress
 @testable import ErmaoLibrary
 
 @MainActor
@@ -100,6 +102,33 @@ final class ContentStoreTests: XCTestCase {
         store.selectScope(.series)
 
         XCTAssertEqual(store.current.scrollAnchor, "group:middle")
+    }
+
+    func testReapplyingCurrentCollectionSortPreservesLoadedResultsAndScrollAnchor() async throws {
+        let client = RacingContentClient()
+        let store = LibraryStore(
+            context: contentContext,
+            client: client,
+            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
+            onUnauthorized: {}
+        )
+
+        store.reload()
+        try await waitUntil {
+            guard case .ready = store.current.results else { return false }
+            return await client.worksRequestCount == 1
+        }
+        store.rememberAnchor("work:unfiltered")
+
+        store.setSort(.recentAdded)
+        try await Task.sleep(for: .milliseconds(350))
+
+        let requestCount = await client.worksRequestCount
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(store.current.scrollAnchor, "work:unfiltered")
+        guard case .ready = store.current.results else {
+            return XCTFail("Returning from detail must keep the visible collection")
+        }
     }
 
     func testApplyingFiltersDoesNotCancelInFlightContentRequestAndRejectsItsStaleResult() async throws {
@@ -315,6 +344,16 @@ final class ContentStoreTests: XCTestCase {
                     progress: nil,
                     isReadable: true,
                     isSelected: true
+                ),
+                WorkVolume(
+                    id: "volume-2",
+                    mediaVersionID: "media-1",
+                    title: "Volume 2",
+                    formatLabel: "EPUB",
+                    sizeLabel: nil,
+                    progress: nil,
+                    isReadable: true,
+                    isSelected: false
                 )
             ],
             chapters: [
@@ -340,9 +379,12 @@ final class ContentStoreTests: XCTestCase {
             workID: "reader-work",
             volumeID: "volume-1",
             percent: 42,
-            currentHref: "Text/all.xhtml#two",
-            chapterTitle: "Chapter 2",
-            capturedAtEpochMillis: 1_000
+            progress: try exactReflowableProgress(
+                href: "Text/all.xhtml",
+                fragment: "two",
+                updatedAtEpochMillis: 1_000
+            ),
+            chapterTitle: "Chapter 2"
         )
 
         guard case .ready(let content, _) = store.state else {
@@ -351,6 +393,157 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(content.work.progress, 42)
         XCTAssertEqual(content.volumes.first?.progress, 42)
         XCTAssertEqual(content.chapters.map(\.state), [.read, .current])
+
+        ReaderProgressPresentationCenter.shared.publish(
+            namespaceKey: contentContext.namespaceKey,
+            workID: "reader-work",
+            volumeID: "volume-2",
+            percent: 75,
+            progress: try exactReflowableProgress(
+                sourceID: "volume-2",
+                href: "Text/all.xhtml",
+                fragment: "one",
+                updatedAtEpochMillis: 2_000
+            ),
+            chapterTitle: "Chapter 1"
+        )
+
+        guard case .ready(let unchanged, _) = store.state else {
+            return XCTFail("Expected work detail to remain ready")
+        }
+        XCTAssertEqual(unchanged.work.progress, 42)
+        XCTAssertNil(unchanged.volumes.first(where: { $0.id == "volume-2" })?.progress)
+        XCTAssertEqual(unchanged.chapters.map(\.state), [.read, .current])
+
+        ReaderProgressPresentationCenter.shared.publish(
+            namespaceKey: contentContext.namespaceKey,
+            workID: "reader-work",
+            volumeID: "volume-1",
+            percent: 55,
+            progress: try exactReflowableProgress(
+                href: "Text/all.xhtml",
+                fragment: "one",
+                updatedAtEpochMillis: 1_500
+            ),
+            chapterTitle: "Chapter 1"
+        )
+
+        guard case .ready(let reordered, _) = store.state else {
+            return XCTFail("Expected work detail to remain ready")
+        }
+        XCTAssertEqual(reordered.work.progress, 55)
+        XCTAssertEqual(reordered.chapters.map(\.state), [.current, .unread])
+    }
+
+    func testReaderProgressUsesPublicationReadingOrderPositionWhenHrefIsSplit() async throws {
+        let initial = WorkDetailContent(
+            work: work("position-work"),
+            description: nil,
+            tags: [],
+            seriesFacet: nil,
+            authorFacets: [],
+            availableMediaKinds: [.ebook],
+            selectedMediaKind: .ebook,
+            selectedVolumeID: "volume-position",
+            readingStatus: .unread,
+            volumes: [
+                WorkVolume(
+                    id: "volume-position",
+                    mediaVersionID: "media-position",
+                    title: "Volume",
+                    formatLabel: "EPUB",
+                    sizeLabel: nil,
+                    progress: nil,
+                    isReadable: true,
+                    isSelected: true
+                )
+            ],
+            chapters: [
+                WorkChapter(
+                    id: "chapter-1",
+                    title: "Chapter 1",
+                    progress: nil,
+                    isCurrent: false,
+                    href: "Text/part0003.xhtml",
+                    sortOrder: 1,
+                    readingOrderPosition: 3
+                ),
+                WorkChapter(
+                    id: "chapter-2",
+                    title: "Chapter 2",
+                    progress: nil,
+                    isCurrent: false,
+                    href: "Text/part0008_split_000.xhtml",
+                    sortOrder: 2,
+                    readingOrderPosition: 10
+                ),
+                WorkChapter(
+                    id: "chapter-3",
+                    title: "Chapter 3",
+                    progress: nil,
+                    isCurrent: false,
+                    href: "Text/part0009.xhtml",
+                    sortOrder: 3,
+                    readingOrderPosition: 13
+                ),
+            ]
+        )
+        let store = WorkDetailStore(
+            context: contentContext,
+            client: ProgressContentClient(content: initial),
+            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
+            workID: "position-work",
+            onUnauthorized: {}
+        )
+        store.load()
+        try await waitUntil {
+            if case .ready = store.state { return true }
+            return false
+        }
+
+        ReaderProgressPresentationCenter.shared.publish(
+            namespaceKey: contentContext.namespaceKey,
+            workID: "position-work",
+            volumeID: "volume-position",
+            percent: 15.2,
+            progress: try exactPositionProgress(
+                sourceID: "volume-position",
+                href: "Text/part0008_split_001.xhtml",
+                position: 11,
+                updatedAtEpochMillis: 3_000
+            ),
+            chapterTitle: "Chapter 2"
+        )
+
+        guard case .ready(let content, _) = store.state else {
+            return XCTFail("Expected work detail to remain ready")
+        }
+        XCTAssertEqual(content.work.progress, 15.2)
+        XCTAssertEqual(content.chapters.map(\.state), [.read, .current, .unread])
+    }
+
+    private func exactReflowableProgress(
+        sourceID: String = "volume-1",
+        href: String,
+        fragment: String,
+        updatedAtEpochMillis: Int64
+    ) throws -> ReaderProgress {
+        let payload = """
+        {"schema":"ermao.reader-progress","version":5,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)#\(fragment)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"fragments":["\(fragment)"]}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"epub-package:1","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":42.0}
+        """
+        return try PublicKt.createReaderProgressJson().decode(payload: payload)
+    }
+
+    private func exactPositionProgress(
+        sourceID: String,
+        href: String,
+        position: Int,
+        updatedAtEpochMillis: Int64
+    ) throws -> ReaderProgress {
+        let payload = """
+        {"schema":"ermao.reader-progress","version":5,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"cssSelector":"#visible","position":\(position)}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"epub-package:1","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":15.2}
+        """
+        return try PublicKt.createReaderProgressJson().decode(payload: payload)
     }
 
     private var contentContext: ContentRequestContext {

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.jsonObject
 
 class ReaderServerWireException(message: String, cause: Throwable? = null) :
     IllegalArgumentException(message, cause)
@@ -37,6 +38,7 @@ class ReaderServerWireMapper(
             ?: throw ReaderServerWireException("Reader progress locator is missing")
         return ReaderProgressSnapshotV4(
             sourceId = expectedSourceId,
+            clientId = root.requiredString("clientId"),
             revision = root.requiredLong("revision"),
             locator = PublicationLocation.parse(locator.toString()),
             displayPercent = root.requiredDouble("displayPercent"),
@@ -46,6 +48,24 @@ class ReaderServerWireMapper(
     }
 
     internal fun responseSerializer() = JsonObject.serializer()
+
+    fun decodeProgressState(payload: String, expectedSourceId: String): ReaderProgressSnapshotV4? {
+        val root = runCatching { json.parseToJsonElement(payload).jsonObject }.getOrElse {
+            throw ReaderServerWireException("Reader progress response is malformed", it)
+        }
+        if ((root["ok"] as? JsonPrimitive)?.content != "true") {
+            throw ReaderServerWireException("Reader progress response is unsuccessful")
+        }
+        val data = root["data"] as? JsonObject
+            ?: throw ReaderServerWireException("Reader progress response data is missing")
+        val snapshot = data["progressSnapshot"] ?: return null
+        if (snapshot is kotlinx.serialization.json.JsonNull) return null
+        return decodeSnapshot(
+            snapshot as? JsonObject
+                ?: throw ReaderServerWireException("Reader progress snapshot is malformed"),
+            expectedSourceId,
+        )
+    }
 }
 
 @Serializable
@@ -73,3 +93,7 @@ private fun JsonObject.requiredDouble(name: String): Double = (this[name] as? Js
     ?: throw ReaderServerWireException("Reader progress field $name is missing")
 
 private fun JsonObject.optionalLong(name: String): Long? = (this[name] as? JsonPrimitive)?.longOrNull
+
+private fun JsonObject.requiredString(name: String): String =
+    (this[name] as? JsonPrimitive)?.content?.takeIf(String::isNotBlank)
+        ?: throw ReaderServerWireException("Reader progress field $name is missing")

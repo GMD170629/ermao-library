@@ -23,3 +23,10 @@ all-Readium envelope. Old v4 locations and pending/conflict state are invalid;
 there is no dual-read or migration fallback. The canonical fixtures are consumed
 by each platform's contract tests. Adding or changing a field requires updating
 the schema, all fixtures, and all four boundary validators in the same change.
+
+`locator-dom-projection-v2.schema.json` defines the content identity used by
+reflowable exact progress. It projects the ordered reading resources and the
+pre-Navigator `body` element tree, preserving element paths, author IDs and
+normalized locator-block text. Platform CSP, `head` decoration and Readium
+runtime nodes are deliberately excluded. Equal normalization identifiers are
+valid only when this projection is equal.

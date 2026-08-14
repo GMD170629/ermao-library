@@ -18,7 +18,7 @@ def test_fresh_database_has_non_unique_publication_hash_lookup(tmp_path: Path) -
 
     indexes = {index["name"]: index for index in inspect(sqlite_engine).get_indexes("LibraryFile")}
 
-    assert head_revision(sqlite_engine) == "0023_publication_full_hash_identity"
+    assert head_revision(sqlite_engine) == "0026_publication_render_cache"
     assert "LibraryFile_fullHash_key" not in indexes
     assert not indexes["LibraryFile_fullHash_idx"]["unique"]
     sqlite_engine.dispose()
@@ -50,7 +50,7 @@ def test_0022_upgrade_removes_only_the_unique_hash_index_and_is_repeat_safe(
             index["name"]: index
             for index in inspect(engine).get_indexes("LibraryFile")
         }
-        assert head_revision(engine) == "0023_publication_full_hash_identity"
+        assert head_revision(engine) == "0026_publication_render_cache"
         assert "LibraryFile_fullHash_key" not in after
         assert not after["LibraryFile_fullHash_idx"]["unique"]
     finally:

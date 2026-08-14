@@ -28,7 +28,7 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.shared.core.time.currentEpochMillis
-import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
@@ -104,7 +104,7 @@ fun createIosReaderBootstrapGateway(
 fun createIosReaderProgressSyncPort(
     cookieStore: SecureCookiePayloadStore,
     profile: ServerProfile,
-): ReaderProgressSyncPort =
+): ReaderProgressServerPort =
     KtorReaderProgressSyncPort(
         clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
         profile = profile,

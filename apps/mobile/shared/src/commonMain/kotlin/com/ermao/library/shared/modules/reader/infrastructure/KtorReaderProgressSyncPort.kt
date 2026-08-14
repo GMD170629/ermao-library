@@ -7,6 +7,9 @@ import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.reader.application.ReaderProgressPushResult
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.application.ReaderProgressQueryPort
+import com.ermao.library.shared.modules.reader.application.ReaderProgressQueryResult
+import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderProgressUpload
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import kotlinx.coroutines.CancellationException
@@ -16,7 +19,7 @@ class KtorReaderProgressSyncPort(
     private val clients: ApiClientFactory,
     private val profile: ServerProfile,
     private val mapper: ReaderServerWireMapper = ReaderServerWireMapper(),
-) : ReaderProgressSyncPort {
+) : ReaderProgressServerPort {
     override suspend fun push(upload: ReaderProgressUpload): ReaderProgressPushResult {
         require(upload.target.namespace.serverIdentity == profile.serverIdentity) {
             "Reader progress upload belongs to another server"
@@ -53,6 +56,40 @@ class KtorReaderProgressSyncPort(
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } finally {
+            client.close()
+        }
+    }
+
+    override suspend fun load(
+        target: com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget,
+        etag: String?,
+    ): ReaderProgressQueryResult {
+        require(target.namespace.serverIdentity == profile.serverIdentity) {
+            "Reader progress query belongs to another server"
+        }
+        val client = clients.create(profile)
+        return try {
+            when (val result = client.loadAuthenticatedAsset(
+                apiPath = "/api/reader/v4/volumes/${encodePathSegment(target.volumeId)}/progress",
+                etag = etag,
+                maximumBytes = 196_608,
+            )) {
+                is ApiResult.Success -> if (result.value.notModified) {
+                    ReaderProgressQueryResult.Unchanged(result.value.etag ?: etag)
+                } else {
+                    runCatching {
+                        ReaderProgressQueryResult.Current(
+                            mapper.decodeProgressState(result.value.bytes.decodeToString(), target.volumeId),
+                            result.value.etag,
+                        )
+                    }.getOrElse { ReaderProgressQueryResult.Failure("INVALID_PROGRESS_RESPONSE", false) }
+                }
+                is ApiResult.Failure -> ReaderProgressQueryResult.Failure(
+                    result.error.code,
+                    result.error.kind in RETRYABLE_KINDS,
+                )
+            }
         } finally {
             client.close()
         }

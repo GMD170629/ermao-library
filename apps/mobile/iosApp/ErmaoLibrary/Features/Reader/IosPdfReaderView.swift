@@ -1,5 +1,6 @@
 import ReadiumNavigator
 import SwiftUI
+@preconcurrency import ErmaoShared
 
 struct IosPdfReaderView: View {
     @Environment(\.dismiss) private var dismiss
@@ -30,6 +31,18 @@ struct IosPdfReaderView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14)).padding()
                 }
             }
+            if let snapshot = session.remoteProgressSnapshot,
+               let location = snapshot.locator as? ErmaoShared.PdfPublicationLocation {
+                IosPageRemoteProgressNotice(
+                    snapshot: snapshot,
+                    position: String(
+                        format: String(localized: "reader.page.number.format"),
+                        Int(location.pageIndex) + 1
+                    ),
+                    onOpen: { Task { await session.goToRemoteProgress() } },
+                    onClose: session.dismissRemoteProgressNotice
+                )
+            }
         }
         .statusBarHidden(!session.controlsVisible)
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
@@ -40,6 +53,9 @@ struct IosPdfReaderView: View {
         }
         .onChange(of: session.pageIndex) { value in
             if !sliderIsEditing { sliderPage = Double(value) }
+        }
+        .onChange(of: session.startupCancelled) { cancelled in
+            if cancelled { dismiss() }
         }
         .onChange(of: scenePhase) { phase in
             Task {
@@ -90,6 +106,13 @@ struct IosPdfReaderView: View {
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
         } message: { Text(session.presentationError?.localizedDescription ?? "") }
+        .readerStartupConflictAlert(
+            isPresented: session.startupConflict != nil,
+            failed: session.startupActionFailed,
+            useLocal: { Task { await session.continueStartupAtLocalPosition() } },
+            useCloud: { Task { await session.useCloudStartupPosition() } },
+            cancel: session.cancelStartupConflict
+        )
     }
 
     @ViewBuilder private var content: some View {
@@ -158,6 +181,68 @@ struct IosPdfReaderView: View {
     private func close() {
         Task {
             do { try await session.close(); dismiss() } catch { closingFailure = true }
+        }
+    }
+}
+
+struct IosPageRemoteProgressNotice: View {
+    let snapshot: ErmaoShared.ReaderProgressSnapshotV4
+    let position: String
+    let onOpen: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 12) {
+                Button(action: onOpen) {
+                    Text(message).multilineTextAlignment(.leading)
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 4)
+                Button(action: onClose) {
+                    Image(systemName: "xmark").frame(width: 32, height: 32)
+                }
+                .accessibilityLabel(Text("common.close"))
+            }
+            .padding(14)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var message: String {
+        let date = Date(
+            timeIntervalSince1970: TimeInterval(snapshot.effectiveCapturedAtEpochMillis) / 1_000
+        )
+        return String(
+            format: String(localized: "reader.remote.notice.format"),
+            locale: .current,
+            position,
+            date.formatted(date: .abbreviated, time: .shortened)
+        )
+    }
+}
+
+extension View {
+    func readerStartupConflictAlert(
+        isPresented: Bool,
+        failed: Bool,
+        useLocal: @escaping () -> Void,
+        useCloud: @escaping () -> Void,
+        cancel: @escaping () -> Void
+    ) -> some View {
+        alert(
+            String(localized: "reader.startup.conflict.title"),
+            isPresented: .constant(isPresented)
+        ) {
+            Button("reader.startup.conflict.local", action: useLocal)
+            Button("reader.startup.conflict.cloud", action: useCloud)
+            Button("common.cancel", role: .cancel, action: cancel)
+        } message: {
+            Text(failed ? "reader.startup.conflict.failed" : "reader.startup.conflict.message")
         }
     }
 }

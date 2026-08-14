@@ -7,14 +7,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class ReflowableChapter:
-    title: str
-    href: str
-    level: int
-    navigation_key: str
-
-
-@dataclass(frozen=True)
 class EmbeddedBookCover:
     content: bytes
     media_type: str
@@ -32,7 +24,6 @@ class ReflowableBookMetadata:
     isbn: str | None
     description: str | None
     subjects: tuple[str, ...]
-    chapters: tuple[ReflowableChapter, ...]
     cover: EmbeddedBookCover | None
     raw_metadata: Mapping[str, object]
     series_name: str | None = None

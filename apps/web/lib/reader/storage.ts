@@ -8,7 +8,6 @@ import {
   type ExactProgressIdentity,
   type ExactProgressRecord,
   type PendingProgressMutation,
-  type PersistedProgressConflict,
   type ReaderPreferenceSnapshot,
   type ReaderSyncDiagnostic
 } from './model';
@@ -22,13 +21,12 @@ import {
 const PREFERENCES_STORE = 'preferences';
 const EXACT_PROGRESS_STORE = 'exact-progress';
 const PENDING_PROGRESS_STORE = 'pending-progress';
-const CONFLICT_STORE = 'progress-conflicts';
 const META_STORE = 'meta';
 const DIAGNOSTICS_STORE = 'diagnostics';
 const BOOK_FILES_STORE = 'book-files';
 
 type ReaderStoreName = typeof PREFERENCES_STORE | typeof EXACT_PROGRESS_STORE
-  | typeof PENDING_PROGRESS_STORE | typeof CONFLICT_STORE | typeof META_STORE
+  | typeof PENDING_PROGRESS_STORE | typeof META_STORE
   | typeof DIAGNOSTICS_STORE | typeof BOOK_FILES_STORE;
 type ClientMeta = { key: 'client'; clientId: string };
 
@@ -42,11 +40,10 @@ export interface ReaderStorage {
   putExactAndPending(progress: ExactProgressRecord, mutation: PendingProgressMutation): Promise<void>;
   putPendingProgress(mutation: PendingProgressMutation): Promise<void>;
   getPendingProgress(key: string): Promise<PendingProgressMutation | null>;
+  getPendingProgressForIdentity(identity: ExactProgressIdentity): Promise<PendingProgressMutation | null>;
   listPendingProgress(userId: string): Promise<PendingProgressMutation[]>;
   deletePendingProgress(key: string, mutationId?: string): Promise<void>;
-  putProgressConflict(conflict: PersistedProgressConflict): Promise<void>;
-  getProgressConflict(key: string): Promise<PersistedProgressConflict | null>;
-  deleteProgressConflict(key: string): Promise<void>;
+  putExactAndDeletePending(progress: ExactProgressRecord, pendingKey: string): Promise<void>;
   addDiagnostic(diagnostic: Omit<ReaderSyncDiagnostic, 'id' | 'createdAt'>, now?: number): Promise<ReaderSyncDiagnostic>;
   listDiagnostics(limit?: number): Promise<ReaderSyncDiagnostic[]>;
   clearAll(): Promise<void>;
@@ -92,7 +89,7 @@ function openDatabase() {
         const store = database.createObjectStore(PENDING_PROGRESS_STORE, { keyPath: 'key' });
         store.createIndex('by-user', 'userId', { unique: false });
       }
-      if (!database.objectStoreNames.contains(CONFLICT_STORE)) database.createObjectStore(CONFLICT_STORE, { keyPath: 'key' });
+      if (database.objectStoreNames.contains('progress-conflicts')) database.deleteObjectStore('progress-conflicts');
       if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(DIAGNOSTICS_STORE)) database.createObjectStore(DIAGNOSTICS_STORE, { keyPath: 'id' });
       if (!database.objectStoreNames.contains(BOOK_FILES_STORE)) {
@@ -100,7 +97,7 @@ function openDatabase() {
         store.createIndex('by-user-volume', 'userVolumeKey', { unique: false });
       }
       if (event.oldVersion > 0 && event.oldVersion < 2) {
-        [EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, CONFLICT_STORE].forEach((name) => {
+        [EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE].forEach((name) => {
           if (database.objectStoreNames.contains(name)) request.transaction?.objectStore(name).clear();
         });
       }
@@ -173,19 +170,56 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache {
       return clientId;
     });
   }
-  async getExactProgress(identity: ExactProgressIdentity) { return withTransaction(EXACT_PROGRESS_STORE, 'readonly', async (stores) => (await requestResult(stores(EXACT_PROGRESS_STORE).get(exactProgressKey(identity))) as ExactProgressRecord | undefined) ?? null); }
+  async getExactProgress(identity: ExactProgressIdentity) {
+    return withTransaction(EXACT_PROGRESS_STORE, 'readwrite', async (stores) => {
+      const store = stores(EXACT_PROGRESS_STORE);
+      const key = exactProgressKey(identity);
+      const current = await requestResult(store.get(key)) as ExactProgressRecord | undefined;
+      if (current) return current;
+      const legacy = ((await requestResult(store.getAll())) as ExactProgressRecord[])
+        .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
+          && candidate.userId === identity.userId
+          && candidate.clientId === identity.clientId
+          && candidate.workId === identity.workId
+          && candidate.volumeId === identity.volumeId)
+        .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
+      if (!legacy) return null;
+      const migrated = { ...legacy, ...identity, key };
+      await requestResult(store.put(migrated));
+      if (legacy.key !== key) await requestResult(store.delete(legacy.key));
+      return migrated;
+    });
+  }
   async putExactProgress(progress: ExactProgressRecord) { await withTransaction(EXACT_PROGRESS_STORE, 'readwrite', async (stores) => { await requestResult(stores(EXACT_PROGRESS_STORE).put(progress)); }); return progress; }
   async putExactAndPending(progress: ExactProgressRecord, mutation: PendingProgressMutation) { await withTransaction([EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE], 'readwrite', async (stores) => { await requestResult(stores(EXACT_PROGRESS_STORE).put(progress)); await requestResult(stores(PENDING_PROGRESS_STORE).put(mutation)); }); }
   async putPendingProgress(mutation: PendingProgressMutation) { await withTransaction(PENDING_PROGRESS_STORE, 'readwrite', async (stores) => { await requestResult(stores(PENDING_PROGRESS_STORE).put(mutation)); }); }
   async getPendingProgress(key: string) { return withTransaction(PENDING_PROGRESS_STORE, 'readonly', async (stores) => (await requestResult(stores(PENDING_PROGRESS_STORE).get(key)) as PendingProgressMutation | undefined) ?? null); }
+  async getPendingProgressForIdentity(identity: ExactProgressIdentity) {
+    return withTransaction(PENDING_PROGRESS_STORE, 'readwrite', async (stores) => {
+      const store = stores(PENDING_PROGRESS_STORE);
+      const key = syncStateKey(identity);
+      const current = await requestResult(store.get(key)) as PendingProgressMutation | undefined;
+      if (current) return current;
+      const legacy = ((await requestResult(store.getAll())) as PendingProgressMutation[])
+        .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
+          && candidate.userId === identity.userId
+          && candidate.clientId === identity.clientId
+          && candidate.workId === identity.workId
+          && candidate.volumeId === identity.volumeId)
+        .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
+      if (!legacy) return null;
+      const migrated = { ...legacy, key };
+      await requestResult(store.put(migrated));
+      if (legacy.key !== key) await requestResult(store.delete(legacy.key));
+      return migrated;
+    });
+  }
   async listPendingProgress(userId: string) { return withTransaction(PENDING_PROGRESS_STORE, 'readonly', async (stores) => await requestResult(stores(PENDING_PROGRESS_STORE).index('by-user').getAll(userId)) as PendingProgressMutation[]); }
   async deletePendingProgress(key: string, mutationId?: string) { await withTransaction(PENDING_PROGRESS_STORE, 'readwrite', async (stores) => { const store = stores(PENDING_PROGRESS_STORE); const current = await requestResult(store.get(key)) as PendingProgressMutation | undefined; if (!mutationId || current?.mutationId === mutationId) await requestResult(store.delete(key)); }); }
-  async putProgressConflict(conflict: PersistedProgressConflict) { await withTransaction(CONFLICT_STORE, 'readwrite', async (stores) => { await requestResult(stores(CONFLICT_STORE).put(conflict)); }); }
-  async getProgressConflict(key: string) { return withTransaction(CONFLICT_STORE, 'readonly', async (stores) => (await requestResult(stores(CONFLICT_STORE).get(key)) as PersistedProgressConflict | undefined) ?? null); }
-  async deleteProgressConflict(key: string) { await withTransaction(CONFLICT_STORE, 'readwrite', async (stores) => { await requestResult(stores(CONFLICT_STORE).delete(key)); }); }
+  async putExactAndDeletePending(progress: ExactProgressRecord, pendingKey: string) { await withTransaction([EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE], 'readwrite', async (stores) => { await requestResult(stores(EXACT_PROGRESS_STORE).put(progress)); await requestResult(stores(PENDING_PROGRESS_STORE).delete(pendingKey)); }); }
   async addDiagnostic(diagnostic: Omit<ReaderSyncDiagnostic, 'id' | 'createdAt'>, now = Date.now()) { const value = { ...diagnostic, id: createId('diagnostic'), createdAt: now }; await withTransaction(DIAGNOSTICS_STORE, 'readwrite', async (stores) => { await requestResult(stores(DIAGNOSTICS_STORE).put(value)); }); return value; }
   async listDiagnostics(limit = 100) { return withTransaction(DIAGNOSTICS_STORE, 'readonly', async (stores) => ((await requestResult(stores(DIAGNOSTICS_STORE).getAll())) as ReaderSyncDiagnostic[]).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)); }
-  async clearAll() { const names: ReaderStoreName[] = [PREFERENCES_STORE, EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, CONFLICT_STORE, META_STORE, DIAGNOSTICS_STORE, BOOK_FILES_STORE]; await withTransaction(names, 'readwrite', async (stores) => { await Promise.all(names.map((name) => requestResult(stores(name).clear()))); }); }
+  async clearAll() { const names: ReaderStoreName[] = [PREFERENCES_STORE, EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, META_STORE, DIAGNOSTICS_STORE, BOOK_FILES_STORE]; await withTransaction(names, 'readwrite', async (stores) => { await Promise.all(names.map((name) => requestResult(stores(name).clear()))); }); }
 }
 
 export { syncStateKey };

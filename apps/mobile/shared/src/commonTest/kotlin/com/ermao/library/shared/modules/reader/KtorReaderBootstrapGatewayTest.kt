@@ -26,12 +26,16 @@ class KtorReaderBootstrapGatewayTest {
         val content = assertIs<Content>(gateway(VALID_BOOTSTRAP).load(request())).value
 
         assertEquals(
-            "sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             content.artifactVersion,
         )
-        assertEquals("/api/volumes/volume-1/file", content.publication.apiPath)
-        assertEquals(1_234, content.publication.expectedSizeBytes)
-        assertEquals("readium:epub", content.publication.publicationFingerprint.parser)
+        assertEquals("/api/reader/v4/volumes/volume-1/publication/render.epub", content.publication.apiPath)
+        assertEquals(2_345, content.publication.expectedSizeBytes)
+        assertEquals(
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            content.publication.expectedContentHash,
+        )
+        assertEquals("epub-package:1", content.publication.publicationFingerprint.parser)
         assertEquals(ReaderSourceFormat.Epub, content.publication.sourceFormat)
         assertEquals(18, content.remoteSnapshot?.revision)
         assertEquals(2_222, content.remoteSnapshot?.receivedAtEpochMillis)
@@ -70,13 +74,16 @@ class KtorReaderBootstrapGatewayTest {
             val response = VALID_BOOTSTRAP
                 .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"$wireFormat\"")
                 .replace("\"format\":\"epub\"", "\"format\":\"$wireFormat\"")
-                .replace("\"kind\":\"EPUB\"", "\"kind\":\"$kind\"")
-                .replace("\"mimeType\":\"application/epub+zip\"", "\"mimeType\":\"$mimeType\"")
+                .replace(
+                    "\"kind\":\"EPUB\",\"mimeType\":\"application/epub+zip\"",
+                    "\"kind\":\"$kind\",\"mimeType\":\"$mimeType\"",
+                )
 
             val content = assertIs<Content>(gateway(response).load(request())).value
 
-            assertEquals(ReaderFormat.Mobi, content.target.sourceFormat)
-            assertEquals(wireFormat, content.publication.sourceFormat.wireValue)
+            assertEquals(ReaderFormat.Epub, content.target.sourceFormat)
+            assertEquals(wireFormat, content.publication.originalSourceFormat.wireValue)
+            assertEquals(ReaderSourceFormat.Epub, content.publication.sourceFormat)
         }
     }
 
@@ -91,8 +98,10 @@ class KtorReaderBootstrapGatewayTest {
                 .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"${format.readerType}\"")
                 .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"${format.sourceFormat}\"")
                 .replace("\"format\":\"epub\"", "\"format\":\"${format.sourceFormat}\"")
-                .replace("\"kind\":\"EPUB\"", "\"kind\":\"${format.kind}\"")
-                .replace("\"mimeType\":\"application/epub+zip\"", "\"mimeType\":\"${format.mimeType}\"")
+                .replace(
+                    "\"kind\":\"EPUB\",\"mimeType\":\"application/epub+zip\"",
+                    "\"kind\":\"${format.kind}\",\"mimeType\":\"${format.mimeType}\"",
+                )
                 .let { value ->
                     if (format.sourceFormat == "cbz") value.replace(
                         "\"units\":[]",
@@ -101,8 +110,15 @@ class KtorReaderBootstrapGatewayTest {
                 }
 
             val content = assertIs<Content>(gateway(response).load(request())).value
-            assertEquals(format.readerFormat, content.target.sourceFormat)
-            assertEquals(format.sourceFormat, content.publication.sourceFormat.wireValue)
+            assertEquals(
+                if (format.readerType == "reflowable") ReaderFormat.Epub else format.readerFormat,
+                content.target.sourceFormat,
+            )
+            assertEquals(format.sourceFormat, content.publication.originalSourceFormat.wireValue)
+            assertEquals(
+                if (format.readerType == "reflowable") ReaderSourceFormat.Epub.wireValue else format.sourceFormat,
+                content.publication.sourceFormat.wireValue,
+            )
             if (format.sourceFormat == "cbz") {
                 assertEquals("pages/001.jpg", content.comicPages.single().resourceHref)
             }
@@ -160,12 +176,12 @@ class KtorReaderBootstrapGatewayTest {
         val VALID_BOOTSTRAP = """
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
-              "publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"contentFingerprint":"sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad","book":{"id":"work-1","title":"Book"},
+              "publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"contentFingerprint":"sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad","book":{"id":"work-1","title":"Book"},
               "mediaVersion":{"id":"media-1","workId":"work-1","mediaKind":"EBOOK","completed":true},
               "volume":{"id":"volume-1","title":"Volume","format":"epub"},"availableVolumes":[],
               "files":[{"id":"file-1","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","contentHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sortOrder":0}],
-              "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},"publication":{"manifestUrl":"/api/reader/v4/volumes/volume-1/publication/manifest.json","positionsUrl":"/api/reader/v4/volumes/volume-1/publication/positions.json"},
-              "progressSnapshot":{"schemaVersion":4,"revision":18,"locator":{"kind":"reflowable","publication":{"originalFileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"readium:epub","normalization":"epub-v1"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
+              "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},"publication":{"manifestUrl":"/api/reader/v4/volumes/volume-1/publication/manifest.json","positionsUrl":"/api/reader/v4/volumes/volume-1/publication/positions.json","renderArtifact":{"schemaVersion":1,"url":"/api/reader/v4/volumes/volume-1/publication/render.epub","mimeType":"application/epub+zip","sizeBytes":2345,"contentHash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+              "progressSnapshot":{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":{"kind":"reflowable","publication":{"originalFileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
             }
         """.trimIndent()
     }

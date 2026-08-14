@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "normalization": "shuku-epub-locator-dom-v2",
+  "readingOrder": [
+    {
+      "href": "OPS/chapter.xhtml",
+      "mediaType": "application/xhtml+xml",
+      "elements": [
+        {"path": "/body[1]", "localName": "body"},
+        {"path": "/body[1]/h1[1]", "localName": "h1", "id": "chapter-title", "text": "\u5929\u5730\u7384\u9ec4"},
+        {"path": "/body[1]/form[1]", "localName": "form"},
+        {"path": "/body[1]/form[1]/p[1]", "localName": "p", "id": "target", "text": "Caf\u00e9 \u5b87\u5b99\u6d2a\u8352"},
+        {"path": "/body[1]/form[1]/p[2]", "localName": "p", "text": "duplicate text"},
+        {"path": "/body[1]/form[1]/p[3]", "localName": "p", "text": "duplicate text"},
+        {"path": "/body[1]/iframe[1]", "localName": "iframe"}
+      ]
+    }
+  ]
+}

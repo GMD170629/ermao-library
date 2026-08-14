@@ -250,12 +250,3 @@ class SeriesVolumeInfo:
     series_index: float
     title: str
     author: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class EpubNavigationChapterDTO:
-    title: str
-    href: str
-    sort_order: int
-    idref: str | None
-    media_type: str | None

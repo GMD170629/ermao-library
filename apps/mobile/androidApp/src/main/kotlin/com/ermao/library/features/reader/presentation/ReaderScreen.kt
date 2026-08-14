@@ -61,6 +61,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -240,10 +243,15 @@ private fun ReaderResumeNoticeCard(
         DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
             .format(Date(notice.capturedAtEpochMillis))
     }
-    val position = notice.chapterLabel?.takeIf(String::isNotBlank)
+    val position = notice.pageNumber?.let { stringResource(R.string.reader_page_number, it) }
+        ?: notice.chapterLabel?.takeIf(String::isNotBlank)
         ?: stringResource(R.string.reader_progress_percent, notice.percent.roundToInt())
     Surface(
-        modifier = modifier.navigationBarsPadding().padding(16.dp).fillMaxWidth(),
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(16.dp)
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
         color = colors.surface,
         shape = MaterialTheme.shapes.medium,
         tonalElevation = 4.dp,

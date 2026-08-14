@@ -27,7 +27,10 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
         }
 
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert head_revision(engine) == "0023_publication_full_hash_identity"
+        assert (
+            head_revision(engine)
+            == "0026_publication_render_cache"
+        )
         inspector = inspect(engine)
         assert "revision" in {
             column["name"] for column in inspector.get_columns("LibraryReadingProgress")
@@ -60,6 +63,9 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
         }
 
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert head_revision(engine) == "0023_publication_full_hash_identity"
+        assert (
+            head_revision(engine)
+            == "0026_publication_render_cache"
+        )
     finally:
         engine.dispose()

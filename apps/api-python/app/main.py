@@ -13,12 +13,9 @@ from app.api.error_handlers import (
 )
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
+from app.bootstrap.opds import build_opds_router
 from app.bootstrap.startup_data_migrations import (
     verify_startup_data_migrations_complete,
-)
-from app.bootstrap.opds import build_opds_router
-from app.bootstrap.reader_navigation import (
-    start_reader_navigation_maintenance_worker,
 )
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
@@ -154,17 +151,8 @@ def create_app(
             background_runtime_factory
         )
         log_maintenance_worker.start()
-        reader_navigation_worker = (
-            start_reader_navigation_maintenance_worker(
-                BackgroundSessionLocal,
-                settings,
-            )
-            if session_factory is None
-            else None
-        )
         app.state.download_queue_worker = download_queue_worker
         app.state.kindle_send_queue_worker = kindle_send_queue_worker
-        app.state.reader_navigation_worker = reader_navigation_worker
         try:
             yield
         finally:
@@ -172,8 +160,6 @@ def create_app(
                 download_queue_worker.stop()
             if kindle_send_queue_worker is not None:
                 kindle_send_queue_worker.stop()
-            if reader_navigation_worker is not None:
-                reader_navigation_worker.stop()
             log_maintenance_worker.stop()
 
     app = FastAPI(

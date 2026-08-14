@@ -8,12 +8,12 @@ from app.modules.reader.application.dto import ReaderPublicationFingerprintDto
 
 _LIBMOBI_PARSER = "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add"
 _FORMAT_IDENTIFIERS: dict[str, tuple[str, str]] = {
-    "epub": ("epub-package:1", "shuku-epub-raw-v1"),
-    "mobi": (_LIBMOBI_PARSER, "ermao-mobi-core-v1"),
-    "azw": (_LIBMOBI_PARSER, "ermao-mobi-core-v1"),
-    "azw3": (_LIBMOBI_PARSER, "ermao-mobi-core-v1"),
-    "prc": (_LIBMOBI_PARSER, "ermao-mobi-core-v1"),
-    "txt": ("shuku-txt-parser-v1", "shuku-txt-publication-v1"),
+    "epub": ("epub-package:1", "shuku-epub-locator-dom-v2"),
+    "mobi": (_LIBMOBI_PARSER, "ermao-mobi-core-v1+shuku-locator-dom-v2"),
+    "azw": (_LIBMOBI_PARSER, "ermao-mobi-core-v1+shuku-locator-dom-v2"),
+    "azw3": (_LIBMOBI_PARSER, "ermao-mobi-core-v1+shuku-locator-dom-v2"),
+    "prc": (_LIBMOBI_PARSER, "ermao-mobi-core-v1+shuku-locator-dom-v2"),
+    "txt": ("shuku-txt-parser-v1", "shuku-txt-publication-v2"),
     "fb2": ("shuku-fb2-parser-v1", "shuku-fb2-publication-v1"),
     "pdf": ("pdf:source-v1", "shuku-pdf-pages-v1"),
     "cbz": ("archive-images:natural-order-v1", "shuku-comic-pages-v1"),

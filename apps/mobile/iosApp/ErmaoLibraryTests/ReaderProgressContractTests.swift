@@ -53,8 +53,8 @@ final class ReaderProgressContractTests: XCTestCase {
         )
         let fingerprint = try IosContentFingerprint(
             originalFileHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            parserVersion: "readium:epub",
-            normalizationVersion: "epub-v1"
+            parserVersion: "epub-package:1",
+            normalizationVersion: "shuku-epub-locator-dom-v2"
         )
 
         XCTAssertThrowsError(
@@ -109,11 +109,12 @@ final class ReaderProgressContractTests: XCTestCase {
             format: .epub,
             contentFingerprint: ErmaoShared.ContentFingerprint(
                 originalFileHash: hash,
-                parserVersion: "readium:epub",
-                normalizationVersion: "epub-v1"
+                parserVersion: "epub-package:1",
+                normalizationVersion: "shuku-epub-locator-dom-v2"
             ),
             workId: "work-42",
-            volumeId: "volume-epub-42"
+            volumeId: "volume-epub-42",
+            sourceFormat: .epub
         )
     }
 
@@ -122,6 +123,6 @@ final class ReaderProgressContractTests: XCTestCase {
         updatedAt: Int64 = 1_775_988_123_456,
         deviceID: String = "ios-installation-a"
     ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":5,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"readium:epub","normalizationVersion":"epub-v1"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
+        ##"{"schema":"ermao.reader-progress","version":5,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"epub-package:1","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
     }
 }

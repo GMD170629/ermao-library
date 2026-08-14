@@ -1,7 +1,6 @@
 import {
   normalizeReaderPreferences,
   parseSupportedReaderSourceFormat,
-  publicationFingerprintsMatch,
   readerFormatCapability,
   type PublicationFingerprint,
   type ReaderLocation,
@@ -72,10 +71,16 @@ export type ReaderBootstrap = Readonly<{
   pages: ReaderPage[];
   fileUrl: string;
   capabilities: import('@shuku/reader-core').ReaderCapabilities;
-  resumeFingerprintMismatch: boolean;
   progressPercent: number;
   serverProgressSnapshot: ReaderProgressSnapshot | null;
   source: ReaderSource;
+  renderArtifact: Readonly<{
+    schemaVersion: 1;
+    url: string;
+    mimeType: 'application/epub+zip';
+    sizeBytes: number;
+    contentHash: string;
+  }> | null;
   initialLocation: ReaderLocation | null;
   serverPreferences: Readonly<{ settings: import('@shuku/reader-core').ReaderPreferences; updatedAt: string | null }>;
 }>;
@@ -225,11 +230,32 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   if (readerType === 'reflowable' && !publicationManifestUrl) {
     throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
   }
+  const renderAccess = record(publicationAccess.renderArtifact);
+  const renderUrl = nullableString(renderAccess.url);
+  const renderHash = nullableString(renderAccess.contentHash);
+  const renderSize = numberValue(renderAccess.sizeBytes);
+  const renderArtifact = renderUrl
+    && renderAccess.schemaVersion === 1
+    && renderAccess.mimeType === 'application/epub+zip'
+    && renderSize > 0
+    && renderHash
+    && /^sha256:[a-f\d]{64}$/u.test(renderHash)
+    ? {
+        schemaVersion: 1 as const,
+        url: withBasePath(renderUrl),
+        mimeType: 'application/epub+zip' as const,
+        sizeBytes: renderSize,
+        contentHash: renderHash
+      }
+    : null;
+  if (publicationAccess.renderArtifact !== null
+    && publicationAccess.renderArtifact !== undefined
+    && !renderArtifact) {
+    throw new ReaderBootstrapError('READER_RENDER_ARTIFACT_INVALID', '阅读渲染文件信息无效');
+  }
   const source: ReaderSource = readerType === 'reflowable'
-    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format as ReflowableFormat, contentUrl: withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint, ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
+    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format as ReflowableFormat, contentUrl: renderArtifact?.url ?? withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint, ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
     : { workId, volumeId: volume.id, kind: readerType, contentUrl: withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint ?? undefined, totalPages: volume.pageCount };
-  const locationMatchesPublication = Boolean(serverProgressSnapshot && fingerprint
-    && publicationFingerprintsMatch(serverProgressSnapshot.locator.publication, fingerprint));
   return {
     schemaVersion: 4,
     userId: stringValue(data.userId),
@@ -258,12 +284,12 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
       supportsSpreads: capabilities.supportsSpreads === true,
       readingDirection: 'ltr'
     },
-    resumeFingerprintMismatch: data.resumeFingerprintMismatch === true,
     progressPercent: serverProgressSnapshot?.displayPercent ?? 0,
     serverProgressSnapshot,
     source,
+    renderArtifact,
     initialLocation: v4LocationToDomain(
-      locationMatchesPublication ? serverProgressSnapshot?.locator ?? null : null,
+      serverProgressSnapshot?.locator ?? null,
       volume.id,
       readerType === 'reflowable' ? format as ReflowableFormat : null
     ),

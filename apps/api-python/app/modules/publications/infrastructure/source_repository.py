@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import false, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.library import (
     LibraryFile,
@@ -27,11 +28,11 @@ class SqlAlchemyPublicationSourceRepository:
         volume_id: str,
         access_scope: PublicationAccessScope,
     ) -> PublicationSource | None:
-        visibility = false()
+        visibility: ColumnElement[bool] = false()
         if access_scope.is_admin:
             visibility = LibraryVolume.id.is_not(None)
         else:
-            clauses = []
+            clauses: list[ColumnElement[bool]] = []
             if access_scope.monitor_folder_ids:
                 clauses.append(
                     LibraryVolume.monitor_folder_id.in_(access_scope.monitor_folder_ids)

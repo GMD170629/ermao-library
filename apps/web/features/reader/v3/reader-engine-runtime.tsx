@@ -30,6 +30,8 @@ type ReaderEngineRuntimeProps = {
   onReady: () => void;
   bookCache: ReaderBookCache;
   onStorageWarning: (message: string) => void;
+  externalNavigation?: { id: number; location: import('@shuku/reader-core').ReaderLocation } | null;
+  onExternalNavigationResult?: (id: number, accepted: boolean) => void;
 };
 
 type PasswordCapableAdapter = ReaderAdapter & { providePassword: (password: string | null) => boolean };
@@ -103,7 +105,9 @@ export function ReaderEngineRuntime({
   onDownloadProgress,
   onReady,
   bookCache,
-  onStorageWarning
+  onStorageWarning,
+  externalNavigation = null,
+  onExternalNavigationResult
 }: ReaderEngineRuntimeProps) {
   const { t: i18nAttribute } = useAttributeI18n();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
@@ -236,6 +240,15 @@ export function ReaderEngineRuntime({
       || adapterLoadError
     ) onReady();
   }, [adapterLoadError, onReady, session.state.lifecycle]);
+
+  useEffect(() => {
+    if (!externalNavigation || session.state.lifecycle !== 'ready') return;
+    let active = true;
+    void sessionExecute({ type: 'go-to-location', location: externalNavigation.location })
+      .then((accepted) => { if (active) onExternalNavigationResult?.(externalNavigation.id, accepted); })
+      .catch(() => { if (active) onExternalNavigationResult?.(externalNavigation.id, false); });
+    return () => { active = false; };
+  }, [externalNavigation, onExternalNavigationResult, session.state.lifecycle, sessionExecute]);
 
   useEffect(() => {
     onIndexProgress(session.state.phase === 'generating-pagination'

@@ -36,7 +36,7 @@ test('exact anchors require the complete structured fingerprint to match', () =>
   const fingerprint = {
     originalFileHash: 'f2b9',
     parser: 'libmobi:0.12',
-    normalization: 'ermao-mobi-core-v1'
+    normalization: 'ermao-mobi-core-v1+shuku-locator-dom-v2'
   };
   assert.equal(compareFingerprints(fingerprint, fingerprint), 'match');
   assert.equal(compareFingerprints(fingerprint, { ...fingerprint, normalization: 'other' }), 'mismatch');

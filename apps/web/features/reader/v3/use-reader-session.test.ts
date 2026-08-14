@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ReaderNavigationIntentQueue } from './use-reader-session';
+import { ReaderNavigationIntentQueue, ReaderPreferenceIntentQueue } from './use-reader-session';
 
 function deferred() {
   let resolve!: () => void;
@@ -76,4 +76,32 @@ test('reset invalidates queued navigation work from a closing adapter session', 
   assert.equal(await stale, false);
   assert.equal(await nextSession, true);
   assert.deepEqual(calls, ['first', 'next-session']);
+});
+
+test('serializes preferences and coalesces pending changes to the latest snapshot', async () => {
+  const queue = new ReaderPreferenceIntentQueue();
+  const firstGate = deferred();
+  const calls: string[] = [];
+
+  const first = queue.enqueue(async () => {
+    calls.push('first:start');
+    await firstGate.promise;
+    calls.push('first:end');
+    return true;
+  });
+  const skipped = queue.enqueue(async () => {
+    calls.push('second');
+    return true;
+  });
+  const latest = queue.enqueue(async () => {
+    calls.push('latest');
+    return true;
+  });
+
+  await flush();
+  assert.deepEqual(calls, ['first:start']);
+  firstGate.resolve();
+
+  assert.deepEqual(await Promise.all([first, skipped, latest]), [true, false, true]);
+  assert.deepEqual(calls, ['first:start', 'first:end', 'latest']);
 });

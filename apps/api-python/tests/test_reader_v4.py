@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, update
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.core.config import Settings
@@ -21,18 +21,6 @@ from app.models.library import (
     LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
-)
-from app.modules.reader.application.navigation_maintenance import (
-    RebuildEpubNavigationBatch,
-)
-from app.modules.reader.infrastructure.epub_navigation_recovery import (
-    FileReaderEpubNavigationParser,
-)
-from app.modules.reader.infrastructure.navigation_maintenance import (
-    prepare_epub_navigation_write,
-)
-from app.modules.reader.infrastructure.uow import (
-    SqlAlchemyEpubNavigationMaintenanceUnitOfWork,
 )
 
 
@@ -106,29 +94,39 @@ def _write_reader_epub(path: Path) -> None:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr(
             "META-INF/container.xml",
-            '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>',
+            "<container><rootfiles>"
+            '<rootfile full-path="OEBPS/content.opf"/>'
+            "</rootfiles></container>",
         )
         archive.writestr(
             "OEBPS/content.opf",
             """<package><metadata><title>Recovered EPUB</title></metadata><manifest>
-            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"
+            properties="nav"/>
             <item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/>
             <item id="two" href="Text/two.xhtml" media-type="application/xhtml+xml"/>
-            </manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>""",
+            </manifest><spine><itemref idref="one"/>
+            <itemref idref="two"/></spine></package>""",
         )
         archive.writestr(
             "OEBPS/nav.xhtml",
-            """<html><body><nav epub:type="toc">
-            <a href="Text/one.xhtml#start">第一章</a>
-            <a href="Text/two.xhtml">第二章</a>
-            </nav></body></html>""",
+            """<html xmlns="http://www.w3.org/1999/xhtml"
+            xmlns:epub="http://www.idpf.org/2007/ops"><head>
+            <title>目录</title></head><body><nav epub:type="toc"><ol>
+            <li><a href="Text/one.xhtml#start">第一章</a></li>
+            <li><a href="Text/two.xhtml">第二章</a></li>
+            </ol></nav></body></html>""",
         )
         archive.writestr(
             "OEBPS/Text/one.xhtml",
-            '<html><body><h1 id="start">第一章</h1></body></html>',
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+            <title>第一章</title></head><body><h1 id="start">第一章</h1>
+            </body></html>""",
         )
         archive.writestr(
-            "OEBPS/Text/two.xhtml", "<html><body><h1>第二章</h1></body></html>"
+            "OEBPS/Text/two.xhtml",
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+            <title>第二章</title></head><body><h1>第二章</h1></body></html>""",
         )
 
 
@@ -238,6 +236,13 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["schemaVersion"] == 4
     assert bootstrap["progressSnapshot"] is None
+    empty_progress_response = client.get(f"/api/reader/v4/volumes/{volume.id}/progress")
+    assert empty_progress_response.status_code == 200
+    assert empty_progress_response.headers["etag"] == '"reader-progress-0"'
+    assert empty_progress_response.json()["data"] == {
+        "schemaVersion": 4,
+        "progressSnapshot": None,
+    }
     assert bootstrap["volume"]["id"] == volume.id
     assert bootstrap["mediaVersion"] == {
         "id": "media-reader-v3",
@@ -265,6 +270,7 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     progress = progress_response.json()["data"]
     assert set(progress) == {
         "schemaVersion",
+        "clientId",
         "revision",
         "locator",
         "displayPercent",
@@ -272,6 +278,7 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
         "capturedAtEpochMillis",
     }
     assert progress["schemaVersion"] == 4
+    assert progress["clientId"] == "web-installation"
     assert progress["revision"] == 1
     assert progress["displayPercent"] == 50
     assert progress["capturedAtEpochMillis"] == 1_700_000_001_000
@@ -285,12 +292,29 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert stored.volume_id == volume.id
     assert stored.percent == 50
     assert stored.location_json is not None
+    assert stored.content_fingerprint == (
+        "work:14:work-reader-v3|volume:16:volume-reader-v3"
+    )
     assert stored.revision == 1
     assert stored.mutation_id == mutation_id
     initial_bootstrap = client.get(
         f"/api/reader/v4/volumes/{volume.id}/bootstrap"
     ).json()["data"]
     assert initial_bootstrap["progressSnapshot"] == progress
+
+    progress_query = client.get(f"/api/reader/v4/volumes/{volume.id}/progress")
+    assert progress_query.status_code == 200
+    assert progress_query.headers["etag"] == '"reader-progress-1"'
+    assert progress_query.json()["data"] == {
+        "schemaVersion": 4,
+        "progressSnapshot": progress,
+    }
+    unchanged = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        headers={"If-None-Match": progress_query.headers["etag"]},
+    )
+    assert unchanged.status_code == 304
+    assert unchanged.content == b""
 
     stale_response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
@@ -572,6 +596,57 @@ def test_reader_v4_rejects_progress_without_locator(
     assert db_session.query(LibraryReadingProgress).count() == 0
 
 
+def test_reader_v4_progress_identity_ignores_publication_fingerprint_changes(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+    locator = _exact_locator(bootstrap)
+    locator["publication"] = {
+        "originalFileHash": f"sha256:{'b' * 64}",
+        "parser": "replacement-parser:2",
+        "normalization": "replacement-normalization:2",
+    }
+
+    response = client.put(
+        f"/api/reader/v4/volumes/{volume.id}/progress",
+        json=_progress_payload(bootstrap, locator=locator),
+    )
+
+    assert response.status_code == 200
+    stored = db_session.query(LibraryReadingProgress).one()
+    assert stored.volume_id == volume.id
+    assert stored.content_fingerprint == (
+        "work:14:work-reader-v3|volume:16:volume-reader-v3"
+    )
+
+
+def test_reader_v4_bootstrap_does_not_require_a_full_file_hash(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    file.full_hash = None
+    file.hash_status = "PARTIAL_PENDING"
+    db_session.commit()
+
+    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+
+    assert response.status_code == 200
+    bootstrap = response.json()["data"]
+    assert bootstrap["volume"]["id"] == volume.id
+    source_path = Path(file.path)
+    assert bootstrap["publicationFingerprint"]["originalFileHash"] == (
+        f"sha256:{hashlib.sha256(source_path.read_bytes()).hexdigest()}"
+    )
+
+
 @pytest.mark.parametrize(
     "mutate_locator",
     [
@@ -785,11 +860,13 @@ def test_volume_reading_status_replaces_all_legacy_progress_state(
     assert progress.extra == '{"legacy":true}'
     assert progress.location_type == "comic"
     assert progress.location_json == '{"type":"comic","pageIndex":7}'
-    assert progress.content_fingerprint == "sha256:legacy"
+    assert progress.content_fingerprint == (
+        "work:14:work-reader-v3|volume:16:volume-reader-v3"
+    )
     assert progress.revision == 0
 
 
-def test_reader_v4_bootstrap_does_not_parse_or_write_missing_epub_navigation(
+def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -801,8 +878,13 @@ def test_reader_v4_bootstrap_does_not_parse_or_write_missing_epub_navigation(
     source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     source_file.path = str(epub)
     source_file.size_bytes = epub.stat().st_size
+    source_file.full_hash = hashlib.sha256(epub.read_bytes()).hexdigest()
+    source_file.fingerprint = f"sha256:{source_file.full_hash}"
+    source_file.mtime_ms = int(epub.stat().st_mtime * 1000)
     volume.chapter_count = None
     db_session.commit()
+
+    first_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
 
     engine = db_session.get_bind()
     assert isinstance(engine, Engine)
@@ -825,123 +907,27 @@ def test_reader_v4_bootstrap_does_not_parse_or_write_missing_epub_navigation(
 
     event.listen(engine, "before_cursor_execute", capture_writes)
     try:
-        first_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
         second_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
     finally:
         event.remove(engine, "before_cursor_execute", capture_writes)
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
-    assert first_response.json()["data"]["units"] == []
-    assert second_response.json()["data"]["units"] == []
-    assert writes == []
-    assert db_session.query(LibraryReadingUnit).count() == 0
-    db_session.refresh(volume)
-    assert volume.chapter_count is None
-
-
-def test_reader_navigation_maintenance_repairs_missing_units_outside_get(
-    db_session: Session,
-    tmp_path: Path,
-) -> None:
-    volume = _ebook_volume(db_session)
-    epub = tmp_path / "historical-missing-navigation.epub"
-    _write_reader_epub(epub)
-    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_file.path = str(epub)
-    source_file.size_bytes = epub.stat().st_size
-    volume.chapter_count = None
-    db_session.commit()
-
-    engine = db_session.get_bind()
-    assert isinstance(engine, Engine)
-    factory = sessionmaker(
-        bind=engine,
-        autoflush=False,
-        autocommit=False,
-        expire_on_commit=False,
-    )
-    maintenance = RebuildEpubNavigationBatch(
-        lambda: SqlAlchemyEpubNavigationMaintenanceUnitOfWork(factory),
-        FileReaderEpubNavigationParser(tmp_path),
-        lambda: datetime(2026, 8, 11, tzinfo=UTC),
-        prepare_epub_navigation_write,
-    )
-
-    result = maintenance.execute(limit=25)
-
-    assert result.scanned == 1
-    assert result.processed == 1
-    db_session.expire_all()
-    units = (
-        db_session.query(LibraryReadingUnit)
-        .order_by(LibraryReadingUnit.sort_order)
-        .all()
-    )
-    assert [unit.href for unit in units] == [
-        "OEBPS/Text/one.xhtml#start",
-        "OEBPS/Text/two.xhtml",
+    assert [unit["title"] for unit in first_response.json()["data"]["units"]] == [
+        "第一章",
+        "第二章",
     ]
-    assert all(
-        json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
-        for unit in units
+    assert (
+        second_response.json()["data"]["units"]
+        == first_response.json()["data"]["units"]
     )
+    assert writes == []
+    assert db_session.query(LibraryReadingUnit).count() == 2
     db_session.refresh(volume)
     assert volume.chapter_count == 2
-    assert maintenance.execute(limit=25).scanned == 0
 
 
-def test_reader_navigation_maintenance_cas_skips_changed_source(
-    db_session: Session,
-    tmp_path: Path,
-) -> None:
-    volume = _ebook_volume(db_session)
-    epub = tmp_path / "source-changes-during-parse.epub"
-    _write_reader_epub(epub)
-    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_file.path = str(epub)
-    source_file.size_bytes = epub.stat().st_size
-    db_session.commit()
-
-    engine = db_session.get_bind()
-    assert isinstance(engine, Engine)
-    factory = sessionmaker(
-        bind=engine,
-        autoflush=False,
-        autocommit=False,
-        expire_on_commit=False,
-    )
-    delegate = FileReaderEpubNavigationParser(tmp_path)
-
-    class MutatingParser:
-        def parse(self, source_path: str):
-            chapters = delegate.parse(source_path)
-            with factory() as mutation:
-                mutation.execute(
-                    update(LibraryFile)
-                    .where(LibraryFile.id == source_file.id)
-                    .values(updated_at=datetime(2026, 8, 12, tzinfo=UTC))
-                )
-                mutation.commit()
-            return chapters
-
-    maintenance = RebuildEpubNavigationBatch(
-        lambda: SqlAlchemyEpubNavigationMaintenanceUnitOfWork(factory),
-        MutatingParser(),
-        lambda: datetime(2026, 8, 11, tzinfo=UTC),
-        prepare_epub_navigation_write,
-    )
-
-    result = maintenance.execute(limit=25)
-
-    assert result.scanned == 1
-    assert result.processed == 0
-    db_session.expire_all()
-    assert db_session.query(LibraryReadingUnit).count() == 0
-    assert db_session.get(LibraryVolume, volume.id).chapter_count is None
-
-
-def test_reader_v4_bootstrap_returns_legacy_navigation_projection_without_repair(
+def test_reader_v4_bootstrap_replaces_legacy_navigation_with_publication_toc(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -953,6 +939,9 @@ def test_reader_v4_bootstrap_returns_legacy_navigation_projection_without_repair
     source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     source_file.path = str(epub)
     source_file.size_bytes = epub.stat().st_size
+    source_file.full_hash = hashlib.sha256(epub.read_bytes()).hexdigest()
+    source_file.fingerprint = f"sha256:{source_file.full_hash}"
+    source_file.mtime_ms = int(epub.stat().st_mtime * 1000)
     db_session.add_all(
         [
             LibraryReadingUnit(
@@ -986,8 +975,8 @@ def test_reader_v4_bootstrap_returns_legacy_navigation_projection_without_repair
 
     assert response.status_code == 200
     assert [unit["href"] for unit in response.json()["data"]["units"]] == [
-        "Text/one.xhtml#start",
-        "Text/two.xhtml",
+        "OEBPS/Text/one.xhtml#start",
+        "OEBPS/Text/two.xhtml",
     ]
     stored_units = (
         db_session.query(LibraryReadingUnit)
@@ -995,15 +984,21 @@ def test_reader_v4_bootstrap_returns_legacy_navigation_projection_without_repair
         .all()
     )
     assert [unit.id for unit in stored_units] == [
-        "legacy-unit-one",
-        "legacy-unit-two",
+        response.json()["data"]["units"][0]["id"],
+        response.json()["data"]["units"][1]["id"],
     ]
+    assert all(unit.id.startswith("pubnav_") for unit in stored_units)
     assert [unit.href for unit in stored_units] == [
-        "Text/one.xhtml#start",
-        "Text/two.xhtml",
+        "OEBPS/Text/one.xhtml#start",
+        "OEBPS/Text/two.xhtml",
     ]
     assert all(
-        "hrefBase" not in json.loads(unit.metadata_json) for unit in stored_units
+        json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
+        for unit in stored_units
+    )
+    assert all(
+        json.loads(unit.metadata_json)["exactNavigation"] is True
+        for unit in stored_units
     )
     detail_units_response = client.get(
         f"/api/works/work-reader-v3/volumes/{volume.id}/reading-units",
@@ -1032,7 +1027,7 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
             id="reader-v3-legacy-bookmark",
             user_id=user.id,
             volume_id=volume.id,
-            content_fingerprint="\0".join(bootstrap["publicationFingerprint"].values()),
+            content_fingerprint=bootstrap["contentFingerprint"],
             bookmark_id="legacy-created-at",
             location_json=json.dumps(
                 {
@@ -1051,11 +1046,7 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
 
     response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/bookmarks",
-        params={
-            "contentFingerprint": "\0".join(
-                bootstrap["publicationFingerprint"].values()
-            )
-        },
+        params={"contentFingerprint": bootstrap["contentFingerprint"]},
     )
 
     assert response.status_code == 200

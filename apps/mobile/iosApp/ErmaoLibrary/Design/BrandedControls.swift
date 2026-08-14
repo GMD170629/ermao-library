@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PrimaryActionButton: View {
     let title: LocalizedStringKey
+    let systemImage: String?
     let isWorking: Bool
     let isDisabled: Bool
     let action: () -> Void
@@ -10,11 +11,13 @@ struct PrimaryActionButton: View {
 
     init(
         _ title: LocalizedStringKey,
+        systemImage: String? = nil,
         isWorking: Bool = false,
         isDisabled: Bool = false,
         action: @escaping () -> Void
     ) {
         self.title = title
+        self.systemImage = systemImage
         self.isWorking = isWorking
         self.isDisabled = isDisabled
         self.action = action
@@ -23,9 +26,15 @@ struct PrimaryActionButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Text(title)
-                    .appTextStyle(.button)
-                    .opacity(isWorking ? 0 : 1)
+                Group {
+                    if let systemImage {
+                        Label(title, systemImage: systemImage)
+                    } else {
+                        Text(title)
+                    }
+                }
+                .appTextStyle(.button)
+                .opacity(isWorking ? 0 : 1)
                 if isWorking {
                     ProgressView()
                         .tint(theme.onAction)

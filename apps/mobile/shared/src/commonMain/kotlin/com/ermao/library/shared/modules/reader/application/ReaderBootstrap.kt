@@ -25,10 +25,13 @@ data class ReaderPublicationDownload(
     val workId: String,
     val volumeId: String,
     val apiPath: String,
+    /** Original library format; retained for metadata and compatibility. */
+    val originalSourceFormat: ReaderSourceFormat,
+    /** Format of the bytes opened by the local reader. */
     val sourceFormat: ReaderSourceFormat,
     val mimeType: String,
     val expectedSizeBytes: Long,
-    val expectedOriginalFileHash: String?,
+    val expectedContentHash: String?,
     val publicationFingerprint: PublicationFingerprint,
 ) {
     init {
@@ -39,14 +42,7 @@ data class ReaderPublicationDownload(
         require(apiPath.startsWith("/api/") && !apiPath.contains('#'))
         require(sourceFormat.acceptsMimeType(mimeType)) { "Reader publication MIME type does not match its source format" }
         require(expectedSizeBytes > 0)
-        require(expectedOriginalFileHash == null || expectedOriginalFileHash.matches(SHA256_PATTERN))
-        require(
-            expectedOriginalFileHash == null ||
-                expectedOriginalFileHash.removePrefix("sha256:").equals(
-                    publicationFingerprint.originalFileHash.removePrefix("sha256:"),
-                    ignoreCase = true,
-                ),
-        ) { "Download hash and Publication fingerprint do not match" }
+        require(expectedContentHash == null || expectedContentHash.matches(SHA256_PATTERN))
     }
 
     private companion object {

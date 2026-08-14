@@ -51,7 +51,7 @@ def test_library_facet_index_upgrade_marks_existing_work_pending(tmp_path) -> No
                     upgraded_work.c.id == "legacy-facet-work"
                 )
             )
-        assert head_revision(engine) == "0023_publication_full_hash_identity"
+        assert head_revision(engine) == "0026_publication_render_cache"
         assert "facetIndexVersion" in columns
         assert indexes["LibraryWork_facetIndexVersion_id_idx"] == (
             "facetIndexVersion",

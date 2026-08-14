@@ -125,7 +125,7 @@ def test_shared_exact_fixture_round_trips_and_is_idempotent(
             "sha256:f2b9fdd883430568c161995e80e52fc337ceb417222884c3c782af8202f4c581"
         ),
         "parser": "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add",
-        "normalization": "ermao-mobi-core-v1",
+        "normalization": "ermao-mobi-core-v1+shuku-locator-dom-v2",
     }
 
     payload = _fixture("exact-reflowable-request.json")

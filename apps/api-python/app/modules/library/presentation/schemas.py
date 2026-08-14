@@ -607,6 +607,7 @@ class WorksPayload(HttpContractModel):
 class ReadingUnitMetadata(HttpContractModel):
     exact_navigation: bool | None = Field(default=None, alias="exactNavigation")
     level: int | None = Field(default=None, ge=0)
+    path: list[int] | None = None
     navigation_key: str | None = Field(default=None, alias="navigationKey")
     zip_entry_name: str | None = Field(default=None, alias="zipEntryName")
     idref: str | None = None
@@ -621,6 +622,11 @@ class ReadingUnitMetadata(HttpContractModel):
         alias="hrefBase",
     )
     recovered: bool | None = None
+    reading_order_position: int | None = Field(
+        default=None,
+        ge=1,
+        alias="readingOrderPosition",
+    )
 
 
 class ReadingUnit(HttpContractModel):
@@ -747,6 +753,10 @@ class WorkReadingUnitsPayload(HttpContractModel):
     progress: float
     current_href: str | None = Field(default=None, alias="currentHref")
     current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
+    current_chapter_title: str | None = Field(
+        default=None,
+        alias="currentChapterTitle",
+    )
     current_chapter_sort_order: int | None = Field(
         default=None, alias="currentChapterSortOrder"
     )

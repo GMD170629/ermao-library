@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Never, cast, overload
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.publications import (
+    ensure_publication_navigation,
+    ensure_publication_render_artifact,
+)
 from app.bootstrap.reader import reader_volume_service
 from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user
@@ -18,6 +23,20 @@ from app.core.authorization import authorization_context, can_access_volume
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.publications.application.ensure_navigation import (
+    PublicationNavigationSourceChangedError,
+)
+from app.modules.publications.application.ensure_render_artifact import (
+    PublicationRenderSourceChangedError,
+)
+from app.modules.publications.application.ports import PublicationAccessScope
+from app.modules.publications.domain.model import (
+    PublicationCorruptError,
+    PublicationNotFoundError,
+    PublicationSecurityError,
+    PublicationStructureError,
+    PublicationUnsupportedError,
+)
 from app.modules.reader.application.content_fingerprint import (
     publication_fingerprint_key,
 )
@@ -80,10 +99,14 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderProgressPut,
     ReaderProgressResponse,
     ReaderProgressSnapshot,
+    ReaderProgressStateData,
+    ReaderProgressStateResponse,
     ReaderPublicationAccess,
     ReaderReadingStatusData,
     ReaderReadingStatusPut,
     ReaderReadingStatusResponse,
+    ReaderRenderArtifact,
+    ReaderSourceFormat,
     ReaderUnauthorizedError,
     ReaderUnitSummary,
     ReaderValidationError,
@@ -91,7 +114,6 @@ from app.modules.reader.presentation.v4_schemas import (
     ReadiumEngineLocator,
     ReadiumLocatorPayload,
     ReflowableExactLocation,
-    ReaderSourceFormat,
 )
 
 router = APIRouter(
@@ -105,6 +127,7 @@ _METADATA_ADAPTER = TypeAdapter(dict[str, ReaderJsonValue])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 _PUBLICATION_SERVER_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt"})
+LOGGER = logging.getLogger(__name__)
 
 
 def _current_user(db: Session, request: Request, settings: Settings) -> User:
@@ -133,6 +156,21 @@ def _access_scope(db: Session, user: User) -> ReaderAccessScope:
         can_view_manual_imports=context.can_view_manual_imports,
         monitor_folder_ids=context.monitor_folder_ids,
     )
+
+
+def _publication_access_scope(scope: ReaderAccessScope) -> PublicationAccessScope:
+    return PublicationAccessScope(
+        is_admin=scope.is_admin,
+        can_view_manual_imports=scope.can_view_manual_imports,
+        monitor_folder_ids=tuple(scope.monitor_folder_ids),
+    )
+
+
+def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
+    factory: object = request.app.state.session_factory
+    if not isinstance(factory, sessionmaker):
+        raise TypeError("application session factory is unavailable")
+    return cast(sessionmaker[Session], factory)
 
 
 def _reader_type(volume_format: str) -> ReaderType:
@@ -352,11 +390,16 @@ def _progress_snapshot(
     return ReaderProgressSnapshot(
         schemaVersion=4,
         revision=progress.revision,
+        clientId=progress.client_id or "shuku-library",
         locator=_exact_location_model(progress.exact_location),
         displayPercent=progress.percent,
         receivedAtEpochMillis=_epoch_millis(progress.updated_at),
         capturedAtEpochMillis=_epoch_millis(progress.progressed_at),
     )
+
+
+def _progress_etag(progress: ReaderProgressDto | None) -> str:
+    return f'"reader-progress-{progress.revision if progress is not None else 0}"'
 
 
 def _raise_service_error(error: Exception) -> Never:
@@ -420,6 +463,24 @@ def _raise_service_error(error: Exception) -> Never:
     raise error
 
 
+def _raise_publication_render_error(error: Exception) -> Never:
+    if isinstance(error, PublicationSecurityError):
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="出版物包含明确不安全的活动内容，已拒绝打开",
+                code="PUBLICATION_SECURITY_REJECTED",
+            )
+        ) from error
+    if isinstance(error, PublicationStructureError):
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="出版物包结构无效，无法建立阅读内容",
+                code="PUBLICATION_STRUCTURE_INVALID",
+            )
+        ) from error
+    raise error
+
+
 @router.get(
     "/volumes/{volume_id}/bootstrap",
     response_model=ReaderBootstrapResponse,
@@ -441,11 +502,32 @@ def reader_bootstrap_v4(
     user = _current_user(db, request, settings)
     if not can_access_volume(db, user, volume_id):
         raise _not_found()
+    user_id = user.id
+    reader_scope = _access_scope(db, user)
+    publication_scope = _publication_access_scope(reader_scope)
+    try:
+        ensure_publication_navigation(
+            _runtime_session_factory(request),
+            settings,
+        ).execute(volume_id=volume_id, access_scope=publication_scope)
+    except (
+        OSError,
+        PublicationCorruptError,
+        PublicationNotFoundError,
+        PublicationNavigationSourceChangedError,
+        PublicationUnsupportedError,
+    ) as error:
+        LOGGER.warning(
+            "reader_navigation_generation outcome=unavailable volume_id=%s "
+            "error_type=%s",
+            volume_id,
+            type(error).__name__,
+        )
     try:
         bootstrap = _service(db, settings).load_bootstrap(
-            user_id=user.id,
+            user_id=user_id,
             volume_id=volume_id,
-            access_scope=_access_scope(db, user),
+            access_scope=reader_scope,
         )
     except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
         _raise_service_error(error)
@@ -455,10 +537,39 @@ def reader_bootstrap_v4(
     progress = bootstrap.progress_by_volume_id.get(volume_id)
     capabilities = capabilities_for_reader_type(reader_type)
     normalized_format = context.volume.format.lower()
+    render_artifact = None
+    if normalized_format in _PUBLICATION_SERVER_FORMATS:
+        try:
+            artifact, _artifact_path = ensure_publication_render_artifact(
+                _runtime_session_factory(request),
+                settings,
+            ).execute(volume_id=volume_id, access_scope=publication_scope)
+            render_artifact = ReaderRenderArtifact(
+                schemaVersion=1,
+                url=(f"/api/reader/v4/volumes/{volume_id}/publication/render.epub"),
+                mimeType="application/epub+zip",
+                sizeBytes=artifact.size_bytes,
+                contentHash=artifact.content_hash,
+            )
+        except (PublicationSecurityError, PublicationStructureError) as error:
+            _raise_publication_render_error(error)
+        except (
+            OSError,
+            PublicationCorruptError,
+            PublicationNotFoundError,
+            PublicationRenderSourceChangedError,
+            PublicationUnsupportedError,
+        ) as error:
+            LOGGER.warning(
+                "reader_render_generation outcome=unavailable volume_id=%s "
+                "error_type=%s",
+                volume_id,
+                type(error).__name__,
+            )
     return ReaderBootstrapResponse(
         data=ReaderBootstrapData(
             schemaVersion=4,
-            userId=user.id,
+            userId=user_id,
             readerType=reader_type.value,
             sourceFormat=cast(ReaderSourceFormat, normalized_format),
             publicationFingerprint=PublicationFingerprint(
@@ -545,6 +656,7 @@ def reader_bootstrap_v4(
                     positionsUrl=(
                         f"/api/reader/v4/volumes/{volume_id}/publication/positions.json"
                     ),
+                    renderArtifact=render_artifact,
                 )
                 if normalized_format in _PUBLICATION_SERVER_FORMATS
                 else None
@@ -657,6 +769,55 @@ def save_progress_v4(
             )
         ) from error
     return ReaderProgressResponse(data=_progress_snapshot(progress))
+
+
+@router.get(
+    "/volumes/{volume_id}/progress",
+    response_model=ReaderProgressStateResponse,
+    response_model_by_alias=True,
+)
+def get_progress_v4(
+    volume_id: str,
+    request: Request,
+    response: Response,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> Annotated[
+    ReaderProgressStateResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+        ReaderValidationError,
+    ),
+]:
+    user = _current_user(db, request, settings)
+    if not can_access_volume(db, user, volume_id):
+        raise _not_found()
+    try:
+        progress = _service(db, settings).load_progress(
+            user_id=user.id,
+            volume_id=volume_id,
+            access_scope=_access_scope(db, user),
+        )
+    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+        _raise_service_error(error)
+    etag = _progress_etag(progress)
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Cookie"}
+    if request.headers.get("if-none-match") == etag:
+        return cast(
+            ReaderProgressStateResponse,
+            Response(status_code=304, headers=headers),
+        )
+    for name, value in headers.items():
+        response.headers[name] = value
+    return ReaderProgressStateResponse(
+        data=ReaderProgressStateData(
+            schemaVersion=4,
+            progressSnapshot=_progress_snapshot(progress)
+            if progress is not None
+            else None,
+        )
+    )
 
 
 @router.get(

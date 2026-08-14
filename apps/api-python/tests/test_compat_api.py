@@ -6225,7 +6225,9 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
             </manifest><spine><itemref idref="c1"/></spine></package>""",
         )
         archive.writestr(
-            "OEBPS/three.xhtml", "<html><body><h1>第三节</h1></body></html>"
+            "OEBPS/three.xhtml",
+            "<html><head><title>第三节</title></head>"
+            "<body><h1>第三节</h1></body></html>",
         )
 
     first_result = import_managed_book(
@@ -6258,15 +6260,15 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     assert data["sourceFormat"] == "epub"
     assert data["volume"]["id"] == second_result.volume_id
     assert data["volume"]["title"] == "第二卷"
-    assert data["volume"]["chapterCount"] == 1
+    assert data["volume"]["chapterCount"] == 0
     assert [
         (item["id"], item["title"], item["chapterCount"])
         for item in data["availableVolumes"]
     ] == [
-        (first_result.volume_id, "第一卷", 1),
-        (second_result.volume_id, "第二卷", 1),
+        (first_result.volume_id, "第一卷", None),
+        (second_result.volume_id, "第二卷", 0),
     ]
-    assert [unit["title"] for unit in data["units"]] == ["第三节"]
+    assert data["units"] == []
 
     second_file = client.get(
         f"/api/volumes/{second_result.volume_id}/file",

@@ -102,6 +102,7 @@ data class ReadingUnitContent(
     val positionLabel: String? = null,
     val href: String? = null,
     val sortOrder: Int = 0,
+    val readingOrderPosition: Int? = null,
     val readingState: ChapterReadingState = ChapterReadingState.Unread,
 )
 

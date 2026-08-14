@@ -24,6 +24,7 @@ export type EbookChapterDetail = Readonly<{
   page: ChapterDetailPage;
   currentHref: string | null;
   currentChapterIndex: number | null;
+  currentChapterTitle: string | null;
   currentChapterSortOrder: number | null;
   currentPageNumber: number | null;
   progress: number;

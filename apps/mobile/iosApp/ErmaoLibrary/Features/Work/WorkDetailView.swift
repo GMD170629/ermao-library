@@ -170,9 +170,6 @@ struct WorkDetailView: View {
                 .padding(.top, .spaceHalf)
                 .padding(.bottom, .space2)
 
-            progressSummary(detail)
-                .padding(.bottom, .space2)
-
             readerAction(detail)
                 .padding(.bottom, .space2)
 
@@ -196,7 +193,7 @@ struct WorkDetailView: View {
             HStack(alignment: .top, spacing: .space2) {
                 cover(detail).frame(width: 128)
                 identity(detail)
-                    .frame(height: 192, alignment: .top)
+                    .frame(minHeight: 192, alignment: .top)
             }
         }
     }
@@ -228,16 +225,25 @@ struct WorkDetailView: View {
                 }
             }
 
-            let format = detail.volumes.first?.formatLabel.lowercased()
-            let chips = [format].compactMap { $0 } + detail.tags
+            let chips = identityChips(detail)
             if !chips.isEmpty {
                 FlowTags(tags: chips)
             }
 
             if let series = detail.seriesFacet {
-                Spacer(minLength: .spaceHalf)
                 facetButton(series, kind: .series)
             }
+
+            Spacer(minLength: .spaceHalf)
+            progressSummary(detail)
+        }
+    }
+
+    private func identityChips(_ detail: WorkDetailContent) -> [String] {
+        let format = detail.volumes.first?.formatLabel.lowercased()
+        return ([format].compactMap { $0 } + detail.tags).reduce(into: []) { result, value in
+            guard !result.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else { return }
+            result.append(value)
         }
     }
 
@@ -274,6 +280,8 @@ struct WorkDetailView: View {
                     Spacer()
                     if let current = detail.chapters.first(where: \.isCurrent) {
                         Text(String(format: String(localized: "work.reading.position.format"), current.title))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .appTextStyle(.label)
                             .foregroundStyle(theme.textSecondary)
                     }
@@ -300,6 +308,7 @@ struct WorkDetailView: View {
 
             PrimaryActionButton(
                 detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action",
+                systemImage: "play.circle",
                 isDisabled: selected == nil || selected?.isReadable == false,
                 action: { requestReaderAccess(detail: detail) }
             )
@@ -332,8 +341,15 @@ struct WorkDetailView: View {
                 .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget, alignment: .trailing)
             }
             .padding(.space2)
-            .background(theme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task)))
+            .background(
+                theme.surface,
+                in: RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
+                    .stroke(theme.divider.opacity(0.75), lineWidth: 0.5)
+            }
+            .shadow(color: theme.textPrimary.opacity(0.08), radius: 10, x: 0, y: 4)
         }
     }
 
@@ -517,6 +533,7 @@ struct WorkDetailView: View {
                     VStack(alignment: .leading, spacing: .spaceHalf) {
                         Text(chapter.title)
                             .appTextStyle(.headline)
+                            .foregroundStyle(chapter.isCurrent ? theme.actionAccent : theme.textPrimary)
                             .lineLimit(2)
                         if let progress = chapter.progress {
                             Text(progressLabel(progress))
@@ -526,28 +543,46 @@ struct WorkDetailView: View {
                         }
                     }
                     Spacer(minLength: .space1)
-                    if chapter.state != .unread {
-                        Group {
-                            if chapter.state == .current {
-                                Text("work.chapter.current")
-                            } else {
-                                Text("work.chapter.read")
-                            }
-                        }
+                    Text(chapterStateTitle(chapter.state))
                         .appTextStyle(.label)
-                        .foregroundStyle(chapter.state == .current ? theme.actionAccent : theme.textSecondary)
-                    } else {
-                        Image(systemName: "chevron.forward")
-                            .foregroundStyle(theme.textTertiary)
-                    }
+                        .foregroundStyle(chapter.isCurrent ? theme.actionAccent : theme.textSecondary)
+                    Image(systemName: chapterStateImage(chapter.state))
+                        .foregroundStyle(chapter.isCurrent ? theme.brandAccent : theme.textTertiary)
+                        .accessibilityHidden(true)
                 }
                 .frame(minHeight: 64)
+                .padding(.horizontal, .space1)
+                .background(chapter.isCurrent ? theme.accentSoft : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.control)))
             }
             Divider()
         }
         .padding(.space2)
-        .background(theme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task)))
+        .background(
+            theme.surface,
+            in: RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
+                .stroke(theme.divider.opacity(0.75), lineWidth: 0.5)
+        }
+        .shadow(color: theme.textPrimary.opacity(0.08), radius: 10, x: 0, y: 4)
+    }
+
+    private func chapterStateTitle(_ state: WorkChapterReadingState) -> LocalizedStringKey {
+        switch state {
+        case .current: "work.chapter.current"
+        case .read: "work.chapter.read"
+        case .unread: "work.chapter.unread"
+        }
+    }
+
+    private func chapterStateImage(_ state: WorkChapterReadingState) -> String {
+        switch state {
+        case .current: "chart.bar.fill"
+        case .read: "checkmark.circle"
+        case .unread: "chevron.forward"
+        }
     }
 
     private func progressLabel(_ progress: Double) -> String {

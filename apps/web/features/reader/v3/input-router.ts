@@ -34,6 +34,26 @@ export function isReaderControlTarget(target: EventTarget | null) {
   return Boolean(editable || element.closest('a, [role="button"], [data-reader-control="true"]'));
 }
 
+/**
+ * Text-entry controls always retain their keyboard behavior. Navigation keys
+ * may still turn pages when focus is left on a toolbar button after a click;
+ * Space remains reserved for the focused control's native activation.
+ */
+export function isReaderKeyboardControlTarget(
+  target: EventTarget | null,
+  key: string
+) {
+  const element = target as Element | null;
+  if (!element || typeof element.closest !== 'function') return false;
+  if (element.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) {
+    return true;
+  }
+  if (key !== ' ') return false;
+  return Boolean(
+    element.closest('button, a, [role="button"], [data-reader-control="true"]')
+  );
+}
+
 export function hasActiveTextSelection(selection: Selection | null | undefined) {
   return Boolean(selection && !selection.isCollapsed && selection.toString().trim());
 }

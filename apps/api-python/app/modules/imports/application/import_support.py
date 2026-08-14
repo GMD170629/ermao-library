@@ -587,7 +587,11 @@ def _existing_file_result(
     if not existing:
         return None
     file_format = str(existing.get("format") or "").lower()
-    total_units = int(existing.get("pageCount") or existing.get("chapterCount") or 0)
+    total_units = (
+        0
+        if file_format in {"epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"}
+        else int(existing.get("pageCount") or existing.get("chapterCount") or 0)
+    )
     result_type = (
         "comic"
         if file_format == "comic"

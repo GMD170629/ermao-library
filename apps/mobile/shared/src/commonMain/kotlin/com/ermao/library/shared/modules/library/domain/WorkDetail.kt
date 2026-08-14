@@ -102,6 +102,7 @@ data class ReadingUnit(
 data class ReadingUnitMetadata(
     val exactNavigation: Boolean?,
     val level: Int?,
+    val path: List<Int>?,
     val navigationKey: String?,
     val zipEntryName: String?,
     val idref: String?,
@@ -113,6 +114,7 @@ data class ReadingUnitMetadata(
     val sourceFileName: String?,
     val hrefBase: String?,
     val recovered: Boolean?,
+    val readingOrderPosition: Int? = null,
 )
 
 data class VolumeSection(

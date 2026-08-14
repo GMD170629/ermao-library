@@ -112,7 +112,7 @@ P0 必须形成以下连续闭环：
 | PDF | Reader v4 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 在线使用系统/原生 PDF renderer 通过 Range 流式读取，不要求先下载整份；完整本地工件可离线打开；捏合缩放、页码 scrubber，连续模式不在未验证前承诺 |
 | 书签 | Reader v4 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
-| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | `clientId / updatedAtEpochMillis / percent / location / contentFingerprint`；服务端按请求到达顺序覆盖，陈旧 fingerprint 丢弃位置但保留百分比 | P0 | 500ms trailing debounce 后先原子保存本地精确位置，再作一次 best-effort PUT；单飞期间只保留内存中最新值，不建持久 outbox、不重试；后台/退出执行一次有界保存与上传 |
+| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `workId + volumeId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作工件校验和诊断 | P0 | 本地事务先保存，再同步；文件或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复 |
 | 音频书 | `/listen/[volumeId]` 仅为瞬时深链；bootstrap + file API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
 | 受管离线内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed + fingerprint 校验为事实来源 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量离线书库 |
 | 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有离线缓存是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示离线缓存和文件导出 |
@@ -197,10 +197,10 @@ authzVersion
 serverIdentity + userId + authzVersion
 ```
 
-Reader 媒体、位置和书签再增加：
+Reader 媒体和书签按内容版本隔离；Reader 阅读进度单独使用：
 
 ```text
-volumeId + contentFingerprint
+workId + volumeId
 ```
 
 服务器切换、用户切换、登出、账户停用或 `authzVersion` 变化时，必须清理不再授权的封面、详情、媒体、搜索历史与播放状态。待同步进度先隔离，只有在确认不可恢复后才允许删除。
@@ -244,7 +244,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 - 网络恢复、App 进入后台、离开 Reader 时尝试 flush；
 - `401` 保留队列，重新登录后在同一 server/user namespace 续传；
 - `403/404/410/422` 进入终止或人工恢复状态；
-- `409 CONTENT_FINGERPRINT_MISMATCH` 单独显示内容已变化，禁止把旧位置写入新文件；
+- 进度读写不得因 Publication fingerprint 变化而拒绝；资源位置仍须属于路由指定的卷册；
 - `applied=false` 的旧序列可安全消费，不能回滚较新本地进度。
 
 ### 7.2 书签同步

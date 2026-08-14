@@ -8,7 +8,6 @@ import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.domain.exactLocatorEnvelope
-import com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks
 import com.ermao.library.shared.modules.reader.domain.AudioPublicationLocation
 import com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
 import com.ermao.library.shared.modules.reader.domain.ComicPublicationLocation
@@ -18,7 +17,7 @@ import com.ermao.library.shared.modules.reader.domain.PdfPublicationLocation
 import com.ermao.library.shared.modules.reader.domain.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.domain.PublicationLocation
 import com.ermao.library.shared.modules.reader.domain.ReflowablePublicationLocation
-import com.ermao.library.shared.modules.reader.domain.compareExactPublicationLocations
+import com.ermao.library.shared.modules.reader.domain.compareExactProgressLocations
 import com.ermao.library.shared.modules.reader.domain.exactPublicationLocation
 import kotlinx.coroutines.flow.StateFlow
 
@@ -145,11 +144,7 @@ data class ReaderResumeDecision(
     }
 }
 
-/**
- * Chooses the newest fingerprint-compatible exact position. Equal timestamps
- * intentionally prefer the server, and semantically identical anchors never
- * produce a redundant alternative prompt.
- */
+/** Online startup always uses the freshly bootstrapped server exact position. */
 fun decideReaderResume(
     localProgress: ReaderProgress?,
     remoteSnapshot: ReaderProgressSnapshotV4?,
@@ -157,12 +152,14 @@ fun decideReaderResume(
 ): ReaderResumeDecision {
     val validLocal = localProgress?.takeIf {
         it.sourceId == openedSource.sourceId &&
-            it.location.contentFingerprint == openedSource.contentFingerprint &&
+            it.location.contentFingerprint.originalFileHash ==
+            openedSource.contentFingerprint.originalFileHash &&
             runCatching { it.exactPublicationLocation() }.isSuccess
     }
     val validRemote = remoteSnapshot?.takeIf {
         it.sourceId == openedSource.sourceId &&
-            it.locator.publication.toContentFingerprint() == openedSource.contentFingerprint
+            it.locator.publication.originalFileHash ==
+            openedSource.contentFingerprint.originalFileHash
     }
     val localTarget = validLocal?.let {
         ReaderResumeTarget(
@@ -182,29 +179,61 @@ fun decideReaderResume(
             remoteSnapshot = it,
         )
     }
-    if (localTarget == null) return ReaderResumeDecision(remoteTarget, null)
-    if (remoteTarget == null) return ReaderResumeDecision(localTarget, null)
-    val sameAnchor = compareExactPublicationLocations(
-        validLocal.exactPublicationLocation(),
-        validRemote.locator,
-    ) == ExactLocationMatch.Exact
-    val selected = if (localTarget.capturedAtEpochMillis > remoteTarget.capturedAtEpochMillis) {
-        localTarget
-    } else {
-        remoteTarget
+    return if (remoteTarget != null) ReaderResumeDecision(remoteTarget, null)
+    else ReaderResumeDecision(localTarget, null)
+}
+
+sealed interface PendingVsServerDecision {
+    data class UseServer(
+        val snapshot: ReaderProgressSnapshotV4?,
+        val discardPending: Boolean = false,
+    ) : PendingVsServerDecision
+
+    data class UseLocalPending(
+        val progress: ReaderProgress,
+        val mutation: com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation,
+    ) : PendingVsServerDecision
+
+    data class RequiresChoice(
+        val progress: ReaderProgress,
+        val mutation: com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation,
+        val server: ReaderProgressSnapshotV4,
+    ) : PendingVsServerDecision
+}
+
+/** Startup decision used after a fresh bootstrap. Confirmed local history is intentionally ignored. */
+fun decidePendingVsServerStartup(
+    localProgress: ReaderProgress?,
+    durableState: ReaderProgressDurableState,
+    remoteSnapshot: ReaderProgressSnapshotV4?,
+    openedSource: ReaderSource,
+): PendingVsServerDecision {
+    val pending = durableState.pending ?: return PendingVsServerDecision.UseServer(remoteSnapshot)
+    val validLocal = localProgress?.takeIf {
+        it.sourceId == openedSource.sourceId &&
+            it.location.contentFingerprint.originalFileHash ==
+            openedSource.contentFingerprint.originalFileHash &&
+            runCatching { it.exactPublicationLocation() }.isSuccess &&
+            runCatching {
+                compareExactProgressLocations(it.exactPublicationLocation(), pending.locator) == ExactLocationMatch.Exact
+            }.getOrDefault(false)
     }
-    if (sameAnchor) return ReaderResumeDecision(selected, null)
-    return ReaderResumeDecision(
-        selected = selected,
-        alternative = if (selected.source == ReaderResumeSource.Local) remoteTarget else localTarget,
-    )
+    if (validLocal == null) {
+        return PendingVsServerDecision.UseServer(remoteSnapshot, discardPending = true)
+    }
+    if (remoteSnapshot == null || pending.baseRevision == remoteSnapshot.revision) {
+        return PendingVsServerDecision.UseLocalPending(validLocal, pending)
+    }
+    return if (remoteSnapshot.revision > pending.baseRevision) {
+        PendingVsServerDecision.RequiresChoice(validLocal, pending, remoteSnapshot)
+    } else {
+        PendingVsServerDecision.UseLocalPending(validLocal, pending)
+    }
 }
 
 /**
- * Restores only exact locations. A durable local location wins because an
- * unresolved pending mutation/conflict must never be silently replaced by a
- * remote revision. A fresh device without local state may use the server's
- * exact Readium Locator after the three-part Publication fingerprint matches.
+ * Restores only exact locations. Online startup uses the bootstrap snapshot;
+ * callers handle a durable pending mutation with [decidePendingVsServerStartup].
  */
 fun planReaderProgressRestore(
     localProgress: ReaderProgress?,
@@ -245,7 +274,10 @@ fun restoreCandidates(
     savedLocation: ReaderLocation,
     openedSource: ReaderSource,
 ): List<ReaderRestoreCandidate> {
-    if (savedLocation.contentFingerprint != openedSource.contentFingerprint) return emptyList()
+    if (
+        savedLocation.contentFingerprint.originalFileHash !=
+        openedSource.contentFingerprint.originalFileHash
+    ) return emptyList()
     return when (savedLocation) {
         is ReflowReaderLocation -> if (
             com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope.from(savedLocation) != null

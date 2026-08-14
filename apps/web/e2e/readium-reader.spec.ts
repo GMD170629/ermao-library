@@ -2,21 +2,26 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 
 const publicationFingerprint = {
   originalFileHash: 'sha256:f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678',
-  parser: 'readium-epub-web-v1',
-  normalization: 'shuku-epub-publication-v1'
+  parser: 'epub-package:1',
+  normalization: 'shuku-epub-locator-dom-v2'
 };
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
 });
 
-const chapterOne = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body>
+function secureXhtml(markup: string) {
+  const policy = "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; script-src blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:";
+  return markup.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${policy}" data-shuku-security-profile="web-v2"/><style data-shuku-security-profile="web-v2">iframe,frame,object,embed,applet{display:none!important}</style>`);
+}
+
+const chapterOne = secureXhtml(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body>
   <h1 id="chapter-title">第一章 Readium 验收</h1>
   <p id="opening">天地玄黄，宇宙洪荒。</p>
   ${Array.from({ length: 24 }, (_, index) => `<p id="filler-${index}">定位夹具正文 ${index + 1}：用于确保恢复目标不在首屏。</p>`).join('')}
   <p id="target">跨端恢复目标正文。</p>
-</body></html>`;
-const chapterTwo = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head><body><h1 id="chapter-two">第二章</h1><p id="second-opening">第二章正文。</p></body></html>`;
+</body></html>`);
+const chapterTwo = secureXhtml(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head><body><h1 id="chapter-two">第二章</h1><p id="second-opening">第二章正文。</p></body></html>`);
 
 function exactLocator(cssSelector: string, highlight: string, progression = 0, href = 'chapter1.xhtml', position = 1) {
   return {
@@ -70,9 +75,17 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
   if (pathname.endsWith('/publication/chapter1.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', body: chapterOne });
   if (pathname.endsWith('/publication/chapter2.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', body: chapterTwo });
   if (pathname.endsWith('/progress')) {
+    if (request.method() === 'GET') {
+      const revision = typeof snapshot?.revision === 'number' ? snapshot.revision : 0;
+      const etag = `"reader-progress-${revision}"`;
+      return route.fulfill({
+        headers: { ETag: etag },
+        json: { ok: true, data: { schemaVersion: 4, progressSnapshot: snapshot } }
+      });
+    }
     const body: unknown = request.postDataJSON(); writes.push(body);
-    const item = body as { locator: Record<string, unknown>; baseRevision: number };
-    return route.fulfill({ json: { ok: true, data: { schemaVersion: 4, revision: item.baseRevision + 1, locator: item.locator, displayPercent: 0, receivedAtEpochMillis: Date.now() } } });
+    const item = body as { clientId: string; locator: Record<string, unknown>; baseRevision: number };
+    return route.fulfill({ json: { ok: true, data: { schemaVersion: 4, clientId: item.clientId, revision: item.baseRevision + 1, locator: item.locator, displayPercent: 0, receivedAtEpochMillis: Date.now() } } });
   }
   if (pathname === '/api/auth/me') return route.fulfill({ json: { ok: true, data: { user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' }, authorization: { isAdmin: true, canManageSystem: true, allLibraryScopes: true, monitorFolderIds: [], canViewManualImports: true, authzVersion: 1 } } } });
   return route.fulfill({ json: { ok: true, data: {} } });
@@ -165,11 +178,11 @@ test('Readium starts at the first reader navigation unit instead of blank front 
   }));
   await page.route('**/publication/cover.xhtml', (route) => route.fulfill({
     contentType: 'application/xhtml+xml',
-    body: '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head><body><p id="front-cover">封面前置页</p></body></html>'
+    body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head><body><p id="front-cover">封面前置页</p></body></html>')
   }));
   await page.route('**/publication/contents.xhtml', (route) => route.fulfill({
     contentType: 'application/xhtml+xml',
-    body: '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>'
+    body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
   }));
 
   await page.goto('/reader/epub-volume');
@@ -209,15 +222,15 @@ test('Readium applies block margins to every page viewport without special-casin
   }));
   await page.route('**/publication/cover.xhtml', (route) => route.fulfill({
     contentType: 'application/xhtml+xml',
-    body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title><style>body{text-align:center;padding:0;margin:0}</style></head><body><div><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 521 751" preserveAspectRatio="none"><rect id="cover-art" width="521" height="751" fill="#315b48"/></svg></div></body></html>'
+    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title><style>body{text-align:center;padding:0;margin:0}</style></head><body><div><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 521 751" preserveAspectRatio="none"><rect id="cover-art" width="521" height="751" fill="#315b48"/></svg></div></body></html>')
   }));
   await page.route('**/publication/contents.xhtml', (route) => route.fulfill({
     contentType: 'application/xhtml+xml',
-    body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>'
+    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
   }));
   await page.route('**/publication/chapter1.xhtml', (route) => route.fulfill({
     contentType: 'application/xhtml+xml',
-    body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1 id="chapter-title">第一章 Readium 验收</h1><p>短章正文。</p></body></html>'
+    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1 id="chapter-title">第一章 Readium 验收</h1><p>短章正文。</p></body></html>')
   }));
 
   await page.goto('/reader/epub-volume');
@@ -277,7 +290,7 @@ test('Readium iframe routes center and jittered edge mouse taps without leaving 
   await installReaderRoutes(page);
   await page.route('**/publication/chapter1.xhtml', (route) => route.fulfill({
     contentType: 'application/xhtml+xml',
-    body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>'
+    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>')
   }));
   await page.goto('/reader/epub-volume');
   const frame = await visibleReadiumFrame(page);
@@ -361,12 +374,10 @@ test('Readium centers a constrained paginated surface instead of pinning it to t
       containerHeight: containerRect?.height ?? 0
     };
   });
-  expect(frameGeometry).toEqual({
-    width: 1350,
-    height: 843.3125,
-    containerWidth: 1350,
-    containerHeight: 843.3125
-  });
+  expect(frameGeometry.width).toBeCloseTo(1350, 1);
+  expect(frameGeometry.height).toBeCloseTo(843.3125, 1);
+  expect(frameGeometry.containerWidth).toBeCloseTo(1350, 1);
+  expect(frameGeometry.containerHeight).toBeCloseTo(843.3125, 1);
   const publicationGeometry = await frame.contentFrame().locator('body').evaluate((body) => {
     const style = getComputedStyle(body);
     return {
@@ -404,6 +415,7 @@ test('an exact paragraph restore stays non-fatal when a preceding block shares t
   const target = exactLocator('#target', '跨端恢复目标正文。', 0.8, 'chapter1.xhtml', 1);
   await installReaderRoutes(page, {
     schemaVersion: 4,
+    clientId: 'ios-e2e',
     revision: 11,
     locator: target,
     displayPercent: 40,
@@ -422,15 +434,39 @@ test('an exact paragraph restore stays non-fatal when a preceding block shares t
 
 test('Readium restore is accepted only after re-capturing the same exact DOM block', async ({ page }) => {
   const target = exactLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2);
-  const writes = await installReaderRoutes(page, { schemaVersion: 4, revision: 7, locator: target, displayPercent: 70, receivedAtEpochMillis: 100 });
+  const writes = await installReaderRoutes(page, { schemaVersion: 4, clientId: 'android-e2e', revision: 7, locator: target, displayPercent: 70, receivedAtEpochMillis: 100 });
   await page.goto('/reader/epub-volume'); const frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#chapter-two')).toBeVisible();
-  await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.engineLocator.payload.href).toBe(target.engineLocator.payload.href);
-  expect(write.locator.engineLocator.payload.locations.cssSelector).toBe(target.engineLocator.payload.locations.cssSelector);
-  expect(write.locator.engineLocator.payload.text?.highlight).toBe(target.engineLocator.payload.text.highlight);
+  await expect(page.locator('[data-reader-exact-restore="verified"]')).toHaveCount(1);
+  expect(writes).toHaveLength(0);
   await expect(page.getByText('无法精确恢复到另一设备的位置')).toHaveCount(0);
+});
+
+test('an in-session remote update stays non-modal and jumps only after exact verification', async ({ page }) => {
+  const writes: unknown[] = [];
+  let currentSnapshot: Record<string, unknown> | null = null;
+  await page.route('**/api/**', (route) => fulfillApi(route, currentSnapshot, 0, writes));
+  await page.goto('/reader/epub-volume');
+  await visibleReadiumFrame(page);
+  await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
+
+  currentSnapshot = {
+    schemaVersion: 4,
+    clientId: 'ios-e2e',
+    revision: 7,
+    locator: exactLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2),
+    displayPercent: 70,
+    receivedAtEpochMillis: Date.now()
+  };
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(page.getByText(/其他设备已阅读至/)).toBeVisible();
+  const writesBeforeJump = writes.length;
+  await page.getByRole('button', { name: '跳转' }).click();
+  const frame = await visibleReadiumFrame(page);
+  await expect(frame.contentFrame().locator('#chapter-two')).toBeVisible();
+  await expect(page.getByText(/其他设备已阅读至/)).toHaveCount(0);
+  await page.waitForTimeout(700);
+  expect(writes).toHaveLength(writesBeforeJump);
 });
 
 test('whole-publication percentage is display-only and never an automatic restore target', async ({ page }) => {

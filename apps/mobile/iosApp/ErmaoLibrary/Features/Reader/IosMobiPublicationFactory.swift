@@ -14,6 +14,10 @@ enum IosMobiPublicationError: Error, Equatable, Sendable {
     case unsupportedMediaType(String)
 }
 
+enum IosMobiPublicationIdentity {
+    static let normalizationIdentifier = "ermao-mobi-core-v1+shuku-locator-dom-v2"
+}
+
 struct IosMobiPublicationResult {
     let publication: Publication
     let format: IosMobiFormat
@@ -30,7 +34,7 @@ struct IosMobiPublicationResult {
         self.publication = publication
         self.format = format
         parserIdentifier = IosMobiBook.parserIdentifier
-        normalizationIdentifier = IosMobiBook.normalizationIdentifier
+        normalizationIdentifier = IosMobiPublicationIdentity.normalizationIdentifier
         self.lifetime = lifetime
     }
 
@@ -41,10 +45,10 @@ struct IosMobiPublicationResult {
 }
 
 struct IosMobiPublicationFactory: Sendable {
-    private let sanitizer: IosMobiContentSanitizer
+    private let securityAdapter: IosPublicationSecurityAdapter
 
-    init(sanitizer: IosMobiContentSanitizer = IosMobiContentSanitizer()) {
-        self.sanitizer = sanitizer
+    init(securityAdapter: IosPublicationSecurityAdapter = IosPublicationSecurityAdapter()) {
+        self.securityAdapter = securityAdapter
     }
 
     func open(
@@ -122,13 +126,13 @@ struct IosMobiPublicationFactory: Sendable {
         let container = try IosMobiLazyContainer(
             descriptors: descriptors,
             lifetime: lifetime,
-            sanitizer: sanitizer
+            securityAdapter: securityAdapter
         )
-        let readingOrder = try readingOrderDescriptors.map(makeLink)
+        let readingOrder = try readingOrderDescriptors.map { try makeLink($0) }
         let readingOrderPaths = Set(readingOrderDescriptors.map(\.href))
         var resources = try descriptors
             .filter { !readingOrderPaths.contains($0.href) }
-            .map(makeLink)
+            .map { try makeLink($0) }
         if let coverIndex = info.coverResourceIndex,
            let cover = descriptorByIndex[coverIndex]
         {
@@ -166,9 +170,9 @@ struct IosMobiPublicationFactory: Sendable {
             readingProgression: Self.readingProgression(info.readingDirection),
             description: description,
             otherMetadata: [
-                "https://shuku.app/reader/decoded-format": .string(Self.decodedFormat(info.format)),
-                "https://shuku.app/reader/adapter": .string(IosMobiBook.parserIdentifier),
-                "https://shuku.app/reader/normalization": .string(IosMobiBook.normalizationIdentifier),
+                "https://shuku.app/reader/decoded-format": Self.decodedFormat(info.format),
+                "https://shuku.app/reader/adapter": IosMobiBook.parserIdentifier,
+                "https://shuku.app/reader/normalization": IosMobiPublicationIdentity.normalizationIdentifier,
             ]
         )
         let publication = Publication(

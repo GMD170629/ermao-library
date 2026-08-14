@@ -1,5 +1,6 @@
 import ReadiumNavigator
 import SwiftUI
+@preconcurrency import ErmaoShared
 
 struct IosComicReaderView: View {
     @Environment(\.dismiss) private var dismiss
@@ -32,6 +33,18 @@ struct IosComicReaderView: View {
                     .padding()
                 }
             }
+            if let snapshot = session.remoteProgressSnapshot,
+               let location = snapshot.locator as? ErmaoShared.ComicPublicationLocation {
+                IosPageRemoteProgressNotice(
+                    snapshot: snapshot,
+                    position: String(
+                        format: String(localized: "reader.page.number.format"),
+                        Int(location.pageIndex) + 1
+                    ),
+                    onOpen: { Task { await session.goToRemoteProgress() } },
+                    onClose: session.dismissRemoteProgressNotice
+                )
+            }
         }
         .statusBarHidden(!session.controlsVisible)
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
@@ -42,6 +55,9 @@ struct IosComicReaderView: View {
         }
         .onChange(of: session.pageIndex) { value in
             if !sliderIsEditing { sliderPage = Double(value) }
+        }
+        .onChange(of: session.startupCancelled) { cancelled in
+            if cancelled { dismiss() }
         }
         .onChange(of: scenePhase) { phase in
             Task {
@@ -82,6 +98,13 @@ struct IosComicReaderView: View {
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
         } message: { Text(session.presentationError?.localizedDescription ?? "") }
+        .readerStartupConflictAlert(
+            isPresented: session.startupConflict != nil,
+            failed: session.startupActionFailed,
+            useLocal: { Task { await session.continueStartupAtLocalPosition() } },
+            useCloud: { Task { await session.useCloudStartupPosition() } },
+            cancel: session.cancelStartupConflict
+        )
     }
 
     @ViewBuilder private var content: some View {

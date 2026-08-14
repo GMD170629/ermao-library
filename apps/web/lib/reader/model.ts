@@ -1,5 +1,6 @@
 import {
   READER_SCHEMA_VERSION,
+  comparePublicationLocations,
   type PublicationFingerprint,
   type PublicationLocation,
   type ReaderLocation,
@@ -7,7 +8,7 @@ import {
 } from '@shuku/reader-core';
 
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v4';
-export const READER_DB_SCHEMA_VERSION = 2;
+export const READER_DB_SCHEMA_VERSION = 3;
 export const READER_PROGRESS_DEBOUNCE_MS = 500;
 
 export type AudioProgressLocation = Readonly<{ kind: 'audio'; volumeId: string; fileId: string; chapterId: string | null; positionMs: number }>;
@@ -26,13 +27,13 @@ export type ExactProgressIdentity = Readonly<{
   serverIdentity: string;
   userId: string;
   clientId: string;
+  workId: string;
   volumeId: string;
-}> & Readonly<({ publicationFingerprint: string; localContentFingerprint?: never } | { publicationFingerprint?: never; localContentFingerprint: string })>;
+}>;
 
 export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
   key: string;
   schemaVersion: 1;
-  workId: string;
   locator: PublicationLocation;
   displayPercent: number | null;
   /** Compatibility alias for non-Reader audio presentation only. */
@@ -44,6 +45,7 @@ export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
 }>;
 
 export type ReaderProgressConflict = Readonly<{
+  clientId: string;
   revision: number;
   locator: PublicationLocation;
   displayPercent: number;
@@ -64,17 +66,6 @@ export type PendingProgressMutation = Readonly<{
   capturedAtEpochMillis: number;
   locator: PublicationLocation;
   displayPercent: number | null;
-}>;
-
-export type PersistedProgressConflict = ReaderProgressConflict & Readonly<{
-  key: string;
-  schemaVersion: 1;
-  serverIdentity: string;
-  userId: string;
-  workId: string;
-  volumeId: string;
-  clientId: string;
-  localMutation: PendingProgressMutation;
 }>;
 
 export type ExactProgressSaveInput = Readonly<{
@@ -100,12 +91,30 @@ export type ReaderProgressPut = Readonly<{
 
 export type ReaderProgressSnapshot = Readonly<{
   schemaVersion: 4;
+  clientId: string;
   revision: number;
   locator: PublicationLocation;
   displayPercent: number;
   receivedAtEpochMillis: number;
   capturedAtEpochMillis?: number;
 }>;
+
+export type RemoteProgressNotice = Readonly<{
+  revision: number;
+  sourceClientId: string;
+  locator: PublicationLocation;
+  displayPercent: number;
+  receivedAtEpochMillis: number;
+  capturedAtEpochMillis?: number;
+}>;
+
+/** Future device-directory seam; null keeps the localized “other device” fallback. */
+export type ReaderDeviceLabelResolver = (clientId: string) => string | null;
+
+export type PendingVsServerDecision =
+  | Readonly<{ kind: 'server'; snapshot: ReaderProgressSnapshot | null; discardPending: boolean }>
+  | Readonly<{ kind: 'local-pending'; pending: PendingProgressMutation; localExact: ExactProgressRecord }>
+  | Readonly<{ kind: 'requires-choice'; pending: PendingProgressMutation; localExact: ExactProgressRecord; server: ReaderProgressSnapshot }>;
 
 export type ProgressUpload = Readonly<{
   volumeId: string;
@@ -123,6 +132,16 @@ export type ProgressSyncTransport = (
   upload: ProgressUpload,
   signal: AbortSignal
 ) => Promise<ReaderProgressSnapshot>;
+
+export type ProgressQueryResult =
+  | Readonly<{ kind: 'unchanged'; etag: string | null }>
+  | Readonly<{ kind: 'current'; snapshot: ReaderProgressSnapshot | null; etag: string | null }>;
+
+export type ProgressQueryTransport = (
+  volumeId: string,
+  etag: string | null,
+  signal: AbortSignal
+) => Promise<ProgressQueryResult>;
 
 export type ReaderSyncDiagnostic = {
   id: string;
@@ -147,14 +166,18 @@ export function publicationFingerprintKey(fingerprint: PublicationFingerprint) {
 }
 
 export function exactProgressKey(identity: ExactProgressIdentity) {
-  const fingerprint = identity.publicationFingerprint ?? identity.localContentFingerprint;
-  return [identity.serverIdentity, identity.userId, identity.clientId, identity.volumeId, fingerprint]
+  return [identity.serverIdentity, identity.userId, identity.clientId, identity.workId, identity.volumeId]
     .map(encodeKeyPart).join('|');
 }
 
-export function syncStateKey(identity: Pick<ExactProgressIdentity, 'serverIdentity' | 'userId' | 'clientId' | 'volumeId'>) {
-  return [identity.serverIdentity, identity.userId, identity.clientId, identity.volumeId]
+export function syncStateKey(identity: Pick<ExactProgressIdentity, 'serverIdentity' | 'userId' | 'clientId' | 'workId' | 'volumeId'>) {
+  return [identity.serverIdentity, identity.userId, identity.clientId, identity.workId, identity.volumeId]
     .map(encodeKeyPart).join('|');
+}
+
+/** Progress belongs to work + volume; publication bytes are locator diagnostics, not ownership. */
+export function progressLocationsMatch(expected: PublicationLocation, actual: PublicationLocation) {
+  return comparePublicationLocations(expected, { ...actual, publication: expected.publication }).precision === 'exact';
 }
 
 export function currentReaderServerIdentity() {

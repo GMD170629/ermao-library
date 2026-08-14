@@ -50,12 +50,11 @@ internal class ReadiumLocatorMapper {
         fingerprint: ContentFingerprint,
     ): ExactBlockMatch {
         val actual = exactEnvelope(recaptured, fingerprint) ?: return ExactBlockMatch.AnchorMismatch
-        return com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks(expected, actual)
+        return com.ermao.library.shared.modules.reader.domain.compareExactProgressReadiumBlocks(expected, actual)
     }
 
-    fun exactEngineLocator(location: ReaderLocation, fingerprint: ContentFingerprint): Locator? {
+    fun exactEngineLocator(location: ReaderLocation): Locator? {
         val reflow = location as? ReflowReaderLocation ?: return null
-        if (reflow.contentFingerprint != fingerprint) return null
         val engineLocator = reflow.engineLocator ?: return null
         if (engineLocator.engine != ReaderEngine.Readium) return null
         val payload = engineLocator.payload.canonicalJson

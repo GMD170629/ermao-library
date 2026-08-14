@@ -120,14 +120,32 @@
     "progressSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "revision", "locator", "displayPercent", "receivedAtEpochMillis"],
+      "required": ["schemaVersion", "revision", "clientId", "locator", "displayPercent", "receivedAtEpochMillis"],
       "properties": {
         "schemaVersion": {"const": 4},
         "revision": {"type": "integer", "minimum": 1},
+        "clientId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
         "locator": {"$ref": "#/$defs/exactLocation"},
         "displayPercent": {"type": "number", "minimum": 0, "maximum": 100},
         "receivedAtEpochMillis": {"type": "integer", "minimum": 0},
         "capturedAtEpochMillis": {"type": "integer", "minimum": 0}
+      }
+    },
+    "progressState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "data"],
+      "properties": {
+        "ok": {"const": true},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "progressSnapshot"],
+          "properties": {
+            "schemaVersion": {"const": 4},
+            "progressSnapshot": {"oneOf": [{"$ref": "#/$defs/progressSnapshot"}, {"type": "null"}]}
+          }
+        }
       }
     },
     "progressPutRequest": {
@@ -149,6 +167,7 @@
   "oneOf": [
     {"$ref": "#/$defs/progressPutRequest"},
     {"$ref": "#/$defs/progressSuccess"},
-    {"$ref": "#/$defs/progressConflict"}
+    {"$ref": "#/$defs/progressConflict"},
+    {"$ref": "#/$defs/progressState"}
   ]
 }
