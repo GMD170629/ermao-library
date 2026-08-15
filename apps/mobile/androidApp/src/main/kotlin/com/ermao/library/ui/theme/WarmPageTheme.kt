@@ -54,6 +54,7 @@ fun WarmPageTheme(
         LocalWarmPageColors provides colors,
         LocalWarmPageSpacing provides WarmPageSpacingTokens,
         LocalWarmPageRadii provides WarmPageRadiusTokens,
+        LocalWarmPageMetrics provides WarmPageMetricTokens,
         LocalWarmPageTypography provides WarmPageTypographyTokens,
     ) {
         MaterialTheme(
@@ -118,6 +119,7 @@ fun ReaderWarmPageTheme(
         LocalWarmPageColors provides colors,
         LocalWarmPageSpacing provides WarmPageSpacingTokens,
         LocalWarmPageRadii provides WarmPageRadiusTokens,
+        LocalWarmPageMetrics provides WarmPageMetricTokens,
         LocalWarmPageTypography provides WarmPageTypographyTokens,
     ) {
         MaterialTheme(
@@ -153,6 +155,11 @@ object WarmPageThemeValues {
         @Composable
         @ReadOnlyComposable
         get() = LocalWarmPageRadii.current
+
+    val metrics: WarmPageMetrics
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalWarmPageMetrics.current
 
     val typography: WarmPageTypography
         @Composable

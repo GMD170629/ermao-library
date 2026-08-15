@@ -37,11 +37,6 @@ test('projects an exact local Readium locator instead of sending it to the serve
         engine: 'readium',
         platform: 'web',
         version: 'readium-web:1',
-        publication: {
-          originalFileHash: `sha256:${'0'.repeat(64)}`,
-          parser: 'epub-package:1',
-          normalization: 'shuku-epub-locator-dom-v2'
-        },
         payload: {
           href: 'OPS/exact.xhtml',
           type: 'application/xhtml+xml',

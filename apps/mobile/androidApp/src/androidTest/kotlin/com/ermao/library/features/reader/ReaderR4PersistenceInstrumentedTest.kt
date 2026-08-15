@@ -5,7 +5,6 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressDatabase
-import com.ermao.library.shared.modules.reader.ContentFingerprint
 import com.ermao.library.shared.modules.reader.EngineLocator
 import com.ermao.library.shared.modules.reader.EngineLocatorPayload
 import com.ermao.library.shared.modules.reader.AudioReaderLocation
@@ -16,12 +15,16 @@ import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressJson
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
+import com.ermao.library.shared.modules.reader.ReaderFormat
+import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
+import com.ermao.library.shared.modules.reader.createReaderProgressUpload
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,6 +60,52 @@ class ReaderR4PersistenceInstrumentedTest {
 
         assertEquals(progress(9_000), rotated.load("volume-1"))
         rotated.close()
+    }
+
+    @Test
+    fun pendingSurvivesProcessReconstructionAndNewerMutationRebasesAfterConflict() = runBlocking {
+        val namespace = ReaderSyncNamespace("server", "user", 4)
+        val target = ReaderProgressSyncTarget(namespace, "work-1", "volume-1", ReaderFormat.Epub)
+        val firstProgress = progress(1_000)
+        val firstPending = createReaderProgressUpload(
+            target,
+            firstProgress,
+            baseRevision = 0,
+            mutationId = "58a3ac3c-52d0-41ed-9c85-0524b532f25b",
+        ).mutation
+        val first = AndroidReaderProgressDatabase(
+            context,
+            identity(namespace),
+            legacyProgressStore = null,
+            databaseName = databaseName,
+        )
+        first.commitProgressAndPending(firstProgress, firstPending)
+        first.close()
+
+        val reconstructed = AndroidReaderProgressDatabase(
+            context,
+            identity(namespace),
+            legacyProgressStore = null,
+            databaseName = databaseName,
+        )
+        assertEquals(firstPending.mutationId, reconstructed.loadSyncState().pending?.mutationId)
+
+        val newerProgress = progress(2_000)
+        val newerPending = createReaderProgressUpload(
+            target,
+            newerProgress,
+            baseRevision = 0,
+            mutationId = "3b5fa6ea-bb95-42ef-a1d4-6bcd65d47255",
+        ).mutation
+        reconstructed.commitProgressAndPending(newerProgress, newerPending)
+        reconstructed.discardPendingAfterConflict(firstPending.mutationId, serverRevision = 5)
+
+        val rebased = reconstructed.loadSyncState()
+        assertEquals(5L, rebased.confirmedRevision)
+        assertNotNull(rebased.pending)
+        assertEquals(newerPending.mutationId, rebased.pending?.mutationId)
+        assertEquals(5L, rebased.pending?.baseRevision)
+        reconstructed.close()
     }
 
     @Test
@@ -131,9 +180,9 @@ class ReaderR4PersistenceInstrumentedTest {
         )
         val locations = listOf(
             progress(1_000).location,
-            PdfReaderLocation(3, 0.375, fingerprint(), engineLocator()),
-            ComicReaderLocation("images/page-004.jpg", 3, fingerprint(), engineLocator()),
-            AudioReaderLocation("track-1", "chapter-2", 45_000, fingerprint(), engineLocator()),
+            PdfReaderLocation(3, 0.375, engineLocator()),
+            ComicReaderLocation("images/page-004.jpg", 3, engineLocator()),
+            AudioReaderLocation("track-1", "chapter-2", 45_000, engineLocator()),
         )
 
         locations.forEachIndexed { index, location ->
@@ -222,7 +271,6 @@ class ReaderR4PersistenceInstrumentedTest {
                     """{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"body","progression":0.5,"totalProgression":0.5}}""",
                 ),
             ),
-            contentFingerprint = fingerprint(),
         ),
         timestamp,
         "android-client",
@@ -244,11 +292,6 @@ class ReaderR4PersistenceInstrumentedTest {
         "volume-1",
     )
 
-    private fun fingerprint(character: Char = 'a') = ContentFingerprint(
-        "sha256:" + character.toString().repeat(64),
-        "readium-kotlin:3.3.0",
-        "v1",
-    )
 }
 
 private fun lengthPrefixed(vararg values: String): String = buildString {

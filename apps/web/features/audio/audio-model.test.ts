@@ -10,12 +10,6 @@ const payload = {
     schemaVersion: 4,
     userId: 'user-1',
     readerType: 'audio',
-    contentFingerprint: 'fingerprint-1',
-    publicationFingerprint: {
-      originalFileHash: 'sha256:' + 'a'.repeat(64),
-      parser: 'audio-index:1',
-      normalization: 'shuku-audio-v1'
-    },
     book: { id: 'work-1', title: '有声书', author: '作者' },
     mediaVersion: { id: 'media-audio', workId: 'work-1', mediaKind: 'AUDIOBOOK', completed: false },
     volume: { id: 'volume-1', mediaVersionId: 'media-audio', title: '第一卷', sortOrder: 0, durationMs: 30_000 },
@@ -35,11 +29,6 @@ const payload = {
       displayPercent: 50,
       locator: {
         kind: 'audio',
-        publication: {
-          originalFileHash: 'sha256:' + 'a'.repeat(64),
-          parser: 'audio-index:1',
-          normalization: 'shuku-audio-v1'
-        },
         fileId: 'file-2',
         positionMillis: 7_000
       }

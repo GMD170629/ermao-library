@@ -18,6 +18,15 @@ export function currentUserId() {
   return window.sessionStorage.getItem(CURRENT_USER_ID_KEY) ?? '';
 }
 
+export function currentAuthorizationVersion(userId = currentUserId()) {
+  if (typeof window === 'undefined' || !userId) return 0;
+  const namespace = window.sessionStorage.getItem(CURRENT_AUTHZ_NAMESPACE_KEY) ?? '';
+  const separator = namespace.lastIndexOf(':');
+  if (separator < 1 || namespace.slice(0, separator) !== userId) return 0;
+  const version = Number(namespace.slice(separator + 1));
+  return Number.isSafeInteger(version) && version >= 0 ? version : 0;
+}
+
 export function userDevicePreferenceKey(key: string, userId = currentUserId()) {
   return userId ? `${key}:${encodeURIComponent(userId)}` : `${key}:anonymous`;
 }

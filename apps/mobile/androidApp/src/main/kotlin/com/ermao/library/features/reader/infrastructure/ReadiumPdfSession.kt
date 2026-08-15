@@ -1,7 +1,9 @@
 package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.features.reader.application.ReaderResumeNotice
+import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.LocalReaderSource
+import com.ermao.library.shared.modules.reader.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
@@ -9,6 +11,12 @@ import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.ReaderPdfPage
+import com.ermao.library.shared.modules.reader.ReaderSource
+import com.ermao.library.shared.modules.reader.RemoteByteRangeReaderSource
+import com.ermao.library.shared.modules.reader.RemoteComicReaderSource
+import com.ermao.library.shared.modules.reader.domain.PdfRangeCacheIdentity
+import java.io.File
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
@@ -22,7 +30,9 @@ import com.ermao.library.shared.modules.reader.createReaderProgressPresentationU
 import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
 import java.io.FileNotFoundException
+import androidx.fragment.app.FragmentFactory
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +44,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
 import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFactory
-import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFragment
+import org.readium.adapter.pdfium.navigator.PdfiumPreferences
+import org.readium.adapter.pdfium.navigator.PdfiumSettings
+import org.readium.r2.navigator.pdf.PdfNavigatorFragment
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
@@ -44,12 +56,14 @@ import org.readium.r2.shared.util.getOrElse
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumPdfSession(
-    private val source: LocalReaderSource,
-    private val expectedPageCount: Int,
+    private val source: ReaderSource,
+    @Suppress("unused") private val expectedPageCount: Int?,
+    private val canonicalPages: List<ReaderPdfPage>,
     private val publicationStore: AndroidReaderPublicationStore,
     private val progressStore: ReaderProgressStore,
     private val deviceIdentity: AndroidReaderDeviceIdentity,
     private val readium: AndroidReadiumRuntime,
+    private val remotePdfium: AndroidRemotePdfiumSessionConfiguration? = null,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
     private val progressCoordinator: ReaderProgressSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
@@ -58,6 +72,7 @@ internal class ReadiumPdfSession(
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
 ) : AndroidReaderNavigatorSession {
+    override val morphology = ReaderMorphology.Pdf
     override val capabilities = ReaderCapabilities(
         canGoPrevious = true, canGoNext = true, hasTableOfContents = true,
         supportsBookmarks = false, supportsAnnotations = false, supportsTheme = true,
@@ -71,6 +86,7 @@ internal class ReadiumPdfSession(
         supportsSwipeToggle = false, supportsPageTurnAnimation = false,
         supportsSmartOptimization = false, supportsKeyboardPageTurn = true,
         supportsVolumeKeyPageTurn = true,
+        supportsPdfFit = source is LocalReaderSource,
     )
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
@@ -88,8 +104,12 @@ internal class ReadiumPdfSession(
         private set
 
     private var publication: Publication? = null
-    private var navigator: PdfiumNavigatorFragment? = null
+    private var navigator: PdfNavigatorFragment<*, *>? = null
+    private var submitNavigatorPreferences: ((ReaderPreferences) -> Unit)? = null
+    private var nativeDocument: ShukuPdfiumDocument? = null
     private var positions: List<Locator> = emptyList()
+    private var pageCount: Int = 0
+    private var pages: List<ReaderPdfPage> = emptyList()
     private var locationJob: Job? = null
     private var lastPersistedLocation: PdfReaderLocation? = null
     private var expectedRestorePage: Int? = null
@@ -98,42 +118,29 @@ internal class ReadiumPdfSession(
     private var prepared = false
     private val saveMutex = Mutex()
 
-    @Suppress("UNCHECKED_CAST")
-    override suspend fun prepare(classLoader: ClassLoader): PdfiumNavigatorFragment {
+    override suspend fun prepare(classLoader: ClassLoader): PdfNavigatorFragment<*, *> {
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
-        val file = try {
-            publicationStore.resolveVerified(source)
-        } catch (error: IllegalArgumentException) {
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
-        } catch (error: FileNotFoundException) {
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
-        }
-        val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile), ReadiumOpeningDiagnostic.AssetRetrieval(error))
-        }
-        val opened = readium.publicationOpener.open(asset, allowUserInteraction = false).getOrElse { error ->
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ParseFailed), ReadiumOpeningDiagnostic.PublicationOpening(error))
-        }
+        val opened = openPublication()
         if (opened.isRestricted) {
-            opened.close()
+            closeOpeningResources(opened)
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.DrmProtected))
         }
         if (!opened.conformsTo(Publication.Profile.PDF)) {
-            opened.close()
+            closeOpeningResources(opened)
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
-        }
-        val openedPageCount = opened.metadata.numberOfPages
-        if (openedPageCount == null || openedPageCount <= 0 || openedPageCount != expectedPageCount) {
-            opened.close()
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile))
         }
         publication = opened
         positions = opened.positions()
-        if (positions.size != expectedPageCount) {
+        val openedPageCount = opened.metadata.numberOfPages
+            ?: nativeDocument?.pageCount
+            ?: positions.size.takeIf { it > 0 }
+        if (openedPageCount == null || openedPageCount <= 0 || positions.size != openedPageCount) {
             release()
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile))
         }
+        pageCount = openedPageCount
+        pages = pageHints(openedPageCount)
 
         val localProgress = loadProgressSafely()
         val decision = decideReaderResume(localProgress, remoteSnapshot, source)
@@ -159,16 +166,113 @@ internal class ReadiumPdfSession(
             _currentLocation.value = location
             lastPersistedLocation = location
         }
-        tableOfContents = opened.tableOfContents.mapNotNull { link ->
-            val locator = opened.locatorFromLink(link) ?: return@mapNotNull null
-            val page = locator.pageIndex() ?: return@mapNotNull null
-            ReaderTocEntry(link.title ?: "${page + 1}", page.toLocation())
+        tableOfContents = pages.map { page ->
+            ReaderTocEntry(
+                title = page.title,
+                location = page.pageIndex.toLocation(),
+                id = "pdf-page-${page.pageIndex}",
+                index = page.pageIndex,
+            )
         }
-        val factory = PdfiumNavigatorFactory(opened, PdfiumEngineProvider()).createFragmentFactory(
-            initialLocator = initialLocator,
+        val factory = navigatorFactory(opened, initialLocator)
+        @Suppress("UNCHECKED_CAST")
+        val created = factory.instantiate(classLoader, PdfNavigatorFragment::class.java.name)
+            as PdfNavigatorFragment<*, *>
+        if (nativeDocument == null) {
+            @Suppress("UNCHECKED_CAST")
+            val configurable = created as PdfNavigatorFragment<PdfiumSettings, PdfiumPreferences>
+            submitNavigatorPreferences = { preferences ->
+                configurable.submitPreferences(preferences.pdf.toReadiumPdfium())
+            }
+        }
+        navigator = created
+        return created
+    }
+
+    private suspend fun openPublication(): Publication = when (val currentSource = source) {
+        is LocalReaderSource -> openLocalPublication(currentSource)
+        is RemoteByteRangeReaderSource -> openRemotePublication(currentSource)
+        is RemoteComicReaderSource -> throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
+    }
+
+    private suspend fun openLocalPublication(localSource: LocalReaderSource): Publication {
+        val file = try {
+            publicationStore.resolve(localSource)
+        } catch (error: IllegalArgumentException) {
+            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
+        } catch (error: FileNotFoundException) {
+            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
+        }
+        val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
+            throw ReaderOpenFailure(
+                ReaderError(ReaderErrorCode.CorruptFile),
+                ReadiumOpeningDiagnostic.AssetRetrieval(error),
+            )
+        }
+        return readium.publicationOpener.open(asset, allowUserInteraction = false).getOrElse { error ->
+            throw ReaderOpenFailure(
+                ReaderError(ReaderErrorCode.ParseFailed),
+                ReadiumOpeningDiagnostic.PublicationOpening(error),
+            )
+        }
+    }
+
+    private suspend fun openRemotePublication(remoteSource: RemoteByteRangeReaderSource): Publication {
+        val configuration = remotePdfium
+            ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError))
+        val identity = PdfRangeCacheIdentity(
+            namespace = remoteSource.namespace,
+            volumeId = remoteSource.volumeId,
         )
-        return (factory.instantiate(classLoader, PdfiumNavigatorFragment::class.java.name) as PdfiumNavigatorFragment)
-            .also { navigator = it }
+        val loader = AndroidPdfRangeLoader(
+            scope = configuration.scope,
+            source = remoteSource,
+            identity = identity,
+            cache = configuration.cache,
+            server = configuration.server,
+        )
+        return try {
+            val document = ShukuPdfiumDocument.open(
+                AndroidRemotePdfiumDataSource(remoteSource.expectedSizeBytes, loader),
+                remoteSource.volumeId,
+            )
+            nativeDocument = document
+            createShukuPdfPublication(
+                identifier = remoteSource.volumeId,
+                title = remoteSource.displayTitle,
+                pages = pageHints(document.pageCount),
+            )
+        } catch (failure: ReaderOpenFailure) {
+            closeNativeDocument()
+            throw failure
+        } catch (failure: AndroidPdfRangeFailure) {
+            closeNativeDocument()
+            throw ReaderOpenFailure(ReaderError(failure.code), cause = failure)
+        } catch (failure: ShukuPdfiumFailure) {
+            closeNativeDocument()
+            throw ReaderOpenFailure(ReaderError(failure.code), cause = failure)
+        } catch (failure: OutOfMemoryError) {
+            closeNativeDocument()
+            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.OutOfMemoryRisk), cause = failure)
+        } catch (failure: RuntimeException) {
+            closeNativeDocument()
+            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError), cause = failure)
+        }
+    }
+
+    private fun navigatorFactory(opened: Publication, initialLocator: Locator?): FragmentFactory {
+        val document = nativeDocument
+        return if (document == null) {
+            PdfiumNavigatorFactory(opened, PdfiumEngineProvider()).createFragmentFactory(
+                initialLocator = initialLocator,
+                initialPreferences = _preferences.value.pdf.toReadiumPdfium(),
+            )
+        } else {
+            org.readium.r2.navigator.pdf.PdfNavigatorFactory(
+                opened,
+                ShukuPdfiumEngineProvider(document),
+            ).createFragmentFactory(initialLocator = initialLocator)
+        }
     }
 
     override fun bind(scope: CoroutineScope) {
@@ -233,7 +337,7 @@ internal class ReadiumPdfSession(
 
     override fun goTo(location: ReaderLocation): Boolean {
         val pdf = location as? PdfReaderLocation ?: return false
-        if (pdf.contentFingerprint != source.contentFingerprint || !isValidPage(pdf.pageIndex)) return false
+        if (!isValidPage(pdf.pageIndex)) return false
         expectedRestorePage = pdf.pageIndex
         return navigator?.go(positions[pdf.pageIndex], animated = true) ?: false
     }
@@ -259,42 +363,71 @@ internal class ReadiumPdfSession(
     override fun updatePreferences(updated: ReaderPreferences) {
         if (_preferences.value == updated) return
         _preferences.value = updated
+        submitNavigatorPreferences?.invoke(updated)
         persistPreferences(updated)
     }
     override fun toggleCurrentBookmark() = Unit
     override fun removeBookmark(id: String) = Unit
     override fun goToBookmark(id: String): Boolean = false
     override suspend fun flush() { (_currentLocation.value as? PdfReaderLocation)?.let { persist(it) } }
-    override suspend fun close() { flush(); release() }
+    override suspend fun close() {
+        try {
+            flush()
+        } finally {
+            release()
+        }
+    }
     override fun release() {
         locationJob?.cancel()
         locationJob = null
         navigator = null
+        submitNavigatorPreferences = null
         positions = emptyList()
         publication?.close()
         publication = null
+        closeNativeDocument()
     }
 
-    private fun isValidPage(pageIndex: Int): Boolean = pageIndex in 0 until expectedPageCount
+    private fun closeOpeningResources(opened: Publication) {
+        opened.close()
+        closeNativeDocument()
+    }
+
+    private fun closeNativeDocument() {
+        nativeDocument?.close()
+        nativeDocument = null
+    }
+
+    private fun isValidPage(pageIndex: Int): Boolean = pageIndex in 0 until pageCount
+    private fun pageHints(count: Int): List<ReaderPdfPage> = List(count) { index ->
+        ReaderPdfPage(index, canonicalPages.getOrNull(index)?.title ?: "${index + 1}")
+    }
     private fun Int.toLocation() = PdfReaderLocation(
         pageIndex = this,
         pageProgression = 0.0,
-        contentFingerprint = source.contentFingerprint,
     )
     private fun Locator.pageIndex(): Int? = locations.position?.minus(1)
     private suspend fun loadProgressSafely(): ReaderProgress? = try {
         progressStore.load(source.sourceId)
-    } catch (_: IllegalArgumentException) {
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
         _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
         null
     }
     private suspend fun persist(location: PdfReaderLocation) = saveMutex.withLock {
         if (lastPersistedLocation == location) return@withLock
         val capturedAt = nowEpochMillis()
-        val percent = if (expectedPageCount == 1) 100.0 else
-            location.pageIndex.toDouble() / (expectedPageCount - 1) * 100.0
+        val percent = if (pageCount == 1) 100.0 else
+            location.pageIndex.toDouble() / (pageCount - 1) * 100.0
         val progress = ReaderProgress(source.sourceId, location, capturedAt, deviceIdentity.stableDeviceId(), percent)
-        progressStore.save(progress)
+        try {
+            progressStore.save(progress)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return@withLock
+        }
         lastPersistedLocation = location
         val namespace = presentationNamespaceKey ?: return@withLock
         val workId = source.workId ?: return@withLock
@@ -310,3 +443,9 @@ internal class ReadiumPdfSession(
 
     private companion object { const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L }
 }
+
+internal data class AndroidRemotePdfiumSessionConfiguration(
+    val scope: CoroutineScope,
+    val cache: AndroidPdfRangeCache,
+    val server: PdfRangeServerPort,
+)

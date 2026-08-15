@@ -104,7 +104,7 @@ class DownloadsTest {
         author: String? = null,
         volumeTitle: String = volumeId,
     ) = DownloadDescriptor(
-        identity = DownloadIdentity(namespace, workId, volumeId, "fp-$volumeId"),
+        identity = DownloadIdentity(namespace, workId, volumeId),
         workTitle = title,
         workAuthor = author,
         coverApiPath = "/api/works/$workId/cover",

@@ -59,8 +59,6 @@ class ReaderFileDto:
     disc_number: int | None
     track_number: int | None
     sort_order: int
-    fingerprint: str | None
-    full_hash: str | None
     mtime_ms: int
     codec: str | None = None
 
@@ -82,13 +80,6 @@ class ReaderUnitDto:
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderPublicationFingerprintDto:
-    original_file_hash: str
-    parser: str
-    normalization: str
-
-
-@dataclass(frozen=True, slots=True)
 class ReaderEngineLocatorDto:
     platform: Literal["android", "ios", "web"]
     version: str
@@ -97,7 +88,6 @@ class ReaderEngineLocatorDto:
 
 @dataclass(frozen=True, slots=True)
 class ReaderReflowableExactLocationDto:
-    publication: ReaderPublicationFingerprintDto
     resource_href: str
     media_type: str
     resource_progression: float | None
@@ -107,7 +97,6 @@ class ReaderReflowableExactLocationDto:
 
 @dataclass(frozen=True, slots=True)
 class ReaderPdfExactLocationDto:
-    publication: ReaderPublicationFingerprintDto
     page_index: int
     page_progression: float
     engine_locator: ReaderEngineLocatorDto | None = None
@@ -115,7 +104,6 @@ class ReaderPdfExactLocationDto:
 
 @dataclass(frozen=True, slots=True)
 class ReaderComicExactLocationDto:
-    publication: ReaderPublicationFingerprintDto
     page_index: int
     resource_href: str
     engine_locator: ReaderEngineLocatorDto | None = None
@@ -123,7 +111,6 @@ class ReaderComicExactLocationDto:
 
 @dataclass(frozen=True, slots=True)
 class ReaderAudioExactLocationDto:
-    publication: ReaderPublicationFingerprintDto
     file_id: str
     chapter_id: str | None
     position_millis: int
@@ -147,7 +134,6 @@ class ReaderProgressDto:
     percent: float
     location_json: str | None
     exact_location: ReaderExactLocationDto | None
-    content_fingerprint: str | None
     mutation_id: str | None
     client_id: str | None
     client_sequence: int | None
@@ -192,6 +178,5 @@ class ReaderBootstrapDto:
     files: tuple[ReaderFileDto, ...]
     units: tuple[ReaderUnitDto, ...]
     progress_by_volume_id: dict[str, ReaderProgressDto]
-    publication_fingerprint: ReaderPublicationFingerprintDto
     resume_location_json: str | None
     media_completed: bool

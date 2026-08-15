@@ -1,5 +1,5 @@
 import { Locator, LocatorLocations, LocatorText } from '@readium/shared';
-import { parseReadiumLocatorEnvelope, type PublicationFingerprint, type ReadiumLocatorEnvelope } from '@shuku/reader-core';
+import { parseReadiumLocatorEnvelope, type ReadiumLocatorEnvelope } from '@shuku/reader-core';
 import { resolveReadiumDocumentResourceHref } from './readium-resource-identity';
 
 const BLOCK_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,pre,blockquote,figcaption,td,th';
@@ -111,7 +111,6 @@ function visibleTargetBlock(container: HTMLElement, target: ReadiumLocatorEnvelo
 function locatorForBlock(
   current: Locator,
   element: HTMLElement,
-  publication: PublicationFingerprint,
   resourceHrefs: readonly string[]
 ) {
   const highlight = bounded(element.textContent ?? undefined, 512);
@@ -134,7 +133,7 @@ function locatorForBlock(
     text: new LocatorText({ highlight })
   });
   return parseReadiumLocatorEnvelope({
-    engine: 'readium', platform: 'web', version: 'readium-ts:2.8.2', publication,
+    engine: 'readium', platform: 'web', version: 'readium-ts:2.8.2',
     payload: locator.serialize()
   });
 }
@@ -160,12 +159,11 @@ export function isReadiumTextAnchorUnique(container: HTMLElement, highlight: str
 export function captureExactReadiumLocator(
   current: Locator,
   container: HTMLElement,
-  publication: PublicationFingerprint,
   resourceHrefs: readonly string[]
 ): ReadiumLocatorEnvelope | null {
   const element = firstVisibleBlock(container, current.href);
   if (!element) return null;
-  return locatorForBlock(current, element, publication, resourceHrefs);
+  return locatorForBlock(current, element, resourceHrefs);
 }
 
 /** Re-captures the requested exact block wherever it lands on the visible page. */
@@ -173,9 +171,8 @@ export function captureVisibleReadiumTarget(
   target: ReadiumLocatorEnvelope,
   current: Locator,
   container: HTMLElement,
-  publication: PublicationFingerprint,
   resourceHrefs: readonly string[]
 ): ReadiumLocatorEnvelope | null {
   const element = visibleTargetBlock(container, target);
-  return element ? locatorForBlock(current, element, publication, resourceHrefs) : null;
+  return element ? locatorForBlock(current, element, resourceHrefs) : null;
 }

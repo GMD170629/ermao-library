@@ -20,9 +20,13 @@ import com.ermao.library.shared.modules.servers.application.ServerProfileReposit
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
+import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
+import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.shelf.application.ShelfRepository
 import com.ermao.library.shared.modules.shelf.infrastructure.KtorShelfRepository
@@ -35,7 +39,11 @@ fun createAndroidMobileRuntime(
 ): MobileRuntime {
     val applicationContext = context.applicationContext
     val cookieVault = AndroidEncryptedCookieVault(applicationContext)
-    val clients = ApiClientFactory(cookieVault)
+    val clients = ApiClientFactory(
+        cookieVault = cookieVault,
+        requestTimeoutMillis = 15_000,
+        connectTimeoutMillis = 5_000,
+    )
     val clientProvider = clients::create
     return DefaultMobileRuntime(
         profileRepository = profileRepository,
@@ -77,6 +85,22 @@ fun createAndroidReaderServerGateway(context: Context): ReaderServerGateway =
     KtorReaderBootstrapGateway(
         ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
     )
+
+fun createAndroidPdfRangeServerPort(
+    context: Context,
+    profile: ServerProfile,
+): PdfRangeServerPort = KtorPdfRangeServerPort(
+    profile,
+    ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+)
+
+fun createAndroidComicPageServerPort(
+    context: Context,
+    profile: ServerProfile,
+): ComicPageServerPort = KtorComicPageServerPort(
+    profile,
+    ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+)
 
 fun createAndroidReaderProgressSyncPort(
     context: Context,

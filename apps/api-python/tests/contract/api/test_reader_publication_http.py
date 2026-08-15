@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import shutil
 import zipfile
 from pathlib import Path
@@ -37,7 +36,7 @@ def _login(client: TestClient, db: Session) -> User:
     return user
 
 
-def _write_epub(path: Path) -> str:
+def _write_epub(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
@@ -75,7 +74,6 @@ def _write_epub(path: Path) -> str:
             <body><h1 id="anchor">第一章</h1><p>天地玄黄，宇宙洪荒</p></body></html>""",
         )
         archive.writestr("OEBPS/Styles/book.css", "body { line-height: 1.6; }")
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _seed_epub(
@@ -86,7 +84,7 @@ def _seed_epub(
 ) -> LibraryVolume:
     relative_path = Path("library") / "exact.epub"
     source_path = settings.resolved_storage_root / relative_path
-    source_hash = _write_epub(source_path)
+    _write_epub(source_path)
     work = LibraryWork(
         id=f"work-publication{user_suffix}",
         origin="MANUAL",
@@ -114,9 +112,6 @@ def _seed_epub(
         id=f"file-publication{user_suffix}",
         volume_id=volume.id,
         path=str(relative_path),
-        fingerprint=f"sha256:{source_hash}",
-        full_hash=source_hash,
-        hash_status="COMPLETED",
         mtime_ms=int(source_path.stat().st_mtime * 1000),
         kind="EPUB",
         mime_type="application/epub+zip",
@@ -136,7 +131,6 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
         b"\xff\xfe"
         + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
     )
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     work = LibraryWork(
         id="work-txt-publication",
         origin="MANUAL",
@@ -164,9 +158,6 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
         id="file-txt-publication",
         volume_id=volume.id,
         path=str(relative_path),
-        fingerprint=f"sha256:{source_hash}",
-        full_hash=source_hash,
-        hash_status="COMPLETED",
         mtime_ms=int(source_path.stat().st_mtime * 1000),
         kind="TXT",
         mime_type="text/plain",
@@ -217,14 +208,15 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     runtime = manifest["https://shuku.app/reader/runtime"]
     assert runtime["parser"] == "epub-package:1"
     assert runtime["normalization"] == "shuku-epub-locator-dom-v2"
-    assert runtime["originalFileHash"].startswith("sha256:")
-    assert len(runtime["originalFileHash"]) == 71
+    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    assert runtime["sourceSizeBytes"] == source.size_bytes
+    assert runtime["sourceMtimeMs"] == source.mtime_ms
 
     resource_response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/Text/chapter.xhtml"
     )
     assert resource_response.status_code == 200
-    assert resource_response.headers["cache-control"] == "private, max-age=60"
+    assert resource_response.headers["cache-control"] == "private, no-cache"
     assert "default-src 'none'" in resource_response.headers["content-security-policy"]
     assert 'data-shuku-security-profile="web-v2"' in resource_response.text
     assert "天地玄黄" in resource_response.text
@@ -303,8 +295,8 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
     source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     source_path = test_settings.resolved_storage_root / source.path
     source_path.write_bytes(b"not-an-epub")
-    source.full_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    source.fingerprint = f"sha256:{source.full_hash}"
+    source.size_bytes = source_path.stat().st_size
+    source.mtime_ms = int(source_path.stat().st_mtime * 1000)
     db_session.add(
         LibraryReadingUnit(
             id="stale-publication-chapter",
@@ -346,9 +338,8 @@ def test_reader_bootstrap_reports_invalid_publication_structure(
     source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     source_path = test_settings.resolved_storage_root / source.path
     source_path.write_bytes(b"not-an-epub")
-    source.full_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    source.fingerprint = f"sha256:{source.full_hash}"
     source.size_bytes = source_path.stat().st_size
+    source.mtime_ms = int(source_path.stat().st_mtime * 1000)
     db_session.commit()
 
     response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
@@ -388,7 +379,6 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     target = test_settings.resolved_storage_root / "library" / "exact.azw3"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixture, target)
-    source_hash = hashlib.sha256(target.read_bytes()).hexdigest()
     work = LibraryWork(
         id="work-mobi-publication",
         origin="MANUAL",
@@ -416,9 +406,6 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
         id="file-mobi-publication",
         volume_id=volume.id,
         path="library/exact.azw3",
-        fingerprint=f"sha256:{source_hash}",
-        full_hash=source_hash,
-        hash_status="COMPLETED",
         mtime_ms=int(target.stat().st_mtime * 1000),
         kind="AZW3",
         mime_type="application/x-mobipocket-ebook",
@@ -437,7 +424,8 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     assert manifest["readingOrder"][0]["href"] == "part00000.html"
     runtime = manifest["https://shuku.app/reader/runtime"]
     assert runtime == {
-        "originalFileHash": f"sha256:{source_hash}",
+        "sourceSizeBytes": target.stat().st_size,
+        "sourceMtimeMs": int(target.stat().st_mtime * 1000),
         "parser": "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add",
         "normalization": "ermao-mobi-core-v1+shuku-locator-dom-v2",
         "positionPageLength": 1024,
@@ -482,27 +470,23 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     )
     assert render_access["mimeType"] == "application/epub+zip"
     assert render_access["sizeBytes"] > 0
-    assert render_access["contentHash"].startswith("sha256:")
+    assert "contentHash" not in render_access
 
     render_response = client.get(render_access["url"])
     assert render_response.status_code == 200
     assert render_response.headers["content-type"].startswith("application/epub+zip")
     assert len(render_response.content) == render_access["sizeBytes"]
-    assert (
-        f"sha256:{hashlib.sha256(render_response.content).hexdigest()}"
-        == render_access["contentHash"]
-    )
-    assert bootstrap["publicationFingerprint"] == {
-        "originalFileHash": bootstrap["files"][0]["contentHash"],
-        "parser": "shuku-txt-parser-v1",
-        "normalization": "shuku-txt-publication-v2",
-    }
+    assert render_response.headers["etag"].startswith('W/"')
+    assert "publicationFingerprint" not in bootstrap
+    assert "contentHash" not in bootstrap["files"][0]
 
     assert manifest_response.status_code == 200
     manifest = manifest_response.json()
-    assert manifest["metadata"]["identifier"] == bootstrap["publicationFingerprint"][
-        "originalFileHash"
-    ].replace("sha256:", "urn:shuku:txt:")
+    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_path = test_settings.resolved_storage_root / source.path
+    assert manifest["metadata"]["identifier"] == (
+        f"urn:shuku:txt:{source.size_bytes}:{source_path.stat().st_mtime_ns}"
+    )
     assert manifest["metadata"]["title"] == "确定性文本出版物"
     assert manifest["metadata"]["author"] == "测试作者"
     assert manifest["metadata"]["readingProgression"] == "ltr"
@@ -524,7 +508,8 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
         },
     ]
     assert manifest["https://shuku.app/reader/runtime"] == {
-        "originalFileHash": bootstrap["publicationFingerprint"]["originalFileHash"],
+        "sourceSizeBytes": source.size_bytes,
+        "sourceMtimeMs": source.mtime_ms,
         "parser": "shuku-txt-parser-v1",
         "normalization": "shuku-txt-publication-v2",
         "positionPageLength": 1024,

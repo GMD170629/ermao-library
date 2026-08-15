@@ -24,7 +24,6 @@ type ImportTask = {
   originalName?: string | null;
   sourcePath: string;
   sourceFileExists?: boolean;
-  contentHash?: string | null;
   progress: number;
   message?: string | null;
   errorSummary?: string | null;

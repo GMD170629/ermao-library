@@ -5,9 +5,15 @@ import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncCoo
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncStateStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -59,6 +65,114 @@ class ReaderProgressSyncTest {
     }
 
     @Test
+    fun retryWakeArrivingDuringFailingUploadIsNotLost() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val store = FakeStore()
+        var calls = 0
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload ->
+                calls += 1
+                if (calls == 1) {
+                    firstStarted.complete(Unit)
+                    releaseFirst.await()
+                    ReaderProgressPushResult.RetryableFailure("OFFLINE")
+                } else {
+                    ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, 1))
+                }
+            },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { MUTATION_ID },
+        )
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        firstStarted.await()
+        coordinator.retryPending(target())
+        releaseFirst.complete(Unit)
+        coordinator.awaitIdle()
+
+        assertEquals(2, calls)
+        assertNull(store.state.pending)
+    }
+
+    @Test
+    fun newerProgressSavedDuringFailingUploadStartsAnotherDrain() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val uploaded = mutableListOf<Long>()
+        var mutationCounter = 0
+        val store = FakeStore()
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload ->
+                uploaded += upload.mutation.capturedAtEpochMillis
+                if (uploaded.size == 1) {
+                    firstStarted.complete(Unit)
+                    releaseFirst.await()
+                    ReaderProgressPushResult.RetryableFailure("OFFLINE")
+                } else {
+                    ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, 1))
+                }
+            },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { "00000000-0000-4000-8000-${(++mutationCounter).toString().padStart(12, '0')}" },
+        )
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        firstStarted.await()
+        coordinator.saveLocalAndSubmit(target(), progress(2))
+        releaseFirst.complete(Unit)
+        coordinator.awaitIdle()
+
+        assertEquals(listOf(1L, 2L), uploaded)
+        assertNull(store.state.pending)
+    }
+
+    @Test
+    fun cancelledWorkerCannotRetireItsReplacement() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val allowCancelledWorkerToFinish = CompletableDeferred<Unit>()
+        val replacementStarted = CompletableDeferred<Unit>()
+        val allowReplacementToFinish = CompletableDeferred<Unit>()
+        var mutationCounter = 0
+        val store = FakeStore()
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload ->
+                if (upload.mutation.capturedAtEpochMillis == 1L) {
+                    firstStarted.complete(Unit)
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) { allowCancelledWorkerToFinish.await() }
+                    }
+                } else {
+                    replacementStarted.complete(Unit)
+                    allowReplacementToFinish.await()
+                    ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, 1))
+                }
+            },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { "00000000-0000-4000-8000-${(++mutationCounter).toString().padStart(12, '0')}" },
+        )
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        firstStarted.await()
+        coordinator.cancelWorker()
+        coordinator.saveLocalAndSubmit(target(), progress(2, movedEnvelope()))
+        replacementStarted.await()
+        allowCancelledWorkerToFinish.complete(Unit)
+
+        val awaitingIdle = async { coordinator.awaitIdle() }
+        yield()
+        assertFalse(awaitingIdle.isCompleted)
+        allowReplacementToFinish.complete(Unit)
+        awaitingIdle.await()
+        assertNull(store.state.pending)
+    }
+
+    @Test
     fun conflictDropsRejectedMutationAndWaitsForRealMovement() = runBlocking {
         val store = FakeStore()
         val coordinator = ReaderProgressSyncCoordinator(
@@ -67,7 +181,6 @@ class ReaderProgressSyncTest {
                 ReaderProgressPushResult.Conflict(
                     snapshot(
                         ReflowablePublicationLocation(
-                            PublicationFingerprint.from(fingerprint()),
                             remoteEnvelope().asEngineLocator(),
                         ),
                         5,
@@ -121,6 +234,46 @@ class ReaderProgressSyncTest {
         assertEquals(listOf(1L, 3L), uploaded)
     }
 
+    @Test
+    fun newerMovementDuringConflictIsRebasedBeforeItsFirstUpload() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val uploaded = mutableListOf<Pair<Long, Long>>()
+        var mutationCounter = 0
+        val store = FakeStore()
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload ->
+                uploaded += upload.mutation.capturedAtEpochMillis to upload.mutation.baseRevision
+                if (uploaded.size == 1) {
+                    firstStarted.complete(Unit)
+                    releaseFirst.await()
+                    ReaderProgressPushResult.Conflict(
+                        snapshot(
+                            ReflowablePublicationLocation(
+                                remoteEnvelope().asEngineLocator(),
+                            ),
+                            5,
+                        ),
+                    )
+                } else {
+                    ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, 6))
+                }
+            },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { "00000000-0000-4000-8000-${(++mutationCounter).toString().padStart(12, '0')}" },
+        )
+
+        coordinator.saveLocalAndSubmit(target(), progress(1))
+        firstStarted.await()
+        coordinator.saveLocalAndSubmit(target(), progress(2, movedEnvelope()))
+        releaseFirst.complete(Unit)
+        coordinator.awaitIdle()
+
+        assertEquals(listOf(1L to 0L, 2L to 5L), uploaded)
+        assertNull(store.state.pending)
+    }
+
     private fun target() = ReaderProgressSyncTarget(
         ReaderSyncNamespace("server", "user", 1),
         "work-1",
@@ -128,12 +281,11 @@ class ReaderProgressSyncTest {
         ReaderFormat.Epub,
     )
 
-    private fun progress(timestamp: Long) = ReaderProgress(
+    private fun progress(timestamp: Long, locator: ReadiumLocatorEnvelope = envelope()) = ReaderProgress(
         "volume-1",
         ReflowReaderLocation(
             resourceKey = "chapter.xhtml",
-            engineLocator = envelope().asEngineLocator(),
-            contentFingerprint = fingerprint(),
+            engineLocator = locator.asEngineLocator(),
         ),
         timestamp,
         "android-client",
@@ -149,17 +301,15 @@ class ReaderProgressSyncTest {
     )
 
     private fun envelope() = ReadiumLocatorEnvelope.parse(
-        """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"${"a".repeat(64)}","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p1"},"text":{"highlight":"anchor"}}}""",
+        """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p1"},"text":{"highlight":"anchor"}}}""",
     )
 
     private fun remoteEnvelope() = ReadiumLocatorEnvelope.parse(
-        """{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"${"a".repeat(64)}","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#remote"},"text":{"highlight":"remote anchor"}}}""",
+        """{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#remote"},"text":{"highlight":"remote anchor"}}}""",
     )
 
-    private fun fingerprint() = ContentFingerprint(
-        "sha256:" + "a".repeat(64),
-        "epub-package:1",
-        "shuku-epub-locator-dom-v2",
+    private fun movedEnvelope() = ReadiumLocatorEnvelope.parse(
+        """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p2"},"text":{"highlight":"second anchor"}}}""",
     )
 
     private class FakeStore(private val committed: () -> Unit = {}) : ReaderProgressSyncStateStore {
@@ -183,9 +333,10 @@ class ReaderProgressSyncTest {
             )
         }
         override suspend fun discardPendingAfterConflict(mutationId: String, serverRevision: Long) {
-            if (state.pending?.mutationId == mutationId) {
-                state = state.copy(confirmedRevision = serverRevision, pending = null)
+            val pending = state.pending?.let {
+                if (it.mutationId == mutationId) null else it.copy(baseRevision = serverRevision)
             }
+            state = state.copy(confirmedRevision = serverRevision, pending = pending)
         }
         override suspend fun acceptRemoteProgress(progress: ReaderProgress, snapshot: ReaderProgressSnapshotV4) {
             value = progress

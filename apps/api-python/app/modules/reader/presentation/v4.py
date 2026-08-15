@@ -23,6 +23,7 @@ from app.core.authorization import authorization_context, can_access_volume
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.media import public as media_public
 from app.modules.publications.application.ensure_navigation import (
     PublicationNavigationSourceChangedError,
 )
@@ -37,24 +38,21 @@ from app.modules.publications.domain.model import (
     PublicationStructureError,
     PublicationUnsupportedError,
 )
-from app.modules.reader.application.content_fingerprint import (
-    publication_fingerprint_key,
-)
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAudioExactLocationDto,
     ReaderBookmarkDto,
+    ReaderBootstrapDto,
     ReaderComicExactLocationDto,
     ReaderEngineLocatorDto,
     ReaderExactLocationDto,
+    ReaderFileDto,
     ReaderPdfExactLocationDto,
     ReaderProgressDto,
-    ReaderPublicationFingerprintDto,
     ReaderReflowableExactLocationDto,
     ReaderVolumeDto,
 )
 from app.modules.reader.application.volume_reader import (
-    ReaderFingerprintMismatch,
     ReaderLocationFormatMismatch,
     ReaderLocatorMediaTypeMismatch,
     ReaderLocatorResourceMismatch,
@@ -78,7 +76,6 @@ from app.modules.reader.presentation.v4_schemas import (
     ExactReaderLocation,
     OpaqueReadiumEngineLocator,
     PdfExactLocation,
-    PublicationFingerprint,
     ReaderBookmark,
     ReaderBookmarksData,
     ReaderBookmarksReplaceRequest,
@@ -87,6 +84,10 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderBootstrapData,
     ReaderBootstrapResponse,
     ReaderCapabilities,
+    ReaderComicDownloadArtifact,
+    ReaderComicManifestData,
+    ReaderComicManifestPage,
+    ReaderComicManifestResponse,
     ReaderConflictError,
     ReaderErrorBody,
     ReaderFileSummary,
@@ -128,6 +129,14 @@ DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 _PUBLICATION_SERVER_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt"})
 LOGGER = logging.getLogger(__name__)
+_COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar"})
+_COMIC_IMAGE_VARIANTS = ["original", "data-saver"]
+_COMIC_ARCHIVE_MIME_TYPES = {
+    "cbz": "application/vnd.comicbook+zip",
+    "zip": "application/zip",
+    "cbr": "application/vnd.comicbook-rar",
+    "rar": "application/vnd.rar",
+}
 
 
 def _current_user(db: Session, request: Request, settings: Settings) -> User:
@@ -164,6 +173,50 @@ def _publication_access_scope(scope: ReaderAccessScope) -> PublicationAccessScop
         can_view_manual_imports=scope.can_view_manual_imports,
         monitor_folder_ids=tuple(scope.monitor_folder_ids),
     )
+
+
+def _authorized_bootstrap(
+    db: Session,
+    request: Request,
+    settings: Settings,
+    volume_id: str,
+) -> tuple[User, ReaderAccessScope, ReaderBootstrapDto]:
+    user = _current_user(db, request, settings)
+    if not can_access_volume(db, user, volume_id):
+        raise _not_found()
+    scope = _access_scope(db, user)
+    try:
+        bootstrap = _service(db, settings).load_bootstrap(
+            user_id=user.id,
+            volume_id=volume_id,
+            access_scope=scope,
+        )
+    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+        _raise_service_error(error)
+    return user, scope, bootstrap
+
+
+def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderFileDto, str]:
+    context = bootstrap.context
+    source_format = context.volume.format.strip().lower()
+    if source_format not in _COMIC_SOURCE_FORMATS:
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="当前卷不是漫画 Publication",
+                code="READER_LOCATION_FORMAT_MISMATCH",
+            )
+        )
+    source = next(
+        (
+            item
+            for item in bootstrap.files
+            if item.kind.strip().upper() in {"COMIC", "CBZ", "ZIP", "CBR", "RAR"}
+        ),
+        None,
+    )
+    if source is None:
+        raise _not_found()
+    return source, source_format
 
 
 def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
@@ -209,14 +262,6 @@ def _location_json(location: ReaderLocation | None) -> str | None:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _fingerprint_dto(value: PublicationFingerprint) -> ReaderPublicationFingerprintDto:
-    return ReaderPublicationFingerprintDto(
-        original_file_hash=value.original_file_hash,
-        parser=value.parser,
-        normalization=value.normalization,
-    )
-
-
 def _engine_dto(
     value: ReadiumEngineLocator | OpaqueReadiumEngineLocator,
 ) -> ReaderEngineLocatorDto:
@@ -234,11 +279,9 @@ def _engine_dto(
 
 
 def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
-    publication = _fingerprint_dto(value.publication)
     if isinstance(value, ReflowableExactLocation):
         payload = value.engine_locator.payload
         return ReaderReflowableExactLocationDto(
-            publication=publication,
             resource_href=payload.href,
             media_type=payload.type,
             resource_progression=payload.locations.progression,
@@ -247,7 +290,6 @@ def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
         )
     if isinstance(value, PdfExactLocation):
         return ReaderPdfExactLocationDto(
-            publication=publication,
             page_index=value.page_index,
             page_progression=value.page_progression,
             engine_locator=(
@@ -258,7 +300,6 @@ def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
         )
     if isinstance(value, ComicExactLocation):
         return ReaderComicExactLocationDto(
-            publication=publication,
             page_index=value.page_index,
             resource_href=value.resource_href,
             engine_locator=(
@@ -268,7 +309,6 @@ def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
             ),
         )
     return ReaderAudioExactLocationDto(
-        publication=publication,
         file_id=value.file_id,
         chapter_id=value.chapter_id,
         position_millis=value.position_millis,
@@ -277,16 +317,6 @@ def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
             if value.engine_locator is not None
             else None
         ),
-    )
-
-
-def _publication_model(
-    value: ReaderPublicationFingerprintDto,
-) -> PublicationFingerprint:
-    return PublicationFingerprint(
-        originalFileHash=value.original_file_hash,
-        parser=value.parser,
-        normalization=value.normalization,
     )
 
 
@@ -307,11 +337,9 @@ def _opaque_engine_model(
 
 
 def _exact_location_model(value: ReaderExactLocationDto) -> ExactReaderLocation:
-    publication = _publication_model(value.publication)
     if isinstance(value, ReaderReflowableExactLocationDto):
         return ReflowableExactLocation(
             kind="reflowable",
-            publication=publication,
             engineLocator=ReadiumEngineLocator(
                 engine="readium",
                 platform=value.engine_locator.platform,
@@ -324,7 +352,6 @@ def _exact_location_model(value: ReaderExactLocationDto) -> ExactReaderLocation:
     if isinstance(value, ReaderPdfExactLocationDto):
         return PdfExactLocation(
             kind="pdf",
-            publication=publication,
             pageIndex=value.page_index,
             pageProgression=value.page_progression,
             engineLocator=_opaque_engine_model(value.engine_locator),
@@ -332,14 +359,12 @@ def _exact_location_model(value: ReaderExactLocationDto) -> ExactReaderLocation:
     if isinstance(value, ReaderComicExactLocationDto):
         return ComicExactLocation(
             kind="comic",
-            publication=publication,
             pageIndex=value.page_index,
             resourceHref=value.resource_href,
             engineLocator=_opaque_engine_model(value.engine_locator),
         )
     return AudioExactLocation(
         kind="audio",
-        publication=publication,
         fileId=value.file_id,
         chapterId=value.chapter_id,
         positionMillis=value.position_millis,
@@ -410,17 +435,6 @@ def _raise_service_error(error: Exception) -> Never:
             ReaderErrorBody(
                 message="卷册格式不支持直接阅读",
                 code="VOLUME_FORMAT_UNSUPPORTED",
-            )
-        ) from error
-    if isinstance(error, ReaderFingerprintMismatch):
-        raise ReaderConflictError(
-            ReaderErrorBody(
-                message="卷册内容已变化，请重新载入",
-                code="CONTENT_FINGERPRINT_MISMATCH",
-                details={
-                    "expectedContentFingerprint": error.expected,
-                    "receivedContentFingerprint": error.received,
-                },
             )
         ) from error
     if isinstance(error, ReaderLocationFormatMismatch):
@@ -549,7 +563,6 @@ def reader_bootstrap_v4(
                 url=(f"/api/reader/v4/volumes/{volume_id}/publication/render.epub"),
                 mimeType="application/epub+zip",
                 sizeBytes=artifact.size_bytes,
-                contentHash=artifact.content_hash,
             )
         except (PublicationSecurityError, PublicationStructureError) as error:
             _raise_publication_render_error(error)
@@ -566,20 +579,45 @@ def reader_bootstrap_v4(
                 volume_id,
                 type(error).__name__,
             )
+    publication_access = None
+    if normalized_format in _PUBLICATION_SERVER_FORMATS:
+        publication_access = ReaderPublicationAccess(
+            kind="reflowable",
+            manifestUrl=(
+                f"/api/reader/v4/volumes/{volume_id}/publication/manifest.json"
+            ),
+            positionsUrl=(
+                f"/api/reader/v4/volumes/{volume_id}/publication/positions.json"
+            ),
+            renderArtifact=render_artifact,
+        )
+    elif normalized_format in _COMIC_SOURCE_FORMATS:
+        comic_source, comic_source_format = _comic_source(bootstrap)
+        publication_access = ReaderPublicationAccess(
+            kind="comic",
+            manifestUrl=f"/api/reader/v4/volumes/{volume_id}/comic/manifest",
+            pageUrlTemplate=(
+                f"/api/reader/v4/volumes/{volume_id}/comic/pages/{{pageIndex}}"
+            ),
+            imageVariants=_COMIC_IMAGE_VARIANTS,
+            downloadArtifact=ReaderComicDownloadArtifact(
+                url=f"/api/reader/v4/volumes/{volume_id}/comic/archive",
+                sourceFormat=cast(
+                    Literal["cbz", "zip", "cbr", "rar"], comic_source_format
+                ),
+                mimeType=(
+                    comic_source.mime_type
+                    or _COMIC_ARCHIVE_MIME_TYPES[comic_source_format]
+                ),
+                sizeBytes=comic_source.size_bytes,
+            ),
+        )
     return ReaderBootstrapResponse(
         data=ReaderBootstrapData(
             schemaVersion=4,
             userId=user_id,
             readerType=reader_type.value,
             sourceFormat=cast(ReaderSourceFormat, normalized_format),
-            publicationFingerprint=PublicationFingerprint(
-                originalFileHash=bootstrap.publication_fingerprint.original_file_hash,
-                parser=bootstrap.publication_fingerprint.parser,
-                normalization=bootstrap.publication_fingerprint.normalization,
-            ),
-            contentFingerprint=publication_fingerprint_key(
-                bootstrap.publication_fingerprint
-            ),
             book=ReaderBookSummary(
                 id=context.work.id,
                 title=context.work.title,
@@ -615,9 +653,6 @@ def reader_bootstrap_v4(
                     sortOrder=file.sort_order,
                     url=f"/api/files/{file.id}",
                     codec=file.codec,
-                    contentHash=(
-                        f"sha256:{file.full_hash}" if file.full_hash else None
-                    ),
                 )
                 for file in bootstrap.files
             ],
@@ -648,19 +683,7 @@ def reader_bootstrap_v4(
                 supportsScrolling=capabilities.supports_scrolling,
                 supportsSpreads=capabilities.supports_spreads,
             ),
-            publication=(
-                ReaderPublicationAccess(
-                    manifestUrl=(
-                        f"/api/reader/v4/volumes/{volume_id}/publication/manifest.json"
-                    ),
-                    positionsUrl=(
-                        f"/api/reader/v4/volumes/{volume_id}/publication/positions.json"
-                    ),
-                    renderArtifact=render_artifact,
-                )
-                if normalized_format in _PUBLICATION_SERVER_FORMATS
-                else None
-            ),
+            publication=publication_access,
             progressSnapshot=(
                 _progress_snapshot(progress)
                 if progress is not None
@@ -669,6 +692,141 @@ def reader_bootstrap_v4(
                 else None
             ),
         )
+    )
+
+
+@router.get(
+    "/volumes/{volume_id}/comic/manifest",
+    response_model=ReaderComicManifestResponse,
+    response_model_by_alias=True,
+)
+def get_comic_manifest_v4(
+    volume_id: str,
+    request: Request,
+    response: Response,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> Annotated[
+    ReaderComicManifestResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+        ReaderValidationError,
+    ),
+]:
+    _user, _scope, bootstrap = _authorized_bootstrap(
+        db, request, settings, volume_id
+    )
+    _source, source_format = _comic_source(bootstrap)
+    index = media_public.load_persisted_volume_page_index(db, volume_id)
+    etag = f'W/"comic-manifest-{volume_id}-{len(index.pages)}"'
+    cache_headers = {
+        "Cache-Control": "private, no-cache",
+        "ETag": etag,
+        "Vary": "Cookie",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return cast(
+            ReaderComicManifestResponse,
+            Response(status_code=304, headers=cache_headers),
+        )
+    if not index.pages:
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="漫画页索引尚未就绪",
+                code="COMIC_MANIFEST_UNAVAILABLE",
+            )
+        )
+    pages = [
+        ReaderComicManifestPage(
+            pageIndex=canonical_index,
+            resourceHref=f"pages/{canonical_index}",
+            title=page.title or None,
+            mediaType=page.media_type or "application/octet-stream",
+            width=page.width,
+            height=page.height,
+            sizeBytes=page.size,
+        )
+        for canonical_index, page in enumerate(index.pages)
+    ]
+    response.headers.update(cache_headers)
+    return ReaderComicManifestResponse(
+        data=ReaderComicManifestData(
+            schemaVersion=1,
+            kind="comic",
+            volumeId=volume_id,
+            sourceFormat=cast(
+                Literal["cbz", "zip", "cbr", "rar"], source_format
+            ),
+            pageCount=len(pages),
+            readingOrder=pages,
+        )
+    )
+
+
+@router.get("/volumes/{volume_id}/comic/pages/{page_index}")
+def get_comic_page_v4(
+    volume_id: str,
+    page_index: int,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    image_variant: Annotated[
+        Literal["original", "data-saver"],
+        Query(alias="imageVariant"),
+    ] = "original",
+) -> Response:
+    user, _scope, _bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
+    index = media_public.load_persisted_volume_page_index(db, volume_id)
+    if page_index < 0 or page_index >= len(index.pages):
+        raise ReaderNotFoundError(
+            ReaderErrorBody(
+                message="漫画页面不存在",
+                code="COMIC_PAGE_OUT_OF_RANGE",
+            )
+        )
+    page = index.pages[page_index]
+    source = index.source_for(page.file_id)
+    if source is None or source.kind != "COMIC":
+        raise _not_found()
+    _ = image_variant
+    page_response = media_public.send_comic_page(
+        archive_path=media_public.stored_media_path(source.path, settings),
+        entry_name=page.href,
+        request=request,
+        actor_id=user.id,
+        settings=settings,
+        media_type=page.media_type,
+        resource_id=page.id,
+    )
+    page_response.headers["Cache-Control"] = (
+        "private, max-age=31536000, immutable"
+    )
+    page_response.headers["X-Comic-Page-Index"] = str(page_index)
+    page_response.headers["X-Comic-Resource-Href"] = f"pages/{page_index}"
+    return page_response
+
+
+@router.get("/volumes/{volume_id}/comic/archive")
+def download_comic_archive_v4(
+    volume_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> Response:
+    user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
+    source, source_format = _comic_source(bootstrap)
+    indexed_source = media_public.load_persisted_volume_page_index(
+        db, volume_id
+    ).source_for(source.id)
+    if indexed_source is None:
+        raise _not_found()
+    return media_public.send_comic_archive(
+        archive_path=media_public.stored_media_path(indexed_source.path, settings),
+        request=request,
+        actor_id=user.id,
+        media_type=source.mime_type or _COMIC_ARCHIVE_MIME_TYPES[source_format],
+        resource_id=source.id,
     )
 
 
@@ -754,7 +912,6 @@ def save_progress_v4(
     except (
         ReaderVolumeNotFound,
         ReaderVolumeFormatUnsupported,
-        ReaderFingerprintMismatch,
         ReaderLocationFormatMismatch,
         ReaderLocatorMediaTypeMismatch,
         ReaderLocatorResourceMismatch,
@@ -830,7 +987,6 @@ def list_bookmarks_v4(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-    content_fingerprint: str = Query(alias="contentFingerprint", min_length=1),
 ) -> Annotated[
     ReaderBookmarksResponse,
     ErrorResponses(
@@ -848,9 +1004,8 @@ def list_bookmarks_v4(
             user_id=user.id,
             volume_id=volume_id,
             access_scope=_access_scope(db, user),
-            content_fingerprint=content_fingerprint,
         )
-    except (ReaderVolumeNotFound, ReaderFingerprintMismatch) as error:
+    except ReaderVolumeNotFound as error:
         _raise_service_error(error)
     return ReaderBookmarksResponse(
         data=ReaderBookmarksData(
@@ -908,7 +1063,6 @@ def replace_bookmarks_v4(
                 user_id=user.id,
                 volume_id=volume_id,
                 access_scope=_access_scope(db, user),
-                content_fingerprint=payload.content_fingerprint,
                 bookmarks=tuple(incoming),
                 location_kinds=tuple(
                     bookmark.location.kind for bookmark in payload.bookmarks
@@ -918,7 +1072,6 @@ def replace_bookmarks_v4(
     except (
         ReaderVolumeNotFound,
         ReaderVolumeFormatUnsupported,
-        ReaderFingerprintMismatch,
         ReaderLocationFormatMismatch,
     ) as error:
         _raise_service_error(error)

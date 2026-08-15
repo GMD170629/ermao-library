@@ -32,7 +32,7 @@ class PreparedConversionTaskWrite:
     task_id: str
     import_task_id: str
     source_volume_id: str
-    source_hash: str
+    source_key: str
     idempotency_key: str
     source_path: str
     source_format: str
@@ -140,7 +140,7 @@ def prepare_conversion_task_write(
     import_task_id: str,
     task_id: str,
     source_volume_id: str,
-    source_hash: str,
+    source_key: str,
     idempotency_key: str,
     source_path: str,
     source_format: str,
@@ -179,7 +179,7 @@ def prepare_conversion_task_write(
         "target_format": "EPUB",
         "source_path": source_path,
         "output_path": None,
-        "source_hash": source_hash,
+        "source_key": source_key,
         "converter": converter,
         "converter_version": None,
         "options_json": options_json,
@@ -199,7 +199,7 @@ def prepare_conversion_task_write(
         task_id=result.id,
         import_task_id=import_task_id,
         source_volume_id=source_volume_id,
-        source_hash=source_hash,
+        source_key=source_key,
         idempotency_key=idempotency_key,
         source_path=source_path,
         source_format=source_format,
@@ -270,7 +270,7 @@ def prepare_conversion_stage_write(
     }
     field_mapping = {
         "sourceFormat": "source_format",
-        "sourceHash": "source_hash",
+        "sourceKey": "source_key",
         "outputPath": "output_path",
         "converter": "converter",
         "converterVersion": "converter_version",
@@ -283,7 +283,7 @@ def prepare_conversion_stage_write(
         "finishedAt": "finished_at",
     }
     nullable_strings = {
-        "sourceHash",
+        "sourceKey",
         "outputPath",
         "converterVersion",
         "errorCode",

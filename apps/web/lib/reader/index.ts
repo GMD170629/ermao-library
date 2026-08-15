@@ -4,6 +4,7 @@ export * from './memory-storage';
 export * from './model';
 export * from './preferences';
 export * from './private-data';
+export * from './pdf-range-cache';
 export * from './progress-wire';
 export * from './runtime';
 export * from './storage';

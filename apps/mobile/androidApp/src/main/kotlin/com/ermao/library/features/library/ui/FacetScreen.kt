@@ -32,12 +32,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
-import com.ermao.library.features.content.ui.CoverSize
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.WorkCard
 import com.ermao.library.features.content.ui.ContentAreaMessage
 import com.ermao.library.features.content.ui.ContentStatusBanner
 import com.ermao.library.features.content.ui.WorkGridItem
+import com.ermao.library.features.content.ui.WorkListItem
+import com.ermao.library.features.content.ui.responsiveCoverColumnCount
 import com.ermao.library.features.library.application.FacetUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -73,7 +74,7 @@ fun FacetScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.two)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = theme.spacing.two, vertical = theme.spacing.two)) {
                 Text(
                     state.facetName ?: stringResource(if (kind == LibraryScope.Series) R.string.facet_series_title else R.string.facet_author_title),
                     style = theme.typography.title,
@@ -87,7 +88,7 @@ fun FacetScreen(
                 )
             }
             if (state.freshness != com.ermao.library.features.content.model.ContentFreshness.Fresh) {
-                ContentStatusBanner(state.freshness, Modifier.padding(horizontal = theme.spacing.three))
+                ContentStatusBanner(state.freshness, Modifier.padding(horizontal = theme.spacing.two))
             }
             when {
                 state.isLoading -> ContentAreaMessage(
@@ -106,19 +107,27 @@ fun FacetScreen(
                     stringResource(R.string.facet_empty_message),
                 )
                 kind == LibraryScope.Series -> LazyColumn(
-                    contentPadding = PaddingValues(horizontal = theme.spacing.three, vertical = theme.spacing.one),
+                    contentPadding = PaddingValues(horizontal = theme.spacing.two, vertical = theme.spacing.one),
                 ) {
                     items(state.works, key = WorkCard::id) { work ->
-                        WorkListRowForFacet(work, repository, context, Modifier.clickable { onOpenWork(work.id) })
+                        WorkListItem(
+                            work = work,
+                            repository = repository,
+                            context = context,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenWork(work.id) }
+                                .padding(vertical = theme.spacing.two),
+                        )
                         HorizontalDivider()
                     }
                     item { FacetPagination(state, onLoadNextPage) }
                 }
                 else -> BoxWithConstraints {
-                    val columns = if (maxWidth >= 360.dp && LocalDensity.current.fontScale <= 1.15f) 3 else 2
+                    val columns = responsiveCoverColumnCount(maxWidth, LocalDensity.current.fontScale)
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(columns),
-                        contentPadding = PaddingValues(horizontal = theme.spacing.three, vertical = theme.spacing.one),
+                        contentPadding = PaddingValues(horizontal = theme.spacing.two, vertical = theme.spacing.one),
                         horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
                         verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
                     ) {
@@ -131,33 +140,6 @@ fun FacetScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun WorkListRowForFacet(
-    work: WorkCard,
-    repository: ContentRepository,
-    context: ContentRequestContext,
-    modifier: Modifier,
-) {
-    val theme = WarmPageThemeValues
-    androidx.compose.foundation.layout.Row(
-        modifier.fillMaxWidth().padding(vertical = theme.spacing.two),
-        horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
-    ) {
-        com.ermao.library.features.content.ui.WorkCover(
-            work,
-            repository,
-            context,
-            CoverSize.Small,
-            Modifier.fillMaxWidth(0.2f),
-        )
-        Column(Modifier.weight(1f)) {
-            Text(work.title, style = theme.typography.headline, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(work.author, style = theme.typography.callout, color = theme.colors.textSecondary)
-            work.progressPercent?.let { Text(stringResource(R.string.progress_percent, it), style = theme.typography.caption) }
         }
     }
 }

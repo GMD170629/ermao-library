@@ -113,7 +113,7 @@ class ContentMappersTest {
                 units = listOf(chapter),
                 volumes = emptyList(),
                 tracks = emptyList(),
-                localProgressScope = LocalProgressScope("user-1", "volume-1", "fingerprint"),
+                localProgressScope = LocalProgressScope("user-1", "volume-1"),
                 currentHref = null,
                 currentSectionIndex = null,
                 currentChapterTitle = null,

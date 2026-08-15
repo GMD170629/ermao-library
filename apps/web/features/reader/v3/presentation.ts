@@ -37,7 +37,7 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
     pdfZoom: preferences.pdf.zoom,
     pdfPageWidth: preferences.pdf.pageWidth,
     comicDirection: preferences.comic.direction,
-    comicMode: preferences.comic.mode,
+    comicMode: preferences.comic.spreadMode,
     comicPageTurnAnimation: preferences.comic.pageTurnAnimation,
     imageFit: preferences.comic.imageFit,
     imageVariant: preferences.comic.imageVariant,
@@ -90,7 +90,7 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
     },
     comic: {
       direction: settings.comicDirection,
-      mode: settings.comicMode,
+      spreadMode: settings.comicMode,
       imageFit: settings.imageFit,
       pageTurnAnimation: settings.comicPageTurnAnimation,
       imageVariant: settings.imageVariant,
@@ -127,13 +127,14 @@ export function locationProgress(location: ReaderLocation | null, percent: numbe
     };
   }
   if (location.kind === 'pdf') {
-    const total = Math.max(1, totalHint ?? location.pageNumber);
+    const pageNumber = location.pageIndex + 1;
+    const total = Math.max(1, totalHint ?? pageNumber);
     return {
-      page: location.pageNumber,
+      page: pageNumber,
       total,
       percent: safePercent,
-      position: String(location.pageNumber),
-      label: `第 ${location.pageNumber} / ${total} 页`
+      position: String(pageNumber),
+      label: `第 ${pageNumber} / ${total} 页`
     };
   }
   return {
@@ -171,5 +172,5 @@ export function locationExtra(location: ReaderLocation | null) {
     };
   }
   if (location.kind === 'comic') return { readerType: 'comic', volumeId: location.volumeId, pageIndex: location.pageIndex };
-  return { readerType: 'pdf', pageIndex: location.pageNumber };
+  return { readerType: 'pdf', pageIndex: location.pageIndex };
 }

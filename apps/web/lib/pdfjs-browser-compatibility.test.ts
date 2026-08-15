@@ -10,6 +10,9 @@ test('PDF reader uses the official legacy main module and worker together', asyn
 
   assert.match(adapterSource, /import\('pdfjs-dist\/legacy\/build\/pdf\.mjs'\)/);
   assert.match(workerPreparationSource, /pdfjs-dist\/legacy\/build\/pdf\.worker\.min\.mjs/);
+  assert.match(workerPreparationSource, /pdfjs-dist\/wasm\//);
   assert.match(workerPreparationSource, /pdf\.worker\.legacy\.min\.mjs/);
+  assert.match(workerPreparationSource, /public\/vendor\/pdfjs\/wasm\//);
   assert.match(adapterSource, /\/vendor\/pdfjs\/pdf\.worker\.legacy\.min\.mjs\?v=6\.1\.200/);
+  assert.match(adapterSource, /wasmUrl:\s*withBasePath\('\/vendor\/pdfjs\/wasm\/'\)/);
 });

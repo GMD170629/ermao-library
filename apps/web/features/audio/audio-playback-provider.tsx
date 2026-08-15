@@ -138,7 +138,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     const trackIndex = trackIndexRef.current;
     const track = bootstrap?.tracks[trackIndex];
-    if (!bootstrap || !track || !bootstrap.userId || !bootstrap.contentFingerprint) return Promise.resolve();
+    if (!bootstrap || !track || !bootstrap.userId) return Promise.resolve();
     const positionMs = completed
       ? Math.max(0, track.durationMs)
       : clamp((audio?.currentTime ?? stateRef.current.positionMs / 1000) * 1000, 0, Math.max(track.durationMs, 0));
@@ -149,7 +149,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const location = audioLocation(track, chapter, positionMs, bootstrap.volume.id);
     const exactLocation = {
       kind: 'audio' as const,
-      publication: bootstrap.publicationFingerprint,
       fileId: location.fileId,
       ...(location.chapterId ? { chapterId: location.chapterId } : {}),
       positionMillis: Math.max(0, Math.round(location.positionMs))

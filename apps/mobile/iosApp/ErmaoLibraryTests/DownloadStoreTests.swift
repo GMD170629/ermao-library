@@ -69,7 +69,6 @@ final class DownloadStoreTests: XCTestCase {
             mediaVersionID: bootstrap.mediaVersionID,
             mediaKind: bootstrap.mediaKind,
             readerType: bootstrap.readerType,
-            contentFingerprint: bootstrap.contentFingerprint,
             expectedBytes: bootstrap.expectedBytes
         )
         let destination = try await store.destination(for: record)
@@ -96,8 +95,7 @@ final class DownloadStoreTests: XCTestCase {
                 destination: destination,
                 receipt: ManagedDownloadReceipt(
                     receivedBytes: 3,
-                    expectedBytes: 4,
-                    contentFingerprint: "fingerprint"
+                    expectedBytes: 4
                 )
             )
             XCTFail("A partial file must never be published as completed")
@@ -123,8 +121,7 @@ final class DownloadStoreTests: XCTestCase {
             destination: destination,
             receipt: ManagedDownloadReceipt(
                 receivedBytes: 4,
-                expectedBytes: 4,
-                contentFingerprint: "fingerprint"
+                expectedBytes: 4
             )
         )
 
@@ -150,8 +147,7 @@ final class DownloadStoreTests: XCTestCase {
             destination: destination,
             receipt: ManagedDownloadReceipt(
                 receivedBytes: 4,
-                expectedBytes: 4,
-                contentFingerprint: "fingerprint"
+                expectedBytes: 4
             )
         )
         try FileManager.default.removeItem(at: destination.finalFileURL)
@@ -177,7 +173,7 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(secondNamespaceRecords.map(\.volumeID), ["two"])
     }
 
-    func testChangedFingerprintReplacesStaleVolumeRecord() async throws {
+    func testSameVolumeIdentityReusesQueuedRecord() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let original = try await makeRecord(store: store)
         let volume = WorkVolume(
@@ -205,17 +201,15 @@ final class DownloadStoreTests: XCTestCase {
             mediaVersionID: volume.mediaVersionID,
             mediaKind: .ebook,
             readerType: .reflowable,
-            contentFingerprint: "new-fingerprint",
             expectedBytes: 4
         )
 
-        XCTAssertNotEqual(replacement.id, original.id)
-        XCTAssertEqual(replacement.contentFingerprint, "new-fingerprint")
+        XCTAssertEqual(replacement.id, original.id)
         let records = try await store.records(namespace: namespace)
         XCTAssertEqual(records.count, 1)
     }
 
-    func testChangedMediaVersionIdentityReplacesSameFingerprintRecord() async throws {
+    func testChangedMediaVersionIdentityReplacesVolumeRecord() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let original = try await makeRecord(store: store)
         let volume = WorkVolume(
@@ -243,7 +237,6 @@ final class DownloadStoreTests: XCTestCase {
             mediaVersionID: volume.mediaVersionID,
             mediaKind: .ebook,
             readerType: .reflowable,
-            contentFingerprint: "fingerprint",
             expectedBytes: 4
         )
 
@@ -300,15 +293,9 @@ final class DownloadStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(handoff?.source, .verifiedLocal(recordID: completed.id))
-        XCTAssertNil(ManagedReaderAccessPolicy.completedRecord(
-            records: [completed],
-            recordID: completed.id,
-            contentFingerprint: "stale-fingerprint"
-        ))
         XCTAssertEqual(ManagedReaderAccessPolicy.completedRecord(
             records: [completed],
-            recordID: completed.id,
-            contentFingerprint: "fingerprint"
+            recordID: completed.id
         )?.id, completed.id)
     }
 
@@ -342,7 +329,6 @@ final class DownloadStoreTests: XCTestCase {
             mediaVersionID: "media-version-ebook",
             mediaKind: .ebook,
             readerType: .reflowable,
-            contentFingerprint: "fingerprint",
             expectedBytes: 4
         )
     }
@@ -363,8 +349,7 @@ final class DownloadStoreTests: XCTestCase {
             destination: destination,
             receipt: ManagedDownloadReceipt(
                 receivedBytes: 4,
-                expectedBytes: 4,
-                contentFingerprint: "fingerprint"
+                expectedBytes: 4
             )
         )
     }

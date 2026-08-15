@@ -71,7 +71,7 @@ class ConversionArtifact:
     source_path: Path
     output_path: Path
     source_format: str
-    source_hash: str
+    source_key: str
     converter: str
     converter_version: str
     cached: bool
@@ -105,12 +105,10 @@ def _now() -> int:
     return now_timestamp_ms()
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _source_key(path: Path) -> str:
+    stat = path.stat()
+    identity = f"{path}\0{stat.st_size}\0{stat.st_mtime_ns}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def _decode_txt_sample(sample: bytes, continuation: bytes, *, encoding: str) -> str:
@@ -456,7 +454,7 @@ def _ensure_conversion_task(
     source: Path,
     fmt: str,
     converter: str,
-    source_hash: str,
+    source_key: str,
     options: dict[str, Any],
 ) -> ConversionProgressTaskDTO:
     return progress_store.ensure_task(
@@ -469,7 +467,7 @@ def _ensure_conversion_task(
         source_path=source,
         source_format=fmt,
         converter=converter,
-        source_hash=source_hash,
+        source_key=source_key,
         options_json=json.dumps(options, ensure_ascii=False, sort_keys=True),
         now=_now(),
     )
@@ -622,7 +620,7 @@ def convert_to_epub(
     source = Path(source_path).expanduser().resolve()
     fmt = source_format(source) or "UNKNOWN"
     converter = _converter_for_format(fmt)
-    source_hash = _sha256(source)
+    source_key = _source_key(source)
     try:
         task = _ensure_conversion_task(
             progress_store,
@@ -630,7 +628,7 @@ def convert_to_epub(
             source,
             fmt,
             converter,
-            source_hash,
+            source_key,
             {},
         )
     except ConversionProgressConflict as exc:
@@ -687,7 +685,7 @@ def convert_to_epub(
         sort_keys=True,
     )
     cache_key = hashlib.sha256(cache_signature.encode("utf-8")).hexdigest()[:16]
-    final_path = settings.conversion_root / source_hash / cache_key / "book.epub"
+    final_path = settings.conversion_root / source_key / cache_key / "book.epub"
     if final_path.is_file():
         try:
             validate_epub(
@@ -715,7 +713,7 @@ def convert_to_epub(
                 progress=85,
                 message="已复用验证过的文件处理结果，正在导入书库",
                 conversion_values={
-                    "sourceHash": source_hash,
+                    "sourceKey": source_key,
                     "outputPath": str(final_path),
                     "converterVersion": version,
                     "optionsJson": json.dumps(
@@ -731,7 +729,7 @@ def convert_to_epub(
                 source,
                 final_path,
                 fmt,
-                source_hash,
+                source_key,
                 converter,
                 version,
                 True,
@@ -751,7 +749,7 @@ def convert_to_epub(
         progress=20,
         message="正在处理电子书文件",
         conversion_values={
-            "sourceHash": source_hash,
+            "sourceKey": source_key,
             "converterVersion": version,
             "optionsJson": json.dumps(options, ensure_ascii=False, sort_keys=True),
             "attempts": task.attempts + 1,
@@ -870,7 +868,7 @@ def convert_to_epub(
             source,
             final_path,
             fmt,
-            source_hash,
+            source_key,
             converter,
             version,
             False,

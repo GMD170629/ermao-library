@@ -36,9 +36,8 @@ class PublicationNavigationCache(Base):
         ForeignKey("LibraryFile.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    original_file_hash: Mapped[str] = mapped_column(
-        "originalFileHash", String(191), nullable=False
-    )
+    source_size_bytes: Mapped[int] = mapped_column("sourceSizeBytes", Integer, nullable=False)
+    source_mtime_ms: Mapped[int] = mapped_column("sourceMtimeMs", Integer, nullable=False)
     parser: Mapped[str] = mapped_column(String(191), nullable=False)
     normalization: Mapped[str] = mapped_column(String(191), nullable=False)
     projection_version: Mapped[int] = mapped_column(
@@ -89,16 +88,12 @@ class PublicationRenderCache(Base):
         ForeignKey("LibraryFile.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    original_file_hash: Mapped[str] = mapped_column(
-        "originalFileHash", String(191), nullable=False
-    )
+    source_size_bytes: Mapped[int] = mapped_column("sourceSizeBytes", Integer, nullable=False)
+    source_mtime_ms: Mapped[int] = mapped_column("sourceMtimeMs", Integer, nullable=False)
     parser: Mapped[str] = mapped_column(String(191), nullable=False)
     normalization: Mapped[str] = mapped_column(String(191), nullable=False)
     relative_path: Mapped[str] = mapped_column(
         "relativePath", String(1024), nullable=False
-    )
-    content_hash: Mapped[str] = mapped_column(
-        "contentHash", String(191), nullable=False
     )
     size_bytes: Mapped[int] = mapped_column("sizeBytes", Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="READY")

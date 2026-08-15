@@ -37,8 +37,9 @@ class PublicationTocEntry(HttpContractModel):
     children: list[PublicationTocEntry] | None = None
 
 
-class PublicationRuntimeFingerprint(HttpContractModel):
-    original_file_hash: str = Field(alias="originalFileHash")
+class PublicationRuntimeMetadata(HttpContractModel):
+    source_size_bytes: int = Field(alias="sourceSizeBytes")
+    source_mtime_ms: int = Field(alias="sourceMtimeMs")
     parser: str
     normalization: str
     position_page_length: int = Field(default=1024, alias="positionPageLength")
@@ -54,7 +55,7 @@ class PublicationManifest(HttpContractModel):
     reading_order: list[PublicationLink] = Field(alias="readingOrder")
     resources: list[PublicationLink]
     toc: list[PublicationTocEntry]
-    runtime: PublicationRuntimeFingerprint = Field(
+    runtime: PublicationRuntimeMetadata = Field(
         alias="https://shuku.app/reader/runtime"
     )
 

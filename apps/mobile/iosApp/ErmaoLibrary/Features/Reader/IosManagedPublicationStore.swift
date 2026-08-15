@@ -7,11 +7,8 @@ struct IosManagedPublication: Sendable, Equatable {
     let displayTitle: String
     let fileURL: URL
     let byteCount: Int64
-    let artifactContentHash: String
-    let fingerprint: IosContentFingerprint
     let workID: String?
     let volumeID: String?
-    let serverContentFingerprint: String?
     let sourceFormat: ErmaoShared.ReaderSourceFormat
 }
 
@@ -49,7 +46,6 @@ actor IosManagedPublicationStore {
         displayTitle: String,
         workID: String? = nil,
         volumeID: String? = nil,
-        expectedOriginalFileHash: String? = nil
     ) async throws -> IosManagedPublication {
         try await importPublication(
             from: sourceURL,
@@ -58,7 +54,6 @@ actor IosManagedPublicationStore {
             sourceFormat: .epub,
             workID: workID,
             volumeID: volumeID,
-            expectedOriginalFileHash: expectedOriginalFileHash,
             parserVersion: Self.parserVersion,
             normalizationVersion: Self.normalizationVersion
         )
@@ -71,7 +66,6 @@ actor IosManagedPublicationStore {
         sourceFormat: ErmaoShared.ReaderSourceFormat,
         workID: String? = nil,
         volumeID: String? = nil,
-        expectedOriginalFileHash: String? = nil,
         parserVersion: String,
         normalizationVersion: String
     ) async throws -> IosManagedPublication {
@@ -112,31 +106,18 @@ actor IosManagedPublicationStore {
             try? input.close()
             try? output.close()
         }
-        var hasher = SHA256()
         var byteCount: Int64 = 0
         while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
             byteCount += Int64(chunk.count)
             guard byteCount <= Self.maximumPublicationBytes else {
                 throw IosReaderFailure(code: .outOfMemoryRisk)
             }
-            hasher.update(data: chunk)
             try output.write(contentsOf: chunk)
         }
         try output.synchronize()
-        let originalFileHash = "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard expectedOriginalFileHash == nil || expectedOriginalFileHash?.caseInsensitiveCompare(
-            originalFileHash
-        ) == .orderedSame else {
-            throw IosReaderFailure(code: .corruptFile)
-        }
         try await validatePublication(
             at: staging,
             sourceFormat: sourceFormat,
-            parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion
-        )
-        let fingerprint = try IosContentFingerprint(
-            originalFileHash: originalFileHash,
             parserVersion: parserVersion,
             normalizationVersion: normalizationVersion
         )
@@ -144,40 +125,32 @@ actor IosManagedPublicationStore {
             sourceID: sourceID,
             displayTitle: displayTitle,
             byteCount: byteCount,
-            artifactContentHash: originalFileHash,
-            fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil,
             sourceFormat: sourceFormat.wireValue
         )
-        try install(staging: staging, destination: destination)
-        do {
-            let encoded = try JSONEncoder().encode(metadata)
-            try encoded.write(to: metadataURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch {
-            try? fileManager.removeItem(at: destination)
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
+        try installPublication(
+            staging: staging,
+            destination: destination,
+            metadata: try JSONEncoder().encode(metadata),
+            metadataURL: metadataURL
+        )
         return IosManagedPublication(
             sourceID: sourceID,
             displayTitle: displayTitle,
             fileURL: destination,
             byteCount: byteCount,
-            artifactContentHash: originalFileHash,
-            fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil,
             sourceFormat: sourceFormat
         )
     }
 
     func prepareDownload(sourceID: String, expectedSize: Int64) throws -> URL {
-        guard !sourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              expectedSize > 0,
-              expectedSize <= Self.maximumPublicationBytes
-        else { throw IosReaderFailure(code: .outOfMemoryRisk) }
+        guard !sourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw IosReaderFailure(code: .resourceMissing)
+        }
+        _ = expectedSize
         let key = opaqueKey(sourceID)
         let staging = root.appendingPathComponent(".\(key).\(UUID().uuidString).partial")
         try requireContained(staging)
@@ -194,43 +167,32 @@ actor IosManagedPublicationStore {
         sourceID: String,
         displayTitle: String,
         byteCount: Int64,
-        artifactContentHash: String,
         expectedSize: Int64,
-        expectedContentHash: String?,
-        originalFileHash: String,
         parserVersion: String,
         normalizationVersion: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
         workID: String,
-        volumeID: String
+        volumeID: String,
+        validateWithReaderParser: Bool = false
     ) async throws -> IosManagedPublication {
         try requireContained(staging)
-        guard byteCount == expectedSize,
-              byteCount <= Self.maximumPublicationBytes,
-              expectedContentHash == nil || expectedContentHash?.caseInsensitiveCompare(
-                  artifactContentHash
-              ) == .orderedSame
+        guard byteCount > 0,
+              byteCount <= Self.maximumPublicationBytes
         else { throw IosReaderFailure(code: .corruptFile) }
+        guard byteCount == expectedSize else { throw IosReaderFailure(code: .corruptFile) }
         let stagingValues = try staging.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard stagingValues.isRegularFile == true,
               stagingValues.isSymbolicLink != true,
               Int64(stagingValues.fileSize ?? -1) == byteCount
         else { throw IosReaderFailure(code: .corruptFile) }
-        guard try hash(of: staging).caseInsensitiveCompare(artifactContentHash) == .orderedSame else {
-            throw IosReaderFailure(code: .corruptFile)
-        }
         try await validatePublication(
             at: staging,
             sourceFormat: sourceFormat,
             parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion
+            normalizationVersion: normalizationVersion,
+            validateWithReaderParser: validateWithReaderParser
         )
 
-        let fingerprint = try IosContentFingerprint(
-            originalFileHash: originalFileHash,
-            parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion
-        )
         let key = opaqueKey(sourceID)
         let destination = root.appendingPathComponent(key)
             .appendingPathExtension(Self.pathExtension(for: sourceFormat))
@@ -241,31 +203,23 @@ actor IosManagedPublicationStore {
             sourceID: sourceID,
             displayTitle: displayTitle,
             byteCount: byteCount,
-            artifactContentHash: artifactContentHash,
-            fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil,
             sourceFormat: sourceFormat.wireValue
         )
-        try install(staging: staging, destination: destination)
-        do {
-            let encoded = try JSONEncoder().encode(metadata)
-            try encoded.write(to: metadataURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch {
-            try? fileManager.removeItem(at: destination)
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
+        try installPublication(
+            staging: staging,
+            destination: destination,
+            metadata: try JSONEncoder().encode(metadata),
+            metadataURL: metadataURL
+        )
         return IosManagedPublication(
             sourceID: sourceID,
             displayTitle: displayTitle,
             fileURL: destination,
             byteCount: byteCount,
-            artifactContentHash: artifactContentHash,
-            fingerprint: fingerprint,
             workID: workID,
             volumeID: volumeID,
-            serverContentFingerprint: nil,
             sourceFormat: sourceFormat
         )
     }
@@ -275,37 +229,6 @@ actor IosManagedPublicationStore {
         if fileManager.fileExists(atPath: staging.path) {
             try fileManager.removeItem(at: staging)
         }
-    }
-
-    func bindServerContentFingerprint(sourceID: String, value: String) throws {
-        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
-        let key = opaqueKey(sourceID)
-        let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
-        try requireContained(metadataURL)
-        let values = try metadataURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-        guard values.isRegularFile == true,
-              values.isSymbolicLink != true,
-              (values.fileSize ?? 0) <= 16_384
-        else { throw IosReaderFailure(code: .persistenceFailed) }
-        let existing = try JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL))
-        guard existing.sourceID == sourceID else { throw IosReaderFailure(code: .persistenceFailed) }
-        let updated = Metadata(
-            sourceID: existing.sourceID,
-            displayTitle: existing.displayTitle,
-            byteCount: existing.byteCount,
-            artifactContentHash: existing.artifactContentHash,
-            fingerprint: existing.fingerprint,
-            workID: existing.workID,
-            volumeID: existing.volumeID,
-            serverContentFingerprint: value,
-            sourceFormat: existing.sourceFormat
-        )
-        try JSONEncoder().encode(updated).write(
-            to: metadataURL,
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-        )
     }
 
     func resolve(sourceID: String) throws -> IosManagedPublication {
@@ -332,25 +255,19 @@ actor IosManagedPublicationStore {
         try requireContained(publicationURL)
         let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
-              Int64(values.fileSize ?? -1) == metadata.byteCount,
-              metadata.byteCount <= Self.maximumPublicationBytes
+              Int64(values.fileSize ?? -1) > 0,
+              Int64(values.fileSize ?? -1) <= Self.maximumPublicationBytes
         else {
             throw IosReaderFailure(code: .corruptFile)
         }
-        let artifactContentHash = metadata.artifactContentHash ?? metadata.fingerprint.originalFileHash
-        guard try hash(of: publicationURL).caseInsensitiveCompare(artifactContentHash) == .orderedSame else {
-            throw IosReaderFailure(code: .corruptFile)
-        }
+        let byteCount = Int64(values.fileSize ?? 0)
         return IosManagedPublication(
             sourceID: metadata.sourceID,
             displayTitle: metadata.displayTitle,
             fileURL: publicationURL,
-            byteCount: metadata.byteCount,
-            artifactContentHash: artifactContentHash,
-            fingerprint: metadata.fingerprint,
+            byteCount: byteCount,
             workID: metadata.workID,
             volumeID: metadata.volumeID,
-            serverContentFingerprint: metadata.serverContentFingerprint,
             sourceFormat: sourceFormat
         )
     }
@@ -363,6 +280,11 @@ actor IosManagedPublicationStore {
             root.appendingPathComponent(key).appendingPathExtension("azw"),
             root.appendingPathComponent(key).appendingPathExtension("azw3"),
             root.appendingPathComponent(key).appendingPathExtension("prc"),
+            root.appendingPathComponent(key).appendingPathExtension("cbz"),
+            root.appendingPathComponent(key).appendingPathExtension("zip"),
+            root.appendingPathComponent(key).appendingPathExtension("cbr"),
+            root.appendingPathComponent(key).appendingPathExtension("rar"),
+            root.appendingPathComponent(key).appendingPathExtension("pdf"),
             root.appendingPathComponent(key).appendingPathExtension("json"),
         ] where fileManager.fileExists(atPath: url.path) {
             try requireContained(url)
@@ -382,6 +304,42 @@ actor IosManagedPublicationStore {
         )
     }
 
+    private func installPublication(
+        staging: URL,
+        destination: URL,
+        metadata: Data,
+        metadataURL: URL
+    ) throws {
+        let transactionID = UUID().uuidString
+        let metadataStaging = root.appendingPathComponent(".\(transactionID).metadata.partial")
+        let contentBackup = root.appendingPathComponent(".\(transactionID).content.backup")
+        let metadataBackup = root.appendingPathComponent(".\(transactionID).metadata.backup")
+        for url in [metadataStaging, contentBackup, metadataBackup] { try requireContained(url) }
+        try metadata.write(
+            to: metadataStaging,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
+        let hadContent = fileManager.fileExists(atPath: destination.path)
+        let hadMetadata = fileManager.fileExists(atPath: metadataURL.path)
+        if hadContent { try fileManager.copyItem(at: destination, to: contentBackup) }
+        if hadMetadata { try fileManager.copyItem(at: metadataURL, to: metadataBackup) }
+        defer {
+            try? fileManager.removeItem(at: metadataStaging)
+            try? fileManager.removeItem(at: contentBackup)
+            try? fileManager.removeItem(at: metadataBackup)
+        }
+        do {
+            try install(staging: staging, destination: destination)
+            try install(staging: metadataStaging, destination: metadataURL)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            try? fileManager.removeItem(at: metadataURL)
+            if hadContent { try? fileManager.moveItem(at: contentBackup, to: destination) }
+            if hadMetadata { try? fileManager.moveItem(at: metadataBackup, to: metadataURL) }
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+    }
+
     private func opaqueKey(_ sourceID: String) -> String {
         SHA256.hash(data: Data(sourceID.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -392,21 +350,12 @@ actor IosManagedPublicationStore {
         guard path.hasPrefix(rootPath) else { throw IosReaderFailure(code: .corruptFile) }
     }
 
-    private func hash(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while let data = try handle.read(upToCount: 1_048_576), !data.isEmpty {
-            hasher.update(data: data)
-        }
-        return "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
     private func validatePublication(
         at url: URL,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
         parserVersion: String,
-        normalizationVersion: String
+        normalizationVersion: String,
+        validateWithReaderParser: Bool = false
     ) async throws {
         switch sourceFormat {
         case .epub:
@@ -418,11 +367,8 @@ actor IosManagedPublicationStore {
                 throw IosReaderFailure(code: .corruptFile)
             }
         case .mobi, .azw, .azw3, .prc:
-            guard parserVersion == IosMobiBook.parserIdentifier,
-                  normalizationVersion == IosMobiPublicationIdentity.normalizationIdentifier
-            else {
-                throw IosReaderFailure(code: .corruptFile)
-            }
+            _ = parserVersion
+            _ = normalizationVersion
             do {
                 let book = try IosMobiBook.open(fileURL: url)
                 do {
@@ -465,7 +411,7 @@ actor IosManagedPublicationStore {
             guard try handle.read(upToCount: 5) == Data("%PDF-".utf8) else {
                 throw IosReaderFailure(code: .corruptFile)
             }
-        case .cbz:
+        case .cbz, .zip:
             do {
                 _ = try IosCbzArchiveIndex(fileURL: url)
             } catch IosCbzError.limitExceeded {
@@ -475,20 +421,33 @@ actor IosManagedPublicationStore {
             } catch {
                 throw IosReaderFailure(code: .corruptFile)
             }
+        case .cbr, .rar:
+            throw IosReaderFailure(code: .comicArchiveFormatUnsupported)
         default:
             throw IosReaderFailure(code: .unsupportedFormat)
         }
+        guard validateWithReaderParser, sourceFormat == .epub || sourceFormat == .pdf else { return }
+        let probe = IosManagedPublication(
+            sourceID: "reader-validation",
+            displayTitle: "reader-validation",
+            fileURL: url,
+            byteCount: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
+            workID: nil,
+            volumeID: nil,
+            sourceFormat: sourceFormat
+        )
+        try await Task { @MainActor in
+            let opened = try await IosReadiumRuntime().open(probe)
+            await opened.close()
+        }.value
     }
 
     private struct Metadata: Codable {
         let sourceID: String
         let displayTitle: String
         let byteCount: Int64
-        let artifactContentHash: String?
-        let fingerprint: IosContentFingerprint
         let workID: String?
         let volumeID: String?
-        let serverContentFingerprint: String?
         let sourceFormat: String
     }
 

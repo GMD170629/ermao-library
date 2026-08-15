@@ -11,8 +11,8 @@ struct IosReflowableReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosReflowableReaderSession
+    var onRetry: () -> Void = {}
     @State private var activePanel: ReaderPanel?
-    @State private var closingFailure = false
     @State private var sliderValue = 0.0
     @State private var sliderIsEditing = false
 
@@ -47,9 +47,6 @@ struct IosReflowableReaderView: View {
             session.applyPreferences()
             updateIdleTimer()
         }
-        .onChange(of: session.startupCancelled) { cancelled in
-            if cancelled { dismiss() }
-        }
         .onChange(of: colorScheme) { _ in
             if session.preferences.themeMode == .system { session.applyPreferences() }
         }
@@ -72,39 +69,15 @@ struct IosReflowableReaderView: View {
             case .settings: ReaderSettingsSheet(session: session)
             }
         }
-        .alert(String(localized: "reader.save.failure.title"), isPresented: $closingFailure) {
-            Button(String(localized: "common.ok"), role: .cancel) {}
-        } message: { Text("reader.save.failure.message") }
         .alert(
             String(localized: "reader.error.title"),
             isPresented: Binding(
-                get: { session.presentationError != nil && !closingFailure },
+                get: { session.presentationError != nil },
                 set: { _ in session.dismissPresentationError() }
             )
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
         } message: { Text(session.presentationError?.localizedDescription ?? "") }
-        .alert(
-            String(localized: "reader.startup.conflict.title"),
-            isPresented: Binding(
-                get: { session.startupConflict != nil },
-                set: { _ in }
-            )
-        ) {
-            Button("reader.startup.conflict.local") {
-                Task { await session.continueStartupAtLocalPosition() }
-            }
-            Button("reader.startup.conflict.cloud") {
-                Task { await session.useCloudStartupPosition() }
-            }
-            Button("common.cancel", role: .cancel) { session.cancelStartupConflict() }
-        } message: {
-            Text(
-                session.startupActionFailed
-                    ? "reader.startup.conflict.failed"
-                    : "reader.startup.conflict.message"
-            )
-        }
     }
 
     private var resumeNotice: some View {
@@ -180,6 +153,7 @@ struct IosReflowableReaderView: View {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
                 Text("reader.error.title").font(.headline)
                 Text(code.localizedDescription).multilineTextAlignment(.center)
+                Button("reader.retry.open", action: onRetry)
                 Button("common.close") { dismiss() }
             }
             .padding(24)
@@ -289,11 +263,9 @@ struct IosReflowableReaderView: View {
 
     private func close() {
         Task {
-            do {
-                try await session.close()
-                UIApplication.shared.isIdleTimerDisabled = false
-                dismiss()
-            } catch { closingFailure = true }
+            try? await session.close()
+            UIApplication.shared.isIdleTimerDisabled = false
+            dismiss()
         }
     }
 }
@@ -357,6 +329,8 @@ private struct ReaderClockView: View {
 private struct ReaderTOCSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var session: IosReflowableReaderSession
+    @State private var pendingEntryID: String?
+    @State private var navigationFailed = false
 
     var body: some View {
         NavigationStack {
@@ -364,9 +338,19 @@ private struct ReaderTOCSheet: View {
                 if session.tableOfContents.isEmpty {
                     ReaderEmptyState(title: "reader.toc.empty", systemImage: "list.bullet")
                 } else {
-                    List(session.tableOfContents) { entry in
+                    List {
+                        if navigationFailed {
+                            Text("reader.navigation.failed").foregroundStyle(.red)
+                        }
+                        ForEach(session.tableOfContents) { entry in
                         Button {
-                            Task { await session.goToTOCEntry(entry); dismiss() }
+                            Task {
+                                pendingEntryID = entry.id
+                                navigationFailed = false
+                                if await session.goToTOCEntry(entry) { dismiss() }
+                                else { navigationFailed = true }
+                                pendingEntryID = nil
+                            }
                         } label: {
                             HStack {
                                 Text(entry.title).padding(.leading, CGFloat(entry.depth) * 16)
@@ -374,8 +358,11 @@ private struct ReaderTOCSheet: View {
                                 if entry.title == session.chapterTitle {
                                     Image(systemName: "location.fill").foregroundStyle(.tint)
                                 }
+                                if pendingEntryID == entry.id { ProgressView() }
                             }
                             .foregroundStyle(.primary)
+                        }
+                        .disabled(pendingEntryID != nil)
                         }
                     }
                 }
@@ -549,10 +536,10 @@ private struct ReaderSettingsSheet: View {
                 Section("reader.settings.layout") {
                     Picker("reader.settings.readingMode", selection: $session.preferences.readingMode) {
                         Text("reader.mode.paged").tag(IosReaderReadingMode.paged)
-                        Text("reader.mode.scroll").tag(IosReaderReadingMode.continuousScroll)
+                        Text("reader.mode.scroll").tag(IosReaderReadingMode.continuousScroll).disabled(true)
                     }
                     Picker("reader.settings.spread", selection: $session.preferences.spreadMode) {
-                        ForEach(IosReaderSpreadMode.allCases) { spread in
+                        ForEach([IosReaderSpreadMode.single, .double]) { spread in
                             Text(verbatim: localizedReaderOption("reader.spread.\(spread.rawValue)"))
                                 .tag(spread)
                         }
@@ -603,7 +590,7 @@ private struct ReaderSettingsSheet: View {
     }
 }
 
-private struct ReaderValueSlider: View {
+struct ReaderValueSlider: View {
     let title: LocalizedStringKey
     @Binding var value: Double
     let range: ClosedRange<Double>

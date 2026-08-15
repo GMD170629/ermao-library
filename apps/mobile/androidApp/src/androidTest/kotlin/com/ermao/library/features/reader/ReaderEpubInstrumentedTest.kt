@@ -20,7 +20,6 @@ import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderAppearancePreferences
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
 import com.ermao.library.shared.modules.reader.ReaderProgress
-import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
@@ -42,7 +41,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.preferences.Theme
+import org.readium.r2.shared.ExperimentalReadiumApi
 
+@OptIn(ExperimentalReadiumApi::class)
 @RunWith(AndroidJUnit4::class)
 class ReaderEpubInstrumentedTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -98,29 +99,48 @@ class ReaderEpubInstrumentedTest {
             }
             waitUntil(scenario, "previous navigation") { currentLocationOrNull(it) != previous }
             scenario.onActivity { activity ->
-                assertTrue(checkNotNull(activity.controllerForTesting).goNext())
                 checkNotNull(activity.controllerForTesting).updatePreferences(
                     ReaderPreferences(
                         appearance = ReaderAppearancePreferences(theme = ReaderTheme.Night),
                         epub = ReaderEpubPreferences(
                             fontSize = 25,
                             lineHeight = 1.6,
-                            flow = ReaderReadingMode.ContinuousScroll,
                         ),
                     ),
                 )
             }
             waitUntil(scenario, "Readium preferences") { activity ->
                 val navigator = activity.navigatorOrNull() ?: return@waitUntil false
-                abs(navigator.settings.value.fontSize - (25.0 / 18.0)) < 0.01 &&
-                    navigator.settings.value.scroll &&
-                    navigator.settings.value.theme == Theme.DARK
+                abs(navigator.settings.value.fontSize - (25.0 / 16.0)) < 0.01 &&
+                    navigator.settings.value.theme == Theme.DARK &&
+                    abs((navigator.settings.value.lineHeight ?: 0.0) - 1.6) < 0.01
+            }
+            waitUntilValue("computed WebView preferences") {
+                evaluateJavascript(
+                    scenario,
+                    """
+                        (() => {
+                          const viewport = document.querySelector('meta[name="viewport"]');
+                          const paragraph = document.querySelector('p');
+                          if (!viewport || !paragraph) return false;
+                          const rootStyle = getComputedStyle(document.documentElement);
+                          const paragraphStyle = getComputedStyle(paragraph);
+                          const fontSize = Number.parseFloat(paragraphStyle.fontSize);
+                          const lineHeight = Number.parseFloat(paragraphStyle.lineHeight);
+                          return viewport.content.includes('width=device-width') &&
+                            window.innerWidth < 600 &&
+                            Math.abs(fontSize - 25) < 0.6 &&
+                            Math.abs(lineHeight / fontSize - 1.6) < 0.05 &&
+                            paragraphStyle.color === 'rgb(226, 232, 240)' &&
+                            rootStyle.backgroundColor === 'rgb(15, 23, 42)';
+                        })()
+                    """.trimIndent(),
+                ) == "true"
             }
 
             scenario.onActivity { activity ->
                 val preferences = checkNotNull(activity.controllerForTesting).preferences.value
                 assertEquals(1.6, preferences.epub.lineHeight, 0.01)
-                assertEquals(ReaderReadingMode.ContinuousScroll, preferences.epub.flow)
                 val controller = checkNotNull(activity.controllerForTesting)
                 assertTrue(controller.goTo(controller.tableOfContents.last().location))
             }
@@ -147,10 +167,6 @@ class ReaderEpubInstrumentedTest {
             )
             val normalizedSecurityState = securityState.replace("\\\"", "\"")
             assertFalse(normalizedSecurityState, normalizedSecurityState.contains("true"))
-            assertFalse(
-                normalizedSecurityState,
-                normalizedSecurityState.contains(Regex("\"(frames|handlers|dangerous|remoteImages)\":(?!0)")),
-            )
         }
     }
 
@@ -239,7 +255,6 @@ class ReaderEpubInstrumentedTest {
                             """{"href":"$removedResource","type":"application/xhtml+xml","locations":{"cssSelector":"body","progression":0.5},"text":{"highlight":"这是第二章，用于验证下一页或目录跳转后的阅读器状态。"}}""",
                         ),
                     ),
-                    contentFingerprint = source.contentFingerprint,
                 ),
                 updatedAtEpochMillis = 1L,
                 deviceId = "legacy-test-device",

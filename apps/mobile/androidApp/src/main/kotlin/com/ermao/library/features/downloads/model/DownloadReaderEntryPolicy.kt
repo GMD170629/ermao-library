@@ -1,9 +1,9 @@
 package com.ermao.library.features.downloads.model
 
 enum class DownloadReaderEntryAction {
-    OpenPreparation,
-    ValidateCurrentArtifact,
-    ValidateStreamingAccess,
+    OpenLocalArtifact,
+    OpenServerReader,
+    ValidateUnsupportedAccess,
 }
 
 fun downloadReaderEntryAction(
@@ -13,12 +13,16 @@ fun downloadReaderEntryAction(
     localArtifactIsValid: (AndroidDownloadRecord) -> Boolean,
 ): DownloadReaderEntryAction {
     if (!isSupportedNativeDownloadReader(readerType, format)) {
-        return DownloadReaderEntryAction.ValidateStreamingAccess
+        return if (isSupportedNativeReaderEntry(readerType, format)) {
+            DownloadReaderEntryAction.OpenServerReader
+        } else {
+            DownloadReaderEntryAction.ValidateUnsupportedAccess
+        }
     }
     return if (existing?.isReadable == true && localArtifactIsValid(existing)) {
-        DownloadReaderEntryAction.ValidateCurrentArtifact
+        DownloadReaderEntryAction.OpenLocalArtifact
     } else {
-        DownloadReaderEntryAction.OpenPreparation
+        DownloadReaderEntryAction.OpenServerReader
     }
 }
 
@@ -28,6 +32,12 @@ fun isSupportedNativeReflowable(readerType: String, format: String): Boolean =
 
 fun isSupportedNativeDownloadReader(readerType: String, format: String): Boolean =
     isSupportedNativeReflowable(readerType, format) ||
-        readerType.equals("comic", ignoreCase = true) && format.trim().equals("CBZ", ignoreCase = true)
+        (readerType.equals("comic", ignoreCase = true) && format.trim().uppercase() in setOf("CBZ", "ZIP")) ||
+        (readerType.equals("pdf", ignoreCase = true) && format.trim().equals("PDF", ignoreCase = true))
 
-private val SUPPORTED_REFLOWABLE_FORMATS = setOf("EPUB", "MOBI", "AZW", "AZW3", "PRC")
+fun isSupportedNativeReaderEntry(readerType: String, format: String): Boolean =
+    isSupportedNativeReflowable(readerType, format) ||
+        readerType.equals("comic", ignoreCase = true) ||
+        readerType.equals("pdf", ignoreCase = true)
+
+private val SUPPORTED_REFLOWABLE_FORMATS = setOf("EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT")

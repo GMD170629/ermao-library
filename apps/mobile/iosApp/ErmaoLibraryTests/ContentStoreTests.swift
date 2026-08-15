@@ -529,7 +529,7 @@ final class ContentStoreTests: XCTestCase {
         updatedAtEpochMillis: Int64
     ) throws -> ReaderProgress {
         let payload = """
-        {"schema":"ermao.reader-progress","version":5,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)#\(fragment)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"fragments":["\(fragment)"]}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"epub-package:1","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":42.0}
+        {"schema":"ermao.reader-progress","version":6,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)#\(fragment)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"fragments":["\(fragment)"]}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":42.0}
         """
         return try PublicKt.createReaderProgressJson().decode(payload: payload)
     }
@@ -541,7 +541,7 @@ final class ContentStoreTests: XCTestCase {
         updatedAtEpochMillis: Int64
     ) throws -> ReaderProgress {
         let payload = """
-        {"schema":"ermao.reader-progress","version":5,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"cssSelector":"#visible","position":\(position)}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"epub-package:1","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":15.2}
+        {"schema":"ermao.reader-progress","version":6,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"cssSelector":"#visible","position":\(position)}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":15.2}
         """
         return try PublicKt.createReaderProgressJson().decode(payload: payload)
     }

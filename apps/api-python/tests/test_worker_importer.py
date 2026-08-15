@@ -2606,23 +2606,12 @@ def test_import_comic_persists_page_units_and_detects_duplicate(
     pages = list(page_rows)
     assert [page["href"] for page in pages] == ["001.jpg", "002.jpg"]
     assert [page["sortOrder"] for page in pages] == [1, 2]
-    assert json.loads(pages[0]["metadataJson"])["zipEntryName"] == "001.jpg"
-    assert (
-        db_session.execute(
-            text("SELECT contentHash FROM ImportTask WHERE duplicate = 0")
-        ).scalar()
-        is None
-    )
-    file_row = (
-        db_session.execute(
-            text("SELECT fullHash, hashStatus, pageIndexVersion FROM LibraryFile")
-        )
-        .mappings()
-        .first()
-    )
-    assert file_row["fullHash"] is None
-    assert file_row["hashStatus"] == "PARTIAL_PENDING"
-    assert file_row["pageIndexVersion"] == 1
+    first_page_metadata = json.loads(pages[0]["metadataJson"])
+    assert first_page_metadata["zipEntryName"] == "001.jpg"
+    assert first_page_metadata["originalName"] == "001.jpg"
+    assert first_page_metadata["pageInVolume"] == 1
+    assert first_page_metadata["pageInSection"] == 1
+    assert db_session.execute(text("SELECT pageIndexVersion FROM LibraryFile")).scalar() == 1
     work = (
         db_session.execute(
             text("SELECT title, author, description, tags FROM LibraryWork")

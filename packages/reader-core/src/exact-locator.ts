@@ -4,12 +4,6 @@ export const READIUM_LOCATOR_CONTEXT_MAX_LENGTH = 256;
 
 export type ReaderPlatform = 'web' | 'android' | 'ios';
 
-export type PublicationFingerprint = Readonly<{
-  originalFileHash: string;
-  parser: string;
-  normalization: string;
-}>;
-
 export type ReadiumLocatorText = Readonly<{
   before?: string;
   highlight?: string;
@@ -36,7 +30,6 @@ export type ReadiumLocatorEnvelope = Readonly<{
   engine: 'readium';
   platform: ReaderPlatform;
   version: string;
-  publication: PublicationFingerprint;
   payload: ReadiumLocatorPayload;
 }>;
 
@@ -47,8 +40,6 @@ export type ExactLocatorComparison = Readonly<{
     | 'same_css_selector'
     | 'same_fragment'
     | 'same_text_anchor'
-    | 'fingerprint_missing'
-    | 'fingerprint_mismatch'
     | 'different_resource'
     | 'missing_locator'
     | 'anchor_mismatch';
@@ -80,18 +71,6 @@ function utf8Length(value: unknown): number {
   } catch {
     return Number.POSITIVE_INFINITY;
   }
-}
-
-export function parsePublicationFingerprint(value: unknown): PublicationFingerprint | null {
-  const item = record(value);
-  if (!item) return null;
-  const originalFileHash = nonEmptyString(item.originalFileHash);
-  const parser = nonEmptyString(item.parser);
-  const normalization = nonEmptyString(item.normalization);
-  return originalFileHash && /^(?:sha256:)?[a-f\d]{64}$/iu.test(originalFileHash)
-    && parser && codePointLength(parser) <= 256 && normalization && codePointLength(normalization) <= 256
-    ? { originalFileHash: `sha256:${originalFileHash.replace(/^sha256:/iu, '').toLowerCase()}`, parser, normalization }
-    : null;
 }
 
 function parseText(value: unknown): ReadiumLocatorText | undefined | null {
@@ -147,9 +126,8 @@ export function parseReadiumLocatorEnvelope(value: unknown): ReadiumLocatorEnvel
     ? item.platform
     : null;
   const version = nonEmptyString(item.version);
-  const publication = parsePublicationFingerprint(item.publication);
   const payload = record(item.payload);
-  if (!platform || !version || codePointLength(version) > 256 || !publication || !payload) return null;
+  if (!platform || !version || codePointLength(version) > 256 || !payload) return null;
   const href = nonEmptyString(payload.href);
   const type = nonEmptyString(payload.type);
   const locations = parseLocations(payload.locations);
@@ -164,7 +142,6 @@ export function parseReadiumLocatorEnvelope(value: unknown): ReadiumLocatorEnvel
     engine: 'readium',
     platform,
     version,
-    publication,
     payload: {
       ...payload,
       href,
@@ -196,16 +173,6 @@ export function isExactReadiumLocatorEnvelope(value: unknown): value is ReadiumL
   return Boolean(envelope && hasExactReadiumAnchor(envelope.payload));
 }
 
-export function publicationFingerprintsMatch(
-  expected: PublicationFingerprint | null | undefined,
-  actual: PublicationFingerprint | null | undefined
-): boolean {
-  return Boolean(expected && actual
-    && expected.originalFileHash === actual.originalFileHash
-    && expected.parser === actual.parser
-    && expected.normalization === actual.normalization);
-}
-
 /** NFC and collapsed whitespace are comparison-only; user content is never rewritten. */
 export function normalizeLocatorText(value: string | undefined): string | undefined {
   const normalized = value?.normalize('NFC').replace(/\s+/gu, ' ').trim();
@@ -229,12 +196,6 @@ export function compareExactReadiumLocators(
   actual: ReadiumLocatorEnvelope | null
 ): ExactLocatorComparison {
   if (!expected || !actual) return { precision: 'unverified', sameResource: false, reason: 'missing_locator' };
-  if (!expected.publication || !actual.publication) {
-    return { precision: 'unverified', sameResource: expected.payload.href === actual.payload.href, reason: 'fingerprint_missing' };
-  }
-  if (!publicationFingerprintsMatch(expected.publication, actual.publication)) {
-    return { precision: 'unverified', sameResource: expected.payload.href === actual.payload.href, reason: 'fingerprint_mismatch' };
-  }
   if (expected.payload.href !== actual.payload.href) {
     return { precision: 'unverified', sameResource: false, reason: 'different_resource' };
   }

@@ -172,7 +172,6 @@ data class PrimaryActionWire(val label: String, val href: String)
 data class LocalProgressScopeWire(
     val userId: String,
     val volumeId: String,
-    val contentFingerprint: String,
 )
 
 @Serializable
@@ -209,6 +208,9 @@ data class ReadingUnitMetadataWire(
     val volumeIndex: Double? = null,
     val trackIndex: Int? = null,
     val pageNumber: Int? = null,
+    val originalName: String? = null,
+    val pageInVolume: Int? = null,
+    val pageInSection: Int? = null,
     val sourceFileName: String? = null,
     val hrefBase: String? = null,
     val recovered: Boolean? = null,
@@ -368,7 +370,6 @@ internal fun ActiveMediaWire.toDomain(): ActiveMedia {
         LocalProgressScope(
             localProgressScope.userId,
             localProgressScope.volumeId,
-            localProgressScope.contentFingerprint,
         ),
         currentHref, currentSectionIndex, currentChapterTitle, currentChapterIndex, currentPageNumber,
         currentChapterSortOrder, progressExtra.toDomain(), progressEstimated,
@@ -392,6 +393,9 @@ private fun ReadingUnitMetadataWire.toDomain(): ReadingUnitMetadata = ReadingUni
     volumeIndex = volumeIndex,
     trackIndex = trackIndex,
     pageNumber = pageNumber,
+    originalName = originalName,
+    pageInVolume = pageInVolume,
+    pageInSection = pageInSection,
     sourceFileName = sourceFileName,
     hrefBase = hrefBase,
     recovered = recovered,

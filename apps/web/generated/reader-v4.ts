@@ -4,7 +4,6 @@
 
 export type AudioExactLocation_Input = {
   kind: "audio";
-  publication: PublicationFingerprint;
   fileId: string;
   chapterId?: string | null;
   positionMillis: number;
@@ -13,7 +12,6 @@ export type AudioExactLocation_Input = {
 
 export type AudioExactLocation_Output = {
   kind: "audio";
-  publication: PublicationFingerprint;
   fileId: string;
   chapterId?: string | null;
   positionMillis: number;
@@ -29,7 +27,6 @@ export type AudioLocation = {
 
 export type ComicExactLocation_Input = {
   kind: "comic";
-  publication: PublicationFingerprint;
   pageIndex: number;
   resourceHref: string;
   engineLocator?: OpaqueReadiumEngineLocator_Input | null;
@@ -37,7 +34,6 @@ export type ComicExactLocation_Input = {
 
 export type ComicExactLocation_Output = {
   kind: "comic";
-  publication: PublicationFingerprint;
   pageIndex: number;
   resourceHref: string;
   engineLocator?: OpaqueReadiumEngineLocator_Output | null;
@@ -68,7 +64,6 @@ export type OpaqueReadiumEngineLocator_Output = {
 
 export type PdfExactLocation_Input = {
   kind: "pdf";
-  publication: PublicationFingerprint;
   pageIndex: number;
   pageProgression: number;
   engineLocator?: OpaqueReadiumEngineLocator_Input | null;
@@ -76,7 +71,6 @@ export type PdfExactLocation_Input = {
 
 export type PdfExactLocation_Output = {
   kind: "pdf";
-  publication: PublicationFingerprint;
   pageIndex: number;
   pageProgression: number;
   engineLocator?: OpaqueReadiumEngineLocator_Output | null;
@@ -85,12 +79,6 @@ export type PdfExactLocation_Output = {
 export type PdfLocation = {
   kind: "pdf";
   pageNumber: number;
-};
-
-export type PublicationFingerprint = {
-  originalFileHash: string;
-  parser: string;
-  normalization: string;
 };
 
 export type ReaderBookSummary = {
@@ -113,7 +101,6 @@ export type ReaderBookmarksData = {
 };
 
 export type ReaderBookmarksReplaceRequest = {
-  contentFingerprint: string;
   bookmarks: Array<ReaderBookmark>;
 };
 
@@ -126,9 +113,7 @@ export type ReaderBootstrapData = {
   schemaVersion?: 4;
   userId: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
-  sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
-  publicationFingerprint: PublicationFingerprint;
-  contentFingerprint: string;
+  sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "zip" | "cbr" | "rar" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
   book: ReaderBookSummary;
   mediaVersion: ReaderMediaVersionSummary;
   volume: ReaderVolumeSummary;
@@ -159,6 +144,37 @@ export type ReaderCapabilities = {
   supportsSpreads: boolean;
 };
 
+export type ReaderComicDownloadArtifact = {
+  url: string;
+  sourceFormat: "cbz" | "zip" | "cbr" | "rar";
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export type ReaderComicManifestData = {
+  schemaVersion?: 1;
+  kind?: "comic";
+  volumeId: string;
+  sourceFormat: "cbz" | "zip" | "cbr" | "rar";
+  pageCount: number;
+  readingOrder: Array<ReaderComicManifestPage>;
+};
+
+export type ReaderComicManifestPage = {
+  pageIndex: number;
+  resourceHref: string;
+  title?: string | null;
+  mediaType: string;
+  width?: number | null;
+  height?: number | null;
+  sizeBytes?: number | null;
+};
+
+export type ReaderComicManifestResponse = {
+  ok?: true;
+  data: ReaderComicManifestData;
+};
+
 export type ReaderErrorBody = {
   message: string;
   code?: string | null;
@@ -178,7 +194,6 @@ export type ReaderFileSummary = {
   sortOrder: number;
   url: string;
   codec?: string | null;
-  contentHash?: string | null;
 };
 
 export type ReaderJsonValue_Input = string | number | boolean | Array<ReaderJsonValue_Input> | {
@@ -237,8 +252,12 @@ export type ReaderProgressStateResponse = {
 };
 
 export type ReaderPublicationAccess = {
+  kind: "reflowable" | "comic";
   manifestUrl: string;
-  positionsUrl: string;
+  positionsUrl?: string | null;
+  pageUrlTemplate?: string | null;
+  imageVariants?: Array<"original" | "data-saver">;
+  downloadArtifact?: ReaderComicDownloadArtifact | null;
   renderArtifact?: ReaderRenderArtifact | null;
 };
 
@@ -262,7 +281,6 @@ export type ReaderRenderArtifact = {
   url: string;
   mimeType: "application/epub+zip";
   sizeBytes: number;
-  contentHash: string;
 };
 
 export type ReaderUnitSummary = {
@@ -360,12 +378,10 @@ export type ReflowLocation = {
 
 export type ReflowableExactLocation_Input = {
   kind: "reflowable";
-  publication: PublicationFingerprint;
   engineLocator: ReadiumEngineLocator_Input;
 };
 
 export type ReflowableExactLocation_Output = {
   kind: "reflowable";
-  publication: PublicationFingerprint;
   engineLocator: ReadiumEngineLocator_Output;
 };

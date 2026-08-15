@@ -117,6 +117,15 @@ final class LocalizationTests: XCTestCase {
             "reader.error.CORRUPT_FILE",
             "reader.error.DRM_PROTECTED",
             "reader.error.PERSISTENCE_FAILED",
+            "reader.error.PDF_RANGE_UNSUPPORTED",
+            "reader.error.PDF_RANGE_INVALID",
+            "reader.error.PDF_RESOURCE_CHANGED",
+            "reader.error.PDF_CACHE_IO",
+            "reader.error.PDF_ENCRYPTED",
+            "reader.error.PDF_INVALID",
+            "reader.error.PDF_PAGE_LOAD_FAILED",
+            "reader.error.PDF_RENDER_FAILED",
+            "reader.pdf.page.description",
         ]
 
         for locale in ["en", "zh-Hans"] {

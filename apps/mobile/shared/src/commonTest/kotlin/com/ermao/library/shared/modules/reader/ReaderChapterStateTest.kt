@@ -151,9 +151,9 @@ class ReaderChapterStateTest {
     fun nonReflowableLocationsNeverSelectAChapter() {
         val units = listOf(ReaderChapterUnit("chapter.xhtml", 0, 1))
         val locations = listOf<PublicationLocation>(
-            PdfPublicationLocation(FINGERPRINT, pageIndex = 0, pageProgression = 0.25),
-            ComicPublicationLocation(FINGERPRINT, resourceHref = "page-1.jpg", pageIndex = 0),
-            AudioPublicationLocation(FINGERPRINT, fileId = "track-1", positionMillis = 5_000),
+            PdfPublicationLocation(pageIndex = 0, pageProgression = 0.25),
+            ComicPublicationLocation(resourceHref = "page-1.jpg", pageIndex = 0),
+            AudioPublicationLocation(fileId = "track-1", positionMillis = 5_000),
         )
 
         locations.forEach { location ->
@@ -173,10 +173,7 @@ class ReaderChapterStateTest {
         )
         val progress = ReaderProgress(
             sourceId = "reader-source",
-            location = ReflowReaderLocation(
-                engineLocator = engineLocator,
-                contentFingerprint = FINGERPRINT.toContentFingerprint(),
-            ),
+            location = ReflowReaderLocation(engineLocator = engineLocator),
             updatedAtEpochMillis = 123_456,
             deviceId = "device-1",
         )
@@ -202,7 +199,6 @@ class ReaderChapterStateTest {
         fragments: List<String>,
         position: Int,
     ): ReflowablePublicationLocation = ReflowablePublicationLocation(
-        FINGERPRINT,
         reflowableEngineLocator(href, fragments, position),
     )
 
@@ -220,11 +216,4 @@ class ReaderChapterStateTest {
         )
     }
 
-    private companion object {
-        val FINGERPRINT = PublicationFingerprint(
-            originalFileHash = "sha256:" + "a".repeat(64),
-            parser = "test-parser:1",
-            normalization = "test-normalization:1",
-        )
-    }
 }

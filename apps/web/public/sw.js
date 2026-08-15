@@ -102,7 +102,7 @@ function isStaticAsset(pathname) {
   pathname = withoutBasePath(pathname);
   return pathname.startsWith('/_next/static/')
     || pathname.startsWith('/icons/')
-    || /\.(css|js|svg)$/i.test(pathname);
+    || /\.(css|js|svg|wasm)$/i.test(pathname);
 }
 
 function isReaderFont(pathname) {

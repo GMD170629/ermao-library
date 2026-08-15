@@ -70,6 +70,85 @@ enum class ReaderReadingMode(val wireValue: String) {
 }
 
 @Serializable
+enum class ReaderComicDirection(val wireValue: String) {
+    @SerialName("ltr") LeftToRight("ltr"),
+    @SerialName("rtl") RightToLeft("rtl"),
+}
+
+@Serializable
+enum class ReaderComicSpreadMode(val wireValue: String) {
+    @SerialName("single") Single("single"),
+    @SerialName("double") Double("double"),
+}
+
+@Serializable
+enum class ReaderComicImageFit(val wireValue: String) {
+    @SerialName("width") Width("width"),
+    @SerialName("height") Height("height"),
+    @SerialName("contain") Contain("contain"),
+    @SerialName("original") Original("original"),
+}
+
+@Serializable
+enum class ReaderComicImageVariant(val wireValue: String) {
+    @SerialName("original") Original("original"),
+    @SerialName("data-saver") DataSaver("data-saver"),
+}
+
+@Serializable
+enum class ReaderPdfFit(val wireValue: String) {
+    @SerialName("width") Width("width"),
+    @SerialName("page") Page("page"),
+}
+
+@Serializable
+enum class ReaderPdfFlow(val wireValue: String) {
+    @SerialName("paged") Paged("paged"),
+}
+
+@Serializable
+enum class ReaderPdfCropMargins(val wireValue: String) {
+    @SerialName("off") Off("off"),
+    @SerialName("auto") Auto("auto"),
+}
+
+enum class ReaderMorphology { Reflowable, Comic, Pdf }
+
+data class ReaderControlProfile(
+    val readingModes: List<ReaderReadingMode>,
+    val disabledReadingModes: Set<ReaderReadingMode>,
+    val reflowableSpreadModes: List<ReaderSpreadMode> = emptyList(),
+    val comicSpreadModes: List<ReaderComicSpreadMode> = emptyList(),
+    val showsComicDirection: Boolean = false,
+    val showsComicCoverSingle: Boolean = false,
+    val showsComicPageGap: Boolean = false,
+    val showsPdfControls: Boolean = false,
+) {
+    companion object {
+        fun forMorphology(morphology: ReaderMorphology): ReaderControlProfile = when (morphology) {
+            ReaderMorphology.Reflowable -> ReaderControlProfile(
+                readingModes = ReaderReadingMode.entries,
+                disabledReadingModes = emptySet(),
+                reflowableSpreadModes = listOf(ReaderSpreadMode.Single, ReaderSpreadMode.Double),
+            )
+            ReaderMorphology.Comic -> ReaderControlProfile(
+                readingModes = ReaderReadingMode.entries,
+                disabledReadingModes = emptySet(),
+                comicSpreadModes = ReaderComicSpreadMode.entries,
+                showsComicDirection = true,
+                showsComicCoverSingle = true,
+                showsComicPageGap = true,
+            )
+            ReaderMorphology.Pdf -> ReaderControlProfile(
+                readingModes = emptyList(),
+                disabledReadingModes = emptySet(),
+                showsPdfControls = true,
+            )
+        }
+    }
+}
+
+@Serializable
 enum class ReaderTextAlignment(val wireValue: String) {
     @SerialName("publisher") PublisherDefault("publisher"),
     @SerialName("left") Start("left"),
@@ -144,19 +223,57 @@ data class ReaderEpubPreferences(
 }
 
 @Serializable
+data class ReaderComicPreferences(
+    val direction: ReaderComicDirection = ReaderComicDirection.LeftToRight,
+    val spreadMode: ReaderComicSpreadMode = ReaderComicSpreadMode.Single,
+    val pageTurnAnimation: ReaderPageTurnAnimation = ReaderPageTurnAnimation.Slide,
+    val imageFit: ReaderComicImageFit = ReaderComicImageFit.Width,
+    val imageVariant: ReaderComicImageVariant = ReaderComicImageVariant.Original,
+    val zoom: Double = 1.0,
+    val pageWidth: Int = 1350,
+    val flow: ReaderReadingMode = ReaderReadingMode.Paged,
+    val coverSingle: Boolean = false,
+    val pageGap: Int = 0,
+) {
+    init {
+        require(zoom.isFinite() && zoom in 0.6..2.4)
+        require(pageWidth in 600..1350)
+        require(pageGap in setOf(0, 8, 16, 24))
+    }
+}
+
+@Serializable
+data class ReaderPdfPreferences(
+    val zoom: Double = 1.0,
+    val pageWidth: Int = 1350,
+    val fit: ReaderPdfFit = ReaderPdfFit.Page,
+    val flow: ReaderPdfFlow = ReaderPdfFlow.Paged,
+    val rotation: Int = 0,
+    val cropMargins: ReaderPdfCropMargins = ReaderPdfCropMargins.Off,
+) {
+    init {
+        require(zoom.isFinite() && zoom in 0.6..2.4)
+        require(pageWidth in 600..1350)
+        require(rotation in setOf(0, 90, 180, 270))
+    }
+}
+
+@Serializable
 data class ReaderPreferences(
     val schemaVersion: Int = SCHEMA_VERSION,
     val appearance: ReaderAppearancePreferences = ReaderAppearancePreferences(),
     val display: ReaderDisplayPreferences = ReaderDisplayPreferences(),
     val interaction: ReaderInteractionPreferences = ReaderInteractionPreferences(),
     val epub: ReaderEpubPreferences = ReaderEpubPreferences(),
+    val comic: ReaderComicPreferences = ReaderComicPreferences(),
+    val pdf: ReaderPdfPreferences = ReaderPdfPreferences(),
 ) {
     init {
         require(schemaVersion == SCHEMA_VERSION) { "Unsupported reader preferences schema" }
     }
 
     companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
     }
 }
 
@@ -190,6 +307,13 @@ data class ReaderCapabilities(
     val supportsSmartOptimization: Boolean,
     val supportsKeyboardPageTurn: Boolean,
     val supportsVolumeKeyPageTurn: Boolean,
+    val supportsComicDirection: Boolean = false,
+    val supportsComicCoverSingle: Boolean = false,
+    val supportsComicPageGap: Boolean = false,
+    val supportsPdfZoomPreference: Boolean = false,
+    val supportsPdfFit: Boolean = false,
+    val supportsPdfRotation: Boolean = false,
+    val supportsPdfCropMargins: Boolean = false,
 ) {
     companion object {
         fun epub(supportsVolumeKeys: Boolean, supportsCustomFonts: Boolean = true) = ReaderCapabilities(

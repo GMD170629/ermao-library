@@ -69,7 +69,6 @@ class CreateVolumeResource:
     format: VolumeFormat
     title: str
     volume_index: float | None
-    source_fingerprint: str | None = None
     derived_from_volume_id: str | None = None
 
     @property

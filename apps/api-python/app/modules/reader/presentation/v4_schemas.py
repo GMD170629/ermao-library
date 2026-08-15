@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, cast
@@ -36,6 +35,9 @@ ReaderSourceFormat = Literal[
     "prc",
     "txt",
     "cbz",
+    "zip",
+    "cbr",
+    "rar",
     "pdf",
     "audio",
     "audiobook",
@@ -73,29 +75,6 @@ class ReadiumExtensionModel(BaseModel):
 
 _MAX_UTC_EPOCH_MILLIS = 253_402_300_799_999
 _MAX_LOCATOR_ENVELOPE_BYTES = 65_536
-_SHA256_PATTERN = re.compile(r"^(?:sha256:)?[a-fA-F0-9]{64}$")
-
-
-class PublicationFingerprint(ReaderWireModel):
-    original_file_hash: str = Field(alias="originalFileHash", max_length=71)
-    parser: str = Field(min_length=1, max_length=256)
-    normalization: str = Field(min_length=1, max_length=256)
-
-    @field_validator("parser", "normalization")
-    @classmethod
-    def require_non_blank_component(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Publication fingerprint components must not be blank")
-        return value
-
-    @field_validator("original_file_hash")
-    @classmethod
-    def normalize_sha256(cls, value: str) -> str:
-        if not _SHA256_PATTERN.fullmatch(value):
-            raise ValueError("originalFileHash must contain a SHA-256 digest")
-        return f"sha256:{value.removeprefix('sha256:').lower()}"
-
-
 class ReadiumLocatorText(ReaderWireModel):
     before: str | None = Field(
         default=None, max_length=256, exclude_if=lambda value: value is None
@@ -218,13 +197,11 @@ class OpaqueReadiumEngineLocator(ReaderWireModel):
 
 class ReflowableExactLocation(ReaderWireModel):
     kind: Literal["reflowable"]
-    publication: PublicationFingerprint
     engine_locator: ReadiumEngineLocator = Field(alias="engineLocator")
 
 
 class PdfExactLocation(ReaderWireModel):
     kind: Literal["pdf"]
-    publication: PublicationFingerprint
     page_index: int = Field(alias="pageIndex", ge=0)
     page_progression: float = Field(alias="pageProgression", ge=0, le=1)
     engine_locator: OpaqueReadiumEngineLocator | None = Field(
@@ -241,7 +218,6 @@ class PdfExactLocation(ReaderWireModel):
 
 class ComicExactLocation(ReaderWireModel):
     kind: Literal["comic"]
-    publication: PublicationFingerprint
     page_index: int = Field(alias="pageIndex", ge=0)
     resource_href: str = Field(alias="resourceHref", min_length=1, max_length=8192)
     engine_locator: OpaqueReadiumEngineLocator | None = Field(
@@ -257,7 +233,6 @@ class ComicExactLocation(ReaderWireModel):
 
 class AudioExactLocation(ReaderWireModel):
     kind: Literal["audio"]
-    publication: PublicationFingerprint
     file_id: str = Field(alias="fileId", min_length=1, max_length=191)
     chapter_id: str | None = Field(
         default=None,
@@ -439,7 +414,6 @@ class ReaderFileSummary(ReaderWireModel):
     sort_order: int = Field(alias="sortOrder")
     url: str
     codec: str | None = None
-    content_hash: str | None = Field(default=None, alias="contentHash")
 
 
 class ReaderCapabilities(ReaderWireModel):
@@ -455,13 +429,90 @@ class ReaderCapabilities(ReaderWireModel):
     supports_spreads: bool = Field(alias="supportsSpreads")
 
 
+class ReaderComicDownloadArtifact(ReaderWireModel):
+    url: str
+    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(
+        alias="sourceFormat"
+    )
+    mime_type: str = Field(alias="mimeType", min_length=1, max_length=191)
+    size_bytes: int = Field(alias="sizeBytes", gt=0)
+
+
 class ReaderPublicationAccess(ReaderWireModel):
+    kind: Literal["reflowable", "comic"]
     manifest_url: str = Field(alias="manifestUrl")
-    positions_url: str = Field(alias="positionsUrl")
+    positions_url: str | None = Field(default=None, alias="positionsUrl")
+    page_url_template: str | None = Field(default=None, alias="pageUrlTemplate")
+    image_variants: list[Literal["original", "data-saver"]] = Field(
+        default_factory=list,
+        alias="imageVariants",
+    )
+    download_artifact: ReaderComicDownloadArtifact | None = Field(
+        default=None,
+        alias="downloadArtifact",
+    )
     render_artifact: ReaderRenderArtifact | None = Field(
         default=None,
         alias="renderArtifact",
     )
+
+    @model_validator(mode="after")
+    def validate_kind(self) -> ReaderPublicationAccess:
+        if self.kind == "reflowable":
+            if self.positions_url is None or self.page_url_template is not None:
+                raise ValueError("Invalid reflowable publication access")
+            if self.image_variants or self.download_artifact is not None:
+                raise ValueError("Invalid reflowable publication access")
+        elif (
+            self.positions_url is not None
+            or self.page_url_template is None
+            or self.image_variants != ["original", "data-saver"]
+            or self.download_artifact is None
+            or self.render_artifact is not None
+        ):
+            raise ValueError("Invalid comic publication access")
+        return self
+
+
+class ReaderComicManifestPage(ReaderWireModel):
+    page_index: int = Field(alias="pageIndex", ge=0)
+    resource_href: str = Field(alias="resourceHref", min_length=1, max_length=2048)
+    title: str | None = Field(default=None, max_length=512)
+    media_type: str = Field(alias="mediaType", min_length=1, max_length=191)
+    width: int | None = Field(default=None, gt=0)
+    height: int | None = Field(default=None, gt=0)
+    size_bytes: int | None = Field(default=None, alias="sizeBytes", ge=0)
+
+
+class ReaderComicManifestData(ReaderWireModel):
+    schema_version: Literal[1] = Field(1, alias="schemaVersion")
+    kind: Literal["comic"] = "comic"
+    volume_id: str = Field(alias="volumeId", min_length=1)
+    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(
+        alias="sourceFormat"
+    )
+    page_count: int = Field(alias="pageCount", gt=0)
+    reading_order: list[ReaderComicManifestPage] = Field(alias="readingOrder")
+
+    @model_validator(mode="after")
+    def validate_reading_order(self) -> ReaderComicManifestData:
+        if len(self.reading_order) != self.page_count:
+            raise ValueError("Comic page count does not match reading order")
+        if [page.page_index for page in self.reading_order] != list(
+            range(self.page_count)
+        ):
+            raise ValueError("Comic reading order must be zero-based and contiguous")
+        if any(
+            page.resource_href != f"pages/{page.page_index}"
+            for page in self.reading_order
+        ):
+            raise ValueError("Comic resource href is not canonical")
+        return self
+
+
+class ReaderComicManifestResponse(ReaderWireModel):
+    ok: Literal[True] = True
+    data: ReaderComicManifestData
 
 
 class ReaderRenderArtifact(ReaderWireModel):
@@ -469,7 +520,6 @@ class ReaderRenderArtifact(ReaderWireModel):
     url: str
     mime_type: Literal["application/epub+zip"] = Field(alias="mimeType")
     size_bytes: int = Field(alias="sizeBytes", gt=0)
-    content_hash: str = Field(alias="contentHash", pattern=r"^sha256:[a-f0-9]{64}$")
 
 
 class ReaderProgressSnapshot(ReaderWireModel):
@@ -495,12 +545,6 @@ class ReaderBootstrapData(ReaderWireModel):
     user_id: str = Field(alias="userId")
     reader_type: ReaderFormat = Field(alias="readerType")
     source_format: ReaderSourceFormat = Field(alias="sourceFormat")
-    publication_fingerprint: PublicationFingerprint = Field(
-        alias="publicationFingerprint"
-    )
-    content_fingerprint: str = Field(
-        alias="contentFingerprint", pattern=r"^sha256:[a-f0-9]{64}$"
-    )
     book: ReaderBookSummary
     media_version: ReaderMediaVersionSummary = Field(alias="mediaVersion")
     volume: ReaderVolumeSummary
@@ -559,9 +603,6 @@ class ReaderBookmark(ReaderWireModel):
 
 
 class ReaderBookmarksReplaceRequest(ReaderWireModel):
-    content_fingerprint: str = Field(
-        alias="contentFingerprint", min_length=1, max_length=191
-    )
     bookmarks: list[ReaderBookmark] = Field(max_length=500)
 
     @model_validator(mode="after")

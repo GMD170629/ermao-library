@@ -15,7 +15,6 @@ from app.modules.publications.application.render_ports import (
     PublicationRenderUnitOfWorkFactory,
 )
 from app.modules.publications.domain.model import PublicationNotFoundError
-from app.modules.publications.domain.navigation import canonical_original_file_hash
 from app.modules.publications.domain.rendering import (
     RENDER_NORMALIZATION_IDENTIFIER,
     PublicationRenderArtifact,
@@ -53,22 +52,20 @@ class EnsurePublicationRenderArtifact:
                 return cached, cached_path
 
         prepared = self._artifact_builder.build(source)
-        if source.full_hash is not None and (
-            canonical_original_file_hash(source.full_hash)
-            != canonical_original_file_hash(prepared.original_file_hash)
+        if (
+            source.size_bytes != prepared.source_size_bytes
+            or source.mtime_ms != prepared.source_mtime_ms
         ):
             raise PublicationRenderSourceChangedError
         relative_path, published_path = self._file_store.publish(prepared)
         artifact = PublicationRenderArtifact(
             volume_id=source.volume_id,
             file_id=source.file_id,
-            original_file_hash=canonical_original_file_hash(
-                prepared.original_file_hash
-            ),
+            source_size_bytes=prepared.source_size_bytes,
+            source_mtime_ms=prepared.source_mtime_ms,
             parser=prepared.source_parser,
             normalization=prepared.normalization,
             relative_path=relative_path,
-            content_hash=prepared.content_hash,
             size_bytes=prepared.size_bytes,
             unreadable_resource_count=len(prepared.unreadable_hrefs),
         )
@@ -105,10 +102,9 @@ class EnsurePublicationRenderArtifact:
         cached: PublicationRenderArtifact,
     ) -> bool:
         return bool(
-            source.full_hash
-            and cached.file_id == source.file_id
-            and cached.original_file_hash
-            == canonical_original_file_hash(source.full_hash)
+            cached.file_id == source.file_id
+            and cached.source_size_bytes == source.size_bytes
+            and cached.source_mtime_ms == source.mtime_ms
             and cached.normalization == RENDER_NORMALIZATION_IDENTIFIER
         )
 

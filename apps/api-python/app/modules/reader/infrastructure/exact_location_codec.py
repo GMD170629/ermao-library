@@ -12,16 +12,12 @@ from app.modules.reader.application.dto import (
     ReaderEngineLocatorDto,
     ReaderExactLocationDto,
     ReaderPdfExactLocationDto,
-    ReaderPublicationFingerprintDto,
     ReaderReflowableExactLocationDto,
 )
 
 
 def encode_exact_location(location: ReaderExactLocationDto) -> str:
-    document: dict[str, object] = {
-        "kind": _kind(location),
-        "publication": _publication_document(location.publication),
-    }
+    document: dict[str, object] = {"kind": _kind(location)}
     if isinstance(location, ReaderReflowableExactLocationDto):
         document["engineLocator"] = _engine_document(location.engine_locator)
     elif isinstance(location, ReaderPdfExactLocationDto):
@@ -53,14 +49,12 @@ def decode_exact_location(raw_json: str | None) -> ReaderExactLocationDto | None
     try:
         value: object = json.loads(raw_json)
         root = _mapping(value)
-        publication = _publication(root["publication"])
         kind = _string(root, "kind")
         if kind == "reflowable":
             engine = _engine(root["engineLocator"])
             payload = _mapping(json.loads(engine.payload_json))
             locations = _mapping(payload["locations"])
             return ReaderReflowableExactLocationDto(
-                publication=publication,
                 resource_href=_string(payload, "href"),
                 media_type=_string(payload, "type"),
                 resource_progression=_optional_number(locations, "progression"),
@@ -69,21 +63,18 @@ def decode_exact_location(raw_json: str | None) -> ReaderExactLocationDto | None
             )
         if kind == "pdf":
             return ReaderPdfExactLocationDto(
-                publication=publication,
                 page_index=_integer(root, "pageIndex"),
                 page_progression=_number(root, "pageProgression"),
                 engine_locator=_optional_engine(root),
             )
         if kind == "comic":
             return ReaderComicExactLocationDto(
-                publication=publication,
                 page_index=_integer(root, "pageIndex"),
                 resource_href=_string(root, "resourceHref"),
                 engine_locator=_optional_engine(root),
             )
         if kind == "audio":
             return ReaderAudioExactLocationDto(
-                publication=publication,
                 file_id=_string(root, "fileId"),
                 chapter_id=_optional_string(root, "chapterId"),
                 position_millis=_integer(root, "positionMillis"),
@@ -102,23 +93,6 @@ def _kind(location: ReaderExactLocationDto) -> str:
     if isinstance(location, ReaderComicExactLocationDto):
         return "comic"
     return "audio"
-
-
-def _publication_document(value: ReaderPublicationFingerprintDto) -> dict[str, str]:
-    return {
-        "originalFileHash": value.original_file_hash,
-        "parser": value.parser,
-        "normalization": value.normalization,
-    }
-
-
-def _publication(value: object) -> ReaderPublicationFingerprintDto:
-    root = _mapping(value)
-    return ReaderPublicationFingerprintDto(
-        original_file_hash=_string(root, "originalFileHash"),
-        parser=_string(root, "parser"),
-        normalization=_string(root, "normalization"),
-    )
 
 
 def _engine_document(value: ReaderEngineLocatorDto) -> dict[str, object]:

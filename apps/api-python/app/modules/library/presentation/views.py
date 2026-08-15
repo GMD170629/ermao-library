@@ -43,9 +43,6 @@ from app.models.library import (
 )
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.reader.public import (
-    build_volume_content_fingerprint,
-)
-from app.modules.reader.public import (
     number_or_none as _number_or_none,
 )
 from app.modules.reader.public import (
@@ -1211,9 +1208,6 @@ def _active_media_view(
         "localProgressScope": {
             "userId": user_id,
             "volumeId": volume_id,
-            "contentFingerprint": build_volume_content_fingerprint(
-                selected_volume, files
-            ),
         },
         **progress_navigation,
     }, navigation

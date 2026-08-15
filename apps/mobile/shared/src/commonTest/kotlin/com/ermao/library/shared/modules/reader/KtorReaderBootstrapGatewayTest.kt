@@ -11,6 +11,7 @@ import com.ermao.library.shared.modules.servers.domain.TlsMode
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -19,23 +20,15 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 class KtorReaderBootstrapGatewayTest {
     @Test
     fun mapsExactV4SnapshotAndArtifactVersion() = runBlocking {
         val content = assertIs<Content>(gateway(VALID_BOOTSTRAP).load(request())).value
 
-        assertEquals(
-            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            content.artifactVersion,
-        )
         assertEquals("/api/reader/v4/volumes/volume-1/publication/render.epub", content.publication.apiPath)
         assertEquals(2_345, content.publication.expectedSizeBytes)
-        assertEquals(
-            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            content.publication.expectedContentHash,
-        )
-        assertEquals("epub-package:1", content.publication.publicationFingerprint.parser)
         assertEquals(ReaderSourceFormat.Epub, content.publication.sourceFormat)
         assertEquals(18, content.remoteSnapshot?.revision)
         assertEquals(2_222, content.remoteSnapshot?.receivedAtEpochMillis)
@@ -43,15 +36,49 @@ class KtorReaderBootstrapGatewayTest {
     }
 
     @Test
-    fun malformedProgressSnapshotFailsClosedWithoutPercentageFallback() = runBlocking {
+    fun acceptsNonEmptyUnitsFromTheRealReaderV4Contract() = runBlocking {
+        val response = VALID_BOOTSTRAP.replace(
+            "\"units\":[]",
+            "\"units\":[$EPUB_UNIT]",
+        )
+
+        val content = assertIs<Content>(gateway(response).load(request())).value
+
+        assertEquals(ReaderSourceFormat.Epub, content.publication.sourceFormat)
+        assertEquals("pubnav-1", content.units.single().id)
+        assertEquals(0, content.units.single().index)
+        assertEquals("Chapter 1", content.units.single().title)
+        assertEquals("EPUB/chapter.xhtml#chapter-title", content.units.single().href)
+    }
+
+    @Test
+    fun retainsCanonicalUnitsInServerIndexOrderAndFallsBackBlankTitlesToIds() = runBlocking {
+        val later = EPUB_UNIT
+            .replace("pubnav-1", "pubnav-2")
+            .replace("\"index\":0", "\"index\":2")
+            .replace("\"title\":\"Chapter 1\"", "\"title\":\"   \"")
+        val response = VALID_BOOTSTRAP.replace(
+            "\"units\":[]",
+            "\"units\":[$later,$EPUB_UNIT]",
+        )
+
+        val content = assertIs<Content>(gateway(response).load(request())).value
+
+        assertEquals(listOf("pubnav-1", "pubnav-2"), content.units.map { it.id })
+        assertEquals(listOf("Chapter 1", "pubnav-2"), content.units.map { it.title })
+    }
+
+    @Test
+    fun malformedProgressSnapshotIsDiscardedWithoutBlockingPublicationBootstrap() = runBlocking {
         val mismatch = VALID_BOOTSTRAP.replace(
             "\"locations\":{\"cssSelector\":\"#chapter-title\"},\"text\":{\"highlight\":\"Chapter\"}",
             "\"locations\":{\"progression\":0.8}",
         )
 
-        val failure = assertIs<Failure>(gateway(mismatch).load(request()))
+        val content = assertIs<Content>(gateway(mismatch).load(request())).value
 
-        assertEquals("READER_PROGRESS_SNAPSHOT_INVALID", failure.failureCode)
+        assertNull(content.remoteSnapshot)
+        assertEquals("/api/reader/v4/volumes/volume-1/publication/render.epub", content.publication.apiPath)
     }
 
     @Test
@@ -103,10 +130,17 @@ class KtorReaderBootstrapGatewayTest {
                     "\"kind\":\"${format.kind}\",\"mimeType\":\"${format.mimeType}\"",
                 )
                 .let { value ->
-                    if (format.sourceFormat == "cbz") value.replace(
-                        "\"units\":[]",
-                        "\"units\":[{\"unitType\":\"page\",\"href\":\"pages/001.jpg\",\"mediaType\":\"image/jpeg\",\"sortOrder\":0,\"width\":1200,\"height\":1800}]",
-                    ) else value
+                    if (format.sourceFormat == "cbz") value
+                        .replace("\"units\":[]", "\"units\":[$COMIC_UNIT]")
+                        .replace(REFLOWABLE_PUBLICATION, COMIC_PUBLICATION)
+                    else if (format.sourceFormat == "pdf") value
+                        .replace(
+                            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\"}",
+                            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\",\"pageCount\":1}",
+                        )
+                        .replace("\"units\":[]", "\"units\":[$PDF_UNIT]")
+                        .replace(REFLOWABLE_PUBLICATION, "\"publication\":null")
+                    else value
                 }
 
             val content = assertIs<Content>(gateway(response).load(request())).value
@@ -120,7 +154,11 @@ class KtorReaderBootstrapGatewayTest {
                 content.publication.sourceFormat.wireValue,
             )
             if (format.sourceFormat == "cbz") {
-                assertEquals("pages/001.jpg", content.comicPages.single().resourceHref)
+                assertEquals("pages/0", content.comicPages.single().resourceHref)
+            }
+            if (format.sourceFormat == "pdf") {
+                assertEquals("Page 1", content.pdfPages.single().title)
+                assertEquals(0, content.pdfPages.single().pageIndex)
             }
         }
     }
@@ -143,15 +181,57 @@ class KtorReaderBootstrapGatewayTest {
         )
     }
 
+    @Test
+    fun pdfBootstrapUsesDeclaredSizeWithoutAContentDigest() = runBlocking {
+        val response = VALID_BOOTSTRAP
+            .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"pdf\"")
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"pdf\"")
+            .replace("\"format\":\"epub\"", "\"format\":\"pdf\"")
+            .replace(
+                "\"kind\":\"EPUB\",\"mimeType\":\"application/epub+zip\"",
+                "\"kind\":\"PDF\",\"mimeType\":\"application/pdf\"",
+            )
+
+        val content = assertIs<Content>(gateway(response).load(request())).value
+        assertEquals(1_234L, content.publication.expectedSizeBytes)
+    }
+
+    @Test
+    fun pdfPageTitlesRemainHintsWhenServerPageNumbersDisagree() = runBlocking {
+        val response = pdfBootstrap(PDF_UNIT.replace("\"pageNumber\":1", "\"pageNumber\":2"))
+
+        val content = assertIs<Content>(gateway(response).load(request())).value
+
+        assertEquals(listOf("Page 1"), content.pdfPages.map { it.title })
+    }
+
+    @Test
+    fun duplicateReaderV4UnitsAreDroppedWithoutBlockingContentAccess() = runBlocking {
+        val duplicate = PDF_UNIT.replace("\"index\":1", "\"index\":2")
+        val response = pdfBootstrap("$PDF_UNIT,$duplicate")
+            .replace("\"pageCount\":1", "\"pageCount\":2")
+
+        val content = assertIs<Content>(gateway(response).load(request())).value
+
+        assertEquals(1, content.units.size)
+    }
+
     private fun gateway(body: String) = KtorReaderBootstrapGateway(
         createClient = { profile ->
             val engine = MockEngine {
-                assertEquals("/api/reader/v4/volumes/volume-1/bootstrap", it.url.encodedPath)
-                respond(
-                    """{"ok":true,"data":$body}""",
-                    HttpStatusCode.OK,
-                    headersOf(HttpHeaders.ContentType, "application/json"),
-                )
+                when (it.url.encodedPath) {
+                    "/api/reader/v4/volumes/volume-1/bootstrap" -> respond(
+                        """{"ok":true,"data":$body}""",
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                    "/api/reader/v4/volumes/volume-1/comic/manifest" -> respond(
+                        """{"ok":true,"data":$COMIC_MANIFEST}""",
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                    else -> respondError(HttpStatusCode.NotFound)
+                }
             }
             ApiClient(profile, HttpClient(engine), Json { ignoreUnknownKeys = false; explicitNulls = false })
         },
@@ -165,6 +245,21 @@ class KtorReaderBootstrapGatewayTest {
         val readerFormat: ReaderFormat,
     )
 
+    private fun pdfBootstrap(units: String): String = VALID_BOOTSTRAP
+        .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"pdf\"")
+        .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"pdf\"")
+        .replace("\"format\":\"epub\"", "\"format\":\"pdf\"")
+        .replace(
+            "\"kind\":\"EPUB\",\"mimeType\":\"application/epub+zip\"",
+            "\"kind\":\"PDF\",\"mimeType\":\"application/pdf\"",
+        )
+        .replace(
+            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\"}",
+            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\",\"pageCount\":1}",
+        )
+        .replace("\"units\":[]", "\"units\":[$units]")
+        .replace(REFLOWABLE_PUBLICATION, "\"publication\":null")
+
     private fun request() = ReaderBootstrapRequest(profile(), ReaderSyncNamespace("server-1", "user-1", 3), "volume-1")
 
     private fun profile(): ServerProfile {
@@ -173,15 +268,21 @@ class KtorReaderBootstrapGatewayTest {
     }
 
     private companion object {
+        const val EPUB_UNIT = """{"id":"pubnav-1","index":0,"title":"Chapter 1","href":"EPUB/chapter.xhtml#chapter-title","fileId":"file-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"exactNavigation":true,"hrefBase":"publication-root","level":1,"navigationKey":"EPUB/chapter.xhtml#chapter-title","path":[0],"readingOrderPosition":1}}"""
+        const val PDF_UNIT = """{"id":"pdf-page-1","index":1,"title":"Page 1","href":"/private/library/book.pdf","fileId":"file-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageNumber":1,"sourceFileName":"book.pdf"}}"""
+        const val COMIC_UNIT = """{"id":"comic-page-1","index":1,"title":"Page 1","href":"images/0001.jpg","fileId":"file-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageIndex":0}}"""
+        const val COMIC_MANIFEST = """{"schemaVersion":1,"kind":"comic","volumeId":"volume-1","sourceFormat":"cbz","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/jpeg","width":1200,"height":1800,"sizeBytes":1234}]}"""
+        const val REFLOWABLE_PUBLICATION = """"publication":{"kind":"reflowable","manifestUrl":"/api/reader/v4/volumes/volume-1/publication/manifest.json","positionsUrl":"/api/reader/v4/volumes/volume-1/publication/positions.json","renderArtifact":{"schemaVersion":1,"url":"/api/reader/v4/volumes/volume-1/publication/render.epub","mimeType":"application/epub+zip","sizeBytes":2345}}"""
+        const val COMIC_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/volumes/volume-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/volumes/volume-1/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":1234}}"""
         val VALID_BOOTSTRAP = """
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
-              "publicationFingerprint":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"contentFingerprint":"sha256:44645987ae2cd242d360a564e584a5c88fa0298b50f9a5282c89d87b5ba52bad","book":{"id":"work-1","title":"Book"},
+              "book":{"id":"work-1","title":"Book"},
               "mediaVersion":{"id":"media-1","workId":"work-1","mediaKind":"EBOOK","completed":true},
               "volume":{"id":"volume-1","title":"Volume","format":"epub"},"availableVolumes":[],
-              "files":[{"id":"file-1","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","contentHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sortOrder":0}],
-              "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},"publication":{"manifestUrl":"/api/reader/v4/volumes/volume-1/publication/manifest.json","positionsUrl":"/api/reader/v4/volumes/volume-1/publication/positions.json","renderArtifact":{"schemaVersion":1,"url":"/api/reader/v4/volumes/volume-1/publication/render.epub","mimeType":"application/epub+zip","sizeBytes":2345,"contentHash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
-              "progressSnapshot":{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":{"kind":"reflowable","publication":{"originalFileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
+              "files":[{"id":"file-1","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","sortOrder":0}],
+              "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},$REFLOWABLE_PUBLICATION,
+              "progressSnapshot":{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":{"kind":"reflowable","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
             }
         """.trimIndent()
     }

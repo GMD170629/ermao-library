@@ -19,15 +19,14 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
-    PublicationFingerprint,
     PublicationLink,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationRevision,
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.source_files import (
-    publication_sha256,
     resolve_publication_source,
 )
 
@@ -352,11 +351,9 @@ def _snapshot(
     source_path_value: str,
     source_size: int,
     source_mtime_ns: int,
-    known_hash: str | None,
     fallback_title: str,
     fallback_author: str | None,
 ) -> _MobiSnapshot:
-    del source_size, source_mtime_ns
     source_path = Path(source_path_value)
     book = core.open(source_path)
     try:
@@ -431,19 +428,15 @@ def _snapshot(
             for entry in [toc_node(index)]
             if entry is not None
         )
-        original_hash = known_hash or publication_sha256(source_path)
-        original_hash = original_hash.removeprefix("sha256:")
-        if len(original_hash) != 64:
-            original_hash = publication_sha256(source_path)
-        canonical_original_hash = f"sha256:{original_hash.lower()}"
         publication = NormalizedPublication(
-            identifier=f"urn:shuku:mobi:{original_hash}",
+            identifier=f"urn:shuku:mobi:{source_size}:{source_mtime_ns}",
             title=core.copy_metadata(book, 1) or fallback_title,
             author=core.copy_metadata(book, 2) or fallback_author,
             language=core.copy_metadata(book, 4),
             reading_progression="rtl" if info.reading_direction == 2 else "ltr",
-            fingerprint=PublicationFingerprint(
-                original_file_hash=canonical_original_hash,
+            revision=PublicationRevision(
+                source_size_bytes=source_size,
+                source_mtime_ms=source_mtime_ns // 1_000_000,
                 parser=core.parser_identifier,
                 normalization=MOBI_NORMALIZATION_IDENTIFIER,
             ),
@@ -497,7 +490,6 @@ class MobiPublicationAdapter(PublicationAdapter):
             str(source_path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
-            source.full_hash,
             source.title,
             source.author,
         )

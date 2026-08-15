@@ -10,6 +10,7 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressSto
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderPdfFit
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -21,6 +22,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFragment
+import org.readium.r2.navigator.preferences.Fit
 import org.readium.r2.shared.ExperimentalReadiumApi
 
 @OptIn(ExperimentalReadiumApi::class)
@@ -41,7 +43,6 @@ class ReaderPdfInstrumentedTest {
                 displayTitle = "Reading notes",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Pdf,
-                publicationFingerprint = null,
                 volumeId = sourceId,
             )
         }
@@ -54,13 +55,25 @@ class ReaderPdfInstrumentedTest {
     }
 
     @Test
-    fun opensPersistsRecreatesAndRecapturesCanonicalPdfPage() {
-        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source, pageCount = 1)).use { scenario ->
+    fun parserPageCountWinsWhenServerMetadataDisagrees() {
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source, pageCount = 99)).use { scenario ->
             waitUntil(scenario, "PDF navigator and canonical first page") { activity ->
                 activity.pdfNavigatorOrNull()?.view != null &&
                     (activity.controllerForTesting?.currentLocation?.value as? PdfReaderLocation)?.let { location ->
                         location.pageIndex == 0 && location.pageProgression == 0.0
                     } == true
+            }
+
+            scenario.onActivity { activity ->
+                val controller = checkNotNull(activity.controllerForTesting)
+                controller.updatePreferences(
+                    controller.preferences.value.copy(
+                        pdf = controller.preferences.value.pdf.copy(fit = ReaderPdfFit.Width),
+                    ),
+                )
+            }
+            waitUntil(scenario, "PDF width fit preference") { activity ->
+                activity.pdfNavigatorOrNull()?.settings?.value?.fit == Fit.WIDTH
             }
 
             runBlocking { controller(scenario).flush() }
@@ -69,7 +82,6 @@ class ReaderPdfInstrumentedTest {
             assertNotNull(persistedLocation)
             assertEquals(0, persistedLocation?.pageIndex)
             assertEquals(0.0, persistedLocation?.pageProgression ?: -1.0, 0.0)
-            assertEquals(source.contentFingerprint, persistedLocation?.contentFingerprint)
 
             scenario.moveToState(Lifecycle.State.CREATED)
             scenario.recreate()
@@ -78,17 +90,15 @@ class ReaderPdfInstrumentedTest {
                 (activity.controllerForTesting?.currentLocation?.value as? PdfReaderLocation)?.let { recaptured ->
                     recaptured.pageIndex == persistedLocation?.pageIndex &&
                         recaptured.pageProgression == 0.0 &&
-                        recaptured.contentFingerprint == persistedLocation.contentFingerprint &&
                         activity.controllerForTesting?.restoreWarning?.value == null
                 } == true
             }
         }
 
-        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source, pageCount = 1)).use { reopened ->
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { reopened ->
             waitUntil(reopened, "new PDF session exact restoration") { activity ->
                 (activity.controllerForTesting?.currentLocation?.value as? PdfReaderLocation)?.let { restored ->
-                    restored.pageIndex == 0 && restored.pageProgression == 0.0 &&
-                        restored.contentFingerprint == source.contentFingerprint
+                    restored.pageIndex == 0 && restored.pageProgression == 0.0
                 } == true
             }
         }

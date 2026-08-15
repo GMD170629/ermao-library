@@ -1,6 +1,8 @@
 import {
+  PDF_RANGE_CHUNK_BYTES,
   quantizePageProgression,
   type PdfLocation,
+  type PdfReaderErrorCode,
   type ReaderAdapter,
   type ReaderAdapterOpenContext,
   type ReaderAdapterOperationContext,
@@ -20,6 +22,7 @@ import type {
 import { withBasePath } from '../../../../lib/base-path';
 import { normalizeLocale } from '../../../../i18n/config';
 import { translateMessage } from '../../../../i18n/messages';
+import { emitReaderDebug } from '../../../../lib/reader/debug';
 import { readerThemeSurfaces } from '../../reader-theme';
 import { ReaderAdapterBase, StaleReaderOperationError, errorMessage, isAbortError } from './adapter-base';
 import { computePdfRenderBudget, pdfPageScale } from './pdf-render-budget';
@@ -29,8 +32,21 @@ import {
   continuousItemAtReadingLine,
   restoreContinuousAnchor
 } from './continuous-layout';
+import {
+  PdfRangeByteSource,
+  PdfRangeError,
+  createPdfJsRangeTransport,
+  type PdfRangeAccess
+} from './pdf-range-transport';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+
+class PdfAdapterFailure extends Error {
+  constructor(readonly code: PdfReaderErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PdfAdapterFailure';
+  }
+}
 
 type RenderedPdfPage = {
   page: PDFPageProxy;
@@ -58,6 +74,7 @@ export type PdfViewModel = {
 
 export type PdfAdapterOptions = {
   container: HTMLElement;
+  rangeAccess: PdfRangeAccess;
   fetch?: typeof globalThis.fetch;
   loadPdfJs?: () => Promise<PdfJsModule>;
   onViewModel?: (model: PdfViewModel) => void;
@@ -66,35 +83,6 @@ export type PdfAdapterOptions = {
 function pagedPdfPreferences(preferences: ReaderPreferences): ReaderPreferences {
   if (preferences.pdf.flow === 'paged') return preferences;
   return { ...preferences, pdf: { ...preferences.pdf, flow: 'paged' } };
-}
-
-async function assertPdfHeader(url: string, fetcher: typeof globalThis.fetch, signal: AbortSignal) {
-  const response = await fetcher(url, {
-    signal,
-    cache: 'no-store',
-    headers: { Range: 'bytes=0-1023' }
-  });
-  if (!response.ok) throw new Error(`PDF 文件读取失败 (${response.status})`);
-  const reader = response.body?.getReader();
-  const bytes: number[] = [];
-  if (reader) {
-    try {
-      while (bytes.length < 1024) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        for (const byte of chunk.value) {
-          bytes.push(byte);
-          if (bytes.length >= 1024) break;
-        }
-      }
-    } finally {
-      await reader.cancel().catch(() => undefined);
-    }
-  } else {
-    bytes.push(...new Uint8Array(await response.arrayBuffer()).slice(0, 1024));
-  }
-  const prefix = String.fromCharCode(...bytes);
-  if (!prefix.includes('%PDF-')) throw new Error('PDF 文件格式无效或已经损坏');
 }
 
 function clampPage(page: number, pageCount: number) {
@@ -128,6 +116,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private readonly container: HTMLElement;
   private readonly fetcher: typeof globalThis.fetch;
   private readonly loadPdfJs: () => Promise<PdfJsModule>;
+  private readonly rangeAccess: PdfRangeAccess;
+  private rangeSource: PdfRangeByteSource | null = null;
+  private rangeFailure: PdfRangeError | null = null;
   private readonly viewListeners = new Set<(model: PdfViewModel) => void>();
   private pdfjs: PdfJsModule | null = null;
   private loadingTask: PDFDocumentLoadingTask | null = null;
@@ -184,6 +175,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   constructor(options: PdfAdapterOptions) {
     super();
     this.container = options.container;
+    this.rangeAccess = options.rangeAccess;
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.loadPdfJs = options.loadPdfJs ?? (() => import('pdfjs-dist/legacy/build/pdf.mjs'));
     if (options.onViewModel) this.viewListeners.add(options.onViewModel);
@@ -221,10 +213,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     const generation = this.beginSession(context.sessionId, context.operation);
     this.openContext = context;
     this.preferences = pagedPdfPreferences(context.preferences);
-    this.pageNumber = context.initialLocation?.kind === 'pdf' ? Math.max(1, context.initialLocation.pageNumber) : 1;
-    this.pageProgression = context.initialLocation?.kind === 'pdf'
-      ? quantizePageProgression(context.initialLocation.pageProgression ?? 0)
-      : 0;
+    this.pageNumber = context.initialLocation?.kind === 'pdf' ? Math.max(1, context.initialLocation.pageIndex + 1) : 1;
+    // Reader v4 phase 1 persists the canonical top-of-page anchor on every platform.
+    this.pageProgression = 0;
     this.status = 'loading';
     this.error = undefined;
     this.container.dataset.readerEngine = 'pdf-v3';
@@ -233,19 +224,26 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.emit({ type: 'phase-changed', phase: 'loading-content' }, context.operation);
 
     try {
-      const [, pdfjs] = await Promise.all([
-        assertPdfHeader(context.source.contentUrl, this.fetcher, context.signal),
-        this.loadPdfJs()
-      ]);
+      const pdfjs = await this.loadPdfJs();
       this.assertActive(generation, context.signal);
       this.pdfjs = pdfjs;
       pdfjs.GlobalWorkerOptions.workerSrc = withBasePath('/vendor/pdfjs/pdf.worker.legacy.min.mjs?v=6.1.200');
+      const rangeSource = new PdfRangeByteSource(this.rangeAccess, this.fetcher);
+      this.rangeSource = rangeSource;
+      const initialData = await rangeSource.prepare(context.signal);
+      this.assertActive(generation, context.signal);
+      const range = createPdfJsRangeTransport(pdfjs, rangeSource, initialData, (error) => {
+        this.rangeFailure = error;
+        void this.loadingTask?.destroy();
+      });
       const loadingTask = pdfjs.getDocument({
-        url: context.source.contentUrl,
+        range,
+        rangeChunkSize: PDF_RANGE_CHUNK_BYTES,
         disableRange: false,
-        disableStream: false,
-        disableAutoFetch: false,
+        disableStream: true,
+        disableAutoFetch: true,
         useWorkerFetch: true,
+        wasmUrl: withBasePath('/vendor/pdfjs/wasm/'),
         stopAtErrors: true,
         // The reader never evaluates PDF actions or XFA content. Links and
         // annotations are deliberately not rendered below either, leaving the
@@ -285,14 +283,15 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.emit({ type: 'ready', capabilities: this.getCapabilities(), location: this.location() }, context.operation);
     } catch (reason) {
       if (isAbortError(reason) || reason instanceof StaleReaderOperationError) return;
+      const effectiveReason = this.rangeFailure ?? reason;
       this.status = 'error';
-      this.error = this.pdfErrorMessage(reason);
+      this.error = this.pdfErrorMessage(effectiveReason);
       this.emitView();
       this.emit({
         type: 'error',
-        error: { code: this.pdfErrorCode(reason), message: this.error, recoverable: true }
+        error: { code: this.pdfErrorCode(effectiveReason), message: this.error, recoverable: true }
       }, context.operation);
-      throw reason;
+      throw effectiveReason;
     }
   }
 
@@ -364,8 +363,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       else if (command.type === 'go-to-index') target = command.index;
       else if (command.type === 'go-to-location') {
         if (command.location.kind !== 'pdf') return this.failOperation(context, 'location-kind-mismatch');
-        target = command.location.pageNumber;
-        targetProgression = quantizePageProgression(command.location.pageProgression ?? 0);
+        target = command.location.pageIndex + 1;
+        targetProgression = 0;
       } else if (command.type === 'retry') {
         this.continuousFailures.delete(this.pageNumber);
         this.releasePage(this.pageNumber);
@@ -431,6 +430,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
 
   async dispose() {
     if (!this.markDisposed()) return;
+    const metrics = this.rangeSource?.metrics();
+    if (metrics) emitReaderDebug('info', 'reader_pdf_range_session', { ...metrics });
     await this.cleanupEngine();
     this.container.removeEventListener('scroll', this.handleContinuousScroll);
     this.viewListeners.clear();
@@ -637,7 +638,13 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     const pdfjs = this.pdfjs;
     const preferences = this.preferences;
     if (!document || !pdfjs || !preferences) throw new Error('PDF is not ready');
-    const page = await document.getPage(pageNumber);
+    let page: PDFPageProxy;
+    try {
+      page = await document.getPage(pageNumber);
+    } catch (cause) {
+      if (cause instanceof PdfRangeError) throw cause;
+      throw new PdfAdapterFailure('PDF_PAGE_LOAD_FAILED', 'PDF 页面加载失败', { cause });
+    }
     this.assertRenderActive(generation, epoch, signal);
     const baseViewport = page.getViewport({ scale: 1, rotation: preferences.pdf.rotation });
     const visibleContainerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
@@ -722,7 +729,13 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     } catch (reason) {
       this.pendingPages.delete(entry);
       this.releaseEntry(entry);
-      throw reason;
+      if (isAbortError(reason) || reason instanceof StaleReaderOperationError || this.isRenderingCancelled(reason)
+        || reason instanceof PdfRangeError || reason instanceof PdfAdapterFailure) throw reason;
+      throw new PdfAdapterFailure(
+        reason instanceof RangeError ? 'OUT_OF_MEMORY_RISK' : 'PDF_RENDER_FAILED',
+        reason instanceof RangeError ? 'PDF 页面尺寸过大，无法安全渲染' : 'PDF 页面渲染失败',
+        { cause: reason }
+      );
     }
   }
 
@@ -819,7 +832,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   }
 
   private location(): PdfLocation {
-    return { kind: 'pdf', pageNumber: this.pageNumber, pageProgression: this.pageProgression };
+    return { kind: 'pdf', pageIndex: this.pageNumber - 1, pageProgression: this.pageProgression };
   }
 
   private neighborPage() {
@@ -874,18 +887,24 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   }
 
   private pdfErrorCode(reason: unknown) {
+    if (reason instanceof PdfRangeError) return reason.code;
+    if (reason instanceof PdfAdapterFailure) return reason.code;
     const pdfjs = this.pdfjs;
     if (pdfjs && reason instanceof pdfjs.InvalidPDFException) return 'PDF_INVALID';
-    if (pdfjs && reason instanceof pdfjs.PasswordException) return 'PDF_PASSWORD_CANCELLED';
-    if (pdfjs && reason instanceof pdfjs.ResponseException) return 'PDF_NETWORK_FAILED';
-    return 'PDF_OPEN_FAILED';
+    if (pdfjs && reason instanceof pdfjs.PasswordException) return 'PDF_ENCRYPTED';
+    if (pdfjs && reason instanceof pdfjs.ResponseException) return 'NETWORK_UNAVAILABLE';
+    return 'PDF_INVALID';
   }
 
   private pdfErrorMessage(reason: unknown) {
     const code = this.pdfErrorCode(reason);
     if (code === 'PDF_INVALID') return 'PDF 文件已损坏或格式无效';
-    if (code === 'PDF_PASSWORD_CANCELLED') return '未提供 PDF 密码';
-    if (code === 'PDF_NETWORK_FAILED') return 'PDF 网络请求失败';
+    if (code === 'PDF_ENCRYPTED') return '加密或密码保护的 PDF 暂不支持阅读';
+    if (code === 'NETWORK_UNAVAILABLE') return 'PDF 网络请求失败';
+    if (code === 'PDF_PAGE_LOAD_FAILED') return 'PDF 页面加载失败';
+    if (code === 'PDF_RENDER_FAILED') return 'PDF 页面渲染失败';
+    if (code === 'OUT_OF_MEMORY_RISK') return 'PDF 页面尺寸过大，无法安全渲染';
+    if (reason instanceof PdfRangeError) return reason.message;
     return errorMessage(reason, 'PDF 加载失败');
   }
 
@@ -945,6 +964,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.preferences = null;
     this.pageNumber = 1;
     this.pageProgression = 0;
+    this.rangeSource?.abort();
+    this.rangeSource = null;
+    this.rangeFailure = null;
     this.pageCount = 0;
     this.cropBoxes.clear();
     this.continuousSlots.clear();

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "status": "candidate",
+  "pdfiumCommit": "875172eae557a308d0c5b2be43822814c8a885bb",
+  "wrapperAbiVersion": 1,
+  "commonGnArgs": {
+    "is_debug": false,
+    "is_component_build": false,
+    "pdf_enable_v8": false,
+    "pdf_enable_xfa": false,
+    "pdf_use_skia": false,
+    "pdf_enable_fontations": false,
+    "pdf_is_standalone": false,
+    "use_remoteexec": false
+  },
+  "androidAbis": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86_64"
+  ],
+  "iosArchitectures": [
+    "ios-arm64"
+  ],
+  "artifacts": [],
+  "licenses": [
+    "PDFium BSD-3-Clause",
+    "PDFium third_party license bundle"
+  ],
+  "freezeRequires": [
+    "Android AAR contains all three declared ABIs",
+    "iOS XCFramework contains iphoneos arm64 only",
+    "both wrappers report the exact pdfiumCommit",
+    "shared PDF corpus and Range acceptance pass on Android and a physical iOS device",
+    "artifact SHA-256 values and license paths are populated"
+  ]
+}

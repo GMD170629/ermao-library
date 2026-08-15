@@ -3,7 +3,7 @@ import SwiftUI
 struct ReaderDownloadTransitionView: View {
     private enum Phase {
         case creating
-        case downloading(recordID: String, fingerprint: String)
+        case downloading(recordID: String)
         case reader(IosReaderLaunchRequest)
         case unsupported(ReaderHandoff)
         case failure(String)
@@ -90,7 +90,7 @@ struct ReaderDownloadTransitionView: View {
                     .appTextStyle(.body)
             }
             .accessibilityElement(children: .combine)
-        case .downloading(let recordID, _):
+        case .downloading(let recordID):
             if let record = store.records.first(where: { $0.id == recordID }) {
                 VStack(spacing: .space1) {
                     if let progress = record.progress {
@@ -161,7 +161,7 @@ struct ReaderDownloadTransitionView: View {
         ) { outcome in
             accessTask = nil
             guard !cancelled else {
-                if case .needsDownload(let recordID, _) = outcome,
+                if case .needsDownload(let recordID) = outcome,
                    let record = store.records.first(where: { $0.id == recordID }) {
                     store.pause(record)
                 }
@@ -169,8 +169,8 @@ struct ReaderDownloadTransitionView: View {
             }
             switch outcome {
             case .open(let handoff): enterReader(handoff)
-            case .needsDownload(let recordID, let fingerprint):
-                phase = .downloading(recordID: recordID, fingerprint: fingerprint)
+            case .needsDownload(let recordID):
+                phase = .downloading(recordID: recordID)
                 evaluateDownloadState()
             case .unavailable(let code):
                 phase = .failure(code)
@@ -179,12 +179,11 @@ struct ReaderDownloadTransitionView: View {
     }
 
     private func evaluateDownloadState() {
-        guard case .downloading(let recordID, let fingerprint) = phase,
+        guard case .downloading(let recordID) = phase,
               let record = store.records.first(where: { $0.id == recordID }) else { return }
         if ManagedReaderAccessPolicy.completedRecord(
             records: store.records,
-            recordID: recordID,
-            contentFingerprint: fingerprint
+            recordID: recordID
         ) != nil {
             enterReader(ReaderHandoff(
                 workID: record.workID,
@@ -203,8 +202,7 @@ struct ReaderDownloadTransitionView: View {
     private func enterReader(_ handoff: ReaderHandoff) {
         guard !didEnterReader else { return }
         didEnterReader = true
-        if handoff.readerType == .reflowable,
-           ManagedReaderAccessPolicy.supportsNativeReader(
+        if ManagedReaderAccessPolicy.supportsNativeReader(
                readerType: handoff.readerType,
                format: handoff.format
            ) {
@@ -234,7 +232,7 @@ struct ReaderDownloadTransitionView: View {
     private func cancelAndReturn() {
         cancelled = true
         accessTask?.cancel()
-        if case .downloading(let recordID, _) = phase,
+        if case .downloading(let recordID) = phase,
            let record = store.records.first(where: { $0.id == recordID }) {
             store.pause(record)
         }

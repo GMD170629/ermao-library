@@ -2,6 +2,7 @@ export * from './adapter';
 export * from './exact-locator';
 export * from './format-capabilities';
 export * from './preferences';
+export * from './pdf-range';
 export * from './publication-location';
 export * from './publication-navigation';
 export * from './session';

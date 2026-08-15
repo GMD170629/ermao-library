@@ -1,6 +1,5 @@
 package com.ermao.library.features.reader.infrastructure
 
-import com.ermao.library.shared.modules.reader.ContentFingerprint
 import com.ermao.library.shared.modules.reader.EngineLocator
 import com.ermao.library.shared.modules.reader.EngineLocatorPayload
 import com.ermao.library.shared.modules.reader.ReaderEngine
@@ -15,7 +14,7 @@ import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 
 internal class ReadiumLocatorMapper {
-    fun toDomain(locator: Locator, fingerprint: ContentFingerprint): ReflowReaderLocation =
+    fun toDomain(locator: Locator): ReflowReaderLocation =
         ReflowReaderLocation(
             resourceKey = locator.href.toString(),
             progression = locator.locations.progression ?: 0.0,
@@ -38,18 +37,16 @@ internal class ReadiumLocatorMapper {
                 version = READIUM_VERSION,
                 payload = EngineLocatorPayload.parse(boundedPayload(locator).toString()),
             ),
-            contentFingerprint = fingerprint,
         )
 
-    fun exactEnvelope(locator: Locator, fingerprint: ContentFingerprint): ReadiumLocatorEnvelope? =
-        ReadiumLocatorEnvelope.from(toDomain(locator, fingerprint))
+    fun exactEnvelope(locator: Locator): ReadiumLocatorEnvelope? =
+        ReadiumLocatorEnvelope.from(toDomain(locator))
 
     fun compareExactBlock(
         expected: ReadiumLocatorEnvelope,
         recaptured: Locator,
-        fingerprint: ContentFingerprint,
     ): ExactBlockMatch {
-        val actual = exactEnvelope(recaptured, fingerprint) ?: return ExactBlockMatch.AnchorMismatch
+        val actual = exactEnvelope(recaptured) ?: return ExactBlockMatch.AnchorMismatch
         return com.ermao.library.shared.modules.reader.domain.compareExactProgressReadiumBlocks(expected, actual)
     }
 

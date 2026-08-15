@@ -10,14 +10,14 @@ import kotlin.test.assertTrue
 
 class ReaderDomainTest {
     @Test
-    fun exactComparatorRequiresFingerprintHrefAndBlockAnchor() {
+    fun exactComparatorRequiresHrefAndBlockAnchor() {
         val expected = envelope("#chapter-title", "same")
 
         assertEquals(ExactBlockMatch.Exact, compare(expected, envelope("#chapter-title", "same")))
         assertEquals(ExactBlockMatch.AnchorMismatch, compare(expected, envelope("#other", "other")))
         assertEquals(
-            ExactBlockMatch.FingerprintMismatch,
-            compare(expected, envelope("#chapter-title", "same", hash = "b".repeat(64))),
+            ExactBlockMatch.ResourceMismatch,
+            compare(expected, envelope("#chapter-title", "same", href = "other.xhtml")),
         )
     }
 
@@ -44,7 +44,7 @@ class ReaderDomainTest {
     }
 
     @Test
-    fun onlineStartupAlwaysUsesFreshServerExact() {
+    fun startupUsesTheNewestValidPositionAndKeepsTheOtherAsANonBlockingAlternative() {
         val local = progress(updatedAt = 3_000)
         val remote = ReaderProgressSnapshotV4(
             "volume-1", "ios-client", 9, envelope("#remote", "remote"), 80.0, 4_000, 2_000,
@@ -52,8 +52,8 @@ class ReaderDomainTest {
 
         val decision = decideReaderResume(local, remote, source())
 
-        assertEquals(ReaderResumeSource.Server, decision.selected?.source)
-        assertNull(decision.alternative)
+        assertEquals(ReaderResumeSource.Local, decision.selected?.source)
+        assertEquals(ReaderResumeSource.Server, decision.alternative?.source)
     }
 
     @Test
@@ -83,7 +83,7 @@ class ReaderDomainTest {
     }
 
     @Test
-    fun pendingAgainstNewerServerRequiresStartupChoice() {
+    fun pendingAgainstNewerServerResolvesWithoutAStartupChoice() {
         val local = progress(updatedAt = 3_000)
         val pending = createReaderProgressUpload(
             ReaderProgressSyncTarget(ReaderSyncNamespace("server", "user", 1), "work-1", "volume-1", ReaderFormat.Epub),
@@ -102,7 +102,8 @@ class ReaderDomainTest {
             source(),
         )
 
-        assertIs<StartupDecision.RequiresChoice>(decision)
+        val useServer = assertIs<StartupDecision.UseServer>(decision)
+        assertTrue(useServer.discardPending)
     }
 
     @Test
@@ -111,7 +112,7 @@ class ReaderDomainTest {
             "volume-1",
             "ios-client",
             9,
-            envelope("#remote", "remote", normalization = "shuku-render-html5-v2"),
+            envelope("#remote", "remote"),
             80.0,
             2_000,
         )
@@ -120,17 +121,17 @@ class ReaderDomainTest {
     }
 
     @Test
-    fun originalFileChangeRejectsExactRestoreEvenForTheSameVolume() {
+    fun originalFileChangeStillOffersTheSemanticRestoreForTheSameVolume() {
         val mismatch = ReaderProgressSnapshotV4(
             "volume-1",
             "ios-client",
             9,
-            envelope("#remote", "remote", hash = "b".repeat(64)),
+            envelope("#remote", "remote"),
             80.0,
             2_000,
         )
 
-        assertTrue(planReaderProgressRestore(null, mismatch, source()).candidates.isEmpty())
+        assertEquals(1, planReaderProgressRestore(null, mismatch, source()).candidates.size)
     }
 
     @Test
@@ -141,7 +142,7 @@ class ReaderDomainTest {
         assertFailsWith<IllegalArgumentException> {
             ReaderProgress(
                 "volume-1",
-                ReflowReaderLocation("part00000.html", 0.5, contentFingerprint = fingerprint()),
+                ReflowReaderLocation("part00000.html", 0.5),
                 1,
                 "client",
             )
@@ -153,15 +154,12 @@ class ReaderDomainTest {
         ReflowReaderLocation(
             resourceKey = "part00000.html",
             engineLocator = envelope("#chapter-title", "same").asEngineLocator(),
-            contentFingerprint = fingerprint(),
         ),
         updatedAt,
         "client",
     )
 
-    private fun source() = LocalReaderSource("volume-1", "Book", ReaderFormat.Epub, fingerprint())
-
-    private fun fingerprint() = ContentFingerprint("sha256:" + "a".repeat(64), PARSER, NORMALIZATION)
+    private fun source() = LocalReaderSource("volume-1", "Book", ReaderFormat.Epub)
 
     private fun compare(expected: ReadiumLocatorEnvelope, actual: ReadiumLocatorEnvelope) =
         com.ermao.library.shared.modules.reader.domain.compareExactReadiumBlocks(expected, actual)
@@ -170,18 +168,12 @@ class ReaderDomainTest {
         selector: String?,
         highlight: String,
         before: String? = null,
-        hash: String = "a".repeat(64),
-        normalization: String = NORMALIZATION,
+        href: String = "part00000.html",
     ): ReadiumLocatorEnvelope {
         val selectorJson = selector?.let { "\"cssSelector\":\"$it\"," } ?: ""
         val beforeJson = before?.let { "\"before\":\"$it\"," } ?: ""
         return ReadiumLocatorEnvelope.parse(
-            """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"$hash","parser":"$PARSER","normalization":"$normalization"},"payload":{"href":"part00000.html","type":"application/xhtml+xml","locations":{$selectorJson"progression":0.42},"text":{$beforeJson"highlight":"$highlight"}}}""",
+            """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","payload":{"href":"$href","type":"application/xhtml+xml","locations":{$selectorJson"progression":0.42},"text":{$beforeJson"highlight":"$highlight"}}}""",
         )
-    }
-
-    private companion object {
-        const val PARSER = "epub-package:1"
-        const val NORMALIZATION = "shuku-epub-locator-dom-v2"
     }
 }

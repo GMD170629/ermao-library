@@ -1,7 +1,9 @@
 package com.ermao.library.features.home.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,12 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -30,17 +27,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
-import com.ermao.library.features.content.ui.CoverSize
+import com.ermao.library.features.content.model.ContentFreshness
+import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.WorkCard
-import com.ermao.library.features.content.ui.ContentAreaMessage
-import com.ermao.library.features.content.ui.ContentStatusBanner
+import com.ermao.library.features.content.ui.CoverRole
+import com.ermao.library.features.content.ui.ReadingProgress
 import com.ermao.library.features.content.ui.WorkCover
+import com.ermao.library.features.content.ui.WorkGridItem
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
+import com.ermao.library.ui.components.WarmPageContentMessage
+import com.ermao.library.ui.components.WarmPageContentMessageKind
+import com.ermao.library.ui.components.WarmPagePrimaryAction
+import com.ermao.library.ui.components.WarmPageSectionHeader
+import com.ermao.library.ui.components.WarmPageStatusBanner
+import com.ermao.library.ui.components.WarmPageStatusBannerKind
 import com.ermao.library.ui.theme.WarmPageThemeValues
+
+private val ContinueCoverWidth = 104.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,7 +68,7 @@ fun HomeScreen(
         containerColor = theme.colors.canvas,
         topBar = {
             LargeTopAppBar(
-                title = { Text(stringResource(R.string.tab_home), style = theme.typography.display) },
+                title = { Text(stringResource(R.string.tab_home)) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = theme.colors.canvas,
                     scrolledContainerColor = theme.colors.surface,
@@ -69,13 +77,14 @@ fun HomeScreen(
         },
     ) { padding ->
         when {
-            state.isLoading -> ContentAreaMessage(
+            state.isLoading -> WarmPageContentMessage(
+                kind = WarmPageContentMessageKind.Loading,
                 title = stringResource(R.string.content_loading_title),
                 message = stringResource(R.string.home_loading_message),
-                loading = true,
                 modifier = Modifier.padding(padding),
             )
-            state.content == null -> ContentAreaMessage(
+            state.content == null -> WarmPageContentMessage(
+                kind = WarmPageContentMessageKind.Error,
                 title = stringResource(R.string.content_error_title),
                 message = stringResource(R.string.content_error_message),
                 actionLabel = stringResource(R.string.retry_action),
@@ -89,84 +98,186 @@ fun HomeScreen(
                     onRefresh = onRefresh,
                     modifier = Modifier.fillMaxSize().padding(padding),
                 ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = theme.spacing.three,
-                        end = theme.spacing.three,
-                        bottom = theme.spacing.six,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(theme.spacing.four),
-                ) {
-                    if (state.freshness != com.ermao.library.features.content.model.ContentFreshness.Fresh) {
-                        item { ContentStatusBanner(state.freshness) }
-                    }
-                    content.continueReading?.let { item ->
-                        item {
-                            Surface(
-                                color = theme.colors.surfaceRaised,
-                                shape = RoundedCornerShape(theme.radii.task),
-                                modifier = Modifier.fillMaxWidth().testTag("home-continue"),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(theme.spacing.three),
-                                    horizontalArrangement = Arrangement.spacedBy(theme.spacing.three),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    WorkCover(
-                                        item.work,
-                                        repository,
-                                        context,
-                                        CoverSize.Medium,
-                                        Modifier.width(92.dp),
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            start = theme.spacing.two,
+                            end = theme.spacing.two,
+                            bottom = theme.spacing.six,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
+                    ) {
+                        if (state.freshness != ContentFreshness.Fresh) {
+                            item {
+                                WarmPageStatusBanner(
+                                    kind = if (state.freshness == ContentFreshness.Cached) {
+                                        WarmPageStatusBannerKind.Offline
+                                    } else {
+                                        WarmPageStatusBannerKind.Stale
+                                    },
+                                    message = stringResource(
+                                        if (state.freshness == ContentFreshness.Cached) {
+                                            R.string.content_cached_banner
+                                        } else {
+                                            R.string.content_stale_banner
+                                        },
+                                    ),
+                                )
+                            }
+                        }
+                        content.continueReading?.let { continueReading ->
+                            item {
+                                ContinueReadingTask(
+                                    item = continueReading,
+                                    repository = repository,
+                                    context = context,
+                                    onOpenWork = onOpenWork,
+                                )
+                            }
+                        }
+                        if (
+                            content.continueReading == null &&
+                            content.recentReading.isEmpty() &&
+                            content.recentAdded.isEmpty()
+                        ) {
+                            item {
+                                WarmPageContentMessage(
+                                    kind = WarmPageContentMessageKind.Empty,
+                                    title = stringResource(R.string.home_empty_title),
+                                    message = stringResource(R.string.home_empty_message),
+                                    actionLabel = stringResource(R.string.home_browse_library),
+                                    onAction = onOpenLibrary,
+                                )
+                            }
+                        } else {
+                            if (content.recentReading.isNotEmpty()) {
+                                item {
+                                    HomeShelf(
+                                        title = stringResource(R.string.home_recent_reading),
+                                        works = content.recentReading,
+                                        repository = repository,
+                                        context = context,
+                                        onOpenWork = onOpenWork,
                                     )
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-                                        Text(stringResource(R.string.home_continue_title), style = theme.typography.label, color = theme.colors.textSecondary)
-                                        Text(item.work.title, style = theme.typography.sectionTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                        item.volumeTitle?.let { Text(it, style = theme.typography.callout, color = theme.colors.textSecondary) }
-                                        item.work.progressPercent?.let { Text(stringResource(R.string.progress_percent, it), style = theme.typography.caption, color = theme.colors.textSecondary) }
-                                        Button(
-                                            onClick = { onOpenWork(item.work.id) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = theme.colors.actionAccent),
-                                            modifier = Modifier.fillMaxWidth().padding(top = theme.spacing.one),
-                                        ) {
-                                            Text(stringResource(R.string.home_view_detail_action))
-                                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, Modifier.padding(start = theme.spacing.one))
-                                        }
-                                    }
+                                }
+                            }
+                            if (content.recentAdded.isNotEmpty()) {
+                                item {
+                                    HomeShelf(
+                                        title = stringResource(R.string.home_recent_added),
+                                        works = content.recentAdded,
+                                        repository = repository,
+                                        context = context,
+                                        onOpenWork = onOpenWork,
+                                    )
                                 }
                             }
                         }
+                        state.errorCode?.let {
+                            item {
+                                WarmPageContentMessage(
+                                    kind = WarmPageContentMessageKind.Error,
+                                    title = stringResource(R.string.home_partial_error_title),
+                                    message = stringResource(R.string.home_partial_error_message),
+                                    actionLabel = stringResource(R.string.retry_action),
+                                    onAction = onRetry,
+                                )
+                            }
+                        }
                     }
-                    if (content.continueReading == null && content.recentReading.isEmpty() && content.recentAdded.isEmpty()) {
-                        item {
-                            ContentAreaMessage(
-                                title = stringResource(R.string.home_empty_title),
-                                message = stringResource(R.string.home_empty_message),
-                                actionLabel = stringResource(R.string.home_browse_library),
-                                onAction = onOpenLibrary,
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContinueReadingTask(
+    item: ContinueReadingCard,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    onOpenWork: (String) -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
+        WarmPageSectionHeader(title = stringResource(R.string.home_continue_title))
+        Surface(
+            color = theme.colors.surface,
+            shape = RoundedCornerShape(theme.radii.task),
+            border = BorderStroke(Dp.Hairline, theme.colors.divider),
+            modifier = Modifier.fillMaxWidth().testTag("home-continue"),
+        ) {
+            Column(
+                modifier = Modifier.padding(theme.spacing.oneAndHalf),
+                verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenWork(item.work.id) },
+                    horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    WorkCover(
+                        work = item.work,
+                        repository = repository,
+                        context = context,
+                        role = CoverRole.Compact,
+                        modifier = Modifier.width(ContinueCoverWidth),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+                    ) {
+                        Text(
+                            text = item.work.title,
+                            style = theme.typography.sectionTitle,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = item.work.author,
+                            style = theme.typography.callout,
+                            color = theme.colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        (item.positionLabel ?: item.volumeTitle)?.let { position ->
+                            Text(
+                                text = position,
+                                style = theme.typography.label,
+                                color = theme.colors.textSecondary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    } else {
-                        if (content.recentReading.isNotEmpty()) {
-                            item { HomeShelf(stringResource(R.string.home_recent_reading), content.recentReading, repository, context, onOpenWork) }
+                        item.work.progressPercent?.let { progress ->
+                            Text(
+                                text = stringResource(R.string.progress_percent, progress),
+                                style = theme.typography.caption,
+                                color = theme.colors.textSecondary,
+                            )
+                            ReadingProgress(
+                                progressPercent = progress,
+                                stateDescription = stringResource(R.string.progress_percent, progress),
+                            )
                         }
-                        if (content.recentAdded.isNotEmpty()) {
-                            item { HomeShelf(stringResource(R.string.home_recent_added), content.recentAdded, repository, context, onOpenWork) }
-                        }
-                    }
-                    state.errorCode?.let {
-                        item {
-                            ContentAreaMessage(
-                                title = stringResource(R.string.home_partial_error_title),
-                                message = stringResource(R.string.home_partial_error_message),
-                                actionLabel = stringResource(R.string.retry_action),
-                                onAction = onRetry,
+                        item.lastReadLabel?.let { lastRead ->
+                            Text(
+                                text = lastRead,
+                                style = theme.typography.caption,
+                                color = theme.colors.textTertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
                 }
-                }
+                WarmPagePrimaryAction(
+                    label = stringResource(R.string.home_view_detail_action),
+                    onClick = { onOpenWork(item.work.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -181,17 +292,20 @@ private fun HomeShelf(
     onOpenWork: (String) -> Unit,
 ) {
     val theme = WarmPageThemeValues
-    Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.two)) {
-        Text(title, style = theme.typography.sectionTitle)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(theme.spacing.two)) {
-            items(works, key = WorkCard::id) { work ->
-                Column(
-                    modifier = Modifier.width(104.dp).clickable { onOpenWork(work.id) },
-                    verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
-                ) {
-                    WorkCover(work, repository, context, CoverSize.Small, Modifier.fillMaxWidth())
-                    Text(work.title, style = theme.typography.callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(work.author, style = theme.typography.caption, color = theme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
+        WarmPageSectionHeader(title = title)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val itemWidth = (maxWidth - (theme.spacing.two * 2)) / 3
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(theme.spacing.two)) {
+                items(works, key = WorkCard::id) { work ->
+                    WorkGridItem(
+                        work = work,
+                        repository = repository,
+                        context = context,
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .clickable { onOpenWork(work.id) },
+                    )
                 }
             }
         }

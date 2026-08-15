@@ -69,7 +69,6 @@ data class PrimaryAction(val label: String, val href: String)
 data class LocalProgressScope(
     val userId: String,
     val volumeId: String,
-    val contentFingerprint: String,
 )
 
 data class ReadingUnitsPage(
@@ -114,6 +113,9 @@ data class ReadingUnitMetadata(
     val sourceFileName: String?,
     val hrefBase: String?,
     val recovered: Boolean?,
+    val originalName: String? = null,
+    val pageInVolume: Int? = null,
+    val pageInSection: Int? = null,
     val readingOrderPosition: Int? = null,
 )
 

@@ -23,9 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -39,7 +36,6 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material3.Button
@@ -48,7 +44,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ModalBottomSheet
@@ -93,14 +88,18 @@ import com.ermao.library.features.content.model.VolumeContent
 import com.ermao.library.features.content.model.WorkDetailContent
 import com.ermao.library.features.content.ui.ContentAreaMessage
 import com.ermao.library.features.content.ui.ContentCover
-import com.ermao.library.features.content.ui.CoverSize
+import com.ermao.library.features.content.ui.CoverProgress
+import com.ermao.library.features.content.ui.CoverRole
+import com.ermao.library.features.content.ui.ReadingProgress
 import com.ermao.library.features.content.ui.WorkCover
+import com.ermao.library.features.content.ui.responsiveCoverColumnCount
 import com.ermao.library.features.library.application.WorkDetailUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
-import com.ermao.library.features.downloads.model.isSupportedNativeReflowable
+import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -213,10 +212,14 @@ private fun WorkDetailBody(
         ?: selectedMedia?.volumes?.firstOrNull()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = theme.spacing.three, end = theme.spacing.three, bottom = theme.spacing.six),
+        contentPadding = PaddingValues(start = theme.spacing.two, end = theme.spacing.two, bottom = theme.spacing.six),
         verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
     ) {
-        item { IdentityHeader(content, repository, context, onOpenFacet) }
+        item {
+            Box(Modifier.testTag("work-identity")) {
+                IdentityHeader(content, repository, context, onOpenFacet)
+            }
+        }
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
@@ -231,23 +234,19 @@ private fun WorkDetailBody(
                         Icon(Icons.Outlined.BookmarkBorder, contentDescription = null)
                         Text(stringResource(R.string.work_action_add_shelf), modifier = Modifier.padding(start = theme.spacing.one))
                     }
-                Button(
+                WarmPagePrimaryAction(
+                    label = primaryActionLabel(state.selectedMediaKind),
                     onClick = { selectedVolume?.let(onOpenSelectedVolume) },
                     enabled = selectedVolume?.readable == true,
                     modifier = Modifier.weight(1f).height(56.dp).testTag("work-reader-action"),
-                ) {
-                    Icon(Icons.Outlined.PlayCircle, contentDescription = null)
-                    Text(primaryActionLabel(state.selectedMediaKind), modifier = Modifier.padding(start = theme.spacing.one))
-                }
+                )
                 }
                 val captionResource = if (selectedVolume == null) {
                     R.string.work_reader_next_phase_message
                 } else {
                     val volume = selectedVolume
                     when {
-                        volume.readerType.equals("reflowable", true) &&
-                            downloadRecordsByVolume[volume.id]?.isReadable != true -> R.string.work_reader_download_required
-                        !isSupportedNativeReflowable(volume.readerType, volume.format) ->
+                        !isSupportedNativeReaderEntry(volume.readerType, volume.format) ->
                             R.string.work_reader_renderer_pending
                         else -> null
                     }
@@ -291,7 +290,7 @@ private fun WorkDetailBody(
                     if (selectedMedia == null || selectedMedia.volumes.isEmpty()) {
                         item { Text(stringResource(R.string.work_no_readable_volumes), color = theme.colors.textSecondary) }
                     } else item {
-                        VolumeCoverRail(
+                        VolumeCoverGrid(
                             volumes = selectedMedia.volumes,
                             selectedVolumeId = selectedVolume?.id,
                             repository = repository,
@@ -324,7 +323,7 @@ private fun IdentityHeader(
             content.work,
             repository,
             context,
-            CoverSize.Large,
+            CoverRole.Hero,
             Modifier.width(112.dp),
         )
         Column(
@@ -346,7 +345,7 @@ private fun IdentityHeader(
                 }
             }
             content.seriesName?.let { series ->
-                FacetLink(series, content.seriesId != null, accent = true, underline = true) {
+                FacetLink(series, content.seriesId != null, accent = true) {
                     content.seriesId?.let { onOpenFacet(LibraryScope.Series, it) }
                 }
             }
@@ -361,7 +360,6 @@ private fun FacetLink(
     label: String,
     enabled: Boolean,
     accent: Boolean = false,
-    underline: Boolean = false,
     onClick: () -> Unit,
 ) {
     val theme = WarmPageThemeValues
@@ -371,9 +369,7 @@ private fun FacetLink(
     ) {
         Text(
             label,
-            style = theme.typography.body.copy(
-                textDecoration = if (underline) androidx.compose.ui.text.style.TextDecoration.Underline else null,
-            ),
+            style = theme.typography.body,
             color = if (accent) theme.colors.actionAccent else theme.colors.textSecondary,
         )
     }
@@ -400,7 +396,6 @@ private fun ReadingSummary(content: WorkDetailContent) {
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.work_reading_progress), style = theme.typography.callout, color = theme.colors.textSecondary)
-            Text("  $progress%", style = theme.typography.headline)
             Spacer(Modifier.weight(1f))
             content.readingUnits.firstOrNull { it.readingState == ChapterReadingState.Current }?.title?.let { title ->
                 Text(
@@ -414,11 +409,9 @@ private fun ReadingSummary(content: WorkDetailContent) {
                 )
             }
         }
-        LinearProgressIndicator(
-            progress = { progress / 100f },
-            modifier = Modifier.fillMaxWidth().height(3.dp),
-            color = theme.colors.brandAccent,
-            trackColor = theme.colors.divider,
+        ReadingProgress(
+            progressPercent = progress,
+            stateDescription = stringResource(R.string.work_volume_accessibility_progress, progress),
         )
     }
 }
@@ -427,31 +420,25 @@ private fun ReadingSummary(content: WorkDetailContent) {
 private fun DescriptionContent(content: WorkDetailContent) {
     val theme = WarmPageThemeValues
     var expanded by remember { mutableStateOf(false) }
-    Surface(
-        shape = RoundedCornerShape(theme.radii.task),
-        color = theme.colors.surface,
-        border = BorderStroke(1.dp, theme.colors.divider.copy(alpha = 0.75f)),
-        tonalElevation = 1.dp,
-        shadowElevation = 4.dp,
+    Column(
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
     ) {
-        Column(Modifier.padding(theme.spacing.three), verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
-            Text(stringResource(R.string.work_description_title), style = theme.typography.sectionTitle)
-            Text(
-                content.description.orEmpty(),
-                style = theme.typography.body,
-                maxLines = if (expanded) Int.MAX_VALUE else 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.align(Alignment.End)) {
-                Text(stringResource(if (expanded) R.string.work_collapse else R.string.work_expand))
-                Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
-            }
+        Text(stringResource(R.string.work_description_title), style = theme.typography.sectionTitle)
+        Text(
+            content.description.orEmpty(),
+            style = theme.typography.body,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.align(Alignment.End)) {
+            Text(stringResource(if (expanded) R.string.work_collapse else R.string.work_expand))
+            Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
         }
     }
 }
 
 @Composable
-private fun VolumeCoverRail(
+private fun VolumeCoverGrid(
     volumes: List<VolumeContent>,
     selectedVolumeId: String?,
     repository: ContentRepository,
@@ -464,26 +451,33 @@ private fun VolumeCoverRail(
 ) {
     val theme = WarmPageThemeValues
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val cardWidth = ((maxWidth - theme.spacing.three) / 2.5f).coerceAtLeast(112.dp)
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
-            contentPadding = PaddingValues(end = theme.spacing.three),
+        val columns = responsiveCoverColumnCount(maxWidth, LocalDensity.current.fontScale)
+        Column(
+            verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
         ) {
-            items(volumes, key = VolumeContent::id) { volume ->
-                val position = volumes.indexOf(volume)
-                VolumeCoverItem(
-                    volume = volume,
-                    position = position,
-                    selected = volume.id == selectedVolumeId,
-                    repository = repository,
-                    context = context,
-                    download = downloadRecordsByVolume[volume.id],
-                    downloadFailure = downloadFailuresByVolume[volume.id],
-                    onSelectVolume = onSelectVolume,
-                    onDownloadVolume = onDownloadVolume,
-                    onCancelDownload = onCancelDownload,
-                    modifier = Modifier.width(cardWidth),
-                )
+            volumes.chunked(columns).forEach { rowVolumes ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
+                ) {
+                    rowVolumes.forEach { volume ->
+                        val position = volumes.indexOf(volume)
+                        VolumeCoverItem(
+                            volume = volume,
+                            position = position,
+                            selected = volume.id == selectedVolumeId,
+                            repository = repository,
+                            context = context,
+                            download = downloadRecordsByVolume[volume.id],
+                            downloadFailure = downloadFailuresByVolume[volume.id],
+                            onSelectVolume = onSelectVolume,
+                            onDownloadVolume = onDownloadVolume,
+                            onCancelDownload = onCancelDownload,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    repeat(columns - rowVolumes.size) { Spacer(Modifier.weight(1f)) }
+                }
             }
         }
     }
@@ -545,12 +539,13 @@ private fun VolumeCoverItem(
                     coverUrl = volume.coverUrl,
                     repository = repository,
                     context = context,
-                    size = CoverSize.Small,
+                    role = CoverRole.Compact,
                     modifier = Modifier.fillMaxWidth().alpha(if (volume.readable) 1f else 0.5f),
                 )
                 if (progress > 0) {
-                    VolumeCoverProgress(
-                        progress = progress,
+                    CoverProgress(
+                        progressPercent = progress,
+                        stateDescription = state,
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }
@@ -570,7 +565,7 @@ private fun VolumeCoverItem(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .size(48.dp)
+                    .size(theme.metrics.androidMinimumTouchTarget)
                     .clickable(enabled = download?.isReadable != true) {
                         if (download?.status == AndroidDownloadStatus.Downloading ||
                             download?.status == AndroidDownloadStatus.Queued
@@ -616,38 +611,6 @@ private fun VolumeCoverItem(
 }
 
 @Composable
-private fun VolumeCoverProgress(progress: Int, modifier: Modifier = Modifier) {
-    val theme = WarmPageThemeValues
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = theme.spacing.one, vertical = theme.spacing.half)
-            .height(12.dp),
-    ) {
-        LinearProgressIndicator(
-            progress = { progress / 100f },
-            color = theme.colors.brandAccent,
-            trackColor = theme.colors.divider.copy(alpha = 0.72f),
-            modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.Center),
-        )
-        if (progress >= 100) {
-            Surface(
-                color = theme.colors.brandAccent,
-                shape = CircleShape,
-                modifier = Modifier.align(Alignment.CenterEnd).size(12.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.CheckCircle,
-                    contentDescription = null,
-                    tint = theme.colors.onAction,
-                    modifier = Modifier.padding(1.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun SectionHeader(title: String, trailing: String) {
     val theme = WarmPageThemeValues
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -660,20 +623,14 @@ private fun SectionHeader(title: String, trailing: String) {
 @Composable
 private fun ChapterCard(chapters: List<ReadingUnitContent>) {
     val theme = WarmPageThemeValues
-    Surface(
-        shape = RoundedCornerShape(theme.radii.task),
-        color = theme.colors.surface,
-        border = BorderStroke(1.dp, theme.colors.divider.copy(alpha = 0.75f)),
-        tonalElevation = 1.dp,
-        shadowElevation = 4.dp,
+    Column(
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
     ) {
-        Column(Modifier.padding(horizontal = theme.spacing.three, vertical = theme.spacing.two)) {
-            SectionHeader(
-                stringResource(R.string.work_directory_title),
-                pluralStringResource(R.plurals.work_chapter_total, chapters.size, chapters.size),
-            )
-            chapters.forEach { ChapterRow(it) }
-        }
+        SectionHeader(
+            stringResource(R.string.work_directory_title),
+            pluralStringResource(R.plurals.work_chapter_total, chapters.size, chapters.size),
+        )
+        chapters.forEach { ChapterRow(it) }
     }
 }
 

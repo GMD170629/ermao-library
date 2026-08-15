@@ -4,12 +4,10 @@ data class ReaderAccessRequest(
     val namespace: DownloadNamespace,
     val volumeId: String,
     val readerType: DownloadReaderType,
-    val contentFingerprint: String,
     val isOnline: Boolean,
 ) {
     init {
         require(volumeId.isNotBlank())
-        require(contentFingerprint.isNotBlank())
     }
 }
 
@@ -27,8 +25,7 @@ class ReaderAccessPolicy {
     ): ReaderAccessDecision {
         val local = completedArtifacts.firstOrNull { artifact ->
             artifact.identity.namespace == request.namespace &&
-                artifact.identity.volumeId == request.volumeId &&
-                artifact.identity.contentFingerprint == request.contentFingerprint
+                artifact.identity.volumeId == request.volumeId
         }
         if (local != null) return ReaderAccessDecision.LocalArtifact(local)
         return when (request.readerType) {

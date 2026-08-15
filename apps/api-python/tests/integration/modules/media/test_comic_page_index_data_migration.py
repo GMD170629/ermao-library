@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,7 +85,6 @@ def _seed_pending_comics(
                 volume_id=volume.id,
                 path=str(archive_path),
                 file_path_hash=f"comic-path-{index:03}",
-                hash_status="PARTIAL_PENDING",
                 mtime_ms=int(archive_path.stat().st_mtime * 1000),
                 kind="COMIC",
                 mime_type="application/zip",
@@ -151,6 +151,14 @@ def test_startup_data_migration_batches_25_comics_with_bounded_dml(
             assert set(
                 verification.scalars(select(LibraryFile.page_index_version))
             ) == {1}
+            first_page = verification.scalars(
+                select(LibraryReadingUnit).order_by(LibraryReadingUnit.sort_order)
+            ).first()
+            assert first_page is not None
+            metadata = json.loads(first_page.metadata_json)
+            assert metadata["originalName"] == "001.jpg"
+            assert metadata["pageInVolume"] == 1
+            assert metadata["pageInSection"] == 1
             volume_times = dict(
                 verification.execute(
                     select(LibraryVolume.id, LibraryVolume.updated_at)

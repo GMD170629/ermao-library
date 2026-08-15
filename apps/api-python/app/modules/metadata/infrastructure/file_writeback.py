@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import tempfile
@@ -31,7 +30,6 @@ class MetadataWritebackError(ValueError):
 class PreparedWriteback:
     prepared_path: Path
     output_path: Path
-    output_hash: str
     written_fields: tuple[str, ...]
     warning_code: str | None = None
 
@@ -142,14 +140,6 @@ def _publication(
         isbn=str(payload.get("isbn") or "").strip() or None,
     )
     return metadata, cover_path
-
-
-def _hash(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _temporary(output_path: Path) -> Path:
@@ -333,7 +323,6 @@ def prepare_writeback(
     return PreparedWriteback(
         prepared_path=temporary,
         output_path=output,
-        output_hash=_hash(temporary),
         written_fields=metadata.populated_fields,
     )
 
@@ -354,16 +343,12 @@ def output_path_for(source_path: str, prepared_path: str) -> Path:
     raise MetadataWritebackError("预备文件不是有效的 OPF 旁车文件")
 
 
-def publish_prepared(
-    source_path: str, prepared_path: str, expected_hash: str
-) -> tuple[Path, int, int]:
+def publish_prepared(source_path: str, prepared_path: str) -> tuple[Path, int, int]:
     prepared = Path(prepared_path)
     output = output_path_for(source_path, prepared_path)
-    if output.is_file() and _hash(output) == expected_hash:
-        prepared.unlink(missing_ok=True)
-    else:
-        if not prepared.is_file() or _hash(prepared) != expected_hash:
-            raise MetadataWritebackError("预备文件丢失或校验失败")
+    if prepared.is_file() and not prepared.is_symlink():
         os.replace(prepared, output)
+    elif not output.is_file() or output.is_symlink():
+        raise MetadataWritebackError("预备文件丢失")
     stat = output.stat()
     return output, stat.st_size, int(stat.st_mtime * 1000)

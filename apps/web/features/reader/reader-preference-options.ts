@@ -65,8 +65,8 @@ export const READER_PROGRESS_STYLE_OPTIONS = [
 ] as const;
 
 export const READER_COMIC_FLOW_OPTIONS = [
-  { value: 'paged', label: '分页' },
-  { value: 'vertical', label: '竖向连续' }
+  { value: 'paginated', label: '分页' },
+  { value: 'scrolled', label: '竖向连续' }
 ] as const;
 
 export const READER_PAGE_GAP_OPTIONS = [0, 8, 16, 24].map((value) => ({ value: String(value), label: value === 0 ? '无' : `${value}px` }));

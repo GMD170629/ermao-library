@@ -1,4 +1,3 @@
-import hashlib
 import json
 import zipfile
 from datetime import UTC, datetime
@@ -45,7 +44,6 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
     source_path = (
         Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     work = LibraryWork(
         id="work-reader-v3",
         origin="MANUAL",
@@ -74,9 +72,6 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
         id="file-reader-v3",
         volume_id=volume.id,
         path=str(source_path),
-        fingerprint=f"sha256:{source_hash}",
-        full_hash=source_hash,
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
@@ -148,7 +143,6 @@ def _exact_locator(
         locations["totalProgression"] = total_progression
     return {
         "kind": "reflowable",
-        "publication": bootstrap["publicationFingerprint"],
         "engineLocator": {
             "engine": "readium",
             "platform": platform,
@@ -172,7 +166,6 @@ def _exact_pdf_locator(
 ) -> dict[str, object]:
     return {
         "kind": "pdf",
-        "publication": bootstrap["publicationFingerprint"],
         "pageIndex": page_index,
         "pageProgression": page_progression,
     }
@@ -183,7 +176,6 @@ def _exact_comic_locator(
 ) -> dict[str, object]:
     return {
         "kind": "comic",
-        "publication": bootstrap["publicationFingerprint"],
         "pageIndex": page_index,
         "resourceHref": resource_href,
     }
@@ -198,7 +190,6 @@ def _exact_audio_locator(
 ) -> dict[str, object]:
     locator: dict[str, object] = {
         "kind": "audio",
-        "publication": bootstrap["publicationFingerprint"],
         "fileId": file_id,
         "positionMillis": position_millis,
     }
@@ -252,14 +243,9 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     }
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
-    fingerprint = bootstrap["publicationFingerprint"]
-    fingerprint_payload = (
-        f"{fingerprint['originalFileHash'].lower()}\0"
-        f"{fingerprint['parser']}\0{fingerprint['normalization']}"
-    )
-    assert bootstrap["contentFingerprint"] == (
-        f"sha256:{hashlib.sha256(fingerprint_payload.encode()).hexdigest()}"
-    )
+    assert "publicationFingerprint" not in bootstrap
+    assert "contentFingerprint" not in bootstrap
+    assert all("contentHash" not in file for file in bootstrap["files"])
 
     mutation_id = str(uuid4())
     progress_response = client.put(
@@ -292,9 +278,6 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert stored.volume_id == volume.id
     assert stored.percent == 50
     assert stored.location_json is not None
-    assert stored.content_fingerprint == (
-        "work:14:work-reader-v3|volume:16:volume-reader-v3"
-    )
     assert stored.revision == 1
     assert stored.mutation_id == mutation_id
     initial_bootstrap = client.get(
@@ -382,9 +365,9 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
 ) -> None:
     _login(client, db_session)
     volume = _ebook_volume(db_session)
+    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     volume.format = "PDF"
     volume.page_count = 12
-    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     file.kind = "PDF"
     file.mime_type = "application/pdf"
     db_session.commit()
@@ -596,7 +579,7 @@ def test_reader_v4_rejects_progress_without_locator(
     assert db_session.query(LibraryReadingProgress).count() == 0
 
 
-def test_reader_v4_progress_identity_ignores_publication_fingerprint_changes(
+def test_reader_v4_rejects_removed_publication_fingerprint_field(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -617,34 +600,24 @@ def test_reader_v4_progress_identity_ignores_publication_fingerprint_changes(
         json=_progress_payload(bootstrap, locator=locator),
     )
 
-    assert response.status_code == 200
-    stored = db_session.query(LibraryReadingProgress).one()
-    assert stored.volume_id == volume.id
-    assert stored.content_fingerprint == (
-        "work:14:work-reader-v3|volume:16:volume-reader-v3"
-    )
+    assert response.status_code == 422
+    assert db_session.query(LibraryReadingProgress).count() == 0
 
 
-def test_reader_v4_bootstrap_does_not_require_a_full_file_hash(
+def test_reader_v4_bootstrap_does_not_expose_file_hashes(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
     volume = _ebook_volume(db_session)
-    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    file.full_hash = None
-    file.hash_status = "PARTIAL_PENDING"
-    db_session.commit()
-
     response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
 
     assert response.status_code == 200
     bootstrap = response.json()["data"]
     assert bootstrap["volume"]["id"] == volume.id
-    source_path = Path(file.path)
-    assert bootstrap["publicationFingerprint"]["originalFileHash"] == (
-        f"sha256:{hashlib.sha256(source_path.read_bytes()).hexdigest()}"
-    )
+    assert "publicationFingerprint" not in bootstrap
+    assert "contentFingerprint" not in bootstrap
+    assert all("contentHash" not in item for item in bootstrap["files"])
 
 
 @pytest.mark.parametrize(
@@ -652,9 +625,6 @@ def test_reader_v4_bootstrap_does_not_require_a_full_file_hash(
     [
         lambda locator: locator["engineLocator"].update({"engine": "foliate"}),
         lambda locator: locator["engineLocator"].update({"platform": "desktop"}),
-        lambda locator: locator["publication"].update(
-            {"originalFileHash": "sha256:not-a-digest"}
-        ),
         lambda locator: locator["engineLocator"]["payload"].update({"href": ""}),
         lambda locator: locator["engineLocator"]["payload"]["text"].update(
             {"highlight": "x" * 513}
@@ -672,7 +642,6 @@ def test_reader_v4_rejects_noncanonical_location_payloads(
     bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
         "data"
     ]
-
     locator = _exact_locator(bootstrap)
     assert callable(mutate_locator)
     mutate_locator(locator)
@@ -694,7 +663,6 @@ def test_reader_v4_rejects_locator_media_type_that_does_not_match_volume(
     bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
         "data"
     ]
-
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
         json=_progress_payload(
@@ -714,16 +682,10 @@ def test_reader_v4_rejects_bookmark_kind_that_does_not_match_volume(
 ) -> None:
     _login(client, db_session)
     volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
 
     response = client.put(
         f"/api/reader/v4/volumes/{volume.id}/bookmarks",
         json={
-            "contentFingerprint": bootstrap["publicationFingerprint"][
-                "originalFileHash"
-            ],
             "bookmarks": [
                 {
                     "id": "wrong-format-bookmark",
@@ -761,8 +723,6 @@ def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
         id="file-reader-v3-2",
         volume_id=second_volume.id,
         path="library/reader-v3-2.epub",
-        fingerprint="sha256:reader-v3-2",
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
@@ -833,7 +793,6 @@ def test_volume_reading_status_replaces_all_legacy_progress_state(
             schema_version=3,
             location_type="comic",
             location_json='{"type":"comic","pageIndex":7}',
-            content_fingerprint="sha256:legacy",
             mutation_id="legacy-mutation",
             client_id="legacy-client",
             client_sequence=99,
@@ -860,9 +819,6 @@ def test_volume_reading_status_replaces_all_legacy_progress_state(
     assert progress.extra == '{"legacy":true}'
     assert progress.location_type == "comic"
     assert progress.location_json == '{"type":"comic","pageIndex":7}'
-    assert progress.content_fingerprint == (
-        "work:14:work-reader-v3|volume:16:volume-reader-v3"
-    )
     assert progress.revision == 0
 
 
@@ -878,8 +834,6 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     source_file.path = str(epub)
     source_file.size_bytes = epub.stat().st_size
-    source_file.full_hash = hashlib.sha256(epub.read_bytes()).hexdigest()
-    source_file.fingerprint = f"sha256:{source_file.full_hash}"
     source_file.mtime_ms = int(epub.stat().st_mtime * 1000)
     volume.chapter_count = None
     db_session.commit()
@@ -917,6 +871,17 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
         "第一章",
         "第二章",
     ]
+    assert set(first_response.json()["data"]["units"][0]) == {
+        "id",
+        "index",
+        "title",
+        "href",
+        "fileId",
+        "startMs",
+        "endMs",
+        "durationMs",
+        "metadata",
+    }
     assert (
         second_response.json()["data"]["units"]
         == first_response.json()["data"]["units"]
@@ -939,8 +904,6 @@ def test_reader_v4_bootstrap_replaces_legacy_navigation_with_publication_toc(
     source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
     source_file.path = str(epub)
     source_file.size_bytes = epub.stat().st_size
-    source_file.full_hash = hashlib.sha256(epub.read_bytes()).hexdigest()
-    source_file.fingerprint = f"sha256:{source_file.full_hash}"
     source_file.mtime_ms = int(epub.stat().st_mtime * 1000)
     db_session.add_all(
         [
@@ -1018,16 +981,12 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
 ) -> None:
     user = _login(client, db_session)
     volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
     fallback_created_at = datetime(2026, 8, 1, 12, 30, tzinfo=UTC)
     db_session.add(
         ReaderBookmark(
             id="reader-v3-legacy-bookmark",
             user_id=user.id,
             volume_id=volume.id,
-            content_fingerprint=bootstrap["contentFingerprint"],
             bookmark_id="legacy-created-at",
             location_json=json.dumps(
                 {
@@ -1046,7 +1005,6 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
 
     response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/bookmarks",
-        params={"contentFingerprint": bootstrap["contentFingerprint"]},
     )
 
     assert response.status_code == 200
@@ -1164,7 +1122,6 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     derived_path.write_bytes(Path(source_file.path).read_bytes())
     with zipfile.ZipFile(derived_path, "a") as archive:
         archive.writestr("META-INF/derived-volume", "derived")
-    derived_hash = hashlib.sha256(derived_path.read_bytes()).hexdigest()
     derived = LibraryVolume(
         id="volume-reader-v3-derived",
         media_version_id=source.media_version_id,
@@ -1181,9 +1138,6 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
             id="file-reader-v3-derived",
             volume_id=derived.id,
             path=str(derived_path),
-            fingerprint=f"sha256:{derived_hash}",
-            full_hash=derived_hash,
-            hash_status="COMPLETED",
             mtime_ms=2,
             kind="EPUB",
             mime_type="application/epub+zip",

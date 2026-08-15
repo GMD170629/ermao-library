@@ -102,7 +102,6 @@ final class DownloadCenterStore: ObservableObject {
                 let bootstrap = try await transfer.prepare(context: context, volumeID: volume.id)
                 if let completed = record(for: volume.id),
                    completed.isVerifiedOfflineCopy,
-                   completed.contentFingerprint == bootstrap.contentFingerprint,
                    completed.readerType == bootstrap.readerType {
                     completion(.open(ReaderHandoff(
                         workID: work.id,
@@ -115,7 +114,6 @@ final class DownloadCenterStore: ObservableObject {
                     )))
                 } else if bootstrap.readerType.requiresCompleteDownloadBeforeReading {
                     if let stale = record(for: volume.id),
-                       stale.contentFingerprint != bootstrap.contentFingerprint ||
                        stale.readerType != bootstrap.readerType ||
                        stale.effectiveMediaVersionID != bootstrap.mediaVersionID {
                         await removeForReplacement(stale)
@@ -127,15 +125,11 @@ final class DownloadCenterStore: ObservableObject {
                         bootstrap: bootstrap,
                         context: context
                     )
-                    guard let record = record(for: volume.id),
-                          record.contentFingerprint == bootstrap.contentFingerprint else {
+                    guard let record = record(for: volume.id) else {
                         completion(.unavailable("DOWNLOAD_MANIFEST_WRITE_FAILED"))
                         return
                     }
-                    completion(.needsDownload(
-                        recordID: record.id,
-                        contentFingerprint: bootstrap.contentFingerprint
-                    ))
+                    completion(.needsDownload(recordID: record.id))
                 } else if bootstrap.readerType.supportsStreaming {
                     completion(.open(ReaderHandoff(
                         workID: work.id,
@@ -260,7 +254,6 @@ final class DownloadCenterStore: ObservableObject {
             mediaVersionID: bootstrap.mediaVersionID,
             mediaKind: mediaKind,
             readerType: bootstrap.readerType,
-            contentFingerprint: bootstrap.contentFingerprint,
             expectedBytes: bootstrap.expectedBytes
         )
         replace(record)

@@ -1,31 +1,5 @@
 package com.ermao.library.shared.modules.reader.domain
 
-data class ContentFingerprint(
-    val originalFileHash: String,
-    val parserVersion: String,
-    val normalizationVersion: String,
-) {
-    init {
-        require(originalFileHash.startsWith(SHA256_PREFIX)) { "Content hash must be SHA-256" }
-        require(originalFileHash.length == SHA256_TEXT_LENGTH) { "Content hash has an invalid length" }
-        require(originalFileHash.drop(SHA256_PREFIX.length).all { it.isHexDigit() }) {
-            "Content hash contains non-hexadecimal characters"
-        }
-        require(parserVersion.isNotBlank()) { "Parser version is blank" }
-        require(normalizationVersion.isNotBlank()) { "Normalization version is blank" }
-    }
-
-    val stableKey: String
-        get() = "$originalFileHash|$parserVersion|$normalizationVersion"
-
-    private companion object {
-        const val SHA256_PREFIX = "sha256:"
-        const val SHA256_TEXT_LENGTH = SHA256_PREFIX.length + 64
-    }
-}
-
-private fun Char.isHexDigit(): Boolean = this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
-
 enum class ReaderFormat(val wireValue: String) {
     Epub("epub"),
     Mobi("mobi"),
@@ -96,6 +70,33 @@ enum class ReaderSourceFormat(
             "application/octet-stream",
         ),
     ),
+    Zip(
+        wireValue = "zip",
+        readerFormat = ReaderFormat.Comic,
+        fileKind = "ZIP",
+        allowedMimeTypes = setOf("application/zip", "application/octet-stream"),
+    ),
+    Cbr(
+        wireValue = "cbr",
+        readerFormat = ReaderFormat.Comic,
+        fileKind = "CBR",
+        allowedMimeTypes = setOf(
+            "application/vnd.comicbook-rar",
+            "application/x-cbr",
+            "application/vnd.rar",
+            "application/octet-stream",
+        ),
+    ),
+    Rar(
+        wireValue = "rar",
+        readerFormat = ReaderFormat.Comic,
+        fileKind = "RAR",
+        allowedMimeTypes = setOf(
+            "application/vnd.rar",
+            "application/vnd.comicbook-rar",
+            "application/octet-stream",
+        ),
+    ),
     Pdf(
         wireValue = "pdf",
         readerFormat = ReaderFormat.Pdf,
@@ -105,6 +106,9 @@ enum class ReaderSourceFormat(
     ;
 
     fun acceptsMimeType(value: String): Boolean = value.trim().lowercase() in allowedMimeTypes
+
+    val isComic: Boolean
+        get() = readerFormat == ReaderFormat.Comic
 
     companion object {
         fun fromWireValue(value: String?): ReaderSourceFormat? = entries.firstOrNull {
@@ -120,7 +124,6 @@ sealed interface ReaderSource {
     /** Exact container format when the source belongs to the supported native reflowable family. */
     val sourceFormat: ReaderSourceFormat?
         get() = null
-    val contentFingerprint: ContentFingerprint
     val workId: String?
     val volumeId: String?
 }
@@ -129,7 +132,6 @@ data class LocalReaderSource(
     override val sourceId: String,
     override val displayTitle: String,
     override val format: ReaderFormat,
-    override val contentFingerprint: ContentFingerprint,
     override val workId: String? = null,
     override val volumeId: String? = null,
     override val sourceFormat: ReaderSourceFormat? = null,
@@ -142,5 +144,70 @@ data class LocalReaderSource(
         require(sourceFormat == null || sourceFormat.readerFormat == format) {
             "Reader source format does not match its reader format"
         }
+    }
+}
+
+/** Online PDF access. Cached chunks are private session data, never a completed offline artifact. */
+data class RemoteByteRangeReaderSource(
+    override val sourceId: String,
+    override val displayTitle: String,
+    override val workId: String,
+    override val volumeId: String,
+    val namespace: ReaderSyncNamespace,
+    val apiPath: String,
+    val expectedSizeBytes: Long,
+) : ReaderSource {
+    override val format: ReaderFormat = ReaderFormat.Pdf
+    override val sourceFormat: ReaderSourceFormat = ReaderSourceFormat.Pdf
+
+    init {
+        require(sourceId.isNotBlank() && sourceId == volumeId) { "Remote PDF source id is invalid" }
+        require(displayTitle.isNotBlank()) { "Remote PDF title is blank" }
+        require(workId.isNotBlank()) { "Remote PDF work id is blank" }
+        require(apiPath.startsWith("/api/") && '#' !in apiPath) { "Remote PDF path is invalid" }
+        require(expectedSizeBytes > 0) { "Remote PDF size is invalid" }
+        require(namespace.serverIdentity.isNotBlank() && namespace.userId.isNotBlank())
+    }
+
+}
+
+data class RemoteComicPage(
+    val pageIndex: Int,
+    val resourceHref: String,
+    val mediaType: String,
+    val width: Int?,
+    val height: Int?,
+) {
+    init {
+        require(pageIndex >= 0)
+        require(resourceHref == "pages/$pageIndex")
+        require(mediaType.startsWith("image/"))
+        require(width == null || width > 0)
+        require(height == null || height > 0)
+    }
+}
+
+/** Online comic access backed by canonical Reader V4 page resources. */
+data class RemoteComicReaderSource(
+    override val sourceId: String,
+    override val displayTitle: String,
+    override val workId: String,
+    override val volumeId: String,
+    val namespace: ReaderSyncNamespace,
+    override val sourceFormat: ReaderSourceFormat,
+    val manifestApiPath: String,
+    val pageApiPathTemplate: String,
+    val pages: List<RemoteComicPage>,
+) : ReaderSource {
+    override val format: ReaderFormat = ReaderFormat.Comic
+
+    init {
+        require(sourceId == volumeId && sourceId.isNotBlank())
+        require(displayTitle.isNotBlank() && workId.isNotBlank())
+        require(sourceFormat.isComic)
+        require(manifestApiPath.startsWith("/api/") && '#' !in manifestApiPath)
+        require(pageApiPathTemplate.startsWith("/api/") && "{pageIndex}" in pageApiPathTemplate)
+        require(pages.isNotEmpty())
+        require(pages.map(RemoteComicPage::pageIndex) == pages.indices.toList())
     }
 }

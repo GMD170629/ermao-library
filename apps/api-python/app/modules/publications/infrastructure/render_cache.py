@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import tempfile
+import uuid
+import zipfile
 from pathlib import Path
 
 from sqlalchemy import exists, select, update
@@ -30,11 +31,11 @@ class SqlAlchemyPublicationRenderCacheReader:
         return PublicationRenderArtifact(
             volume_id=cache.volume_id,
             file_id=cache.file_id,
-            original_file_hash=cache.original_file_hash,
+            source_size_bytes=cache.source_size_bytes,
+            source_mtime_ms=cache.source_mtime_ms,
             parser=cache.parser,
             normalization=cache.normalization,
             relative_path=cache.relative_path,
-            content_hash=cache.content_hash,
             size_bytes=cache.size_bytes,
             unreadable_resource_count=cache.unreadable_resource_count,
         )
@@ -66,11 +67,8 @@ class SqlAlchemyPublicationRenderWriteRepository:
             select(LibraryFile.id).where(
                 LibraryFile.id == source.file_id,
                 LibraryFile.volume_id == source.volume_id,
-                (
-                    LibraryFile.full_hash == source.full_hash
-                    if source.full_hash is not None
-                    else LibraryFile.full_hash.is_(None)
-                ),
+                LibraryFile.size_bytes == source.size_bytes,
+                LibraryFile.mtime_ms == source.mtime_ms,
             )
         )
         current_volume_id = self._session.scalar(
@@ -90,11 +88,11 @@ class SqlAlchemyPublicationRenderWriteRepository:
             cache = PublicationRenderCache(volume_id=source.volume_id)
             self._session.add(cache)
         cache.file_id = artifact.file_id
-        cache.original_file_hash = artifact.original_file_hash
+        cache.source_size_bytes = artifact.source_size_bytes
+        cache.source_mtime_ms = artifact.source_mtime_ms
         cache.parser = artifact.parser
         cache.normalization = artifact.normalization
         cache.relative_path = artifact.relative_path
-        cache.content_hash = artifact.content_hash
         cache.size_bytes = artifact.size_bytes
         cache.status = "READY"
         cache.unreadable_resource_count = artifact.unreadable_resource_count
@@ -106,19 +104,13 @@ class LocalPublicationRenderFileStore:
         self._cache_root = cache_root.resolve()
 
     def publish(self, prepared: PreparedPublicationRenderArtifact) -> tuple[str, Path]:
-        digest = prepared.content_hash.removeprefix("sha256:").lower()
-        if len(digest) != 64 or any(
-            character not in "0123456789abcdef" for character in digest
-        ):
-            raise ValueError("render artifact hash is invalid")
-        relative = Path(digest[:2]) / f"{digest}.epub"
+        artifact_id = uuid.uuid4().hex
+        relative = Path(artifact_id[:2]) / f"{artifact_id}.epub"
         destination = (self._cache_root / relative).resolve()
         destination.relative_to(self._cache_root)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.is_file() and self._matches(destination, prepared):
-            return relative.as_posix(), destination
         descriptor, temporary_value = tempfile.mkstemp(
-            prefix=f".{digest}.",
+            prefix=f".{artifact_id}.",
             suffix=".partial",
             dir=destination.parent,
         )
@@ -147,11 +139,11 @@ class LocalPublicationRenderFileStore:
     def _matches(path: Path, prepared: PreparedPublicationRenderArtifact) -> bool:
         if path.stat().st_size != prepared.size_bytes:
             return False
-        digest = hashlib.sha256()
-        with path.open("rb") as source:
-            while chunk := source.read(1024 * 1024):
-                digest.update(chunk)
-        return f"sha256:{digest.hexdigest()}" == prepared.content_hash
+        try:
+            with zipfile.ZipFile(path) as archive:
+                return archive.testzip() is None
+        except (OSError, zipfile.BadZipFile):
+            return False
 
 
 __all__ = [

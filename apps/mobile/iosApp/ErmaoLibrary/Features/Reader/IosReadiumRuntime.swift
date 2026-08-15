@@ -133,16 +133,10 @@ final class IosReadiumRuntime {
     private func openMobiFamily(
         _ managed: IosManagedPublication
     ) async throws -> IosOpenedReadiumPublication {
-        guard managed.fingerprint.parserVersion == IosMobiBook.parserIdentifier,
-              managed.fingerprint.normalizationVersion == IosMobiPublicationIdentity.normalizationIdentifier,
-              let contentFingerprint = managed.serverContentFingerprint
-        else {
-            throw IosReaderFailure(code: .corruptFile)
-        }
         do {
             let result = try await IosMobiPublicationFactory().open(
                 fileURL: managed.fileURL,
-                contentFingerprint: contentFingerprint,
+                sourceID: managed.sourceID,
                 displayTitle: managed.displayTitle
             )
             return IosOpenedReadiumPublication(publication: result.publication) {
@@ -155,7 +149,7 @@ final class IosReadiumRuntime {
             case .closed, .invalidResourceIndex, .invalidResourcePath,
                  .duplicateResourcePath, .invalidTableOfContents, .invalidTextEncoding:
                 throw IosReaderFailure(code: .corruptFile)
-            case .invalidContentFingerprint:
+            case .invalidSourceIdentity:
                 throw IosReaderFailure(code: .corruptFile)
             case .missingReadingOrder, .unsupportedMediaType:
                 throw IosReaderFailure(code: .unsupportedFormat)

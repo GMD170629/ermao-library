@@ -195,14 +195,14 @@ position but must not upload or label it cross-device synchronized.
 ## 8. Startup and session restoration policy
 
 An explicit deep link, chapter/page request, or bookmark always wins. Online
-Reader entry fetches a fresh bootstrap and ignores confirmed local history. With
-no pending mutation, the server's exact location for the same work and volume
-restores automatically. A valid pending mutation at the server's current
-revision resumes locally and uploads normally. If the server revision advanced
-past the pending mutation's base revision, a blocking local/cloud/cancel decision
-is required before opening. A pending state for another work or volume is discarded. If
-bootstrap is unavailable offline, a local exact/pending position may open only
-with already available local content.
+Reader entry fetches a fresh bootstrap. When content is already local, bootstrap
+and local parsing are independent: bootstrap failure does not prevent the parser
+from opening the publication. With no pending mutation, the newest valid exact
+location for the same work and volume restores automatically. Invalid or
+un-restorable progress starts at the beginning. A newer server snapshot is
+selected deterministically and a newer valid local pending mutation remains local
+and retries normally; no startup progress condition may display a blocking
+local/cloud/cancel dialog. A pending state for another work or volume is ignored.
 
 Once Reader is open, a newer snapshot from another `clientId` that differs from
 the current exact position is shown as a non-modal notice. It does not steal focus

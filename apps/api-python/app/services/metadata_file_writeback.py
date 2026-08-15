@@ -158,7 +158,6 @@ def _mark_target_prepared_uow(
     target_id: str,
     owner_id: str,
     prepared_path: str,
-    output_hash: str,
     warning_code: str | None,
 ) -> None:
     now = db_timestamp()
@@ -168,7 +167,6 @@ def _mark_target_prepared_uow(
             target_id,
             owner_id=owner_id,
             prepared_path=prepared_path,
-            output_hash=output_hash,
             warning_code=warning_code,
             now=now,
         )
@@ -321,14 +319,11 @@ def process_next_metadata_writeback(
                 target_id=target_id,
                 owner_id=owner_id,
                 prepared_path=prepared_path,
-                output_hash=prepared.output_hash,
                 warning_code=prepared.warning_code,
             )
-            output_hash = prepared.output_hash
             written_fields = prepared.written_fields
             warning_code = prepared.warning_code
         else:
-            output_hash = str(target.get("outputHash") or "")
             written_fields = tuple(
                 str(item)
                 for item in target.get("payload", {})
@@ -338,9 +333,7 @@ def process_next_metadata_writeback(
                 str(target.get("warningCode")) if target.get("warningCode") else None
             )
         output, published_size_bytes, published_mtime_ms = (
-            file_writeback.publish_prepared(
-                str(target["sourcePath"]), prepared_path, output_hash
-            )
+            file_writeback.publish_prepared(str(target["sourcePath"]), prepared_path)
         )
         size_bytes: int | None = published_size_bytes
         mtime_ms: int | None = published_mtime_ms

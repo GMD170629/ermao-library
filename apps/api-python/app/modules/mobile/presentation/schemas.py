@@ -11,9 +11,9 @@ from app.contracts.http_errors import HttpContractError
 
 
 class MobileProtocolPayload(HttpContractModel):
-    version: Literal[1] = 1
-    minimum_supported_client_version: Literal[1] = Field(
-        default=1,
+    version: Literal[2] = 2
+    minimum_supported_client_version: Literal[2] = Field(
+        default=2,
         alias="minimumSupportedClientVersion",
     )
 

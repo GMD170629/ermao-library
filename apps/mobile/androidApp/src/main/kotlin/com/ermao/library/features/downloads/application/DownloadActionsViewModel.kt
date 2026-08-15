@@ -48,7 +48,6 @@ sealed interface AndroidReaderAccessOutcome {
         val readerType: String,
         val format: String,
         val localReference: String,
-        val contentFingerprint: String,
         val expectedBytes: Long,
     ) : AndroidReaderAccessOutcome
     data class RemoteStream(val readerType: String, val format: String) : AndroidReaderAccessOutcome
@@ -113,6 +112,13 @@ class DownloadActionsViewModel(
         if (volumeId.isBlank() || activeReaderChecks[volumeId]?.isActive == true) return
         mutableFailureByVolume.value -= volumeId
         val job = viewModelScope.launch {
+            sharedCatalog.listArtifacts(context.namespace)
+                .filter { it.identity.volumeId == volumeId }
+                .maxByOrNull { it.completedAtEpochMillis }
+                ?.let { artifact ->
+                    onOutcome(artifact.toReaderAccessOutcome())
+                    return@launch
+                }
             val descriptor = when (val bootstrap = gateway.load(context, volumeId)) {
                 is DownloadBootstrapSuccess -> bootstrap.bootstrap.descriptor
                 is DownloadBootstrapFailure -> {
@@ -126,19 +132,10 @@ class DownloadActionsViewModel(
                     namespace = context.namespace,
                     volumeId = descriptor.identity.volumeId,
                     readerType = descriptor.readerType,
-                    contentFingerprint = descriptor.identity.contentFingerprint,
                     isOnline = isOnline,
                 ),
             )) {
-                is ReaderLocalArtifact -> onOutcome(
-                    AndroidReaderAccessOutcome.LocalArtifact(
-                        readerType = decision.artifact.descriptor.readerType.name,
-                        format = decision.artifact.descriptor.format,
-                        localReference = decision.artifact.localReference,
-                        contentFingerprint = decision.artifact.descriptor.identity.contentFingerprint,
-                        expectedBytes = decision.artifact.verifiedBytes,
-                    ),
-                )
+                is ReaderLocalArtifact -> onOutcome(decision.artifact.toReaderAccessOutcome())
                 is ReaderUnavailable -> onOutcome(
                     AndroidReaderAccessOutcome.Unavailable(decision.reasonCode),
                 )
@@ -153,6 +150,13 @@ class DownloadActionsViewModel(
         activeReaderChecks[volumeId] = job
         job.invokeOnCompletion { activeReaderChecks.remove(volumeId, job) }
     }
+
+    private fun CompletedDownloadArtifact.toReaderAccessOutcome() = AndroidReaderAccessOutcome.LocalArtifact(
+        readerType = descriptor.readerType.name,
+        format = descriptor.format,
+        localReference = localReference,
+        expectedBytes = verifiedBytes,
+    )
 
     private suspend fun transfer(volumeId: String, descriptor: DownloadDescriptor) {
         var task: DownloadTask? = null

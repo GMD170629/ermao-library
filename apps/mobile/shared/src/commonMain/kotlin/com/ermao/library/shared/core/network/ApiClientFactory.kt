@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
 class ApiClientFactory(
     private val cookieVault: CookieVault,
     private val requestTimeoutMillis: Long = 30_000,
+    private val connectTimeoutMillis: Long = 15_000,
 ) {
     private val json = Json {
         ignoreUnknownKeys = false
@@ -30,7 +31,7 @@ class ApiClientFactory(
             }
             install(HttpTimeout) {
                 requestTimeoutMillis = this@ApiClientFactory.requestTimeoutMillis
-                connectTimeoutMillis = 15_000
+                connectTimeoutMillis = this@ApiClientFactory.connectTimeoutMillis
                 socketTimeoutMillis = requestTimeoutMillis
             }
         }

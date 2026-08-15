@@ -162,7 +162,6 @@ class ImportTask(HttpContractModel):
         alias="recognizedMetadata"
     )
     source_path: str = Field(alias="sourcePath")
-    content_hash: str | None = Field(alias="contentHash")
     task_kind: str = Field(alias="taskKind")
     bundle_key: str | None = Field(alias="bundleKey")
     asset_count: int = Field(alias="assetCount")

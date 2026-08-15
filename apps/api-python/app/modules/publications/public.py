@@ -13,10 +13,6 @@ from app.modules.publications.application.ensure_render_artifact import (
 )
 from app.modules.publications.application.open_publication import OpenPublication
 from app.modules.publications.application.ports import PublicationAccessScope
-from app.modules.publications.application.resolve_source_identity import (
-    PublicationSourceIdentity,
-    ResolvePublicationSourceIdentity,
-)
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
@@ -37,7 +33,5 @@ __all__ = [
     "PublicationNavigationSourceChangedError",
     "PublicationNotFoundError",
     "PublicationRenderSourceChangedError",
-    "PublicationSourceIdentity",
     "PublicationUnsupportedError",
-    "ResolvePublicationSourceIdentity",
 ]

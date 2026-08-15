@@ -24,8 +24,7 @@ class ReaderServerWireTest {
         assertEquals("reflowable", locator.getValue("kind").jsonPrimitive.content)
         assertEquals("readium", locator.getValue("engineLocator").jsonObject.getValue("engine").jsonPrimitive.content)
         assertEquals("android", locator.getValue("engineLocator").jsonObject.getValue("platform").jsonPrimitive.content)
-        assertEquals("sha256:$ORIGINAL_HASH", locator.getValue("publication").jsonObject
-            .getValue("originalFileHash").jsonPrimitive.content)
+        assertEquals(setOf("kind", "engineLocator"), locator.keys)
     }
 
     @Test
@@ -71,13 +70,12 @@ class ReaderServerWireTest {
     )
 
     private companion object {
-        const val ORIGINAL_HASH = "f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678"
         val PUBLICATION_LOCATION = reflowable(LOCATOR)
-        const val LOCATOR = """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"$ORIGINAL_HASH","parser":"libmobi:0.12@85dcfe","normalization":"ermao-mobi-core-v1+shuku-locator-dom-v2"},"payload":{"href":"part00000.html","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title","fragments":["chapter-title"],"progression":0.42,"position":17},"text":{"highlight":"天地玄黄，宇宙洪荒"}}}"""
+        const val LOCATOR = """{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","payload":{"href":"part00000.html","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title","fragments":["chapter-title"],"progression":0.42,"position":17},"text":{"highlight":"天地玄黄，宇宙洪荒"}}}"""
     }
 }
 
 private fun reflowable(envelope: String): String {
     val root = Json.parseToJsonElement(envelope).jsonObject
-    return """{"kind":"reflowable","publication":${root.getValue("publication")},"engineLocator":{"engine":${root.getValue("engine")},"platform":${root.getValue("platform")},"version":${root.getValue("version")},"payload":${root.getValue("payload")}}}"""
+    return """{"kind":"reflowable","engineLocator":{"engine":${root.getValue("engine")},"platform":${root.getValue("platform")},"version":${root.getValue("version")},"payload":${root.getValue("payload")}}}"""
 }

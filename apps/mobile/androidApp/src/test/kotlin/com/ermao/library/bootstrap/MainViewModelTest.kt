@@ -2,6 +2,7 @@ package com.ermao.library.bootstrap
 
 import com.ermao.library.shared.modules.auth.MobileRuntime
 import com.ermao.library.platform.persistence.LoginCredentialStore
+import com.ermao.library.platform.persistence.NoOpLoginCredentialStore
 import com.ermao.library.platform.persistence.SavedLoginCredential
 import com.ermao.library.features.me.platform.AppLocaleController
 import com.ermao.library.shared.core.network.AppError
@@ -21,10 +22,12 @@ import com.ermao.library.shared.modules.servers.domain.ServerProfileSnapshot
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsLocale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -52,7 +55,7 @@ class MainViewModelTest {
     @Test
     fun invalidServerInputStaysAtBoundaryAndDoesNotCallRuntime() = runTest(dispatcher) {
         val runtime = FakeMobileRuntime(AppSession.NoServer)
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
 
         viewModel.updateServerDisplayName("Home")
         viewModel.updateServerBaseUrl("books.example.com")
@@ -66,7 +69,7 @@ class MainViewModelTest {
     @Test
     fun validServerInputIsNormalizedBySharedValueObjectBeforeRuntimeCall() = runTest(dispatcher) {
         val runtime = FakeMobileRuntime(AppSession.NoServer)
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
 
         viewModel.updateServerDisplayName(" Home ")
         viewModel.updateServerBaseUrl(" https://Books.Example.com/base/ ")
@@ -82,7 +85,7 @@ class MainViewModelTest {
     fun tlsConfirmationResubmitsOnlyTheTlsMode() = runTest(dispatcher) {
         val draft = ServerConnectionDraft("Home", "https://books.example.com/base")
         val runtime = FakeMobileRuntime(AppSession.TlsRisk(draft, "TLS_FAILURE"))
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
 
         viewModel.permanentlyIgnoreTlsAndConnect()
         advanceUntilIdle()
@@ -93,7 +96,7 @@ class MainViewModelTest {
     @Test
     fun setupValidationRejectsShortAndMismatchedPasswordsBeforeRuntime() = runTest(dispatcher) {
         val runtime = FakeMobileRuntime(AppSession.NoServer)
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
         viewModel.updateSetupName("Admin")
         viewModel.updateSetupEmail("admin@example.com")
         viewModel.updateSetupPassword("short")
@@ -112,7 +115,7 @@ class MainViewModelTest {
         val provisional = profile("setup", "https://setup.example", active = true)
         val runtime = FakeMobileRuntime(AppSession.SetupRequired(provisional))
 
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.session is AppSession.SetupRequired)
@@ -126,7 +129,7 @@ class MainViewModelTest {
             authenticatedAfterSetup = authenticated(provisional)
         }
         val credentials = FakeCredentialStore()
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
         viewModel.updateSetupName("Admin")
         viewModel.updateSetupEmail(" admin@example.com ")
         viewModel.updateSetupPassword("setup-password")
@@ -148,7 +151,7 @@ class MainViewModelTest {
             authenticatedAfterSetup = authenticated(provisional)
         }
         val credentials = FakeCredentialStore().apply { failSave = true }
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
         viewModel.updateSetupName("Admin")
         viewModel.updateSetupEmail("admin@example.com")
         viewModel.updateSetupPassword("setup-password")
@@ -170,7 +173,7 @@ class MainViewModelTest {
         }
         val runtime = FakeMobileRuntime(AppSession.SignedOut(profile), listOf(profile.toSnapshot()))
 
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
         advanceUntilIdle()
 
         assertEquals(profile.id, viewModel.uiState.value.loginProfileId)
@@ -186,7 +189,7 @@ class MainViewModelTest {
             save(profile.id, SavedLoginCredential("reader@example.com", "saved-password"))
         }
         val runtime = FakeMobileRuntime(authenticated(profile), listOf(profile.toSnapshot()))
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
 
         viewModel.openServerCenter()
         advanceUntilIdle()
@@ -205,7 +208,7 @@ class MainViewModelTest {
                 AppError(AppErrorKind.Unauthorized, "INVALID_CREDENTIALS"),
             )
         }
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
         viewModel.updateLoginServerAddress("https://Books.Example.com/library/")
         viewModel.updateLoginEmail(" reader@example.com ")
         viewModel.updateLoginPassword("attempted-password")
@@ -221,6 +224,29 @@ class MainViewModelTest {
     }
 
     @Test
+    fun entryLoginKeepsLoadingStateResponsiveAndIgnoresDuplicateSubmission() = runTest(dispatcher) {
+        val loginGate = CompletableDeferred<Unit>()
+        val runtime = FakeMobileRuntime(AppSession.NoServer).apply { this.loginGate = loginGate }
+        val viewModel = viewModel(runtime)
+        advanceUntilIdle()
+        viewModel.updateLoginServerAddress("https://books.example.com")
+        viewModel.updateLoginEmail("reader@example.com")
+        viewModel.updateLoginPassword("password")
+
+        viewModel.loginFromEntry()
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.operationInProgress)
+        viewModel.loginFromEntry()
+        runCurrent()
+        assertEquals(1, runtime.loginToServerCalls)
+
+        loginGate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(viewModel.uiState.value.operationInProgress)
+    }
+
+    @Test
     fun selectingAnotherServerOnlyRefillsTheForm() = runTest(dispatcher) {
         val current = profile("home", "https://home.example", active = true)
         val other = profile("office", "https://office.example", active = false)
@@ -231,7 +257,7 @@ class MainViewModelTest {
             AppSession.SignedOut(current),
             listOf(current.toSnapshot(), other.toSnapshot()),
         )
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
 
         viewModel.selectLoginServer(other.id)
         advanceUntilIdle()
@@ -250,7 +276,7 @@ class MainViewModelTest {
             authenticatedAfterLogin = authenticated(profile)
         }
         val credentials = FakeCredentialStore()
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
         viewModel.updateLoginServerAddress(profile.baseUrl.value)
         viewModel.updateLoginEmail("reader@example.com")
         viewModel.updateLoginPassword("saved-password")
@@ -271,7 +297,7 @@ class MainViewModelTest {
             save(profile.id, SavedLoginCredential("reader@example.com", "saved-password"))
         }
         val runtime = FakeMobileRuntime(AppSession.SignedOut(profile), listOf(profile.toSnapshot()))
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
 
         viewModel.deleteDisplayedServer()
         advanceUntilIdle()
@@ -290,7 +316,7 @@ class MainViewModelTest {
             failRemoval = true
         }
         val runtime = FakeMobileRuntime(AppSession.SignedOut(profile), listOf(profile.toSnapshot()))
-        val viewModel = MainViewModel(runtime, credentials)
+        val viewModel = viewModel(runtime, credentials)
 
         viewModel.deleteDisplayedServer()
         advanceUntilIdle()
@@ -307,7 +333,7 @@ class MainViewModelTest {
         val runtime = FakeMobileRuntime(authenticated).apply {
             sessionAfterRefresh = AppSession.SessionExpired(profile, authenticated.identity)
         }
-        val viewModel = MainViewModel(runtime)
+        val viewModel = viewModel(runtime)
 
         viewModel.requireReauthentication()
         advanceUntilIdle()
@@ -325,7 +351,7 @@ class MainViewModelTest {
             logoutResult = RuntimeOperationResult.Failure(AppError(AppErrorKind.StorageFailure, "LOGOUT_FAILED"))
         }
         val localeController = RecordingLocaleController()
-        val viewModel = MainViewModel(runtime, localeController = localeController)
+        val viewModel = viewModel(runtime, localeController = localeController)
         advanceUntilIdle()
 
         runCatching { viewModel.logoutAwaitingCompletion(purgeNamespace = false) }
@@ -333,6 +359,17 @@ class MainViewModelTest {
         assertFalse(localeController.didRestoreSystemLanguage)
         assertTrue(runtime.currentSession is AppSession.Authenticated)
     }
+
+    private fun viewModel(
+        runtime: MobileRuntime,
+        credentialStore: LoginCredentialStore = NoOpLoginCredentialStore,
+        localeController: AppLocaleController? = null,
+    ) = MainViewModel(
+        runtime = runtime,
+        credentialStore = credentialStore,
+        localeController = localeController,
+        runtimeDispatcher = dispatcher,
+    )
 
     private class FakeMobileRuntime(
         initialSession: AppSession,
@@ -354,6 +391,8 @@ class MainViewModelTest {
         var loginToServerAddress: String? = null
         var loginToServerEmail: String? = null
         var loginToServerPassword: String? = null
+        var loginToServerCalls = 0
+        var loginGate: CompletableDeferred<Unit>? = null
         var switchServerCalls = 0
         var removedProfileId: String? = null
         var authenticatedAfterLogin: AppSession.Authenticated? = null
@@ -406,9 +445,11 @@ class MainViewModelTest {
             email: String,
             password: String,
         ): RuntimeOperationResult {
+            loginToServerCalls += 1
             loginToServerAddress = baseUrl
             loginToServerEmail = email
             loginToServerPassword = password
+            loginGate?.await()
             authenticatedAfterLogin?.let {
                 currentSession = it
                 observer?.onSessionChanged(it)

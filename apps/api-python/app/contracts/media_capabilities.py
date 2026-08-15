@@ -22,26 +22,28 @@ class PublicationPreparation(StrEnum):
 class MediaFormatCapability:
     source_format: str
     reader_type: ReaderType
-    requires_full_hash: bool
     preparation: PublicationPreparation = PublicationPreparation.READY
 
 
 _FORMAT_CAPABILITIES = {
     capability.source_format: capability
     for capability in (
-        MediaFormatCapability("EPUB", ReaderType.REFLOWABLE, True),
-        MediaFormatCapability("MOBI", ReaderType.REFLOWABLE, True),
-        MediaFormatCapability("AZW", ReaderType.REFLOWABLE, True),
-        MediaFormatCapability("AZW3", ReaderType.REFLOWABLE, True),
-        MediaFormatCapability("PRC", ReaderType.REFLOWABLE, True),
-        MediaFormatCapability("TXT", ReaderType.REFLOWABLE, True),
-        MediaFormatCapability("CBZ", ReaderType.COMIC, True),
-        MediaFormatCapability("PDF", ReaderType.PDF, True),
-        MediaFormatCapability("AUDIO", ReaderType.AUDIO, False),
-        MediaFormatCapability("AUDIOBOOK", ReaderType.AUDIO, False),
-        MediaFormatCapability("M4B", ReaderType.AUDIO, False),
-        MediaFormatCapability("M4A", ReaderType.AUDIO, False),
-        MediaFormatCapability("MP3", ReaderType.AUDIO, False),
+        MediaFormatCapability("EPUB", ReaderType.REFLOWABLE),
+        MediaFormatCapability("MOBI", ReaderType.REFLOWABLE),
+        MediaFormatCapability("AZW", ReaderType.REFLOWABLE),
+        MediaFormatCapability("AZW3", ReaderType.REFLOWABLE),
+        MediaFormatCapability("PRC", ReaderType.REFLOWABLE),
+        MediaFormatCapability("TXT", ReaderType.REFLOWABLE),
+        MediaFormatCapability("CBZ", ReaderType.COMIC),
+        MediaFormatCapability("ZIP", ReaderType.COMIC),
+        MediaFormatCapability("CBR", ReaderType.COMIC),
+        MediaFormatCapability("RAR", ReaderType.COMIC),
+        MediaFormatCapability("PDF", ReaderType.PDF),
+        MediaFormatCapability("AUDIO", ReaderType.AUDIO),
+        MediaFormatCapability("AUDIOBOOK", ReaderType.AUDIO),
+        MediaFormatCapability("M4B", ReaderType.AUDIO),
+        MediaFormatCapability("M4A", ReaderType.AUDIO),
+        MediaFormatCapability("MP3", ReaderType.AUDIO),
     )
 }
 _KINDLE_SEND = frozenset({"EPUB", "PDF"})

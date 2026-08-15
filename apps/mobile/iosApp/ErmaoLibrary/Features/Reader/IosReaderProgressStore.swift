@@ -36,7 +36,7 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
         runtime.coordinator.beginSession(snapshot: bootstrapSnapshot)
         networkMonitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
-            Task { @MainActor [weak self] in await self?.checkForRemoteProgress() }
+            Task { @MainActor [weak self] in await self?.recoverPendingAndCheckRemote() }
         }
         networkMonitor.start(queue: DispatchQueue(label: "reader.progress.network"))
     }
@@ -68,6 +68,13 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
         }
     }
 
+    func recoverPendingAndCheckRemote() async {
+        try? await runtime.store.retryPendingUpload()
+        try? await runtime.store.awaitPendingUpload()
+        remoteSnapshot = runtime.coordinator.remoteProgressNotice()?.snapshot
+        await checkForRemoteProgress()
+    }
+
     /// Waits for the single-flight slot so a 409 becomes visible before the
     /// next user gesture. Network failures return without clearing pending.
     func refreshAfterSave() async {
@@ -88,147 +95,27 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
         remoteSnapshot = nil
     }
 
-    func continueStartupWithLocal(
-        progress: ErmaoShared.ReaderProgress,
-        serverRevision: Int64
-    ) async throws {
-        try await runtime.coordinator.continueStartupWithLocal(
-            target: target,
-            progress: progress,
-            serverRevision: serverRevision
-        )
-    }
-
-    func useServerForStartup(_ conflict: IosReaderStartupConflict) async throws {
-        try await runtime.coordinator.discardStartupPending(
-            mutationId: conflict.mutation.mutationId,
-            serverRevision: conflict.server.revision
-        )
-    }
 }
 
-/// Durable latest-only Reader v4 synchronization for the native iOS shell.
-final class IosReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
-    private let database: IosReaderLocalDatabase
-    private let target: ErmaoShared.ReaderProgressSyncTarget
-    private let uploadSlot: IosReaderProgressUploadSlot
+/// Reader content remains usable when progress persistence or synchronization
+/// cannot be initialized. This store intentionally keeps those concerns inert.
+final class IosNonBlockingReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
+    func load(sourceId _: String) async throws -> ErmaoShared.ReaderProgress? { nil }
 
-    init(
-        database: IosReaderLocalDatabase,
-        target: ErmaoShared.ReaderProgressSyncTarget,
-        syncPort: ErmaoShared.ReaderProgressSyncPort
-    ) {
-        self.database = database
-        self.target = target
-        uploadSlot = IosReaderProgressUploadSlot(database: database, target: target, port: syncPort)
-    }
+    func save(progress _: ErmaoShared.ReaderProgress) async throws {}
 
-    func load(sourceId: String) async throws -> ErmaoShared.ReaderProgress? {
-        try await database.load(sourceId: sourceId)
-    }
+    func delete(sourceId _: String) async throws {}
 
-    func save(progress: ErmaoShared.ReaderProgress) async throws {
-        guard progress.sourceId == target.volumeId else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
+    func awaitPendingUpload() async throws {}
 
-        let state = try await database.loadSyncState()
-        let baseRevision = state.confirmedRevision
-        let upload = ErmaoShared.PublicKt.createReaderProgressUpload(
-            target: target,
-            progress: progress,
-            baseRevision: baseRevision,
-            mutationId: UUID().uuidString.lowercased()
-        )
-        try await database.commitProgressAndPending(progress: progress, pending: upload.mutation)
-        await uploadSlot.wake()
-    }
-
-    func delete(sourceId: String) async throws {
-        try await database.delete(sourceId: sourceId)
-    }
-
-    func awaitPendingUpload() async throws {
-        await uploadSlot.awaitIdle()
-    }
-
-    func retryPendingUpload() async throws {
-        await uploadSlot.wake()
-    }
+    func retryPendingUpload() async throws {}
 
     func syncState() async throws -> ErmaoShared.ReaderProgressDurableState {
-        try await database.loadSyncState()
-    }
-}
-
-/// Single-flight worker. The database, not actor memory, owns the latest slot.
-private actor IosReaderProgressUploadSlot {
-    private let database: IosReaderLocalDatabase
-    private let target: ErmaoShared.ReaderProgressSyncTarget
-    private let port: ErmaoShared.ReaderProgressSyncPort
-    private var worker: Task<Void, Never>?
-
-    init(
-        database: IosReaderLocalDatabase,
-        target: ErmaoShared.ReaderProgressSyncTarget,
-        port: ErmaoShared.ReaderProgressSyncPort
-    ) {
-        self.database = database
-        self.target = target
-        self.port = port
-    }
-
-    func wake() {
-        guard worker == nil else { return }
-        worker = Task { await drain() }
-    }
-
-    func awaitIdle() async {
-        while let active = worker { await active.value }
-    }
-
-    private func drain() async {
-        defer { worker = nil }
-        while !Task.isCancelled {
-            guard let state = try? await database.loadSyncState(),
-                  state.terminalFailureCode == nil,
-                  let pending = state.pending
-            else { return }
-            let upload = ErmaoShared.ReaderProgressUpload(target: target, mutation: pending)
-            let result: ErmaoShared.ReaderProgressPushResult
-            do {
-                result = try await port.push(upload: upload)
-            } catch {
-                return
-            }
-            switch result {
-            case let accepted as ErmaoShared.ReaderProgressPushResultAccepted:
-                try? await database.acknowledge(mutationId: pending.mutationId, snapshot: accepted.snapshot)
-            case let conflict as ErmaoShared.ReaderProgressPushResultConflict:
-                // The rejected mutation must never be replayed automatically. The
-                // active Reader session will surface the remote snapshot and only
-                // a later, genuine position change may create a replacement.
-                try? await database.discardPendingAfterConflict(
-                    mutationId: pending.mutationId,
-                    serverRevision: conflict.current.revision
-                )
-                return
-            case is ErmaoShared.ReaderProgressPushResultRetryableFailure:
-                return
-            case let rejected as ErmaoShared.ReaderProgressPushResultRejected:
-                try? await database.recordTerminalFailure(
-                    mutationId: pending.mutationId,
-                    failureCode: rejected.failureCode
-                )
-                return
-            default:
-                try? await database.recordTerminalFailure(
-                    mutationId: pending.mutationId,
-                    failureCode: "INVALID_PROGRESS_RESPONSE"
-                )
-                return
-            }
-        }
+        ErmaoShared.ReaderProgressDurableState(
+            confirmedRevision: 0,
+            pending: nil,
+            terminalFailureCode: nil
+        )
     }
 }
 

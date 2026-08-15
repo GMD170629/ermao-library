@@ -5,7 +5,8 @@ export function emitReaderDebug(
   message: string,
   data?: Record<string, unknown>
 ) {
-  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
+  if (typeof window === 'undefined'
+    || typeof window.dispatchEvent !== 'function'
+    || typeof CustomEvent === 'undefined') return;
   window.dispatchEvent(new CustomEvent('shuku:reader-debug', { detail: { level, message, data } }));
 }
-

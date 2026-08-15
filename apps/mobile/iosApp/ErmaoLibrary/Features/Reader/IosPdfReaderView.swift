@@ -6,10 +6,13 @@ struct IosPdfReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosPdfReaderSession
+    var onRetry: () -> Void = {}
     @State private var sliderPage = 0.0
     @State private var sliderIsEditing = false
     @State private var showsTableOfContents = false
-    @State private var closingFailure = false
+    @State private var showsSettings = false
+    @State private var pendingPageID: String?
+    @State private var navigationFailed = false
 
     var body: some View {
         ZStack {
@@ -54,9 +57,6 @@ struct IosPdfReaderView: View {
         .onChange(of: session.pageIndex) { value in
             if !sliderIsEditing { sliderPage = Double(value) }
         }
-        .onChange(of: session.startupCancelled) { cancelled in
-            if cancelled { dismiss() }
-        }
         .onChange(of: scenePhase) { phase in
             Task {
                 switch phase {
@@ -76,11 +76,25 @@ struct IosPdfReaderView: View {
                         }
                         .padding(24)
                     } else {
-                        List(session.tableOfContents) { entry in
+                        List {
+                            if navigationFailed { Text("reader.navigation.failed").foregroundStyle(.red) }
+                            ForEach(session.tableOfContents) { entry in
                             Button {
-                                Task { await session.goToTOCEntry(entry); showsTableOfContents = false }
+                                Task {
+                                    pendingPageID = entry.id
+                                    navigationFailed = false
+                                    if await session.goToTOCEntry(entry) { showsTableOfContents = false }
+                                    else { navigationFailed = true }
+                                    pendingPageID = nil
+                                }
                             } label: {
-                                Text(entry.title).padding(.leading, CGFloat(entry.depth) * 16)
+                                HStack {
+                                    Text(entry.title).padding(.leading, CGFloat(entry.depth) * 16)
+                                    Spacer()
+                                    if pendingPageID == entry.id { ProgressView() }
+                                }
+                            }
+                            .disabled(pendingPageID != nil)
                             }
                         }
                     }
@@ -94,25 +108,16 @@ struct IosPdfReaderView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .alert(String(localized: "reader.save.failure.title"), isPresented: $closingFailure) {
-            Button(String(localized: "common.ok"), role: .cancel) {}
-        } message: { Text("reader.save.failure.message") }
+        .sheet(isPresented: $showsSettings) { IosPdfReaderSettingsSheet(session: session) }
         .alert(
             String(localized: "reader.error.title"),
             isPresented: Binding(
-                get: { session.presentationError != nil && !closingFailure },
+                get: { session.presentationError != nil },
                 set: { _ in session.dismissPresentationError() }
             )
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
         } message: { Text(session.presentationError?.localizedDescription ?? "") }
-        .readerStartupConflictAlert(
-            isPresented: session.startupConflict != nil,
-            failed: session.startupActionFailed,
-            useLocal: { Task { await session.continueStartupAtLocalPosition() } },
-            useCloud: { Task { await session.useCloudStartupPosition() } },
-            cancel: session.cancelStartupConflict
-        )
     }
 
     @ViewBuilder private var content: some View {
@@ -124,12 +129,15 @@ struct IosPdfReaderView: View {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
                 Text("reader.error.title").font(.headline)
                 Text(code.localizedDescription).multilineTextAlignment(.center)
+                Button("reader.retry.open", action: onRetry)
                 Button("common.close") { dismiss() }
             }
             .padding(24).foregroundStyle(.white)
         default:
             if let navigator = session.navigator {
                 PdfNavigatorHost(navigator: navigator).ignoresSafeArea()
+            } else if let navigator = session.pdfiumNavigator {
+                PdfiumNavigatorHost(navigator: navigator).ignoresSafeArea()
             }
         }
     }
@@ -143,6 +151,8 @@ struct IosPdfReaderView: View {
                 Button { showsTableOfContents = true } label: {
                     Image(systemName: "list.bullet").frame(width: 44, height: 44)
                 }.accessibilityLabel(Text("reader.toc"))
+                Button { showsSettings = true } label: { Image(systemName: "gearshape").frame(width: 44, height: 44) }
+                    .accessibilityLabel(Text("reader.settings"))
                 Button { session.zoomOut() } label: { Image(systemName: "minus.magnifyingglass").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.pdf.zoom.out"))
                 Button { session.zoomToFit() } label: { Image(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 44, height: 44) }
@@ -163,7 +173,7 @@ struct IosPdfReaderView: View {
                         step: 1
                     ) { editing in
                         sliderIsEditing = editing
-                        if !editing { Task { await session.goToPage(Int(sliderPage.rounded())) } }
+                        if !editing { Task { _ = await session.goToPage(Int(sliderPage.rounded())) } }
                     }
                     .accessibilityLabel(Text("reader.progress"))
                     .accessibilityValue(Text(session.pageLabel))
@@ -180,8 +190,61 @@ struct IosPdfReaderView: View {
 
     private func close() {
         Task {
-            do { try await session.close(); dismiss() } catch { closingFailure = true }
+            try? await session.close()
+            dismiss()
         }
+    }
+}
+
+private struct IosPdfReaderSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var session: IosPdfReaderSession
+    @State private var draft: IosReaderPreferences
+    @State private var applyFailed = false
+
+    init(session: IosPdfReaderSession) {
+        self.session = session
+        _draft = State(initialValue: session.preferences)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if applyFailed { Text("reader.preferences.apply.failed").foregroundStyle(.red) }
+                Section("reader.settings.layout") {
+                    ReaderValueSlider(
+                        title: "reader.settings.pdfZoom",
+                        value: $draft.pdfZoom,
+                        range: 0.6 ... 2.4,
+                        step: 0.1,
+                        valueText: draft.pdfZoom.formatted(.percent.precision(.fractionLength(0)))
+                    )
+                    Picker("reader.settings.pdfFit", selection: $draft.pdfFit) {
+                        Text("reader.settings.pdfFit.page").tag(IosPdfFit.page)
+                        Text("reader.settings.pdfFit.width").tag(IosPdfFit.width)
+                    }
+                    Picker("reader.settings.pdfRotation", selection: $draft.pdfRotation) {
+                        ForEach([0, 90, 180, 270], id: \.self) { Text("\($0)°").tag($0) }
+                    }
+                    Picker("reader.settings.pdfCrop", selection: $draft.pdfCropMargins) {
+                        Text("reader.settings.pdfCrop.off").tag(IosPdfCropMargins.off)
+                        Text("reader.settings.pdfCrop.auto").tag(IosPdfCropMargins.auto)
+                    }
+                }
+            }
+            .navigationTitle("reader.settings")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("common.done") {
+                        Task {
+                            if await session.applyPreferences(draft) { dismiss() }
+                            else { applyFailed = true }
+                        }
+                    }
+                }
+            }
+        }.presentationDetents([.medium, .large])
     }
 }
 
@@ -226,29 +289,14 @@ struct IosPageRemoteProgressNotice: View {
     }
 }
 
-extension View {
-    func readerStartupConflictAlert(
-        isPresented: Bool,
-        failed: Bool,
-        useLocal: @escaping () -> Void,
-        useCloud: @escaping () -> Void,
-        cancel: @escaping () -> Void
-    ) -> some View {
-        alert(
-            String(localized: "reader.startup.conflict.title"),
-            isPresented: .constant(isPresented)
-        ) {
-            Button("reader.startup.conflict.local", action: useLocal)
-            Button("reader.startup.conflict.cloud", action: useCloud)
-            Button("common.cancel", role: .cancel, action: cancel)
-        } message: {
-            Text(failed ? "reader.startup.conflict.failed" : "reader.startup.conflict.message")
-        }
-    }
-}
-
 private struct PdfNavigatorHost: UIViewControllerRepresentable {
     let navigator: PDFNavigatorViewController
     func makeUIViewController(context: Context) -> PDFNavigatorViewController { navigator }
     func updateUIViewController(_ uiViewController: PDFNavigatorViewController, context: Context) {}
+}
+
+private struct PdfiumNavigatorHost: UIViewControllerRepresentable {
+    let navigator: IosPdfiumNavigatorViewController
+    func makeUIViewController(context: Context) -> IosPdfiumNavigatorViewController { navigator }
+    func updateUIViewController(_ uiViewController: IosPdfiumNavigatorViewController, context: Context) {}
 }

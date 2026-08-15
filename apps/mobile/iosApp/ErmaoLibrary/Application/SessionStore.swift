@@ -283,6 +283,7 @@ final class SessionStore: ObservableObject {
         guard let namespace = currentPrivateNamespace else { return }
         do {
             try await privateContentCache.removeNamespace(namespace)
+            try IosPdfRangeCache.clearAll()
         } catch {
             throw RuntimeOperationFailure(
                 errorKind: "StorageFailure",

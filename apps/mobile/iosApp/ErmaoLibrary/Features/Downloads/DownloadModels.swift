@@ -56,7 +56,6 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     let readerType: ManagedDownloadReaderType
     var state: ManagedDownloadState
     var verification: ManagedDownloadVerification
-    var contentFingerprint: String?
     var expectedBytes: Int64?
     var receivedBytes: Int64
     var localRelativePath: String?
@@ -163,7 +162,6 @@ struct ManagedDownloadBootstrap: Sendable {
     let mediaVersionID: String
     let mediaKind: LibraryMediaKind
     let readerType: ManagedDownloadReaderType
-    let contentFingerprint: String
     let expectedBytes: Int64?
 }
 
@@ -181,7 +179,6 @@ struct ManagedDownloadProgress: Sendable {
 struct ManagedDownloadReceipt: Sendable {
     let receivedBytes: Int64
     let expectedBytes: Int64?
-    let contentFingerprint: String
 }
 
 enum ManagedDownloadTransferError: Error, Equatable, Sendable {
@@ -206,7 +203,7 @@ enum ManagedDownloadTransferError: Error, Equatable, Sendable {
 
 enum ManagedReaderAccessOutcome: Sendable {
     case open(ReaderHandoff)
-    case needsDownload(recordID: String, contentFingerprint: String)
+    case needsDownload(recordID: String)
     case unavailable(String)
 }
 
@@ -236,10 +233,17 @@ struct ReaderHandoff: Hashable, Sendable {
 
 enum ManagedReaderAccessPolicy {
     static func supportsNativeReader(readerType: ManagedDownloadReaderType, format: String) -> Bool {
-        readerType == .reflowable &&
-            ["EPUB", "MOBI", "AZW", "AZW3", "PRC"].contains(
-                format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            )
+        let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch readerType {
+        case .reflowable:
+            return ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"].contains(normalized)
+        case .comic:
+            return ["CBZ", "ZIP"].contains(normalized)
+        case .pdf:
+            return normalized == "PDF"
+        case .audio:
+            return false
+        }
     }
 
     static func verifiedLocalHandoff(
@@ -262,13 +266,11 @@ enum ManagedReaderAccessPolicy {
 
     static func completedRecord(
         records: [ManagedDownloadRecord],
-        recordID: String,
-        contentFingerprint: String
+        recordID: String
     ) -> ManagedDownloadRecord? {
         records.first {
             $0.id == recordID &&
-            $0.isVerifiedOfflineCopy &&
-            $0.contentFingerprint == contentFingerprint
+            $0.isVerifiedOfflineCopy
         }
     }
 }

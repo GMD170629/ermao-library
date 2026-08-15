@@ -52,9 +52,8 @@ class DownloadsRuntime(
     suspend fun artifact(
         namespace: DownloadNamespace,
         volumeId: String,
-        contentFingerprint: String,
     ): CompletedDownloadArtifact? = catalog.listArtifacts(namespace).firstOrNull {
-        it.identity.volumeId == volumeId && it.identity.contentFingerprint == contentFingerprint
+        it.identity.volumeId == volumeId
     }
 }
 

@@ -43,7 +43,7 @@ class SqlAlchemyTextConversionProgress:
         source_path: Path,
         source_format: str,
         converter: str,
-        source_hash: str,
+        source_key: str,
         options_json: str,
         now: int,
     ) -> ConversionProgressTaskDTO:
@@ -59,7 +59,7 @@ class SqlAlchemyTextConversionProgress:
             raise ValueError("遗留文件处理记录缺少源卷册")
         idempotency_key = conversion_idempotency_key(
             source_volume_id,
-            source_hash,
+            source_key,
         )
         for attempt in range(2):
             with self._session_factory() as session:
@@ -73,7 +73,7 @@ class SqlAlchemyTextConversionProgress:
                 import_task_id=import_task_id,
                 task_id=task_id,
                 source_volume_id=source_volume_id,
-                source_hash=source_hash,
+                source_key=source_key,
                 idempotency_key=idempotency_key,
                 source_path=source_path_value,
                 source_format=source_format,

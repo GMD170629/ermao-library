@@ -10,7 +10,7 @@ class ReaderPreferencesTest {
     fun defaultsMatchWebReaderV3() {
         val preferences = ReaderPreferences()
 
-        assertEquals(3, preferences.schemaVersion)
+        assertEquals(4, preferences.schemaVersion)
         assertEquals(ReaderTheme.Warm, preferences.appearance.theme)
         assertEquals(ReaderThemeMode.Manual, preferences.appearance.themeMode)
         assertEquals(18, preferences.epub.fontSize)
@@ -18,6 +18,15 @@ class ReaderPreferencesTest {
         assertEquals(ReaderFontFamily.Pingfang, preferences.epub.fontFamily)
         assertEquals(ReaderSpreadMode.Single, preferences.epub.spreadMode)
         assertEquals(ReaderReadingMode.Paged, preferences.epub.flow)
+        assertEquals(ReaderComicDirection.LeftToRight, preferences.comic.direction)
+        assertEquals(ReaderReadingMode.Paged, preferences.comic.flow)
+        assertEquals(ReaderComicSpreadMode.Single, preferences.comic.spreadMode)
+        assertEquals(ReaderComicImageVariant.Original, preferences.comic.imageVariant)
+        assertEquals(1.0, preferences.pdf.zoom)
+        assertEquals(ReaderPdfFit.Page, preferences.pdf.fit)
+        assertEquals(ReaderPdfFlow.Paged, preferences.pdf.flow)
+        assertEquals(0, preferences.pdf.rotation)
+        assertEquals(ReaderPdfCropMargins.Off, preferences.pdf.cropMargins)
         assertTrue(preferences.interaction.swipePageTurn)
         assertFalse(preferences.interaction.keepScreenAwake)
     }
@@ -52,5 +61,22 @@ class ReaderPreferencesTest {
         assertFalse(ios.supportsAnnotations)
         assertFalse(ios.supportsVolumeKeyPageTurn)
         assertTrue(android.supportsVolumeKeyPageTurn)
+    }
+
+    @Test
+    fun controlProfilesMatchWebMorphologyRules() {
+        val reflowable = ReaderControlProfile.forMorphology(ReaderMorphology.Reflowable)
+        assertEquals(listOf(ReaderReadingMode.Paged, ReaderReadingMode.ContinuousScroll), reflowable.readingModes)
+        assertTrue(reflowable.disabledReadingModes.isEmpty())
+        assertEquals(listOf(ReaderSpreadMode.Single, ReaderSpreadMode.Double), reflowable.reflowableSpreadModes)
+
+        val comic = ReaderControlProfile.forMorphology(ReaderMorphology.Comic)
+        assertTrue(comic.showsComicDirection)
+        assertTrue(comic.showsComicCoverSingle)
+        assertTrue(comic.showsComicPageGap)
+
+        val pdf = ReaderControlProfile.forMorphology(ReaderMorphology.Pdf)
+        assertTrue(pdf.readingModes.isEmpty())
+        assertTrue(pdf.showsPdfControls)
     }
 }

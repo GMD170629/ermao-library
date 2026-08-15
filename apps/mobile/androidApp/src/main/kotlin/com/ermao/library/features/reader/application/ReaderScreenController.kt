@@ -4,9 +4,25 @@ import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.ReaderNavigationResult
+import com.ermao.library.shared.modules.reader.ReaderNavigationTarget
+import com.ermao.library.shared.modules.reader.ReaderCommandResult
+import com.ermao.library.shared.modules.reader.ReaderCommandCompleted
+import com.ermao.library.shared.modules.reader.ReaderCommandRejected
+import com.ermao.library.shared.modules.reader.ReaderNavigationCompleted
+import com.ermao.library.shared.modules.reader.ReaderNavigationRejected
+import com.ermao.library.shared.modules.reader.ReaderNavigationTargetComic
+import com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid
+import com.ermao.library.shared.modules.reader.ReaderNavigationTargetPdf
+import com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable
+import com.ermao.library.shared.modules.reader.ComicReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReaderBookmark
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal data class ReaderResumeNotice(
     val capturedAtEpochMillis: Long,
@@ -16,6 +32,7 @@ internal data class ReaderResumeNotice(
 )
 
 internal interface ReaderScreenController {
+    val morphology: ReaderMorphology
     val capabilities: ReaderCapabilities
     val currentLocation: StateFlow<ReaderLocation?>
     val preferences: StateFlow<ReaderPreferences>
@@ -32,6 +49,24 @@ internal interface ReaderScreenController {
 
     fun goTo(location: ReaderLocation): Boolean
 
+    suspend fun navigateTo(entry: ReaderTocEntry): ReaderNavigationResult {
+        val target = entry.target
+        if (target is ReaderNavigationTargetInvalid) {
+            return ReaderNavigationRejected(target.reasonCode)
+        }
+        if (currentLocation.value?.matches(target) == true) {
+            return ReaderNavigationCompleted(moved = false)
+        }
+        if (!goTo(entry.location)) {
+            return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
+        }
+        val verified = withTimeoutOrNull(NAVIGATION_VERIFICATION_TIMEOUT_MILLIS) {
+            currentLocation.filterNotNull().first { location -> location.matches(target) }
+        }
+        return if (verified != null) ReaderNavigationCompleted(moved = true)
+        else ReaderNavigationRejected("READER_NAVIGATION_VERIFICATION_FAILED")
+    }
+
     fun goToTotalProgression(totalProgression: Double): Boolean
 
     fun dismissResumeNotice()
@@ -39,6 +74,17 @@ internal interface ReaderScreenController {
     fun returnToResumeNotice(): Boolean
 
     fun updatePreferences(updated: ReaderPreferences)
+
+    suspend fun applyPreferences(updated: ReaderPreferences): ReaderCommandResult {
+        val previous = preferences.value
+        return try {
+            updatePreferences(updated)
+            ReaderCommandCompleted
+        } catch (_: RuntimeException) {
+            runCatching { updatePreferences(previous) }
+            ReaderCommandRejected("READER_PREFERENCES_APPLY_FAILED")
+        }
+    }
 
     fun toggleCurrentBookmark()
 
@@ -49,4 +95,25 @@ internal interface ReaderScreenController {
     suspend fun flush()
 
     suspend fun close()
+}
+
+private const val NAVIGATION_VERIFICATION_TIMEOUT_MILLIS = 3_000L
+
+private fun ReaderLocation.matches(target: ReaderNavigationTarget): Boolean {
+    return when (target) {
+    is ReaderNavigationTargetReflowable -> {
+        val current = (this as? com.ermao.library.shared.modules.reader.ReflowReaderLocation)?.resourceKey
+            ?: return false
+        val expectedResource = target.href.substringBefore('#').removePrefix("./")
+        val currentResource = current.substringBefore('#').removePrefix("./")
+        currentResource == expectedResource &&
+            ('#' !in target.href || current.substringAfter('#', "") == target.href.substringAfter('#'))
+    }
+    is ReaderNavigationTargetPdf ->
+        (this as? com.ermao.library.shared.modules.reader.PdfReaderLocation)?.pageIndex == target.pageIndex
+    is ReaderNavigationTargetComic -> (this as? ComicReaderLocation)?.let { location ->
+        location.pageIndex == target.pageIndex && location.resourceHref == target.resourceHref
+    } == true
+    is ReaderNavigationTargetInvalid -> false
+    }
 }

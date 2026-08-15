@@ -49,7 +49,7 @@ import { ReaderControlNavButton, ReaderSegmentedControl } from './ui/reader-cont
 import { createScreenWakeLockController, readerWakeLockPort } from './screen-wake-lock';
 
 type ComicDirection = ReaderPreferences['comic']['direction'];
-type ComicMode = ReaderPreferences['comic']['mode'];
+type ComicMode = ReaderPreferences['comic']['spreadMode'];
 type ComicPageTurnAnimation = ReaderPreferences['comic']['pageTurnAnimation'];
 type ComicImageFit = ReaderPreferences['comic']['imageFit'];
 type ComicImageVariant = ReaderPreferences['comic']['imageVariant'];
@@ -76,11 +76,11 @@ export type ReaderProgress = {
 };
 
 export type ReaderControls = {
-  next: () => Promise<void>;
-  prev: () => Promise<void>;
-  jumpToProgress: (value: number) => Promise<void>;
-  jumpToHref?: (href: string) => Promise<void>;
-  jumpToIndex?: (index: number) => Promise<void>;
+  next: () => Promise<boolean>;
+  prev: () => Promise<boolean>;
+  jumpToProgress: (value: number) => Promise<boolean>;
+  jumpToHref?: (href: string) => Promise<boolean>;
+  jumpToIndex?: (index: number) => Promise<boolean>;
 };
 
 export type ReaderSettings = {
@@ -308,9 +308,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const dark = isDarkReaderTheme(settings.theme);
   const themeSurface = readerThemeSurfaces[settings.theme];
   const availableNavigationItems = navItems.length > 0 ? navItems : volumeNavigation?.pages ?? [];
-  const chapterNavigationItems = readerType === 'reflowable'
-    ? availableNavigationItems.filter((item) => Boolean(item.href))
-    : availableNavigationItems;
+  const chapterNavigationItems = availableNavigationItems;
   const currentNavigationItem = activeNavigationItem(readerType, chapterNavigationItems, progress, progressExtra);
   const currentNavigationIndex = currentNavigationItem
     ? chapterNavigationItems.findIndex((item) => navigationItemKey(item) === navigationItemKey(currentNavigationItem))
@@ -664,17 +662,21 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   }
 
   async function navigateToItem(item: ReaderNavigationItem, dismissPanel: boolean) {
-    const activeControls = controlsRef.current;
-    if (item.href && capabilitiesRef.current?.canJumpToHref !== false && activeControls?.jumpToHref) {
-      await activeControls.jumpToHref(item.href);
-    } else if (capabilitiesRef.current?.canJumpToIndex !== false && activeControls?.jumpToIndex) {
-      await activeControls.jumpToIndex(item.index);
-    } else {
-      const total = progress.total ?? chapterNavigationItems.length;
-      const percent = total > 1 ? ((item.index - 1) / (total - 1)) * 100 : 0;
-      await jumpToPercent(percent);
+    if (currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem)) {
+      if (dismissPanel) closePanel();
+      keepControlsOpen();
+      return;
     }
-    if (dismissPanel) closePanel();
+    const activeControls = controlsRef.current;
+    let accepted = false;
+    if (readerType === 'reflowable' && !item.href) {
+      accepted = false;
+    } else if (readerType === 'reflowable' && item.href && capabilitiesRef.current?.canJumpToHref !== false && activeControls?.jumpToHref) {
+      accepted = await activeControls.jumpToHref(item.href);
+    } else if (capabilitiesRef.current?.canJumpToIndex !== false && activeControls?.jumpToIndex) {
+      accepted = await activeControls.jumpToIndex(item.index);
+    }
+    if (dismissPanel && accepted) closePanel();
     keepControlsOpen();
   }
 
@@ -1193,11 +1195,11 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     ) : readerType === 'comic' ? (
                       <>
                         <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.comicFlow} options={READER_COMIC_FLOW_OPTIONS} onChange={(value) => updateSettings({ comicFlow: value as ReaderSettings['comicFlow'] })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("模式")} value={settings.comicMode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} disabled={settings.comicFlow === 'vertical'} onChange={(value) => updateSettings({ comicMode: value as ComicMode })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("方向")} value={settings.comicDirection} options={READER_COMIC_DIRECTION_OPTIONS} disabled={settings.comicFlow === 'vertical'} onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("模式")} value={settings.comicMode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} disabled={settings.comicFlow === 'scrolled'} onChange={(value) => updateSettings({ comicMode: value as ComicMode })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("方向")} value={settings.comicDirection} options={READER_COMIC_DIRECTION_OPTIONS} disabled={settings.comicFlow === 'scrolled'} onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })} dark={dark} />
                         <CompactSettingOptions label={i18nAttribute("适配")} value={settings.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(value) => updateSettings({ imageFit: value as ComicImageFit })} dark={dark} />
-                        <ReaderToggleRow label={i18nAttribute("双页时封面单独显示")} checked={settings.comicCoverSingle} disabled={settings.comicFlow === 'vertical' || settings.comicMode !== 'double'} onChange={(checked) => updateSettings({ comicCoverSingle: checked })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("页间距")} value={String(settings.comicPageGap)} options={READER_PAGE_GAP_OPTIONS} disabled={settings.comicFlow === 'vertical'} onChange={(value) => updateSettings({ comicPageGap: Number(value) as ReaderSettings['comicPageGap'] })} dark={dark} />
+                        <ReaderToggleRow label={i18nAttribute("双页时封面单独显示")} checked={settings.comicCoverSingle} disabled={settings.comicFlow === 'scrolled' || settings.comicMode !== 'double'} onChange={(checked) => updateSettings({ comicCoverSingle: checked })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("页间距")} value={String(settings.comicPageGap)} options={READER_PAGE_GAP_OPTIONS} disabled={settings.comicFlow === 'scrolled'} onChange={(value) => updateSettings({ comicPageGap: Number(value) as ReaderSettings['comicPageGap'] })} dark={dark} />
                       </>
                     ) : (
                       <>

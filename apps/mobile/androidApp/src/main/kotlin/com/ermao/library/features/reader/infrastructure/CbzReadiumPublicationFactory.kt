@@ -1,6 +1,5 @@
 package com.ermao.library.features.reader.infrastructure
 
-import android.graphics.BitmapFactory
 import com.ermao.library.shared.modules.reader.ReaderComicPage
 import java.io.File
 import java.util.Locale
@@ -19,12 +18,12 @@ import org.readium.r2.shared.util.asset.ContainerAsset
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.mediatype.MediaType
 
-/** Builds an image Publication only after the downloaded archive matches the server canonical index. */
+/** Builds a local image Publication from the downloaded archive itself. */
 internal class CbzReadiumPublicationFactory(
     private val assetRetriever: AssetRetriever,
 ) {
-    suspend fun open(file: File, title: String, canonicalPages: List<ReaderComicPage>): Publication {
-        validateCanonicalIndex(file, canonicalPages)
+    suspend fun open(file: File, title: String, pageHints: List<ReaderComicPage>): Publication {
+        val localPages = indexPages(file, pageHints)
         val asset = assetRetriever.retrieve(file).getOrElse { error ->
             throw IllegalArgumentException("CBZ asset could not be opened: $error")
         }
@@ -33,11 +32,11 @@ internal class CbzReadiumPublicationFactory(
             asset.close()
             throw IllegalArgumentException("CBZ did not open as an archive")
         }
-        val readingOrder = canonicalPages.mapIndexed { index, page ->
+        val readingOrder = localPages.mapIndexed { index, page ->
             Link(
                 href = requireNotNull(Url(page.resourceHref)),
                 mediaType = requireNotNull(MediaType(page.mediaType)),
-                title = page.resourceHref.substringAfterLast('/'),
+                title = page.title,
                 rels = if (index == 0) setOf("cover") else emptySet(),
             )
         }
@@ -63,51 +62,40 @@ internal class CbzReadiumPublicationFactory(
         )
     }
 
-    private fun validateCanonicalIndex(file: File, canonicalPages: List<ReaderComicPage>) {
-        require(canonicalPages.isNotEmpty()) { "CBZ canonical page index is empty" }
-        require(canonicalPages.map(ReaderComicPage::pageIndex) == canonicalPages.indices.toList()) {
-            "CBZ canonical page indexes are not contiguous"
-        }
-        require(canonicalPages.map { it.resourceHref.lowercase(Locale.ROOT) }.distinct().size == canonicalPages.size) {
-            "CBZ canonical page hrefs are duplicated"
-        }
+    fun indexPages(file: File, pageHints: List<ReaderComicPage> = emptyList()): List<ReaderComicPage> =
         ZipFile(file).use { archive ->
             val localImageEntries = archive.entries().asSequence()
                 .filterNot { it.isDirectory }
                 .filter { it.name.substringAfterLast('.', "").lowercase(Locale.ROOT) in IMAGE_EXTENSIONS }
-                .toList()
-            require(localImageEntries.size == canonicalPages.size) {
-                "CBZ canonical page count does not match the archive"
-            }
-            val localNames = localImageEntries.map { it.name }.toSet()
-            require(localNames == canonicalPages.map(ReaderComicPage::resourceHref).toSet()) {
-                "CBZ canonical hrefs do not match the archive"
-            }
-            canonicalPages.forEach { page ->
-                val entry = requireNotNull(archive.getEntry(page.resourceHref)) {
-                    "CBZ canonical page is missing"
+                .onEach { entry ->
+                    require(entry.name.isNotBlank() && !entry.name.startsWith('/') && '\\' !in entry.name)
+                    require(entry.name.split('/').none { it.isBlank() || it == "." || it == ".." })
                 }
+                .sortedBy { naturalSortKey(it.name) }
+                .toList()
+            require(localImageEntries.isNotEmpty()) { "CBZ has no supported image pages" }
+            require(localImageEntries.map { it.name.lowercase(Locale.ROOT) }.distinct().size == localImageEntries.size) {
+                "CBZ page names are duplicated"
+            }
+            localImageEntries.mapIndexed { index, entry ->
+                val header = ByteArray(16)
                 archive.getInputStream(entry).buffered().use { input ->
-                    val bytes = input.readBytes()
-                    require(detectMediaType(bytes) == page.mediaType) {
-                        "CBZ canonical media type does not match page content"
-                    }
-                    if (page.width != null || page.height != null) {
-                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-                            "CBZ page dimensions could not be read"
-                        }
-                        require(page.width == null || page.width == bounds.outWidth) {
-                            "CBZ canonical width does not match page content"
-                        }
-                        require(page.height == null || page.height == bounds.outHeight) {
-                            "CBZ canonical height does not match page content"
-                        }
-                    }
+                    val count = input.read(header)
+                    val mediaType = detectMediaType(header.copyOf(count.coerceAtLeast(0)))
+                        ?: throw IllegalArgumentException("CBZ page content is unsupported")
+                    val hint = pageHints.getOrNull(index)
+                    ReaderComicPage(
+                        pageIndex = index,
+                        resourceHref = encodeComicArchiveEntryHref(entry.name),
+                        mediaType = mediaType,
+                        title = hint?.title ?: entry.name.substringAfterLast('/'),
+                    )
                 }
             }
         }
+
+    private fun naturalSortKey(value: String): String = DIGITS.replace(value.lowercase(Locale.ROOT)) { match ->
+        match.value.padStart(20, '0')
     }
 
     private fun detectMediaType(bytes: ByteArray): String? = when {
@@ -124,8 +112,22 @@ internal class CbzReadiumPublicationFactory(
 
     private companion object {
         val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp")
+        val DIGITS = Regex("\\d+")
         val PNG_SIGNATURE = byteArrayOf(
             0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
         )
+    }
+}
+
+internal fun encodeComicArchiveEntryHref(name: String): String = buildString {
+    name.encodeToByteArray().forEach { byte ->
+        val value = byte.toInt() and 0xFF
+        val character = value.toChar()
+        if ((character.isLetterOrDigit() && value < 128) || character in "-._~/") {
+            append(character)
+        } else {
+            append('%')
+            append(value.toString(16).uppercase(Locale.ROOT).padStart(2, '0'))
+        }
     }
 }

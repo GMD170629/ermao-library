@@ -31,7 +31,7 @@ export function comicImageSizing(fit: ComicImageFit, layoutMode: 'single' | 'dou
 }
 
 export function comicOrderedPages(pageCount: number) {
-  return Array.from({ length: Math.max(0, Math.round(pageCount)) }, (_, index) => index + 1);
+  return Array.from({ length: Math.max(0, Math.round(pageCount)) }, (_, index) => index);
 }
 
 export function comicSpreadStarts(orderedPages: number[], mode: 'single' | 'double', pairing: ComicPairingPolicy = 'paired-from-first') {
@@ -43,8 +43,8 @@ export function comicSpreadStarts(orderedPages: number[], mode: 'single' | 'doub
 }
 
 export function comicNormalizePage(orderedPages: number[], page: number, mode: 'single' | 'double', pairing: ComicPairingPolicy = 'paired-from-first') {
-  if (!orderedPages.length) return 1;
-  const clamped = Math.max(orderedPages[0], Math.min(orderedPages.at(-1) ?? orderedPages[0], Math.round(page || 1)));
+  if (!orderedPages.length) return 0;
+  const clamped = Math.max(orderedPages[0], Math.min(orderedPages.at(-1) ?? orderedPages[0], Math.round(Number.isFinite(page) ? page : 0)));
   if (mode === 'single') return clamped;
   if (pairing === 'cover-single') {
     const index = orderedPages.indexOf(clamped);
@@ -63,7 +63,7 @@ export function comicAdjacentSpreadPage(orderedPages: number[], page: number, mo
 }
 
 export function comicLastSpreadPage(orderedPages: number[], mode: 'single' | 'double', pairing: ComicPairingPolicy = 'paired-from-first') {
-  return comicSpreadStarts(orderedPages, mode, pairing).at(-1) ?? 1;
+  return comicSpreadStarts(orderedPages, mode, pairing).at(-1) ?? 0;
 }
 
 export function comicSpreadPages(orderedPages: number[], page: number, mode: 'single' | 'double', pairing: ComicPairingPolicy = 'paired-from-first') {
@@ -111,7 +111,7 @@ export function comicPagePercent(page: number, orderedPages: number[], mode: 'si
 }
 
 export function comicPageForProgress(progression: number, orderedPages: number[]) {
-  if (!orderedPages.length) return 1;
+  if (!orderedPages.length) return 0;
   const index = Math.round(Math.max(0, Math.min(1, progression)) * (orderedPages.length - 1));
   return orderedPages[index] ?? orderedPages[0];
 }

@@ -28,8 +28,8 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.DownloadSource
 import com.ermao.library.shared.modules.downloads.domain.isSafeMediaApiPath
 import io.ktor.client.plugins.HttpRequestTimeoutException
-import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
@@ -88,64 +88,65 @@ class KtorDownloadsGateway(
         var session: DownloadByteSinkSession? = null
         try {
             val source = request.descriptor.source
-            val response = apiClient.authenticatedHttpClient().get(
+            val statement = apiClient.authenticatedHttpClient().prepareGet(
                 apiClient.resolveAuthenticatedApiPath(source.apiPath),
             ) {
                 if (request.resumeFromBytes > 0) {
                     header(HttpHeaders.Range, "bytes=${request.resumeFromBytes}-")
                 }
             }
-            if (response.status.value in REDIRECT_STATUS_CODES) {
-                response.bodyAsText()
-                return transferFailure("DOWNLOAD_REDIRECT_REJECTED")
-            }
-            val responseContract = validateResponse(
-                statusCode = response.status.value,
-                contentLength = response.headers[HttpHeaders.ContentLength],
-                contentRange = response.headers[HttpHeaders.ContentRange],
-                expectedTotalBytes = source.totalBytes,
-                resumeFromBytes = request.resumeFromBytes,
-            ) ?: run {
-                response.bodyAsChannel().cancel(null)
-                return transferFailure("DOWNLOAD_RESPONSE_INVALID")
-            }
-            session = sink.begin(
-                DownloadSinkRequest(
-                    namespace = context.namespace,
-                    taskId = request.taskId,
-                    volumeId = request.descriptor.identity.volumeId,
-                    contentFingerprint = request.descriptor.identity.contentFingerprint,
+            return statement.execute { response ->
+                if (response.status.value in REDIRECT_STATUS_CODES) {
+                    response.bodyAsText()
+                    return@execute transferFailure("DOWNLOAD_REDIRECT_REJECTED")
+                }
+                val responseContract = validateResponse(
+                    statusCode = response.status.value,
+                    contentLength = response.headers[HttpHeaders.ContentLength],
+                    contentRange = response.headers[HttpHeaders.ContentRange],
                     expectedTotalBytes = source.totalBytes,
                     resumeFromBytes = request.resumeFromBytes,
-                ),
-            )
-            val channel = response.bodyAsChannel()
-            val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
-            var receivedBytes = 0L
-            while (true) {
-                val read = channel.readAvailable(buffer, 0, buffer.size)
-                if (read < 0) break
-                if (read == 0) continue
-                receivedBytes += read
-                if (receivedBytes > responseContract.contentLength) {
-                    throw DownloadProtocolException("Response exceeded Content-Length")
+                ) ?: run {
+                    response.bodyAsChannel().cancel(null)
+                    return@execute transferFailure("DOWNLOAD_RESPONSE_INVALID")
                 }
-                session.write(buffer.copyOf(read))
-                progressObserver?.onProgress(request.resumeFromBytes + receivedBytes, source.totalBytes)
+                session = sink.begin(
+                    DownloadSinkRequest(
+                        namespace = context.namespace,
+                        taskId = request.taskId,
+                        volumeId = request.descriptor.identity.volumeId,
+                        expectedTotalBytes = source.totalBytes,
+                        resumeFromBytes = request.resumeFromBytes,
+                    ),
+                )
+                val channel = response.bodyAsChannel()
+                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
+                var receivedBytes = 0L
+                while (true) {
+                    val read = channel.readAvailable(buffer, 0, buffer.size)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    receivedBytes += read
+                    if (receivedBytes > responseContract.contentLength) {
+                        throw DownloadProtocolException("Response exceeded Content-Length")
+                    }
+                    session.write(buffer.copyOf(read))
+                    progressObserver?.onProgress(request.resumeFromBytes + receivedBytes, source.totalBytes)
+                }
+                if (receivedBytes != responseContract.contentLength) {
+                    throw DownloadProtocolException("Response ended before Content-Length")
+                }
+                val localReference = session.commit(source.totalBytes)
+                require(localReference.isNotBlank()) { "Sink returned an empty local reference" }
+                DownloadTransferResult.Success(
+                    CompletedTransfer(
+                        localReference = localReference,
+                        verifiedBytes = source.totalBytes,
+                        etag = response.headers[HttpHeaders.ETag],
+                        lastModified = response.headers[HttpHeaders.LastModified],
+                    ),
+                )
             }
-            if (receivedBytes != responseContract.contentLength) {
-                throw DownloadProtocolException("Response ended before Content-Length")
-            }
-            val localReference = session.commit(source.totalBytes)
-            require(localReference.isNotBlank()) { "Sink returned an empty local reference" }
-            return DownloadTransferResult.Success(
-                CompletedTransfer(
-                    localReference = localReference,
-                    verifiedBytes = source.totalBytes,
-                    etag = response.headers[HttpHeaders.ETag],
-                    lastModified = response.headers[HttpHeaders.LastModified],
-                ),
-            )
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { session?.abort() }
             throw cancelled
@@ -222,34 +223,47 @@ class KtorDownloadsGateway(
         require(fileUrl.isSafeMediaApiPath()) { "Bootstrap file URL is invalid" }
         val volumeFormat = volume.requiredString("format")
         val sourceFiles = files.map { it as? JsonObject ?: throw IllegalArgumentException("Bootstrap file is invalid") }
-        val expectedKind = if (readerType == DownloadReaderType.Reflowable) {
-            val sourceFormat = requiredString("sourceFormat").trim().lowercase()
-            require(sourceFormat in DOWNLOADABLE_REFLOWABLE_FORMATS) { "Unsupported reflowable source format" }
-            require(volumeFormat.equals(sourceFormat, ignoreCase = true)) { "Bootstrap source format is inconsistent" }
-            sourceFormat.uppercase()
-        } else {
-            volumeFormat.uppercase()
+        val expectedKind = when (readerType) {
+            DownloadReaderType.Reflowable -> {
+                val sourceFormat = requiredString("sourceFormat").trim().lowercase()
+                require(sourceFormat in DOWNLOADABLE_REFLOWABLE_FORMATS) { "Unsupported reflowable source format" }
+                require(volumeFormat.equals(sourceFormat, ignoreCase = true)) {
+                    "Bootstrap source format is inconsistent"
+                }
+                sourceFormat.uppercase()
+            }
+            DownloadReaderType.Comic -> DownloadMediaKind.Comic.wireValue
+            else -> volumeFormat.uppercase()
         }
         val sourceFile = sourceFiles
             .sortedWith(compareBy<JsonObject>({ it.requiredNonNegativeInt("sortOrder") }, { it.requiredString("id") }))
             .firstOrNull { it.requiredString("kind").equals(expectedKind, ignoreCase = true) }
             ?: throw IllegalArgumentException("Bootstrap publication file is missing")
-        require(sourceFile.requiredString("url").isSafeMediaApiPath()) { "Bootstrap publication URL is invalid" }
-        val sourceSize = sourceFile.requiredLong("sizeBytes")
-        val sourceMime = sourceFile.requiredString("mimeType").lowercase()
+        val comicArtifact = if (readerType == DownloadReaderType.Comic) {
+            val publication = requiredObject("publication")
+            require(publication.requiredString("kind") == "comic") { "Comic publication contract is invalid" }
+            publication.requiredObject("downloadArtifact").also { artifact ->
+                require(artifact.requiredString("sourceFormat").equals(volumeFormat, ignoreCase = true)) {
+                    "Comic download source format is inconsistent"
+                }
+            }
+        } else {
+            null
+        }
+        val sourceApiPath = comicArtifact?.requiredString("url") ?: sourceFile.requiredString("url")
+        require(sourceApiPath.isSafeMediaApiPath()) { "Bootstrap publication URL is invalid" }
+        val sourceSize = comicArtifact?.requiredLong("sizeBytes") ?: sourceFile.requiredLong("sizeBytes")
+        val sourceMime = (comicArtifact?.requiredString("mimeType") ?: sourceFile.requiredString("mimeType")).lowercase()
         if (readerType == DownloadReaderType.Reflowable) {
             require(sourceMime in allowedReflowableMimeTypes(expectedKind)) {
                 "Bootstrap publication MIME type is inconsistent"
             }
         }
-        val contentFingerprint = requiredString("contentFingerprint")
-        require(contentFingerprint.matches(CONTENT_FINGERPRINT)) { "Bootstrap content fingerprint is invalid" }
         return DownloadDescriptor(
             identity = DownloadIdentity(
                 namespace = context.namespace,
                 workId = work.requiredString("id"),
                 volumeId = expectedVolumeId,
-                contentFingerprint = contentFingerprint,
             ),
             workTitle = work.requiredString("title"),
             workAuthor = work.optionalString("author"),
@@ -258,7 +272,7 @@ class KtorDownloadsGateway(
             format = volumeFormat,
             readerType = readerType,
             source = DownloadSource(
-                apiPath = fileUrl,
+                apiPath = sourceApiPath,
                 mimeType = sourceMime,
                 totalBytes = sourceSize,
             ),
@@ -319,7 +333,6 @@ class KtorDownloadsGateway(
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
         val DOWNLOADABLE_REFLOWABLE_FORMATS = setOf("epub", "mobi", "azw", "azw3", "prc")
-        val CONTENT_FINGERPRINT = Regex("^sha256:[0-9a-f]{64}$")
     }
 }
 

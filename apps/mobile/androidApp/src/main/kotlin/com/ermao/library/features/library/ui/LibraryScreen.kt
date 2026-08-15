@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.MoreVert
@@ -87,6 +88,8 @@ import com.ermao.library.features.content.ui.ContentAreaMessage
 import com.ermao.library.features.content.ui.ContentStatusBanner
 import com.ermao.library.features.content.ui.WorkCover
 import com.ermao.library.features.content.ui.WorkGridItem
+import com.ermao.library.features.content.ui.WorkListItem
+import com.ermao.library.features.content.ui.responsiveCoverColumnCount
 import com.ermao.library.features.library.application.LibraryUiState
 import com.ermao.library.features.library.application.ScrollAnchor
 import com.ermao.library.shared.modules.library.ContentRepository
@@ -137,7 +140,7 @@ fun LibraryScreen(
         containerColor = theme.colors.canvas,
         topBar = {
             LargeTopAppBar(
-                title = { Text(stringResource(R.string.tab_library), style = theme.typography.display) },
+                title = { Text(stringResource(R.string.tab_library)) },
                 actions = {
                     if (state.selectedScope == LibraryScope.Works) {
                         Box {
@@ -165,7 +168,7 @@ fun LibraryScreen(
             OutlinedTextField(
                 value = state.current.query,
                 onValueChange = onQueryChanged,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three).testTag("library-search"),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.two).testTag("library-search"),
                 label = { Text(stringResource(R.string.library_search_label)) },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 trailingIcon = if (state.current.query.isNotEmpty()) {
@@ -174,7 +177,7 @@ fun LibraryScreen(
                 singleLine = true,
             )
             SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.two),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.two, vertical = theme.spacing.two),
             ) {
                 LibraryScope.entries.forEachIndexed { index, scope ->
                     SegmentedButton(
@@ -196,7 +199,7 @@ fun LibraryScreen(
             if (state.current.freshness != ContentFreshness.Fresh) {
                 ContentStatusBanner(
                     state.current.freshness,
-                    Modifier.padding(horizontal = theme.spacing.three, vertical = theme.spacing.one),
+                    Modifier.padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
                 )
             }
             Box(Modifier.fillMaxSize()) {
@@ -241,7 +244,7 @@ private fun LibraryContextRow(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.one),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -270,7 +273,7 @@ private fun LibraryContextRow(
         }
         if (state.selectedScope == LibraryScope.Works && state.current.filters.count > 0) {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = theme.spacing.three),
+                contentPadding = PaddingValues(horizontal = theme.spacing.two),
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
             ) {
                 items(state.current.filters.media.toList(), key = MediaFilter::name) { filter ->
@@ -290,8 +293,13 @@ private fun AppliedFilterChip(label: String, onRemove: () -> Unit) {
         selected = true,
         onClick = onRemove,
         label = { Text(label) },
-        trailingIcon = { Text("×") },
-        modifier = Modifier.heightIn(min = 48.dp),
+        trailingIcon = {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = stringResource(R.string.library_remove_filter),
+            )
+        },
+        modifier = Modifier.heightIn(min = WarmPageThemeValues.metrics.androidMinimumTouchTarget),
     )
 }
 
@@ -389,23 +397,35 @@ private fun WorksResults(
         ObserveListState(listState, works, onScrollAnchorChanged, onLoadNextPage)
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
             items(works, key = WorkCard::id) { work ->
-                WorkListRow(work, repository, context, Modifier.clickable { onOpenWork(work.id) })
+                WorkListItem(
+                    work = work,
+                    repository = repository,
+                    context = context,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenWork(work.id) }
+                        .padding(horizontal = WarmPageThemeValues.spacing.two, vertical = WarmPageThemeValues.spacing.two),
+                )
             }
             paginationFooter(isLoadingMore, paginationError, onLoadNextPage)
         }
     } else {
         BoxWithConstraints {
             val fontScale = LocalDensity.current.fontScale
-            val columns = if (maxWidth >= 360.dp && fontScale <= 1.15f) 3 else 2
+            val columns = responsiveCoverColumnCount(maxWidth, fontScale)
             val initialIndex = works.indexOfFirst { it.id == scrollAnchor.itemId }.coerceAtLeast(0)
             val gridState = rememberLazyGridState(initialIndex, scrollAnchor.offset)
             ObserveGridState(gridState, works, onScrollAnchorChanged, onLoadNextPage)
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 state = gridState,
-                contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 96.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+                contentPadding = PaddingValues(
+                    start = WarmPageThemeValues.spacing.two,
+                    end = WarmPageThemeValues.spacing.two,
+                    bottom = 96.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(WarmPageThemeValues.spacing.two),
+                verticalArrangement = Arrangement.spacedBy(WarmPageThemeValues.spacing.three),
             ) {
                 items(works, key = WorkCard::id) { work ->
                     WorkGridItem(
@@ -439,30 +459,15 @@ private fun GroupingResults(
     val initialIndex = groups.indexOfFirst { it.id == scrollAnchor.itemId }.coerceAtLeast(0)
     val listState = rememberLazyListState(initialIndex, scrollAnchor.offset)
     ObserveListState(listState, groups, onScrollAnchorChanged, onLoadNextPage) { it.id }
-    LazyColumn(state = listState, contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)) {
+    LazyColumn(
+        state = listState,
+        contentPadding = PaddingValues(horizontal = WarmPageThemeValues.spacing.two, vertical = WarmPageThemeValues.spacing.one),
+    ) {
         items(groups, key = GroupingCard::id) { group ->
             GroupingRow(group, scope, repository, context, Modifier.clickable { onOpenFacet(scope, group.id) })
             HorizontalDivider()
         }
         paginationFooter(isLoadingMore, paginationError, onLoadNextPage)
-    }
-}
-
-@Composable
-private fun WorkListRow(
-    work: WorkCard,
-    repository: ContentRepository,
-    context: ContentRequestContext,
-    modifier: Modifier = Modifier,
-) {
-    val theme = WarmPageThemeValues
-    Row(modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.two)) {
-        WorkCover(work, repository, context, CoverSize.Small, Modifier.size(width = 64.dp, height = 96.dp))
-        Column(Modifier.weight(1f).padding(start = theme.spacing.two)) {
-            Text(work.title, style = theme.typography.headline, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(work.author, style = theme.typography.callout, color = theme.colors.textSecondary)
-            work.progressPercent?.let { Text(stringResource(R.string.progress_percent, it), style = theme.typography.caption, color = theme.colors.textSecondary) }
-        }
     }
 }
 
@@ -671,12 +676,17 @@ private fun FilterSheet(
 
 @Composable
 private fun FilterRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val theme = WarmPageThemeValues
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onCheckedChange(!checked) }.padding(vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = theme.metrics.androidMinimumTouchTarget)
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = theme.spacing.half),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
-        Text(label, modifier = Modifier.padding(start = 8.dp))
+        Text(label, modifier = Modifier.padding(start = theme.spacing.one))
     }
 }
 

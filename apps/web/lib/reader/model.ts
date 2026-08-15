@@ -1,14 +1,13 @@
 import {
   READER_SCHEMA_VERSION,
   comparePublicationLocations,
-  type PublicationFingerprint,
   type PublicationLocation,
   type ReaderLocation,
   type ReaderPreferences
 } from '@shuku/reader-core';
 
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v4';
-export const READER_DB_SCHEMA_VERSION = 3;
+export const READER_DB_SCHEMA_VERSION = 4;
 export const READER_PROGRESS_DEBOUNCE_MS = 500;
 
 export type AudioProgressLocation = Readonly<{ kind: 'audio'; volumeId: string; fileId: string; chapterId: string | null; positionMs: number }>;
@@ -160,11 +159,6 @@ export function preferenceKey(userId: string, workId: string) {
   return `${encodeURIComponent(userId)}::${encodeURIComponent(workId)}`;
 }
 
-export function publicationFingerprintKey(fingerprint: PublicationFingerprint) {
-  return [fingerprint.originalFileHash, fingerprint.parser, fingerprint.normalization]
-    .map(encodeKeyPart).join('|');
-}
-
 export function exactProgressKey(identity: ExactProgressIdentity) {
   return [identity.serverIdentity, identity.userId, identity.clientId, identity.workId, identity.volumeId]
     .map(encodeKeyPart).join('|');
@@ -175,9 +169,9 @@ export function syncStateKey(identity: Pick<ExactProgressIdentity, 'serverIdenti
     .map(encodeKeyPart).join('|');
 }
 
-/** Progress belongs to work + volume; publication bytes are locator diagnostics, not ownership. */
+/** Progress belongs to work + volume. */
 export function progressLocationsMatch(expected: PublicationLocation, actual: PublicationLocation) {
-  return comparePublicationLocations(expected, { ...actual, publication: expected.publication }).precision === 'exact';
+  return comparePublicationLocations(expected, actual).precision === 'exact';
 }
 
 export function currentReaderServerIdentity() {

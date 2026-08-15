@@ -24,7 +24,8 @@ class PublicationSource:
     file_id: str
     source_format: str
     path: str
-    full_hash: str | None
+    size_bytes: int
+    mtime_ms: int
     title: str
     author: str | None
 
@@ -36,10 +37,6 @@ class PublicationSourceRepository(Protocol):
         volume_id: str,
         access_scope: PublicationAccessScope,
     ) -> PublicationSource | None: ...
-
-
-class PublicationSourceHasher(Protocol):
-    def sha256(self, source: PublicationSource) -> str: ...
 
 
 class PublicationAdapter(Protocol):

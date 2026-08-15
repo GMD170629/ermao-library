@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="5" failures="0" errors="0" skipped="0" time="5.316" timestamp="2026-08-14T19:57:29" hostname="localhost">
+  <testsuite name="com.ermao.library.AndroidShellSmokeTest" tests="5" failures="0" errors="0" skipped="0" time="4.821" timestamp="2026-08-14T19:57:29" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":androidApp" />
+    </properties>
+    <testcase name="loginCheckKeepsVisibleIndeterminateFeedbackAndPreventsAnotherSubmission" classname="com.ermao.library.AndroidShellSmokeTest" time="1.193" />
+    <testcase name="eachRootTabOwnsAVisibleNavigationDestination" classname="com.ermao.library.AndroidShellSmokeTest" time="2.24" />
+    <testcase name="noProfileShowsInlineServerAndLoginFields" classname="com.ermao.library.AndroidShellSmokeTest" time="0.53" />
+    <testcase name="authenticatedServerManagementReusesLoginEntryAndCanReturnToShell" classname="com.ermao.library.AndroidShellSmokeTest" time="0.505" />
+    <testcase name="lightDarkAndSupportedLocalesResolveFromResources" classname="com.ermao.library.AndroidShellSmokeTest" time="0.353" />
+  </testsuite>
+</testsuites>

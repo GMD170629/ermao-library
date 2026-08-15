@@ -11,7 +11,6 @@ import kotlinx.serialization.json.put
 
 /** Renderer-neutral exact publication location shared by Reader clients and Reader v4. */
 sealed interface PublicationLocation {
-    val publication: PublicationFingerprint
     val engineLocator: EngineLocator?
 
     val platform: ReaderEnginePlatform?
@@ -31,34 +30,29 @@ sealed interface PublicationLocation {
             }
             val root = runCatching { Json.parseToJsonElement(value) as? JsonObject }.getOrNull()
                 ?: throw IllegalArgumentException("Publication location must be a JSON object")
-            val publication = root.requiredObject("publication").toPublicationFingerprint()
             val engineLocator = root.optionalObject("engineLocator")?.toEngineLocator()
             return when (root.requiredString("kind")) {
-                "reflowable" -> root.requireOnly("kind", "publication", "engineLocator").let { ReflowablePublicationLocation(
-                    publication = publication,
+                "reflowable" -> root.requireOnly("kind", "engineLocator", "publication").let { ReflowablePublicationLocation(
                     engineLocator = engineLocator
                         ?: throw IllegalArgumentException("Reflowable publication location requires an engine locator"),
                 ) }
                 "pdf" -> root.requireOnly(
-                    "kind", "publication", "pageIndex", "pageProgression", "engineLocator",
+                    "kind", "pageIndex", "pageProgression", "engineLocator", "publication",
                 ).let { PdfPublicationLocation(
-                    publication = publication,
                     pageIndex = root.requiredInt("pageIndex"),
                     pageProgression = root.requiredCanonicalPageProgression("pageProgression"),
                     engineLocator = engineLocator,
                 ) }
                 "comic" -> root.requireOnly(
-                    "kind", "publication", "resourceHref", "pageIndex", "engineLocator",
+                    "kind", "resourceHref", "pageIndex", "engineLocator", "publication",
                 ).let { ComicPublicationLocation(
-                    publication = publication,
                     resourceHref = root.requiredString("resourceHref"),
                     pageIndex = root.requiredInt("pageIndex"),
                     engineLocator = engineLocator,
                 ) }
                 "audio" -> root.requireOnly(
-                    "kind", "publication", "fileId", "chapterId", "positionMillis", "engineLocator",
+                    "kind", "fileId", "chapterId", "positionMillis", "engineLocator", "publication",
                 ).let { AudioPublicationLocation(
-                    publication = publication,
                     fileId = root.requiredString("fileId"),
                     chapterId = root.optionalString("chapterId"),
                     positionMillis = root.requiredLong("positionMillis"),
@@ -75,7 +69,6 @@ sealed interface PublicationLocation {
 }
 
 data class ReflowablePublicationLocation(
-    override val publication: PublicationFingerprint,
     override val engineLocator: EngineLocator,
 ) : PublicationLocation {
     init {
@@ -83,7 +76,6 @@ data class ReflowablePublicationLocation(
         ReadiumLocatorEnvelope(
             platform = engineLocator.platform,
             version = engineLocator.version,
-            publication = publication,
             payload = engineLocator.payload,
         )
     }
@@ -92,13 +84,11 @@ data class ReflowablePublicationLocation(
         get() = ReadiumLocatorEnvelope(
             platform = engineLocator.platform,
             version = engineLocator.version,
-            publication = publication,
             payload = engineLocator.payload,
         )
 }
 
 class PdfPublicationLocation(
-    override val publication: PublicationFingerprint,
     val pageIndex: Int,
     pageProgression: Double,
     override val engineLocator: EngineLocator? = null,
@@ -113,19 +103,18 @@ class PdfPublicationLocation(
     }
 
     override fun equals(other: Any?): Boolean = other is PdfPublicationLocation &&
-        publication == other.publication && pageIndex == other.pageIndex &&
+        pageIndex == other.pageIndex &&
         pageProgression == other.pageProgression && engineLocator == other.engineLocator
 
-    override fun hashCode(): Int = 31 * (31 * (31 * publication.hashCode() + pageIndex) + pageProgression.hashCode()) +
+    override fun hashCode(): Int = 31 * (31 * pageIndex + pageProgression.hashCode()) +
         (engineLocator?.hashCode() ?: 0)
 
     override fun toString(): String =
-        "PdfPublicationLocation(publication=$publication, pageIndex=$pageIndex, " +
+        "PdfPublicationLocation(pageIndex=$pageIndex, " +
             "pageProgression=$pageProgression, engineLocator=$engineLocator)"
 }
 
 data class ComicPublicationLocation(
-    override val publication: PublicationFingerprint,
     val resourceHref: String,
     val pageIndex: Int,
     override val engineLocator: EngineLocator? = null,
@@ -137,7 +126,6 @@ data class ComicPublicationLocation(
 }
 
 data class AudioPublicationLocation(
-    override val publication: PublicationFingerprint,
     val fileId: String,
     val chapterId: String? = null,
     val positionMillis: Long,
@@ -150,20 +138,18 @@ data class AudioPublicationLocation(
     }
 }
 
-enum class ExactLocationMatch { Exact, FingerprintMismatch, MorphologyMismatch, AnchorMismatch }
+enum class ExactLocationMatch { Exact, MorphologyMismatch, AnchorMismatch }
 
 fun compareExactPublicationLocations(
     expected: PublicationLocation,
     actual: PublicationLocation,
 ): ExactLocationMatch {
-    if (expected.publication != actual.publication) return ExactLocationMatch.FingerprintMismatch
     if (expected::class != actual::class) return ExactLocationMatch.MorphologyMismatch
     return when (expected) {
         is ReflowablePublicationLocation -> {
             val candidate = actual as ReflowablePublicationLocation
             when (compareExactReadiumBlocks(expected.readiumEnvelope, candidate.readiumEnvelope)) {
                 ExactBlockMatch.Exact -> ExactLocationMatch.Exact
-                ExactBlockMatch.FingerprintMismatch -> ExactLocationMatch.FingerprintMismatch
                 else -> ExactLocationMatch.AnchorMismatch
             }
         }
@@ -185,24 +171,10 @@ fun compareExactPublicationLocations(
     }
 }
 
-/** Exact progress comparison deliberately ignores publication fingerprint changes. */
 fun compareExactProgressLocations(
     expected: PublicationLocation,
     actual: PublicationLocation,
-): ExactLocationMatch = compareExactPublicationLocations(
-    expected,
-    when (actual) {
-        is ReflowablePublicationLocation -> actual.copy(publication = expected.publication)
-        is PdfPublicationLocation -> PdfPublicationLocation(
-            publication = expected.publication,
-            pageIndex = actual.pageIndex,
-            pageProgression = actual.pageProgression,
-            engineLocator = actual.engineLocator,
-        )
-        is ComicPublicationLocation -> actual.copy(publication = expected.publication)
-        is AudioPublicationLocation -> actual.copy(publication = expected.publication)
-    },
-)
+): ExactLocationMatch = compareExactPublicationLocations(expected, actual)
 
 private fun PublicationLocation.toJson(): JsonObject = buildJsonObject {
     put("kind", when (this@toJson) {
@@ -211,7 +183,6 @@ private fun PublicationLocation.toJson(): JsonObject = buildJsonObject {
         is ComicPublicationLocation -> "comic"
         is AudioPublicationLocation -> "audio"
     })
-    put("publication", publication.toJson())
     when (val location = this@toJson) {
         is ReflowablePublicationLocation -> put("engineLocator", location.engineLocator.toJson())
         is PdfPublicationLocation -> {
@@ -233,27 +204,11 @@ private fun PublicationLocation.toJson(): JsonObject = buildJsonObject {
     }
 }
 
-private fun PublicationFingerprint.toJson() = buildJsonObject {
-    put("originalFileHash", originalFileHash)
-    put("parser", parser)
-    put("normalization", normalization)
-}
-
 private fun EngineLocator.toJson() = buildJsonObject {
     put("engine", engine.wireValue)
     put("platform", platform.wireValue)
     put("version", version)
     put("payload", Json.parseToJsonElement(payload.canonicalJson))
-}
-
-private fun JsonObject.toPublicationFingerprint() = requireOnly(
-    "originalFileHash", "parser", "normalization",
-).let {
-    PublicationFingerprint(
-        originalFileHash = requiredString("originalFileHash"),
-        parser = requiredString("parser"),
-        normalization = requiredString("normalization"),
-    )
 }
 
 private fun JsonObject.toEngineLocator() = requireOnly("engine", "platform", "version", "payload").let {

@@ -4,7 +4,6 @@ import com.ermao.library.features.content.model.ChapterReadingState
 import com.ermao.library.features.content.model.ReadingUnitContent
 import com.ermao.library.features.content.model.WorkCard
 import com.ermao.library.features.content.model.WorkDetailContent
-import com.ermao.library.shared.modules.reader.PublicationFingerprint
 import com.ermao.library.shared.modules.reader.ReaderEngine
 import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
@@ -46,11 +45,6 @@ class DetailViewModelsTest {
             volumeId = "volume-1",
             percent = 42.0,
             location = ReflowablePublicationLocation(
-                publication = PublicationFingerprint(
-                    originalFileHash = "sha256:${"a".repeat(64)}",
-                    parser = "readium:test",
-                    normalization = "readium:test",
-                ),
                 engineLocator = createEngineLocator(
                     engine = ReaderEngine.Readium,
                     platform = ReaderEnginePlatform.Android,

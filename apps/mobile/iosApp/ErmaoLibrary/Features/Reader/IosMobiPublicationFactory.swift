@@ -5,7 +5,7 @@ import Foundation
 enum IosMobiPublicationError: Error, Equatable, Sendable {
     case closed
     case duplicateResourcePath(String)
-    case invalidContentFingerprint
+    case invalidSourceIdentity
     case invalidResourceIndex(Int)
     case invalidResourcePath(String)
     case invalidTextEncoding
@@ -53,17 +53,17 @@ struct IosMobiPublicationFactory: Sendable {
 
     func open(
         fileURL: URL,
-        contentFingerprint: String,
+        sourceID: String,
         displayTitle: String? = nil
     ) async throws -> IosMobiPublicationResult {
-        guard Self.isValidContentFingerprint(contentFingerprint) else {
-            throw IosMobiPublicationError.invalidContentFingerprint
+        guard Self.isValidSourceIdentity(sourceID) else {
+            throw IosMobiPublicationError.invalidSourceIdentity
         }
         let book = try IosMobiBook.open(fileURL: fileURL)
         do {
             return try await build(
                 book: book,
-                contentFingerprint: contentFingerprint,
+                sourceID: sourceID,
                 displayTitle: displayTitle
             )
         } catch {
@@ -74,11 +74,11 @@ struct IosMobiPublicationFactory: Sendable {
 
     func build(
         book: any IosMobiBookAccess,
-        contentFingerprint: String,
+        sourceID: String,
         displayTitle: String? = nil
     ) async throws -> IosMobiPublicationResult {
-        guard Self.isValidContentFingerprint(contentFingerprint) else {
-            throw IosMobiPublicationError.invalidContentFingerprint
+        guard Self.isValidSourceIdentity(sourceID) else {
+            throw IosMobiPublicationError.invalidSourceIdentity
         }
 
         let info = try await book.info()
@@ -158,11 +158,11 @@ struct IosMobiPublicationFactory: Sendable {
         let description = try await book.metadata(.description)
 
         let metadata = Metadata(
-            identifier: "urn:shuku:publication:\(contentFingerprint)",
+            identifier: "urn:shuku:publication:\(sourceID)",
             conformsTo: [.epub],
             title: title.flatMap { $0.isEmpty ? nil : $0 }
                 ?? fallbackTitle.flatMap { $0.isEmpty ? nil : $0 }
-                ?? contentFingerprint,
+                ?? sourceID,
             languages: language.flatMap { $0.isEmpty ? nil : [$0] } ?? [],
             authors: author.flatMap { $0.isEmpty ? nil : [Contributor(name: $0)] } ?? [],
             publishers: publisher.flatMap { $0.isEmpty ? nil : [Contributor(name: $0)] } ?? [],
@@ -271,7 +271,7 @@ struct IosMobiPublicationFactory: Sendable {
         return roots
     }
 
-    private static func isValidContentFingerprint(_ value: String) -> Bool {
+    private static func isValidSourceIdentity(_ value: String) -> Bool {
         guard (1 ... 512).contains(value.utf8.count) else { return false }
         return value.unicodeScalars.allSatisfy {
             CharacterSet.alphanumerics.contains($0) || "-_.:".unicodeScalars.contains($0)

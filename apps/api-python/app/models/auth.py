@@ -230,9 +230,8 @@ class ReaderBookmark(Base):
         UniqueConstraint(
             "userId",
             "volumeId",
-            "contentFingerprint",
             "bookmarkId",
-            name="ReaderBookmark_user_volume_fingerprint_bookmark_key",
+            name="ReaderBookmark_user_volume_bookmark_key",
         ),
         Index("ReaderBookmark_user_volume_idx", "userId", "volumeId"),
     )
@@ -249,9 +248,6 @@ class ReaderBookmark(Base):
         String(191),
         ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
-    )
-    content_fingerprint: Mapped[str] = mapped_column(
-        "contentFingerprint", String(191), nullable=False
     )
     bookmark_id: Mapped[str] = mapped_column("bookmarkId", Text, nullable=False)
     location_json: Mapped[str] = mapped_column("locationJson", Text, nullable=False)

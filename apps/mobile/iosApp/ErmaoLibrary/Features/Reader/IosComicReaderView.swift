@@ -6,10 +6,13 @@ struct IosComicReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosComicReaderSession
+    var onRetry: () -> Void = {}
     @State private var sliderPage = 0.0
     @State private var sliderIsEditing = false
     @State private var showsPages = false
-    @State private var closingFailure = false
+    @State private var showsSettings = false
+    @State private var pendingPageIndex: Int?
+    @State private var navigationFailed = false
 
     var body: some View {
         ZStack {
@@ -56,9 +59,6 @@ struct IosComicReaderView: View {
         .onChange(of: session.pageIndex) { value in
             if !sliderIsEditing { sliderPage = Double(value) }
         }
-        .onChange(of: session.startupCancelled) { cancelled in
-            if cancelled { dismiss() }
-        }
         .onChange(of: scenePhase) { phase in
             Task {
                 switch phase {
@@ -70,15 +70,29 @@ struct IosComicReaderView: View {
         }
         .sheet(isPresented: $showsPages) {
             NavigationStack {
-                List(session.pages, id: \.pageIndex) { page in
+                List {
+                    if navigationFailed { Text("reader.navigation.failed").foregroundStyle(.red) }
+                    ForEach(session.pages, id: \.pageIndex) { page in
                     Button {
-                        Task { await session.goToPage(page.pageIndex); showsPages = false }
+                        Task {
+                            pendingPageIndex = page.pageIndex
+                            navigationFailed = false
+                            if await session.goToPage(page.pageIndex) { showsPages = false }
+                            else { navigationFailed = true }
+                            pendingPageIndex = nil
+                        }
                     } label: {
                         HStack {
-                            Text(String(format: String(localized: "reader.comic.page.format"), page.pageIndex + 1))
+                            Text(page.title ?? String(
+                                format: String(localized: "reader.comic.page.format"),
+                                page.pageIndex + 1
+                            ))
                             Spacer()
                             if page.pageIndex == session.pageIndex { Image(systemName: "location.fill") }
+                            if pendingPageIndex == page.pageIndex { ProgressView() }
                         }
+                    }
+                    .disabled(pendingPageIndex != nil)
                     }
                 }
                 .navigationTitle("reader.toc")
@@ -86,25 +100,16 @@ struct IosComicReaderView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .alert(String(localized: "reader.save.failure.title"), isPresented: $closingFailure) {
-            Button(String(localized: "common.ok"), role: .cancel) {}
-        } message: { Text("reader.save.failure.message") }
+        .sheet(isPresented: $showsSettings) { IosComicReaderSettingsSheet(session: session) }
         .alert(
             String(localized: "reader.error.title"),
             isPresented: Binding(
-                get: { session.presentationError != nil && !closingFailure },
+                get: { session.presentationError != nil },
                 set: { _ in session.dismissPresentationError() }
             )
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
         } message: { Text(session.presentationError?.localizedDescription ?? "") }
-        .readerStartupConflictAlert(
-            isPresented: session.startupConflict != nil,
-            failed: session.startupActionFailed,
-            useLocal: { Task { await session.continueStartupAtLocalPosition() } },
-            useCloud: { Task { await session.useCloudStartupPosition() } },
-            cancel: session.cancelStartupConflict
-        )
     }
 
     @ViewBuilder private var content: some View {
@@ -116,6 +121,7 @@ struct IosComicReaderView: View {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
                 Text("reader.error.title").font(.headline)
                 Text(code.localizedDescription).multilineTextAlignment(.center)
+                Button("reader.retry.open", action: onRetry)
                 Button("common.close") { dismiss() }
             }
             .padding(24).foregroundStyle(.white)
@@ -134,6 +140,8 @@ struct IosComicReaderView: View {
                 Text(session.displayTitle).font(.headline).lineLimit(1).frame(maxWidth: .infinity)
                 Button { showsPages = true } label: { Image(systemName: "square.grid.2x2").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.toc"))
+                Button { showsSettings = true } label: { Image(systemName: "gearshape").frame(width: 44, height: 44) }
+                    .accessibilityLabel(Text("reader.settings"))
             }
             .padding(.horizontal, 8).background(.regularMaterial)
             Spacer()
@@ -148,7 +156,7 @@ struct IosComicReaderView: View {
                         step: 1
                     ) { editing in
                         sliderIsEditing = editing
-                        if !editing { Task { await session.goToPage(Int(sliderPage.rounded())) } }
+                        if !editing { Task { _ = await session.goToPage(Int(sliderPage.rounded())) } }
                     }
                     .accessibilityLabel(Text("reader.progress"))
                     .accessibilityValue(Text(session.pageLabel))
@@ -165,13 +173,65 @@ struct IosComicReaderView: View {
 
     private func close() {
         Task {
-            do { try await session.close(); dismiss() } catch { closingFailure = true }
+            try? await session.close()
+            dismiss()
         }
     }
 }
 
+private struct IosComicReaderSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var session: IosComicReaderSession
+    @State private var draft: IosReaderPreferences
+    @State private var applyFailed = false
+
+    init(session: IosComicReaderSession) {
+        self.session = session
+        _draft = State(initialValue: session.preferences)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if applyFailed { Text("reader.preferences.apply.failed").foregroundStyle(.red) }
+                Section("reader.settings.layout") {
+                    Picker("reader.settings.readingMode", selection: $draft.comicFlow) {
+                        Text("reader.mode.paged").tag(IosComicFlow.paginated)
+                        Text("reader.mode.scroll").tag(IosComicFlow.scrolled)
+                    }
+                    Picker("reader.settings.spread", selection: $draft.comicSpread) {
+                        Text("reader.spread.single").tag(IosComicSpread.single)
+                        Text("reader.spread.double").tag(IosComicSpread.double)
+                    }.disabled(draft.comicFlow == .scrolled)
+                    Picker("reader.settings.comicDirection", selection: $draft.comicDirection) {
+                        Text(verbatim: "LTR").tag(IosComicDirection.ltr)
+                        Text(verbatim: "RTL").tag(IosComicDirection.rtl)
+                    }.disabled(draft.comicFlow == .scrolled)
+                    Toggle("reader.settings.coverSingle", isOn: $draft.comicCoverSingle)
+                        .disabled(draft.comicFlow == .scrolled || draft.comicSpread != .double)
+                    Picker("reader.settings.pageGap", selection: $draft.comicPageGap) {
+                        ForEach([0, 8, 16, 24], id: \.self) { Text("\($0) px").tag($0) }
+                    }.disabled(draft.comicFlow == .scrolled)
+                }
+            }
+            .navigationTitle("reader.settings")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("common.done") {
+                        Task {
+                            if await session.applyPreferences(draft) { dismiss() }
+                            else { applyFailed = true }
+                        }
+                    }
+                }
+            }
+        }.presentationDetents([.medium, .large])
+    }
+}
+
 private struct ComicNavigatorHost: UIViewControllerRepresentable {
-    let navigator: EPUBNavigatorViewController
-    func makeUIViewController(context: Context) -> EPUBNavigatorViewController { navigator }
-    func updateUIViewController(_ uiViewController: EPUBNavigatorViewController, context: Context) {}
+    let navigator: CBZNavigatorViewController
+    func makeUIViewController(context: Context) -> CBZNavigatorViewController { navigator }
+    func updateUIViewController(_ uiViewController: CBZNavigatorViewController, context: Context) {}
 }

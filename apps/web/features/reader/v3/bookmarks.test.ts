@@ -6,12 +6,12 @@ test('creates stable bookmark ids for every reader location kind', () => {
   assert.equal(readerBookmarkId({ kind: 'epub', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'epub:cfi:epubcfi(/6/4!/4/2:1)');
   assert.equal(readerBookmarkId({ kind: 'reflowable', format: 'fb2', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'reflowable:fb2:cfi:epubcfi(/6/4!/4/2:1)');
   assert.equal(readerBookmarkId({ kind: 'comic', volumeId: 'volume-2', pageIndex: 18 }), 'comic:volume-2:18');
-  assert.equal(readerBookmarkId({ kind: 'pdf', pageNumber: 7 }), 'pdf:7');
+  assert.equal(readerBookmarkId({ kind: 'pdf', pageIndex: 7, pageProgression: 0 }), 'pdf:7');
 });
 
 test('toggles a current location without creating duplicate bookmarks', () => {
   const draft = {
-    location: { kind: 'pdf' as const, pageNumber: 7 },
+    location: { kind: 'pdf' as const, pageIndex: 7, pageProgression: 0 },
     label: '第 7 / 20 页',
     percent: 35,
     createdAt: '2026-07-19T00:00:00.000Z'
@@ -22,14 +22,14 @@ test('toggles a current location without creating duplicate bookmarks', () => {
   assert.deepEqual(toggleReaderBookmark(added, draft), []);
 });
 
-test('isolates bookmarks by user, volume and content fingerprint', () => {
+test('isolates bookmarks by user and volume', () => {
   assert.notEqual(
-    readerBookmarkStorageKey('user-1', 'volume-1', 'fingerprint-a'),
-    readerBookmarkStorageKey('user-2', 'volume-1', 'fingerprint-a')
+    readerBookmarkStorageKey('user-1', 'volume-1'),
+    readerBookmarkStorageKey('user-2', 'volume-1')
   );
-  assert.notEqual(readerBookmarkStorageKey('user-1', 'volume-1', 'fingerprint-a'), readerBookmarkStorageKey('user-1', 'volume-2', 'fingerprint-a'));
+  assert.notEqual(readerBookmarkStorageKey('user-1', 'volume-1'), readerBookmarkStorageKey('user-1', 'volume-2'));
   assert.deepEqual(readReaderBookmarks('{broken'), []);
-  assert.deepEqual(readReaderBookmarks('[{"id":"pdf:2","location":{"kind":"pdf","pageNumber":2},"label":"第 2 页","percent":10,"createdAt":"now"}]').length, 1);
+  assert.deepEqual(readReaderBookmarks('[{"id":"pdf:2","location":{"kind":"pdf","pageIndex":2,"pageProgression":0},"label":"第 3 页","percent":10,"createdAt":"now"}]').length, 1);
 });
 
 test('merges legacy volume lists in reading order and removes a single saved bookmark', () => {

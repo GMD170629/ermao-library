@@ -14,8 +14,8 @@ import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 class KtorServerProbe(
     private val compatibilityChecker: ServerCompatibilityChecker = ServerCompatibilityChecker(
-        clientProtocolVersion = 1,
-        supportedServerProtocolVersions = setOf(1),
+        clientProtocolVersion = 2,
+        supportedServerProtocolVersions = setOf(2),
         supportedReaderSchemaVersions = setOf(4),
     ),
     private val clientProvider: (ServerProfile) -> ApiClient,

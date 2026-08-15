@@ -320,8 +320,6 @@ class LibraryFile(Base):
         Index("LibraryFile_path_key", "path", unique=True),
         Index("LibraryFile_filePathHash_key", "filePathHash", unique=True),
         Index("LibraryFile_volumeId_sortOrder_idx", "volumeId", "sortOrder"),
-        Index("LibraryFile_fingerprint_idx", "fingerprint"),
-        Index("LibraryFile_fullHash_idx", "fullHash"),
         Index("LibraryFile_sizeBytes_mtimeMs_idx", "sizeBytes", "mtimeMs"),
         Index("LibraryFile_pathKey_idx", "pathKey"),
         Index(
@@ -343,17 +341,6 @@ class LibraryFile(Base):
     path_key: Mapped[str | None] = mapped_column("pathKey", String(64), nullable=True)
     file_path_hash: Mapped[str | None] = mapped_column(
         "filePathHash", String(191), nullable=True
-    )
-    fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
-    full_hash: Mapped[str | None] = mapped_column(
-        "fullHash", String(191), nullable=True
-    )
-    hash_status: Mapped[str] = mapped_column(
-        "hashStatus",
-        String(191),
-        nullable=False,
-        default="FAILED",
-        server_default="FAILED",
     )
     mtime_ms: Mapped[int] = mapped_column(
         "mtimeMs", Integer, nullable=False, default=0, server_default="0"
@@ -706,9 +693,6 @@ class LibraryReadingProgress(Base):
     location_json: Mapped[str | None] = mapped_column(
         "locationJson", Text, nullable=True
     )
-    content_fingerprint: Mapped[str | None] = mapped_column(
-        "contentFingerprint", String(191), nullable=True
-    )
     mutation_id: Mapped[str | None] = mapped_column(
         "mutationId", String(191), nullable=True
     )
@@ -788,9 +772,6 @@ class ReaderProgressMutation(Base):
     client_id: Mapped[str] = mapped_column("clientId", String(256), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     locator_json: Mapped[str] = mapped_column("locatorJson", Text, nullable=False)
-    content_fingerprint: Mapped[str] = mapped_column(
-        "contentFingerprint", String(191), nullable=False
-    )
     display_percent: Mapped[float] = mapped_column(
         "displayPercent", Float, nullable=False
     )

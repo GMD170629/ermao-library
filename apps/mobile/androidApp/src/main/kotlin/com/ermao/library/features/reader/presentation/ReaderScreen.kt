@@ -58,12 +58,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -75,6 +75,8 @@ import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ermao.library.R
 import com.ermao.library.features.reader.application.ReaderScreenController
+import com.ermao.library.shared.modules.reader.ReaderMorphology
+import com.ermao.library.shared.modules.reader.ReaderControlProfile
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderBookmark
@@ -82,10 +84,20 @@ import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderNavigationResult
+import com.ermao.library.shared.modules.reader.ReaderCommandResult
+import com.ermao.library.shared.modules.reader.ReaderCommandRejected
+import com.ermao.library.shared.modules.reader.ReaderNavigationCompleted
 import com.ermao.library.shared.modules.reader.ReaderPageMargin
+import com.ermao.library.shared.modules.reader.ReaderPageTurnAnimation
+import com.ermao.library.shared.modules.reader.ReaderPdfCropMargins
+import com.ermao.library.shared.modules.reader.ReaderPdfFit
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderProgressStyle
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
+import com.ermao.library.shared.modules.reader.ReaderComicDirection
+import com.ermao.library.shared.modules.reader.ReaderComicSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTapZones
 import com.ermao.library.shared.modules.reader.ReaderTextAlignment
@@ -99,6 +111,9 @@ import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private enum class ReaderPanel { Contents, Notes, Appearance, Settings }
 
@@ -112,8 +127,13 @@ internal fun ReaderScreen(
     controlsVisible: Boolean,
     onControlsVisibleChange: (Boolean) -> Unit,
     onClose: () -> Unit,
+    onRetryOpen: (() -> Unit)? = null,
+    onReadOnline: (() -> Unit)? = null,
+    onDeleteDownload: (() -> Unit)? = null,
     onNavigatorContainerReady: () -> Unit,
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    val navigationMutex = remember(controller) { Mutex() }
     val preferences by controller?.preferences?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(ReaderPreferences()) }
     val currentLocation by controller?.currentLocation?.collectAsStateWithLifecycle()
@@ -133,6 +153,9 @@ internal fun ReaderScreen(
         supportsCustomFonts = false,
     )
     var panel by remember { mutableStateOf<ReaderPanel?>(null) }
+    var pendingNavigationId by remember(controller) { mutableStateOf<String?>(null) }
+    var navigationFailed by remember(controller) { mutableStateOf(false) }
+    var preferencesApplyFailed by remember(controller) { mutableStateOf(false) }
 
     KeepScreenAwake(preferences.interaction.keepScreenAwake)
     ReaderWarmPageTheme(preferences.appearance.theme, preferences.appearance.themeMode) {
@@ -167,7 +190,10 @@ internal fun ReaderScreen(
                     preferences = preferences,
                     bookmarks = bookmarks,
                     onClose = onClose,
-                    onPanel = { panel = it },
+                    onPanel = {
+                        if (it == ReaderPanel.Contents) navigationFailed = false
+                        panel = it
+                    },
                     onHide = { onControlsVisibleChange(false) },
                 )
             }
@@ -193,7 +219,13 @@ internal fun ReaderScreen(
             }
 
             when {
-                openError != null -> ReaderOpenError(openError, onClose)
+                openError != null -> ReaderOpenError(
+                    openError,
+                    onClose,
+                    onRetryOpen,
+                    onReadOnline,
+                    onDeleteDownload,
+                )
                 opening -> ReaderOpeningIndicator()
             }
         }
@@ -202,8 +234,25 @@ internal fun ReaderScreen(
             ReaderPanel.Contents -> ReaderContentsSheet(
                 entries = controller?.tableOfContents.orEmpty(),
                 currentLocation = currentLocation,
+                pendingEntryId = pendingNavigationId,
+                navigationFailed = navigationFailed,
                 onDismiss = { panel = null },
-                onSelect = { controller?.goTo(it); panel = null },
+                onSelect = { entry ->
+                    controller?.let { activeController ->
+                        coroutineScope.launch {
+                            navigationMutex.withLock {
+                                pendingNavigationId = entry.id
+                                navigationFailed = false
+                                if (activeController.navigateTo(entry) is ReaderNavigationCompleted) {
+                                    panel = null
+                                } else {
+                                    navigationFailed = true
+                                }
+                                pendingNavigationId = null
+                            }
+                        }
+                    }
+                },
             )
             ReaderPanel.Notes -> ReaderNotesSheet(
                 capabilities = capabilities,
@@ -216,16 +265,45 @@ internal fun ReaderScreen(
             ReaderPanel.Appearance -> ReaderAppearanceSheet(
                 preferences,
                 capabilities,
-                onUpdate = { controller?.updatePreferences(it) },
+                controller?.morphology ?: ReaderMorphology.Reflowable,
+                onUpdate = { updated ->
+                    controller?.let { activeController ->
+                        coroutineScope.launch {
+                            navigationMutex.withLock {
+                                preferencesApplyFailed = false
+                                preferencesApplyFailed = activeController.applyPreferences(updated) is ReaderCommandRejected
+                            }
+                        }
+                    }
+                },
                 onDismiss = { panel = null },
             )
             ReaderPanel.Settings -> ReaderSettingsSheet(
                 preferences,
                 capabilities,
-                onUpdate = { controller?.updatePreferences(it) },
+                controller?.morphology ?: ReaderMorphology.Reflowable,
+                onUpdate = { updated ->
+                    controller?.let { activeController ->
+                        coroutineScope.launch {
+                            navigationMutex.withLock {
+                                preferencesApplyFailed = false
+                                preferencesApplyFailed = activeController.applyPreferences(updated) is ReaderCommandRejected
+                            }
+                        }
+                    }
+                },
                 onDismiss = { panel = null },
             )
             null -> Unit
+        }
+        if (preferencesApplyFailed) {
+            Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                Text(
+                    stringResource(R.string.reader_preferences_apply_failed),
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
         }
     }
 }
@@ -342,12 +420,10 @@ private fun ReaderBottomConsole(
     modifier: Modifier = Modifier,
 ) {
     val colors = WarmPageThemeValues.colors
-    val totalProgression = when (currentLocation) {
-        is ReflowReaderLocation -> currentLocation.totalProgression ?: 0.0
-        is ComicReaderLocation -> currentLocation.pageIndex.toDouble() /
-            controller?.tableOfContents.orEmpty().lastIndex.coerceAtLeast(1)
-        else -> 0.0
-    }
+    val totalProgression = readerTotalProgression(
+        currentLocation,
+        controller?.tableOfContents.orEmpty().lastIndex,
+    )
     var sliderProgress by remember { mutableFloatStateOf(totalProgression.toFloat()) }
     var dragging by remember { mutableStateOf(false) }
     LaunchedEffect(totalProgression, dragging) { if (!dragging) sliderProgress = totalProgression.toFloat() }
@@ -423,15 +499,30 @@ private fun progressLabel(preferences: ReaderPreferences, location: ReaderLocati
     val position = when (location) {
         is ReflowReaderLocation -> location.position?.let { stringResource(R.string.reader_position, it) }
         is ComicReaderLocation -> stringResource(R.string.reader_comic_page, location.pageIndex + 1)
+        is PdfReaderLocation -> stringResource(R.string.reader_pdf_page, location.pageIndex + 1)
         else -> null
     } ?: percent
     return when (preferences.display.progressStyle) {
         ReaderProgressStyle.Hidden -> ""
         ReaderProgressStyle.Percent -> percent
-        ReaderProgressStyle.Position, ReaderProgressStyle.Remaining -> position
+        ReaderProgressStyle.Position -> position
+        ReaderProgressStyle.Remaining -> stringResource(
+            R.string.reader_progress_remaining_percent,
+            ((1f - progress) * 100).roundToInt().coerceIn(0, 100),
+        )
         ReaderProgressStyle.Auto -> percent
     }
 }
+
+internal fun readerTotalProgression(location: ReaderLocation?, lastPageIndex: Int): Double = when (location) {
+    is ReflowReaderLocation -> location.totalProgression ?: location.progression ?: 0.0
+    is ComicReaderLocation -> pageProgression(location.pageIndex, lastPageIndex)
+    is PdfReaderLocation -> pageProgression(location.pageIndex, lastPageIndex)
+    else -> 0.0
+}.coerceIn(0.0, 1.0)
+
+private fun pageProgression(pageIndex: Int, lastPageIndex: Int): Double =
+    if (lastPageIndex <= 0) 1.0 else pageIndex.toDouble() / lastPageIndex
 
 @Composable
 private fun rememberClock(enabled: Boolean): String? {
@@ -450,6 +541,7 @@ private fun rememberClock(enabled: Boolean): String? {
 private fun ReaderAppearanceSheet(
     preferences: ReaderPreferences,
     capabilities: ReaderCapabilities,
+    morphology: ReaderMorphology,
     onUpdate: (ReaderPreferences) -> Unit,
     onDismiss: () -> Unit,
 ) = ReaderSheet(R.string.reader_appearance, onDismiss) { scroll ->
@@ -466,6 +558,7 @@ private fun ReaderAppearanceSheet(
             preferences.appearance.themeMode == ReaderThemeMode.System,
             capabilities.supportsSystemTheme,
         ) { onUpdate(preferences.copy(appearance = preferences.appearance.copy(themeMode = if (it) ReaderThemeMode.System else ReaderThemeMode.Manual))) }
+        if (morphology == ReaderMorphology.Reflowable) {
         StepperRow(R.string.reader_font_size, "${epub.fontSize}px", epub.fontSize > 14, epub.fontSize < 30, {
             onUpdate(preferences.copy(epub = epub.copy(fontSize = epub.fontSize - 1)))
         }, {
@@ -496,6 +589,7 @@ private fun ReaderAppearanceSheet(
         ChoiceRow(R.string.reader_page_margin, ReaderPageMargin.entries, epub.pageMargin, { marginLabel(it) }) {
             onUpdate(preferences.copy(epub = epub.copy(pageMargin = it)))
         }
+        }
     }
 }
 
@@ -504,10 +598,10 @@ private fun ReaderAppearanceSheet(
 private fun ReaderSettingsSheet(
     preferences: ReaderPreferences,
     capabilities: ReaderCapabilities,
+    morphology: ReaderMorphology,
     onUpdate: (ReaderPreferences) -> Unit,
     onDismiss: () -> Unit,
 ) = ReaderSheet(R.string.reader_settings_title, onDismiss) { scroll ->
-    val epub = preferences.epub
     Column(Modifier.verticalScroll(scroll)) {
         SettingsHeader(R.string.reader_interface)
         ChoiceRow(R.string.reader_progress_display, ReaderProgressStyle.entries, preferences.display.progressStyle, { progressStyleLabel(it) }) {
@@ -520,36 +614,36 @@ private fun ReaderSettingsSheet(
             onUpdate(preferences.copy(interaction = preferences.interaction.copy(keepScreenAwake = it)))
         }
         SettingsHeader(R.string.reader_page_turn_settings)
-        ChoiceRow(R.string.reader_page_turn_animation, listOf("slide", "off"), "slide", { it }, enabled = { false }) {}
+        val pageTurnAnimation = when (morphology) {
+            ReaderMorphology.Reflowable -> preferences.epub.pageTurnAnimation
+            ReaderMorphology.Comic -> preferences.comic.pageTurnAnimation
+            ReaderMorphology.Pdf -> ReaderPageTurnAnimation.Slide
+        }
+        ChoiceRow(
+            R.string.reader_page_turn_animation,
+            ReaderPageTurnAnimation.entries,
+            pageTurnAnimation,
+            { pageTurnAnimationLabel(it) },
+            enabled = { capabilities.supportsPageTurnAnimation },
+        ) { selected ->
+            val updated = when (morphology) {
+                ReaderMorphology.Reflowable -> preferences.copy(epub = preferences.epub.copy(pageTurnAnimation = selected))
+                ReaderMorphology.Comic -> preferences.copy(comic = preferences.comic.copy(pageTurnAnimation = selected))
+                ReaderMorphology.Pdf -> preferences
+            }
+            onUpdate(updated)
+        }
         ChoiceRow(R.string.reader_tap_zones, ReaderTapZones.entries, preferences.interaction.tapZones, { tapZoneLabel(it) }) {
             onUpdate(preferences.copy(interaction = preferences.interaction.copy(tapZones = it)))
         }
-        ToggleRow(R.string.reader_swipe_page_turn, true, capabilities.supportsSwipeToggle) {}
-        SettingsHeader(R.string.reader_layout)
-        ChoiceRow(R.string.reader_reading_mode, ReaderReadingMode.entries, epub.flow, { readingModeLabel(it) }) {
-            onUpdate(preferences.copy(epub = epub.copy(flow = it)))
+        ToggleRow(
+            R.string.reader_swipe_page_turn,
+            preferences.interaction.swipePageTurn,
+            capabilities.supportsSwipeToggle,
+        ) {
+            onUpdate(preferences.copy(interaction = preferences.interaction.copy(swipePageTurn = it)))
         }
-        ChoiceRow(R.string.reader_spread_mode, ReaderSpreadMode.entries, epub.spreadMode, { spreadLabel(it) }) {
-            onUpdate(preferences.copy(epub = epub.copy(spreadMode = it)))
-        }
-        ChoiceRow(R.string.reader_page_width, listOf(epub.pageWidth), epub.pageWidth, { "$it px" }, enabled = { capabilities.supportsPageWidth }) {}
-        SettingsHeader(R.string.reader_smart_optimization)
-        ToggleRow(R.string.reader_safe_optimization, epub.optimization.enabled, capabilities.supportsSmartOptimization) {}
-        ToggleRow(R.string.reader_deduplicate_indent, epub.optimization.deduplicateIndent, capabilities.supportsSmartOptimization) {}
-        ToggleRow(R.string.reader_indent_unindented, epub.optimization.indentUnindented, capabilities.supportsSmartOptimization) {}
-        SettingsHeader(R.string.reader_advanced_settings)
-        ChoiceRow(R.string.reader_paragraph_indent, listOf(0.0, 1.0, 2.0, 3.0), epub.typography.paragraphIndent, { it.toInt().toString() }) {
-            onUpdate(preferences.copy(epub = epub.copy(typography = epub.typography.copy(paragraphIndent = it))))
-        }
-        ChoiceRow(R.string.reader_paragraph_spacing, listOf(0.0, 0.4, 0.8, 1.2), epub.typography.paragraphSpacing, { it.toString() }) {
-            onUpdate(preferences.copy(epub = epub.copy(typography = epub.typography.copy(paragraphSpacing = it))))
-        }
-        ChoiceRow(R.string.reader_text_alignment, ReaderTextAlignment.entries, epub.typography.textAlign, { alignmentLabel(it) }) {
-            onUpdate(preferences.copy(epub = epub.copy(typography = epub.typography.copy(textAlign = it))))
-        }
-        ToggleRow(R.string.reader_preserve_publisher_styles, epub.typography.preservePublisherStyles, capabilities.supportsIndependentPublisherStyles) {}
-        ToggleRow(R.string.reader_allow_publisher_colors, epub.typography.allowPublisherColors, capabilities.supportsIndependentPublisherStyles) {}
-        ToggleRow(R.string.reader_allow_publisher_fonts, epub.typography.allowPublisherFonts, capabilities.supportsIndependentPublisherStyles) {}
+        ReaderMorphologyControls(morphology, capabilities, preferences, onUpdate)
         ToggleRow(R.string.reader_keyboard_page_turn, preferences.interaction.keyboardPageTurn, capabilities.supportsKeyboardPageTurn) {
             onUpdate(preferences.copy(interaction = preferences.interaction.copy(keyboardPageTurn = it)))
         }
@@ -558,6 +652,88 @@ private fun ReaderSettingsSheet(
         }
         Button(onClick = { onUpdate(ReaderPreferences()) }, Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
             Text(stringResource(R.string.reader_reset_defaults))
+        }
+    }
+}
+
+@Composable
+private fun ReaderMorphologyControls(
+    morphology: ReaderMorphology,
+    capabilities: ReaderCapabilities,
+    preferences: ReaderPreferences,
+    onUpdate: (ReaderPreferences) -> Unit,
+) {
+    val profile = ReaderControlProfile.forMorphology(morphology)
+    SettingsHeader(R.string.reader_layout)
+    when (morphology) {
+        ReaderMorphology.Reflowable -> {
+            val epub = preferences.epub
+            ChoiceRow(
+                R.string.reader_reading_mode,
+                profile.readingModes,
+                epub.flow,
+                { readingModeLabel(it) },
+                enabled = { capabilities.supportsReadingMode && it !in profile.disabledReadingModes },
+            ) { onUpdate(preferences.copy(epub = epub.copy(flow = it))) }
+            ChoiceRow(
+                R.string.reader_spread_mode,
+                profile.reflowableSpreadModes,
+                epub.spreadMode.takeUnless { it == ReaderSpreadMode.Auto } ?: ReaderSpreadMode.Single,
+                { spreadLabel(it) },
+                enabled = { capabilities.supportsSpreadMode },
+            ) { onUpdate(preferences.copy(epub = epub.copy(spreadMode = it))) }
+            SettingsHeader(R.string.reader_advanced_settings)
+            ChoiceRow(R.string.reader_paragraph_indent, listOf(0.0, 1.0, 2.0, 3.0), epub.typography.paragraphIndent, { it.toInt().toString() }) {
+                onUpdate(preferences.copy(epub = epub.copy(typography = epub.typography.copy(paragraphIndent = it))))
+            }
+            ChoiceRow(R.string.reader_paragraph_spacing, listOf(0.0, 0.4, 0.8, 1.2), epub.typography.paragraphSpacing, { it.toString() }) {
+                onUpdate(preferences.copy(epub = epub.copy(typography = epub.typography.copy(paragraphSpacing = it))))
+            }
+            ChoiceRow(R.string.reader_text_alignment, ReaderTextAlignment.entries, epub.typography.textAlign, { alignmentLabel(it) }) {
+                onUpdate(preferences.copy(epub = epub.copy(typography = epub.typography.copy(textAlign = it))))
+            }
+        }
+        ReaderMorphology.Comic -> {
+            val comic = preferences.comic
+            val paginated = comic.flow == ReaderReadingMode.Paged
+            ChoiceRow(
+                R.string.reader_reading_mode,
+                profile.readingModes,
+                comic.flow,
+                { readingModeLabel(it) },
+                enabled = { capabilities.supportsReadingMode && it !in profile.disabledReadingModes },
+            ) {
+                onUpdate(preferences.copy(comic = comic.copy(flow = it)))
+            }
+            ChoiceRow(R.string.reader_spread_mode, profile.comicSpreadModes, comic.spreadMode, { comicSpreadLabel(it) }, enabled = { paginated && capabilities.supportsSpreadMode }) {
+                onUpdate(preferences.copy(comic = comic.copy(spreadMode = it)))
+            }
+            ChoiceRow(R.string.reader_comic_direction, ReaderComicDirection.entries, comic.direction, { comicDirectionLabel(it) }, enabled = { paginated && capabilities.supportsComicDirection }) {
+                onUpdate(preferences.copy(comic = comic.copy(direction = it)))
+            }
+            ToggleRow(R.string.reader_comic_cover_single, comic.coverSingle, paginated && comic.spreadMode == ReaderComicSpreadMode.Double && capabilities.supportsComicCoverSingle) {
+                onUpdate(preferences.copy(comic = comic.copy(coverSingle = it)))
+            }
+            ChoiceRow(R.string.reader_page_gap, listOf(0, 8, 16, 24), comic.pageGap, { stringResource(R.string.reader_pixels, it) }, enabled = { paginated && capabilities.supportsComicPageGap }) {
+                onUpdate(preferences.copy(comic = comic.copy(pageGap = it)))
+            }
+        }
+        ReaderMorphology.Pdf -> {
+            val pdf = preferences.pdf
+            StepperRow(R.string.reader_pdf_zoom, "${(pdf.zoom * 100).roundToInt()}%", capabilities.supportsPdfZoomPreference && pdf.zoom > 0.6, capabilities.supportsPdfZoomPreference && pdf.zoom < 2.4, {
+                onUpdate(preferences.copy(pdf = pdf.copy(zoom = (pdf.zoom - 0.1).coerceAtLeast(0.6))))
+            }, {
+                onUpdate(preferences.copy(pdf = pdf.copy(zoom = (pdf.zoom + 0.1).coerceAtMost(2.4))))
+            })
+            ChoiceRow(R.string.reader_pdf_fit, ReaderPdfFit.entries, pdf.fit, { pdfFitLabel(it) }, enabled = { capabilities.supportsPdfFit }) {
+                onUpdate(preferences.copy(pdf = pdf.copy(fit = it)))
+            }
+            ChoiceRow(R.string.reader_pdf_rotation, listOf(0, 90, 180, 270), pdf.rotation, { stringResource(R.string.reader_degrees, it) }, enabled = { capabilities.supportsPdfRotation }) {
+                onUpdate(preferences.copy(pdf = pdf.copy(rotation = it)))
+            }
+            ChoiceRow(R.string.reader_pdf_crop_margins, ReaderPdfCropMargins.entries, pdf.cropMargins, { pdfCropLabel(it) }, enabled = { capabilities.supportsPdfCropMargins }) {
+                onUpdate(preferences.copy(pdf = pdf.copy(cropMargins = it)))
+            }
         }
     }
 }
@@ -607,11 +783,20 @@ private fun ReaderNotesSheet(
 private fun ReaderContentsSheet(
     entries: List<ReaderTocEntry>,
     currentLocation: ReaderLocation?,
+    pendingEntryId: String?,
+    navigationFailed: Boolean,
     onDismiss: () -> Unit,
-    onSelect: (ReaderLocation) -> Unit,
+    onSelect: (ReaderTocEntry) -> Unit,
 ) = ReaderSheet(R.string.reader_contents_title, onDismiss) { scroll ->
     val flattened = remember(entries) { flattenContents(entries) }
     Column(Modifier.verticalScroll(scroll)) {
+        if (navigationFailed) {
+            Text(
+                stringResource(R.string.reader_navigation_failed),
+                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         if (flattened.isEmpty()) Text(stringResource(R.string.reader_contents_empty), Modifier.padding(vertical = 24.dp))
         flattened.forEach { entry ->
             val entryLocation = entry.entry.location
@@ -621,13 +806,19 @@ private fun ReaderContentsSheet(
                 currentLocation is ComicReaderLocation && entryLocation is ComicReaderLocation ->
                     currentLocation.resourceHref == entryLocation.resourceHref &&
                         currentLocation.pageIndex == entryLocation.pageIndex
+                currentLocation is PdfReaderLocation && entryLocation is PdfReaderLocation ->
+                    currentLocation.pageIndex == entryLocation.pageIndex
                 else -> false
             }
             TextButton(
-                { onSelect(entry.entry.location) },
+                { onSelect(entry.entry) },
                 Modifier.fillMaxWidth().padding(start = (entry.depth * 16).dp),
+                enabled = pendingEntryId == null,
             ) {
-                Text(entry.entry.title, Modifier.fillMaxWidth(), color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(entry.entry.title, Modifier.weight(1f), color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    if (pendingEntryId == entry.entry.id) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
             }
             HorizontalDivider()
         }
@@ -723,12 +914,27 @@ private fun <T> ChoiceRow(
     ReaderTapZones.Reversed -> R.string.reader_reversed
     ReaderTapZones.Disabled -> R.string.reader_disabled
 })
+@Composable private fun pageTurnAnimationLabel(value: ReaderPageTurnAnimation) = stringResource(
+    if (value == ReaderPageTurnAnimation.Slide) R.string.reader_animation_slide else R.string.reader_animation_off,
+)
 @Composable private fun readingModeLabel(value: ReaderReadingMode) = stringResource(if (value == ReaderReadingMode.Paged) R.string.reader_mode_paged else R.string.reader_mode_scroll)
 @Composable private fun spreadLabel(value: ReaderSpreadMode) = stringResource(when (value) {
     ReaderSpreadMode.Auto -> R.string.reader_auto
     ReaderSpreadMode.Single -> R.string.reader_single_page
     ReaderSpreadMode.Double -> R.string.reader_double_page
 })
+@Composable private fun comicSpreadLabel(value: ReaderComicSpreadMode) = stringResource(
+    if (value == ReaderComicSpreadMode.Single) R.string.reader_single_page else R.string.reader_double_page,
+)
+@Composable private fun comicDirectionLabel(value: ReaderComicDirection) = stringResource(
+    if (value == ReaderComicDirection.LeftToRight) R.string.reader_left_to_right else R.string.reader_right_to_left,
+)
+@Composable private fun pdfFitLabel(value: ReaderPdfFit) = stringResource(
+    if (value == ReaderPdfFit.Width) R.string.reader_fit_width else R.string.reader_fit_page,
+)
+@Composable private fun pdfCropLabel(value: ReaderPdfCropMargins) = stringResource(
+    if (value == ReaderPdfCropMargins.Off) R.string.reader_crop_off else R.string.reader_crop_auto,
+)
 @Composable private fun alignmentLabel(value: ReaderTextAlignment) = stringResource(when (value) {
     ReaderTextAlignment.PublisherDefault -> R.string.reader_publisher_default
     ReaderTextAlignment.Start -> R.string.reader_left_align
@@ -768,7 +974,13 @@ private fun KeepScreenAwake(enabled: Boolean) {
     }
 }
 
-@Composable private fun BoxScope.ReaderOpenError(error: ReaderError, onClose: () -> Unit) {
+@Composable private fun BoxScope.ReaderOpenError(
+    error: ReaderError,
+    onClose: () -> Unit,
+    onRetryOpen: (() -> Unit)?,
+    onReadOnline: (() -> Unit)?,
+    onDeleteDownload: (() -> Unit)?,
+) {
     val message = when (error.code) {
         ReaderErrorCode.UnsupportedFormat -> R.string.reader_error_unsupported
         ReaderErrorCode.CorruptFile -> R.string.reader_error_corrupt
@@ -778,11 +990,36 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.OutOfMemoryRisk -> R.string.reader_error_memory
         ReaderErrorCode.LocationRestoreFailed -> R.string.reader_error_location
         ReaderErrorCode.NetworkUnavailable, ReaderErrorCode.ReaderEngineError -> R.string.reader_error_generic
+        ReaderErrorCode.RangeUnsupported -> R.string.reader_error_pdf_range_unsupported
+        ReaderErrorCode.RangeInvalid -> R.string.reader_error_pdf_range_invalid
+        ReaderErrorCode.ResourceChanged -> R.string.reader_error_pdf_resource_changed
+        ReaderErrorCode.CacheIo -> R.string.reader_error_pdf_cache
+        ReaderErrorCode.Encrypted -> R.string.reader_error_pdf_encrypted
+        ReaderErrorCode.Invalid -> R.string.reader_error_pdf_invalid
+        ReaderErrorCode.PageLoadFailed -> R.string.reader_error_pdf_page_load
+        ReaderErrorCode.RenderFailed -> R.string.reader_error_pdf_render
+        ReaderErrorCode.ComicArchiveOpenFailed,
+        ReaderErrorCode.ComicArchiveEncrypted,
+        ReaderErrorCode.ComicArchivePartMissing,
+        ReaderErrorCode.ComicArchiveFormatUnsupported,
+        ReaderErrorCode.ComicArchiveCorrupt,
+        ReaderErrorCode.ComicPageDecodeFailed,
+        ReaderErrorCode.ComicOutOfMemoryRisk,
+        -> R.string.reader_error_comic_open
     }
     Surface(Modifier.align(Alignment.Center).padding(24.dp), shape = MaterialTheme.shapes.large) {
         Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(stringResource(R.string.reader_error_title), style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp)); Text(stringResource(message)); Spacer(Modifier.height(20.dp))
+            onRetryOpen?.let { retry ->
+                Button(retry) { Text(stringResource(R.string.reader_retry_open)) }
+            }
+            onReadOnline?.let { readOnline ->
+                Button(readOnline) { Text(stringResource(R.string.reader_read_online)) }
+            }
+            onDeleteDownload?.let { deleteDownload ->
+                Button(deleteDownload) { Text(stringResource(R.string.reader_delete_download)) }
+            }
             Button(onClose) { Text(stringResource(R.string.reader_close)) }
         }
     }

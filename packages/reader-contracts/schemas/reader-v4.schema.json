@@ -4,16 +4,6 @@
   "title": "Shuku Reader v4 exact progress contract",
   "type": "object",
   "$defs": {
-    "publicationFingerprint": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["originalFileHash", "parser", "normalization"],
-      "properties": {
-        "originalFileHash": {"type": "string", "pattern": "^(sha256:)?[a-fA-F0-9]{64}$"},
-        "parser": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
-        "normalization": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"}
-      }
-    },
     "locatorText": {
       "type": "object",
       "additionalProperties": false,
@@ -65,20 +55,18 @@
     "reflowableLocation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "publication", "engineLocator"],
+      "required": ["kind", "engineLocator"],
       "properties": {
         "kind": {"const": "reflowable"},
-        "publication": {"$ref": "#/$defs/publicationFingerprint"},
         "engineLocator": {"allOf": [{"$ref": "#/$defs/engineLocator"}, {"properties": {"payload": {"$ref": "#/$defs/readiumLocator"}}}]}
       }
     },
     "pdfLocation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "publication", "pageIndex", "pageProgression"],
+      "required": ["kind", "pageIndex", "pageProgression"],
       "properties": {
         "kind": {"const": "pdf"},
-        "publication": {"$ref": "#/$defs/publicationFingerprint"},
         "pageIndex": {"type": "integer", "minimum": 0},
         "pageProgression": {"type": "number", "minimum": 0, "maximum": 1, "multipleOf": 0.0001},
         "engineLocator": {"$ref": "#/$defs/engineLocator"}
@@ -87,10 +75,9 @@
     "comicLocation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "publication", "pageIndex", "resourceHref"],
+      "required": ["kind", "pageIndex", "resourceHref"],
       "properties": {
         "kind": {"const": "comic"},
-        "publication": {"$ref": "#/$defs/publicationFingerprint"},
         "pageIndex": {"type": "integer", "minimum": 0},
         "resourceHref": {"type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"},
         "engineLocator": {"$ref": "#/$defs/engineLocator"}
@@ -99,10 +86,9 @@
     "audioLocation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "publication", "fileId", "positionMillis"],
+      "required": ["kind", "fileId", "positionMillis"],
       "properties": {
         "kind": {"const": "audio"},
-        "publication": {"$ref": "#/$defs/publicationFingerprint"},
         "fileId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
         "chapterId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
         "positionMillis": {"type": "integer", "minimum": 0},

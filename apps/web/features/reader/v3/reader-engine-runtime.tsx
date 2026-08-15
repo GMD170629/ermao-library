@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReaderAdapter, ReaderCommand, ReaderNavigationEntry, ReaderPreferences } from '@shuku/reader-core';
+import type { ReaderAdapter, ReaderCommand, ReaderPreferences } from '@shuku/reader-core';
 import { LoaderCircle, LockKeyhole, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type ReaderShellEvents, type ReaderVolumeNavigation } from '../reader-shell';
@@ -13,6 +13,9 @@ import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './ada
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import type { ReaderBookCache } from '../../../lib/reader/book-cache';
+import { currentReaderServerIdentity } from '../../../lib/reader/model';
+import type { PdfRangeCache } from '../../../lib/reader/pdf-range-cache';
+import { currentAuthorizationVersion } from '../../../lib/user-preferences';
 import { projectReadiumEffectivePreferences } from './adapters/readium-presentation';
 
 type ReaderEngineRuntimeProps = {
@@ -29,6 +32,7 @@ type ReaderEngineRuntimeProps = {
   onDownloadProgress: (progress: { loadedBytes: number; totalBytes: number | null; percent: number | null } | null) => void;
   onReady: () => void;
   bookCache: ReaderBookCache;
+  pdfRangeCache: PdfRangeCache;
   onStorageWarning: (message: string) => void;
   externalNavigation?: { id: number; location: import('@shuku/reader-core').ReaderLocation } | null;
   onExternalNavigationResult?: (id: number, accepted: boolean) => void;
@@ -40,30 +44,23 @@ function canProvidePassword(adapter: ReaderAdapter | null): adapter is PasswordC
   return Boolean(adapter && 'providePassword' in adapter && typeof (adapter as PasswordCapableAdapter).providePassword === 'function');
 }
 
-function bootstrapNavigationItems(bootstrap: ReaderBootstrap, actualTotalPages?: number | null): ReaderNavigationItem[] {
-  if (bootstrap.readerType === 'reflowable') {
-    return bootstrap.source.kind === 'reflowable' ? adapterNavigationItems(bootstrap.source.navigation) : [];
+function bootstrapNavigationItems(bootstrap: ReaderBootstrap): ReaderNavigationItem[] {
+  if (bootstrap.readerType !== 'comic') {
+    return bootstrap.units.map((unit) => ({
+      index: unit.index,
+      title: unit.title,
+      href: unit.href ?? undefined,
+      navigationKey: unit.id
+    }));
   }
-  const pageCount = actualTotalPages ?? bootstrap.volume.pageCount ?? bootstrap.pages.length ?? 0;
-  if (bootstrap.readerType === 'comic' && bootstrap.pages.length) {
-    return bootstrap.pages.map((page) => ({ index: page.pageIndex, title: page.title ?? `第 ${page.pageIndex} 页` }));
-  }
-  return Array.from({ length: pageCount }, (_, index) => ({ index: index + 1, title: `第 ${index + 1} 页` }));
-}
-
-function adapterNavigationItems(entries: ReaderNavigationEntry[]): ReaderNavigationItem[] {
-  const items: ReaderNavigationItem[] = [];
-  const append = (entry: ReaderNavigationEntry) => {
-    items.push({
-      index: entry.index ?? items.length + 1,
-      title: entry.label,
-      href: entry.href,
-      navigationKey: entry.navigationKey
-    });
-    entry.children?.forEach(append);
-  };
-  entries.forEach(append);
-  return items;
+  return bootstrap.pages.map((page) => ({
+    index: page.pageIndex,
+    title: page.title ?? String(page.pageIndex + 1),
+    href: page.resourceHref,
+    navigationKey: bootstrap.units.find(
+      (unit) => unit.metadata.pageIndex === page.pageIndex
+    )?.id
+  }));
 }
 
 function novelErrorMessage(code: string | undefined, translate: (source: string) => string) {
@@ -79,6 +76,14 @@ function novelErrorMessage(code: string | undefined, translate: (source: string)
   if (code === 'READER_FORMAT_MORPHOLOGY_MISMATCH') return translate('文件格式与阅读器类型不匹配。');
   if (code === 'PDF_ENCRYPTED' || code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
   if (code === 'PDF_INVALID') return translate('PDF 文件已损坏或格式无效。');
+  if (code === 'PDF_RANGE_UNSUPPORTED') return translate('服务器不支持 PDF 按需读取，请先下载后离线阅读。');
+  if (code === 'PDF_RANGE_INVALID') return translate('PDF 字节区间响应无效，请重试。');
+  if (code === 'PDF_RESOURCE_CHANGED') return translate('PDF 文件已更新，请重新打开。');
+  if (code === 'NETWORK_UNAVAILABLE') return translate('网络不可用，无法加载 PDF 页面。');
+  if (code === 'PDF_CACHE_IO') return translate('PDF 缓存读写失败。');
+  if (code === 'PDF_PAGE_LOAD_FAILED') return translate('PDF 页面加载失败。');
+  if (code === 'PDF_RENDER_FAILED') return translate('PDF 页面渲染失败。');
+  if (code === 'OUT_OF_MEMORY_RISK') return translate('PDF 页面尺寸过大，无法安全渲染。');
   if (code === 'COMIC_INDEX_INVALID') return translate('漫画页面索引无效或尚未准备完成。');
   return null;
 }
@@ -105,6 +110,7 @@ export function ReaderEngineRuntime({
   onDownloadProgress,
   onReady,
   bookCache,
+  pdfRangeCache,
   onStorageWarning,
   externalNavigation = null,
   onExternalNavigationResult
@@ -184,7 +190,22 @@ export function ReaderEngineRuntime({
         });
       } else {
         const adapterModule = await import('./adapters/pdf-adapter');
-        created = adapterModule.createPdfAdapter({ container });
+        const pdfFile = bootstrap.files.find((file) => file.mimeType.toLowerCase() === 'application/pdf') ?? bootstrap.files[0];
+        if (!pdfFile || pdfFile.sizeBytes <= 0) throw new Error('PDF_INVALID');
+        created = adapterModule.createPdfAdapter({
+          container,
+          rangeAccess: {
+            url: pdfFile.url,
+            length: pdfFile.sizeBytes,
+            identity: {
+              serverIdentity: currentReaderServerIdentity(),
+              userId: bootstrap.userId,
+              authorizationVersion: currentAuthorizationVersion(bootstrap.userId),
+              volumeId: bootstrap.volume.id
+            },
+            cache: pdfRangeCache
+          }
+        });
       }
       if (!active) {
         void created.dispose();
@@ -203,7 +224,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bookCache, bootstrap.availableVolumes, bootstrap.book.title, bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.volume.id, container, i18nAttribute, onStorageWarning]);
+  }, [bookCache, bootstrap.availableVolumes, bootstrap.book.title, bootstrap.files, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.volume.id, container, i18nAttribute, onStorageWarning, pdfRangeCache]);
 
   const session = useReaderSession({
     adapter,
@@ -279,15 +300,11 @@ export function ReaderEngineRuntime({
     ...preferencesToReaderSettings(runtimePreferences),
     manualTheme: preferences.appearance.theme
   };
-  const items = useMemo(() => {
-    const adapterItems = session.state.navigationReady ? adapterNavigationItems(session.state.navigationItems) : [];
-    return adapterItems.length > 0 ? adapterItems : bootstrapNavigationItems(bootstrap, session.state.totalPages);
-  }, [bootstrap, session.state.navigationItems, session.state.navigationReady, session.state.totalPages]);
+  const items = useMemo(() => bootstrapNavigationItems(bootstrap), [bootstrap]);
   const bookmarkStorageKey = useMemo(() => readerBookmarkStorageKey(
     bootstrap.userId,
-    bootstrap.volume.id,
-    bootstrap.contentFingerprint
-  ), [bootstrap.contentFingerprint, bootstrap.userId, bootstrap.volume.id]);
+    bootstrap.volume.id
+  ), [bootstrap.userId, bootstrap.volume.id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -301,7 +318,7 @@ export function ReaderEngineRuntime({
     } catch {
       setBookmarks([]);
     }
-    fetchReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, format, controller.signal)
+    fetchReaderBookmarks(bootstrap.volume.id, format, controller.signal)
       .then((serverBookmarks) => {
         setBookmarks((current) => {
           const next = mergeReaderBookmarks(current, serverBookmarks);
@@ -312,7 +329,7 @@ export function ReaderEngineRuntime({
           }
           bookmarkSyncReadyRef.current = true;
           if (JSON.stringify(next) !== JSON.stringify(serverBookmarks)) {
-            void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, format, next).catch(() => undefined);
+            void saveReaderBookmarks(bootstrap.volume.id, format, next).catch(() => undefined);
           }
           return next;
         });
@@ -321,7 +338,7 @@ export function ReaderEngineRuntime({
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) bookmarkSyncReadyRef.current = true;
       });
     return () => controller.abort();
-  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.source, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.source, bootstrap.volume.id]);
 
   const persistBookmarks = useCallback((update: (current: ReaderBookmark[]) => ReaderBookmark[]) => {
     setBookmarks((current) => {
@@ -333,11 +350,11 @@ export function ReaderEngineRuntime({
       }
       if (bookmarkSyncReadyRef.current) {
         const format = bootstrap.source.kind === 'reflowable' ? bootstrap.source.sourceFormat : null;
-        void saveReaderBookmarks(bootstrap.volume.id, bootstrap.contentFingerprint, format, next).catch(() => undefined);
+        void saveReaderBookmarks(bootstrap.volume.id, format, next).catch(() => undefined);
       }
       return next;
     });
-  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.source, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.source, bootstrap.volume.id]);
 
   const currentBookmarkLabel = useMemo(() => {
     if (currentLocation?.kind === 'comic') {
@@ -376,11 +393,11 @@ export function ReaderEngineRuntime({
   }, [bootstrap.volume.id, onSelectVolume, sessionExecute]);
 
   const controls: ReaderControls = useMemo(() => ({
-    next: async () => { await sessionControls.next(); },
-    prev: async () => { await sessionControls.prev(); },
-    jumpToProgress: async (percent) => { await sessionControls.jumpToProgress(percent); },
-    jumpToHref: async (href) => { await sessionControls.jumpToHref(href); },
-    jumpToIndex: async (index) => { await sessionControls.jumpToIndex(index); }
+    next: () => sessionControls.next(),
+    prev: () => sessionControls.prev(),
+    jumpToProgress: (percent) => sessionControls.jumpToProgress(percent),
+    jumpToHref: (href) => sessionControls.jumpToHref(href),
+    jumpToIndex: (index) => sessionControls.jumpToIndex(index)
   }), [sessionControls]);
 
   const volumeNavigation: ReaderVolumeNavigation = useMemo(() => ({
@@ -396,7 +413,7 @@ export function ReaderEngineRuntime({
     loading: false,
     onSelectVolume,
     onSelectItem: (item) => {
-      if (item.href) void sessionControls.jumpToHref(item.href);
+      if (bootstrap.readerType === 'reflowable' && item.href) void sessionControls.jumpToHref(item.href);
       else void sessionControls.jumpToIndex(item.index);
     }
   }), [bootstrap, items, onSelectVolume, sessionControls]);

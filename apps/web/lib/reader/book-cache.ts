@@ -3,7 +3,6 @@ import type { ReflowableFormat } from '@shuku/reader-core';
 export type ReaderBookCacheIdentity = {
   userId: string;
   volumeId: string;
-  contentFingerprint: string;
 };
 
 export type CachedReaderBookFile = ReaderBookCacheIdentity & {
@@ -23,7 +22,7 @@ export interface ReaderBookCache {
 }
 
 export function readerBookCacheKey(identity: ReaderBookCacheIdentity) {
-  return [identity.userId, identity.volumeId, identity.contentFingerprint]
+  return [identity.userId, identity.volumeId]
     .map(encodeURIComponent)
     .join('::');
 }

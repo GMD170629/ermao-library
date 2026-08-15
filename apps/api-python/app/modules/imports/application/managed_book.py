@@ -48,7 +48,6 @@ from app.modules.imports.application.import_policy import (
 )
 from app.modules.imports.application.import_support import (
     SUPPORTED_EXTS,
-    _content_hash,
     _ensure_import_task,
     _existing_audio_bundle_result,
     _existing_file_result,
@@ -471,25 +470,10 @@ def import_managed_book(
         ):
             raise RuntimeError("导入任务租约已失效")
         release_import_transaction(unit_of_work)
-        content_hash = (
-            None
-            if ext
-            in {
-                ".cbr",
-                ".cbz",
-                ".rar",
-                ".zip",
-                ".audio-bundle",
-                *SUPPORTED_AUDIO_EXTS,
-            }
-            else _content_hash(source)
-        )
         task_update: dict[str, object] = {
             "progress": 30,
             "message": "正在读取元数据",
         }
-        if content_hash:
-            task_update["contentHash"] = content_hash
         store.update_import_task(task_id, columns=task_update)
         release_import_transaction(unit_of_work)
         if ext == ".epub":

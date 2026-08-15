@@ -40,12 +40,10 @@ data class DownloadIdentity(
     val namespace: DownloadNamespace,
     val workId: String,
     val volumeId: String,
-    val contentFingerprint: String,
 ) {
     init {
         require(workId.isNotBlank())
         require(volumeId.isNotBlank())
-        require(contentFingerprint.isNotBlank())
     }
 }
 
@@ -329,7 +327,8 @@ private fun String.encodeForKey(): String = encodeToByteArray().joinToString("")
 internal fun String.isSafeMediaApiPath(): Boolean =
     isSafeApiPath() && (
         matches(Regex("^/api/files/[^/?#]+$")) ||
-            matches(Regex("^/api/volumes/[^/?#]+/file$"))
+            matches(Regex("^/api/volumes/[^/?#]+/file$")) ||
+            matches(Regex("^/api/reader/v4/volumes/[^/?#]+/comic/archive$"))
         )
 
 internal fun String.isSafeApiPath(): Boolean =

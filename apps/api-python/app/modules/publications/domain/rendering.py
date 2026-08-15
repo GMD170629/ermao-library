@@ -12,9 +12,9 @@ RENDER_NORMALIZATION_IDENTIFIER = "shuku-render-html5-v1"
 @dataclass(frozen=True, slots=True)
 class PreparedPublicationRenderArtifact:
     content: bytes
-    content_hash: str
     size_bytes: int
-    original_file_hash: str
+    source_size_bytes: int
+    source_mtime_ms: int
     source_parser: str
     normalization: str
     unreadable_hrefs: tuple[str, ...]
@@ -25,11 +25,11 @@ class PreparedPublicationRenderArtifact:
 class PublicationRenderArtifact:
     volume_id: str
     file_id: str
-    original_file_hash: str
+    source_size_bytes: int
+    source_mtime_ms: int
     parser: str
     normalization: str
     relative_path: str
-    content_hash: str
     size_bytes: int
     unreadable_resource_count: int
 

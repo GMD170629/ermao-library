@@ -39,7 +39,13 @@ Status: content-discovery compact/light smoke review passed. Work Detail v2 impl
   - `design-qa/screenshots/ios-work-detail-physical-zh.png`
   - `design-qa/screenshots/ios-series-facet-physical-zh.png`
   - `design-qa/screenshots/ios-filter-sheet-physical-zh.png`
-- Android: per the product-owner decision for this delivery, Android runtime tests and screenshots are not required. Static resource and source checks were completed; no runtime visual claim is made.
+- Android Warm Page three-page milestone: API 36 AVD `Shuku_API_36` (`emulator-5554`), 1080×2400 at 420 dpi (about 412×915 dp), portrait, animations disabled, `font_scale=1.0`.
+- The debug-only `VisualFixtureActivity` renders seven deterministic, offline scenarios. The blocking matrix is 7 scenarios × zh-CN/en-US × Light/Dark = 28 Android goldens. The comparator rejects channel differences greater than 8 when more than 0.5% of compared pixels differ; only the clock/status-icon area is masked. Modal fixtures use the device screenshot so the real Sheet is included; ordinary screens use the fixture window surface to exclude unrelated foreground windows.
+- The default matrix and the six Light `fontScale=2.0` Home/Library/Work Detail structure captures passed (`VisualFixtureActivityTest`: 3 tests). Home's dedicated Compose test passed (1 test), and the existing shell/localization smoke suite passed (5 tests). Instrumentation execution is therefore non-zero and explicitly bound to `emulator-5554`.
+- Final Android runtime evidence is in `design-qa/screenshots/android-warm-page-20260815-final/` (34 PNGs). The 28 blocking baselines are checked into `androidApp/src/androidTest/assets/warm-page-goldens/`.
+- Passing instrumentation XML is archived in `design-qa/evidence/android-warm-page-20260815/` for the 3-test visual fixture, 1-test Home contract, and 5-test shell/localization smoke runs.
+- `verifyDesignTokens`, `:shared:testAndroidHostTest`, the focused metrics/progress unit tests, debug APK assembly, Android-test APK assembly, replace-install, cold launch, version verification, and crash-log verification passed.
+- The repository-wide Android unit and lint gates are not green for unrelated Reader work already present in the working tree: the full unit suite has one `DownloadReaderEntryPolicyTest` expectation mismatch, and `lintDebug` crashes inside the lifecycle lint detector while analyzing the dirty `ReaderActivity.kt`. A prior full instrumentation run also retained three Reader-only failures after the visual fixture was fixed. These failures were not skipped, weakened, or changed by this UI milestone.
 
 ### Work Detail v2 verification
 

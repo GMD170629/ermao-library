@@ -93,8 +93,8 @@ function commandForInput(intent: ReturnType<typeof readerKeyIntent> | ReturnType
 }
 
 
-function envelope(locator: Locator, publication: ReadiumLocatorEnvelope['publication']): ReadiumLocatorEnvelope | null {
-  const parsed = parseReadiumLocatorEnvelope({ engine: 'readium', platform: 'web', version: READIUM_VERSION, publication, payload: locator.serialize() });
+function envelope(locator: Locator): ReadiumLocatorEnvelope | null {
+  const parsed = parseReadiumLocatorEnvelope({ engine: 'readium', platform: 'web', version: READIUM_VERSION, payload: locator.serialize() });
   return parsed && hasExactReadiumAnchor(parsed.payload) ? parsed : null;
 }
 
@@ -134,7 +134,6 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
   private navigator: EpubNavigator | null = null;
   private preferences: ReaderPreferences | null = null;
   private format: ReflowableLocation['format'] = 'epub';
-  private fingerprint: ReadiumLocatorEnvelope['publication'] | null = null;
   private latestExact: ReadiumLocatorEnvelope | null = null;
   private restoreTarget: ReadiumLocatorEnvelope | null = null;
   private captureEnabled = false;
@@ -161,9 +160,9 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
   async open(context: ReaderAdapterOpenContext) {
     const generation = this.beginSession(context.sessionId, context.operation);
     this.locationOperation = context.operation;
-    if (context.source.kind !== 'reflowable' || !context.source.publicationFingerprint) throw new Error('READIUM_PUBLICATION_FINGERPRINT_MISSING');
+    if (context.source.kind !== 'reflowable') throw new Error('READIUM_SOURCE_INVALID');
     if (!context.source.publicationManifestUrl) throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
-    this.preferences = context.preferences; this.format = context.source.sourceFormat; this.fingerprint = context.source.publicationFingerprint;
+    this.preferences = context.preferences; this.format = context.source.sourceFormat;
     this.emit({ type: 'phase-changed', phase: 'loading-font' }, context.operation);
     await this.resolveFont(context.preferences, context.signal);
     this.emit({ type: 'phase-changed', phase: 'loading-content' }, context.operation);
@@ -451,8 +450,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
 
   private onPositionChanged(value: Locator, settledNavigation = false) {
     if (
-      !this.fingerprint
-      || !this.captureEnabled
+      !this.captureEnabled
       || this.restoreNavigationInFlight
       || (this.resizePresentationInFlight && !settledNavigation)
     ) return;
@@ -465,12 +463,12 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     const restoreTarget = this.restoreTarget;
     const resourceHrefs = this.navigator?.publication.readingOrder.items.map((item) => item.href) ?? [];
     let exact = restoreTarget
-      ? captureVisibleReadiumTarget(restoreTarget, value, this.options.container, this.fingerprint, resourceHrefs)
-      : captureExactReadiumLocator(value, this.options.container, this.fingerprint, resourceHrefs)
-        ?? envelope(value, this.fingerprint);
+      ? captureVisibleReadiumTarget(restoreTarget, value, this.options.container, resourceHrefs)
+      : captureExactReadiumLocator(value, this.options.container, resourceHrefs)
+        ?? envelope(value);
     if (restoreTarget && !exact) {
-      exact = captureExactReadiumLocator(value, this.options.container, this.fingerprint, resourceHrefs)
-        ?? envelope(value, this.fingerprint);
+      exact = captureExactReadiumLocator(value, this.options.container, resourceHrefs)
+        ?? envelope(value);
       this.restoreTarget = null;
       this.options.container.dataset.readerExactRestore = 'failed';
     }
@@ -480,8 +478,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       const textAnchorIsUnique = comparison.reason !== 'same_text_anchor'
         || isReadiumTextAnchorUnique(this.options.container, restoreTarget.payload.text?.highlight ?? '');
       if (comparison.precision !== 'exact-block' || !textAnchorIsUnique) {
-        exact = captureExactReadiumLocator(value, this.options.container, this.fingerprint, resourceHrefs)
-          ?? envelope(value, this.fingerprint);
+        exact = captureExactReadiumLocator(value, this.options.container, resourceHrefs)
+          ?? envelope(value);
         this.restoreTarget = null;
         this.options.container.dataset.readerExactRestore = 'failed';
         if (!exact) return;
@@ -535,7 +533,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     }
     else if (command.type === 'go-to-location' && command.location.kind === 'reflowable' && command.location.exactLocator) {
       const target = parseReadiumLocatorEnvelope(command.location.exactLocator); const readium = target ? Locator.deserialize(target.payload) : null;
-      if (target && readium && this.fingerprint && target.publication.originalFileHash === this.fingerprint.originalFileHash && target.publication.parser === this.fingerprint.parser && target.publication.normalization === this.fingerprint.normalization) {
+      if (target && readium) {
         accepted = await this.navigateToExact(navigator, target, readium);
         if (accepted) {
           this.captureEnabled = true;

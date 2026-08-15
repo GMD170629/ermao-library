@@ -107,14 +107,14 @@ P0 必须形成以下连续闭环：
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
 | Reader bootstrap | `/reader/[volumeId]`；`GET /api/reader/v4/volumes/{volumeId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot 与 publication | P0 | 只使用 `volumeId` 与 Reader v4；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
-| 可重排电子书 | Reader v4 + `GET/HEAD /api/files/{fileId}` 或 volume file | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；完整工件、fingerprint、下载失败和内容版本变化 | P0 | **必须先形成与当前 `contentFingerprint` 匹配的完整、已验证本地工件，才能进入 Reader**；未完成、旧 fingerprint 或仅缓存部分字节均不可读。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
+| 可重排电子书 | Reader v4 + `GET/HEAD /api/files/{fileId}` 或 volume file | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；完整工件、fingerprint、下载失败和内容版本变化 | P0 | 在线入口始终请求 Bootstrap；已有本地完整工件时由原生解析器决定能否打开，fingerprint、版本和声明长度差异仅作诊断。在线章节优先，离线使用缓存章节并由书内 TOC 补充。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
 | 漫画 | Reader v4 + pages list/page API | LTR/RTL、页列表、图片加载失败、内存与预取窗口 | P0 | 在线默认按页流式阅读，原生图片管线只做有限预取，禁止一次加载全部页；有完整本地工件时可离线打开，不要求在线阅读前下载整包 |
 | PDF | Reader v4 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 在线使用系统/原生 PDF renderer 通过 Range 流式读取，不要求先下载整份；完整本地工件可离线打开；捏合缩放、页码 scrubber，连续模式不在未验证前承诺 |
 | 书签 | Reader v4 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
-| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `workId + volumeId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作工件校验和诊断 | P0 | 本地事务先保存，再同步；文件或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复 |
+| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `workId + volumeId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作诊断 | P0 | 本地事务先保存，再同步；文件或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复；进度模块异常不得阻止内容打开或退出 |
 | 音频书 | `/listen/[volumeId]` 仅为瞬时深链；bootstrap + file API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
-| 受管离线内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed + fingerprint 校验为事实来源 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量离线书库 |
+| 受管离线内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、命名空间、volume 和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量离线书库 |
 | 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有离线缓存是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示离线缓存和文件导出 |
 
 ### 4.4 导入、发送与系统管理
@@ -253,7 +253,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 ### 7.3 离线能力边界
 
-格式访问策略固定为：可重排格式缺少匹配 fingerprint 的 completed 工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，存在 completed 工件时优先 `LocalArtifact`，离线且无工件时为 `Unavailable`。任务只有在临时 sink 分块写入成功、响应字节长度验证通过并原子提交后才可进入 completed；取消、空间不足、短响应或进程中断不得留下伪 completed。
+格式访问策略固定为：可重排格式缺少 completed 本地工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，同一命名空间和 volume 存在 completed 本地工件时优先 `LocalArtifact`，离线且无工件时为 `Unavailable`。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
 
 第一阶段可以承诺：
 

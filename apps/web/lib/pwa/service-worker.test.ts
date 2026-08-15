@@ -23,6 +23,11 @@ test('reader fonts and large reader payloads bypass caches', () => {
   assert.match(source, /files\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);
 });
 
+test('PDF.js decoder WASM uses the versioned static resource cache', () => {
+  assert.match(source.match(/function isStaticAsset[\s\S]*?\n\}/)?.[0] ?? '', /wasm/);
+  assert.match(source, /isStaticAsset\(url\.pathname\)[\s\S]*cacheFirst\(event\.request, STATIC_CACHE\)/);
+});
+
 test('service worker scopes shell and API handling to the configured application base path', () => {
   assert.match(source, /const BASE_PATH = new URL\(self\.registration\.scope\)/);
   assert.match(source, /\]\.map\(withBasePath\)/);

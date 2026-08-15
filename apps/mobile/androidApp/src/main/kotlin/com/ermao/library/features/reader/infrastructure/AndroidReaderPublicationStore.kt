@@ -1,8 +1,8 @@
 package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
-import com.ermao.library.shared.modules.reader.ContentFingerprint
 import com.ermao.library.shared.modules.reader.LocalReaderSource
+import com.ermao.library.shared.modules.reader.LocalReaderSourceResolver
 import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderSource
@@ -15,7 +15,6 @@ import java.io.InputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.ZipFile
 import com.ermao.library.mobi.infrastructure.MobiReadiumPublicationFactory
@@ -24,6 +23,10 @@ import kotlinx.coroutines.withContext
 
 internal class AndroidReaderPublicationStore(context: Context) {
     private val publicationRoot = File(context.filesDir, PUBLICATION_DIRECTORY)
+
+    init {
+        removeLegacyHashedPublicationArtifacts(publicationRoot)
+    }
 
     suspend fun publishLocalEpub(
         sourceId: String,
@@ -36,7 +39,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
         displayTitle = displayTitle,
         input = input,
         sourceFormat = ReaderSourceFormat.Epub,
-        publicationFingerprint = null,
         workId = workId,
         volumeId = volumeId,
     )
@@ -46,7 +48,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
         displayTitle: String,
         input: InputStream,
         sourceFormat: ReaderSourceFormat,
-        publicationFingerprint: com.ermao.library.shared.modules.reader.PublicationFingerprint?,
         workId: String? = null,
         volumeId: String? = null,
     ): LocalReaderSource = withContext(Dispatchers.IO) {
@@ -61,9 +62,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
 
         val target = targetFile(sourceId, sourceFormat)
         val temporary = File(publicationRoot, ".${target.name}.${System.nanoTime()}.tmp")
-        val digest = MessageDigest.getInstance("SHA-256")
         var written = 0L
-        lateinit var artifactContentHash: String
         try {
             FileOutputStream(temporary).use { output ->
                 val buffer = ByteArray(COPY_BUFFER_BYTES)
@@ -72,16 +71,13 @@ internal class AndroidReaderPublicationStore(context: Context) {
                     if (count < 0) break
                     written += count
                     require(written <= MAX_PUBLICATION_BYTES) { "Reader publication exceeds the size limit" }
-                    digest.update(buffer, 0, count)
                     output.write(buffer, 0, count)
                 }
                 output.fd.sync()
             }
             require(written > 0) { "Reader publication is empty" }
-            artifactContentHash = digest.digestToFingerprint()
-            validatePublication(temporary, sourceFormat, publicationFingerprint)
+            validatePublication(temporary, sourceFormat)
             atomicReplace(temporary, target)
-            writeArtifactHash(sourceId, artifactContentHash, sourceFormat)
         } finally {
             temporary.delete()
         }
@@ -90,11 +86,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
             sourceId = sourceId,
             displayTitle = displayTitle,
             format = sourceFormat.readerFormat,
-            contentFingerprint = ContentFingerprint(
-                originalFileHash = publicationFingerprint?.originalFileHash ?: artifactContentHash,
-                parserVersion = publicationFingerprint?.parser ?: sourceFormat.defaultParser,
-                normalizationVersion = publicationFingerprint?.normalization ?: sourceFormat.defaultNormalization,
-            ),
             workId = workId,
             volumeId = volumeId,
             sourceFormat = sourceFormat,
@@ -115,6 +106,21 @@ internal class AndroidReaderPublicationStore(context: Context) {
         }
     }
 
+    fun localSourceResolver(): LocalReaderSourceResolver = LocalReaderSourceResolver { download ->
+        val source = LocalReaderSource(
+            sourceId = download.sourceId,
+            displayTitle = download.displayTitle,
+            format = download.sourceFormat.readerFormat,
+            workId = download.workId,
+            volumeId = download.volumeId,
+            sourceFormat = download.sourceFormat,
+        )
+        runCatching {
+            resolve(source)
+            source
+        }.getOrNull()
+    }
+
     fun resolve(source: LocalReaderSource): File {
         require(source.format in SUPPORTED_LOCAL_FORMATS) { "Unsupported Reader source" }
         val sourceFormat = source.sourceFormat ?: when (source.format) {
@@ -133,21 +139,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
     suspend fun resolveVerified(source: LocalReaderSource): File = withContext(Dispatchers.IO) {
         val target = resolve(source)
         val sourceFormat = source.sourceFormat ?: ReaderSourceFormat.Epub
-        val digest = MessageDigest.getInstance("SHA-256")
-        target.inputStream().use { input ->
-            val buffer = ByteArray(COPY_BUFFER_BYTES)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        val computedHash = digest.digestToFingerprint()
-        val expectedHash = readArtifactHash(source.sourceId, sourceFormat)
-            ?: source.contentFingerprint.originalFileHash
-        require(computedHash.equals(expectedHash, ignoreCase = true)) {
-            "Reader publication fingerprint does not match the launch contract"
-        }
+        validatePublication(target, sourceFormat)
         target
     }
 
@@ -155,7 +147,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
         require(sourceId.isNotBlank()) { "Reader source id is blank" }
         ReaderSourceFormat.entries.forEach {
             Files.deleteIfExists(targetFile(sourceId, it).toPath())
-            Files.deleteIfExists(artifactHashFile(sourceId, it).toPath())
         }
     }
 
@@ -180,7 +171,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
         private val temporary: File,
         private val target: File,
     ) : PublicationDownloadSink {
-        private val digest = MessageDigest.getInstance("SHA-256")
         private var output: FileOutputStream? = FileOutputStream(temporary)
         private var writtenBytes = 0L
         private var completed = false
@@ -189,8 +179,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
             check(!completed) { "Reader publication sink is closed" }
             require(count in 1..bytes.size) { "Reader publication chunk is invalid" }
             val nextSize = writtenBytes + count
-            require(nextSize <= download.expectedSizeBytes) { "Reader publication exceeds declared size" }
-            digest.update(bytes, 0, count)
+            require(nextSize <= MAX_PUBLICATION_BYTES) { "Reader publication exceeds the size limit" }
             checkNotNull(output).write(bytes, 0, count)
             writtenBytes = nextSize
         }
@@ -199,30 +188,20 @@ internal class AndroidReaderPublicationStore(context: Context) {
             check(!completed) { "Reader publication sink is closed" }
             completed = true
             try {
-                check(writtenBytes == download.expectedSizeBytes) { "Reader publication size does not match bootstrap" }
                 checkNotNull(output).apply {
                     fd.sync()
                     close()
                 }
                 output = null
-                val computedHash = digest.digestToFingerprint()
-                download.expectedContentHash?.let { expectedHash ->
-                    check(computedHash.equals(expectedHash, ignoreCase = true)) {
-                        "Reader publication hash does not match bootstrap"
-                    }
+                require(writtenBytes == download.expectedSizeBytes) {
+                    "Reader publication length does not match the launch contract"
                 }
-                validatePublication(temporary, download.sourceFormat, download.publicationFingerprint)
+                validatePublication(temporary, download.sourceFormat)
                 atomicReplace(temporary, target)
-                writeArtifactHash(download.sourceId, computedHash, download.sourceFormat)
                 LocalReaderSource(
                     sourceId = download.sourceId,
                     displayTitle = download.displayTitle,
                     format = download.sourceFormat.readerFormat,
-                    contentFingerprint = ContentFingerprint(
-                        download.publicationFingerprint.originalFileHash,
-                        download.publicationFingerprint.parser,
-                        download.publicationFingerprint.normalization,
-                    ),
                     workId = download.workId,
                     volumeId = download.volumeId,
                     sourceFormat = download.sourceFormat,
@@ -243,35 +222,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
         }
     }
 
-    private fun artifactHashFile(sourceId: String, sourceFormat: ReaderSourceFormat): File =
-        File(publicationRoot, sha256(sourceId) + "." + sourceFormat.wireValue + ".sha256")
-
-    private fun writeArtifactHash(
-        sourceId: String,
-        contentHash: String,
-        sourceFormat: ReaderSourceFormat,
-    ) {
-        require(contentHash.matches(SHA256_PATTERN)) { "Reader artifact hash is invalid" }
-        val destination = artifactHashFile(sourceId, sourceFormat)
-        val temporary = File(publicationRoot, ".${destination.name}.${System.nanoTime()}.tmp")
-        try {
-            temporary.writeText(contentHash, Charsets.US_ASCII)
-            FileOutputStream(temporary, true).use { it.fd.sync() }
-            atomicReplace(temporary, destination)
-        } finally {
-            temporary.delete()
-        }
-    }
-
-    private fun readArtifactHash(
-        sourceId: String,
-        sourceFormat: ReaderSourceFormat,
-    ): String? {
-        val file = artifactHashFile(sourceId, sourceFormat)
-        if (!file.isFile || Files.isSymbolicLink(file.toPath()) || file.length() > 80) return null
-        return file.readText(Charsets.US_ASCII).trim().takeIf { it.matches(SHA256_PATTERN) }
-    }
-
     private fun validateEpubArchive(file: File) {
         ZipFile(file).use { archive ->
             val mimeEntry = archive.getEntry("mimetype") ?: error("EPUB mimetype entry is missing")
@@ -289,25 +239,22 @@ internal class AndroidReaderPublicationStore(context: Context) {
     private fun validatePublication(
         file: File,
         sourceFormat: ReaderSourceFormat,
-        expected: com.ermao.library.shared.modules.reader.PublicationFingerprint?,
     ) {
         when (sourceFormat) {
             ReaderSourceFormat.Epub -> validateEpubArchive(file)
             ReaderSourceFormat.Txt -> validateText(file)
-            ReaderSourceFormat.Cbz -> validateComicArchive(file)
+            ReaderSourceFormat.Cbz,
+            ReaderSourceFormat.Zip,
+            -> validateComicArchive(file)
+            ReaderSourceFormat.Cbr,
+            ReaderSourceFormat.Rar,
+            -> throw IllegalArgumentException("RAR comic archives are available through server page streaming only")
             ReaderSourceFormat.Pdf -> validatePdf(file)
             ReaderSourceFormat.Mobi,
             ReaderSourceFormat.Azw,
             ReaderSourceFormat.Azw3,
             ReaderSourceFormat.Prc,
-            -> MobiReadiumPublicationFactory().open(file).use { opened ->
-                expected?.let {
-                    require(("sha256:" + opened.originalFileHash).equals(it.originalFileHash, ignoreCase = true))
-                    require(opened.parser == it.parser && opened.normalization == it.normalization) {
-                        "MOBI parser identity does not match bootstrap"
-                    }
-                }
-            }
+            -> MobiReadiumPublicationFactory().open(file).close()
         }
     }
 
@@ -325,12 +272,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
             require(entries.size in 1..MAX_COMIC_ENTRIES) { "CBZ entry count is invalid" }
             entries.forEach { entry ->
                 val name = entry.name
-                require(name.isNotBlank() && !name.startsWith('/') && '\\' !in name) {
-                    "CBZ entry path is unsafe"
-                }
-                require(name.split('/').none { it.isBlank() || it == "." || it == ".." }) {
-                    "CBZ entry path is unsafe"
-                }
+                require(isSafeComicArchiveEntryPath(name, entry.isDirectory)) { "CBZ entry path is unsafe" }
                 require(seen.add(name.lowercase(Locale.ROOT))) { "CBZ contains duplicate entry names" }
                 require(entry.method != java.util.zip.ZipEntry.STORED || entry.compressedSize == entry.size) {
                     "CBZ stored entry metadata is invalid"
@@ -375,7 +317,6 @@ internal class AndroidReaderPublicationStore(context: Context) {
         private const val EPUB_MIME_TYPE = "application/epub+zip"
         private val PDF_HEADER = "%PDF-".toByteArray(Charsets.US_ASCII)
         private val COMIC_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp")
-        private val SHA256_PATTERN = Regex("^sha256:[0-9a-f]{64}$")
         private val SUPPORTED_LOCAL_FORMATS = setOf(
             ReaderFormat.Epub,
             ReaderFormat.Mobi,
@@ -386,20 +327,16 @@ internal class AndroidReaderPublicationStore(context: Context) {
     }
 }
 
-private val ReaderSourceFormat.defaultParser: String
-    get() = when (this) {
-        ReaderSourceFormat.Epub -> "epub-package:1"
-        ReaderSourceFormat.Txt -> "shuku-txt-parser-v1"
-        ReaderSourceFormat.Cbz -> "archive-images:natural-order-v1"
-        ReaderSourceFormat.Pdf -> "pdf:source-v1"
-        else -> "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add"
-    }
+internal fun removeLegacyHashedPublicationArtifacts(publicationRoot: File) {
+    publicationRoot.listFiles { file -> file.isFile && file.name.endsWith(".sha256") }
+        ?.forEach { sidecar ->
+            File(sidecar.parentFile, sidecar.name.removeSuffix(".sha256")).delete()
+            sidecar.delete()
+        }
+}
 
-private val ReaderSourceFormat.defaultNormalization: String
-    get() = when (this) {
-        ReaderSourceFormat.Epub -> "shuku-epub-locator-dom-v2"
-        ReaderSourceFormat.Txt -> "shuku-txt-publication-v2"
-        ReaderSourceFormat.Cbz -> "shuku-comic-pages-v1"
-        ReaderSourceFormat.Pdf -> "shuku-pdf-pages-v1"
-        else -> "ermao-mobi-core-v1+shuku-locator-dom-v2"
-    }
+internal fun isSafeComicArchiveEntryPath(name: String, isDirectory: Boolean): Boolean {
+    if (name.isBlank() || name.startsWith('/') || '\\' in name) return false
+    val path = if (isDirectory) name.removeSuffix("/") else name
+    return path.isNotBlank() && path.split('/').none { it.isBlank() || it == "." || it == ".." }
+}

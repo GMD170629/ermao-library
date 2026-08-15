@@ -51,7 +51,6 @@ sealed interface DownloadPreparationUiState {
 
 data class PreparedDownloadArtifact(
     val localReference: String,
-    val contentFingerprint: String,
     val expectedBytes: Long,
     val format: String,
 )
@@ -105,7 +104,6 @@ class DownloadPreparationViewModel(
                     namespace = context.namespace,
                     volumeId = descriptor.identity.volumeId,
                     readerType = descriptor.readerType,
-                    contentFingerprint = descriptor.identity.contentFingerprint,
                     isOnline = true,
                 ),
             )) {
@@ -204,7 +202,6 @@ class DownloadPreparationViewModel(
         completedArtifacts.send(
             PreparedDownloadArtifact(
                 localReference = artifact.localReference,
-                contentFingerprint = artifact.identity.contentFingerprint,
                 expectedBytes = artifact.verifiedBytes,
                 format = artifact.descriptor.format,
             ),

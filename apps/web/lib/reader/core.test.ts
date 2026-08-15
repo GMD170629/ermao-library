@@ -77,13 +77,13 @@ test('normalizes a complete V4 preference snapshot from legacy and invalid input
     },
     comic: {
       direction: 'rtl',
-      mode: 'double',
+      spreadMode: 'double',
       pageTurnAnimation: 'slide',
       imageFit: 'contain',
       imageVariant: 'data-saver',
       zoom: 1.6,
       pageWidth: 1350,
-      flow: 'paged',
+      flow: 'paginated',
       coverSingle: false,
       pageGap: 0
     },
@@ -115,7 +115,7 @@ test('migrates V2 kindle animation and missing paging fields to V4 defaults', ()
   assert.equal(preferences.schemaVersion, 4);
   assert.equal(preferences.epub.spreadMode, 'single');
   assert.equal(preferences.epub.pageTurnAnimation, 'slide');
-  assert.equal(preferences.comic.mode, 'double');
+  assert.equal(preferences.comic.spreadMode, 'double');
   assert.equal(preferences.comic.pageTurnAnimation, 'slide');
 });
 
@@ -157,7 +157,7 @@ test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
   );
   assert.deepEqual(
     { flow: preferences.comic.flow, coverSingle: preferences.comic.coverSingle, pageGap: preferences.comic.pageGap },
-    { flow: 'vertical', coverSingle: true, pageGap: 16 }
+    { flow: 'scrolled', coverSingle: true, pageGap: 16 }
   );
   assert.deepEqual(
     { flow: preferences.pdf.flow, rotation: preferences.pdf.rotation, cropMargins: preferences.pdf.cropMargins },

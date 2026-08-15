@@ -68,7 +68,8 @@ class SqlAlchemyPublicationSourceRepository:
             file_id=source.id,
             source_format=volume.format.lower(),
             path=source.path,
-            full_hash=source.full_hash,
+            size_bytes=source.size_bytes,
+            mtime_ms=source.mtime_ms,
             title=volume.title or work.title,
             author=work.author,
         )

@@ -33,7 +33,7 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
                 ReaderSpreadMode.Double -> ColumnCount.TWO
             },
             fontFamily = if (epub.typography.allowPublisherFonts) null else fontFamily(epub.fontFamily),
-            fontSize = epub.fontSize / BASE_FONT_SIZE,
+            fontSize = epub.fontSize / READIUM_CSS_ROOT_FONT_SIZE,
             fontWeight = epub.fontWeight / NORMAL_FONT_WEIGHT,
             lineHeight = if (epub.typography.preservePublisherStyles) null else epub.lineHeight,
             letterSpacing = epub.letterSpacing.coerceAtLeast(0.0),
@@ -91,7 +91,7 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
     private data class ThemeColors(val background: String, val foreground: String)
 
     companion object {
-        private const val BASE_FONT_SIZE = 18.0
+        private const val READIUM_CSS_ROOT_FONT_SIZE = 16.0
         private const val NORMAL_FONT_WEIGHT = 400.0
     }
 }

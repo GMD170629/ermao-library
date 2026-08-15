@@ -27,7 +27,6 @@ from app.modules.publications.domain.navigation import (
     PublicationNavigationCacheState,
     PublicationNavigationEntry,
     PublicationParserProfile,
-    canonical_original_file_hash,
     flatten_publication_navigation,
     publication_cache_identity,
 )
@@ -108,10 +107,7 @@ class EnsurePublicationNavigation:
             )
 
         publication = self._publication_adapter.open(source)
-        if source.full_hash is not None and (
-            canonical_original_file_hash(source.full_hash)
-            != canonical_original_file_hash(publication.fingerprint.original_file_hash)
-        ):
+        if not _source_matches_publication(source, publication):
             return EnsurePublicationNavigationResult(
                 outcome=EnsurePublicationNavigationOutcome.SOURCE_CHANGED,
                 chapter_count=None,
@@ -123,7 +119,8 @@ class EnsurePublicationNavigation:
         actual_identity = publication_cache_identity(
             volume_id=source.volume_id,
             file_id=source.file_id,
-            original_file_hash=publication.fingerprint.original_file_hash,
+            source_size_bytes=publication.revision.source_size_bytes,
+            source_mtime_ms=publication.revision.source_mtime_ms,
             profile=profile,
         )
         with self._unit_of_work_factory() as unit_of_work:
@@ -177,13 +174,11 @@ class EnsurePublicationNavigation:
         actual_identity = publication_cache_identity(
             volume_id=source.volume_id,
             file_id=source.file_id,
-            original_file_hash=publication.fingerprint.original_file_hash,
+            source_size_bytes=publication.revision.source_size_bytes,
+            source_mtime_ms=publication.revision.source_mtime_ms,
             profile=profile,
         )
-        if source.full_hash is not None and (
-            actual_identity.original_file_hash
-            != canonical_original_file_hash(source.full_hash)
-        ):
+        if not _source_matches_publication(source, publication):
             if cache_matches:
                 self._invalidate(source)
             raise PublicationNavigationSourceChangedError
@@ -262,13 +257,12 @@ class EnsurePublicationNavigation:
         self,
         source: PublicationSource,
         profile: PublicationParserProfile,
-    ) -> PublicationNavigationCacheIdentity | None:
-        if source.full_hash is None:
-            return None
+    ) -> PublicationNavigationCacheIdentity:
         return publication_cache_identity(
             volume_id=source.volume_id,
             file_id=source.file_id,
-            original_file_hash=source.full_hash,
+            source_size_bytes=source.size_bytes,
+            source_mtime_ms=source.mtime_ms,
             profile=profile,
         )
 
@@ -277,6 +271,16 @@ class EnsurePublicationNavigation:
         source: PublicationSource,
     ) -> PublicationParserProfile | None:
         return self._profile_resolver.resolve(source_format=source.source_format)
+
+
+def _source_matches_publication(
+    source: PublicationSource,
+    publication: NormalizedPublication,
+) -> bool:
+    return (
+        publication.revision.source_size_bytes == source.size_bytes
+        and publication.revision.source_mtime_ms == source.mtime_ms
+    )
 
 
 __all__ = [

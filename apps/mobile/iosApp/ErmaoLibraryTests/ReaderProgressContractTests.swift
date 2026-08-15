@@ -18,7 +18,7 @@ final class ReaderProgressContractTests: XCTestCase {
         let encoded = try codec.encode(progress: progress)
         let decoded = try IosReaderProgressContractDecoder.decode(encoded)
 
-        XCTAssertTrue(encoded.contains(#""version":5"#))
+        XCTAssertTrue(encoded.contains(#""version":6"#))
         XCTAssertTrue(encoded.contains(#""engine":"readium""#))
         XCTAssertTrue(encoded.contains(#""payload":{"href""#))
         XCTAssertFalse(encoded.contains(#""payload":"{"#))
@@ -30,7 +30,7 @@ final class ReaderProgressContractTests: XCTestCase {
 
     func testLegacyV1AndProgressionOnlyLocatorsAreRejected() {
         let codec = ErmaoShared.PublicKt.createReaderProgressJson()
-        let legacy = exactProgressPayload().replacingOccurrences(of: #""version":5"#, with: #""version":1"#)
+        let legacy = exactProgressPayload().replacingOccurrences(of: #""version":6"#, with: #""version":1"#)
         let approximate = exactProgressPayload().replacingOccurrences(
             of: ##""locations":{"cssSelector":"#paragraph-17","progression":0.375}"##,
             with: #""locations":{"progression":0.375}"#
@@ -51,18 +51,12 @@ final class ReaderProgressContractTests: XCTestCase {
                 jsonString: #"{"href":"OPS/chapter.xhtml","type":"application/xhtml+xml","locations":{"progression":0.25,"totalProgression":0.5}}"#
             )
         )
-        let fingerprint = try IosContentFingerprint(
-            originalFileHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            parserVersion: "epub-package:1",
-            normalizationVersion: "shuku-epub-locator-dom-v2"
-        )
-
         XCTAssertThrowsError(
-            try ReadiumSwiftLocatorMapper().sharedLocation(from: locator, fingerprint: fingerprint)
+            try ReadiumSwiftLocatorMapper().sharedLocation(from: locator)
         )
     }
 
-    func testExactBlockComparatorRequiresFingerprintResourceAndAnchor() throws {
+    func testExactBlockComparatorRequiresResourceAndAnchor() throws {
         let progress = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: exactProgressPayload())
         let location = try XCTUnwrap(progress.location as? ErmaoShared.ReflowReaderLocation)
         let expected = try XCTUnwrap(ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location))
@@ -86,14 +80,12 @@ final class ReaderProgressContractTests: XCTestCase {
         )
     }
 
-    func testRestoreNeverFallsBackToPercentageOnFingerprintMismatch() throws {
+    func testRestoreNeverFallsBackToPercentageForAnotherSource() throws {
         let local = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: exactProgressPayload())
         let plan = ErmaoShared.PublicKt.planReaderProgressRestore(
             localProgress: local,
             remoteSnapshot: nil,
-            openedSource: makeSource(
-                hash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-            )
+            openedSource: makeSource(sourceID: "another-volume")
         )
 
         XCTAssertFalse(plan.usesLocalExact)
@@ -102,18 +94,13 @@ final class ReaderProgressContractTests: XCTestCase {
         XCTAssertTrue(plan.candidates.isEmpty)
     }
 
-    private func makeSource(hash: String = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef") -> ErmaoShared.ReaderSource {
+    private func makeSource(sourceID: String = "volume-epub-42") -> ErmaoShared.ReaderSource {
         ErmaoShared.LocalReaderSource(
-            sourceId: "volume-epub-42",
+            sourceId: sourceID,
             displayTitle: "Fixture",
             format: .epub,
-            contentFingerprint: ErmaoShared.ContentFingerprint(
-                originalFileHash: hash,
-                parserVersion: "epub-package:1",
-                normalizationVersion: "shuku-epub-locator-dom-v2"
-            ),
             workId: "work-42",
-            volumeId: "volume-epub-42",
+            volumeId: sourceID,
             sourceFormat: .epub
         )
     }
@@ -123,6 +110,6 @@ final class ReaderProgressContractTests: XCTestCase {
         updatedAt: Int64 = 1_775_988_123_456,
         deviceID: String = "ios-installation-a"
     ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":5,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}},"contentFingerprint":{"originalFileHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","parserVersion":"epub-package:1","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
+        ##"{"schema":"ermao.reader-progress","version":6,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
     }
 }

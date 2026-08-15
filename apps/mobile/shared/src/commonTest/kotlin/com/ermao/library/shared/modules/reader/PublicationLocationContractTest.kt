@@ -10,10 +10,10 @@ class PublicationLocationContractTest {
     @Test
     fun exactPublicationLocationsRoundTripCanonically() {
         val values = listOf(
-            ReflowablePublicationLocation(fingerprint(), engineLocator()),
-            PdfPublicationLocation(fingerprint(), 7, 0.375, engineLocator()),
-            ComicPublicationLocation(fingerprint(), "images/page-008.jpg", 7, engineLocator()),
-            AudioPublicationLocation(fingerprint(), "track-1", "chapter-2", 45_000, engineLocator()),
+            ReflowablePublicationLocation(engineLocator()),
+            PdfPublicationLocation(7, 0.375, engineLocator()),
+            ComicPublicationLocation("images/page-008.jpg", 7, engineLocator()),
+            AudioPublicationLocation("track-1", "chapter-2", 45_000, engineLocator()),
         )
 
         values.forEach { expected ->
@@ -24,16 +24,15 @@ class PublicationLocationContractTest {
     }
 
     @Test
-    fun localProgressRoundTripsAllMorphologiesAtVersionFive() {
+    fun localProgressRoundTripsAllMorphologiesAtVersionSix() {
         val locations = listOf(
             ReflowReaderLocation(
                 resourceKey = "chapter.xhtml",
                 engineLocator = engineLocator(),
-                contentFingerprint = contentFingerprint(),
             ),
-            PdfReaderLocation(3, 0.25, contentFingerprint(), engineLocator()),
-            ComicReaderLocation("images/004.jpg", 3, contentFingerprint(), engineLocator()),
-            AudioReaderLocation("track-1", null, 1200, contentFingerprint(), engineLocator()),
+            PdfReaderLocation(3, 0.25, engineLocator()),
+            ComicReaderLocation("images/004.jpg", 3, engineLocator()),
+            AudioReaderLocation("track-1", null, 1200, engineLocator()),
         )
         val codec = ReaderProgressJson()
         locations.forEach { location ->
@@ -46,12 +45,12 @@ class PublicationLocationContractTest {
     fun oldLocalDocumentsAndSyncStatesAreStrictlyRejected() {
         val progress = ReaderProgress(
             "volume-1",
-            PdfReaderLocation(0, 0.0, contentFingerprint()),
+            PdfReaderLocation(0, 0.0),
             100,
             "device-1",
             0.0,
         )
-        val oldProgress = ReaderProgressJson().encode(progress).replace("\"version\":5", "\"version\":4")
+        val oldProgress = ReaderProgressJson().encode(progress).replace("\"version\":6", "\"version\":4")
         assertFailsWith<IllegalArgumentException> { ReaderProgressJson().decode(oldProgress) }
         assertFailsWith<IllegalArgumentException> {
             ReaderProgressSyncStateJson().decode(
@@ -62,28 +61,28 @@ class PublicationLocationContractTest {
 
     @Test
     fun invalidMorphologyAnchorsAreRejected() {
-        assertFailsWith<IllegalArgumentException> { PdfPublicationLocation(fingerprint(), 0, Double.NaN) }
-        assertFailsWith<IllegalArgumentException> { ComicPublicationLocation(fingerprint(), "../escape.jpg", 0) }
+        assertFailsWith<IllegalArgumentException> { PdfPublicationLocation(0, Double.NaN) }
+        assertFailsWith<IllegalArgumentException> { ComicPublicationLocation("../escape.jpg", 0) }
         assertFailsWith<IllegalArgumentException> {
             PublicationLocation.parse(
-                """{"kind":"reflowable","publication":${fingerprintJson()}}""",
+                """{"kind":"reflowable"}""",
             )
         }
         assertFailsWith<IllegalArgumentException> {
             PublicationLocation.parse(
-                """{"kind":"pdf","publication":${fingerprintJson()},"pageIndex":0,"pageProgression":0.12345}""",
+                """{"kind":"pdf","pageIndex":0,"pageProgression":0.12345}""",
             )
         }
         assertFailsWith<IllegalArgumentException> {
             PublicationLocation.parse(
-                """{"kind":"comic","publication":${fingerprintJson().dropLast(1)},"unexpected":true},"pageIndex":0,"resourceHref":"page.jpg"}""",
+                """{"kind":"comic","unexpected":true,"pageIndex":0,"resourceHref":"page.jpg"}""",
             )
         }
     }
 
     @Test
     fun exactComparisonUsesMorphologySpecificAnchors() {
-        val pdf = PdfPublicationLocation(fingerprint(), 4, 0.12344)
+        val pdf = PdfPublicationLocation(4, 0.12344)
         assertEquals(0.1234, pdf.pageProgression)
         assertEquals(0.1234, PublicationLocation.parse(pdf.canonicalJson()).let {
             (it as PdfPublicationLocation).pageProgression
@@ -93,14 +92,14 @@ class PublicationLocationContractTest {
             ExactLocationMatch.Exact,
             com.ermao.library.shared.modules.reader.domain.compareExactPublicationLocations(
                 pdf,
-                PdfPublicationLocation(fingerprint(), 4, 0.12343),
+                PdfPublicationLocation(4, 0.12343),
             ),
         )
         assertEquals(
             ExactLocationMatch.MorphologyMismatch,
             com.ermao.library.shared.modules.reader.domain.compareExactPublicationLocations(
                 pdf,
-                ComicPublicationLocation(fingerprint(), "page-5.jpg", 4),
+                ComicPublicationLocation("page-5.jpg", 4),
             ),
         )
     }
@@ -112,13 +111,4 @@ class PublicationLocationContractTest {
         """{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#p1"}}""",
     )
 
-    private fun contentFingerprint() = ContentFingerprint(HASH, "parser-v1", "normalization-v1")
-    private fun fingerprint() = PublicationFingerprint(HASH, "parser-v1", "normalization-v1")
-    private fun fingerprintJson() = fingerprint().let {
-        """{"originalFileHash":"${it.originalFileHash}","parser":"${it.parser}","normalization":"${it.normalization}"}"""
-    }
-
-    private companion object {
-        const val HASH = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    }
 }

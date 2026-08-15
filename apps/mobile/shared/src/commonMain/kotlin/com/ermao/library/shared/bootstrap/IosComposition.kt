@@ -30,7 +30,11 @@ import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
+import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
+import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
+import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
@@ -99,6 +103,22 @@ fun createIosReaderBootstrapGateway(
     KtorReaderBootstrapGateway(
         ApiClientFactory(SerializedCookieVault(cookieStore)),
     )
+
+fun createIosPdfRangeServerPort(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+): PdfRangeServerPort = KtorPdfRangeServerPort(
+    profile,
+    ApiClientFactory(SerializedCookieVault(cookieStore)),
+)
+
+fun createIosComicPageServerPort(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+): ComicPageServerPort = KtorComicPageServerPort(
+    profile,
+    ApiClientFactory(SerializedCookieVault(cookieStore)),
+)
 
 /** Shared Reader v4 best-effort progress wire; exact local storage remains native. */
 fun createIosReaderProgressSyncPort(

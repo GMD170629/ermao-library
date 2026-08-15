@@ -251,10 +251,22 @@ private actor IosReaderLocalDatabaseWorker {
         try initializeIfNeeded()
         try withTransaction {
             let current = try readSyncState()
-            guard current.pending?.mutationId == mutationID else { return }
+            let pending: ErmaoShared.ReaderProgressMutation?
+            if let existing = current.pending, existing.mutationId != mutationID {
+                pending = ErmaoShared.ReaderProgressMutation(
+                    sourceId: existing.sourceId,
+                    clientId: existing.clientId,
+                    mutationId: existing.mutationId,
+                    baseRevision: serverRevision,
+                    capturedAtEpochMillis: existing.capturedAtEpochMillis,
+                    locator: existing.locator
+                )
+            } else {
+                pending = nil
+            }
             try writeSyncState(ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: max(current.confirmedRevision, serverRevision),
-                pending: nil,
+                pending: pending,
                 terminalFailureCode: nil
             ))
         }

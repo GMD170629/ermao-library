@@ -70,7 +70,7 @@ interface ReaderProgressSyncStateStore : ReaderProgressStore {
 
     suspend fun acknowledge(mutationId: String, snapshot: ReaderProgressSnapshotV4)
 
-    /** Drops only the rejected mutation and adopts the newer server revision atomically. */
+    /** Drops the rejected mutation, or rebases an already newer pending mutation, and adopts the server revision. */
     suspend fun discardPendingAfterConflict(mutationId: String, serverRevision: Long)
 
     /** Called only after the Navigator has post-verified the remote exact location. */

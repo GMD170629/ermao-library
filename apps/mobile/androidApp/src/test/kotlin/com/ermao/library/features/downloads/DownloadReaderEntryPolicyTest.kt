@@ -10,25 +10,25 @@ import org.junit.Test
 
 class DownloadReaderEntryPolicyTest {
     @Test
-    fun missingEpubOpensPreparationImmediately() {
+    fun missingEpubOpensServerReaderImmediately() {
         assertEquals(
-            DownloadReaderEntryAction.OpenPreparation,
+            DownloadReaderEntryAction.OpenServerReader,
             downloadReaderEntryAction("reflowable", "EPUB", null) { false },
         )
     }
 
     @Test
-    fun verifiedEpubValidatesCurrentFingerprintWithoutPreparation() {
+    fun verifiedEpubOpensCurrentLocalArtifact() {
         assertEquals(
-            DownloadReaderEntryAction.ValidateCurrentArtifact,
+            DownloadReaderEntryAction.OpenLocalArtifact,
             downloadReaderEntryAction("reflowable", "EPUB", completedRecord()) { true },
         )
     }
 
     @Test
-    fun missingLocalFileCannotBypassPreparation() {
+    fun missingLocalFileFallsBackToServerReader() {
         assertEquals(
-            DownloadReaderEntryAction.OpenPreparation,
+            DownloadReaderEntryAction.OpenServerReader,
             downloadReaderEntryAction("reflowable", "EPUB", completedRecord()) { false },
         )
     }
@@ -37,20 +37,22 @@ class DownloadReaderEntryPolicyTest {
     fun mobiFamilyUsesTheNativeDownloadAndReaderFlow() {
         listOf("MOBI", "AZW", "AZW3", "PRC").forEach { format ->
             assertEquals(
-                DownloadReaderEntryAction.OpenPreparation,
+                DownloadReaderEntryAction.OpenServerReader,
                 downloadReaderEntryAction("reflowable", format, null) { false },
             )
         }
     }
 
     @Test
-    fun unsupportedReflowableFormatsRemainOnTheStreamingValidationPath() {
-        listOf("TXT", "FB2").forEach { format ->
-            assertEquals(
-                DownloadReaderEntryAction.ValidateStreamingAccess,
-                downloadReaderEntryAction("reflowable", format, null) { false },
-            )
-        }
+    fun txtUsesNativeReaderWhileUnsupportedReflowableFormatsStayOnStreamingValidation() {
+        assertEquals(
+            DownloadReaderEntryAction.OpenServerReader,
+            downloadReaderEntryAction("reflowable", "TXT", null) { false },
+        )
+        assertEquals(
+            DownloadReaderEntryAction.ValidateUnsupportedAccess,
+            downloadReaderEntryAction("reflowable", "FB2", null) { false },
+        )
     }
 
     private fun completedRecord() = AndroidDownloadRecord(
@@ -64,7 +66,6 @@ class DownloadReaderEntryPolicyTest {
         volumeTitle = "Volume",
         format = "EPUB",
         readerType = "reflowable",
-        contentFingerprint = "fingerprint",
         sourceApiPath = "/api/files/file",
         sourceMimeType = "application/epub+zip",
         expectedBytes = 8,

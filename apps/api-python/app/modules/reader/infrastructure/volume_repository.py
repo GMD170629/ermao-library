@@ -72,7 +72,6 @@ def _progress_dto(progress: LibraryReadingProgress) -> ReaderProgressDto:
             if progress.revision >= 1
             else None
         ),
-        content_fingerprint=progress.content_fingerprint,
         mutation_id=progress.mutation_id,
         client_id=progress.client_id,
         client_sequence=progress.client_sequence,
@@ -98,7 +97,6 @@ def _mutation_progress_dto(mutation: ReaderProgressMutation) -> ReaderProgressDt
         percent=mutation.display_percent,
         location_json=mutation.locator_json,
         exact_location=exact_location,
-        content_fingerprint=mutation.content_fingerprint,
         mutation_id=mutation.mutation_id,
         client_id=mutation.client_id,
         client_sequence=None,
@@ -225,8 +223,6 @@ class SqlAlchemyReaderVolumeRepository:
                 disc_number=file.disc_number,
                 track_number=file.track_number,
                 sort_order=file.sort_order,
-                fingerprint=file.fingerprint,
-                full_hash=file.full_hash,
                 mtime_ms=file.mtime_ms,
                 codec=file.codec,
             )
@@ -299,7 +295,6 @@ class SqlAlchemyReaderVolumeRepository:
         reader_type: str,
         display_percent: float,
         location: ReaderExactLocationDto,
-        content_fingerprint: str,
         client_id: str,
         mutation_id: str,
         base_revision: int,
@@ -322,7 +317,6 @@ class SqlAlchemyReaderVolumeRepository:
                 schemaVersion=4,
                 locationType=location_kind,
                 locationJson=locator_json,
-                contentFingerprint=content_fingerprint,
                 mutationId=mutation_id,
                 clientId=client_id,
                 clientSequence=None,
@@ -345,7 +339,6 @@ class SqlAlchemyReaderVolumeRepository:
                         "schemaVersion": 4,
                         "locationType": location_kind,
                         "locationJson": locator_json,
-                        "contentFingerprint": content_fingerprint,
                         "mutationId": mutation_id,
                         "clientId": client_id,
                         "clientSequence": None,
@@ -372,7 +365,6 @@ class SqlAlchemyReaderVolumeRepository:
                     schema_version=4,
                     location_type=location_kind,
                     location_json=locator_json,
-                    content_fingerprint=content_fingerprint,
                     mutation_id=mutation_id,
                     client_id=client_id,
                     client_sequence=None,
@@ -396,7 +388,6 @@ class SqlAlchemyReaderVolumeRepository:
                 client_id=client_id,
                 revision=next_revision,
                 locator_json=locator_json,
-                content_fingerprint=content_fingerprint,
                 display_percent=display_percent,
                 captured_at=progressed_at,
                 received_at=now,
@@ -439,7 +430,6 @@ class SqlAlchemyReaderVolumeRepository:
         context: ReaderVolumeContextDto,
         reader_type: str,
         status: ReaderReadingStatus,
-        content_fingerprint: str,
         now: datetime,
     ) -> ReaderProgressDto | None:
         if status == "UNREAD":
@@ -469,7 +459,6 @@ class SqlAlchemyReaderVolumeRepository:
             schemaVersion=4,
             locationType=None,
             locationJson=None,
-            contentFingerprint=content_fingerprint,
             mutationId=None,
             clientId="shuku-library",
             clientSequence=None,
@@ -489,9 +478,6 @@ class SqlAlchemyReaderVolumeRepository:
                     "readerType": progress_insert.excluded["readerType"],
                     "percent": progress_insert.excluded.percent,
                     "schemaVersion": progress_insert.excluded["schemaVersion"],
-                    "contentFingerprint": progress_insert.excluded[
-                        "contentFingerprint"
-                    ],
                     "updatedAt": progress_insert.excluded["updatedAt"],
                 },
             )
@@ -530,7 +516,6 @@ class SqlAlchemyReaderVolumeRepository:
         reader_type: str,
         percent: float,
         location_json: str,
-        content_fingerprint: str,
         mutation_id: str,
         client_id: str,
         client_sequence: int,
@@ -551,7 +536,6 @@ class SqlAlchemyReaderVolumeRepository:
             schemaVersion=3,
             locationType=reader_type,
             locationJson=location_json,
-            contentFingerprint=content_fingerprint,
             mutationId=mutation_id,
             clientId=client_id,
             clientSequence=client_sequence,
@@ -573,7 +557,6 @@ class SqlAlchemyReaderVolumeRepository:
                     "schemaVersion": 3,
                     "locationType": reader_type,
                     "locationJson": location_json,
-                    "contentFingerprint": content_fingerprint,
                     "mutationId": mutation_id,
                     "clientId": client_id,
                     "clientSequence": client_sequence,
@@ -609,14 +592,13 @@ class SqlAlchemyReaderVolumeRepository:
         return _progress_dto(progress)
 
     def list_bookmarks(
-        self, user_id: str, volume_id: str, content_fingerprint: str
+        self, user_id: str, volume_id: str
     ) -> list[ReaderBookmarkDto]:
         bookmarks = self._session.scalars(
             select(ReaderBookmark)
             .where(
                 ReaderBookmark.user_id == user_id,
                 ReaderBookmark.volume_id == volume_id,
-                ReaderBookmark.content_fingerprint == content_fingerprint,
             )
             .order_by(ReaderBookmark.bookmark_created_at, ReaderBookmark.bookmark_id)
         ).all()
@@ -627,7 +609,6 @@ class SqlAlchemyReaderVolumeRepository:
         *,
         user_id: str,
         volume_id: str,
-        content_fingerprint: str,
         bookmarks: list[ReaderBookmarkDto],
         now: datetime,
     ) -> list[ReaderBookmarkDto]:
@@ -636,7 +617,6 @@ class SqlAlchemyReaderVolumeRepository:
                 "id": cuid(),
                 "userId": user_id,
                 "volumeId": volume_id,
-                "contentFingerprint": content_fingerprint,
                 "bookmarkId": bookmark.bookmark_id,
                 "locationJson": bookmark.location_json,
                 "label": bookmark.label,
@@ -651,9 +631,8 @@ class SqlAlchemyReaderVolumeRepository:
             delete(ReaderBookmark).where(
                 ReaderBookmark.user_id == user_id,
                 ReaderBookmark.volume_id == volume_id,
-                ReaderBookmark.content_fingerprint == content_fingerprint,
             )
         )
         for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
             self._session.execute(sqlite_insert(ReaderBookmark).values(list(chunk)))
-        return self.list_bookmarks(user_id, volume_id, content_fingerprint)
+        return self.list_bookmarks(user_id, volume_id)

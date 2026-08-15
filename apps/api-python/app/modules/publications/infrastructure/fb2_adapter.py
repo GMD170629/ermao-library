@@ -20,16 +20,15 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
-    PublicationFingerprint,
     PublicationLink,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationRevision,
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.locator_dom import validate_xhtml
 from app.modules.publications.infrastructure.source_files import (
-    publication_sha256,
     resolve_publication_source,
 )
 
@@ -145,15 +144,6 @@ def _person_name(person: ElementTree.Element) -> str:
         for name in ("first-name", "middle-name", "last-name")
     ]
     return " ".join(value for value in values if value)
-
-
-def _canonical_hash(path: Path, known_hash: str | None) -> str:
-    candidate = (known_hash or publication_sha256(path)).removeprefix("sha256:")
-    if len(candidate) != 64 or any(
-        character not in "0123456789abcdefABCDEF" for character in candidate
-    ):
-        candidate = publication_sha256(path)
-    return candidate.lower()
 
 
 def _safe_resource_href(raw_href: str) -> str:
@@ -437,11 +427,9 @@ def _snapshot(
     source_path_value: str,
     source_size: int,
     source_mtime_ns: int,
-    known_hash: str | None,
     fallback_title: str,
     fallback_author: str | None,
 ) -> _Fb2Snapshot:
-    del source_size, source_mtime_ns
     source_path = Path(source_path_value)
     try:
         content = source_path.read_bytes()
@@ -487,15 +475,15 @@ def _snapshot(
                 title=section.title,
             )
         )
-    original_hash = _canonical_hash(source_path, known_hash)
     publication = NormalizedPublication(
-        identifier=f"urn:shuku:fb2:{original_hash}",
+        identifier=f"urn:shuku:fb2:{source_size}:{source_mtime_ns}",
         title=title,
         author=author,
         language=language,
         reading_progression="ltr",
-        fingerprint=PublicationFingerprint(
-            original_file_hash=f"sha256:{original_hash}",
+        revision=PublicationRevision(
+            source_size_bytes=source_size,
+            source_mtime_ms=source_mtime_ns // 1_000_000,
             parser=FB2_PARSER_IDENTIFIER,
             normalization=FB2_NORMALIZATION_IDENTIFIER,
         ),
@@ -550,7 +538,6 @@ class Fb2PublicationAdapter(PublicationAdapter):
             str(source_path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
-            source.full_hash,
             source.title,
             source.author,
         )

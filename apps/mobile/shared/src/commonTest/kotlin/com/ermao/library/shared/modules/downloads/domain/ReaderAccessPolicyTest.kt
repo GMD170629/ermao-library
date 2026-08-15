@@ -9,13 +9,11 @@ class ReaderAccessPolicyTest {
     private val policy = ReaderAccessPolicy()
 
     @Test
-    fun reflowableRequiresMatchingCompletedFingerprint() {
-        val old = artifact(DownloadReaderType.Reflowable, "old")
-        val request = request(DownloadReaderType.Reflowable, "current", isOnline = true)
-        assertEquals(ReaderAccessDecision.NeedsDownload, policy.decide(request, listOf(old)))
-        assertIs<ReaderAccessDecision.LocalArtifact>(
-            policy.decide(request, listOf(artifact(DownloadReaderType.Reflowable, "current"))),
-        )
+    fun completedArtifactForTheVolumeWins() {
+        val old = artifact(DownloadReaderType.Reflowable)
+        val request = request(DownloadReaderType.Reflowable, isOnline = true)
+
+        assertEquals(ReaderAccessDecision.LocalArtifact(old), policy.decide(request, listOf(old)))
     }
 
     @Test
@@ -23,29 +21,29 @@ class ReaderAccessPolicyTest {
         for (type in listOf(DownloadReaderType.Pdf, DownloadReaderType.Comic)) {
             assertEquals(
                 ReaderAccessDecision.RemoteStream,
-                policy.decide(request(type, "fp", isOnline = true), emptyList()),
+                policy.decide(request(type, isOnline = true), emptyList()),
             )
             assertEquals(
                 ReaderAccessDecision.Unavailable("OFFLINE_ARTIFACT_MISSING"),
-                policy.decide(request(type, "fp", isOnline = false), emptyList()),
+                policy.decide(request(type, isOnline = false), emptyList()),
             )
             assertIs<ReaderAccessDecision.LocalArtifact>(
-                policy.decide(request(type, "fp", isOnline = false), listOf(artifact(type, "fp"))),
+                policy.decide(request(type, isOnline = false), listOf(artifact(type))),
             )
         }
     }
 
-    private fun request(type: DownloadReaderType, fingerprint: String, isOnline: Boolean) =
-        ReaderAccessRequest(namespace, "volume", type, fingerprint, isOnline)
+    private fun request(type: DownloadReaderType, isOnline: Boolean) =
+        ReaderAccessRequest(namespace, "volume", type, isOnline)
 
-    private fun artifact(type: DownloadReaderType, fingerprint: String): CompletedDownloadArtifact {
+    private fun artifact(type: DownloadReaderType): CompletedDownloadArtifact {
         val mime = when (type) {
             DownloadReaderType.Pdf -> "application/pdf"
             DownloadReaderType.Comic -> "application/zip"
             else -> "application/epub+zip"
         }
         val descriptor = DownloadDescriptor(
-            DownloadIdentity(namespace, "work", "volume", fingerprint),
+            DownloadIdentity(namespace, "work", "volume"),
             "Book",
             null,
             null,

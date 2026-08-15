@@ -7,15 +7,15 @@ from typing import Literal
 
 SERVER_IDENTITY_SETTING_KEY = "mobile.serverIdentity"
 MOBILE_SERVICE_NAME: Literal["ermao-books"] = "ermao-books"
-MOBILE_PROTOCOL_VERSION: Literal[1] = 1
-MINIMUM_SUPPORTED_MOBILE_CLIENT_VERSION: Literal[1] = 1
+MOBILE_PROTOCOL_VERSION: Literal[2] = 2
+MINIMUM_SUPPORTED_MOBILE_CLIENT_VERSION: Literal[2] = 2
 MOBILE_READER_SCHEMA_VERSION: Literal[4] = 4
 
 
 @dataclass(frozen=True, slots=True)
 class MobileProtocolCompatibility:
-    version: Literal[1]
-    minimum_supported_client_version: Literal[1]
+    version: Literal[2]
+    minimum_supported_client_version: Literal[2]
 
 
 @dataclass(frozen=True, slots=True)

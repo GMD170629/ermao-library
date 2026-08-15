@@ -19,19 +19,16 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
                 request.namespace.authorizationVersion,
             ),
             volumeId = request.volumeId,
-            contentFingerprint = request.contentFingerprint,
         )
     }
 
     suspend fun begin(
         namespace: AndroidDownloadNamespace,
         volumeId: String,
-        contentFingerprint: String,
     ): Session = withContext(Dispatchers.IO) {
         require(volumeId.isNotBlank())
-        require(contentFingerprint.isNotBlank())
         val namespaceKey = sha256("${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}")
-        val artifactKey = sha256("$volumeId|$contentFingerprint")
+        val artifactKey = sha256(volumeId)
         val relativeDirectory = "$namespaceKey/artifacts"
         val directory = File(rootDirectory, relativeDirectory).apply { mkdirs() }
         val part = File(directory, "$artifactKey.part")
@@ -39,7 +36,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         // The first Android delivery restarts interrupted foreground transfers. It does not
         // advertise byte-range resume until the transfer gateway owns an If-Range contract.
         part.delete()
-        Session(part, final, "$relativeDirectory/$artifactKey.bin", FileOutputStream(part, false))
+        Session(
+            part,
+            final,
+            "$relativeDirectory/$artifactKey.bin",
+            FileOutputStream(part, false),
+        )
     }
 
     fun resolveLocalReference(localReference: String): File? {
@@ -50,10 +52,29 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         return candidate.takeIf { it.path.startsWith(rootPrefix) }
     }
 
-    fun isVerifiedLocalArtifact(localReference: String?, expectedBytes: Long): Boolean {
-        if (localReference.isNullOrBlank() || expectedBytes <= 0L) return false
+    fun hasLocalArtifact(localReference: String?): Boolean {
+        if (localReference.isNullOrBlank()) return false
         val file = resolveLocalReference(localReference) ?: return false
-        return file.isFile && file.length() == expectedBytes
+        return file.isFile && file.length() > 0L
+    }
+
+    suspend fun replaceLocalArtifact(localReference: String, parsedSource: File) = withContext(Dispatchers.IO) {
+        val target = requireNotNull(resolveLocalReference(localReference)) { "Download reference is invalid" }
+        require(parsedSource.isFile && parsedSource.length() > 0L) { "Parsed Reader source is missing" }
+        target.parentFile?.mkdirs()
+        val temporary = File(target.parentFile, ".${target.name}.${System.nanoTime()}.repair")
+        try {
+            parsedSource.inputStream().use { input ->
+                FileOutputStream(temporary).use { output ->
+                    input.copyTo(output)
+                    output.fd.sync()
+                }
+            }
+            require(temporary.length() == parsedSource.length()) { "Reader repair copy is incomplete" }
+            atomicReplace(temporary, target)
+        } finally {
+            temporary.delete()
+        }
     }
 
     class Session internal constructor(

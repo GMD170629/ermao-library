@@ -917,7 +917,6 @@ def claim_next_target(
             MetadataWritebackTarget.status,
             MetadataWritebackTarget.attempts,
             MetadataWritebackTarget.prepared_path,
-            MetadataWritebackTarget.output_hash,
             MetadataWritebackTarget.warning_code,
         )
     ).one_or_none()
@@ -938,7 +937,6 @@ def claim_next_target(
         "status": row.status,
         "attempts": row.attempts,
         "preparedPath": row.prepared_path,
-        "outputHash": row.output_hash,
         "warningCode": row.warning_code,
         "leaseOwnerId": owner_id,
     }
@@ -997,7 +995,6 @@ def mark_prepared(
     *,
     owner_id: str,
     prepared_path: str,
-    output_hash: str,
     warning_code: str | None,
     now: datetime,
 ) -> bool:
@@ -1011,7 +1008,6 @@ def mark_prepared(
         .values(
             status="PREPARED",
             prepared_path=prepared_path,
-            output_hash=output_hash,
             warning_code=warning_code,
             lease_expires_at=now + timedelta(seconds=WRITEBACK_LEASE_SECONDS),
             updated_at=now,
@@ -1089,8 +1085,6 @@ def complete_target(
             .values(
                 size_bytes=size_bytes,
                 mtime_ms=mtime_ms,
-                hash_status="PARTIAL_PENDING",
-                full_hash=None,
                 updated_at=now,
             )
         )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from dataclasses import replace
@@ -283,18 +282,11 @@ def _import_audio(
         stat = source_stats[item.path.resolve()]
         sort_order = index
         existing_file = existing_by_path.get(str(item.path))
-        existing_full_hash = existing_file.get("fullHash") if existing_file else None
-        existing_hash_status = (
-            existing_file.get("hashStatus") if existing_file else None
-        )
         file_values = {
             "volumeId": item_volume["id"],
             "path": str(item.path),
             "filePathHash": _hash_text(str(item.path)),
             "fingerprint": existing_file.get("fingerprint") if existing_file else None,
-            "fullHash": existing_full_hash,
-            "hashStatus": existing_hash_status
-            or ("COMPLETED" if existing_full_hash else "PARTIAL_PENDING"),
             "mtimeMs": int(stat.st_mtime * 1000),
             "kind": "AUDIO",
             "mimeType": audio_mime_type(item.path),
@@ -1043,23 +1035,6 @@ def _refresh_audio_progress_after_bundle_sync(
     files = queries.list_audio_files_for_volume(media_version_id, volume_id)
     if not files:
         return
-    fingerprint_tokens = [
-        {
-            "id": file.get("id"),
-            "hash": file.get("fingerprint") or file.get("fullHash"),
-            "size": file.get("sizeBytes"),
-            "mtime": file.get("mtimeMs"),
-        }
-        for file in files
-    ]
-    content_fingerprint = (
-        "sha256:"
-        + hashlib.sha256(
-            json.dumps(
-                fingerprint_tokens, ensure_ascii=False, separators=(",", ":")
-            ).encode("utf-8")
-        ).hexdigest()
-    )
     offsets: dict[str, int] = {}
     elapsed = 0
     for file in files:
@@ -1094,7 +1069,6 @@ def _refresh_audio_progress_after_bundle_sync(
             position_ms = 0
         values: dict[str, Any] = {
             "volumeId": volume_id,
-            "contentFingerprint": content_fingerprint,
             "updatedAt": _now(),
         }
         if file_id in offsets:

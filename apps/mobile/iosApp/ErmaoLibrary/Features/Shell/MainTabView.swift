@@ -431,8 +431,7 @@ struct MainTabView: View {
         context: ContentRequestContext,
         fallbackTab: TabPresentation
     ) {
-        if handoff.readerType == .reflowable,
-           ManagedReaderAccessPolicy.supportsNativeReader(
+        if ManagedReaderAccessPolicy.supportsNativeReader(
                readerType: handoff.readerType,
                format: handoff.format
            ),
@@ -520,8 +519,7 @@ struct OfflineShellView: View {
         NavigationStack {
             DownloadCenterView(store: downloads) { handoff in
                 // Offline access only reaches already verified records in DownloadCenterView.
-                if handoff.readerType == .reflowable,
-                   ManagedReaderAccessPolicy.supportsNativeReader(
+                if ManagedReaderAccessPolicy.supportsNativeReader(
                        readerType: handoff.readerType,
                        format: handoff.format
                    ),

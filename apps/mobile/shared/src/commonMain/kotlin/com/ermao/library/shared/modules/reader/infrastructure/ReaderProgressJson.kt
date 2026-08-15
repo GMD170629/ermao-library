@@ -2,7 +2,6 @@ package com.ermao.library.shared.modules.reader.infrastructure
 
 import com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
-import com.ermao.library.shared.modules.reader.domain.ContentFingerprint
 import com.ermao.library.shared.modules.reader.domain.EngineLocator
 import com.ermao.library.shared.modules.reader.domain.EngineLocatorPayload
 import com.ermao.library.shared.modules.reader.domain.PdfReaderLocation
@@ -45,7 +44,7 @@ class ReaderProgressJson(
         } catch (error: SerializationException) {
             throw ReaderProgressDocumentException("Reader progress document is malformed", error)
         }
-        if (document.schema != SCHEMA_NAME || document.version != SCHEMA_VERSION) {
+        if (document.schema != SCHEMA_NAME || document.version !in SUPPORTED_VERSIONS) {
             throw ReaderProgressDocumentException("Reader progress schema is unsupported")
         }
         return try {
@@ -71,21 +70,22 @@ class ReaderProgressJson(
             position,
             textQuote?.let { TextQuoteWire(it.exact, it.prefix, it.suffix) },
             engineLocator?.toWire(),
-            contentFingerprint.toWire(),
         )
         is PdfReaderLocation -> PdfLocationWire(
-            pageIndex,
-            pageProgression,
-            contentFingerprint.toWire(),
-            engineLocator?.toWire(),
+            pageIndex = pageIndex,
+            pageProgression = pageProgression,
+            engineLocator = engineLocator?.toWire(),
         )
-        is ComicReaderLocation -> ComicLocationWire(resourceHref, pageIndex, contentFingerprint.toWire(), engineLocator?.toWire())
+        is ComicReaderLocation -> ComicLocationWire(
+            resourceHref = resourceHref,
+            pageIndex = pageIndex,
+            engineLocator = engineLocator?.toWire(),
+        )
         is AudioReaderLocation -> AudioLocationWire(
-            fileId,
-            chapterId,
-            positionMillis,
-            contentFingerprint.toWire(),
-            engineLocator?.toWire(),
+            fileId = fileId,
+            chapterId = chapterId,
+            positionMillis = positionMillis,
+            engineLocator = engineLocator?.toWire(),
         )
     }
 
@@ -99,7 +99,6 @@ class ReaderProgressJson(
 
     private fun ReaderLocationWire.toDomain(): ReaderLocation = when (this) {
         is ReflowLocationWire -> {
-            val fingerprint = contentFingerprint.toDomain()
             ReflowReaderLocation(
                 resourceKey,
                 progression,
@@ -107,24 +106,19 @@ class ReaderProgressJson(
                 position,
                 textQuote?.let { TextQuote(it.exact, it.prefix, it.suffix) },
                 engineLocator?.toEngineLocator(),
-                fingerprint,
             )
         }
         is PdfLocationWire -> {
-            val fingerprint = contentFingerprint.toDomain()
-            PdfReaderLocation(pageIndex, pageProgression, fingerprint, engineLocator?.toEngineLocator())
+            PdfReaderLocation(pageIndex, pageProgression, engineLocator?.toEngineLocator())
         }
         is ComicLocationWire -> {
-            val fingerprint = contentFingerprint.toDomain()
-            ComicReaderLocation(resourceHref, pageIndex, fingerprint, engineLocator?.toEngineLocator())
+            ComicReaderLocation(resourceHref, pageIndex, engineLocator?.toEngineLocator())
         }
         is AudioLocationWire -> {
-            val fingerprint = contentFingerprint.toDomain()
             AudioReaderLocation(
                 fileId,
                 chapterId,
                 positionMillis,
-                fingerprint,
                 engineLocator?.toEngineLocator(),
             )
         }
@@ -148,7 +142,8 @@ class ReaderProgressJson(
 }
 
 private const val SCHEMA_NAME = "ermao.reader-progress"
-private const val SCHEMA_VERSION = 5
+private const val SCHEMA_VERSION = 6
+private val SUPPORTED_VERSIONS = setOf(SCHEMA_VERSION)
 
 private val defaultReaderProgressJson = Json {
     classDiscriminator = "kind"
@@ -180,7 +175,6 @@ private data class ReflowLocationWire(
     val position: Int? = null,
     val textQuote: TextQuoteWire? = null,
     val engineLocator: JsonObject? = null,
-    val contentFingerprint: ContentFingerprintWire,
 ) : ReaderLocationWire
 
 @Serializable
@@ -188,7 +182,6 @@ private data class ReflowLocationWire(
 private data class PdfLocationWire(
     val pageIndex: Int,
     val pageProgression: Double,
-    val contentFingerprint: ContentFingerprintWire,
     val engineLocator: JsonObject? = null,
 ) : ReaderLocationWire
 
@@ -197,7 +190,6 @@ private data class PdfLocationWire(
 private data class ComicLocationWire(
     val resourceHref: String,
     val pageIndex: Int,
-    val contentFingerprint: ContentFingerprintWire,
     val engineLocator: JsonObject? = null,
 ) : ReaderLocationWire
 
@@ -207,31 +199,11 @@ private data class AudioLocationWire(
     val fileId: String,
     val chapterId: String? = null,
     val positionMillis: Long,
-    val contentFingerprint: ContentFingerprintWire,
     val engineLocator: JsonObject? = null,
 ) : ReaderLocationWire
 
 @Serializable
 private data class TextQuoteWire(val exact: String, val prefix: String? = null, val suffix: String? = null)
-
-@Serializable
-private data class ContentFingerprintWire(
-    val originalFileHash: String,
-    val parserVersion: String,
-    val normalizationVersion: String,
-)
-
-private fun ContentFingerprint.toWire() = ContentFingerprintWire(
-    originalFileHash,
-    parserVersion,
-    normalizationVersion,
-)
-
-private fun ContentFingerprintWire.toDomain() = ContentFingerprint(
-    originalFileHash,
-    parserVersion,
-    normalizationVersion,
-)
 
 private fun JsonObject.requiredString(name: String): String =
     (this[name] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)

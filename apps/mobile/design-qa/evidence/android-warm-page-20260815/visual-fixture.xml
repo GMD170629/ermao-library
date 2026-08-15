@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="3" failures="0" errors="0" skipped="0" time="39.563" timestamp="2026-08-14T20:03:23" hostname="localhost">
+  <testsuite name="com.ermao.library.visual.VisualFixtureActivityTest" tests="3" failures="0" errors="0" skipped="0" time="39.091" timestamp="2026-08-14T20:03:23" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":androidApp" />
+    </properties>
+    <testcase name="keyScreensRemainReachableAtTwoHundredPercentFontScaleInBothLocales" classname="com.ermao.library.visual.VisualFixtureActivityTest" time="7.472" />
+    <testcase name="sevenScenariosRenderInBothLocalesAndAppearances" classname="com.ermao.library.visual.VisualFixtureActivityTest" time="31.618" />
+    <testcase name="variantIntentContractRejectsMissingAndUnknownValuesAndRoundTripsMatrix" classname="com.ermao.library.visual.VisualFixtureActivityTest" time="0.001" />
+  </testsuite>
+</testsuites>

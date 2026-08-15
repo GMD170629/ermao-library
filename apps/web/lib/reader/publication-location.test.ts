@@ -37,28 +37,28 @@ test('enforces zero-based exact page anchors and safe comic resources', () => {
   assert.equal(parsePublicationLocation({ ...pdf, resourceHref: 'page.jpg' }), null);
   assert.equal(parsePublicationLocation({
     ...comic,
-    publication: { ...comic.publication, unexpected: true }
+    unexpected: true
   }), null);
   assert.equal(quantizePageProgression(0.12345), 0.1235);
 });
 
-test('maps PDF and comic locations across one-based Web adapters and zero-based wire data', () => {
+test('keeps PDF locations zero-based across domain and wire data', () => {
   const pdf = parsePublicationLocation(pdfRequest.locator);
   const comic = parsePublicationLocation(comicRequest.locator);
   assert.ok(pdf?.kind === 'pdf' && comic?.kind === 'comic');
   const pdfDomain = v4LocationToDomain(pdf, 'volume-pdf', null);
   const comicDomain = v4LocationToDomain(comic, 'volume-comic', null);
-  assert.equal(pdfDomain?.kind === 'pdf' ? pdfDomain.pageNumber : null, pdf.pageIndex + 1);
+  assert.equal(pdfDomain?.kind === 'pdf' ? pdfDomain.pageIndex : null, pdf.pageIndex);
   assert.equal(comicDomain?.kind === 'comic' ? comicDomain.pageIndex : null, comic.pageIndex + 1);
-  assert.deepEqual(pdfDomain ? publicationLocationFromDomain(pdfDomain, pdf.publication) : null, pdf);
-  assert.deepEqual(comicDomain ? publicationLocationFromDomain(comicDomain, comic.publication) : null, comic);
+  assert.deepEqual(pdfDomain ? publicationLocationFromDomain(pdfDomain) : null, pdf);
+  assert.deepEqual(comicDomain ? publicationLocationFromDomain(comicDomain) : null, comic);
 });
 
-test('compares exact locations only within the same publication and morphology', () => {
+test('compares exact locations only within the same morphology', () => {
   const pdf = parsePublicationLocation(pdfRequest.locator) as PublicationLocation;
   const comic = parsePublicationLocation(comicRequest.locator) as PublicationLocation;
   assert.equal(comparePublicationLocations(pdf, pdf).precision, 'exact');
   assert.equal(comparePublicationLocations(comic, comic).precision, 'exact');
-  assert.equal(comparePublicationLocations(pdf, comic).reason, 'fingerprint_mismatch');
+  assert.equal(comparePublicationLocations(pdf, comic).reason, 'kind_mismatch');
   assert.equal(comparePublicationLocations(pdf, { ...pdf, pageProgression: 0 } as PublicationLocation).precision, 'unverified');
 });

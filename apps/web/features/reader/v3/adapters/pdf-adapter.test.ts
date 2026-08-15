@@ -9,8 +9,56 @@ import type {
   TextLayer
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { PdfReaderAdapter } from './pdf-adapter';
+import { MemoryReaderStorage } from '../../../../lib/reader/memory-storage';
 
 type FakeListener = (event: Event) => void;
+
+const PDF_FIXTURE_BYTES = new TextEncoder().encode('%PDF-1.7\nreader range fixture');
+const PDF_FIXTURE_HASH = `sha256:${'1'.repeat(64)}`;
+const PDF_FIXTURE_ETAG = `"${PDF_FIXTURE_HASH}"`;
+
+class FakePdfDataRangeTransport {
+  constructor(
+    readonly length: number,
+    readonly initialData: Uint8Array | null
+  ) {}
+  onDataRange() {}
+  requestDataRange() {}
+  abort() {}
+}
+
+function pdfRangeFixture() {
+  return {
+    rangeAccess: {
+      url: '/book.pdf',
+      length: PDF_FIXTURE_BYTES.byteLength,
+      etag: PDF_FIXTURE_ETAG,
+      identity: {
+        serverIdentity: 'https://reader.test',
+        userId: 'user-1',
+        authorizationVersion: 1,
+        volumeId: 'volume-1',
+      },
+      cache: new MemoryReaderStorage()
+    },
+    fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers({
+        'Accept-Ranges': 'bytes',
+        'Content-Length': String(PDF_FIXTURE_BYTES.byteLength),
+        ETag: PDF_FIXTURE_ETAG
+      });
+      if (init?.method === 'HEAD') return new Response(null, { status: 200, headers });
+      const range = new Headers(init?.headers).get('Range');
+      const match = /^bytes=(\d+)-(\d+)$/u.exec(range ?? '');
+      assert.ok(match);
+      const begin = Number(match[1]);
+      const end = Number(match[2]);
+      headers.set('Content-Range', `bytes ${begin}-${end}/${PDF_FIXTURE_BYTES.byteLength}`);
+      headers.set('Content-Length', String(end - begin + 1));
+      return new Response(PDF_FIXTURE_BYTES.slice(begin, end + 1), { status: 206, headers });
+    }
+  };
+}
 
 class FakeStyle {
   [key: string]: unknown;
@@ -121,10 +169,16 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
   }
   const pdfjs = {
     GlobalWorkerOptions: {},
-    getDocument: () => loadingTask,
+    getDocument: (parameters: unknown) => {
+      assert.ok(parameters !== null && typeof parameters === 'object');
+      assert.equal(Reflect.get(parameters, 'wasmUrl'), '/vendor/pdfjs/wasm/');
+      assert.equal(Reflect.get(parameters, 'stopAtErrors'), true);
+      return loadingTask;
+    },
     TextLayer: FakeTextLayer as unknown as typeof TextLayer,
     AnnotationMode: { DISABLE: 0 },
-    PasswordResponses: { INCORRECT_PASSWORD: 2 }
+    PasswordResponses: { INCORRECT_PASSWORD: 2 },
+    PDFDataRangeTransport: FakePdfDataRangeTransport
   } as unknown as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
   Object.assign(globalThis, {
     ResizeObserver: FakeResizeObserver,
@@ -132,7 +186,7 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
   });
   const adapter = new PdfReaderAdapter({
     container: container as unknown as HTMLElement,
-    fetch: async () => new Response('%PDF-1.7', { status: 200 }),
+    ...pdfRangeFixture(),
     loadPdfJs: async () => pdfjs
   });
 
@@ -146,7 +200,6 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
         workId: 'work-1',
         kind: 'pdf',
         contentUrl: '/book.pdf',
-        contentFingerprint: 'pdf-fingerprint',
         totalPages: 2
       },
       initialLocation: null,
@@ -203,7 +256,8 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
     getDocument: () => loadingTask,
     TextLayer: FakeTextLayer as unknown as typeof TextLayer,
     AnnotationMode: { DISABLE: 0 },
-    PasswordResponses: { INCORRECT_PASSWORD: 2 }
+    PasswordResponses: { INCORRECT_PASSWORD: 2 },
+    PDFDataRangeTransport: FakePdfDataRangeTransport
   } as unknown as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
   Object.assign(globalThis, {
     ResizeObserver: FakeResizeObserver,
@@ -211,7 +265,7 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
   });
   const adapter = new PdfReaderAdapter({
     container: container as unknown as HTMLElement,
-    fetch: async () => new Response('%PDF-1.7', { status: 200 }),
+    ...pdfRangeFixture(),
     loadPdfJs: async () => pdfjs
   });
 
@@ -225,7 +279,6 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
         workId: 'work-1',
         kind: 'pdf',
         contentUrl: '/book.pdf',
-        contentFingerprint: 'pdf-continuous-fingerprint',
         totalPages: 7
       },
       initialLocation: null,
@@ -246,6 +299,17 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
     assert.equal(acknowledged.accepted, true);
     assert.equal(container.children.length, 1);
     assert.equal(container.children[0]?.dataset.pageNumber, '4');
+
+    const restored = await adapter.execute({
+      type: 'go-to-location',
+      location: { kind: 'pdf', pageIndex: 4, pageProgression: 0.5 }
+    }, {
+      operation: { sessionId: 'pdf-continuous-session', kind: 'navigation', sequence: 3 },
+      signal: new AbortController().signal
+    });
+
+    assert.equal(restored.accepted, true);
+    assert.deepEqual(restored.location, { kind: 'pdf', pageIndex: 4, pageProgression: 0 });
   } finally {
     await adapter.dispose();
     Object.assign(globalThis, {
@@ -340,7 +404,8 @@ test('PDF resize and preference rerenders keep the committed page visible until 
     getDocument: () => loadingTask,
     TextLayer: FakeTextLayer as unknown as typeof TextLayer,
     AnnotationMode: { DISABLE: 0 },
-    PasswordResponses: { INCORRECT_PASSWORD: 2 }
+    PasswordResponses: { INCORRECT_PASSWORD: 2 },
+    PDFDataRangeTransport: FakePdfDataRangeTransport
   } as unknown as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
   Object.assign(globalThis, {
@@ -355,7 +420,7 @@ test('PDF resize and preference rerenders keep the committed page visible until 
 
   const adapter = new PdfReaderAdapter({
     container: container as unknown as HTMLElement,
-    fetch: async () => new Response('%PDF-1.7', { status: 200 }),
+    ...pdfRangeFixture(),
     loadPdfJs: async () => pdfjs
   });
 
@@ -369,7 +434,6 @@ test('PDF resize and preference rerenders keep the committed page visible until 
         workId: 'work-1',
         kind: 'pdf',
         contentUrl: '/book.pdf',
-        contentFingerprint: 'pdf-fingerprint',
         totalPages: 1
       },
       initialLocation: null,

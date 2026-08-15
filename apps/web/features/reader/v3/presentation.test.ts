@@ -9,7 +9,7 @@ test('round trips the complete work-scoped preference snapshot', () => {
 });
 
 test('projects discriminated locations into the existing visual progress model', () => {
-  assert.deepEqual(locationProgress({ kind: 'pdf', pageNumber: 3 }, 20, 11), {
+  assert.deepEqual(locationProgress({ kind: 'pdf', pageIndex: 2, pageProgression: 0 }, 20, 11), {
     page: 3,
     total: 11,
     percent: 20,

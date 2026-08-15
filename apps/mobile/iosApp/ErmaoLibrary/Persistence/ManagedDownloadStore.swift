@@ -61,15 +61,13 @@ actor ManagedDownloadStore {
         mediaVersionID: String,
         mediaKind: LibraryMediaKind,
         readerType: ManagedDownloadReaderType,
-        contentFingerprint: String,
         expectedBytes: Int64?,
         now: Date = Date()
     ) throws -> ManagedDownloadRecord {
         var manifest = try loadManifest(namespace: namespace)
         if let existingIndex = manifest.records.firstIndex(where: { $0.volumeID == volume.id }) {
             let existing = manifest.records[existingIndex]
-            if existing.contentFingerprint == contentFingerprint,
-               existing.effectiveMediaVersionID == mediaVersionID,
+            if existing.effectiveMediaVersionID == mediaVersionID,
                existing.mediaKind == mediaKind,
                existing.readerType == readerType {
                 return existing
@@ -101,7 +99,6 @@ actor ManagedDownloadStore {
             readerType: readerType,
             state: .queued,
             verification: .pending,
-            contentFingerprint: contentFingerprint,
             expectedBytes: expectedBytes,
             receivedBytes: 0,
             localRelativePath: nil,
@@ -153,8 +150,7 @@ actor ManagedDownloadStore {
     ) throws -> ManagedDownloadRecord {
         guard receipt.receivedBytes > 0,
               fileSize(at: destination.partialFileURL) == receipt.receivedBytes,
-              receipt.expectedBytes.map({ $0 == receipt.receivedBytes }) ?? true,
-              !receipt.contentFingerprint.isEmpty else {
+              receipt.expectedBytes.map({ $0 == receipt.receivedBytes }) ?? true else {
             if FileManager.default.fileExists(atPath: destination.partialFileURL.path) {
                 try? FileManager.default.removeItem(at: destination.partialFileURL)
             }
@@ -173,7 +169,6 @@ actor ManagedDownloadStore {
         var completed = record
         completed.state = .completed
         completed.verification = .verified
-        completed.contentFingerprint = receipt.contentFingerprint
         completed.expectedBytes = receipt.expectedBytes ?? receipt.receivedBytes
         completed.receivedBytes = receipt.receivedBytes
         completed.localRelativePath = destination.finalRelativePath
@@ -211,7 +206,7 @@ actor ManagedDownloadStore {
     func fileURL(for record: ManagedDownloadRecord) -> URL? {
         guard record.isVerifiedOfflineCopy, let relativePath = record.localRelativePath else { return nil }
         guard let url = resolvedContentURL(relativePath, namespace: record.namespace) else { return nil }
-        return fileSize(at: url) == record.receivedBytes ? url : nil
+        return fileSize(at: url) > 0 ? url : nil
     }
 
     func verifiedReaderArtifact(recordID: String, namespace: String) throws -> IosReaderDownloadArtifact? {
@@ -222,8 +217,6 @@ actor ManagedDownloadStore {
                   readerType: record.readerType,
                   format: record.format
               ),
-              let serverContentFingerprint = record.contentFingerprint,
-              !serverContentFingerprint.isEmpty,
               let fileURL = fileURL(for: record)
         else { return nil }
         return IosReaderDownloadArtifact(
@@ -232,8 +225,7 @@ actor ManagedDownloadStore {
             displayTitle: record.workTitle,
             workID: record.workID,
             volumeID: record.volumeID,
-            sourceFormat: record.format,
-            serverContentFingerprint: serverContentFingerprint
+            sourceFormat: record.format
         )
     }
 

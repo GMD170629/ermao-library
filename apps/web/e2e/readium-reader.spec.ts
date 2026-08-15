@@ -1,11 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-const publicationFingerprint = {
-  originalFileHash: 'sha256:f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678',
-  parser: 'epub-package:1',
-  normalization: 'shuku-epub-locator-dom-v2'
-};
-
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
 });
@@ -26,7 +20,6 @@ const chapterTwo = secureXhtml(`<?xml version="1.0" encoding="UTF-8"?><html xmln
 function exactLocator(cssSelector: string, highlight: string, progression = 0, href = 'chapter1.xhtml', position = 1) {
   return {
     kind: 'reflowable',
-    publication: publicationFingerprint,
     engineLocator: {
       engine: 'readium', platform: 'web', version: 'readium-ts:2.8.2',
       payload: { href, type: 'application/xhtml+xml', locations: { cssSelector, fragments: [cssSelector.slice(1)], progression, position }, text: { highlight } }
@@ -37,12 +30,12 @@ function exactLocator(cssSelector: string, highlight: string, progression = 0, h
 function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legacyPercent = 0) {
   const volume = { id: 'epub-volume', mediaVersionId: 'epub-media', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', derivedFromVolumeId: null, pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
   return { ok: true, data: {
-    schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub', publicationFingerprint,
+    schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
     publication: { manifestUrl: '/api/reader/v4/volumes/epub-volume/publication/manifest.json', positionsUrl: '/api/reader/v4/volumes/epub-volume/publication/positions.json' },
     book: { id: 'work-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
     mediaVersion: { id: 'epub-media', workId: 'work-epub', mediaKind: 'EBOOK', completed: false },
     volume, availableVolumes: [volume],
-    files: [{ id: 'epub-file', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, contentHash: publicationFingerprint.originalFileHash, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/volumes/epub-volume/file' }],
+    files: [{ id: 'epub-file', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/volumes/epub-volume/file' }],
     units: [
       { id: 'unit-1', index: 0, title: '第一章', href: 'chapter1.xhtml', fileId: 'epub-file', startMs: null, endMs: null, durationMs: null, metadata: {} },
       { id: 'unit-2', index: 1, title: '第二章', href: 'chapter2.xhtml', fileId: 'epub-file', startMs: null, endMs: null, durationMs: null, metadata: {} }
@@ -59,8 +52,7 @@ function rwpmManifest() {
     metadata: { '@type': 'http://schema.org/Book', identifier: 'urn:shuku:e2e', title: 'Readium E2E', conformsTo: ['https://readium.org/webpub-manifest/profiles/epub'], layout: 'reflowable', readingProgression: 'ltr' },
     links: [{ rel: ['self'], href: 'manifest.json', type: 'application/webpub+json' }, { rel: ['positions'], href: 'positions.json', type: 'application/vnd.readium.position-list+json' }],
     readingOrder: [{ href: 'chapter1.xhtml', type: 'application/xhtml+xml', title: '第一章' }, { href: 'chapter2.xhtml', type: 'application/xhtml+xml', title: '第二章' }],
-    toc: [{ href: 'chapter1.xhtml#chapter-title', title: '第一章' }, { href: 'chapter2.xhtml#chapter-two', title: '第二章' }],
-    'https://shuku.app/reader/runtime': publicationFingerprint
+    toc: [{ href: 'chapter1.xhtml#chapter-title', title: '第一章' }, { href: 'chapter2.xhtml#chapter-two', title: '第二章' }]
   };
 }
 
@@ -107,7 +99,7 @@ test('Readium opens EPUB through RWPM and uploads an exact first-visible locator
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.engineLocator.engine).toBe('readium'); expect(write.locator.publication).toEqual(publicationFingerprint);
+  expect(write.locator.engineLocator.engine).toBe('readium');
   expect(write.locator.kind).toBe('reflowable');
   expect(write.locator.engineLocator.payload.href).toBe('chapter1.xhtml');
   expect(write.locator.engineLocator.payload.locations.cssSelector || write.locator.engineLocator.payload.locations.fragments?.length || write.locator.engineLocator.payload.text?.highlight).toBeTruthy();

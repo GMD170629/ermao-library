@@ -152,3 +152,21 @@ def test_datetime_serializes_as_utc_z() -> None:
     )
 
     assert '"createdAt":"2026-07-28T03:04:05Z"' in event.model_dump_json(by_alias=True)
+
+
+def test_library_reading_unit_metadata_accepts_comic_page_fields() -> None:
+    metadata = library_schemas.ReadingUnitMetadata.model_validate(
+        {
+            "zipEntryName": "volume/001.jpg",
+            "originalName": "001.jpg",
+            "pageInVolume": 1,
+            "pageInSection": 1,
+        }
+    )
+
+    assert metadata.model_dump(by_alias=True, exclude_none=True) == {
+        "zipEntryName": "volume/001.jpg",
+        "originalName": "001.jpg",
+        "pageInVolume": 1,
+        "pageInSection": 1,
+    }

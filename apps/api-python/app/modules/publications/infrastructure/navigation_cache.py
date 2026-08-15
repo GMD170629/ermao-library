@@ -16,7 +16,6 @@ from app.modules.publications.domain.navigation import (
     PublicationNavigationCacheState,
     PublicationNavigationEntry,
     PublicationParserProfile,
-    canonical_original_file_hash,
 )
 from app.modules.publications.infrastructure.models import PublicationNavigationCache
 
@@ -46,7 +45,8 @@ class SqlAlchemyPublicationNavigationCacheReader:
             identity=PublicationNavigationCacheIdentity(
                 volume_id=cache.volume_id,
                 file_id=cache.file_id,
-                original_file_hash=cache.original_file_hash,
+                source_size_bytes=cache.source_size_bytes,
+                source_mtime_ms=cache.source_mtime_ms,
                 parser=cache.parser,
                 normalization=cache.normalization,
             ),
@@ -129,9 +129,8 @@ class SqlAlchemyPublicationNavigationWriteRepository:
             cache = PublicationNavigationCache(volume_id=source.volume_id)
             self._session.add(cache)
         cache.file_id = source.file_id
-        cache.original_file_hash = canonical_original_file_hash(
-            identity.original_file_hash
-        )
+        cache.source_size_bytes = identity.source_size_bytes
+        cache.source_mtime_ms = identity.source_mtime_ms
         cache.parser = identity.parser
         cache.normalization = identity.normalization
         cache.projection_version = CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
@@ -166,11 +165,8 @@ class SqlAlchemyPublicationNavigationWriteRepository:
             select(LibraryFile.id).where(
                 LibraryFile.id == source.file_id,
                 LibraryFile.volume_id == source.volume_id,
-                (
-                    LibraryFile.full_hash == source.full_hash
-                    if source.full_hash is not None
-                    else LibraryFile.full_hash.is_(None)
-                ),
+                LibraryFile.size_bytes == source.size_bytes,
+                LibraryFile.mtime_ms == source.mtime_ms,
             )
         )
         updated_volume_id = self._session.scalar(

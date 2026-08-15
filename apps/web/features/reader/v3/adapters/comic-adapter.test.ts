@@ -229,7 +229,7 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   const events: Array<{ type: string; location?: { kind: string; pageIndex?: number } }> = [];
   adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [1, 2, 3].map((pageIndex) => ({ pageIndex, width: 600, height: 900 })),
+    initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
     fetch: async () => new Response(new Blob(['page']), { status: 200 }),
     onInputIntent: (intent) => {
       if (intent.type !== 'command') return;
@@ -250,8 +250,10 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
     source: {
       workId: 'work-1',
       kind: 'comic',
+      sourceFormat: 'cbz',
+      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      contentFingerprint: 'comic-fingerprint',
       volumeId: 'volume-1',
       totalPages: 3
     },
@@ -280,22 +282,22 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   });
 
   assert.equal(programmatic.accepted, true);
-  assert.equal(adapter.getViewModel().currentPage, 2);
+  assert.equal(adapter.getViewModel().currentPage, 1);
   assert.equal(container.children[0], viewport);
   assert.equal(track.children[1], nextSlot);
   assert.equal(track.children[0], currentSlot);
-  assert.deepEqual(events.map((event) => event.location?.pageIndex), [2]);
+  assert.deepEqual(events.map((event) => event.location?.pageIndex), [1]);
 
   events.splice(0);
   viewport.dispatch('pointerdown', pointer(viewport, 7, 650, 100));
   const releaseEvent = pointer(viewport, 7, 80, 150);
   viewport.dispatch('pointerup', releaseEvent);
-  await waitFor(() => adapter.getViewModel().currentPage === 3);
+  await waitFor(() => adapter.getViewModel().currentPage === 2);
   const compatibilityClick = pointer(viewport, 7, 80, 151);
   viewport.dispatch('click', compatibilityClick);
 
   assert.equal(container.children[0], viewport);
-  assert.deepEqual(events.map((event) => event.location?.pageIndex), [3]);
+  assert.deepEqual(events.map((event) => event.location?.pageIndex), [2]);
   assert.equal(releaseEvent.defaultPrevented, true);
   assert.equal(releaseEvent.propagationStopped, true);
   assert.equal(compatibilityClick.defaultPrevented, true);
@@ -313,7 +315,7 @@ test('comic navigation waits for the candidate image to decode before promoting 
   let sequence = 1;
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [1, 2].map((pageIndex) => ({ pageIndex, width: 600, height: 900 })),
+    initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
     fetch: async () => new Response(new Blob(['page']), { status: 200 }),
     decodeImage: async () => {
       decodeCalls += 1;
@@ -328,8 +330,10 @@ test('comic navigation waits for the candidate image to decode before promoting 
     source: {
       workId: 'work-1',
       kind: 'comic',
+      sourceFormat: 'cbz',
+      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      contentFingerprint: 'comic-fingerprint',
       volumeId: 'volume-1',
       totalPages: 2
     },
@@ -343,13 +347,13 @@ test('comic navigation waits for the candidate image to decode before promoting 
     signal: new AbortController().signal
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(adapter.getViewModel().currentPage, 1);
-  assert.equal(container.children[0].children[0].children[1].dataset.comicSpreadAnchor, '1');
+  assert.equal(adapter.getViewModel().currentPage, 0);
+  assert.equal(container.children[0].children[0].children[1].dataset.comicSpreadAnchor, '0');
 
   candidateDecode.resolve();
   const acknowledged = await navigation;
   assert.equal(acknowledged.accepted, true);
-  assert.equal(adapter.getViewModel().currentPage, 2);
+  assert.equal(adapter.getViewModel().currentPage, 1);
   adapter.dispose();
 });
 
@@ -367,11 +371,11 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   const container = new FakeElement(ownerDocument);
   const preferences = {
     ...DEFAULT_READER_PREFERENCES,
-    comic: { ...DEFAULT_READER_PREFERENCES.comic, flow: 'vertical' as const }
+    comic: { ...DEFAULT_READER_PREFERENCES.comic, flow: 'scrolled' as const }
   };
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [1, 2, 3].map((pageIndex) => ({ pageIndex, width: 600, height: 900 }))
+    initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 }))
   });
 
   await adapter.open({
@@ -381,8 +385,10 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
     source: {
       workId: 'work-1',
       kind: 'comic',
+      sourceFormat: 'cbz',
+      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      contentFingerprint: 'comic-fingerprint',
       volumeId: 'volume-1',
       totalPages: 3
     },
@@ -397,9 +403,9 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   const images = slots.map((slot) => slot.children[0]);
   assert.deepEqual(images.map((image) => image.loading), ['lazy', 'lazy', 'lazy']);
   assert.deepEqual(images.map((image) => image.src), [
-    '/api/volumes/volume-1/pages/1?imageVariant=original',
-    '/api/volumes/volume-1/pages/2?imageVariant=original',
-    '/api/volumes/volume-1/pages/3?imageVariant=original'
+    '/api/reader/v4/volumes/volume-1/comic/pages/0?imageVariant=original',
+    '/api/reader/v4/volumes/volume-1/comic/pages/1?imageVariant=original',
+    '/api/reader/v4/volumes/volume-1/comic/pages/2?imageVariant=original'
   ]);
   const preloadObserver = FakeIntersectionObserver.latest as FakeIntersectionObserver | null;
   assert.ok(preloadObserver);
@@ -424,12 +430,12 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   stream.scrollTop = 900;
   stream.dispatch('scroll', {});
 
-  assert.equal(adapter.getViewModel().currentPage, 2);
+  assert.equal(adapter.getViewModel().currentPage, 1);
   assert.equal(stream.scrollTop, 900);
   assert.equal(slots[0].children[0], images[0]);
   assert.deepEqual(slots.map((slot) => slot.children[0]), images);
 
-  const jump = await adapter.execute({ type: 'go-to-index', index: 3 }, {
+  const jump = await adapter.execute({ type: 'go-to-index', index: 2 }, {
     operation: operation(2),
     signal: new AbortController().signal
   });
@@ -449,7 +455,7 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
   const container = new FakeElement(ownerDocument);
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [1, 2].map((pageIndex) => ({ pageIndex, width: 600, height: 900 })),
+    initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
     fetch: async () => new Response(new Blob(['page']), { status: 200 }),
     decodeImage: async () => undefined,
     onInputIntent: () => false
@@ -462,8 +468,10 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
     source: {
       workId: 'work-1',
       kind: 'comic',
+      sourceFormat: 'cbz',
+      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      contentFingerprint: 'comic-fingerprint',
       volumeId: 'volume-1',
       totalPages: 2
     },
@@ -482,8 +490,8 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
   observer.trigger();
 
   assert.equal(viewport.scrollLeft, 400);
-  assert.equal(adapter.getViewModel().currentPage, 1);
-  assert.equal(viewport.children[0].children[1].dataset.comicSpreadAnchor, '1');
+  assert.equal(adapter.getViewModel().currentPage, 0);
+  assert.equal(viewport.children[0].children[1].dataset.comicSpreadAnchor, '0');
   adapter.dispose();
   assert.equal(observer.disconnected, true);
 });
@@ -496,7 +504,7 @@ test('comic signal fallback removes source listeners after abort and every compl
   const container = new FakeElement(ownerDocument);
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [1, 2, 3].map((pageIndex) => ({ pageIndex, width: 600, height: 900 })),
+    initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
     fetch: async () => new Response(new Blob(['page']), { status: 200 }),
     decodeImage: async () => undefined
   });
@@ -546,8 +554,10 @@ test('comic signal fallback removes source listeners after abort and every compl
       source: {
         workId: 'work-1',
         kind: 'comic',
+        sourceFormat: 'cbz',
+        comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
+        comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
         contentUrl: '/comic',
-        contentFingerprint: 'comic-fingerprint',
         volumeId: 'volume-1',
         totalPages: 3
       },

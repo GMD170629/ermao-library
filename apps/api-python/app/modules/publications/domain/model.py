@@ -34,8 +34,9 @@ class PublicationResourceNotFoundError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class PublicationFingerprint:
-    original_file_hash: str
+class PublicationRevision:
+    source_size_bytes: int
+    source_mtime_ms: int
     parser: str
     normalization: str
 
@@ -62,7 +63,7 @@ class NormalizedPublication:
     author: str | None
     language: str | None
     reading_progression: str
-    fingerprint: PublicationFingerprint
+    revision: PublicationRevision
     reading_order: tuple[PublicationLink, ...]
     resources: tuple[PublicationLink, ...]
     toc: tuple[PublicationTocEntry, ...]

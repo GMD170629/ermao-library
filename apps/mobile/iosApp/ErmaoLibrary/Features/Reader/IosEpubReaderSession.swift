@@ -60,8 +60,14 @@ enum IosReaderTextAlignment: String, CaseIterable, Codable, Identifiable, Sendab
     var id: Self { self }
 }
 
+enum IosComicDirection: String, CaseIterable, Codable, Identifiable, Sendable { case ltr, rtl; var id: Self { self } }
+enum IosComicSpread: String, CaseIterable, Codable, Identifiable, Sendable { case single, double; var id: Self { self } }
+enum IosComicFlow: String, CaseIterable, Codable, Identifiable, Sendable { case paginated, scrolled; var id: Self { self } }
+enum IosPdfFit: String, CaseIterable, Codable, Identifiable, Sendable { case width, page; var id: Self { self } }
+enum IosPdfCropMargins: String, CaseIterable, Codable, Identifiable, Sendable { case off, auto; var id: Self { self } }
+
 struct IosReaderPreferences: Codable, Equatable, Sendable {
-    var schemaVersion = 3
+    var schemaVersion = 4
     var theme = IosReaderTheme.warm
     var themeMode = IosReaderThemeMode.manual
     var progressStyle = IosReaderProgressStyle.auto
@@ -90,6 +96,16 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
     var smartOptimization = true
     var deduplicateIndent = true
     var indentUnindented = true
+    var comicDirection = IosComicDirection.ltr
+    var comicSpread = IosComicSpread.single
+    var comicFlow = IosComicFlow.paginated
+    var comicCoverSingle = false
+    var comicPageGap = 0
+    var comicZoom = 1.0
+    var pdfZoom = 1.0
+    var pdfFit = IosPdfFit.page
+    var pdfRotation = 0
+    var pdfCropMargins = IosPdfCropMargins.off
 
     init() {}
 
@@ -173,21 +189,79 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
     init(serverIdentity: String, userID: String, defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let digest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
-        key = "reader.preferences.v3." + digest.map { String(format: "%02x", $0) }.joined()
+        key = "reader.preferences.v4." + digest.map { String(format: "%02x", $0) }.joined()
     }
 
     func load() -> IosReaderPreferences {
-        guard let data = defaults.data(forKey: key) else { return IosReaderPreferences() }
-        if let decoded = try? JSONDecoder().decode(IosReaderPreferences.self, from: data),
-           decoded.schemaVersion == 3 {
-            return decoded
-        }
-        return migrateLegacy(data)
+        guard let data = defaults.data(forKey: key),
+              let payload = String(data: data, encoding: .utf8),
+              (try? ErmaoShared.PublicKt.createReaderPreferencesJson().decode(payload: payload)) != nil,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let draft = root["iosDraft"],
+              let draftData = try? JSONSerialization.data(withJSONObject: draft),
+              let decoded = try? JSONDecoder().decode(IosReaderPreferences.self, from: draftData),
+              decoded.schemaVersion == 4
+        else { return IosReaderPreferences() }
+        return decoded
     }
 
-    func save(_ preferences: IosReaderPreferences) {
-        guard let data = try? JSONEncoder().encode(preferences) else { return }
+    @discardableResult
+    func save(_ preferences: IosReaderPreferences) -> Bool {
+        guard let draftData = try? JSONEncoder().encode(preferences),
+              let draft = try? JSONSerialization.jsonObject(with: draftData) else { return false }
+        let document: [String: Any] = [
+            "schemaVersion": 4,
+            "appearance": ["theme": preferences.theme.rawValue, "themeMode": preferences.themeMode.rawValue],
+            "display": ["progressStyle": preferences.progressStyle.rawValue, "showClock": preferences.showClock],
+            "interaction": [
+                "tapZones": preferences.tapZones.rawValue,
+                "swipePageTurn": preferences.swipePageTurn,
+                "keyboardPageTurn": preferences.keyboardPageTurn,
+                "volumeKeyPageTurn": preferences.volumeKeyPageTurn,
+                "keepScreenAwake": preferences.keepScreenAwake,
+            ],
+            "epub": [
+                "fontSize": preferences.fontSize, "lineHeight": preferences.lineHeight,
+                "pageWidth": preferences.pageWidth, "fontFamily": preferences.fontFamily.rawValue,
+                "fontWeight": preferences.fontWeight, "letterSpacing": preferences.letterSpacing,
+                "pageMargin": preferences.pageMargin.rawValue, "spreadMode": preferences.spreadMode.rawValue,
+                "pageTurnAnimation": preferences.pageTurnAnimation,
+                "flow": preferences.readingMode == .paged ? "paginated" : "scrolled",
+                "typography": [
+                    "paragraphIndent": preferences.paragraphIndent,
+                    "paragraphSpacing": preferences.paragraphSpacing,
+                    "textAlign": preferences.textAlignment.rawValue,
+                    "preservePublisherStyles": preferences.preservePublisherStyles,
+                    "allowPublisherColors": preferences.allowPublisherColors,
+                    "allowPublisherFonts": preferences.allowPublisherFonts,
+                ],
+                "optimization": [
+                    "enabled": preferences.smartOptimization,
+                    "deduplicateIndent": preferences.deduplicateIndent,
+                    "indentUnindented": preferences.indentUnindented,
+                ],
+            ],
+            "comic": [
+                "direction": preferences.comicDirection.rawValue,
+                "spreadMode": preferences.comicSpread.rawValue,
+                "pageTurnAnimation": "slide", "imageFit": "width", "imageVariant": "original",
+                "zoom": preferences.comicZoom, "pageWidth": 1350,
+                "flow": preferences.comicFlow.rawValue,
+                "coverSingle": preferences.comicCoverSingle, "pageGap": preferences.comicPageGap,
+            ],
+            "pdf": [
+                "zoom": preferences.pdfZoom, "pageWidth": 1350,
+                "fit": preferences.pdfFit.rawValue, "flow": "paged",
+                "rotation": preferences.pdfRotation, "cropMargins": preferences.pdfCropMargins.rawValue,
+            ],
+            "iosDraft": draft,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: document),
+              let payload = String(data: data, encoding: .utf8),
+              (try? ErmaoShared.PublicKt.createReaderPreferencesJson().decode(payload: payload)) != nil
+        else { return false }
         defaults.set(data, forKey: key)
+        return true
     }
 
     func reset() -> IosReaderPreferences {
@@ -196,26 +270,6 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
         return preferences
     }
 
-    private func migrateLegacy(_ data: Data) -> IosReaderPreferences {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return IosReaderPreferences()
-        }
-        var result = IosReaderPreferences()
-        switch object["theme"] as? String {
-        case "paper": result.theme = .warm
-        case "night": result.theme = .night
-        case "system": result.themeMode = .system
-        default: break
-        }
-        if let value = object["fontSize"] as? Double {
-            result.fontSize = min(30, max(14, Int((value * 18).rounded())))
-        }
-        if let value = object["lineHeight"] as? Double {
-            result.lineHeight = min(2.4, max(1.4, value))
-        }
-        save(result)
-        return result
-    }
 }
 
 struct IosReaderBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
@@ -243,11 +297,10 @@ final class IosReaderBookmarkStore: @unchecked Sendable {
         serverIdentity: String,
         userID: String,
         volumeID: String,
-        contentFingerprint: String,
         defaults: UserDefaults = .standard
     ) {
         self.defaults = defaults
-        let namespace = "\(serverIdentity)\0\(userID)\0\(volumeID)\0\(contentFingerprint)"
+        let namespace = "\(serverIdentity)\0\(userID)\0\(volumeID)"
         let digest = SHA256.hash(data: Data(namespace.utf8))
         key = "reader.bookmarks.v1." + digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -287,7 +340,7 @@ private final class IosReaderBookmarkRemote: @unchecked Sendable {
 struct IosReaderTocEntry: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
-    let href: String
+    let href: String?
     let depth: Int
 }
 
@@ -376,9 +429,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     @Published private(set) var restoreWarning: IosReaderFailureCode?
     @Published private(set) var resumePrompt: IosReaderResumePrompt?
     @Published private(set) var resumeActionFailed = false
-    @Published private(set) var startupConflict: IosReaderStartupConflict?
-    @Published private(set) var startupCancelled = false
-    @Published private(set) var startupActionFailed = false
     private var returningToResumeAlternative = false
     @Published private(set) var presentationError: IosReaderFailureCode?
     @Published private(set) var tableOfContents: [IosReaderTocEntry] = []
@@ -405,6 +455,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let namespaceKey: String
     private let workID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
+    private let canonicalNavigation: [IosReaderTocEntry]
     private var publication: Publication?
     private var openedPublication: IosOpenedReadiumPublication?
     private var managedPublication: IosManagedPublication?
@@ -413,11 +464,13 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private var persistenceGate = IosReaderPersistenceGate()
     private var expectedRestoredEnvelope: ErmaoShared.ReadiumLocatorEnvelope?
     private var didOpen = false
+    private let navigationQueue = IosReaderNavigationQueue()
 
     init(
         sourceID: String,
         displayTitle: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat = .epub,
+        canonicalNavigation: [IosReaderTocEntry] = [],
         preferences: IosReaderPreferences = IosReaderPreferences(),
         managedStore: IosManagedPublicationStore,
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
@@ -427,7 +480,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         bookmarkSyncPort: ErmaoShared.ReaderBookmarkSyncPort? = nil,
         bookmarkSyncTarget: ErmaoShared.ReaderBookmarkSyncTarget? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4? = nil,
-        startupConflict: IosReaderStartupConflict? = nil,
         namespaceKey: String = "local",
         workID: String = "local",
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void = { _ in },
@@ -438,6 +490,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         self.sourceID = sourceID
         self.displayTitle = displayTitle
         self.sourceFormat = sourceFormat
+        self.canonicalNavigation = canonicalNavigation
         self.preferences = preferences
         self.managedStore = managedStore
         self.progressStore = progressStore
@@ -450,7 +503,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             nil
         }
         self.remoteSnapshot = remoteSnapshot
-        self.startupConflict = startupConflict
         self.namespaceKey = namespaceKey
         self.workID = workID
         self.publishProgressUpdate = publishProgressUpdate
@@ -479,7 +531,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             let openedPublication = try await runtime.open(managed)
             let publication = openedPublication.publication
             self.openedPublication = openedPublication
-            let saved = try await progressStore.load(sourceId: sourceID)
+            let saved = try? await progressStore.load(sourceId: sourceID)
             let initial = await restore(
                 local: saved,
                 remote: remoteSnapshot,
@@ -508,7 +560,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 self?.showRemoteProgress(snapshot)
             }
-            tableOfContents = await loadTableOfContents(publication)
+            tableOfContents = mergedNavigation(publication: publication)
             phase = .reading
             startBookmarkSynchronization()
             if let initial { reflectLocation(initial) }
@@ -546,13 +598,30 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         _ = await navigator?.goRight(options: .animated)
     }
 
-    func goToTOCEntry(_ entry: IosReaderTocEntry) async {
-        guard let publication,
-              let href = RelativeURL(string: entry.href),
-              let link = publication.linkWithHREF(href)
-        else { return }
+    func goToTOCEntry(_ entry: IosReaderTocEntry) async -> Bool {
+        await navigationQueue.enqueue { [weak self] in
+            guard let self else { return false }
+            return await self.executeTOCNavigation(entry)
+        }
+    }
+
+    private func executeTOCNavigation(_ entry: IosReaderTocEntry) async -> Bool {
+        guard let canonicalHref = entry.href,
+              let href = RelativeURL(string: canonicalHref)
+        else { return false }
+        let link = Link(href: href, title: entry.title)
+        if navigationHrefMatches(navigator?.currentLocation?.href.normalized.string, canonicalHref) {
+            return true
+        }
         beginUserNavigation()
-        _ = await navigator?.go(to: link, options: .animated)
+        guard await navigator?.go(to: link, options: .animated) == true else { return false }
+        for _ in 0 ..< 30 {
+            if navigationHrefMatches(navigator?.currentLocation?.href.normalized.string, canonicalHref) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
     }
 
     func goToProgression(_ progression: Double) async {
@@ -665,7 +734,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         try? await Task.sleep(for: .milliseconds(120))
         if let recaptured = await navigator.firstVisibleElementLocator(),
            let managedPublication,
-           let actual = try? mapper.exactEnvelope(from: recaptured, fingerprint: managedPublication.fingerprint),
+           let actual = try? mapper.exactEnvelope(from: recaptured),
            ErmaoShared.PublicKt.compareExactProgressReadiumLocators(
                expected: prompt.expectedEnvelope,
                recaptured: actual
@@ -688,7 +757,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         expectedRestoredEnvelope = nil
         try? await Task.sleep(for: .milliseconds(160))
         guard let recaptured = await navigator.firstVisibleElementLocator(),
-              let actual = try? mapper.exactEnvelope(from: recaptured, fingerprint: managedPublication.fingerprint)
+              let actual = try? mapper.exactEnvelope(from: recaptured)
         else { return }
         let match = ErmaoShared.PublicKt.compareExactProgressReadiumLocators(expected: expected, recaptured: actual)
         if match == ErmaoShared.ExactBlockMatch.resourcemismatch {
@@ -700,58 +769,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         presentationError = nil
     }
 
-    func continueStartupAtLocalPosition() async {
-        guard let conflict = startupConflict,
-              let location = conflict.progress.location as? ErmaoShared.ReflowReaderLocation,
-              let expected = ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location),
-              let locator = try? mapper.exactLocator(from: location),
-              let navigator
-        else { startupActionFailed = true; return }
-        persistenceGate.suppressPreferenceReflow()
-        _ = await navigator.go(to: locator, options: .animated)
-        try? await Task.sleep(for: .milliseconds(160))
-        guard let recaptured = await navigator.firstVisibleElementLocator(),
-              let managedPublication,
-              let actual = try? mapper.exactEnvelope(from: recaptured, fingerprint: managedPublication.fingerprint),
-              ErmaoShared.PublicKt.compareExactProgressReadiumLocators(expected: expected, recaptured: actual) == .exact
-        else { startupActionFailed = true; return }
-        do {
-            try await progressCoordination?.continueStartupWithLocal(
-                progress: conflict.progress,
-                serverRevision: conflict.server.revision
-            )
-            startupConflict = nil
-        } catch {
-            startupActionFailed = true
-        }
-    }
-
-    func useCloudStartupPosition() async {
-        guard let conflict = startupConflict,
-              let expected = conflict.server.locator as? ErmaoShared.ReflowablePublicationLocation,
-              let navigator,
-              let recaptured = await navigator.firstVisibleElementLocator(),
-              let managedPublication,
-              let actual = try? mapper.exactEnvelope(from: recaptured, fingerprint: managedPublication.fingerprint),
-              ErmaoShared.PublicKt.compareExactProgressReadiumLocators(
-                  expected: expected.readiumEnvelope,
-                  recaptured: actual
-              ) == .exact,
-              let progress = try? makeProgress(from: recaptured)
-        else { startupActionFailed = true; return }
-        do {
-            try await progressCoordination?.useServerForStartup(conflict)
-            try await progressCoordination?.acceptVerifiedRemote(progress: progress, snapshot: conflict.server)
-            startupConflict = nil
-        } catch {
-            startupActionFailed = true
-        }
-    }
-
-    func cancelStartupConflict() {
-        startupCancelled = true
-    }
-
     func showControls() {
         controlsVisible = true
     }
@@ -759,14 +776,19 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     func enterBackground() async {
         phase = .background
         await flushProgress()
+        try? await progressStore.retryPendingUpload()
         try? await progressStore.awaitPendingUpload()
     }
 
     func becomeActive() {
         if phase == .background { phase = .reading }
         Task {
-            try? await progressStore.retryPendingUpload()
-            await progressCoordination?.checkForRemoteProgress()
+            if let progressCoordination {
+                await progressCoordination.recoverPendingAndCheckRemote()
+            } else {
+                try? await progressStore.retryPendingUpload()
+                try? await progressStore.awaitPendingUpload()
+            }
         }
     }
 
@@ -775,13 +797,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         phase = .closing
         pendingSave?.cancel()
         bookmarkSyncTask?.cancel()
-        do {
-            try await persistCurrentLocation()
-            try? await progressStore.awaitPendingUpload()
-        } catch {
-            phase = .reading
-            throw error
-        }
+        try? await persistCurrentLocation()
+        try? await progressStore.retryPendingUpload()
+        try? await progressStore.awaitPendingUpload()
         navigator?.delegate = nil
         navigator = nil
         await openedPublication?.close()
@@ -792,11 +810,22 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     func flushProgress() async {
         pendingSave?.cancel()
-        do {
-            try await persistCurrentLocation()
-        } catch {
-            presentationError = .persistenceFailed
+        try? await persistCurrentLocation()
+    }
+
+    private func mergedNavigation(publication: Publication) -> [IosReaderTocEntry] {
+        let publicationEntries = publication.tableOfContents.enumerated().map { index, link in
+            let title = link.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            IosReaderTocEntry(
+                id: "publication:\(index)",
+                title: title?.isEmpty == false ? title ?? String(index + 1) : String(index + 1),
+                href: String(describing: link.href),
+                depth: 0
+            )
         }
+        guard !canonicalNavigation.isEmpty else { return publicationEntries }
+        let canonicalHrefs = Set(canonicalNavigation.map(\.href))
+        return canonicalNavigation + publicationEntries.filter { !canonicalHrefs.contains($0.href) }
     }
 
     private func restore(
@@ -809,7 +838,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             sourceId: managed.sourceID,
             displayTitle: managed.displayTitle,
             format: managed.sourceFormat.readerFormat,
-            contentFingerprint: managed.fingerprint.shared,
             workId: managed.workID,
             volumeId: managed.volumeID,
             sourceFormat: managed.sourceFormat
@@ -920,23 +948,17 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         return exact
     }
 
-    private func loadTableOfContents(_ publication: Publication) async -> [IosReaderTocEntry] {
-        guard case let .success(links) = await publication.tableOfContents() else { return [] }
-        var index = 0
-        func flatten(_ links: [Link], depth: Int) -> [IosReaderTocEntry] {
-            links.flatMap { link in
-                index += 1
-                let current = IosReaderTocEntry(
-                    id: "\(index):\(link.href)",
-                    title: link.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-                        ?? String(localized: "reader.toc.untitled"),
-                    href: link.href,
-                    depth: depth
-                )
-                return [current] + flatten(link.children, depth: depth + 1)
-            }
+    private func navigationHrefMatches(_ current: String?, _ expected: String) -> Bool {
+        guard let current else { return false }
+        let expectedParts = expected.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        let currentParts = current.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        func normalize(_ value: Substring) -> Substring {
+            value.hasPrefix("./") ? value.dropFirst(2) : value
         }
-        return flatten(links, depth: 0)
+        guard normalize(currentParts[0]) == normalize(expectedParts[0]) else {
+            return false
+        }
+        return expectedParts.count == 1 || (currentParts.count == 2 && currentParts[1] == expectedParts[1])
     }
 
     private func customFontFamilyDeclarations() -> [AnyHTMLFontFamilyDeclaration] {
@@ -1111,7 +1133,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     private func makeProgress(from locator: Locator) throws -> ErmaoShared.ReaderProgress {
         guard let managedPublication else { throw IosReaderFailure(code: .persistenceFailed) }
-        let location = try mapper.sharedLocation(from: locator, fingerprint: managedPublication.fingerprint)
+        let location = try mapper.sharedLocation(from: locator)
         return ErmaoShared.ReaderProgress(
             sourceId: sourceID,
             location: location,

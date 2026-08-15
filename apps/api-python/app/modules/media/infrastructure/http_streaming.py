@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
-from PIL import Image, ImageChops, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import Settings, get_settings
 from app.infrastructure.comic_archives import ComicArchiveError, open_comic_archive
@@ -31,10 +31,11 @@ STREAMS_PER_USER_LIMIT: int | None = None
 SLOW_REQUEST_LOG_THRESHOLD_MS = 1500
 COMIC_PAGE_DATA_SAVER_VARIANT = "data-saver"
 COMIC_PAGE_ORIGINAL_VARIANT = "original"
-COMIC_PAGE_DATA_SAVER_MEDIA_TYPE = "image/avif"
-COMIC_PAGE_DATA_SAVER_QUALITY = 12
-COMIC_PAGE_DATA_SAVER_SPEED = 9
-COMIC_PAGE_DATA_SAVER_CACHE_VERSION = 3
+COMIC_PAGE_DATA_SAVER_MEDIA_TYPE = "image/webp"
+COMIC_PAGE_DATA_SAVER_QUALITY = 75
+COMIC_PAGE_DATA_SAVER_METHOD = 4
+COMIC_PAGE_DATA_SAVER_MAX_EDGE = 2048
+COMIC_PAGE_DATA_SAVER_CACHE_VERSION = 4
 SMALL_COVER_MAX_BYTES = 50 * 1024
 SMALL_COVER_MAX_DIMENSION = 600
 SMALL_COVER_MEDIA_TYPE = "image/webp"
@@ -479,33 +480,28 @@ def _small_cover_response(
     )
 
 
-def _comic_page_avif_image(image: Image.Image) -> Image.Image:
+def _comic_page_webp_image(image: Image.Image) -> Image.Image:
     prepared = ImageOps.exif_transpose(image)
-    if prepared.mode == "RGB":
-        red, green, blue = prepared.split()
-        if (
-            ImageChops.difference(red, green).getbbox() is None
-            and ImageChops.difference(red, blue).getbbox() is None
-        ):
-            return red
-        return prepared
-    if prepared.mode in {"L", "RGBA"}:
-        return prepared
+    prepared.thumbnail(
+        (COMIC_PAGE_DATA_SAVER_MAX_EDGE, COMIC_PAGE_DATA_SAVER_MAX_EDGE),
+        Image.Resampling.LANCZOS,
+    )
     return prepared.convert("RGBA" if _image_has_alpha(prepared) else "RGB")
 
 
-def _comic_page_avif_bytes(data: bytes) -> bytes | None:
+def _comic_page_webp_bytes(data: bytes) -> bytes | None:
     try:
         with Image.open(io.BytesIO(data)) as source:
             if getattr(source, "is_animated", False):
                 return None
-            image = _comic_page_avif_image(source)
+            image = _comic_page_webp_image(source)
             output = io.BytesIO()
             image.save(
                 output,
-                format="AVIF",
+                format="WEBP",
                 quality=COMIC_PAGE_DATA_SAVER_QUALITY,
-                speed=COMIC_PAGE_DATA_SAVER_SPEED,
+                method=COMIC_PAGE_DATA_SAVER_METHOD,
+                lossless=_image_has_alpha(image),
             )
             optimized = output.getvalue()
             return optimized if len(optimized) < len(data) else None
@@ -514,11 +510,11 @@ def _comic_page_avif_bytes(data: bytes) -> bytes | None:
         return None
 
 
-def _avif_page_name(name: str) -> str:
-    return str(Path(name or "page").with_suffix(".avif"))
+def _webp_page_name(name: str) -> str:
+    return str(Path(name or "page").with_suffix(".webp"))
 
 
-def _comic_page_avif_response(
+def _comic_page_webp_response(
     data: bytes,
     request: Request,
     name: str,
@@ -531,14 +527,14 @@ def _comic_page_avif_response(
         data,
         request,
         COMIC_PAGE_DATA_SAVER_MEDIA_TYPE,
-        _avif_page_name(name),
+        _webp_page_name(name),
         mtime=source_mtime,
-        extra=f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}-{variant_extra}",
+        extra=f"comic-webp-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}-{variant_extra}",
     )
     response.headers["X-Comic-Image-Variant"] = COMIC_PAGE_DATA_SAVER_VARIANT
     response.headers["X-Comic-Image-Quality"] = (
-        f"avif;q={COMIC_PAGE_DATA_SAVER_QUALITY};"
-        f"speed={COMIC_PAGE_DATA_SAVER_SPEED};mode=extreme"
+        f"webp;q={COMIC_PAGE_DATA_SAVER_QUALITY};"
+        f"max-edge={COMIC_PAGE_DATA_SAVER_MAX_EDGE}"
     )
     if source_size > 0:
         response.headers["X-Comic-Image-Compression-Ratio"] = (
@@ -643,11 +639,19 @@ def _file_response(
     ):
         kind, parsed = _parse_byte_range(range_header, stat.st_size)
         if kind == "invalid":
-            response = fail("Range 请求格式不正确", status_code=416)
+            response = fail(
+                "Range 请求格式不正确",
+                status_code=416,
+                code="RANGE_INVALID",
+            )
             response.headers["Content-Range"] = f"bytes */{stat.st_size}"
             return response
         if kind == "unsatisfiable":
-            response = fail("Range 超出文件大小", status_code=416)
+            response = fail(
+                "Range 超出文件大小",
+                status_code=416,
+                code="RANGE_NOT_SATISFIABLE",
+            )
             response.headers["Content-Range"] = f"bytes */{stat.st_size}"
             return response
         byte_range = parsed
@@ -949,13 +953,13 @@ def _send_comic_page_file(
     stat = path.stat()
     cache_key = (
         f"file:{path}:{stat.st_size}:{stat.st_mtime_ns}:"
-        f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
+        f"comic-webp-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
         f"q-{COMIC_PAGE_DATA_SAVER_QUALITY}:"
-        f"speed-{COMIC_PAGE_DATA_SAVER_SPEED}"
+        f"edge-{COMIC_PAGE_DATA_SAVER_MAX_EDGE}"
     )
     cache_path = _comic_page_cache_path(settings, cache_key)
     if cache_path.exists() and cache_path.is_file():
-        return _comic_page_avif_response(
+        return _comic_page_webp_response(
             cache_path.read_bytes(),
             request,
             path.name,
@@ -967,7 +971,7 @@ def _send_comic_page_file(
         source = path.read_bytes()
     except OSError:
         return fail("文件不存在", status_code=404)
-    optimized = _comic_page_avif_bytes(source)
+    optimized = _comic_page_webp_bytes(source)
     if optimized is None:
         return _send_original_comic_page_file(
             path,
@@ -978,7 +982,7 @@ def _send_comic_page_file(
             file_id=file_id,
         )
     _write_cache_bytes(cache_path, optimized)
-    return _comic_page_avif_response(
+    return _comic_page_webp_response(
         optimized, request, path.name, stat.st_mtime, len(source), cache_key
     )
 
@@ -1034,13 +1038,13 @@ def _send_comic_page_zip_entry(
             cache_key = (
                 f"zip:{archive_path}:{archive_stat.st_size}:{archive_stat.st_mtime_ns}:"
                 f"{entry_name}:{info.file_size}:{info.checksum}:"
-                f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
+                f"comic-webp-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
                 f"q-{COMIC_PAGE_DATA_SAVER_QUALITY}:"
-                f"speed-{COMIC_PAGE_DATA_SAVER_SPEED}"
+                f"edge-{COMIC_PAGE_DATA_SAVER_MAX_EDGE}"
             )
             cache_path = _comic_page_cache_path(settings, cache_key)
             if cache_path.exists() and cache_path.is_file():
-                return _comic_page_avif_response(
+                return _comic_page_webp_response(
                     cache_path.read_bytes(),
                     request,
                     Path(entry_name).name,
@@ -1052,7 +1056,7 @@ def _send_comic_page_zip_entry(
     except (KeyError, OSError, ComicArchiveError):
         return fail("页面不存在", status_code=404)
 
-    optimized = _comic_page_avif_bytes(source)
+    optimized = _comic_page_webp_bytes(source)
     if optimized is None:
         return _send_original_comic_page_zip_entry(
             archive_path,
@@ -1064,7 +1068,7 @@ def _send_comic_page_zip_entry(
             file_id=file_id,
         )
     _write_cache_bytes(cache_path, optimized)
-    return _comic_page_avif_response(
+    return _comic_page_webp_response(
         optimized,
         request,
         Path(entry_name).name,

@@ -41,7 +41,6 @@ data class AndroidDownloadRecord(
     val mediaVersionId: String = "legacy-volume:$volumeId",
     val mediaKind: String = readerType.toLegacyMediaKind(),
     val mediaVersionCompleted: Boolean? = null,
-    val contentFingerprint: String,
     val sourceApiPath: String,
     val sourceMimeType: String,
     val expectedBytes: Long,
@@ -60,7 +59,6 @@ data class AndroidDownloadRecord(
         require(taskId.isNotBlank())
         require(workId.isNotBlank())
         require(volumeId.isNotBlank())
-        require(contentFingerprint.isNotBlank())
         require(sourceApiPath.startsWith("/api/"))
         require(sourceMimeType.isNotBlank())
         require(expectedBytes >= 0)

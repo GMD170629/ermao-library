@@ -2,8 +2,6 @@ import {
   hasExactReadiumAnchor,
   compareExactReadiumLocators,
   parseReadiumLocatorEnvelope,
-  publicationFingerprintsMatch,
-  type PublicationFingerprint,
   type ReadiumLocatorEnvelope,
   type ReadiumLocatorPayload,
   type ReaderPlatform
@@ -22,13 +20,11 @@ export type ReadiumEngineLocator = Omit<EngineLocator, 'payload'> & Readonly<{
 
 export type ReflowablePublicationLocation = Readonly<{
   kind: 'reflowable';
-  publication: PublicationFingerprint;
   engineLocator: ReadiumEngineLocator;
 }>;
 
 export type PdfPublicationLocation = Readonly<{
   kind: 'pdf';
-  publication: PublicationFingerprint;
   /** Zero-based canonical document page. */
   pageIndex: number;
   /** Normalized reading-line position within the page, quantized to four decimals. */
@@ -38,7 +34,6 @@ export type PdfPublicationLocation = Readonly<{
 
 export type ComicPublicationLocation = Readonly<{
   kind: 'comic';
-  publication: PublicationFingerprint;
   /** Zero-based canonical reading-order page. */
   pageIndex: number;
   resourceHref: string;
@@ -47,7 +42,6 @@ export type ComicPublicationLocation = Readonly<{
 
 export type AudioPublicationLocation = Readonly<{
   kind: 'audio';
-  publication: PublicationFingerprint;
   fileId: string;
   chapterId?: string;
   positionMillis: number;
@@ -69,7 +63,6 @@ export type PublicationLocationComparison = Readonly<{
     | 'same_comic_page'
     | 'same_audio_position'
     | 'missing_location'
-    | 'fingerprint_mismatch'
     | 'kind_mismatch'
     | 'resource_mismatch'
     | 'anchor_mismatch';
@@ -107,18 +100,6 @@ function safeRelativeHref(value: unknown): string | undefined {
   return path.split('/').includes('..') ? undefined : href;
 }
 
-function parseFingerprint(value: unknown): PublicationFingerprint | null {
-  const item = record(value);
-  if (!item || !hasOnlyKeys(item, ['originalFileHash', 'parser', 'normalization'])) return null;
-  const originalFileHash = nonEmptyString(item.originalFileHash);
-  const parser = nonEmptyString(item.parser);
-  const normalization = nonEmptyString(item.normalization);
-  return originalFileHash && /^(?:sha256:)?[a-f\d]{64}$/iu.test(originalFileHash)
-    && parser && parser.length <= 256 && normalization && normalization.length <= 256
-    ? { originalFileHash: `sha256:${originalFileHash.replace(/^sha256:/iu, '').toLowerCase()}`, parser, normalization }
-    : null;
-}
-
 function parseEngineLocator(value: unknown): EngineLocator | null {
   const item = record(value);
   if (!item || !hasOnlyKeys(item, ['engine', 'platform', 'version', 'payload'])) return null;
@@ -143,21 +124,18 @@ export function parsePublicationLocation(value: unknown): PublicationLocation | 
   if (utf8Length(value) > 64 * 1024) return null;
   const item = record(value);
   if (!item) return null;
-  const publication = parseFingerprint(item.publication);
-  if (!publication) return null;
   const engineLocator = item.engineLocator === undefined
     ? undefined
     : parseEngineLocator(item.engineLocator) ?? null;
   if (engineLocator === null) return null;
   if (item.kind === 'reflowable') {
     const envelope = engineLocator
-      ? parseReadiumLocatorEnvelope({ ...engineLocator, publication })
+      ? parseReadiumLocatorEnvelope(engineLocator)
       : null;
-    if (!hasOnlyKeys(item, ['kind', 'publication', 'engineLocator'])
+    if (!hasOnlyKeys(item, ['kind', 'engineLocator'])
       || !envelope || !hasExactReadiumAnchor(envelope.payload)) return null;
     return {
       kind: 'reflowable',
-      publication,
       engineLocator: {
         engine: envelope.engine,
         platform: envelope.platform,
@@ -169,28 +147,28 @@ export function parsePublicationLocation(value: unknown): PublicationLocation | 
   if (item.kind === 'pdf') {
     const pageIndex = item.pageIndex;
     const pageProgression = item.pageProgression;
-    if (!hasOnlyKeys(item, ['kind', 'publication', 'pageIndex', 'pageProgression', 'engineLocator'])
+    if (!hasOnlyKeys(item, ['kind', 'pageIndex', 'pageProgression', 'engineLocator'])
       || !Number.isInteger(pageIndex) || (pageIndex as number) < 0
       || typeof pageProgression !== 'number' || !Number.isFinite(pageProgression)
       || pageProgression < 0 || pageProgression > 1
       || pageProgression !== quantizePageProgression(pageProgression)) return null;
-    return { kind: 'pdf', publication, pageIndex: pageIndex as number, pageProgression, ...(engineLocator ? { engineLocator } : {}) };
+    return { kind: 'pdf', pageIndex: pageIndex as number, pageProgression, ...(engineLocator ? { engineLocator } : {}) };
   }
   if (item.kind === 'comic') {
     const pageIndex = item.pageIndex;
     const resourceHref = safeRelativeHref(item.resourceHref);
-    if (!hasOnlyKeys(item, ['kind', 'publication', 'pageIndex', 'resourceHref', 'engineLocator'])
+    if (!hasOnlyKeys(item, ['kind', 'pageIndex', 'resourceHref', 'engineLocator'])
       || !Number.isInteger(pageIndex) || (pageIndex as number) < 0 || !resourceHref) return null;
-    return { kind: 'comic', publication, pageIndex: pageIndex as number, resourceHref, ...(engineLocator ? { engineLocator } : {}) };
+    return { kind: 'comic', pageIndex: pageIndex as number, resourceHref, ...(engineLocator ? { engineLocator } : {}) };
   }
   if (item.kind === 'audio') {
     const fileId = nonEmptyString(item.fileId);
     const chapterId = item.chapterId === undefined ? undefined : nonEmptyString(item.chapterId);
     const positionMillis = item.positionMillis;
-    if (!hasOnlyKeys(item, ['kind', 'publication', 'fileId', 'chapterId', 'positionMillis', 'engineLocator'])
+    if (!hasOnlyKeys(item, ['kind', 'fileId', 'chapterId', 'positionMillis', 'engineLocator'])
       || !fileId || fileId.length > 191 || (item.chapterId !== undefined && (!chapterId || chapterId.length > 191))
       || !Number.isInteger(positionMillis) || (positionMillis as number) < 0) return null;
-    return { kind: 'audio', publication, fileId, ...(chapterId ? { chapterId } : {}), positionMillis: positionMillis as number, ...(engineLocator ? { engineLocator } : {}) };
+    return { kind: 'audio', fileId, ...(chapterId ? { chapterId } : {}), positionMillis: positionMillis as number, ...(engineLocator ? { engineLocator } : {}) };
   }
   return null;
 }
@@ -202,7 +180,6 @@ export function isExactPublicationLocation(value: unknown): value is Publication
 export function reflowablePublicationLocation(envelope: ReadiumLocatorEnvelope): ReflowablePublicationLocation {
   return {
     kind: 'reflowable',
-    publication: envelope.publication,
     engineLocator: {
       engine: envelope.engine,
       platform: envelope.platform,
@@ -213,7 +190,7 @@ export function reflowablePublicationLocation(envelope: ReadiumLocatorEnvelope):
 }
 
 export function readiumEnvelopeFromPublicationLocation(location: ReflowablePublicationLocation): ReadiumLocatorEnvelope {
-  return { ...location.engineLocator, publication: location.publication };
+  return location.engineLocator;
 }
 
 export function comparePublicationLocations(
@@ -221,9 +198,6 @@ export function comparePublicationLocations(
   actual: PublicationLocation | null
 ): PublicationLocationComparison {
   if (!expected || !actual) return { precision: 'unverified', sameResource: false, reason: 'missing_location' };
-  if (!publicationFingerprintsMatch(expected.publication, actual.publication)) {
-    return { precision: 'unverified', sameResource: false, reason: 'fingerprint_mismatch' };
-  }
   if (expected.kind !== actual.kind) return { precision: 'unverified', sameResource: false, reason: 'kind_mismatch' };
   if (expected.kind === 'reflowable' && actual.kind === 'reflowable') {
     const comparison = compareExactReadiumLocators(

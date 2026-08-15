@@ -1,8 +1,5 @@
 """Stable reader capability contracts."""
 
-from app.modules.reader.application.content_fingerprint import (
-    build_volume_content_fingerprint,
-)
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderExternalProgressDto,
@@ -41,7 +38,6 @@ __all__ = [
     "SaveExternalProgressCommand",
     "VolumeReaderService",
     "VolumeReadingState",
-    "build_volume_content_fingerprint",
     "choose_continue_volume_id",
     "completed_for_available_volumes",
     "normalize_reader_href",

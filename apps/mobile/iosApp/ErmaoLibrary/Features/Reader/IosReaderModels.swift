@@ -1,37 +1,18 @@
 import Foundation
 @preconcurrency import ErmaoShared
 
-struct IosContentFingerprint: Codable, Equatable, Sendable {
-    let originalFileHash: String
-    let parserVersion: String
-    let normalizationVersion: String
+@MainActor
+final class IosReaderNavigationQueue {
+    private var tail: Task<Void, Never>?
 
-    init(originalFileHash: String, parserVersion: String, normalizationVersion: String) throws {
-        let digest = originalFileHash.dropFirst("sha256:".count)
-        guard originalFileHash.hasPrefix("sha256:"), originalFileHash.count == 71,
-              digest.allSatisfy({ $0.isHexDigit }),
-              !parserVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !normalizationVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else {
-            throw IosReaderFailure(code: .corruptFile)
+    func enqueue(_ operation: @escaping @MainActor () async -> Bool) async -> Bool {
+        let previous = tail
+        let current = Task { @MainActor in
+            await previous?.value
+            return await operation()
         }
-        self.originalFileHash = originalFileHash
-        self.parserVersion = parserVersion
-        self.normalizationVersion = normalizationVersion
-    }
-
-    init(shared: ErmaoShared.ContentFingerprint) {
-        originalFileHash = shared.originalFileHash
-        parserVersion = shared.parserVersion
-        normalizationVersion = shared.normalizationVersion
-    }
-
-    var shared: ErmaoShared.ContentFingerprint {
-        ErmaoShared.ContentFingerprint(
-            originalFileHash: originalFileHash,
-            parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion
-        )
+        tail = Task { @MainActor in _ = await current.value }
+        return await current.value
     }
 }
 
@@ -46,6 +27,21 @@ enum IosReaderFailureCode: String, Sendable {
     case engineError = "READER_ENGINE_ERROR"
     case locationRestoreFailed = "LOCATION_RESTORE_FAILED"
     case persistenceFailed = "PERSISTENCE_FAILED"
+    case pdfRangeUnsupported = "PDF_RANGE_UNSUPPORTED"
+    case pdfRangeInvalid = "PDF_RANGE_INVALID"
+    case pdfResourceChanged = "PDF_RESOURCE_CHANGED"
+    case pdfCacheIO = "PDF_CACHE_IO"
+    case pdfEncrypted = "PDF_ENCRYPTED"
+    case pdfInvalid = "PDF_INVALID"
+    case pdfPageLoadFailed = "PDF_PAGE_LOAD_FAILED"
+    case pdfRenderFailed = "PDF_RENDER_FAILED"
+    case comicArchiveOpenFailed = "COMIC_ARCHIVE_OPEN_FAILED"
+    case comicArchiveEncrypted = "COMIC_ARCHIVE_ENCRYPTED"
+    case comicArchivePartMissing = "COMIC_ARCHIVE_PART_MISSING"
+    case comicArchiveFormatUnsupported = "COMIC_ARCHIVE_FORMAT_UNSUPPORTED"
+    case comicArchiveCorrupt = "COMIC_ARCHIVE_CORRUPT"
+    case comicPageDecodeFailed = "COMIC_PAGE_DECODE_FAILED"
+    case comicOutOfMemoryRisk = "COMIC_OUT_OF_MEMORY_RISK"
 
     var localizedDescription: String {
         switch self {
@@ -59,6 +55,18 @@ enum IosReaderFailureCode: String, Sendable {
         case .engineError: String(localized: "reader.error.READER_ENGINE_ERROR")
         case .locationRestoreFailed: String(localized: "reader.error.LOCATION_RESTORE_FAILED")
         case .persistenceFailed: String(localized: "reader.error.PERSISTENCE_FAILED")
+        case .pdfRangeUnsupported: String(localized: "reader.error.PDF_RANGE_UNSUPPORTED")
+        case .pdfRangeInvalid: String(localized: "reader.error.PDF_RANGE_INVALID")
+        case .pdfResourceChanged: String(localized: "reader.error.PDF_RESOURCE_CHANGED")
+        case .pdfCacheIO: String(localized: "reader.error.PDF_CACHE_IO")
+        case .pdfEncrypted: String(localized: "reader.error.PDF_ENCRYPTED")
+        case .pdfInvalid: String(localized: "reader.error.PDF_INVALID")
+        case .pdfPageLoadFailed: String(localized: "reader.error.PDF_PAGE_LOAD_FAILED")
+        case .pdfRenderFailed: String(localized: "reader.error.PDF_RENDER_FAILED")
+        case .comicArchiveOpenFailed, .comicArchiveEncrypted, .comicArchivePartMissing,
+             .comicArchiveFormatUnsupported, .comicArchiveCorrupt, .comicPageDecodeFailed,
+             .comicOutOfMemoryRisk:
+            String(localized: "reader.error.COMIC_ARCHIVE_OPEN_FAILED")
         }
     }
 }
@@ -88,12 +96,11 @@ struct IosReaderProgressContract: Equatable, Sendable {
     let fileID: String?
     let chapterID: String?
     let positionMillis: Int64?
-    let fingerprint: IosContentFingerprint
     let updatedAtEpochMillis: Int64
     let deviceID: String
 }
 
-/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v5 documents.
+/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v6 documents.
 /// The KMP codec remains the persistence authority; this decoder lets iOS map
 /// an engine locator without turning its arbitrary JSON members into domain state.
 enum IosReaderProgressContractDecoder {
@@ -117,7 +124,7 @@ enum IosReaderProgressContractDecoder {
                 && ($0.suffix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
         } ?? true
         let engineLocatorIsValid = document.location.engineLocator.map(\.isObject) ?? true
-        guard document.schema == "ermao.reader-progress", document.version == 5,
+        guard document.schema == "ermao.reader-progress", document.version == 6,
               ["reflow", "pdf", "comic", "audio"].contains(document.location.kind),
               !document.sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               resourceKeyIsValid,
@@ -170,11 +177,6 @@ enum IosReaderProgressContractDecoder {
             fileID: document.location.fileId,
             chapterID: document.location.chapterId,
             positionMillis: document.location.positionMillis,
-            fingerprint: try IosContentFingerprint(
-                originalFileHash: document.location.contentFingerprint.originalFileHash,
-                parserVersion: document.location.contentFingerprint.parserVersion,
-                normalizationVersion: document.location.contentFingerprint.normalizationVersion
-            ),
             updatedAtEpochMillis: document.updatedAtEpochMillis,
             deviceID: document.deviceId
         )
@@ -192,7 +194,7 @@ enum IosReaderProgressContractDecoder {
     }
 
     private static func enginePayload(_ value: JSONValue, schemaVersion: Int) throws -> String {
-        guard schemaVersion == 5 else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        guard schemaVersion == 6 else { throw IosReaderFailure(code: .locationRestoreFailed) }
         guard case let .object(fields) = value,
               fields["engine"]?.stringValue == "readium",
               fields["platform"]?.stringValue == "ios",
@@ -229,7 +231,6 @@ enum IosReaderProgressContractDecoder {
         let fileId: String?
         let chapterId: String?
         let positionMillis: Int64?
-        let contentFingerprint: Fingerprint
     }
 
     private struct Quote: Decodable {
@@ -238,11 +239,6 @@ enum IosReaderProgressContractDecoder {
         let suffix: String?
     }
 
-    private struct Fingerprint: Decodable {
-        let originalFileHash: String
-        let parserVersion: String
-        let normalizationVersion: String
-    }
 }
 
 private enum JSONValue: Decodable {

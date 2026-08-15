@@ -21,18 +21,18 @@ class SharedDownloadCatalogAdapter(
     override suspend fun listArtifacts(namespace: DownloadNamespace): List<CompletedDownloadArtifact> =
         catalog.records(namespace.toAndroid()).mapNotNull { record ->
             record.takeIf(AndroidDownloadRecord::isReadable)
-                ?.takeIf { files.isVerifiedLocalArtifact(it.localReference, it.expectedBytes) }
+                ?.takeIf { files.hasLocalArtifact(it.localReference) }
                 ?.toArtifact()
         }
 
     override suspend fun saveArtifact(artifact: CompletedDownloadArtifact) {
         val namespace = artifact.identity.namespace.toAndroid()
         val existing = catalog.records(namespace).firstOrNull {
-            it.volumeId == artifact.identity.volumeId && it.contentFingerprint == artifact.identity.contentFingerprint
+            it.volumeId == artifact.identity.volumeId
         }
         replaceRecord(
             artifact.toRecord(
-                taskId = existing?.taskId ?: "artifact-${artifact.identity.volumeId}-${artifact.identity.contentFingerprint}",
+                taskId = existing?.taskId ?: "artifact-${artifact.identity.volumeId}",
                 createdAtEpochMillis = existing?.createdAtEpochMillis ?: artifact.completedAtEpochMillis,
             ),
         )
@@ -97,7 +97,6 @@ private fun AndroidDownloadRecord.descriptor() = DownloadDescriptor(
         namespace = DownloadNamespace(namespace.serverIdentity, namespace.userId, namespace.authorizationVersion),
         workId = workId,
         volumeId = volumeId,
-        contentFingerprint = contentFingerprint,
     ),
     workTitle = workTitle,
     workAuthor = author.takeIf(String::isNotBlank),
@@ -137,7 +136,6 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
         volumeTitle = descriptor.volumeTitle,
         format = descriptor.format,
         readerType = descriptor.readerType.name.lowercase(),
-        contentFingerprint = descriptor.identity.contentFingerprint,
         sourceApiPath = descriptor.source.apiPath,
         sourceMimeType = descriptor.source.mimeType,
         expectedBytes = descriptor.source.totalBytes,

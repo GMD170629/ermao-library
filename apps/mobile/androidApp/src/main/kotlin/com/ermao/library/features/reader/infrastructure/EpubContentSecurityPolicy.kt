@@ -5,6 +5,7 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.text.Normalizer
 import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.parsers.ParserConfigurationException
 import org.readium.r2.shared.util.Try
 import org.readium.r2.shared.util.data.Container
 import org.readium.r2.shared.util.data.ReadError
@@ -17,15 +18,18 @@ import org.w3c.dom.Node
 
 internal object EpubContentSecurityPolicy {
     private const val MAXIMUM_MARKUP_BYTES = 64 * 1024 * 1024
-    private const val PROFILE = "android-v2"
+    private const val PROFILE = "android-v3"
     private const val CONTENT_SECURITY_POLICY =
         "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; " +
             "frame-src 'none'; child-src 'none'; object-src 'none'; " +
-            "script-src https://readium_assets; " +
-            "style-src https://readium_package blob: 'unsafe-inline'; " +
-            "img-src https://readium_package blob: data:; " +
-            "font-src https://readium_package blob: data:; " +
-            "media-src https://readium_package blob: data:"
+            "script-src https://*/readium/scripts/readium-reflowable.js " +
+            "https://*/readium/scripts/readium-fixed.js; script-src-attr 'none'; " +
+            "style-src 'self' https://*/readium/readium-css/ blob: 'unsafe-inline'; " +
+            "img-src 'self' blob: data:; " +
+            "font-src 'self' https://*/readium/readium-css/fonts/ https://*/readium/fonts/ blob: data:; " +
+            "media-src 'self' blob: data:"
+    private const val DEVICE_VIEWPORT =
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>"
     private const val SECURITY_STYLE =
         "iframe,frame,object,embed,applet{display:none!important;}" +
             "input,button,select,textarea{pointer-events:none!important;}"
@@ -59,9 +63,18 @@ internal object EpubContentSecurityPolicy {
             val value = HTTP_EQUIV.find(match.value)?.groups?.get("value")?.value?.trim()?.lowercase()
             if (value == "content-security-policy" || value == "refresh") "" else match.value
         }
+        val viewport = if (META_TAG.findAll(safeHead).any { match ->
+                NAME.find(match.value)?.groups?.get("value")?.value?.trim()?.lowercase() == "viewport"
+            }
+        ) {
+            ""
+        } else {
+            DEVICE_VIEWPORT
+        }
         val decoration =
             "<meta http-equiv=\"Content-Security-Policy\" content=\"$CONTENT_SECURITY_POLICY\" " +
                 "data-shuku-security-profile=\"$PROFILE\"/>" +
+                viewport +
                 "<style data-shuku-security-profile=\"$PROFILE\">$SECURITY_STYLE</style>"
         val decorated = markup.substring(0, headStart) + decoration + safeHead + markup.substring(close.range.first)
         val declaration = XML_DECLARATION.find(decorated)
@@ -127,12 +140,12 @@ internal object EpubContentSecurityPolicy {
         val parserMarkup = replaceStandardEntitiesForParsing(markup)
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
-            isXIncludeAware = false
             isExpandEntityReferences = false
-            setFeature("http://xml.org/sax/features/external-general-entities", false)
-            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
         }
+        disableXIncludeWhenSupported(factory)
+        disableFeatureWhenSupported(factory, "http://xml.org/sax/features/external-general-entities")
+        disableFeatureWhenSupported(factory, "http://xml.org/sax/features/external-parameter-entities")
+        disableFeatureWhenSupported(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd")
         val document = factory.newDocumentBuilder().apply {
             setEntityResolver { _, _ -> InputSource(StringReader("")) }
         }.parse(InputSource(StringReader(parserMarkup)))
@@ -156,6 +169,25 @@ internal object EpubContentSecurityPolicy {
             .filterIsInstance<Element>()
             .single { localName(it) == "body" }
         return ValidatedMarkup(markup, projectElement(body, "/body[1]"))
+    }
+
+    private fun disableXIncludeWhenSupported(factory: DocumentBuilderFactory) {
+        try {
+            factory.isXIncludeAware = false
+        } catch (_: UnsupportedOperationException) {
+            // Android's platform parser reports XInclude as unsupported; it cannot expand it.
+            return
+        }
+    }
+
+    private fun disableFeatureWhenSupported(factory: DocumentBuilderFactory, feature: String) {
+        try {
+            factory.setFeature(feature, false)
+        } catch (_: ParserConfigurationException) {
+            // Android rejects unsupported SAX flags. Lexical declaration checks and the
+            // empty EntityResolver below still prevent external entity or DTD expansion.
+            return
+        }
     }
 
     private fun validateDeclarations(markup: String) {
@@ -257,6 +289,10 @@ internal object EpubContentSecurityPolicy {
     private val META_TAG = Regex("<(?:[A-Za-z_][\\w.-]*:)?meta\\b[^>]*(?:/\\s*)?>", RegexOption.IGNORE_CASE)
     private val HTTP_EQUIV = Regex(
         "\\bhttp-equiv\\s*=\\s*['\"](?<value>[^'\"]+)['\"]",
+        RegexOption.IGNORE_CASE,
+    )
+    private val NAME = Regex(
+        "\\bname\\s*=\\s*['\"](?<value>[^'\"]+)['\"]",
         RegexOption.IGNORE_CASE,
     )
     private val NON_MARKUP = Regex(

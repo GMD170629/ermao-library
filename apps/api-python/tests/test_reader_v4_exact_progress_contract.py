@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -58,9 +57,8 @@ def test_former_all_readium_v4_envelope_is_rejected() -> None:
 
 def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
     source_path = (
-        _REPOSITORY_ROOT / "test-data" / "library" / "mobi" / "08-zh-hans.azw3"
+        _REPOSITORY_ROOT / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     user = User(
         email="reader-v4-exact@example.com",
         name="Reader Exact",
@@ -80,7 +78,7 @@ def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
         media_version_id=media.id,
         title="Exact Volume",
         sort_order=0,
-        format="MOBI",
+        format="EPUB",
         resource_key="exact:volume",
         import_status="COMPLETED",
     )
@@ -94,12 +92,9 @@ def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
                 id="exact-file",
                 volume_id=volume.id,
                 path=str(source_path),
-                fingerprint="exact-file",
-                full_hash=source_hash,
-                hash_status="COMPLETED",
-                mtime_ms=1,
-                kind="MOBI",
-                mime_type="application/x-mobipocket-ebook",
+                mtime_ms=int(source_path.stat().st_mtime * 1000),
+                kind="EPUB",
+                mime_type="application/epub+zip",
                 size_bytes=source_path.stat().st_size,
                 sort_order=0,
             ),
@@ -120,19 +115,11 @@ def test_shared_exact_fixture_round_trips_and_is_idempotent(
     volume = _login_and_volume(client, db_session)
     bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
     assert bootstrap.status_code == 200
-    assert bootstrap.json()["data"]["publicationFingerprint"] == {
-        "originalFileHash": (
-            "sha256:f2b9fdd883430568c161995e80e52fc337ceb417222884c3c782af8202f4c581"
-        ),
-        "parser": "libmobi:0.12@85dcfe803fc2a21020ddcf15c3eb66b93d388add",
-        "normalization": "ermao-mobi-core-v1+shuku-locator-dom-v2",
-    }
+    assert "publicationFingerprint" not in bootstrap.json()["data"]
 
     payload = _fixture("exact-reflowable-request.json")
     payload["baseRevision"] = 0
-    payload["locator"]["publication"] = bootstrap.json()["data"][
-        "publicationFingerprint"
-    ]
+    payload["locator"]["engineLocator"]["payload"]["href"] = "OEBPS/chapter1.xhtml"
     first = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
     replay = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
 
@@ -149,11 +136,7 @@ def test_shared_progression_only_fixture_has_stable_exactness_error(
     client: TestClient, db_session: Session
 ) -> None:
     volume = _login_and_volume(client, db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
     payload = _fixture("progression-only-invalid.json")
-    payload["locator"]["publication"] = bootstrap["publicationFingerprint"]
 
     response = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
 
@@ -166,12 +149,9 @@ def test_exact_locator_resource_must_belong_to_the_normalized_publication(
     client: TestClient, db_session: Session
 ) -> None:
     volume = _login_and_volume(client, db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
     payload = _fixture("exact-reflowable-request.json")
     payload["baseRevision"] = 0
-    payload["locator"]["publication"] = bootstrap["publicationFingerprint"]
+    payload["locator"]["engineLocator"]["payload"]["href"] = "OEBPS/chapter1.xhtml"
     payload["locator"]["engineLocator"]["payload"]["href"] = (
         "not-in-reading-order.xhtml"
     )
@@ -187,17 +167,14 @@ def test_stale_revision_returns_current_exact_snapshot_without_overwrite(
     client: TestClient, db_session: Session
 ) -> None:
     volume = _login_and_volume(client, db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
     payload = _fixture("exact-reflowable-request.json")
     payload["baseRevision"] = 0
-    payload["locator"]["publication"] = bootstrap["publicationFingerprint"]
+    payload["locator"]["engineLocator"]["payload"]["href"] = "OEBPS/chapter1.xhtml"
     accepted = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=payload)
     stale = _fixture("exact-reflowable-request.json")
     stale["mutationId"] = "08f57563-4ceb-46bf-a79f-2ca21e5f5ef4"
     stale["baseRevision"] = 0
-    stale["locator"]["publication"] = bootstrap["publicationFingerprint"]
+    stale["locator"]["engineLocator"]["payload"]["href"] = "OEBPS/chapter1.xhtml"
     stale["locator"]["engineLocator"]["payload"]["locations"]["totalProgression"] = 0.9
 
     conflict = client.put(f"/api/reader/v4/volumes/{volume.id}/progress", json=stale)

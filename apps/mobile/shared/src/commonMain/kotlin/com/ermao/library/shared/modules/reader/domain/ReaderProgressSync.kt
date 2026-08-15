@@ -76,7 +76,7 @@ data class ReaderProgressSnapshotV4(
         sourceId,
         clientId,
         revision,
-        ReflowablePublicationLocation(locator.publication, locator.asEngineLocator()),
+        ReflowablePublicationLocation(locator.asEngineLocator()),
         displayPercent,
         receivedAtEpochMillis,
         capturedAtEpochMillis,
@@ -127,7 +127,7 @@ data class ReaderProgressMutation(
         mutationId,
         baseRevision,
         capturedAtEpochMillis,
-        ReflowablePublicationLocation(locator.publication, locator.asEngineLocator()),
+        ReflowablePublicationLocation(locator.asEngineLocator()),
     )
     init {
         require(sourceId.isNotBlank()) { "Reader mutation source id is blank" }
@@ -140,24 +140,20 @@ data class ReaderProgressMutation(
 
 fun ReaderProgress.exactPublicationLocation(): PublicationLocation = when (val exact = location) {
     is ReflowReaderLocation -> ReflowablePublicationLocation(
-        publication = PublicationFingerprint.from(exact.contentFingerprint),
         engineLocator = exact.engineLocator
             ?: throw IllegalArgumentException("Reflowable progress does not contain an engine locator"),
     )
     is PdfReaderLocation -> PdfPublicationLocation(
-        publication = PublicationFingerprint.from(exact.contentFingerprint),
         pageIndex = exact.pageIndex,
         pageProgression = exact.pageProgression,
         engineLocator = exact.engineLocator,
     )
     is ComicReaderLocation -> ComicPublicationLocation(
-        publication = PublicationFingerprint.from(exact.contentFingerprint),
         resourceHref = exact.resourceHref,
         pageIndex = exact.pageIndex,
         engineLocator = exact.engineLocator,
     )
     is AudioReaderLocation -> AudioPublicationLocation(
-        publication = PublicationFingerprint.from(exact.contentFingerprint),
         fileId = exact.fileId,
         chapterId = exact.chapterId,
         positionMillis = exact.positionMillis,

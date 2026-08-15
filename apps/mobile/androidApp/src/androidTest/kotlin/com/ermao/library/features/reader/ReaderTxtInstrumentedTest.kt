@@ -9,10 +9,13 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressSto
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
+import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
+import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import java.io.ByteArrayInputStream
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -44,7 +47,6 @@ class ReaderTxtInstrumentedTest {
                 displayTitle = "TXT Book",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Txt,
-                publicationFingerprint = null,
                 volumeId = sourceId,
             )
         }
@@ -75,6 +77,14 @@ class ReaderTxtInstrumentedTest {
             scenario.onActivity { activity ->
                 val location = activity.controllerForTesting?.currentLocation?.value as? ReflowReaderLocation
                 assertNotNull(location?.engineLocator)
+                checkNotNull(activity.controllerForTesting).updatePreferences(
+                    ReaderPreferences(epub = ReaderEpubPreferences(fontSize = 23)),
+                )
+            }
+            waitUntil(scenario, "TXT reader preferences") { activity ->
+                activity.navigatorOrNull()?.settings?.value?.fontSize?.let {
+                    abs(it - (23.0 / 18.0)) < 0.01
+                } == true
             }
         }
     }

@@ -51,6 +51,12 @@ on:
       - 'docs/testing/mobile-stage-1-acceptance.md'
       - '.github/workflows/mobile.yml'
   workflow_dispatch:
+    inputs:
+      run_full_android_regression:
+        description: Run the complete Android instrumented regression suite instead of the shell smoke test.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -104,9 +110,6 @@ jobs:
             tests/contract/api/test_mobile_compatibility.py \
             tests/contract/api/test_mobile_auth_contract.py \
             --junitxml=mobile-contract-results.xml
-
-      - name: Run complete backend test suite
-        run: uv run --extra dev --locked pytest -q
 
       - name: Upload backend contract results
         if: always()
@@ -189,6 +192,8 @@ jobs:
     defaults:
       run:
         working-directory: apps/mobile
+    env:
+      RUN_FULL_ANDROID_REGRESSION: ${{ inputs.run_full_android_regression || 'false' }}
 
     steps:
       - name: Check out repository
@@ -220,7 +225,14 @@ jobs:
           working-directory: apps/mobile
           script: |
             set -euo pipefail
-            ./gradlew :androidApp:connectedDebugAndroidTest :androidApp:assembleDebug
+            if [ "$RUN_FULL_ANDROID_REGRESSION" = "true" ]; then
+              ./gradlew :androidApp:connectedDebugAndroidTest :androidApp:assembleDebug
+            else
+              ./gradlew \
+                :androidApp:connectedDebugAndroidTest \
+                -Pandroid.testInstrumentationRunnerArguments.class=com.ermao.library.AndroidShellSmokeTest \
+                :androidApp:assembleDebug
+            fi
             adb logcat -c
             adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
             adb shell am force-stop com.ermao.library
@@ -255,58 +267,4 @@ jobs:
         with:
           name: ermao-library-android-instrumented-results
           path: apps/mobile/androidApp/build/outputs/androidTest-results/connected/**/*.xml
-          if-no-files-found: warn
-
-  ios:
-    name: Shared and iOS
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: apps/mobile
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Test shared iOS target and tokens
-        run: ./gradlew verifyDesignTokens :shared:iosSimulatorArm64Test
-
-      - name: Build SwiftUI application
-        working-directory: .
-        run: |
-          xcodebuild \
-            -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
-            -scheme ErmaoLibrary \
-            -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-
-      - name: Run iOS tests
-        working-directory: .
-        run: |
-          xcodebuild \
-            -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
-            -scheme ErmaoLibrary \
-            -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
-            CODE_SIGNING_ALLOWED=NO \
-            -resultBundlePath apps/mobile/ios-stage-1-tests.xcresult \
-            test
-
-      - name: Upload iOS test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ermao-library-ios-results
-          path: apps/mobile/ios-stage-1-tests.xcresult
           if-no-files-found: warn

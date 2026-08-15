@@ -16,15 +16,14 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
-    PublicationFingerprint,
     PublicationLink,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationRevision,
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.source_files import (
-    publication_sha256,
     resolve_publication_source,
 )
 
@@ -193,11 +192,9 @@ def _snapshot(
     source_path_value: str,
     source_size: int,
     source_mtime_ns: int,
-    known_hash: str | None,
     title: str,
     author: str | None,
 ) -> _TxtSnapshot:
-    del source_size, source_mtime_ns
     source_path = Path(source_path_value)
     try:
         content = source_path.read_bytes()
@@ -228,21 +225,15 @@ def _snapshot(
                 title=chapter.title,
             )
         )
-    original_hash = (known_hash or publication_sha256(source_path)).removeprefix(
-        "sha256:"
-    )
-    if len(original_hash) != 64 or any(
-        character not in "0123456789abcdefABCDEF" for character in original_hash
-    ):
-        original_hash = publication_sha256(source_path)
     publication = NormalizedPublication(
-        identifier=f"urn:shuku:txt:{original_hash.lower()}",
+        identifier=f"urn:shuku:txt:{source_size}:{source_mtime_ns}",
         title=title,
         author=author,
         language=None,
         reading_progression="ltr",
-        fingerprint=PublicationFingerprint(
-            original_file_hash=f"sha256:{original_hash.lower()}",
+        revision=PublicationRevision(
+            source_size_bytes=source_size,
+            source_mtime_ms=source_mtime_ns // 1_000_000,
             parser=TXT_PARSER_IDENTIFIER,
             normalization=TXT_NORMALIZATION_IDENTIFIER,
         ),
@@ -293,7 +284,6 @@ class TxtPublicationAdapter(PublicationAdapter):
             str(source_path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
-            source.full_hash,
             source.title,
             source.author,
         )

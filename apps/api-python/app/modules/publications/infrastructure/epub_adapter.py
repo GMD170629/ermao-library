@@ -20,11 +20,11 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
-    PublicationFingerprint,
     PublicationLink,
     PublicationMarkupError,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationRevision,
     PublicationSecurityError,
     PublicationStructureError,
     PublicationTocEntry,
@@ -32,7 +32,6 @@ from app.modules.publications.domain.model import (
 )
 from app.modules.publications.infrastructure.locator_dom import parse_safe_markup_root
 from app.modules.publications.infrastructure.source_files import (
-    publication_sha256,
     resolve_publication_source,
 )
 
@@ -62,7 +61,6 @@ _SAFE_NCX_DOCTYPE = re.compile(
 class _IndexedEpub:
     source_path: Path
     source_mtime: float
-    original_file_hash: str
     publication: NormalizedPublication
     entries_by_href: dict[str, str]
     media_types_by_href: dict[str, str]
@@ -370,11 +368,9 @@ def _index_epub(
     source_path_value: str,
     source_size: int,
     source_mtime_ns: int,
-    known_hash: str | None,
     fallback_title: str,
     fallback_author: str | None,
 ) -> _IndexedEpub:
-    del source_size, source_mtime_ns
     source_path = Path(source_path_value)
     try:
         with zipfile.ZipFile(source_path) as archive:
@@ -456,12 +452,6 @@ def _index_epub(
                 for item_id, (href, media_type, properties) in manifest_by_id.items()
                 if item_id not in reading_ids
             )
-            original_hash = known_hash or publication_sha256(source_path)
-            if original_hash.startswith("sha256:"):
-                original_hash = original_hash.removeprefix("sha256:")
-            if len(original_hash) != 64:
-                original_hash = publication_sha256(source_path)
-            canonical_original_hash = f"sha256:{original_hash.lower()}"
             try:
                 toc = _toc_from_nav(archive, entries, nav_href)
             except PublicationSecurityError:
@@ -481,8 +471,9 @@ def _index_epub(
                 author=_metadata_value(opf_root, "creator") or fallback_author,
                 language=_metadata_value(opf_root, "language"),
                 reading_progression=_reading_progression(opf_root),
-                fingerprint=PublicationFingerprint(
-                    original_file_hash=canonical_original_hash,
+                revision=PublicationRevision(
+                    source_size_bytes=source_size,
+                    source_mtime_ms=source_mtime_ns // 1_000_000,
                     parser=EPUB_PARSER_IDENTIFIER,
                     normalization=EPUB_NORMALIZATION_IDENTIFIER,
                 ),
@@ -497,7 +488,6 @@ def _index_epub(
             return _IndexedEpub(
                 source_path=source_path,
                 source_mtime=source_path.stat().st_mtime,
-                original_file_hash=canonical_original_hash,
                 publication=publication,
                 entries_by_href={key: info.filename for key, info in entries.items()},
                 media_types_by_href=media_types,
@@ -546,7 +536,6 @@ class EpubPublicationAdapter(PublicationAdapter):
             str(path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
-            source.full_hash,
             source.title,
             source.author,
         )

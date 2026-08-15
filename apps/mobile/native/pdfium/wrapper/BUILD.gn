@@ -1,0 +1,21 @@
+if (is_android) {
+  shared_library("shuku_pdfium") {
+    sources = [
+      "src/shuku_pdfium.cc",
+      "src/shuku_pdfium_android_jni.cc",
+      "src/shuku_pdfium_revision.cc",
+    ]
+    include_dirs = [ "include", "//" ]
+    deps = [ "//:pdfium" ]
+  }
+} else if (is_ios) {
+  static_library("shuku_pdfium") {
+    complete_static_lib = true
+    sources = [
+      "src/shuku_pdfium.cc",
+      "src/shuku_pdfium_revision.cc",
+    ]
+    include_dirs = [ "include", "//" ]
+    deps = [ "//:pdfium" ]
+  }
+}

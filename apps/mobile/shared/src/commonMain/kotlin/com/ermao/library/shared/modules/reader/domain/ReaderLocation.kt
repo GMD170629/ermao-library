@@ -86,9 +86,7 @@ data class TextQuote(
     }
 }
 
-sealed interface ReaderLocation {
-    val contentFingerprint: ContentFingerprint
-}
+sealed interface ReaderLocation
 
 data class ReflowReaderLocation(
     val resourceKey: String? = null,
@@ -97,7 +95,6 @@ data class ReflowReaderLocation(
     val position: Int? = null,
     val textQuote: TextQuote? = null,
     val engineLocator: EngineLocator? = null,
-    override val contentFingerprint: ContentFingerprint,
 ) : ReaderLocation {
     init {
         require(resourceKey == null || resourceKey.isNotBlank()) { "Reflow resource key is blank" }
@@ -117,7 +114,6 @@ data class ReflowReaderLocation(
 data class PdfReaderLocation(
     val pageIndex: Int,
     val pageProgression: Double,
-    override val contentFingerprint: ContentFingerprint,
     val engineLocator: EngineLocator? = null,
 ) : ReaderLocation {
     init {
@@ -131,7 +127,6 @@ data class PdfReaderLocation(
 data class ComicReaderLocation(
     val resourceHref: String,
     val pageIndex: Int,
-    override val contentFingerprint: ContentFingerprint,
     val engineLocator: EngineLocator? = null,
 ) : ReaderLocation {
     init {
@@ -144,7 +139,6 @@ data class AudioReaderLocation(
     val fileId: String,
     val chapterId: String? = null,
     val positionMillis: Long,
-    override val contentFingerprint: ContentFingerprint,
     val engineLocator: EngineLocator? = null,
 ) : ReaderLocation {
     init {

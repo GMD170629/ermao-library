@@ -20,7 +20,6 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
             mediaVersionID: descriptor.mediaVersionId,
             mediaKind: try mediaKind(descriptor.mediaKind),
             readerType: try readerType(descriptor.readerType),
-            contentFingerprint: descriptor.identity.contentFingerprint,
             expectedBytes: descriptor.source.totalBytes
         )
     }
@@ -37,7 +36,6 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
         }
         guard descriptor.identity.workId == request.record.workID,
               descriptor.identity.volumeId == request.record.volumeID,
-              descriptor.identity.contentFingerprint == request.record.contentFingerprint,
               descriptor.source.totalBytes == request.record.expectedBytes else {
             throw ManagedDownloadTransferError.invalidResponse
         }
@@ -67,8 +65,7 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
         }
         return ManagedDownloadReceipt(
             receivedBytes: success.transfer.verifiedBytes,
-            expectedBytes: descriptor.source.totalBytes,
-            contentFingerprint: descriptor.identity.contentFingerprint
+            expectedBytes: descriptor.source.totalBytes
         )
     }
 
@@ -187,7 +184,6 @@ private final class SharedPartialFileSink: NSObject, DownloadByteSink {
     func begin(request: DownloadSinkRequest) async throws -> DownloadByteSinkSession {
         guard request.taskId == record.id,
               request.volumeId == record.volumeID,
-              request.contentFingerprint == record.contentFingerprint,
               request.expectedTotalBytes == record.expectedBytes,
               request.resumeFromBytes == 0 else {
             throw ManagedDownloadTransferError.invalidResponse

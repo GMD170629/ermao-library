@@ -96,13 +96,12 @@ import com.ermao.library.features.downloads.application.DownloadCenterViewModel
 import com.ermao.library.features.downloads.application.DownloadedWorkViewModel
 import com.ermao.library.features.downloads.application.DownloadActionsViewModel
 import com.ermao.library.features.downloads.application.AndroidReaderAccessOutcome
-import com.ermao.library.features.downloads.presentation.DownloadPreparationActivity
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
 import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.model.DownloadReaderEntryAction
 import com.ermao.library.features.downloads.model.downloadReaderEntryAction
-import com.ermao.library.features.downloads.model.isSupportedNativeReflowable
+import com.ermao.library.features.downloads.model.isSupportedNativeDownloadReader
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
 import com.ermao.library.shared.core.network.AndroidEncryptedCookieVault
@@ -553,7 +552,7 @@ fun MainShell(
                     val downloadsViewModel: DownloadCenterViewModel = viewModel(
                         key = "downloads-$contentKey",
                         factory = DownloadCenterViewModel.factory(downloadCatalog, downloadNamespace) { record ->
-                            downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+                            downloadFiles.hasLocalArtifact(record.localReference)
                         },
                     )
                     val downloadsState by downloadsViewModel.uiState.collectAsStateWithLifecycle()
@@ -573,7 +572,7 @@ fun MainShell(
                     val downloadedWorkViewModel: DownloadedWorkViewModel = viewModel(
                         key = "downloaded-work-$contentKey-${route.workId}",
                         factory = DownloadedWorkViewModel.factory(downloadCatalog, downloadNamespace, route.workId) { record ->
-                            downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+                            downloadFiles.hasLocalArtifact(record.localReference)
                         },
                     )
                     val downloadedWorkState by downloadedWorkViewModel.uiState.collectAsStateWithLifecycle()
@@ -581,7 +580,7 @@ fun MainShell(
                         state = downloadedWorkState,
                         onBack = { meBackStack.removeLastOrNull() },
                         onOpenVolume = { volume ->
-                            if (isSupportedNativeReflowable(volume.readerType, volume.format)) {
+                            if (isSupportedNativeDownloadReader(volume.readerType, volume.format)) {
                                 appContext.startActivity(
                                     ReaderActivity.createManagedDownloadIntent(
                                         context = appContext,
@@ -590,8 +589,6 @@ fun MainShell(
                                         volumeId = volume.volumeId,
                                         displayTitle = volume.workTitle,
                                         localReference = checkNotNull(volume.localReference),
-                                        serverContentFingerprint = volume.contentFingerprint,
-                                        expectedBytes = volume.expectedBytes,
                                         sourceFormat = volume.format,
                                     ),
                                 )
@@ -790,33 +787,25 @@ private fun openWorkVolume(
     requestAccess: (String, Boolean, (AndroidReaderAccessOutcome) -> Unit) -> Unit,
     onUnavailable: (ReaderUnavailableRoute) -> Unit,
 ) {
-    fun openPreparation() {
-        context.startActivity(
-            DownloadPreparationActivity.createIntent(
-                context = context,
-                profileId = profileId,
-                workId = work.id,
-                workTitle = work.title,
-                author = work.author,
-                coverApiPath = work.coverUrl,
-                volumeId = volume.id,
-            ),
-        )
-    }
     when (downloadReaderEntryAction(volume.readerType, volume.format, existing) { record ->
-        files.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+        files.hasLocalArtifact(record.localReference)
     }) {
-        DownloadReaderEntryAction.OpenPreparation -> {
-            openPreparation()
+        DownloadReaderEntryAction.OpenServerReader -> {
+            context.startActivity(ReaderActivity.createServerIntent(context, profileId, volume.id))
             return
         }
-        DownloadReaderEntryAction.ValidateCurrentArtifact,
-        DownloadReaderEntryAction.ValidateStreamingAccess,
+        DownloadReaderEntryAction.OpenLocalArtifact,
+        DownloadReaderEntryAction.ValidateUnsupportedAccess,
         -> Unit
     }
     requestAccess(volume.id, true) { outcome ->
         when (outcome) {
-            AndroidReaderAccessOutcome.DownloadRequired -> openPreparation()
+            AndroidReaderAccessOutcome.DownloadRequired -> {
+                context.startActivity(ReaderActivity.createServerIntent(context, profileId, volume.id))
+            }
+            is AndroidReaderAccessOutcome.RemoteStream -> {
+                context.startActivity(ReaderActivity.createServerIntent(context, profileId, volume.id))
+            }
             else -> {
                 val readerIntent = outcome.toNativeReaderIntent(context, profileId, work.id, work.title, volume.id)
                 if (readerIntent != null) context.startActivity(readerIntent)
@@ -834,7 +823,7 @@ private fun AndroidReaderAccessOutcome.toNativeReaderIntent(
     volumeId: String,
 ): android.content.Intent? {
     val artifact = this as? AndroidReaderAccessOutcome.LocalArtifact ?: return null
-    if (!isSupportedNativeReflowable(artifact.readerType, artifact.format)) return null
+    if (!isSupportedNativeDownloadReader(artifact.readerType, artifact.format)) return null
     return ReaderActivity.createManagedDownloadIntent(
         context = context,
         profileId = profileId,
@@ -842,8 +831,6 @@ private fun AndroidReaderAccessOutcome.toNativeReaderIntent(
         volumeId = volumeId,
         displayTitle = workTitle,
         localReference = artifact.localReference,
-        serverContentFingerprint = artifact.contentFingerprint,
-        expectedBytes = artifact.expectedBytes,
         sourceFormat = artifact.format,
     )
 }

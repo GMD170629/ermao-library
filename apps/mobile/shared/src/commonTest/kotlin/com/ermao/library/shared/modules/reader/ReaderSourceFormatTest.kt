@@ -35,15 +35,8 @@ class ReaderSourceFormatTest {
                 sourceId = "volume-1",
                 displayTitle = "Book",
                 format = ReaderFormat.Epub,
-                contentFingerprint = fingerprint(),
                 sourceFormat = ReaderSourceFormat.Azw3,
             )
         }
     }
-
-    private fun fingerprint() = ContentFingerprint(
-        originalFileHash = "sha256:${"a".repeat(64)}",
-        parserVersion = "parser-v1",
-        normalizationVersion = "normalization-v1",
-    )
 }

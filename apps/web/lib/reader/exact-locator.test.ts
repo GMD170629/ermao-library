@@ -13,18 +13,18 @@ import { parseReaderV4ProgressSnapshot, v4LocationToDomain } from './progress-wi
 
 const wire = parsePublicationLocation(exactRequest.locator);
 if (!wire || wire.kind !== 'reflowable') throw new Error('invalid exact fixture');
-const exact = { ...wire.engineLocator, publication: wire.publication } satisfies ReadiumLocatorEnvelope;
+const exact = { ...wire.engineLocator } satisfies ReadiumLocatorEnvelope;
 
 test('accepts the canonical cross-language exact locator fixture', () => {
   assert.equal(isExactReadiumLocatorEnvelope(exact), true);
   assert.deepEqual(parseReadiumLocatorEnvelope(exact), exact);
 });
 
-test('rejects progression-only and mismatched publication fingerprints as exact', () => {
+test('rejects progression-only locators and detects resource mismatches', () => {
   assert.equal(isExactReadiumLocatorEnvelope(progressionOnly.locator), false);
-  const mismatch = { ...exact, publication: { ...exact.publication, normalization: 'different-v2' } };
+  const mismatch = { ...exact, payload: { ...exact.payload, href: 'different.xhtml' } };
   assert.deepEqual(compareExactReadiumLocators(exact, mismatch), {
-    precision: 'unverified', sameResource: true, reason: 'fingerprint_mismatch'
+    precision: 'unverified', sameResource: false, reason: 'different_resource'
   });
 });
 

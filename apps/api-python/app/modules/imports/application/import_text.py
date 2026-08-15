@@ -20,7 +20,6 @@ from app.modules.imports.application.identity_resolution import (
 from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
-    _content_hash,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -95,10 +94,8 @@ def refresh_existing_reflowable_source(
     volume_id = str(volume["id"])
     file_id = str(file_row["id"])
     source_stat = source_path.stat()
-    full_hash = _content_hash(source_path)
     content_changed = (
-        file_row.get("fullHash") != full_hash
-        or int(file_row.get("sizeBytes") or -1) != source_stat.st_size
+        int(file_row.get("sizeBytes") or -1) != source_stat.st_size
         or int(file_row.get("mtimeMs") or -1) != int(source_stat.st_mtime * 1000)
     )
     if not file_row.get("volumeId"):
@@ -110,8 +107,6 @@ def refresh_existing_reflowable_source(
         store.update_library_file(
             file_id,
             columns={
-                "fullHash": full_hash,
-                "hashStatus": "COMPLETED",
                 "sizeBytes": source_stat.st_size,
                 "mtimeMs": int(source_stat.st_mtime * 1000),
                 "updatedAt": _now(),
@@ -248,7 +243,6 @@ def _import_reflowable_source(
 
     source_path = options.source_file_path.resolve()
     source_stat = source_path.stat()
-    full_hash = _content_hash(source_path)
     source_format = ext.removeprefix(".").upper()
     metadata = services.inspect_reflowable_book(source_path, source_format)
     embedded_title = (
@@ -358,8 +352,6 @@ def _import_reflowable_source(
             "volumeId": volume["id"],
             "path": str(source_path),
             "filePathHash": _hash_text(str(source_path)),
-            "fullHash": full_hash,
-            "hashStatus": "COMPLETED",
             "kind": source_format,
             "mimeType": mime_type,
             "sizeBytes": file_size,

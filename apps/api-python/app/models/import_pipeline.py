@@ -290,7 +290,6 @@ class ImportTask(Base):
     __table_args__ = (
         Index("ImportTask_monitorFolderId_status_idx", "monitorFolderId", "status"),
         Index("ImportTask_status_createdAt_idx", "status", "createdAt"),
-        Index("ImportTask_contentHash_idx", "contentHash"),
         Index("ImportTask_workId_idx", "workId"),
         Index("ImportTask_volumeId_idx", "volumeId"),
         Index("ImportTask_status_leaseExpiresAt_idx", "status", "leaseExpiresAt"),
@@ -361,9 +360,6 @@ class ImportTask(Base):
     source_path: Mapped[str] = mapped_column("sourcePath", Text, nullable=False)
     source_key: Mapped[str | None] = mapped_column(
         "sourceKey", String(64), nullable=True
-    )
-    content_hash: Mapped[str | None] = mapped_column(
-        "contentHash", String(191), nullable=True
     )
     task_kind: Mapped[str] = mapped_column(
         "taskKind", String(191), nullable=False, default="FILE", server_default="FILE"
@@ -642,7 +638,7 @@ class BookConversionTask(Base):
     __table_args__ = (
         UniqueConstraint("importTaskId"),
         Index("BookConversionTask_status_createdAt_idx", "status", "createdAt"),
-        Index("BookConversionTask_sourceHash_idx", "sourceHash"),
+        Index("BookConversionTask_sourceKey_idx", "sourceKey"),
         UniqueConstraint(
             "idempotencyKey", name="BookConversionTask_idempotencyKey_key"
         ),
@@ -685,8 +681,8 @@ class BookConversionTask(Base):
     )
     source_path: Mapped[str] = mapped_column("sourcePath", Text, nullable=False)
     output_path: Mapped[str | None] = mapped_column("outputPath", Text, nullable=True)
-    source_hash: Mapped[str | None] = mapped_column(
-        "sourceHash", String(191), nullable=True
+    source_key: Mapped[str | None] = mapped_column(
+        "sourceKey", String(191), nullable=True
     )
     converter: Mapped[str] = mapped_column(
         String(191),

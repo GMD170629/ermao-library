@@ -107,6 +107,7 @@ tasks.named("preBuild") {
 dependencies {
     implementation(project(":shared"))
     implementation(project(":mobiCore"))
+    implementation(project(":pdfiumNative"))
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

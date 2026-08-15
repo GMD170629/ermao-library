@@ -310,13 +310,12 @@ internal fun JsonElement.toDirectoryNode(): DirectoryNode {
 internal fun JsonElement.toImportTask(): ImportTask {
     val task = objectValue("INVALID_IMPORT_TASK").expectKeys(
         "id", "monitorFolderId", "workId", "volumeId", "origin", "mediaKindPolicy", "status", "originalName",
-        "requestedTitle", "requestedAuthor", "recognizedMetadata", "sourcePath", "contentHash", "taskKind", "bundleKey",
+        "requestedTitle", "requestedAuthor", "recognizedMetadata", "sourcePath", "taskKind", "bundleKey",
         "assetCount", "processedAssetCount", "progress", "duration", "errorSummary", "errorCode", "retryable",
         "attempts", "leaseOwner", "leaseExpiresAt", "message", "startedAt", "finishedAt", "createdAt", "updatedAt",
         "sourceFileExists", "friendlyError", "monitorFolder", "book", "logs",
     )
     task.requiredNullableObject("recognizedMetadata")
-    task.requiredNullableString("contentHash")
     task.requiredNullableString("bundleKey")
     task.requiredNullableString("leaseOwner")
     task.requiredNullableString("leaseExpiresAt")

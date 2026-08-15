@@ -84,10 +84,21 @@ class AndroidDownloadCatalog(
                 require(payload.records.map(AndroidDownloadRecord::volumeId).distinct().size == payload.records.size)
             }
         } catch (error: SerializationException) {
-            throw AndroidDownloadStorageException("Managed download catalog is unreadable", error)
+            resetInvalidCatalog(namespace, error)
         } catch (error: IllegalArgumentException) {
-            throw AndroidDownloadStorageException("Managed download catalog is invalid", error)
+            resetInvalidCatalog(namespace, error)
         }
+    }
+
+    private fun resetInvalidCatalog(
+        namespace: AndroidDownloadNamespace,
+        cause: Exception,
+    ): CatalogPayload {
+        val directory = namespaceDirectory(namespace)
+        if (directory.exists() && !directory.deleteRecursively()) {
+            throw AndroidDownloadStorageException("Unable to remove invalid managed downloads", cause)
+        }
+        return CatalogPayload()
     }
 
     private suspend fun writePayload(namespace: AndroidDownloadNamespace, payload: CatalogPayload) = withContext(Dispatchers.IO) {

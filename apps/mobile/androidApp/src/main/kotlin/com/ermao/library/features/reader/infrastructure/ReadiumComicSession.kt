@@ -1,8 +1,12 @@
 package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.features.reader.application.ReaderResumeNotice
+import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.LocalReaderSource
+import com.ermao.library.shared.modules.reader.RemoteComicReaderSource
+import com.ermao.library.shared.modules.reader.ReaderSource
+import com.ermao.library.shared.modules.reader.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ReaderComicPage
@@ -24,6 +28,7 @@ import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
 import java.io.FileNotFoundException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,12 +43,13 @@ import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 
 internal class ReadiumComicSession(
-    private val source: LocalReaderSource,
+    private val source: ReaderSource,
     private val canonicalPages: List<ReaderComicPage>,
     private val publicationStore: AndroidReaderPublicationStore,
     private val progressStore: ReaderProgressStore,
     private val deviceIdentity: AndroidReaderDeviceIdentity,
     private val readium: AndroidReadiumRuntime,
+    private val comicPageServer: ComicPageServerPort? = null,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
     private val progressCoordinator: ReaderProgressSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
@@ -52,6 +58,7 @@ internal class ReadiumComicSession(
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
 ) : AndroidReaderNavigatorSession {
+    override val morphology = ReaderMorphology.Comic
     override val capabilities = ReaderCapabilities(
         canGoPrevious = true,
         canGoNext = true,
@@ -110,17 +117,35 @@ internal class ReadiumComicSession(
     override suspend fun prepare(classLoader: ClassLoader): ImageNavigatorFragment {
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
-        val file = try {
-            publicationStore.resolveVerified(source)
-        } catch (error: IllegalArgumentException) {
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
+        val opened = try {
+            when (source) {
+                is LocalReaderSource -> {
+                    if (source.sourceFormat !in setOf(
+                            com.ermao.library.shared.modules.reader.ReaderSourceFormat.Cbz,
+                            com.ermao.library.shared.modules.reader.ReaderSourceFormat.Zip,
+                        )
+                    ) {
+                        throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ComicArchiveFormatUnsupported))
+                    }
+                    val file = publicationStore.resolve(source)
+                    CbzReadiumPublicationFactory(readium.assetRetriever).open(file, source.displayTitle, canonicalPages)
+                }
+                is RemoteComicReaderSource -> RemoteComicReadiumPublicationFactory(
+                    requireNotNull(comicPageServer) { "Comic page server is missing" },
+                ).open(source, _preferences.value.comic.imageVariant)
+                else -> throw IllegalArgumentException("Comic source is unsupported")
+            }
+        } catch (error: ReaderOpenFailure) {
+            throw error
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
-        }
-        val opened = try {
-            CbzReadiumPublicationFactory(readium.assetRetriever).open(file, source.displayTitle, canonicalPages)
         } catch (error: IllegalArgumentException) {
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile), cause = error)
+            val code = if (source is LocalReaderSource) {
+                ReaderErrorCode.ComicArchiveCorrupt
+            } else {
+                ReaderErrorCode.ReaderEngineError
+            }
+            throw ReaderOpenFailure(ReaderError(code), cause = error)
         }
         publication = opened
         val localProgress = loadProgressSafely()
@@ -150,8 +175,10 @@ internal class ReadiumComicSession(
         }
         tableOfContents = canonicalPages.map { page ->
             ReaderTocEntry(
-                title = page.resourceHref.substringAfterLast('/'),
+                title = page.title ?: (page.pageIndex + 1).toString(),
                 location = page.toLocation(),
+                id = page.resourceHref,
+                index = page.pageIndex,
             )
         }
         val factory = ImageNavigatorFragment.createFactory(opened, initialLocator)
@@ -223,7 +250,6 @@ internal class ReadiumComicSession(
 
     override fun goTo(location: ReaderLocation): Boolean {
         val comic = location as? ComicReaderLocation ?: return false
-        if (comic.contentFingerprint != source.contentFingerprint) return false
         val page = canonicalPages.getOrNull(comic.pageIndex)
             ?.takeIf { it.resourceHref == comic.resourceHref }
             ?: return false
@@ -270,8 +296,11 @@ internal class ReadiumComicSession(
     }
 
     override suspend fun close() {
-        flush()
-        release()
+        try {
+            flush()
+        } finally {
+            release()
+        }
     }
 
     override fun release() {
@@ -300,12 +329,13 @@ internal class ReadiumComicSession(
     private fun ReaderComicPage.toLocation() = ComicReaderLocation(
         resourceHref = resourceHref,
         pageIndex = pageIndex,
-        contentFingerprint = source.contentFingerprint,
     )
 
     private suspend fun loadProgressSafely(): ReaderProgress? = try {
         progressStore.load(source.sourceId)
-    } catch (_: IllegalArgumentException) {
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
         _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
         null
     }
@@ -313,7 +343,11 @@ internal class ReadiumComicSession(
     private suspend fun persist(location: ComicReaderLocation) = saveMutex.withLock {
         if (lastPersistedLocation == location) return@withLock
         val capturedAt = nowEpochMillis()
-        val percent = ((location.pageIndex + 1).toDouble() / canonicalPages.size * 100.0).coerceIn(0.0, 100.0)
+        val percent = if (canonicalPages.size <= 1) {
+            100.0
+        } else {
+            location.pageIndex.toDouble() / canonicalPages.lastIndex * 100.0
+        }
         val progress = ReaderProgress(
             sourceId = source.sourceId,
             location = location,
@@ -321,7 +355,13 @@ internal class ReadiumComicSession(
             deviceId = deviceIdentity.stableDeviceId(),
             percent = percent,
         )
-        progressStore.save(progress)
+        try {
+            progressStore.save(progress)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return@withLock
+        }
         lastPersistedLocation = location
         val namespace = presentationNamespaceKey ?: return@withLock
         val workId = source.workId ?: return@withLock

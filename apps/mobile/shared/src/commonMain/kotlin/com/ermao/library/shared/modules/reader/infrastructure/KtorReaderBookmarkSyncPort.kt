@@ -30,7 +30,6 @@ class KtorReaderBookmarkSyncPort(
         ApiMethod.Put,
         readerServerWireJson.encodeToString(
             ReaderBookmarksReplaceWire(
-                contentFingerprint = target.contentFingerprint,
                 bookmarks = bookmarks.map(ReaderBookmark::toWire),
             ),
         ),
@@ -50,11 +49,7 @@ class KtorReaderBookmarkSyncPort(
                 ApiRequest(
                     method = method,
                     apiPath = "/api/reader/v4/volumes/${encodePathSegment(target.volumeId)}/bookmarks",
-                    queryParameters = if (method == ApiMethod.Get) {
-                        mapOf("contentFingerprint" to listOf(target.contentFingerprint))
-                    } else {
-                        emptyMap()
-                    },
+                    queryParameters = emptyMap(),
                     responseDeserializer = ReaderBookmarksDataWire.serializer(),
                     requestBody = requestBody,
                 ),
@@ -114,7 +109,6 @@ private data class ReaderBookmarksDataWire(val bookmarks: List<ReaderBookmarkWir
 
 @Serializable
 private data class ReaderBookmarksReplaceWire(
-    val contentFingerprint: String,
     val bookmarks: List<ReaderBookmarkWire>,
 )
 

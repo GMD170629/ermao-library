@@ -38,13 +38,13 @@ export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.fr
   }),
   comic: Object.freeze({
     direction: 'ltr',
-    mode: 'single',
+    spreadMode: 'single',
     pageTurnAnimation: 'slide',
     imageFit: 'width',
     imageVariant: 'original',
     zoom: 1,
     pageWidth: 1350,
-    flow: 'paged',
+    flow: 'paginated',
     coverSingle: false,
     pageGap: 0
   }),
@@ -170,13 +170,21 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
     },
     comic: {
       direction: choice(comic.direction ?? legacyComicDirection, ['ltr', 'rtl'], fallback.comic.direction),
-      mode: choice(comic.mode ?? legacyComicMode, ['single', 'double'], fallback.comic.mode),
+      spreadMode: choice(
+        comic.spreadMode ?? comic.mode ?? legacyComicMode,
+        ['single', 'double'],
+        fallback.comic.spreadMode
+      ),
       pageTurnAnimation: choice(comic.pageTurnAnimation, ['slide', 'off'], fallback.comic.pageTurnAnimation),
       imageFit: choice(comic.imageFit ?? source.imageFit, ['width', 'height', 'contain', 'original'], fallback.comic.imageFit),
       imageVariant: choice(comic.imageVariant ?? source.imageVariant, ['original', 'data-saver'], fallback.comic.imageVariant),
       zoom: clamp(comic.zoom ?? source.zoom, 0.6, 2.4, fallback.comic.zoom, 1),
       pageWidth: clamp(comic.pageWidth, 600, 1350, fallback.comic.pageWidth),
-      flow: choice(comic.flow, ['paged', 'vertical'], fallback.comic.flow),
+      flow: comic.flow === 'vertical' || comic.flow === 'scrolled'
+        ? 'scrolled'
+        : comic.flow === 'paged' || comic.flow === 'paginated'
+          ? 'paginated'
+          : fallback.comic.flow,
       coverSingle: boolean(comic.coverSingle, fallback.comic.coverSingle),
       pageGap: choice(comic.pageGap, [0, 8, 16, 24] as const, fallback.comic.pageGap)
     },

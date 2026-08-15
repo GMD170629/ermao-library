@@ -121,7 +121,7 @@ class ConversionArtifactDTO:
     source_path: Path
     output_path: Path
     source_format: str
-    source_hash: str
+    source_key: str
     converter: str
     converter_version: str
     cached: bool

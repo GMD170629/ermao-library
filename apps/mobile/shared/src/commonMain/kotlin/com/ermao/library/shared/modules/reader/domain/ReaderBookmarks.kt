@@ -32,12 +32,10 @@ data class ReaderBookmark(
 data class ReaderBookmarkSyncTarget(
     val serverIdentity: String,
     val volumeId: String,
-    val contentFingerprint: String,
 ) {
     init {
         require(serverIdentity.isNotBlank())
         require(volumeId.isNotBlank())
-        require(contentFingerprint.isNotBlank())
     }
 }
 

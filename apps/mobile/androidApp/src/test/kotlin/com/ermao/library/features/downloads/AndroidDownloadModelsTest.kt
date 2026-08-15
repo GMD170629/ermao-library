@@ -78,7 +78,6 @@ class AndroidDownloadModelsTest {
         volumeTitle = volume,
         format = "EPUB",
         readerType = "reflowable",
-        contentFingerprint = "$taskId-fingerprint",
         sourceApiPath = "/api/volumes/$taskId-volume/file",
         sourceMimeType = "application/epub+zip",
         expectedBytes = 20,

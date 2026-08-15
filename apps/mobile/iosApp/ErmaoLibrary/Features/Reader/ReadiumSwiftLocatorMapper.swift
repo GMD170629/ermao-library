@@ -4,8 +4,7 @@ import ReadiumShared
 
 struct ReadiumSwiftLocatorMapper {
     func sharedLocation(
-        from locator: Locator,
-        fingerprint: IosContentFingerprint
+        from locator: Locator
     ) throws -> ErmaoShared.ReflowReaderLocation {
         let progression = locator.locations.progression
         guard progression.map({ $0.isFinite && (0 ... 1).contains($0) }) ?? true else {
@@ -37,8 +36,7 @@ struct ReadiumSwiftLocatorMapper {
                 platform: .ios,
                 version: "readium-swift:3.8.0",
                 payloadJson: canonicalLocator
-            ),
-            contentFingerprint: fingerprint.shared
+            )
         )
         guard ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location) != nil else {
             throw IosReaderFailure(code: .persistenceFailed)
@@ -47,10 +45,9 @@ struct ReadiumSwiftLocatorMapper {
     }
 
     func exactEnvelope(
-        from locator: Locator,
-        fingerprint: IosContentFingerprint
+        from locator: Locator
     ) throws -> ErmaoShared.ReadiumLocatorEnvelope {
-        let location = try sharedLocation(from: locator, fingerprint: fingerprint)
+        let location = try sharedLocation(from: locator)
         guard let envelope = ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location) else {
             throw IosReaderFailure(code: .locationRestoreFailed)
         }

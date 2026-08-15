@@ -22,16 +22,22 @@ import com.ermao.library.shared.modules.servers.domain.ServerConnectionDraft
 import com.ermao.library.shared.modules.servers.domain.ServerProfileSnapshot
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.content.Context
 import com.ermao.library.features.me.platform.AppLocaleController
+import com.ermao.library.features.reader.infrastructure.AndroidPdfRangeCache
 import com.ermao.library.platform.persistence.AndroidContentSnapshotCache
 import com.ermao.library.platform.persistence.AndroidCoverCache
 import com.ermao.library.shared.modules.library.ContentRequestContext
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import java.io.File
 
 data class ServerFormState(
     val displayName: String = "",
@@ -96,10 +102,16 @@ class MainViewModel(
     private val credentialStore: LoginCredentialStore = NoOpLoginCredentialStore,
     private val appContext: Context? = null,
     private val localeController: AppLocaleController? = null,
+    private val runtimeDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    initialLoginForm: LoginFormState = LoginFormState(),
 ) : ViewModel() {
     private var loadedCredentialProfileId: String? = null
     private val mutableUiState = MutableStateFlow(
-        MainUiState(session = runtime.currentSession, serverProfiles = runtime.serverProfiles),
+        MainUiState(
+            session = runtime.currentSession,
+            serverProfiles = runtime.serverProfiles,
+            loginForm = initialLoginForm,
+        ),
     )
     val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
 
@@ -142,10 +154,11 @@ class MainViewModel(
                     operationErrorCode = null,
                     operationErrorKind = null,
                     loginProfileId = profile?.id ?: current.loginProfileId,
-                    savedAccountEmails = savedAccountEmails(runtime.serverProfiles),
+                    savedAccountEmails = current.savedAccountEmails,
                 )
             }
             if (profile != null) loadCredential(profile.id)
+            loadSavedAccountEmails(runtime.serverProfiles)
         },
     )
 
@@ -155,10 +168,11 @@ class MainViewModel(
                 it.copy(
                     loginProfileId = activeProfile.id,
                     loginForm = it.loginForm.copy(serverAddress = activeProfile.baseUrl),
-                    savedAccountEmails = savedAccountEmails(runtime.serverProfiles),
+                    savedAccountEmails = it.savedAccountEmails,
                 )
             }
             loadCredential(activeProfile.id)
+            loadSavedAccountEmails(runtime.serverProfiles)
         }
         viewModelScope.launch { performRuntimeOperation { runtime.start() } }
     }
@@ -306,6 +320,13 @@ class MainViewModel(
             try {
                 AndroidContentSnapshotCache.clearNamespace(appContext, context)
                 AndroidCoverCache.clearNamespace(appContext, context)
+                AndroidPdfRangeCache(File(appContext.cacheDir, "reader/pdf-range-v1")).clearNamespace(
+                    ReaderSyncNamespace(
+                        session.identity.namespace.serverIdentity,
+                        session.identity.namespace.userId,
+                        session.identity.namespace.authorizationVersion,
+                    ),
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -373,6 +394,7 @@ class MainViewModel(
 
     fun loginFromEntry() {
         val state = mutableUiState.value
+        if (state.operationInProgress) return
         val form = state.loginForm
         val parsed = ServerBaseUrl.parse(form.serverAddress)
         val invalidAddress = parsed !is ServerBaseUrlParseResult.Valid
@@ -398,6 +420,7 @@ class MainViewModel(
     }
 
     fun acceptUnsafeTlsAndLogin() {
+        if (mutableUiState.value.operationInProgress) return
         val form = mutableUiState.value.loginForm
         val parsed = ServerBaseUrl.parse(form.serverAddress) as? ServerBaseUrlParseResult.Valid ?: return
         if (form.email.isBlank() || form.password.isBlank()) return
@@ -417,7 +440,7 @@ class MainViewModel(
             if (result is RuntimeOperationResult.Success) {
                 var credentialRemovalFailed = false
                 try {
-                    credentialStore.remove(profileId)
+                    withContext(runtimeDispatcher) { credentialStore.remove(profileId) }
                 } catch (_: Exception) {
                     credentialRemovalFailed = true
                 }
@@ -537,9 +560,11 @@ class MainViewModel(
         }
     }
 
-    private fun saveCredential(profileId: String, email: String, password: String) {
+    private suspend fun saveCredential(profileId: String, email: String, password: String) {
         try {
-            credentialStore.save(profileId, SavedLoginCredential(email, password))
+            withContext(runtimeDispatcher) {
+                credentialStore.save(profileId, SavedLoginCredential(email, password))
+            }
             loadedCredentialProfileId = null
             mutableUiState.update {
                 it.copy(savedAccountEmails = it.savedAccountEmails + (profileId to email))
@@ -557,22 +582,30 @@ class MainViewModel(
     private fun loadCredential(profileId: String) {
         if (loadedCredentialProfileId == profileId) return
         loadedCredentialProfileId = profileId
-        val credential = credentialStore.load(profileId) ?: return
-        mutableUiState.update { state ->
-            if (state.loginProfileId != profileId) state else state.copy(
-                loginForm = state.loginForm.copy(email = credential.email, password = credential.password),
-                savedAccountEmails = state.savedAccountEmails + (profileId to credential.email),
-            )
+        viewModelScope.launch {
+            val credential = withContext(runtimeDispatcher) { credentialStore.load(profileId) } ?: return@launch
+            mutableUiState.update { state ->
+                if (state.loginProfileId != profileId) state else state.copy(
+                    loginForm = state.loginForm.copy(email = credential.email, password = credential.password),
+                    savedAccountEmails = state.savedAccountEmails + (profileId to credential.email),
+                )
+            }
         }
     }
 
-    private fun savedAccountEmails(profiles: List<ServerProfileSnapshot>): Map<String, String> =
-        profiles.mapNotNull { profile ->
-            runCatching { credentialStore.load(profile.id) }
-                .getOrNull()
-                ?.email
-                ?.let { profile.id to it }
-        }.toMap()
+    private fun loadSavedAccountEmails(profiles: List<ServerProfileSnapshot>) {
+        viewModelScope.launch {
+            val accounts = withContext(runtimeDispatcher) {
+                profiles.mapNotNull { profile ->
+                    runCatching { credentialStore.load(profile.id) }
+                        .getOrNull()
+                        ?.email
+                        ?.let { profile.id to it }
+                }.toMap()
+            }
+            mutableUiState.update { it.copy(savedAccountEmails = accounts) }
+        }
+    }
 
     private fun clearLoginEntry() {
         loadedCredentialProfileId = null
@@ -648,7 +681,7 @@ class MainViewModel(
     ): RuntimeOperationResult? {
         mutableUiState.update { it.copy(operationInProgress = true, operationErrorCode = null) }
         return try {
-            operation().also { result ->
+            withContext(runtimeDispatcher) { operation() }.also { result ->
                 mutableUiState.update { current ->
                     val directive = (result as? RuntimeOperationResult.Success)?.navigationDirective
                     current.copy(
@@ -708,8 +741,17 @@ class MainViewModel(
             credentialStore: LoginCredentialStore = NoOpLoginCredentialStore,
             appContext: Context? = null,
             localeController: AppLocaleController? = null,
+            initialLoginForm: LoginFormState = LoginFormState(),
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { MainViewModel(runtime, credentialStore, appContext, localeController) }
+            initializer {
+                MainViewModel(
+                    runtime = runtime,
+                    credentialStore = credentialStore,
+                    appContext = appContext,
+                    localeController = localeController,
+                    initialLoginForm = initialLoginForm,
+                )
+            }
         }
     }
 }

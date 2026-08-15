@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from app.modules.reader.application.content_fingerprint import (
-    build_publication_fingerprint,
-    publication_fingerprint_key,
-)
 from app.modules.reader.application.dto import (
     ExactReaderLocationKind,
     ReaderAccessScope,
@@ -50,12 +46,6 @@ class ReaderVolumeNotFound(Exception):
 
 class ReaderVolumeFormatUnsupported(Exception):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class ReaderFingerprintMismatch(Exception):
-    expected: str
-    received: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +100,6 @@ class ReplaceBookmarksCommand:
     user_id: str
     volume_id: str
     access_scope: ReaderAccessScope
-    content_fingerprint: str
     bookmarks: tuple[ReaderBookmarkDto, ...]
     location_kinds: tuple[ReaderLocationKind, ...]
 
@@ -173,12 +162,6 @@ class VolumeReaderService:
         progress_by_volume_id = {
             progress.volume_id: progress for progress in progresses
         }
-        publication_fingerprint = self._publication_locator_index.fingerprint(
-            volume_id=volume_id,
-            access_scope=access_scope,
-        ) or build_publication_fingerprint(
-            asdict(context.volume), [asdict(file) for file in files]
-        )
         selected_progress = progress_by_volume_id.get(volume_id)
         selected_media_volumes = [
             volume
@@ -196,7 +179,6 @@ class VolumeReaderService:
             files=tuple(files),
             units=tuple(units),
             progress_by_volume_id=progress_by_volume_id,
-            publication_fingerprint=publication_fingerprint,
             resume_location_json=(
                 selected_progress.location_json
                 if selected_progress is not None
@@ -231,20 +213,16 @@ class VolumeReaderService:
                 expected=reader_type.value,
                 received=received_kind,
             )
-        publication = self._publication_locator_index.validate(
+        location_is_valid = self._publication_locator_index.validate(
             volume_id=command.volume_id,
             access_scope=command.access_scope,
             location=command.location,
         )
-        if publication is None:
+        if not location_is_valid:
             raise ReaderLocatorResourceMismatch(
                 href=_location_reference(command.location),
                 media_type=reader_type.value,
             )
-        progress_identity = _progress_identity_key(
-            context.work.id,
-            context.volume.id,
-        )
         now = _aware_utc(self._clock.now())
         progressed_at = datetime.fromtimestamp(
             command.captured_at_epoch_millis / 1000,
@@ -275,7 +253,6 @@ class VolumeReaderService:
                 reader_type=reader_type.value,
                 display_percent=display_percent,
                 location=command.location,
-                content_fingerprint=progress_identity,
                 client_id=command.client_id,
                 mutation_id=command.mutation_id,
                 base_revision=command.base_revision,
@@ -311,17 +288,12 @@ class VolumeReaderService:
         reader_type = reader_type_for_volume_format(context.volume.format)
         if reader_type is None:
             raise ReaderVolumeFormatUnsupported
-        progress_identity = _progress_identity_key(
-            context.work.id,
-            context.volume.id,
-        )
         try:
             progress = self._repository.set_reading_status(
                 user_id=command.user_id,
                 context=context,
                 reader_type=reader_type.value,
                 status=command.status,
-                content_fingerprint=progress_identity,
                 now=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
@@ -354,10 +326,6 @@ class VolumeReaderService:
         existing = self._repository.get_progress(command.user_id, command.volume_id)
         if existing is not None and _aware_utc(existing.progressed_at) > modified_at:
             raise ReaderProgressDateConflict(_external_progress_dto(existing))
-        progress_identity = _progress_identity_key(
-            context.work.id,
-            context.volume.id,
-        )
         location_json = _external_location_json(
             reader_type=reader_type.value,
             volume_id=command.volume_id,
@@ -386,7 +354,6 @@ class VolumeReaderService:
                 reader_type=reader_type.value,
                 percent=command.progression * 100,
                 location_json=location_json,
-                content_fingerprint=progress_identity,
                 mutation_id=mutation_id,
                 client_id=command.device_id,
                 client_sequence=int(modified_at.timestamp() * 1000),
@@ -420,14 +387,9 @@ class VolumeReaderService:
         user_id: str,
         volume_id: str,
         access_scope: ReaderAccessScope,
-        content_fingerprint: str,
     ) -> list[ReaderBookmarkDto]:
-        self._require_current_fingerprint(
-            volume_id,
-            content_fingerprint,
-            access_scope=access_scope,
-        )
-        return self._repository.list_bookmarks(user_id, volume_id, content_fingerprint)
+        self._require_visible_context(volume_id, access_scope)
+        return self._repository.list_bookmarks(user_id, volume_id)
 
     def replace_bookmarks(
         self, command: ReplaceBookmarksCommand
@@ -438,16 +400,10 @@ class VolumeReaderService:
             raise ReaderVolumeFormatUnsupported
         for location_kind in command.location_kinds:
             _require_matching_location_kind(reader_type, location_kind)
-        self._require_current_fingerprint(
-            command.volume_id,
-            command.content_fingerprint,
-            access_scope=command.access_scope,
-        )
         try:
             result = self._repository.replace_bookmarks(
                 user_id=command.user_id,
                 volume_id=command.volume_id,
-                content_fingerprint=command.content_fingerprint,
                 bookmarks=list(command.bookmarks),
                 now=_aware_utc(self._clock.now()),
             )
@@ -456,38 +412,6 @@ class VolumeReaderService:
             self._unit_of_work.rollback()
             raise
         return result
-
-    def _require_current_fingerprint(
-        self,
-        volume_id: str,
-        received_fingerprint: str,
-        *,
-        access_scope: ReaderAccessScope,
-    ) -> None:
-        context = self._repository.get_context(volume_id)
-        if context is None:
-            raise ReaderVolumeNotFound
-        files = self._repository.list_files(volume_id)
-        publication = self._publication_locator_index.fingerprint(
-            volume_id=volume_id,
-            access_scope=access_scope,
-        ) or build_publication_fingerprint(
-            asdict(context.volume),
-            [asdict(file) for file in files],
-        )
-        expected = publication_fingerprint_key(publication)
-        if expected != received_fingerprint:
-            raise ReaderFingerprintMismatch(
-                expected=expected,
-                received=received_fingerprint,
-            )
-
-
-def _progress_identity_key(work_id: str, volume_id: str) -> str:
-    """Stable progress ownership independent of publication bytes or parser versions."""
-
-    return f"work:{len(work_id)}:{work_id}|volume:{len(volume_id)}:{volume_id}"
-
 
 def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:

@@ -6,14 +6,10 @@ import Foundation
 enum IosTxtPublicationError: Error, Sendable {
     case invalidEncoding
     case invalidResourcePath
-    case invalidFingerprint
 }
 
 struct IosTxtPublicationFactory: Sendable {
     func open(_ managed: IosManagedPublication) throws -> Publication {
-        guard managed.fingerprint.parserVersion == "shuku-txt-parser-v1",
-              managed.fingerprint.normalizationVersion == "shuku-txt-publication-v2"
-        else { throw IosTxtPublicationError.invalidFingerprint }
         let data = try Data(contentsOf: managed.fileURL, options: [.mappedIfSafe])
         guard data.count <= 64 * 1_024 * 1_024,
               let decoded = Self.decode(data), !decoded.contains("\0")
@@ -39,7 +35,7 @@ struct IosTxtPublicationFactory: Sendable {
         return Publication(
             manifest: Manifest(
                 metadata: Metadata(
-                    identifier: "urn:shuku:txt:\(managed.fingerprint.originalFileHash)",
+                    identifier: "urn:shuku:txt:\(managed.sourceID)",
                     conformsTo: [.epub],
                     title: normalized.title,
                     layout: .reflowable,

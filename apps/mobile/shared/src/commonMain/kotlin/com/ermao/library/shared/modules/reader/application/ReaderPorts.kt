@@ -47,9 +47,39 @@ data class ReaderTocEntry(
     val title: String,
     val location: ReaderLocation,
     val children: List<ReaderTocEntry> = emptyList(),
+    val id: String = title,
+    val index: Int = 0,
+    val target: ReaderNavigationTarget = ReaderNavigationTarget.from(location),
 ) {
     init {
         require(title.isNotBlank()) { "Reader table-of-contents title is blank" }
+    }
+}
+
+sealed interface ReaderNavigationTarget {
+    data class Reflowable(val href: String) : ReaderNavigationTarget
+    data class Pdf(val pageIndex: Int) : ReaderNavigationTarget
+    data class Comic(val pageIndex: Int, val resourceHref: String) : ReaderNavigationTarget
+    data class Invalid(val reasonCode: String = "READER_NAVIGATION_TARGET_INVALID") : ReaderNavigationTarget
+
+    companion object {
+        fun from(location: ReaderLocation): ReaderNavigationTarget = when (location) {
+            is ReflowReaderLocation -> location.resourceKey
+                ?.let(ReaderNavigationTarget::Reflowable)
+                ?: Invalid()
+            is com.ermao.library.shared.modules.reader.domain.PdfReaderLocation -> Pdf(location.pageIndex)
+            is ComicReaderLocation -> Comic(location.pageIndex, location.resourceHref)
+            else -> Invalid()
+        }
+    }
+}
+
+sealed interface ReaderNavigationResult {
+    data class Completed(val moved: Boolean) : ReaderNavigationResult
+    data class Rejected(val reasonCode: String) : ReaderNavigationResult {
+        init {
+            require(reasonCode.isNotBlank())
+        }
     }
 }
 
@@ -144,7 +174,7 @@ data class ReaderResumeDecision(
     }
 }
 
-/** Online startup always uses the freshly bootstrapped server exact position. */
+/** Selects the newest valid position. Server wins ties; neither candidate can block opening. */
 fun decideReaderResume(
     localProgress: ReaderProgress?,
     remoteSnapshot: ReaderProgressSnapshotV4?,
@@ -152,14 +182,10 @@ fun decideReaderResume(
 ): ReaderResumeDecision {
     val validLocal = localProgress?.takeIf {
         it.sourceId == openedSource.sourceId &&
-            it.location.contentFingerprint.originalFileHash ==
-            openedSource.contentFingerprint.originalFileHash &&
             runCatching { it.exactPublicationLocation() }.isSuccess
     }
     val validRemote = remoteSnapshot?.takeIf {
-        it.sourceId == openedSource.sourceId &&
-            it.locator.publication.originalFileHash ==
-            openedSource.contentFingerprint.originalFileHash
+        it.sourceId == openedSource.sourceId
     }
     val localTarget = validLocal?.let {
         ReaderResumeTarget(
@@ -179,8 +205,21 @@ fun decideReaderResume(
             remoteSnapshot = it,
         )
     }
-    return if (remoteTarget != null) ReaderResumeDecision(remoteTarget, null)
-    else ReaderResumeDecision(localTarget, null)
+    if (localTarget == null) return ReaderResumeDecision(remoteTarget, null)
+    if (remoteTarget == null) return ReaderResumeDecision(localTarget, null)
+    val sameLocation = runCatching {
+        compareExactProgressLocations(
+            requireNotNull(localTarget.localProgress).exactPublicationLocation(),
+            requireNotNull(remoteTarget.remoteSnapshot).locator,
+        ) == ExactLocationMatch.Exact
+    }.getOrDefault(false)
+    val selected = if (remoteTarget.capturedAtEpochMillis >= localTarget.capturedAtEpochMillis) {
+        remoteTarget
+    } else {
+        localTarget
+    }
+    val alternative = if (sameLocation) null else if (selected === remoteTarget) localTarget else remoteTarget
+    return ReaderResumeDecision(selected, alternative)
 }
 
 sealed interface PendingVsServerDecision {
@@ -194,11 +233,6 @@ sealed interface PendingVsServerDecision {
         val mutation: com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation,
     ) : PendingVsServerDecision
 
-    data class RequiresChoice(
-        val progress: ReaderProgress,
-        val mutation: com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation,
-        val server: ReaderProgressSnapshotV4,
-    ) : PendingVsServerDecision
 }
 
 /** Startup decision used after a fresh bootstrap. Confirmed local history is intentionally ignored. */
@@ -211,8 +245,6 @@ fun decidePendingVsServerStartup(
     val pending = durableState.pending ?: return PendingVsServerDecision.UseServer(remoteSnapshot)
     val validLocal = localProgress?.takeIf {
         it.sourceId == openedSource.sourceId &&
-            it.location.contentFingerprint.originalFileHash ==
-            openedSource.contentFingerprint.originalFileHash &&
             runCatching { it.exactPublicationLocation() }.isSuccess &&
             runCatching {
                 compareExactProgressLocations(it.exactPublicationLocation(), pending.locator) == ExactLocationMatch.Exact
@@ -224,8 +256,11 @@ fun decidePendingVsServerStartup(
     if (remoteSnapshot == null || pending.baseRevision == remoteSnapshot.revision) {
         return PendingVsServerDecision.UseLocalPending(validLocal, pending)
     }
-    return if (remoteSnapshot.revision > pending.baseRevision) {
-        PendingVsServerDecision.RequiresChoice(validLocal, pending, remoteSnapshot)
+    return if (
+        remoteSnapshot.revision > pending.baseRevision &&
+        remoteSnapshot.effectiveCapturedAtEpochMillis >= validLocal.updatedAtEpochMillis
+    ) {
+        PendingVsServerDecision.UseServer(remoteSnapshot, discardPending = true)
     } else {
         PendingVsServerDecision.UseLocalPending(validLocal, pending)
     }
@@ -274,10 +309,6 @@ fun restoreCandidates(
     savedLocation: ReaderLocation,
     openedSource: ReaderSource,
 ): List<ReaderRestoreCandidate> {
-    if (
-        savedLocation.contentFingerprint.originalFileHash !=
-        openedSource.contentFingerprint.originalFileHash
-    ) return emptyList()
     return when (savedLocation) {
         is ReflowReaderLocation -> if (
             com.ermao.library.shared.modules.reader.domain.ReadiumLocatorEnvelope.from(savedLocation) != null

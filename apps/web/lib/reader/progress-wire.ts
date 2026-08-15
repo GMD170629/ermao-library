@@ -1,7 +1,6 @@
 import {
   parsePublicationLocation,
   quantizePageProgression,
-  type PublicationFingerprint,
   type PublicationLocation,
   type ReaderLocation,
   type ReflowableFormat
@@ -48,13 +47,13 @@ export function v4LocationToDomain(
 ): ReaderLocation | null {
   if (!locator) return null;
   if (locator.kind === 'pdf') {
-    return { kind: 'pdf', pageNumber: locator.pageIndex + 1, pageProgression: locator.pageProgression };
+    return { kind: 'pdf', pageIndex: locator.pageIndex, pageProgression: locator.pageProgression };
   }
   if (locator.kind === 'comic') {
     return { kind: 'comic', volumeId, pageIndex: locator.pageIndex + 1, resourceHref: locator.resourceHref };
   }
   if (locator.kind !== 'reflowable' || !format) return null;
-  const envelope = { ...locator.engineLocator, publication: locator.publication };
+  const envelope = locator.engineLocator;
   const locations = locator.engineLocator.payload.locations;
   const fragments = Array.isArray(locations.fragments) ? locations.fragments : [];
   const cfi = fragments.find((fragment) => fragment.startsWith('epubcfi('));
@@ -81,7 +80,6 @@ export function exactLocatorFromDomain(location: ReaderLocation): PublicationLoc
   return location.kind === 'reflowable' && location.exactLocator
     ? parsePublicationLocation({
         kind: 'reflowable',
-        publication: location.exactLocator.publication,
         engineLocator: {
           engine: location.exactLocator.engine,
           platform: location.exactLocator.platform,
@@ -93,22 +91,19 @@ export function exactLocatorFromDomain(location: ReaderLocation): PublicationLoc
 }
 
 export function publicationLocationFromDomain(
-  location: ReaderLocation,
-  publication: PublicationFingerprint
+  location: ReaderLocation
 ): PublicationLocation | null {
   if (location.kind === 'reflowable') return exactLocatorFromDomain(location);
   if (location.kind === 'pdf') {
     return parsePublicationLocation({
       kind: 'pdf',
-      publication,
-      pageIndex: location.pageNumber - 1,
-      pageProgression: quantizePageProgression(location.pageProgression ?? 0)
+      pageIndex: location.pageIndex,
+      pageProgression: quantizePageProgression(location.pageProgression)
     });
   }
   if (location.kind === 'comic' && location.resourceHref) {
     return parsePublicationLocation({
       kind: 'comic',
-      publication,
       pageIndex: location.pageIndex - 1,
       resourceHref: location.resourceHref
     });

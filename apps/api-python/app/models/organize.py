@@ -559,9 +559,6 @@ class MetadataWritebackTarget(Base):
     prepared_path: Mapped[str | None] = mapped_column(
         "preparedPath", Text, nullable=True
     )
-    output_hash: Mapped[str | None] = mapped_column(
-        "outputHash", String(64), nullable=True
-    )
     written_fields_json: Mapped[str] = mapped_column(
         "writtenFieldsJson", Text, nullable=False, default="[]", server_default="[]"
     )

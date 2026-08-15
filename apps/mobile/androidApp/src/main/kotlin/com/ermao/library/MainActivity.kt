@@ -18,7 +18,13 @@ class MainActivity : AppCompatActivity() {
     private val localeController = AndroidXAppLocaleController()
     private val mainViewModel: MainViewModel by viewModels {
         val app = application as ErmaoLibraryApplication
-        MainViewModel.factory(app.mobileRuntime, app.loginCredentialStore, app, localeController)
+        MainViewModel.factory(
+            runtime = app.mobileRuntime,
+            credentialStore = app.loginCredentialStore,
+            appContext = app,
+            localeController = localeController,
+            initialLoginForm = localLoginDefaults(),
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

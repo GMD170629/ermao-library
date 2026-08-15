@@ -93,8 +93,6 @@ class DownloadPreparationActivity : AppCompatActivity() {
                                 volumeId = request.volumeId,
                                 displayTitle = request.workTitle,
                                 localReference = artifact.localReference,
-                                serverContentFingerprint = artifact.contentFingerprint,
-                                expectedBytes = artifact.expectedBytes,
                                 sourceFormat = artifact.format,
                             ),
                         )

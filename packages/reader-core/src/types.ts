@@ -49,8 +49,10 @@ export type ComicLocation = {
 
 export type PdfLocation = {
   kind: 'pdf';
-  pageNumber: number;
-  pageProgression?: number;
+  /** Zero-based canonical document page. */
+  pageIndex: number;
+  /** Normalized position within the page, quantized to four decimals. */
+  pageProgression: number;
 };
 
 export type ReaderLocation = ReflowableLocation | LegacyEpubLocation | ComicLocation | PdfLocation;
@@ -109,13 +111,13 @@ export type ReaderPreferences = {
   };
   comic: {
     direction: 'ltr' | 'rtl';
-    mode: 'single' | 'double';
+    spreadMode: 'single' | 'double';
     pageTurnAnimation: 'slide' | 'off';
     imageFit: 'width' | 'height' | 'contain' | 'original';
     imageVariant: 'original' | 'data-saver';
     zoom: number;
     pageWidth: number;
-    flow: 'paged' | 'vertical';
+    flow: 'paginated' | 'scrolled';
     coverSingle: boolean;
     pageGap: 0 | 8 | 16 | 24;
   };
@@ -133,13 +135,6 @@ type ReaderSourceBase = {
   workId: string;
   volumeId: string;
   contentUrl: string;
-  contentFingerprint: string;
-  localContentFingerprint?: {
-    originalFileHash: string;
-    parserVersion: string;
-    normalizationVersion: string;
-  };
-  publicationFingerprint?: PublicationFingerprint;
   /** Absolute RWPM manifest URL. Required by the Readium Web adapter. */
   publicationManifestUrl?: string;
   totalPages?: number | null;
@@ -152,7 +147,13 @@ export type ReaderSource = ReaderSourceBase & (
     navigation: ReaderNavigationEntry[];
     navigationFingerprint?: string;
   }
-  | { kind: 'comic' | 'pdf'; sourceFormat?: never }
+  | {
+      kind: 'comic';
+      sourceFormat: 'cbz' | 'zip' | 'cbr' | 'rar';
+      comicManifestUrl: string;
+      comicPageUrlTemplate: string;
+    }
+  | { kind: 'pdf'; sourceFormat?: never }
 );
 
 export type OperationToken = {
@@ -221,4 +222,4 @@ export type ReaderAdapterEvent =
   | (ReaderAdapterEventBase & { type: 'external-link'; href: string })
   | (ReaderAdapterEventBase & { type: 'password-required'; reason: 'need-password' | 'incorrect-password' })
   | (ReaderAdapterEventBase & { type: 'error'; error: ReaderError });
-import type { PublicationFingerprint, ReadiumLocatorEnvelope } from './exact-locator';
+import type { ReadiumLocatorEnvelope } from './exact-locator';

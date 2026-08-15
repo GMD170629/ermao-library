@@ -34,9 +34,8 @@ class ReaderCbzInstrumentedTest {
     private val sourceId = "cbz-reader-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
     private val progressStore = AndroidReaderProgressStore(context)
-    private val pages = listOf(
-        ReaderComicPage(0, "images/page-001.png", "image/png"),
-        ReaderComicPage(1, "images/page-002.png", "image/png"),
+    private val mismatchedServerHints = listOf(
+        ReaderComicPage(0, "server/not-local.png", "image/png", title = "Server title"),
     )
     private lateinit var source: com.ermao.library.shared.modules.reader.LocalReaderSource
 
@@ -48,7 +47,6 @@ class ReaderCbzInstrumentedTest {
                 displayTitle = "CBZ Book",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Cbz,
-                publicationFingerprint = null,
                 volumeId = sourceId,
             )
         }
@@ -61,8 +59,10 @@ class ReaderCbzInstrumentedTest {
     }
 
     @Test
-    fun opensCanonicalImagePublicationNavigatesPersistsAndRestoresZeroBasedPage() {
-        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source, pages)).use { scenario ->
+    fun localArchiveDefinesPageOrderEvenWhenServerHintsDisagree() {
+        ActivityScenario.launch<ReaderActivity>(
+            ReaderActivity.createIntent(context, source, mismatchedServerHints),
+        ).use { scenario ->
             waitUntil(scenario, "CBZ first page") {
                 it.imageNavigatorOrNull()?.view != null &&
                     (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.pageIndex == 0
@@ -80,7 +80,7 @@ class ReaderCbzInstrumentedTest {
         assertEquals(1, (persisted?.location as? ComicReaderLocation)?.pageIndex)
         assertEquals("images/page-002.png", (persisted?.location as? ComicReaderLocation)?.resourceHref)
 
-        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source, pages)).use { scenario ->
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             waitUntil(scenario, "restored CBZ second page") {
                 (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.let { location ->
                     location.pageIndex == 1 && location.resourceHref == "images/page-002.png"

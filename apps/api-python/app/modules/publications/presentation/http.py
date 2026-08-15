@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Request
@@ -60,7 +59,7 @@ from app.modules.publications.presentation.schemas import (
     PublicationPositions,
     PublicationRenderArtifactResponse,
     PublicationResourceResponse,
-    PublicationRuntimeFingerprint,
+    PublicationRuntimeMetadata,
     PublicationTocEntry,
 )
 
@@ -174,10 +173,11 @@ def _manifest(publication: NormalizedPublication) -> PublicationManifest:
         readingOrder=[link(value) for value in publication.reading_order],
         resources=[link(value) for value in publication.resources],
         toc=[toc(value) for value in publication.toc],
-        runtime=PublicationRuntimeFingerprint(
-            originalFileHash=publication.fingerprint.original_file_hash,
-            parser=publication.fingerprint.parser,
-            normalization=publication.fingerprint.normalization,
+        runtime=PublicationRuntimeMetadata(
+            sourceSizeBytes=publication.revision.source_size_bytes,
+            sourceMtimeMs=publication.revision.source_mtime_ms,
+            parser=publication.revision.parser,
+            normalization=publication.revision.normalization,
         ),
     )
 
@@ -280,8 +280,11 @@ def publication_render_artifact(
         media_type=RENDER_ARTIFACT_MEDIA_TYPE,
         filename=f"{volume_id}.epub",
         headers={
-            "Cache-Control": "private, max-age=31536000, immutable",
-            "ETag": f'"{artifact.content_hash.removeprefix("sha256:")}"',
+            "Cache-Control": "private, no-cache",
+            "ETag": (
+                f'W/"render-{artifact.source_size_bytes}-'
+                f'{artifact.source_mtime_ms}-{artifact.size_bytes}"'
+            ),
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -315,17 +318,13 @@ def publication_resource(
         PublicationResourceNotFoundError,
     ) as error:
         raise _not_found() from error
-    etag = f'"{hashlib.sha256(content).hexdigest()}"'
     headers = {
-        "Cache-Control": "private, max-age=60",
-        "ETag": etag,
+        "Cache-Control": "private, no-cache",
         "Vary": "Cookie",
         "X-Content-Type-Options": "nosniff",
     }
     if resource.media_type in {"application/xhtml+xml", "text/html"}:
         headers["Content-Security-Policy"] = _ACTIVE_CONTENT_CSP
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers=headers)
     response_content = b"" if request.method == "HEAD" else content
     headers["Content-Length"] = str(len(content))
     return Response(

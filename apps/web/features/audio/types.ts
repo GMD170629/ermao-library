@@ -1,12 +1,9 @@
-import type { PublicationFingerprint } from '@shuku/reader-core';
-
 export type AudioTrack = {
   fileId: string;
   title: string;
   url: string;
   mimeType: string;
   codec: string | null;
-  contentHash: string | null;
   durationMs: number;
   discNumber: number | null;
   trackNumber: number | null;
@@ -67,9 +64,6 @@ export type AudioBootstrap = {
   schemaVersion: 4;
   userId: string;
   readerType: 'audio';
-  contentFingerprint: string;
-  localContentFingerprint: string;
-  publicationFingerprint: PublicationFingerprint;
   progressRevision: number;
   book: AudioBookSummary;
   mediaVersion: AudioMediaVersionSummary;

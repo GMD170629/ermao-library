@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 
 import pytest
+from lxml import etree
+
 from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.infrastructure.file_writeback import (
@@ -13,7 +15,6 @@ from app.modules.metadata.infrastructure.file_writeback import (
     prepare_writeback,
     publish_prepared,
 )
-from lxml import etree
 
 
 def _payload(path: Path, **values: object) -> dict[str, object]:
@@ -72,7 +73,7 @@ def test_every_book_format_writes_opf_without_mutating_source(
     assert prepared.output_path == source.with_suffix(".opf")
     assert prepared.warning_code is None
     output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path), prepared.output_hash
+        str(source), str(prepared.prepared_path)
     )
 
     assert output == source.with_suffix(".opf")
@@ -100,7 +101,7 @@ def test_sidecar_preserves_extensions_and_clears_removed_managed_fields(
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
     output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path), prepared.output_hash
+        str(source), str(prepared.prepared_path)
     )
 
     content = output.read_bytes()
@@ -130,7 +131,7 @@ def test_audiobook_fields_and_work_series_index_round_trip_independently(
         tmp_path,
     )
     output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path), prepared.output_hash
+        str(source), str(prepared.prepared_path)
     )
 
     metadata = parse_opf_metadata(output.read_bytes())
@@ -154,7 +155,7 @@ def test_cover_is_written_beside_opf_and_referenced_with_real_media_type(
         str(source), _payload(source, coverPath=str(cover)), tmp_path
     )
     output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path), prepared.output_hash
+        str(source), str(prepared.prepared_path)
     )
 
     package = etree.fromstring(output.read_bytes())
@@ -183,7 +184,7 @@ def test_directory_book_writes_metadata_opf_without_changing_contents(
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
     output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path), prepared.output_hash
+        str(source), str(prepared.prepared_path)
     )
 
     assert output == source / "metadata.opf"

@@ -79,7 +79,7 @@ class DownloadVolumeRuntimeTest {
     )
     private val context = DownloadRequestContext(profile, namespace)
     private val descriptor = DownloadDescriptor(
-        identity = DownloadIdentity(namespace, "work", "volume", "fingerprint"),
+        identity = DownloadIdentity(namespace, "work", "volume"),
         workTitle = "Book",
         workAuthor = "Author",
         coverApiPath = "/api/works/work/cover",

@@ -34,7 +34,7 @@ import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.features.downloads.application.DownloadCenterViewModel
 import com.ermao.library.features.downloads.application.DownloadedWorkViewModel
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
-import com.ermao.library.features.downloads.model.isSupportedNativeReflowable
+import com.ermao.library.features.downloads.model.isSupportedNativeDownloadReader
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
 import androidx.compose.foundation.layout.Arrangement
@@ -321,7 +321,7 @@ private fun OfflineDownloadsShell(
         val workViewModel: DownloadedWorkViewModel = viewModel(
             key = "offline-download-work-$namespaceKey-$workId",
             factory = DownloadedWorkViewModel.factory(downloadCatalog, namespace, workId) { record ->
-                downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+                downloadFiles.hasLocalArtifact(record.localReference)
             },
         )
         val workState by workViewModel.uiState.collectAsStateWithLifecycle()
@@ -329,7 +329,7 @@ private fun OfflineDownloadsShell(
             state = workState,
             onBack = { selectedWorkId = null },
             onOpenVolume = { record ->
-                if (isSupportedNativeReflowable(record.readerType, record.format)) {
+                if (isSupportedNativeDownloadReader(record.readerType, record.format)) {
                     appContext.startActivity(
                         com.ermao.library.features.reader.presentation.ReaderActivity.createManagedDownloadIntent(
                             context = appContext,
@@ -338,8 +338,6 @@ private fun OfflineDownloadsShell(
                             volumeId = record.volumeId,
                             displayTitle = record.workTitle,
                             localReference = checkNotNull(record.localReference),
-                            serverContentFingerprint = record.contentFingerprint,
-                            expectedBytes = record.expectedBytes,
                             sourceFormat = record.format,
                         ),
                     )
@@ -354,7 +352,7 @@ private fun OfflineDownloadsShell(
     val centerViewModel: DownloadCenterViewModel = viewModel(
         key = "offline-downloads-$namespaceKey",
         factory = DownloadCenterViewModel.factory(downloadCatalog, namespace) { record ->
-            downloadFiles.isVerifiedLocalArtifact(record.localReference, record.expectedBytes)
+            downloadFiles.hasLocalArtifact(record.localReference)
         },
     )
     val centerState by centerViewModel.uiState.collectAsStateWithLifecycle()

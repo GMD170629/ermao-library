@@ -91,16 +91,17 @@ internal class AndroidReaderProgressDatabase(
         val writable = database.writableDatabase
         writable.transaction {
             val current = readSyncState(writable)
-            if (current.pending?.mutationId == mutationId) {
-                writeSyncState(
-                    writable,
-                    current.copy(
-                        confirmedRevision = maxOf(current.confirmedRevision, serverRevision),
-                        pending = null,
-                        terminalFailureCode = null,
-                    ),
-                )
+            val rebased = current.pending?.let { pending ->
+                if (pending.mutationId == mutationId) null else pending.copy(baseRevision = serverRevision)
             }
+            writeSyncState(
+                writable,
+                current.copy(
+                    confirmedRevision = maxOf(current.confirmedRevision, serverRevision),
+                    pending = rebased,
+                    terminalFailureCode = null,
+                ),
+            )
         }
     }
 

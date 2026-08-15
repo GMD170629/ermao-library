@@ -1,0 +1,5 @@
+module ShukuPdfium {
+  header "shuku_pdfium.h"
+  header "shuku_pdfium_revision.h"
+  export *
+}

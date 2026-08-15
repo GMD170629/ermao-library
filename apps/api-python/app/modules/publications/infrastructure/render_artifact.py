@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import posixpath
 import zipfile
@@ -247,8 +246,9 @@ def build_render_artifact(
 
     metadata = {
         "normalization": RENDER_NORMALIZATION_IDENTIFIER,
-        "originalFileHash": publication.fingerprint.original_file_hash,
-        "parser": publication.fingerprint.parser,
+        "sourceSizeBytes": publication.revision.source_size_bytes,
+        "sourceMtimeMs": publication.revision.source_mtime_ms,
+        "parser": publication.revision.parser,
         "recoveredResourceCount": recovered_count,
         "schemaVersion": RENDER_ARTIFACT_SCHEMA_VERSION,
         "sourceFormat": source.source_format,
@@ -269,10 +269,10 @@ def build_render_artifact(
     content = _artifact_bytes(resources)
     return PreparedPublicationRenderArtifact(
         content=content,
-        content_hash=f"sha256:{hashlib.sha256(content).hexdigest()}",
         size_bytes=len(content),
-        original_file_hash=publication.fingerprint.original_file_hash,
-        source_parser=publication.fingerprint.parser,
+        source_size_bytes=publication.revision.source_size_bytes,
+        source_mtime_ms=publication.revision.source_mtime_ms,
+        source_parser=publication.revision.parser,
         normalization=RENDER_NORMALIZATION_IDENTIFIER,
         unreadable_hrefs=tuple(unreadable),
         recovered_resource_count=recovered_count,

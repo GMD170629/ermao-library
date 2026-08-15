@@ -2,7 +2,6 @@ import {
   normalizeReaderPreferences,
   parseSupportedReaderSourceFormat,
   readerFormatCapability,
-  type PublicationFingerprint,
   type ReaderLocation,
   type ReaderNavigationEntry,
   type ReaderSource,
@@ -60,13 +59,11 @@ export type ReaderBootstrap = Readonly<{
   userId: string;
   readerType: VisualReaderType;
   sourceFormat: SupportedReaderSourceFormat;
-  contentFingerprint: string;
-  publicationFingerprint: PublicationFingerprint;
   book: Readonly<{ id: string; title: string; author: string | null; coverUrl: string | null }>;
   mediaVersion: Readonly<{ id: string; workId: string; mediaKind: MediaKind; completed: boolean }>;
   volume: ReaderVolume;
   availableVolumes: ReaderVolume[];
-  files: ReadonlyArray<Readonly<{ id: string; kind: string; mimeType: string; sizeBytes: number; contentHash: string | null; durationMs: number | null; discNumber: number | null; trackNumber: number | null; sortOrder: number; url: string }>>;
+  files: ReadonlyArray<Readonly<{ id: string; kind: string; mimeType: string; sizeBytes: number; durationMs: number | null; discNumber: number | null; trackNumber: number | null; sortOrder: number; url: string }>>;
   units: ReaderUnit[];
   pages: ReaderPage[];
   fileUrl: string;
@@ -79,7 +76,6 @@ export type ReaderBootstrap = Readonly<{
     url: string;
     mimeType: 'application/epub+zip';
     sizeBytes: number;
-    contentHash: string;
   }> | null;
   initialLocation: ReaderLocation | null;
   serverPreferences: Readonly<{ settings: import('@shuku/reader-core').ReaderPreferences; updatedAt: string | null }>;
@@ -116,16 +112,6 @@ function visualReaderType(value: unknown): VisualReaderType | null {
   return value === 'reflowable' || value === 'comic' || value === 'pdf' ? value : null;
 }
 
-function publicationFingerprint(value: unknown): PublicationFingerprint | null {
-  const item = record(value);
-  const originalFileHash = stringValue(item.originalFileHash).trim();
-  const parser = stringValue(item.parser).trim();
-  const normalization = stringValue(item.normalization).trim();
-  return /^(?:sha256:)?[a-f\d]{64}$/iu.test(originalFileHash) && parser && normalization
-    ? { originalFileHash: `sha256:${originalFileHash.replace(/^sha256:/iu, '').toLowerCase()}`, parser, normalization }
-    : null;
-}
-
 function mapVolume(value: unknown): ReaderVolume | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
@@ -151,29 +137,63 @@ function mapVolume(value: unknown): ReaderVolume | null {
 }
 
 function mapUnits(value: unknown): ReaderUnit[] {
-  return (Array.isArray(value) ? value : []).flatMap((raw) => {
+  const units = (Array.isArray(value) ? value : []).map((raw) => {
     const item = record(raw);
     const id = stringValue(item.id).trim();
-    if (!id) return [];
-    return [{ id, index: numberValue(item.index), title: stringValue(item.title, id), href: nullableString(item.href), fileId: nullableString(item.fileId), startMs: nullableNumber(item.startMs), endMs: nullableNumber(item.endMs), durationMs: nullableNumber(item.durationMs), metadata: record(item.metadata) }];
+    const index = numberValue(item.index, -1);
+    if (!id || !Number.isInteger(index) || index < 0) {
+      throw new ReaderBootstrapError('READER_BOOTSTRAP_INVALID', 'Reader navigation unit is invalid');
+    }
+    return { id, index, title: stringValue(item.title).trim() || id, href: nullableString(item.href), fileId: nullableString(item.fileId), startMs: nullableNumber(item.startMs), endMs: nullableNumber(item.endMs), durationMs: nullableNumber(item.durationMs), metadata: record(item.metadata) };
   });
+  units.sort((left, right) => left.index - right.index);
+  if (new Set(units.map((unit) => unit.id)).size !== units.length
+    || new Set(units.map((unit) => unit.index)).size !== units.length) {
+    throw new ReaderBootstrapError('READER_BOOTSTRAP_INVALID', 'Reader navigation units must be unique');
+  }
+  return units;
 }
 
 function serverNavigation(units: ReaderUnit[]): ReaderNavigationEntry[] {
   return units.filter((unit) => unit.href).map((unit) => ({ id: unit.id, navigationKey: unit.id, label: unit.title, href: unit.href ?? undefined, index: unit.index }));
 }
 
-function mapPages(units: ReaderUnit[]): ReaderPage[] {
-  return units.flatMap((unit) => unit.href ? [{
-    // The server contract is zero-based; the Web comic presentation is one-based.
-    pageIndex: Math.max(0, numberValue(unit.metadata.pageIndex, unit.index)) + 1,
-    resourceHref: unit.href,
-    title: unit.title || null,
-    mimeType: nullableString(unit.metadata.mimeType),
-    width: nullableNumber(unit.metadata.width),
-    height: nullableNumber(unit.metadata.height),
-    size: nullableNumber(unit.metadata.size)
-  }] : []);
+async function fetchComicManifest(
+  manifestUrl: string,
+  volumeId: string,
+  sourceFormat: SupportedReaderSourceFormat,
+  signal: AbortSignal
+): Promise<ReaderPage[]> {
+  const response = await fetch(withBasePath(manifestUrl), { credentials: 'same-origin', cache: 'no-cache', signal });
+  const payload: unknown = await response.json().catch(() => null);
+  const envelope = record(payload);
+  const manifest = record(envelope.data);
+  const readingOrder = Array.isArray(manifest.readingOrder) ? manifest.readingOrder : [];
+  if (!response.ok || envelope.ok !== true
+    || manifest.schemaVersion !== 1
+    || manifest.kind !== 'comic'
+    || manifest.volumeId !== volumeId
+    || manifest.sourceFormat !== sourceFormat
+    || numberValue(manifest.pageCount, -1) !== readingOrder.length
+    || readingOrder.length === 0) {
+    throw new ReaderBootstrapError('READER_COMIC_MANIFEST_INVALID', '漫画页面清单无效');
+  }
+  return readingOrder.map((raw, index) => {
+    const page = record(raw);
+    const resourceHref = stringValue(page.resourceHref);
+    if (page.pageIndex !== index || resourceHref !== `pages/${index}`) {
+      throw new ReaderBootstrapError('READER_COMIC_INDEX_INVALID', '漫画页面顺序无效');
+    }
+    return {
+      pageIndex: index,
+      resourceHref,
+      title: nullableString(page.title),
+      mimeType: nullableString(page.mediaType),
+      width: nullableNumber(page.width),
+      height: nullableNumber(page.height),
+      size: nullableNumber(page.sizeBytes)
+    };
+  });
 }
 
 export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal): Promise<ReaderBootstrap> {
@@ -208,16 +228,39 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     const file = record(raw);
     const id = stringValue(file.id).trim();
     if (!id) return [];
-    return [{ id, kind: stringValue(file.kind), mimeType: stringValue(file.mimeType), sizeBytes: numberValue(file.sizeBytes), contentHash: nullableString(file.contentHash), durationMs: nullableNumber(file.durationMs), discNumber: nullableNumber(file.discNumber), trackNumber: nullableNumber(file.trackNumber), sortOrder: numberValue(file.sortOrder), url: withBasePath(stringValue(file.url)) }];
+    return [{ id, kind: stringValue(file.kind), mimeType: stringValue(file.mimeType), sizeBytes: numberValue(file.sizeBytes), durationMs: nullableNumber(file.durationMs), discNumber: nullableNumber(file.discNumber), trackNumber: nullableNumber(file.trackNumber), sortOrder: numberValue(file.sortOrder), url: withBasePath(stringValue(file.url)) }];
   });
+  if (readerType === 'pdf') {
+    const pdfFile = files.find((file) => file.mimeType.toLowerCase() === 'application/pdf') ?? files[0];
+    if (!pdfFile || pdfFile.sizeBytes <= 0) {
+      throw new ReaderBootstrapError('PDF_INVALID', 'PDF 阅读信息缺少准确大小');
+    }
+  }
   const fileUrl = stringValue(data.fileUrl).trim();
   if (!fileUrl) throw new Error('阅读器启动信息缺少内容文件');
   const capabilities = record(data.capabilities);
-  const fingerprint = publicationFingerprint(data.publicationFingerprint);
-  if (!fingerprint) throw new Error('阅读器启动信息缺少 Publication 指纹');
-  const contentFingerprint = fingerprint
-    ? [fingerprint.originalFileHash, fingerprint.parser, fingerprint.normalization].join('\u0000')
-    : '';
+  const comicManifestUrl = readerType === 'comic' ? nullableString(publicationAccess.manifestUrl) : null;
+  const comicPageUrlTemplate = readerType === 'comic' ? nullableString(publicationAccess.pageUrlTemplate) : null;
+  const expectedComicManifestUrl = `/api/reader/v4/volumes/${encodeURIComponent(volume.id)}/comic/manifest`;
+  const expectedComicPageTemplate = `/api/reader/v4/volumes/${encodeURIComponent(volume.id)}/comic/pages/{pageIndex}`;
+  if (readerType === 'comic' && (
+    publicationAccess.kind !== 'comic'
+    || comicManifestUrl !== expectedComicManifestUrl
+    || comicPageUrlTemplate !== expectedComicPageTemplate
+    || !Array.isArray(publicationAccess.imageVariants)
+    || publicationAccess.imageVariants.join(',') !== 'original,data-saver'
+  )) {
+    throw new ReaderBootstrapError('READER_COMIC_PROTOCOL_INVALID', '漫画流式阅读协议无效');
+  }
+  const manifestPages = readerType === 'comic'
+    ? await fetchComicManifest(comicManifestUrl ?? '', volume.id, format, signal)
+    : [];
+  const pages = manifestPages.map((page) => ({
+    ...page,
+    title: page.title
+      ?? units.find((unit) => unit.metadata.pageIndex === page.pageIndex)?.title
+      ?? String(page.pageIndex + 1)
+  }));
   const serverProgressSnapshot = data.progressSnapshot === null || data.progressSnapshot === undefined
     ? null
     : parseReaderV4ProgressSnapshot(data.progressSnapshot);
@@ -232,20 +275,16 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   }
   const renderAccess = record(publicationAccess.renderArtifact);
   const renderUrl = nullableString(renderAccess.url);
-  const renderHash = nullableString(renderAccess.contentHash);
   const renderSize = numberValue(renderAccess.sizeBytes);
   const renderArtifact = renderUrl
     && renderAccess.schemaVersion === 1
     && renderAccess.mimeType === 'application/epub+zip'
     && renderSize > 0
-    && renderHash
-    && /^sha256:[a-f\d]{64}$/u.test(renderHash)
     ? {
         schemaVersion: 1 as const,
         url: withBasePath(renderUrl),
         mimeType: 'application/epub+zip' as const,
-        sizeBytes: renderSize,
-        contentHash: renderHash
+        sizeBytes: renderSize
       }
     : null;
   if (publicationAccess.renderArtifact !== null
@@ -254,22 +293,31 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     throw new ReaderBootstrapError('READER_RENDER_ARTIFACT_INVALID', '阅读渲染文件信息无效');
   }
   const source: ReaderSource = readerType === 'reflowable'
-    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format as ReflowableFormat, contentUrl: renderArtifact?.url ?? withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint, ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
-    : { workId, volumeId: volume.id, kind: readerType, contentUrl: withBasePath(fileUrl), contentFingerprint, publicationFingerprint: fingerprint ?? undefined, totalPages: volume.pageCount };
+    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format as ReflowableFormat, contentUrl: renderArtifact?.url ?? withBasePath(fileUrl), ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
+    : readerType === 'comic'
+      ? {
+          workId,
+          volumeId: volume.id,
+          kind: 'comic',
+          sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar',
+          contentUrl: withBasePath(fileUrl),
+          comicManifestUrl: withBasePath(comicManifestUrl ?? ''),
+          comicPageUrlTemplate: withBasePath(comicPageUrlTemplate ?? ''),
+          totalPages: pages.length
+        }
+      : { workId, volumeId: volume.id, kind: 'pdf', contentUrl: withBasePath(fileUrl), totalPages: volume.pageCount };
   return {
     schemaVersion: 4,
     userId: stringValue(data.userId),
     readerType,
     sourceFormat: format,
-    contentFingerprint,
-    publicationFingerprint: fingerprint,
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名作品'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
     mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind, completed: mediaVersion.completed === true },
     volume,
     availableVolumes: (Array.isArray(data.availableVolumes) ? data.availableVolumes : []).map(mapVolume).filter((item): item is ReaderVolume => item !== null),
     files,
     units,
-    pages: readerType === 'comic' ? mapPages(units) : [],
+    pages,
     fileUrl,
     capabilities: {
       canGoNext: capabilities.canGoNext === true,
@@ -346,9 +394,8 @@ export function readerBookmarkToWire(entry: ReaderBookmark) {
   };
 }
 
-export async function fetchReaderBookmarks(volumeId: string, contentFingerprint: string, format: ReflowableFormat | null, signal?: AbortSignal): Promise<ReaderBookmark[]> {
-  const query = new URLSearchParams({ contentFingerprint });
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks?${query}`, { credentials: 'same-origin', cache: 'no-store', signal });
+export async function fetchReaderBookmarks(volumeId: string, format: ReflowableFormat | null, signal?: AbortSignal): Promise<ReaderBookmark[]> {
+  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks`, { credentials: 'same-origin', cache: 'no-store', signal });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);
@@ -356,9 +403,9 @@ export async function fetchReaderBookmarks(volumeId: string, contentFingerprint:
   return data.bookmarks.map((item) => readerBookmarkFromWire(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
 }
 
-export async function saveReaderBookmarks(volumeId: string, contentFingerprint: string, format: ReflowableFormat | null, bookmarks: ReaderBookmark[]): Promise<ReaderBookmark[]> {
+export async function saveReaderBookmarks(volumeId: string, format: ReflowableFormat | null, bookmarks: ReaderBookmark[]): Promise<ReaderBookmark[]> {
   const wireBookmarks = bookmarks.map(readerBookmarkToWire);
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentFingerprint, bookmarks: wireBookmarks }) });
+  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookmarks: wireBookmarks }) });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);

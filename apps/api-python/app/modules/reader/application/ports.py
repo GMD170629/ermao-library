@@ -11,7 +11,6 @@ from app.modules.reader.application.dto import (
     ReaderExactLocationDto,
     ReaderFileDto,
     ReaderProgressDto,
-    ReaderPublicationFingerprintDto,
     ReaderReadingStatus,
     ReaderUnitDto,
     ReaderVolumeContextDto,
@@ -50,7 +49,6 @@ class ReaderVolumeRepository(Protocol):
         reader_type: str,
         display_percent: float,
         location: ReaderExactLocationDto,
-        content_fingerprint: str,
         client_id: str,
         mutation_id: str,
         base_revision: int,
@@ -66,7 +64,6 @@ class ReaderVolumeRepository(Protocol):
         context: ReaderVolumeContextDto,
         reader_type: str,
         status: ReaderReadingStatus,
-        content_fingerprint: str,
         now: datetime,
     ) -> ReaderProgressDto | None: ...
 
@@ -78,7 +75,6 @@ class ReaderVolumeRepository(Protocol):
         reader_type: str,
         percent: float,
         location_json: str,
-        content_fingerprint: str,
         mutation_id: str,
         client_id: str,
         client_sequence: int,
@@ -89,7 +85,7 @@ class ReaderVolumeRepository(Protocol):
     ) -> ReaderProgressDto: ...
 
     def list_bookmarks(
-        self, user_id: str, volume_id: str, content_fingerprint: str
+        self, user_id: str, volume_id: str
     ) -> list[ReaderBookmarkDto]: ...
 
     def replace_bookmarks(
@@ -97,7 +93,6 @@ class ReaderVolumeRepository(Protocol):
         *,
         user_id: str,
         volume_id: str,
-        content_fingerprint: str,
         bookmarks: list[ReaderBookmarkDto],
         now: datetime,
     ) -> list[ReaderBookmarkDto]: ...
@@ -114,17 +109,10 @@ class ReaderClock(Protocol):
 
 
 class ReaderPublicationLocatorIndex(Protocol):
-    def fingerprint(
-        self,
-        *,
-        volume_id: str,
-        access_scope: ReaderAccessScope,
-    ) -> ReaderPublicationFingerprintDto | None: ...
-
     def validate(
         self,
         *,
         volume_id: str,
         access_scope: ReaderAccessScope,
         location: ReaderExactLocationDto,
-    ) -> ReaderPublicationFingerprintDto | None: ...
+    ) -> bool: ...

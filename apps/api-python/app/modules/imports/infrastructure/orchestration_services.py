@@ -170,7 +170,7 @@ class SessionImportOrchestrationServices:
             source_path=artifact.source_path,
             output_path=artifact.output_path,
             source_format=artifact.source_format,
-            source_hash=artifact.source_hash,
+            source_key=artifact.source_key,
             converter=artifact.converter,
             converter_version=artifact.converter_version,
             cached=artifact.cached,

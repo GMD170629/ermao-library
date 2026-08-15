@@ -43,7 +43,15 @@ final class ReaderPersistenceTests: XCTestCase {
         var changed = initial
         changed.theme = .green
         changed.fontSize = 24
-        first.save(changed)
+        changed.comicDirection = .rtl
+        changed.comicSpread = .double
+        changed.comicCoverSingle = true
+        changed.comicPageGap = 16
+        changed.pdfZoom = 1.4
+        changed.pdfFit = .width
+        changed.pdfRotation = 90
+        changed.pdfCropMargins = .auto
+        XCTAssertTrue(first.save(changed))
         XCTAssertEqual(first.load(), changed)
         XCTAssertEqual(anotherUser.load(), IosReaderPreferences())
         XCTAssertEqual(first.reset(), IosReaderPreferences())
@@ -170,7 +178,7 @@ final class ReaderPersistenceTests: XCTestCase {
         )
     }
 
-    func testExactIdentitySeparatesClientButKeepsProgressAcrossContentVersion() async throws {
+    func testExactIdentitySeparatesClientButKeepsProgressForTheVolume() async throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         let primary = try IosReaderLocalDatabase(
             identity: makeIdentity(authorizationVersion: 4, volumeID: "volume-a"),
@@ -186,29 +194,24 @@ final class ReaderPersistenceTests: XCTestCase {
             ),
             databaseURL: databaseURL
         )
-        let anotherContent = try IosReaderLocalDatabase(
-            identity: makeIdentity(
-                authorizationVersion: 4,
-                volumeID: "volume-a",
-                fileHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            ),
+        let sameVolume = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 4, volumeID: "volume-a"),
             databaseURL: databaseURL
         )
 
         let otherClientBeforeSave = try await anotherClient.load(sourceId: "volume-a")
-        let otherContentBeforeSave = try await anotherContent.load(sourceId: "volume-a")
+        let sameVolumeBeforeSave = try await sameVolume.load(sourceId: "volume-a")
         XCTAssertNil(otherClientBeforeSave)
-        XCTAssertEqual(otherContentBeforeSave?.updatedAtEpochMillis, 100)
+        XCTAssertEqual(sameVolumeBeforeSave?.updatedAtEpochMillis, 100)
 
-        try await anotherContent.save(progress: try decodeProgress(
+        try await sameVolume.save(progress: try decodeProgress(
             sourceID: "volume-a",
-            updatedAt: 200,
-            fileHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            updatedAt: 200
         ))
         let originalRestored = try await primary.load(sourceId: "volume-a")
-        let otherContentRestored = try await anotherContent.load(sourceId: "volume-a")
+        let sameVolumeRestored = try await sameVolume.load(sourceId: "volume-a")
         XCTAssertEqual(originalRestored?.updatedAtEpochMillis, 200)
-        XCTAssertEqual(otherContentRestored?.updatedAtEpochMillis, 200)
+        XCTAssertEqual(sameVolumeRestored?.updatedAtEpochMillis, 200)
     }
 
     func testLatestLocalSaveOverwritesEvenWhenWallClockMovesBackward() async throws {
@@ -305,7 +308,7 @@ final class ReaderPersistenceTests: XCTestCase {
         ))
     }
 
-    func testIncompleteExactKeyFromAnotherContentVersionIsDiscarded() async throws {
+    func testIncompleteExactKeyIsDiscarded() async throws {
         let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
         let oldOwnerKey = "8:server-a6:user-a"
         try createIncompleteExactDatabase(
@@ -314,8 +317,7 @@ final class ReaderPersistenceTests: XCTestCase {
             sourceID: "preview-volume",
             payload: progressPayload(
                 sourceID: "preview-volume",
-                updatedAt: 444,
-                fileHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                updatedAt: 444
             )
         )
 
@@ -393,11 +395,13 @@ final class ReaderPersistenceTests: XCTestCase {
             databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
         )
         let port = RecordingReaderProgressPort(failure: TestUploadFailure.expected)
-        let store = IosReaderProgressStore(
-            database: database,
+        let runtime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
+            stateStore: database,
             target: makeTarget(namespace: namespace, volumeID: "upload-volume"),
-            syncPort: port
+            server: port
         )
+        defer { runtime.close() }
+        let store = runtime.store
         let progress = try decodeProgress(sourceID: "upload-volume", updatedAt: 1_775_988_523_456)
 
         try await store.save(progress: progress)
@@ -409,10 +413,6 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(port.uploadCount, 1)
         XCTAssertNotNil(state.pending)
         XCTAssertEqual(state.pending?.capturedAtEpochMillis, progress.updatedAtEpochMillis)
-        XCTAssertEqual(
-            port.lastLocalContentHash,
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        )
         XCTAssertTrue(port.lastLocatorPayload?.contains("chapter.xhtml") == true)
     }
 
@@ -423,11 +423,13 @@ final class ReaderPersistenceTests: XCTestCase {
             databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
         )
         let port = BlockingReaderProgressPort()
-        let store = IosReaderProgressStore(
-            database: database,
+        let runtime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
+            stateStore: database,
             target: makeTarget(namespace: namespace, volumeID: "single-flight-volume"),
-            syncPort: port
+            server: port
         )
+        defer { runtime.close() }
+        let store = runtime.store
 
         try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 100))
         await port.waitUntilFirstUploadStarts()
@@ -457,19 +459,13 @@ final class ReaderPersistenceTests: XCTestCase {
         authorizationVersion: Int64,
         workID: String = "work-a",
         volumeID: String,
-        clientID: String = "ios-installation-c",
-        fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        parserVersion: String = "readium-swift:3.8.0",
-        normalizationVersion: String = "shuku-epub-locator-dom-v2"
+        clientID: String = "ios-installation-c"
     ) -> ErmaoShared.ReaderLocalProgressIdentity {
         makeIdentity(
             namespace: makeNamespace(authorizationVersion: authorizationVersion),
             workID: workID,
             volumeID: volumeID,
-            clientID: clientID,
-            fileHash: fileHash,
-            parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion
+            clientID: clientID
         )
     }
 
@@ -477,10 +473,7 @@ final class ReaderPersistenceTests: XCTestCase {
         namespace: ErmaoShared.ReaderSyncNamespace,
         workID: String = "work-a",
         volumeID: String,
-        clientID: String = "ios-installation-c",
-        fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        parserVersion: String = "readium-swift:3.8.0",
-        normalizationVersion: String = "shuku-epub-locator-dom-v2"
+        clientID: String = "ios-installation-c"
     ) -> ErmaoShared.ReaderLocalProgressIdentity {
         ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
             namespace: namespace,
@@ -493,14 +486,12 @@ final class ReaderPersistenceTests: XCTestCase {
     private func decodeProgress(
         sourceID: String,
         updatedAt: Int64,
-        clientID: String = "ios-installation-c",
-        fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        clientID: String = "ios-installation-c"
     ) throws -> ErmaoShared.ReaderProgress {
         try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: progressPayload(
             sourceID: sourceID,
             updatedAt: updatedAt,
-            clientID: clientID,
-            fileHash: fileHash
+            clientID: clientID
         ))
     }
 
@@ -519,10 +510,9 @@ final class ReaderPersistenceTests: XCTestCase {
     private func progressPayload(
         sourceID: String,
         updatedAt: Int64,
-        clientID: String = "ios-installation-c",
-        fileHash: String = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        clientID: String = "ios-installation-c"
     ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":5,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}},"contentFingerprint":{"originalFileHash":"\##(fileHash)","parserVersion":"readium-swift:3.8.0","normalizationVersion":"shuku-epub-locator-dom-v2"}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
+        ##"{"schema":"ermao.reader-progress","version":6,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
     }
 
     private func legacyProgressURL(sourceID: String, root: URL) -> URL {
@@ -650,7 +640,7 @@ private enum TestUploadFailure: Error {
     case expected
 }
 
-private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressSyncPort, @unchecked Sendable {
+private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressServerPort, @unchecked Sendable {
     private let lock = NSLock()
     private let failure: Error?
     private var uploads: [ErmaoShared.ReaderProgressUpload] = []
@@ -660,9 +650,6 @@ private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressSyncP
     }
 
     var uploadCount: Int { withLock { uploads.count } }
-    var lastLocalContentHash: String? {
-        withLock { uploads.last?.mutation.locator.publication.originalFileHash }
-    }
     var lastLocatorPayload: String? {
         withLock {
             (uploads.last?.mutation.locator as? ErmaoShared.ReflowablePublicationLocation)?
@@ -686,6 +673,13 @@ private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressSyncP
         )
     }
 
+    func load(
+        target: ErmaoShared.ReaderProgressSyncTarget,
+        etag: String?
+    ) async throws -> ErmaoShared.ReaderProgressQueryResult {
+        ErmaoShared.ReaderProgressQueryResultCurrent(snapshot: nil, etag: etag)
+    }
+
     private func withLock<T>(_ operation: () -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -693,7 +687,7 @@ private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressSyncP
     }
 }
 
-private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressSyncPort, @unchecked Sendable {
+private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressServerPort, @unchecked Sendable {
     private let lock = NSLock()
     private var uploads: [Int64] = []
     private var firstContinuation: CheckedContinuation<Void, Never>?
@@ -721,6 +715,13 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressSyncPo
                 capturedAtEpochMillis: KotlinLong(longLong: upload.mutation.capturedAtEpochMillis)
             )
         )
+    }
+
+    func load(
+        target: ErmaoShared.ReaderProgressSyncTarget,
+        etag: String?
+    ) async throws -> ErmaoShared.ReaderProgressQueryResult {
+        ErmaoShared.ReaderProgressQueryResultCurrent(snapshot: nil, etag: etag)
     }
 
     func waitUntilFirstUploadStarts() async {

@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 @preconcurrency import ReadiumShared
 import XCTest
@@ -31,7 +30,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
             )
             let result = try await IosMobiPublicationFactory().open(
                 fileURL: url,
-                contentFingerprint: "physical-\(fixture.0)",
+                sourceID: "physical-\(fixture.0)",
                 displayTitle: fixture.0
             )
             let firstLink = try XCTUnwrap(result.publication.readingOrder.first)
@@ -47,7 +46,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let book = FixedMobiBook.fixture()
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            contentFingerprint: "sha256-parser-normalization"
+            sourceID: "parser-normalization"
         )
 
         XCTAssertEqual(result.format, .kf8)
@@ -81,7 +80,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let book = FixedMobiBook.fixture(binarySize: IosMobiBook.maximumReadBytes * 2 + 31)
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            contentFingerprint: "streaming-fixture"
+            sourceID: "streaming-fixture"
         )
         let resourceLink = try XCTUnwrap(
             result.publication.resources.first { $0.href == "assets/large.bin" }
@@ -105,7 +104,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let book = FixedMobiBook.fixture(structuralTocRoot: true)
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            contentFingerprint: "structural-toc"
+            sourceID: "structural-toc"
         )
 
         let root = try XCTUnwrap(result.publication.manifest.tableOfContents.first)
@@ -131,7 +130,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            contentFingerprint: "sanitizer-fixture"
+            sourceID: "sanitizer-fixture"
         )
         let markupLink = try XCTUnwrap(
             result.publication.readingOrder.first { $0.href == "text/chapter.xhtml" }
@@ -163,7 +162,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         do {
             _ = try await IosMobiPublicationFactory().build(
                 book: invalidPath,
-                contentFingerprint: "invalid-path"
+                sourceID: "invalid-path"
             )
             XCTFail("Expected invalid resource path")
         } catch {
@@ -174,7 +173,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         do {
             _ = try await IosMobiPublicationFactory().build(
                 book: duplicatePath,
-                contentFingerprint: "duplicate-path"
+                sourceID: "duplicate-path"
             )
             XCTFail("Expected duplicate resource path")
         } catch {
@@ -185,7 +184,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         do {
             _ = try await IosMobiPublicationFactory().build(
                 book: invalidToc,
-                contentFingerprint: "invalid-toc"
+                sourceID: "invalid-toc"
             )
             XCTFail("Expected invalid table of contents")
         } catch {
@@ -203,7 +202,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
     }
 
-    func testManagedStorePersistsSidecarEpubWithOriginalMobiFingerprint() async throws {
+    func testManagedStorePersistsValidatedSidecarEpubBySourceIdentity() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("managed-mobi-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -214,10 +213,6 @@ final class MobiPublicationFactoryTests: XCTestCase {
             0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
             0x14, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
         ]) + Data("mimetypeapplication/epub+zip".utf8)
-        let artifactHash = "sha256:" + SHA256.hash(data: sidecar)
-            .map { String(format: "%02x", $0) }
-            .joined()
-        let originalHash = "sha256:" + String(repeating: "a", count: 64)
         let staging = try await store.prepareDownload(
             sourceID: "volume-azw3",
             expectedSize: Int64(sidecar.count)
@@ -229,10 +224,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
             sourceID: "volume-azw3",
             displayTitle: "AZW3 fixture",
             byteCount: Int64(sidecar.count),
-            artifactContentHash: artifactHash,
             expectedSize: Int64(sidecar.count),
-            expectedContentHash: artifactHash,
-            originalFileHash: originalHash,
             parserVersion: IosMobiBook.parserIdentifier,
             normalizationVersion: IosMobiPublicationIdentity.normalizationIdentifier,
             sourceFormat: .epub,
@@ -241,21 +233,10 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
         XCTAssertEqual(imported.sourceFormat, .epub)
         XCTAssertEqual(imported.fileURL.pathExtension, "epub")
-        XCTAssertEqual(imported.artifactContentHash, artifactHash)
-        XCTAssertEqual(imported.fingerprint.originalFileHash, originalHash)
-
-        try await store.bindServerContentFingerprint(
-            sourceID: imported.sourceID,
-            value: "opaque-content-key"
-        )
         let restored = try await store.resolve(sourceID: imported.sourceID)
         XCTAssertEqual(restored.sourceFormat, .epub)
-        XCTAssertEqual(restored.serverContentFingerprint, "opaque-content-key")
-        XCTAssertEqual(restored.fingerprint.parserVersion, IosMobiBook.parserIdentifier)
-        XCTAssertEqual(
-            restored.fingerprint.normalizationVersion,
-            IosMobiPublicationIdentity.normalizationIdentifier
-        )
+        XCTAssertEqual(restored.sourceID, "volume-azw3")
+        XCTAssertEqual(restored.byteCount, Int64(sidecar.count))
     }
 }
 

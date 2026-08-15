@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 @preconcurrency import ErmaoShared
 
@@ -51,7 +50,6 @@ private actor IosPublicationDownloadWorker {
     private let staging: URL
     private let download: ErmaoShared.ReaderPublicationDownload
     private var output: FileHandle?
-    private var hasher = SHA256()
     private var byteCount: Int64 = 0
     private var completed = false
 
@@ -71,13 +69,11 @@ private actor IosPublicationDownloadWorker {
               count <= bytes.size
         else { throw IosReaderFailure(code: .corruptFile) }
         let nextCount = byteCount + Int64(count)
-        guard nextCount <= download.expectedSizeBytes,
-              nextCount <= IosManagedPublicationStore.maximumPublicationBytes
+        guard nextCount <= IosManagedPublicationStore.maximumPublicationBytes
         else { throw IosReaderFailure(code: .outOfMemoryRisk) }
         let chunk = Data((0..<Int(count)).map { UInt8(bitPattern: bytes.get(index: Int32($0))) })
         if output == nil { output = try FileHandle(forWritingTo: staging) }
         try output?.write(contentsOf: chunk)
-        hasher.update(data: chunk)
         byteCount = nextCount
     }
 
@@ -88,31 +84,23 @@ private actor IosPublicationDownloadWorker {
             try output?.synchronize()
             try output?.close()
             output = nil
-            let hash = "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
             let managed = try await store.commitDownload(
                 staging: staging,
                 sourceID: download.sourceId,
                 displayTitle: download.displayTitle,
                 byteCount: byteCount,
-                artifactContentHash: hash,
                 expectedSize: download.expectedSizeBytes,
-                expectedContentHash: download.expectedContentHash,
-                originalFileHash: download.publicationFingerprint.originalFileHash,
-                parserVersion: download.publicationFingerprint.parser,
-                normalizationVersion: download.publicationFingerprint.normalization,
+                parserVersion: "reader-v4",
+                normalizationVersion: "reader-v4",
                 sourceFormat: download.sourceFormat,
                 workID: download.workId,
-                volumeID: download.volumeId
+                volumeID: download.volumeId,
+                validateWithReaderParser: true
             )
             return ErmaoShared.LocalReaderSource(
                 sourceId: managed.sourceID,
                 displayTitle: managed.displayTitle,
                 format: managed.sourceFormat.readerFormat,
-                contentFingerprint: ErmaoShared.ContentFingerprint(
-                    originalFileHash: managed.fingerprint.originalFileHash,
-                    parserVersion: managed.fingerprint.parserVersion,
-                    normalizationVersion: managed.fingerprint.normalizationVersion
-                ),
                 workId: managed.workID,
                 volumeId: managed.volumeID,
                 sourceFormat: managed.sourceFormat

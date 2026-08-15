@@ -26,7 +26,6 @@ from app.modules.imports.application.import_support import (
     _attrs,
     _classification_columns,
     _classification_result_type,
-    _content_hash,
     _ensure_work,
     _extract_isbn,
     _file_resource_key,
@@ -76,7 +75,6 @@ def _import_epub(
     metadata = parse_epub_metadata(options.source_file_path)
     source_path = options.source_file_path.resolve()
     source_stat = source_path.stat()
-    full_hash = _content_hash(source_path)
     raw_metadata = metadata.get("rawMetadata")
     embedded_metadata = metadata["publicationMetadata"]
     identity, resolved_local = resolve_import_metadata(
@@ -233,8 +231,6 @@ def _import_epub(
                     "volumeId": volume["id"],
                     "path": str(source_path),
                     "filePathHash": _hash_text(str(source_path)),
-                    "fullHash": full_hash,
-                    "hashStatus": "COMPLETED",
                     "kind": "EPUB",
                     "mimeType": "application/epub+zip",
                     "sizeBytes": file_size,
@@ -369,8 +365,6 @@ def _import_epub(
                 "volumeId": volume["id"],
                 "path": str(source_path),
                 "filePathHash": _hash_text(str(source_path)),
-                "fullHash": full_hash,
-                "hashStatus": "COMPLETED",
                 "kind": "EPUB",
                 "mimeType": "application/epub+zip",
                 "sizeBytes": file_size,

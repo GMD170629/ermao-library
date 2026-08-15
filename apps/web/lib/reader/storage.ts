@@ -1,4 +1,14 @@
-import { READER_SCHEMA_VERSION, normalizeReaderPreferences, type ReaderPreferences } from '@shuku/reader-core';
+import {
+  PDF_RANGE_DOCUMENT_CACHE_BYTES,
+  PDF_RANGE_NAMESPACE_CACHE_BYTES,
+  READER_SCHEMA_VERSION,
+  normalizeReaderPreferences,
+  pdfRangeChunkKey,
+  pdfRangeDocumentKey,
+  pdfRangeNamespaceKey,
+  type PdfRangeCacheIdentity,
+  type ReaderPreferences
+} from '@shuku/reader-core';
 import {
   READER_DB_SCHEMA_VERSION,
   READER_PROGRESS_DB_NAME,
@@ -17,6 +27,7 @@ import {
   type ReaderBookCache,
   type ReaderBookCacheIdentity
 } from './book-cache';
+import type { CachedPdfRangeChunk, PdfRangeCache } from './pdf-range-cache';
 
 const PREFERENCES_STORE = 'preferences';
 const EXACT_PROGRESS_STORE = 'exact-progress';
@@ -24,11 +35,21 @@ const PENDING_PROGRESS_STORE = 'pending-progress';
 const META_STORE = 'meta';
 const DIAGNOSTICS_STORE = 'diagnostics';
 const BOOK_FILES_STORE = 'book-files';
+const PDF_RANGE_CHUNKS_STORE = 'pdf-range-chunks';
 
 type ReaderStoreName = typeof PREFERENCES_STORE | typeof EXACT_PROGRESS_STORE
   | typeof PENDING_PROGRESS_STORE | typeof META_STORE
-  | typeof DIAGNOSTICS_STORE | typeof BOOK_FILES_STORE;
+  | typeof DIAGNOSTICS_STORE | typeof BOOK_FILES_STORE | typeof PDF_RANGE_CHUNKS_STORE;
 type ClientMeta = { key: 'client'; clientId: string };
+type StoredPdfRangeChunk = {
+  key: string;
+  documentKey: string;
+  namespaceKey: string;
+  chunkIndex: number;
+  byteLength: number;
+  bytes: ArrayBuffer;
+  lastAccessedAt: number;
+};
 
 export interface ReaderStorage {
   getPreference(userId: string, workId: string): Promise<ReaderPreferenceSnapshot | null>;
@@ -96,6 +117,11 @@ function openDatabase() {
         const store = database.createObjectStore(BOOK_FILES_STORE, { keyPath: 'key' });
         store.createIndex('by-user-volume', 'userVolumeKey', { unique: false });
       }
+      if (!database.objectStoreNames.contains(PDF_RANGE_CHUNKS_STORE)) {
+        const store = database.createObjectStore(PDF_RANGE_CHUNKS_STORE, { keyPath: 'key' });
+        store.createIndex('by-document', 'documentKey', { unique: false });
+        store.createIndex('by-namespace', 'namespaceKey', { unique: false });
+      }
       if (event.oldVersion > 0 && event.oldVersion < 2) {
         [EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE].forEach((name) => {
           if (database.objectStoreNames.contains(name)) request.transaction?.objectStore(name).clear();
@@ -128,7 +154,68 @@ async function withTransaction<T>(stores: ReaderStoreName | ReaderStoreName[], m
   }
 }
 
-export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache {
+export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache, PdfRangeCache {
+  async getPdfRangeChunk(identity: PdfRangeCacheIdentity, chunkIndex: number): Promise<CachedPdfRangeChunk | null> {
+    return withTransaction(PDF_RANGE_CHUNKS_STORE, 'readwrite', async (stores) => {
+      const store = stores(PDF_RANGE_CHUNKS_STORE);
+      const value = await requestResult(store.get(pdfRangeChunkKey(identity, chunkIndex))) as StoredPdfRangeChunk | undefined;
+      if (!value || !(value.bytes instanceof ArrayBuffer) || value.byteLength <= 0) return null;
+      const updated = { ...value, lastAccessedAt: Date.now() };
+      await requestResult(store.put(updated));
+      return { bytes: new Uint8Array(value.bytes.slice(0)), lastAccessedAt: updated.lastAccessedAt };
+    });
+  }
+  async putPdfRangeChunk(
+    identity: PdfRangeCacheIdentity,
+    chunkIndex: number,
+    bytes: Uint8Array,
+    protectedChunkKeys: readonly string[] = []
+  ) {
+    if (bytes.byteLength <= 0) return;
+    const documentKey = pdfRangeDocumentKey(identity);
+    const namespaceKey = pdfRangeNamespaceKey(identity);
+    const key = pdfRangeChunkKey(identity, chunkIndex);
+    const protectedKeys = new Set([...protectedChunkKeys, key]);
+    await withTransaction(PDF_RANGE_CHUNKS_STORE, 'readwrite', async (stores) => {
+      const store = stores(PDF_RANGE_CHUNKS_STORE);
+      const value: StoredPdfRangeChunk = {
+        key,
+        documentKey,
+        namespaceKey,
+        chunkIndex,
+        byteLength: bytes.byteLength,
+        bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+        lastAccessedAt: Date.now()
+      };
+      await requestResult(store.put(value));
+      const documentChunks = await requestResult(store.index('by-document').getAll(documentKey)) as StoredPdfRangeChunk[];
+      const removed = new Set<string>();
+      let documentBytes = documentChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+      for (const chunk of documentChunks.sort((left, right) => left.lastAccessedAt - right.lastAccessedAt)) {
+        if (documentBytes <= PDF_RANGE_DOCUMENT_CACHE_BYTES) break;
+        if (protectedKeys.has(chunk.key)) continue;
+        await requestResult(store.delete(chunk.key));
+        removed.add(chunk.key);
+        documentBytes -= chunk.byteLength;
+      }
+      const namespaceChunks = (await requestResult(store.index('by-namespace').getAll(namespaceKey)) as StoredPdfRangeChunk[])
+        .filter((chunk) => !removed.has(chunk.key));
+      let namespaceBytes = namespaceChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+      for (const chunk of namespaceChunks.sort((left, right) => left.lastAccessedAt - right.lastAccessedAt)) {
+        if (namespaceBytes <= PDF_RANGE_NAMESPACE_CACHE_BYTES) break;
+        if (protectedKeys.has(chunk.key)) continue;
+        await requestResult(store.delete(chunk.key));
+        namespaceBytes -= chunk.byteLength;
+      }
+    });
+  }
+  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'volumeId'>) {
+    await withTransaction(PDF_RANGE_CHUNKS_STORE, 'readwrite', async (stores) => {
+      const store = stores(PDF_RANGE_CHUNKS_STORE);
+      const keys = await requestResult(store.index('by-namespace').getAllKeys(pdfRangeNamespaceKey(identity)));
+      await Promise.all(keys.map((key) => requestResult(store.delete(key))));
+    });
+  }
   async getBookFile(identity: ReaderBookCacheIdentity) {
     return withTransaction(BOOK_FILES_STORE, 'readonly', async (stores) => {
       const value = await requestResult(stores(BOOK_FILES_STORE).get(readerBookCacheKey(identity))) as CachedReaderBookFile | undefined;
@@ -219,7 +306,7 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache {
   async putExactAndDeletePending(progress: ExactProgressRecord, pendingKey: string) { await withTransaction([EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE], 'readwrite', async (stores) => { await requestResult(stores(EXACT_PROGRESS_STORE).put(progress)); await requestResult(stores(PENDING_PROGRESS_STORE).delete(pendingKey)); }); }
   async addDiagnostic(diagnostic: Omit<ReaderSyncDiagnostic, 'id' | 'createdAt'>, now = Date.now()) { const value = { ...diagnostic, id: createId('diagnostic'), createdAt: now }; await withTransaction(DIAGNOSTICS_STORE, 'readwrite', async (stores) => { await requestResult(stores(DIAGNOSTICS_STORE).put(value)); }); return value; }
   async listDiagnostics(limit = 100) { return withTransaction(DIAGNOSTICS_STORE, 'readonly', async (stores) => ((await requestResult(stores(DIAGNOSTICS_STORE).getAll())) as ReaderSyncDiagnostic[]).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)); }
-  async clearAll() { const names: ReaderStoreName[] = [PREFERENCES_STORE, EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, META_STORE, DIAGNOSTICS_STORE, BOOK_FILES_STORE]; await withTransaction(names, 'readwrite', async (stores) => { await Promise.all(names.map((name) => requestResult(stores(name).clear()))); }); }
+  async clearAll() { const names: ReaderStoreName[] = [PREFERENCES_STORE, EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, META_STORE, DIAGNOSTICS_STORE, BOOK_FILES_STORE, PDF_RANGE_CHUNKS_STORE]; await withTransaction(names, 'readwrite', async (stores) => { await Promise.all(names.map((name) => requestResult(stores(name).clear()))); }); }
 }
 
 export { syncStateKey };

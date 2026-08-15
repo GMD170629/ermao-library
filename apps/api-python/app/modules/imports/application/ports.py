@@ -67,7 +67,7 @@ class TextConversionProgressStore(Protocol):
         source_path: Path,
         source_format: str,
         converter: str,
-        source_hash: str,
+        source_key: str,
         options_json: str,
         now: int,
     ) -> ConversionProgressTaskDTO: ...

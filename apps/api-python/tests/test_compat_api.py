@@ -1,3 +1,4 @@
+import hashlib
 import json
 import zipfile
 from contextlib import nullcontext
@@ -6951,6 +6952,49 @@ def test_imported_pdf_supports_stream_bootstrap_and_v4_progress(
     assert data["volume"]["format"] == "PDF"
     assert data["volume"]["pageCount"] >= 1
     assert len(data["units"]) == 1
+    assert len(data["files"]) == 1
+    content_hash = data["files"][0]["contentHash"]
+    assert content_hash.startswith("sha256:")
+
+    head = client.head(f"/api/volumes/{volume_id}/file")
+    assert head.status_code == 200
+    assert head.content == b""
+    assert head.headers["accept-ranges"] == "bytes"
+    assert head.headers["etag"] == f'"{content_hash}"'
+    assert int(head.headers["content-length"]) == pdf.stat().st_size
+
+    matching_if_range = client.get(
+        f"/api/volumes/{volume_id}/file",
+        headers={"Range": "bytes=5-9", "If-Range": head.headers["etag"]},
+    )
+    assert matching_if_range.status_code == 206
+    assert matching_if_range.headers["content-range"].startswith("bytes 5-9/")
+    assert matching_if_range.headers["etag"] == head.headers["etag"]
+
+    changed_resource = client.get(
+        f"/api/volumes/{volume_id}/file",
+        headers={"Range": "bytes=5-9", "If-Range": '"sha256:' + "0" * 64 + '"'},
+    )
+    assert changed_resource.status_code == 200
+    assert "content-range" not in changed_resource.headers
+
+    suffix = client.get(f"/api/volumes/{volume_id}/file", headers={"Range": "bytes=-5"})
+    assert suffix.status_code == 206
+    assert suffix.headers["content-range"].endswith(f"/{pdf.stat().st_size}")
+
+    invalid_range = client.get(
+        f"/api/volumes/{volume_id}/file", headers={"Range": "bytes=invalid"}
+    )
+    assert invalid_range.status_code == 416
+    assert invalid_range.headers["content-range"] == f"bytes */{pdf.stat().st_size}"
+    assert invalid_range.json()["error"]["code"] == "RANGE_INVALID"
+
+    unsatisfiable_range = client.get(
+        f"/api/volumes/{volume_id}/file",
+        headers={"Range": f"bytes={pdf.stat().st_size}-"},
+    )
+    assert unsatisfiable_range.status_code == 416
+    assert unsatisfiable_range.json()["error"]["code"] == "RANGE_NOT_SATISFIABLE"
 
     saved = _save_reader_progress_v4(
         client,
@@ -6998,7 +7042,47 @@ def test_imported_comic_serves_archive_page(
         ).scalar()
         == 2
     )
-    page = client.get(f"/api/volumes/{volume_id}/pages/1")
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap")
+    assert bootstrap.status_code == 200
+    bootstrap_data = bootstrap.json()["data"]
+    publication = bootstrap_data["publication"]
+    assert publication["kind"] == "comic"
+    assert publication["imageVariants"] == ["original", "data-saver"]
+    assert publication["downloadArtifact"]["sourceFormat"] == "zip"
+    fingerprint = bootstrap_data["contentFingerprint"]
+
+    manifest = client.get(publication["manifestUrl"])
+    assert manifest.status_code == 200
+    assert manifest.json()["data"]["readingOrder"] == [
+        {
+            "pageIndex": 0,
+            "resourceHref": "pages/0",
+            "title": "第 1 页",
+            "mediaType": "image/jpeg",
+            "width": None,
+            "height": None,
+            "sizeBytes": 3,
+        },
+        {
+            "pageIndex": 1,
+            "resourceHref": "pages/1",
+            "title": "第 2 页",
+            "mediaType": "image/jpeg",
+            "width": None,
+            "height": None,
+            "sizeBytes": 3,
+        },
+    ]
+    unchanged_manifest = client.get(
+        publication["manifestUrl"], headers={"If-None-Match": manifest.headers["etag"]}
+    )
+    assert unchanged_manifest.status_code == 304
+
+    page_url = publication["pageUrlTemplate"].replace("{pageIndex}", "0")
+    page = client.get(
+        page_url,
+        params={"fingerprint": fingerprint, "imageVariant": "original"},
+    )
 
     assert page.status_code == 200
     assert page.content == b"one"
@@ -7012,17 +7096,34 @@ def test_imported_comic_serves_archive_page(
     )
 
     ranged = client.get(
-        f"/api/volumes/{volume_id}/pages/1", headers={"Range": "bytes=1-2"}
+        page_url,
+        params={"fingerprint": fingerprint, "imageVariant": "original"},
+        headers={"Range": "bytes=1-2"},
     )
     assert ranged.status_code == 206
     assert ranged.content == b"ne"
     assert ranged.headers["content-range"] == "bytes 1-2/3"
 
     cached = client.get(
-        f"/api/volumes/{volume_id}/pages/1",
+        page_url,
+        params={"fingerprint": fingerprint, "imageVariant": "original"},
         headers={"If-None-Match": page.headers["etag"]},
     )
     assert cached.status_code == 304
+    changed = client.get(
+        page_url,
+        params={"fingerprint": "sha256:" + "0" * 64},
+    )
+    assert changed.status_code == 409
+    assert changed.json()["error"]["code"] == "READER_COMIC_PUBLICATION_CHANGED"
+
+    archive = client.get(publication["downloadArtifact"]["url"])
+    assert archive.status_code == 200
+    assert archive.content == comic.read_bytes()
+    assert hashlib.sha256(archive.content).hexdigest() in publication["downloadArtifact"]["contentHash"]
+
+    assert client.get(f"/api/volumes/{volume_id}/pages").status_code == 410
+    assert client.get(f"/api/volumes/{volume_id}/pages/1").status_code == 410
 
 
 def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
@@ -7043,6 +7144,7 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
     )
     volume_id = "archive-volume"
     _add_comic_volume(db_session, volume_id)
+    db_session.get(LibraryVolume, volume_id).format = "ZIP"
     db_session.execute(
         text(
             """
@@ -7075,28 +7177,40 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
             "metadata": json.dumps({"zipEntryName": "001.jpg"}),
         },
     )
+    archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    db_session.execute(
+        text("UPDATE LibraryFile SET fullHash = :hash, fingerprint = :fingerprint WHERE id = 'archive-file'"),
+        {"hash": archive_hash, "fingerprint": f"sha256:{archive_hash}"},
+    )
     db_session.commit()
 
-    original = client.get(f"/api/volumes/{volume_id}/pages/1?imageVariant=original")
+    bootstrap_response = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap")
+    assert bootstrap_response.status_code == 200, bootstrap_response.json()
+    bootstrap = bootstrap_response.json()["data"]
+    page_url = bootstrap["publication"]["pageUrlTemplate"].replace("{pageIndex}", "0")
+    page_params = {"fingerprint": bootstrap["contentFingerprint"]}
+    original = client.get(page_url, params={**page_params, "imageVariant": "original"})
     assert original.status_code == 200
     assert original.content == source_jpeg
     assert original.headers["content-type"].startswith("image/jpeg")
     assert original.headers["x-comic-image-variant"] == "original"
 
-    data_saver = client.get(f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver")
+    data_saver = client.get(page_url, params={**page_params, "imageVariant": "data-saver"})
     assert data_saver.status_code == 200
-    assert data_saver.content[4:12] == b"ftypavif"
-    assert data_saver.headers["content-type"].startswith("image/avif")
+    assert data_saver.content[:4] == b"RIFF"
+    assert data_saver.content[8:12] == b"WEBP"
+    assert data_saver.headers["content-type"].startswith("image/webp")
     assert data_saver.headers["x-comic-image-variant"] == "data-saver"
     assert (
-        data_saver.headers["x-comic-image-quality"] == "avif;q=12;speed=9;mode=extreme"
+        data_saver.headers["x-comic-image-quality"] == "webp;q=75;max-edge=2048"
     )
     assert float(data_saver.headers["x-comic-image-compression-ratio"]) < 1
     assert len(data_saver.content) < len(source_jpeg)
     assert data_saver.headers["etag"] != original.headers["etag"]
 
     ranged = client.get(
-        f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver",
+        page_url,
+        params={**page_params, "imageVariant": "data-saver"},
         headers={"Range": "bytes=0-3"},
     )
     assert ranged.status_code == 206
@@ -7104,13 +7218,14 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
     assert ranged.headers["content-range"] == f"bytes 0-3/{len(data_saver.content)}"
 
     cached = client.get(
-        f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver",
+        page_url,
+        params={**page_params, "imageVariant": "data-saver"},
         headers={"If-None-Match": data_saver.headers["etag"]},
     )
     assert cached.status_code == 304
 
 
-def test_comic_page_data_saver_returns_extreme_avif_for_stored_page_file(
+def test_legacy_comic_page_route_is_retired_for_stored_page_file(
     client, db_session, test_settings
 ):
     create_worker_tables(db_session)
@@ -7138,23 +7253,9 @@ def test_comic_page_data_saver_returns_extreme_avif_for_stored_page_file(
     )
     db_session.commit()
 
-    original = client.get("/api/volumes/direct-volume/pages/1?imageVariant=original")
-    assert original.status_code == 200
-    assert original.content == source_jpeg
-    assert original.headers["x-comic-image-variant"] == "original"
-
-    data_saver = client.get(
-        "/api/volumes/direct-volume/pages/1?imageVariant=data-saver"
-    )
-    assert data_saver.status_code == 200
-    assert data_saver.content[4:12] == b"ftypavif"
-    assert data_saver.headers["content-type"].startswith("image/avif")
-    assert data_saver.headers["x-comic-image-variant"] == "data-saver"
-    assert (
-        data_saver.headers["x-comic-image-quality"] == "avif;q=12;speed=9;mode=extreme"
-    )
-    assert float(data_saver.headers["x-comic-image-compression-ratio"]) < 1
-    assert len(data_saver.content) < len(source_jpeg)
+    retired = client.get("/api/volumes/direct-volume/pages/1?imageVariant=original")
+    assert retired.status_code == 410
+    assert retired.json()["error"]["code"] == "READER_LEGACY_ROUTE_RETIRED"
 
 
 def test_comic_page_data_saver_never_returns_a_larger_transcode():
@@ -7162,10 +7263,11 @@ def test_comic_page_data_saver_never_returns_a_larger_transcode():
     Image.new("L", (1, 1), "white").save(output, format="PNG", optimize=True)
     source = output.getvalue()
 
-    assert media_streaming._comic_page_avif_bytes(source) is None
+    optimized = media_streaming._comic_page_webp_bytes(source)
+    assert optimized is None or len(optimized) < len(source)
 
 
-def test_comic_page_data_saver_uses_one_fixed_avif_encode(monkeypatch):
+def test_comic_page_data_saver_uses_one_fixed_webp_encode(monkeypatch):
     source = _comic_page_jpeg_bytes()
     original_save = Image.Image.save
     calls: list[dict] = []
@@ -7176,10 +7278,10 @@ def test_comic_page_data_saver_uses_one_fixed_avif_encode(monkeypatch):
 
     monkeypatch.setattr(Image.Image, "save", capture_save)
 
-    optimized = media_streaming._comic_page_avif_bytes(source)
+    optimized = media_streaming._comic_page_webp_bytes(source)
 
     assert optimized is not None
-    assert calls == [{"format": "AVIF", "quality": 12, "speed": 9}]
+    assert calls == [{"format": "WEBP", "quality": 75, "method": 4, "lossless": False}]
 
 
 def test_volume_pages_require_persisted_comic_page_index(
@@ -7217,9 +7319,10 @@ def test_volume_pages_require_persisted_comic_page_index(
     db_session.commit()
 
     listed = client.get(f"/api/volumes/{volume_id}/pages")
-    assert listed.status_code == 200
-    pages = listed.json()["data"]["pages"]
-    assert pages == []
+    assert listed.status_code == 410
+    manifest = client.get(f"/api/reader/v4/volumes/{volume_id}/comic/manifest")
+    assert manifest.status_code == 422
+    assert manifest.json()["error"]["code"] == "COMIC_MANIFEST_UNAVAILABLE"
     assert (
         db_session.execute(
             text("SELECT COUNT(*) FROM LibraryReadingUnit WHERE volumeId = :volume_id"),
@@ -7243,7 +7346,7 @@ def test_volume_pages_require_persisted_comic_page_index(
     }
 
     page = client.get(f"/api/volumes/{volume_id}/pages/2")
-    assert page.status_code == 404
+    assert page.status_code == 410
 
 
 def test_file_stream_limit_zero_disables_slot_rejection(monkeypatch):
@@ -7308,6 +7411,10 @@ def test_archive_page_streams_are_limited_and_logged(
         ),
     )
     volume_id = imported.volume_id
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap")
+    assert bootstrap.status_code == 200
+    fingerprint = bootstrap.json()["data"]["contentFingerprint"]
+    page_url = f"/api/reader/v4/volumes/{volume_id}/comic/pages/0"
     user_id = db_session.execute(
         text("SELECT id FROM User WHERE email = 'admin@example.com'")
     ).scalar()
@@ -7315,7 +7422,7 @@ def test_archive_page_streams_are_limited_and_logged(
     with media_streaming._active_file_streams_lock:
         media_streaming._active_file_streams_by_user[user_id] = 1
     try:
-        limited = client.get(f"/api/volumes/{volume_id}/pages/1")
+        limited = client.get(page_url, params={"fingerprint": fingerprint})
         assert limited.status_code == 429
     finally:
         with media_streaming._active_file_streams_lock:
@@ -7326,13 +7433,15 @@ def test_archive_page_streams_are_limited_and_logged(
         "WARNING", logger="app.modules.media.infrastructure.http_streaming"
     ):
         streamed = client.get(
-            f"/api/volumes/{volume_id}/pages/1", headers={"Range": "bytes=0-1"}
+            page_url,
+            params={"fingerprint": fingerprint},
+            headers={"Range": "bytes=0-1"},
         )
 
     assert streamed.status_code == 206
     assert streamed.content == b"on"
     assert any(
         "[slow-file-request]" in record.message
-        and "route=volume-page-zip" in record.message
+        and "route=reader-v4-comic-page" in record.message
         for record in caplog.records
     )

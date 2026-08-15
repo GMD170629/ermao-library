@@ -2,7 +2,6 @@ package com.ermao.library.mobi.infrastructure
 
 import java.io.File
 import java.io.IOException
-import java.security.MessageDigest
 import org.readium.r2.shared.InternalReadiumApi
 import org.readium.r2.shared.publication.Contributor
 import org.readium.r2.shared.publication.Layout
@@ -38,11 +37,6 @@ class MobiReadiumPublicationFactory {
         file: File,
         transformContainer: (Container<Resource>) -> Container<Resource> = { it },
     ): MobiReadiumPublication {
-        val originalHash = try {
-            sha256(file)
-        } catch (error: Throwable) {
-            throw error.toPublicationOpenException()
-        }
         val book = try {
             MobiCoreBook.open(file)
         } catch (error: Throwable) {
@@ -109,7 +103,7 @@ class MobiReadiumPublicationFactory {
             val container = MobiPublicationContainer(book, resources)
             val publication = Publication(
                 manifest = Manifest(
-                    metadata = metadata(book, info, file, originalHash),
+                    metadata = metadata(book, info, file),
                     readingOrder = readingOrder,
                     resources = manifestResources,
                     tableOfContents = tableOfContents,
@@ -118,7 +112,6 @@ class MobiReadiumPublicationFactory {
             )
             return MobiReadiumPublication(
                 publication = publication,
-                originalFileHash = originalHash,
                 parser = MobiCoreBook.parserIdentifier,
                 normalization = MOBI_PUBLICATION_NORMALIZATION_IDENTIFIER,
                 resources = resources.map(::MobiResourceEvidence),
@@ -134,14 +127,13 @@ class MobiReadiumPublicationFactory {
         book: MobiCoreBook,
         info: MobiCoreBookInfo,
         file: File,
-        originalHash: String,
     ): Metadata {
         val title = book.metadata(MobiCoreMetadataField.Title)?.takeIf(String::isNotBlank)
             ?: file.nameWithoutExtension
         val author = book.metadata(MobiCoreMetadataField.Author)?.takeIf(String::isNotBlank)
         val publisher = book.metadata(MobiCoreMetadataField.Publisher)?.takeIf(String::isNotBlank)
         return Metadata(
-            identifier = "urn:shuku:mobi:$originalHash",
+            identifier = "urn:shuku:mobi:${file.name}",
             type = "https://schema.org/Book",
             conformsTo = setOf(Publication.Profile.EPUB),
             localizedTitle = LocalizedString(title),
@@ -225,20 +217,8 @@ class MobiReadiumPublicationFactory {
         return value
     }
 
-    private fun sha256(file: File): String = file.inputStream().use { input ->
-        val digest = MessageDigest.getInstance("SHA-256")
-        val buffer = ByteArray(FILE_HASH_BUFFER_BYTES)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            digest.update(buffer, 0, count)
-        }
-        digest.digest().hex()
-    }
-
     private companion object {
         const val COVER_REL = "cover"
-        const val FILE_HASH_BUFFER_BYTES = 64 * 1024
         const val MAXIMUM_FRAGMENT_LENGTH = 2_048
         const val MAXIMUM_HREF_LENGTH = 4_096
         const val MAXIMUM_RESOURCE_BYTES = 64L * 1024L * 1024L
@@ -263,8 +243,6 @@ class MobiPublicationOpenException(
 
 class MobiReadiumPublication internal constructor(
     val publication: Publication,
-    /** Lower-case SHA-256 without a prefix, matching Reader v4 canonical wire output. */
-    val originalFileHash: String,
     val parser: String,
     val normalization: String,
     val resources: List<MobiResourceEvidence>,
@@ -279,17 +257,13 @@ class MobiReadiumPublication internal constructor(
     override fun close() = publication.close()
 }
 
-/** Immutable descriptor evidence; the digest is calculated lazily without retaining decoded bytes. */
+/** Immutable descriptor evidence. Bytes are read only when a diagnostic explicitly asks for them. */
 class MobiResourceEvidence internal constructor(
     private val resource: MobiLazyResource,
 ) {
     val href: String = resource.descriptor.href
     val mediaType: String = resource.descriptor.mediaType.toString()
     val byteCount: Long = resource.descriptor.decodedLength
-    val sha256: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        MessageDigest.getInstance("SHA-256").digest(readBytes()).hex()
-    }
-
     internal fun readBytes(): ByteArray = resource.readExact(null)
 }
 

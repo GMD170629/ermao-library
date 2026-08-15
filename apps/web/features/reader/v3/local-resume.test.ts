@@ -39,8 +39,7 @@ test('a newer server revision requires a startup choice', () => {
   assert.equal(decidePendingVsServer({ localExact: exact, pending, serverSnapshot: server(5) }).kind, 'requires-choice');
 });
 
-test('a publication fingerprint change does not invalidate pending progress for the same work and volume', () => {
-  const changedPublication = { ...pending, locator: { ...locator, publication: { ...locator.publication, normalization: 'different' } } };
-  const decision = decidePendingVsServer({ localExact: exact, pending: changedPublication, serverSnapshot: server(5) });
+test('pending progress remains scoped to the same work and volume without a fingerprint', () => {
+  const decision = decidePendingVsServer({ localExact: exact, pending: { ...pending, locator: { ...locator } }, serverSnapshot: server(5) });
   assert.equal(decision.kind, 'requires-choice');
 });

@@ -10,8 +10,6 @@ import com.ermao.library.shared.modules.reader.domain.compareExactProgressLocati
 
 typealias ComicReaderLocation = com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
 typealias AudioReaderLocation = com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
-typealias ContentFingerprint = com.ermao.library.shared.modules.reader.domain.ContentFingerprint
-typealias PublicationFingerprint = com.ermao.library.shared.modules.reader.domain.PublicationFingerprint
 typealias PublicationLocation = com.ermao.library.shared.modules.reader.domain.PublicationLocation
 typealias ReflowablePublicationLocation = com.ermao.library.shared.modules.reader.domain.ReflowablePublicationLocation
 typealias PdfPublicationLocation = com.ermao.library.shared.modules.reader.domain.PdfPublicationLocation
@@ -42,6 +40,17 @@ typealias ReaderAppearancePreferences = com.ermao.library.shared.modules.reader.
 typealias ReaderDisplayPreferences = com.ermao.library.shared.modules.reader.domain.ReaderDisplayPreferences
 typealias ReaderInteractionPreferences = com.ermao.library.shared.modules.reader.domain.ReaderInteractionPreferences
 typealias ReaderEpubPreferences = com.ermao.library.shared.modules.reader.domain.ReaderEpubPreferences
+typealias ReaderComicPreferences = com.ermao.library.shared.modules.reader.domain.ReaderComicPreferences
+typealias ReaderComicDirection = com.ermao.library.shared.modules.reader.domain.ReaderComicDirection
+typealias ReaderComicSpreadMode = com.ermao.library.shared.modules.reader.domain.ReaderComicSpreadMode
+typealias ReaderComicImageFit = com.ermao.library.shared.modules.reader.domain.ReaderComicImageFit
+typealias ReaderComicImageVariant = com.ermao.library.shared.modules.reader.domain.ReaderComicImageVariant
+typealias ReaderPdfPreferences = com.ermao.library.shared.modules.reader.domain.ReaderPdfPreferences
+typealias ReaderPdfFit = com.ermao.library.shared.modules.reader.domain.ReaderPdfFit
+typealias ReaderPdfFlow = com.ermao.library.shared.modules.reader.domain.ReaderPdfFlow
+typealias ReaderPdfCropMargins = com.ermao.library.shared.modules.reader.domain.ReaderPdfCropMargins
+typealias ReaderMorphology = com.ermao.library.shared.modules.reader.domain.ReaderMorphology
+typealias ReaderControlProfile = com.ermao.library.shared.modules.reader.domain.ReaderControlProfile
 typealias ReaderTypographyPreferences = com.ermao.library.shared.modules.reader.domain.ReaderTypographyPreferences
 typealias ReaderOptimizationPreferences = com.ermao.library.shared.modules.reader.domain.ReaderOptimizationPreferences
 typealias ReaderFontFamily = com.ermao.library.shared.modules.reader.domain.ReaderFontFamily
@@ -72,6 +81,10 @@ typealias ReflowReaderLocation = com.ermao.library.shared.modules.reader.domain.
 typealias TextQuote = com.ermao.library.shared.modules.reader.domain.TextQuote
 typealias ReaderClock = com.ermao.library.shared.modules.reader.application.ReaderClock
 typealias ReaderCommandResult = com.ermao.library.shared.modules.reader.application.ReaderCommandResult
+typealias ReaderCommandCompleted =
+    com.ermao.library.shared.modules.reader.application.ReaderCommandResult.Completed
+typealias ReaderCommandRejected =
+    com.ermao.library.shared.modules.reader.application.ReaderCommandResult.Rejected
 typealias ReaderDeviceIdentity = com.ermao.library.shared.modules.reader.application.ReaderDeviceIdentity
 typealias ReaderEnginePort = com.ermao.library.shared.modules.reader.application.ReaderEnginePort
 typealias ReaderOpenRequest = com.ermao.library.shared.modules.reader.application.ReaderOpenRequest
@@ -102,6 +115,7 @@ typealias LocalFirstReaderProgressStore =
     com.ermao.library.shared.modules.reader.application.LocalFirstReaderProgressStore
 typealias ReaderBootstrapRequest = com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
 typealias ReaderBootstrap = com.ermao.library.shared.modules.reader.application.ReaderBootstrap
+typealias ReaderNavigationUnit = com.ermao.library.shared.modules.reader.application.ReaderNavigationUnit
 typealias ReaderBootstrapResult = com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
 typealias ReaderBootstrapContent =
     com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult.Content
@@ -110,7 +124,10 @@ typealias ReaderBootstrapFailure =
 typealias ReaderBootstrapGateway = com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 typealias ReaderPublicationDownload =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
+typealias LocalReaderSourceResolver =
+    com.ermao.library.shared.modules.reader.application.LocalReaderSourceResolver
 typealias ReaderComicPage = com.ermao.library.shared.modules.reader.application.ReaderComicPage
+typealias ReaderPdfPage = com.ermao.library.shared.modules.reader.application.ReaderPdfPage
 typealias ReaderPublicationBootstrapResult =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationBootstrapResult
 typealias PublicationDownloadSink =
@@ -122,12 +139,23 @@ typealias PublicationDownloadPort =
 typealias PublicationDownloadResult =
     com.ermao.library.shared.modules.reader.application.PublicationDownloadResult
 typealias ReaderServerGateway = com.ermao.library.shared.modules.reader.application.ReaderServerGateway
+typealias PdfRangeServerPort = com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
+typealias PdfRangeProbeResult = com.ermao.library.shared.modules.reader.application.PdfRangeProbeResult
+typealias PdfRangeReadResult = com.ermao.library.shared.modules.reader.application.PdfRangeReadResult
 typealias BootstrapReaderPublication =
     com.ermao.library.shared.modules.reader.application.BootstrapReaderPublication
 typealias ReaderPublicationBootstrapContent =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationBootstrapResult.Content
 typealias ReaderPublicationBootstrapFailure =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationBootstrapResult.Failure
+typealias RemoteByteRangeReaderSource =
+    com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
+typealias RemoteComicReaderSource =
+    com.ermao.library.shared.modules.reader.domain.RemoteComicReaderSource
+typealias RemoteComicPage = com.ermao.library.shared.modules.reader.domain.RemoteComicPage
+typealias ReaderComicAccess = com.ermao.library.shared.modules.reader.application.ReaderComicAccess
+typealias ComicPageServerPort = com.ermao.library.shared.modules.reader.application.ComicPageServerPort
+typealias ComicPageReadResult = com.ermao.library.shared.modules.reader.application.ComicPageReadResult
 typealias ReaderRestoreCandidate = com.ermao.library.shared.modules.reader.application.ReaderRestoreCandidate
 typealias ReaderRestoreExactEngineLocation = com.ermao.library.shared.modules.reader.application.ReaderRestoreCandidate.ExactEngineLocation
 typealias ReaderRestoreExactLocalLocation = com.ermao.library.shared.modules.reader.application.ReaderRestoreCandidate.ExactLocalLocation
@@ -146,6 +174,20 @@ typealias ReaderResumeSource = com.ermao.library.shared.modules.reader.applicati
 typealias PendingVsServerDecision =
     com.ermao.library.shared.modules.reader.application.PendingVsServerDecision
 typealias ReaderTocEntry = com.ermao.library.shared.modules.reader.application.ReaderTocEntry
+typealias ReaderNavigationTarget = com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget
+typealias ReaderNavigationResult = com.ermao.library.shared.modules.reader.application.ReaderNavigationResult
+typealias ReaderNavigationTargetReflowable =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Reflowable
+typealias ReaderNavigationTargetPdf =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Pdf
+typealias ReaderNavigationTargetComic =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Comic
+typealias ReaderNavigationTargetInvalid =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Invalid
+typealias ReaderNavigationCompleted =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationResult.Completed
+typealias ReaderNavigationRejected =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationResult.Rejected
 typealias ReaderProgressJson = com.ermao.library.shared.modules.reader.infrastructure.ReaderProgressJson
 typealias ReaderProgressSyncStateJson =
     com.ermao.library.shared.modules.reader.infrastructure.ReaderProgressSyncStateJson

@@ -8,7 +8,6 @@ from app.modules.reader.application.dto import (
     ReaderComicExactLocationDto,
     ReaderExactLocationDto,
     ReaderPdfExactLocationDto,
-    ReaderPublicationFingerprintDto,
     ReaderReflowableExactLocationDto,
 )
 
@@ -23,9 +22,3 @@ def exact_location_kind(location: ReaderExactLocationDto) -> ExactReaderLocation
     if isinstance(location, ReaderAudioExactLocationDto):
         return "audio"
     raise TypeError("Unsupported exact Reader location")
-
-
-def exact_location_publication(
-    location: ReaderExactLocationDto,
-) -> ReaderPublicationFingerprintDto:
-    return location.publication

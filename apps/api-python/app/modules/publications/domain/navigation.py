@@ -14,15 +14,6 @@ from app.modules.publications.domain.model import (
 CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION = 3
 
 
-def canonical_original_file_hash(value: str) -> str:
-    """Normalize persisted and adapter hashes to the Publication wire form."""
-
-    normalized = value.strip().lower()
-    if normalized.startswith("sha256:"):
-        return normalized
-    return f"sha256:{normalized}"
-
-
 @dataclass(frozen=True, slots=True)
 class PublicationParserProfile:
     parser: str
@@ -33,7 +24,8 @@ class PublicationParserProfile:
 class PublicationNavigationCacheIdentity:
     volume_id: str
     file_id: str
-    original_file_hash: str
+    source_size_bytes: int
+    source_mtime_ms: int
     parser: str
     normalization: str
 
@@ -62,13 +54,15 @@ def publication_cache_identity(
     *,
     volume_id: str,
     file_id: str,
-    original_file_hash: str,
+    source_size_bytes: int,
+    source_mtime_ms: int,
     profile: PublicationParserProfile,
 ) -> PublicationNavigationCacheIdentity:
     return PublicationNavigationCacheIdentity(
         volume_id=volume_id,
         file_id=file_id,
-        original_file_hash=canonical_original_file_hash(original_file_hash),
+        source_size_bytes=source_size_bytes,
+        source_mtime_ms=source_mtime_ms,
         parser=profile.parser,
         normalization=profile.normalization,
     )
@@ -136,7 +130,6 @@ __all__ = [
     "PublicationNavigationCacheState",
     "PublicationNavigationEntry",
     "PublicationParserProfile",
-    "canonical_original_file_hash",
     "flatten_publication_navigation",
     "publication_cache_identity",
 ]

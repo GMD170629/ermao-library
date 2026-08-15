@@ -27,7 +27,6 @@ from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
     _clean_title_part,
-    _content_hash,
     _ensure_work,
     _file_resource_key,
     _finalize_work_cover,
@@ -121,7 +120,6 @@ def _import_comic(
     archive_format = str(
         parsed.get("format") or ext.removeprefix(".") or "COMIC"
     ).upper()
-    full_hash = _content_hash(source_path) if archive_format == "CBZ" else None
     classification = classify_content(
         normalize_media_kind_policy(options.media_kind_policy),
         ContentEvidence(
@@ -258,8 +256,6 @@ def _import_comic(
                 "volumeId": volume["id"],
                 "path": str(source_path),
                 "filePathHash": _hash_text(str(source_path)),
-                "fullHash": full_hash,
-                "hashStatus": "COMPLETED" if full_hash else "PARTIAL_PENDING",
                 "kind": "COMIC",
                 "mimeType": _comic_archive_media_type(parsed["format"]),
                 "sizeBytes": file_size,

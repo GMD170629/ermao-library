@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,6 +36,7 @@ class ReaderProgressSyncCoordinator(
 ) {
     private val mutex = Mutex()
     private var worker: Job? = null
+    private var wakeGeneration: Long = 0
     private var baselineRevision: Long = 0
     private var remoteNotice: ReaderRemoteProgressNotice? = null
     private val _remoteProgressNotices = MutableStateFlow<ReaderRemoteProgressNotice?>(null)
@@ -141,16 +143,22 @@ class ReaderProgressSyncCoordinator(
 
     private suspend fun launchDrain(target: ReaderProgressSyncTarget) {
         mutex.withLock {
+            wakeGeneration += 1
             if (worker?.isActive != true) worker = scope.launch { drain(target) }
         }
     }
 
     private suspend fun drain(target: ReaderProgressSyncTarget) {
+        val ownedWorker = checkNotNull(currentCoroutineContext()[Job])
         try {
             while (true) {
+                val observedWakeGeneration = mutex.withLock { wakeGeneration }
                 val state = stateStore.loadSyncState()
-                val next = state.pending ?: return
-                if (state.terminalFailureCode != null) return
+                val next = state.pending
+                if (next == null || state.terminalFailureCode != null) {
+                    if (finishIfNotWoken(ownedWorker, observedWakeGeneration)) return
+                    continue
+                }
                 when (val result = try {
                     server.push(ReaderProgressUpload(target, next))
                 } catch (cancelled: CancellationException) {
@@ -162,19 +170,36 @@ class ReaderProgressSyncCoordinator(
                     is ReaderProgressPushResult.Conflict -> {
                         stateStore.discardPendingAfterConflict(next.mutationId, result.current.revision)
                         observeRemoteProgress(result.current, next.clientId, stateStore.load(next.sourceId))
-                        return
+                        if (finishIfNotWoken(ownedWorker, observedWakeGeneration)) return
                     }
-                    is ReaderProgressPushResult.RetryableFailure -> return
+                    is ReaderProgressPushResult.RetryableFailure -> {
+                        if (finishIfNotWoken(ownedWorker, observedWakeGeneration)) return
+                    }
                     is ReaderProgressPushResult.Rejected -> {
                         stateStore.recordTerminalFailure(next.mutationId, result.failureCode)
-                        return
+                        if (finishIfNotWoken(ownedWorker, observedWakeGeneration)) return
                     }
                 }
             }
         } finally {
-            mutex.withLock { worker = null }
+            mutex.withLock {
+                if (worker === ownedWorker) worker = null
+            }
         }
     }
+
+    /** Atomically retires this worker only when no lifecycle/save wake arrived during its attempt. */
+    private suspend fun finishIfNotWoken(ownedWorker: Job, observedWakeGeneration: Long): Boolean =
+        mutex.withLock {
+            when {
+                worker !== ownedWorker -> true
+                wakeGeneration != observedWakeGeneration -> false
+                else -> {
+                    worker = null
+                    true
+                }
+            }
+        }
 }
 
 private fun ReaderFormat.accepts(progress: ReaderProgress): Boolean = when (this) {

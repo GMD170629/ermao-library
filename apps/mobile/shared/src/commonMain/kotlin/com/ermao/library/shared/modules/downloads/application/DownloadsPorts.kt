@@ -30,14 +30,12 @@ data class DownloadSinkRequest(
     val namespace: DownloadNamespace,
     val taskId: String,
     val volumeId: String,
-    val contentFingerprint: String,
     val expectedTotalBytes: Long,
     val resumeFromBytes: Long,
 ) {
     init {
         require(taskId.isNotBlank())
         require(volumeId.isNotBlank())
-        require(contentFingerprint.isNotBlank())
         require(expectedTotalBytes > 0)
         require(resumeFromBytes in 0 until expectedTotalBytes)
     }

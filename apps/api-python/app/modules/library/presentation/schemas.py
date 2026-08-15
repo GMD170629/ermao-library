@@ -616,6 +616,9 @@ class ReadingUnitMetadata(HttpContractModel):
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     track_index: int | None = Field(default=None, alias="trackIndex")
     page_number: int | None = Field(default=None, alias="pageNumber")
+    original_name: str | None = Field(default=None, alias="originalName")
+    page_in_volume: int | None = Field(default=None, ge=1, alias="pageInVolume")
+    page_in_section: int | None = Field(default=None, ge=1, alias="pageInSection")
     source_file_name: str | None = Field(default=None, alias="sourceFileName")
     href_base: Literal["publication-root"] | None = Field(
         default=None,
@@ -688,7 +691,6 @@ class PrimaryAction(HttpContractModel):
 class LocalProgressScope(HttpContractModel):
     user_id: str = Field(alias="userId")
     volume_id: str = Field(alias="volumeId")
-    content_fingerprint: str = Field(alias="contentFingerprint")
 
 
 class ActiveMedia(HttpContractModel):

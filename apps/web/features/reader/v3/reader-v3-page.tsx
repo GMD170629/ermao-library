@@ -356,7 +356,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
         if (pageNumber !== null) {
           bootstrap = {
             ...bootstrap,
-            initialLocation: { kind: 'pdf', pageNumber }
+            initialLocation: { kind: 'pdf', pageIndex: pageNumber - 1, pageProgression: 0 }
           };
           hasDirectTarget = true;
         } else {
@@ -525,7 +525,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     void runtime.storage.getClientId().then((clientId) => {
       if (!active) return;
       const initialExact = bootstrap.initialLocation
-        ? publicationLocationFromDomain(bootstrap.initialLocation, bootstrap.publicationFingerprint)
+        ? publicationLocationFromDomain(bootstrap.initialLocation)
         : bootstrap.serverProgressSnapshot?.locator ?? null;
       currentExactRef.current = initialExact;
       runtime.progress.beginSession(
@@ -589,7 +589,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const saveLocation = useCallback((location: Parameters<ReaderV4PageLocationHandler>[0], percent: number) => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
-    const exactLocation = publicationLocationFromDomain(location, bootstrap.publicationFingerprint);
+    const exactLocation = publicationLocationFromDomain(location);
     if (!exactLocation) {
       setStorageError(translate('当前阅读位置尚未形成可跨端验证的精确锚点'));
       return;
@@ -730,7 +730,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     <>
       {bootstrap && preferences && effectivePreferences ? (
         <ReaderEngineRuntime
-          key={`${bootstrap.volume.id}:${bootstrap.contentFingerprint}:${retry}`}
+          key={`${bootstrap.volume.id}:${retry}`}
           bootstrap={bootstrap}
           preferences={preferences}
           effectivePreferences={effectivePreferences}
@@ -744,6 +744,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
           onDownloadProgress={setDownloadProgress}
           onReady={() => setReaderReady(true)}
           bookCache={runtime.storage}
+          pdfRangeCache={runtime.storage}
           onStorageWarning={setStorageError}
           externalNavigation={externalNavigation}
           onExternalNavigationResult={handleExternalNavigationResult}

@@ -28,10 +28,9 @@ internal class AndroidReaderBookmarkStore(
     serverIdentity: String,
     userId: String,
     volumeId: String,
-    contentFingerprint: String,
 ) {
     private val preferences = context.getSharedPreferences("reader_bookmarks_v1", Context.MODE_PRIVATE)
-    private val key = listOf(serverIdentity, userId, volumeId, contentFingerprint)
+    private val key = listOf(serverIdentity, userId, volumeId)
         .joinToString("\u0000")
         .sha256()
 

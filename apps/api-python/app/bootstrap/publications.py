@@ -14,9 +14,6 @@ from app.modules.publications.application.navigation_ports import (
     PublicationNavigationUnitOfWork,
 )
 from app.modules.publications.application.open_publication import OpenPublication
-from app.modules.publications.application.resolve_source_identity import (
-    ResolvePublicationSourceIdentity,
-)
 from app.modules.publications.domain.navigation import PublicationParserProfile
 from app.modules.publications.infrastructure.epub_adapter import (
     EPUB_PARSER_IDENTIFIER,
@@ -39,9 +36,6 @@ from app.modules.publications.infrastructure.render_artifact import (
 )
 from app.modules.publications.infrastructure.render_cache import (
     LocalPublicationRenderFileStore,
-)
-from app.modules.publications.infrastructure.source_hash import (
-    LocalPublicationSourceHasher,
 )
 from app.modules.publications.infrastructure.source_repository import (
     SqlAlchemyPublicationSourceRepository,
@@ -117,16 +111,6 @@ def open_publication(db: Session, settings: Settings) -> OpenPublication:
     )
 
 
-def resolve_publication_source_identity(
-    db: Session,
-    settings: Settings,
-) -> ResolvePublicationSourceIdentity:
-    return ResolvePublicationSourceIdentity(
-        repository=SqlAlchemyPublicationSourceRepository(db),
-        hasher=LocalPublicationSourceHasher(settings.resolved_storage_root),
-    )
-
-
 def ensure_publication_navigation(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -173,5 +157,4 @@ __all__ = [
     "ensure_publication_navigation",
     "ensure_publication_render_artifact",
     "open_publication",
-    "resolve_publication_source_identity",
 ]

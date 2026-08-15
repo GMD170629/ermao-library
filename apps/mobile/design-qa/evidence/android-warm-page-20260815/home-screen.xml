@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="1" failures="0" errors="0" skipped="0" time="1.781" timestamp="2026-08-14T20:02:12" hostname="localhost">
+  <testsuite name="com.ermao.library.features.home.ui.HomeScreenTest" tests="1" failures="0" errors="0" skipped="0" time="1.293" timestamp="2026-08-14T20:02:12" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 16" />
+      <property name="flavor" value="" />
+      <property name="project" value=":androidApp" />
+    </properties>
+    <testcase name="dailyStateUsesCompactGutterThreeScanTargetsAndOneTruthfulPrimaryAction" classname="com.ermao.library.features.home.ui.HomeScreenTest" time="1.293" />
+  </testsuite>
+</testsuites>

@@ -6,11 +6,6 @@
   "capturedAtEpochMillis": 1786500000000,
   "locator": {
     "kind": "reflowable",
-    "publication": {
-      "originalFileHash": "sha256:f2b9fdd81234567890abcdef1234567890abcdef1234567890abcdef12345678",
-      "parser": "libmobi:0.12@85dcfe",
-      "normalization": "ermao-mobi-core-v1+shuku-locator-dom-v2"
-    },
     "engineLocator": {
       "engine": "readium",
       "platform": "web",

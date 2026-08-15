@@ -9,6 +9,23 @@ struct IosCbzPage: Equatable, Sendable {
     let mediaType: String
     let width: Int?
     let height: Int?
+    let title: String?
+
+    init(
+        pageIndex: Int,
+        resourceHref: String,
+        mediaType: String,
+        width: Int?,
+        height: Int?,
+        title: String? = nil
+    ) {
+        self.pageIndex = pageIndex
+        self.resourceHref = resourceHref
+        self.mediaType = mediaType
+        self.width = width
+        self.height = height
+        self.title = title
+    }
 }
 
 enum IosCbzError: Error, Equatable, Sendable {
@@ -16,7 +33,6 @@ enum IosCbzError: Error, Equatable, Sendable {
     case encrypted
     case unsafeEntry
     case limitExceeded
-    case canonicalIndexMismatch
 }
 
 /// A fail-closed ZIP central-directory inspection used before Readium receives a CBZ.
@@ -131,16 +147,6 @@ struct IosCbzArchiveIndex: Sendable {
         }
     }
 
-    func requireCanonicalPages(_ expected: [IosCbzPage]) throws {
-        guard expected.count == pages.count else { throw IosCbzError.canonicalIndexMismatch }
-        for (actual, canonical) in zip(pages, expected) {
-            guard actual.pageIndex == canonical.pageIndex,
-                  actual.resourceHref == canonical.resourceHref,
-                  actual.mediaType == canonical.mediaType
-            else { throw IosCbzError.canonicalIndexMismatch }
-        }
-    }
-
     private static func isSafePath(_ value: String) -> Bool {
         guard !value.isEmpty, !value.hasPrefix("/"), !value.contains("\\"), !value.contains("\0"),
               value.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
@@ -192,22 +198,29 @@ struct IosCbzArchiveIndex: Sendable {
 struct IosCbzPublicationFactory {
     private let assetRetriever = AssetRetriever(httpClient: DefaultHTTPClient(ephemeral: true))
 
-    func open(_ managed: IosManagedPublication, canonicalPages: [IosCbzPage]) async throws -> IosOpenedReadiumPublication {
-        guard managed.sourceFormat == .cbz,
-              managed.fingerprint.parserVersion == "archive-images:natural-order-v1",
-              managed.fingerprint.normalizationVersion == "shuku-comic-pages-v1",
+    func open(_ managed: IosManagedPublication, pageTitleHints: [IosCbzPage]) async throws -> IosOpenedReadiumPublication {
+        guard (managed.sourceFormat == .cbz || managed.sourceFormat == .zip),
               let fileURL = FileURL(url: managed.fileURL)
         else { throw IosReaderFailure(code: .corruptFile) }
         let localIndex: IosCbzArchiveIndex
         do {
             localIndex = try IosCbzArchiveIndex(fileURL: managed.fileURL)
-            try localIndex.requireCanonicalPages(canonicalPages)
         } catch IosCbzError.limitExceeded {
-            throw IosReaderFailure(code: .outOfMemoryRisk)
+            throw IosReaderFailure(code: .comicOutOfMemoryRisk)
         } catch IosCbzError.encrypted {
-            throw IosReaderFailure(code: .drmProtected)
+            throw IosReaderFailure(code: .comicArchiveEncrypted)
         } catch {
-            throw IosReaderFailure(code: .corruptFile)
+            throw IosReaderFailure(code: .comicArchiveCorrupt)
+        }
+        let localPages = localIndex.pages.enumerated().map { index, page in
+            IosCbzPage(
+                pageIndex: page.pageIndex,
+                resourceHref: page.resourceHref,
+                mediaType: page.mediaType,
+                width: page.width,
+                height: page.height,
+                title: pageTitleHints.indices.contains(index) ? pageTitleHints[index].title : nil
+            )
         }
         let asset: Asset
         switch await assetRetriever.retrieve(url: fileURL, mediaType: .cbz) {
@@ -218,7 +231,7 @@ struct IosCbzPublicationFactory {
             asset.close()
             throw IosReaderFailure(code: .corruptFile)
         }
-        for page in canonicalPages {
+        for page in localPages {
             guard let href = AnyURL(string: page.resourceHref),
                   let resource = containerAsset.container[href]
             else {
@@ -249,18 +262,22 @@ struct IosCbzPublicationFactory {
                 }
             }
         }
-        let links = canonicalPages.compactMap { page -> Link? in
+        let links = localPages.compactMap { page -> Link? in
             guard let mediaType = MediaType(page.mediaType) else { return nil }
-            return Link(href: page.resourceHref, mediaType: mediaType, title: String(page.pageIndex + 1))
+            return Link(
+                href: page.resourceHref,
+                mediaType: mediaType,
+                title: page.title ?? String(page.pageIndex + 1)
+            )
         }
-        guard links.count == canonicalPages.count else {
+        guard links.count == localPages.count else {
             asset.close()
             throw IosReaderFailure(code: .corruptFile)
         }
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
-                    identifier: "urn:shuku:cbz:\(managed.fingerprint.originalFileHash)",
+                    identifier: "urn:shuku:cbz:\(managed.sourceID)",
                     conformsTo: [.divina],
                     title: managed.displayTitle,
                     layout: .fixed,
@@ -288,6 +305,98 @@ struct IosCbzPublicationFactory {
            String(data: data.prefix(4), encoding: .ascii) == "RIFF",
            String(data: data[8 ..< 12], encoding: .ascii) == "WEBP" { return "image/webp" }
         return nil
+    }
+}
+
+private final class IosRemoteComicContainer: Container, @unchecked Sendable {
+    let sourceURL: AbsoluteURL? = nil
+    let entries: Set<AnyURL>
+
+    private let source: ErmaoShared.RemoteComicReaderSource
+    private let server: any ErmaoShared.ComicPageServerPort
+    private let imageVariant: ErmaoShared.ReaderComicImageVariant
+    private let pageByHref: [String: Int]
+
+    init(
+        source: ErmaoShared.RemoteComicReaderSource,
+        pages: [IosCbzPage],
+        server: any ErmaoShared.ComicPageServerPort,
+        imageVariant: ErmaoShared.ReaderComicImageVariant
+    ) throws {
+        self.source = source
+        self.server = server
+        self.imageVariant = imageVariant
+        pageByHref = Dictionary(uniqueKeysWithValues: pages.map { ($0.resourceHref, $0.pageIndex) })
+        entries = try Set(pages.map {
+            guard let url = AnyURL(string: $0.resourceHref) else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            return url
+        })
+    }
+
+    subscript(url: any URLConvertible) -> (any Resource)? {
+        let href = url.anyURL.string
+        guard let pageIndex = pageByHref[href] else { return nil }
+        return DataResource { [source, server, imageVariant] in
+            do {
+                let result = try await server.read(
+                    source: source,
+                    pageIndex: Int32(pageIndex),
+                    variant: imageVariant
+                )
+                guard let content = result as? ErmaoShared.ComicPageReadResultContent else {
+                    let failure = result as? ErmaoShared.ComicPageReadResultFailure
+                    return .failure(.decoding(failure?.code ?? "COMIC_PAGE_LOAD_FAILED"))
+                }
+                return .success(Data((0 ..< Int(content.bytes.size)).map {
+                    UInt8(bitPattern: content.bytes.get(index: Int32($0)))
+                }))
+            } catch {
+                return .failure(.decoding(error))
+            }
+        }
+    }
+}
+
+@MainActor
+struct IosRemoteComicPublicationFactory {
+    func open(
+        source: ErmaoShared.RemoteComicReaderSource,
+        pages: [IosCbzPage],
+        server: any ErmaoShared.ComicPageServerPort,
+        imageVariant: ErmaoShared.ReaderComicImageVariant = .original
+    ) throws -> IosOpenedReadiumPublication {
+        let container = try IosRemoteComicContainer(
+            source: source,
+            pages: pages,
+            server: server,
+            imageVariant: imageVariant
+        )
+        let links = pages.compactMap { page -> Link? in
+            guard let mediaType = MediaType(page.mediaType) else { return nil }
+            return Link(href: page.resourceHref, mediaType: mediaType, title: String(page.pageIndex + 1))
+        }
+        guard links.count == pages.count else { throw IosReaderFailure(code: .corruptFile) }
+        let publication = Publication(
+            manifest: Manifest(
+                metadata: Metadata(
+                    identifier: "urn:shuku:comic:\(source.volumeId):\(source.protocolFingerprint)",
+                    conformsTo: [.divina],
+                    title: source.displayTitle,
+                    layout: .fixed,
+                    readingProgression: .ltr,
+                    numberOfPages: links.count
+                ),
+                readingOrder: links,
+                tableOfContents: links
+            ),
+            container: container,
+            servicesBuilder: PublicationServicesBuilder(
+                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: MediaType("image/*")!)
+            )
+        )
+        return IosOpenedReadiumPublication(publication: publication) { publication.close() }
     }
 }
 

@@ -122,7 +122,7 @@ class DownloadPreparationViewModelTest {
     }
 
     private fun descriptor() = DownloadDescriptor(
-        identity = DownloadIdentity(DownloadNamespace("server", "user", 2), "work", "volume", "fingerprint"),
+        identity = DownloadIdentity(DownloadNamespace("server", "user", 2), "work", "volume"),
         workTitle = "Book",
         workAuthor = "Author",
         coverApiPath = "/api/works/work/cover",

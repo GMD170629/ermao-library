@@ -9,9 +9,12 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressSto
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ReaderFormat
+import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
+import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -39,7 +42,6 @@ class ReaderMobiInstrumentedTest {
                 displayTitle = "MOBI product fixture",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Mobi,
-                publicationFingerprint = null,
                 volumeId = "mobi-volume",
             )
         }
@@ -61,21 +63,50 @@ class ReaderMobiInstrumentedTest {
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             val deadline = SystemClock.uptimeMillis() + TEST_TIMEOUT_MILLIS
+            var ready = false
             while (SystemClock.uptimeMillis() < deadline) {
                 instrumentation.waitForIdleSync()
-                val ready = AtomicBoolean(false)
+                val readerReady = AtomicBoolean(false)
                 scenario.onActivity { activity ->
-                    ready.set(
+                    readerReady.set(
                         activity.controllerForTesting?.tableOfContents?.isNotEmpty() == true &&
                             activity.supportFragmentManager.fragments
                                 .filterIsInstance<EpubNavigatorFragment>()
                                 .singleOrNull()?.view != null,
                     )
                 }
-                if (ready.get()) return@use
+                if (readerReady.get()) {
+                    ready = true
+                    break
+                }
                 SystemClock.sleep(POLL_MILLIS)
             }
-            throw AssertionError("Timed out waiting for the MOBI product Reader")
+            if (!ready) throw AssertionError("Timed out waiting for the MOBI product Reader")
+
+            scenario.onActivity { activity ->
+                checkNotNull(activity.controllerForTesting).updatePreferences(
+                    ReaderPreferences(epub = ReaderEpubPreferences(fontSize = 24)),
+                )
+            }
+            val preferenceDeadline = SystemClock.uptimeMillis() + TEST_TIMEOUT_MILLIS
+            while (SystemClock.uptimeMillis() < preferenceDeadline) {
+                instrumentation.waitForIdleSync()
+                val applied = AtomicBoolean(false)
+                scenario.onActivity { activity ->
+                    applied.set(
+                        activity.supportFragmentManager.fragments
+                            .filterIsInstance<EpubNavigatorFragment>()
+                            .singleOrNull()
+                            ?.settings
+                            ?.value
+                            ?.fontSize
+                            ?.let { abs(it - (24.0 / 18.0)) < 0.01 } == true,
+                    )
+                }
+                if (applied.get()) return@use
+                SystemClock.sleep(POLL_MILLIS)
+            }
+            throw AssertionError("Timed out waiting for MOBI reader preferences")
         }
     }
 

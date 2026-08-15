@@ -84,6 +84,10 @@
 		B18500000000000000000185 /* IosPdfReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18500000000000000000185 /* IosPdfReaderView.swift */; };
 		B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18600000000000000000186 /* IosPdfPageCountStore.swift */; };
 		B18700000000000000000187 /* PdfReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18700000000000000000187 /* PdfReaderTests.swift */; };
+		B18800000000000000000188 /* IosPdfRangeAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18800000000000000000188 /* IosPdfRangeAccess.swift */; };
+		B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18900000000000000000189 /* IosPdfiumDocument.swift */; };
+		B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19000000000000000000190 /* IosPdfiumNavigator.swift */; };
+		B19100000000000000000191 /* ShukuPdfium.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F19100000000000000000191 /* ShukuPdfium.xcframework */; };
 		B08700000000000000000087 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F08700000000000000000087 /* libsqlite3.tbd */; };
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
 		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
@@ -234,6 +238,9 @@
 		F18500000000000000000185 /* IosPdfReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfReaderView.swift; sourceTree = "<group>"; };
 		F18600000000000000000186 /* IosPdfPageCountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfPageCountStore.swift; sourceTree = "<group>"; };
 		F18700000000000000000187 /* PdfReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PdfReaderTests.swift; sourceTree = "<group>"; };
+		F18800000000000000000188 /* IosPdfRangeAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfRangeAccess.swift; sourceTree = "<group>"; };
+		F18900000000000000000189 /* IosPdfiumDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumDocument.swift; sourceTree = "<group>"; };
+		F19000000000000000000190 /* IosPdfiumNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumNavigator.swift; sourceTree = "<group>"; };
 		F08700000000000000000087 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -280,6 +287,7 @@
 		F80100000000000000000801 /* ErmaoLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F80200000000000000000802 /* ErmaoLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90000000000000000000900 /* ErmaoShared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = ErmaoShared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		F19100000000000000000191 /* ShukuPdfium.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ShukuPdfium.xcframework; path = ../native/pdfium/artifacts/ios/ShukuPdfium.xcframework; sourceTree = SOURCE_ROOT; };
 		E17400000000000000000174 /* DownloadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadModels.swift; sourceTree = "<group>"; };
 		E17500000000000000000175 /* DownloadCenterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterStore.swift; sourceTree = "<group>"; };
 		E17600000000000000000176 /* DownloadCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterView.swift; sourceTree = "<group>"; };
@@ -294,6 +302,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B90000000000000000000900 /* ErmaoShared.framework in Frameworks */,
+				B19100000000000000000191 /* ShukuPdfium.xcframework in Frameworks */,
 				BR0100000000000000000001 /* ReadiumShared in Frameworks */,
 				BR0200000000000000000002 /* ReadiumStreamer in Frameworks */,
 				BR0300000000000000000003 /* ReadiumNavigator in Frameworks */,
@@ -581,6 +590,9 @@
 				F18400000000000000000184 /* IosPdfReaderSession.swift */,
 				F18500000000000000000185 /* IosPdfReaderView.swift */,
 				F18600000000000000000186 /* IosPdfPageCountStore.swift */,
+				F18800000000000000000188 /* IosPdfRangeAccess.swift */,
+				F18900000000000000000189 /* IosPdfiumDocument.swift */,
+				F19000000000000000000190 /* IosPdfiumNavigator.swift */,
 			);
 			path = Reader;
 			sourceTree = "<group>";
@@ -600,6 +612,7 @@
 			isa = PBXGroup;
 			children = (
 				F90000000000000000000900 /* ErmaoShared.framework */,
+				F19100000000000000000191 /* ShukuPdfium.xcframework */,
 				F08700000000000000000087 /* libsqlite3.tbd */,
 			);
 			name = Frameworks;
@@ -882,6 +895,9 @@
 				B18400000000000000000184 /* IosPdfReaderSession.swift in Sources */,
 				B18500000000000000000185 /* IosPdfReaderView.swift in Sources */,
 				B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */,
+				B18800000000000000000188 /* IosPdfRangeAccess.swift in Sources */,
+				B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */,
+				B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */,
 				A17400000000000000000174 /* DownloadModels.swift in Sources */,
 				A17500000000000000000175 /* DownloadCenterStore.swift in Sources */,
 				A17600000000000000000176 /* DownloadCenterView.swift in Sources */,

@@ -11,9 +11,11 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.math.roundToInt
 
@@ -28,6 +30,14 @@ class ReaderPreferencesJson(
 
     fun decode(payload: String): ReaderPreferences {
         val document = json.decodeFromString<JsonObject>(payload)
+        if (document["schemaVersion"]?.jsonPrimitive?.contentOrNull == "3") {
+            val migrated = JsonObject(
+                document.toMutableMap().apply {
+                    put("schemaVersion", JsonPrimitive(ReaderPreferences.SCHEMA_VERSION))
+                },
+            )
+            return json.decodeFromJsonElement<ReaderPreferences>(migrated)
+        }
         if ("schemaVersion" !in document && document.keys.any(LEGACY_KEYS::contains)) {
             return decodeLegacy(document)
         }

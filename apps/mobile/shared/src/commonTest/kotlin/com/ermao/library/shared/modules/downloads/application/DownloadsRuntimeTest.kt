@@ -37,7 +37,7 @@ class DownloadsRuntimeTest {
         assertEquals(listOf("work"), runtime.downloadedWorks(namespace).map { it.workId })
         assertIs<ReaderAccessDecision.LocalArtifact>(
             runtime.readerAccess(
-                ReaderAccessRequest(namespace, "volume", DownloadReaderType.Reflowable, "fingerprint", false),
+                ReaderAccessRequest(namespace, "volume", DownloadReaderType.Reflowable, false),
             ),
         )
         Unit
@@ -46,7 +46,7 @@ class DownloadsRuntimeTest {
     private val namespace = DownloadNamespace("server", "user", 1)
 
     private fun descriptor() = DownloadDescriptor(
-        DownloadIdentity(namespace, "work", "volume", "fingerprint"),
+        DownloadIdentity(namespace, "work", "volume"),
         "Book",
         "Author",
         "/api/works/work/cover",

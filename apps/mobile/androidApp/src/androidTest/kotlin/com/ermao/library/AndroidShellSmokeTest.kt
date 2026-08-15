@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -12,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.bootstrap.ErmaoLibraryRoot
+import com.ermao.library.bootstrap.LoginFormState
 import com.ermao.library.bootstrap.MainActions
 import com.ermao.library.bootstrap.MainUiState
 import com.ermao.library.features.shell.MainShell
@@ -22,6 +24,7 @@ import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.auth.domain.SessionIdentity
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
+import com.ermao.library.shared.modules.servers.domain.ServerConnectionDraft
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.shared.createAndroidPersonalSettingsRepository
@@ -55,6 +58,34 @@ class AndroidShellSmokeTest {
         composeRule.onNodeWithTag("login-server-address").assertIsDisplayed()
         composeRule.onNodeWithTag("login-submit").assertIsDisplayed()
         composeRule.onAllNodesWithTag("login-entry-close").assertCountEquals(0)
+    }
+
+    @Test
+    fun loginCheckKeepsVisibleIndeterminateFeedbackAndPreventsAnotherSubmission() {
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                ErmaoLibraryRoot(
+                    state = MainUiState(
+                        session = AppSession.CheckingServer(
+                            ServerConnectionDraft("127.0.0.1", "http://127.0.0.1:3000"),
+                        ),
+                        loginForm = LoginFormState(
+                            serverAddress = "http://127.0.0.1:3000",
+                            email = "reader@example.com",
+                            password = "password",
+                        ),
+                        operationInProgress = true,
+                    ),
+                    actions = noOpMainActions,
+                    contentRepository = createAndroidContentRepository(
+                        InstrumentationRegistry.getInstrumentation().targetContext,
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("login-submit").assertIsDisplayed().assertIsNotEnabled()
+        composeRule.onNodeWithTag("primary-action-loading").assertIsDisplayed()
     }
 
     @Test

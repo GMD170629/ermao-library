@@ -375,7 +375,7 @@ fun PrimaryActionButton(
     ) {
         if (loading) {
             CircularProgressIndicator(
-                modifier = Modifier.size(theme.spacing.three),
+                modifier = Modifier.size(theme.spacing.three).testTag("primary-action-loading"),
                 color = theme.colors.onAction,
                 strokeWidth = 2.dp,
             )

@@ -20,7 +20,6 @@ from app.modules.imports.application.identity_resolution import (
 )
 from app.modules.imports.application.import_support import (
     _classification_columns,
-    _content_hash,
     _classification_result_type,
     _ensure_work,
     _file_resource_key,
@@ -142,7 +141,6 @@ def _import_pdf(
     )
     source_path = options.source_file_path.resolve()
     source_stat = source_path.stat()
-    full_hash = _content_hash(source_path)
     embedded_series_name = str(inspection.raw_metadata.get("Series") or "").strip()
     embedded_volume_raw = inspection.raw_metadata.get("Volume")
     try:
@@ -264,8 +262,6 @@ def _import_pdf(
                 "volumeId": volume["id"],
                 "path": str(source_path),
                 "filePathHash": _hash_text(str(source_path)),
-                "fullHash": full_hash,
-                "hashStatus": "COMPLETED",
                 "kind": "PDF",
                 "mimeType": "application/pdf",
                 "sizeBytes": file_size,

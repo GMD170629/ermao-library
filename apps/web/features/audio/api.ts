@@ -1,4 +1,4 @@
-import { parsePublicationFingerprint, parsePublicationLocation, publicationFingerprintsMatch } from '@shuku/reader-core';
+import { parsePublicationLocation } from '@shuku/reader-core';
 import { withBasePath } from '../../lib/base-path';
 import { clamp, orderedChapters, orderedTracks } from './audio-model';
 import type { AudioBootstrap, AudioChapter, AudioLocation, AudioTrack, AudioVolumeSummary } from './types';
@@ -31,7 +31,6 @@ function normalizeTrack(value: unknown, index: number): AudioTrack | null {
     url: withBasePath(stringValue(item.url, `/api/files/${encodeURIComponent(fileId)}`)),
     mimeType: stringValue(item.mimeType, 'audio/mpeg'),
     codec: nullableString(item.codec),
-    contentHash: nullableString(item.contentHash),
     durationMs: Math.max(0, numberValue(item.durationMs)),
     discNumber: typeof item.discNumber === 'number' ? numberValue(item.discNumber) : null,
     trackNumber: typeof item.trackNumber === 'number' ? numberValue(item.trackNumber) : null,
@@ -72,29 +71,17 @@ export function normalizeAudioBootstrap(input: unknown, requestedVolumeId = ''):
   const chapters = orderedChapters((Array.isArray(raw.units) ? raw.units : []).map(normalizeChapter).filter((chapter): chapter is AudioChapter => chapter !== null && trackIds.has(chapter.fileId)));
   const calculatedDuration = tracks.reduce((sum, track) => sum + track.durationMs, 0);
   const progressSnapshot = record(raw.progressSnapshot);
-  const localHashes = tracks
-    .flatMap((track) => track.contentHash ? [`${track.fileId}:${track.contentHash}`] : [])
-    .sort();
-  const serverContentFingerprint = stringValue(raw.contentFingerprint);
-  const publicationFingerprint = parsePublicationFingerprint(raw.publicationFingerprint);
-  if (!publicationFingerprint) throw new Error('阅读器启动信息缺少 Publication 指纹');
   const resume = parsePublicationLocation(progressSnapshot.locator);
   if (raw.progressSnapshot !== null && raw.progressSnapshot !== undefined && !resume) {
     throw new Error('阅读器启动信息包含无效的 Reader v4 进度快照');
   }
   const resumeLocation: AudioLocation | null = resume?.kind === 'audio'
-    && publicationFingerprintsMatch(resume.publication, publicationFingerprint)
     ? { type: 'audio', volumeId: volume.id, fileId: resume.fileId, chapterId: resume.chapterId ?? null, positionMs: resume.positionMillis }
     : null;
   return {
     schemaVersion: 4,
     userId: stringValue(raw.userId),
     readerType: 'audio',
-    contentFingerprint: serverContentFingerprint,
-    localContentFingerprint: localHashes.length > 0
-      ? `audio-v1:${localHashes.join('|')}`
-      : serverContentFingerprint,
-    publicationFingerprint,
     progressRevision: Math.max(0, numberValue(progressSnapshot.revision)),
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名有声书'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
     mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind: 'AUDIOBOOK', completed: mediaVersion.completed === true },
