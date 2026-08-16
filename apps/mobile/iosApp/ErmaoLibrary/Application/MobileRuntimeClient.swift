@@ -13,10 +13,8 @@ enum SessionPhase: Equatable, Sendable {
     case loginFailed
     case accountDisabled
     case authenticated
-    case sessionUnavailable
     case sessionExpired
     case incompatibleServer
-    case offlineGrace
 }
 
 enum RuntimeTLSMode: String, Codable, Equatable, Sendable {
@@ -66,7 +64,6 @@ struct RuntimeSessionSnapshot: Equatable, Sendable {
     let userAvatarURL: String?
     let userLocale: String?
     let authorization: RuntimeAuthorization?
-    let entitlementExpiresAt: Date?
     let reasonCode: String?
 
     init(
@@ -78,7 +75,6 @@ struct RuntimeSessionSnapshot: Equatable, Sendable {
         userAvatarURL: String? = nil,
         userLocale: String? = nil,
         authorization: RuntimeAuthorization? = nil,
-        entitlementExpiresAt: Date? = nil,
         reasonCode: String?
     ) {
         self.phase = phase
@@ -89,7 +85,6 @@ struct RuntimeSessionSnapshot: Equatable, Sendable {
         self.userAvatarURL = userAvatarURL
         self.userLocale = userLocale
         self.authorization = authorization
-        self.entitlementExpiresAt = entitlementExpiresAt
         self.reasonCode = reasonCode
     }
 
@@ -131,7 +126,6 @@ enum RuntimeNavigationDirective: String, Equatable, Sendable {
     case resetAllStacksHome = "ResetAllStacksHome"
     case revalidatePrivateShell = "RevalidatePrivateShell"
     case hidePrivateShell = "HidePrivateShell"
-    case enterOfflineShell = "EnterOfflineShell"
     case showServerProfiles = "ShowServerProfiles"
 }
 
@@ -190,7 +184,6 @@ protocol MobileRuntimeClient: AnyObject {
     func setup(_ request: SetupRequest) async throws -> RuntimeOperationOutcome
     func retry() async throws -> RuntimeOperationOutcome
     func refreshCurrentSession() async throws -> RuntimeOperationOutcome
-    func enterOfflineMode() async throws -> RuntimeOperationOutcome
     func logout() async throws -> RuntimeOperationOutcome
     func close()
 }

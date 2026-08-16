@@ -71,12 +71,6 @@ export type ReaderBootstrap = Readonly<{
   progressPercent: number;
   serverProgressSnapshot: ReaderProgressSnapshot | null;
   source: ReaderSource;
-  renderArtifact: Readonly<{
-    schemaVersion: 1;
-    url: string;
-    mimeType: 'application/epub+zip';
-    sizeBytes: number;
-  }> | null;
   initialLocation: ReaderLocation | null;
   serverPreferences: Readonly<{ settings: import('@shuku/reader-core').ReaderPreferences; updatedAt: string | null }>;
 }>;
@@ -270,42 +264,38 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   const publicationManifestUrl = readerType === 'reflowable'
     ? nullableString(publicationAccess.manifestUrl)
     : null;
-  if (readerType === 'reflowable' && !publicationManifestUrl) {
-    throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
+  let source: ReaderSource;
+  if (readerType === 'reflowable') {
+    if (!publicationManifestUrl) throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
+    source = {
+      workId,
+      volumeId: volume.id,
+      kind: 'reflowable',
+      sourceFormat: format as ReflowableFormat,
+      publicationManifestUrl: withBasePath(publicationManifestUrl),
+      navigation: serverNavigation(units),
+      totalPages: volume.pageCount
+    };
+  } else if (readerType === 'comic') {
+    source = {
+      workId,
+      volumeId: volume.id,
+      kind: 'comic',
+      sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar',
+      contentUrl: withBasePath(fileUrl),
+      comicManifestUrl: withBasePath(comicManifestUrl ?? ''),
+      comicPageUrlTemplate: withBasePath(comicPageUrlTemplate ?? ''),
+      totalPages: pages.length
+    };
+  } else {
+    source = {
+      workId,
+      volumeId: volume.id,
+      kind: 'pdf',
+      contentUrl: withBasePath(fileUrl),
+      totalPages: volume.pageCount
+    };
   }
-  const renderAccess = record(publicationAccess.renderArtifact);
-  const renderUrl = nullableString(renderAccess.url);
-  const renderSize = numberValue(renderAccess.sizeBytes);
-  const renderArtifact = renderUrl
-    && renderAccess.schemaVersion === 1
-    && renderAccess.mimeType === 'application/epub+zip'
-    && renderSize > 0
-    ? {
-        schemaVersion: 1 as const,
-        url: withBasePath(renderUrl),
-        mimeType: 'application/epub+zip' as const,
-        sizeBytes: renderSize
-      }
-    : null;
-  if (publicationAccess.renderArtifact !== null
-    && publicationAccess.renderArtifact !== undefined
-    && !renderArtifact) {
-    throw new ReaderBootstrapError('READER_RENDER_ARTIFACT_INVALID', '阅读渲染文件信息无效');
-  }
-  const source: ReaderSource = readerType === 'reflowable'
-    ? { workId, volumeId: volume.id, kind: 'reflowable', sourceFormat: format as ReflowableFormat, contentUrl: renderArtifact?.url ?? withBasePath(fileUrl), ...(publicationManifestUrl ? { publicationManifestUrl: withBasePath(publicationManifestUrl) } : {}), navigation: serverNavigation(units), totalPages: volume.pageCount }
-    : readerType === 'comic'
-      ? {
-          workId,
-          volumeId: volume.id,
-          kind: 'comic',
-          sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar',
-          contentUrl: withBasePath(fileUrl),
-          comicManifestUrl: withBasePath(comicManifestUrl ?? ''),
-          comicPageUrlTemplate: withBasePath(comicPageUrlTemplate ?? ''),
-          totalPages: pages.length
-        }
-      : { workId, volumeId: volume.id, kind: 'pdf', contentUrl: withBasePath(fileUrl), totalPages: volume.pageCount };
   return {
     schemaVersion: 4,
     userId: stringValue(data.userId),
@@ -335,7 +325,6 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     progressPercent: serverProgressSnapshot?.displayPercent ?? 0,
     serverProgressSnapshot,
     source,
-    renderArtifact,
     initialLocation: v4LocationToDomain(
       serverProgressSnapshot?.locator ?? null,
       volume.id,

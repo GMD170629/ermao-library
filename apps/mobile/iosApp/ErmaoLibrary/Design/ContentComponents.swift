@@ -232,43 +232,6 @@ struct ContentStatusView: View {
     }
 }
 
-struct ContentOfflineNotice: View {
-    let retry: () -> Void
-
-    @Environment(\.appTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: .space1Half) {
-            Image(systemName: "icloud.slash")
-                .font(.title2)
-                .foregroundStyle(theme.textTertiary)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text("library.offline.title")
-                    .appTextStyle(.label)
-                Text("library.offline.cached")
-                    .appTextStyle(.caption)
-                    .foregroundStyle(theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: .space1)
-            Button("library.offline.retry", action: retry)
-                .appTextStyle(.label)
-                .foregroundStyle(theme.actionAccent)
-                .frame(minHeight: .iosMinimumTouchTarget)
-        }
-        .padding(.horizontal, .space1Half)
-        .padding(.vertical, .space1)
-        .background(theme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.control)))
-        .overlay {
-            RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.control))
-                .stroke(theme.divider, lineWidth: 1)
-        }
-        .accessibilityElement(children: .contain)
-    }
-}
-
 struct PaginationStatusView: View {
     let isLoading: Bool
     let hasError: Bool

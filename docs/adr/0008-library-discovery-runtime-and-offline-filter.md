@@ -4,6 +4,8 @@
 - Date: 2026-08-12
 - Owner: Mobile Library Discovery capability
 
+> Persistent discovery snapshots, cache provenance, staleness fallback, and their platform payload store are superseded for v1.0.0 by [ADR 0015](0015-mobile-v1-verified-session-without-offline-mode.md). Query identity, request generations, scope behavior, and the local-manifest boundary remain active.
+
 ## Context
 
 Library discovery spans Works, Series, Authors, Search, Facets, filters, pagination, cached results, permission changes, and compact/expanded navigation. The first mobile implementation duplicated query identity, cache provenance, and persistence schemas in Swift and Android code. It also exposed a downloaded-only filter before a managed download manifest existed.

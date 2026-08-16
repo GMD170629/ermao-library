@@ -81,7 +81,6 @@ final class HomeStore: ObservableObject {
             guard continueGeneration == generation else { return }
             if let value {
                 continueReading = .content(value, isCached: false)
-                await saveCache(value, key: "home.continue")
             } else {
                 continueReading = .empty
             }
@@ -89,11 +88,7 @@ final class HomeStore: ObservableObject {
             guard continueGeneration == generation else { return }
             if handleUnauthorized(error) { return }
             if await handleInaccessible(error) { continueReading = .failure; return }
-            do {
-                if let cached = try await cache.load(ContinueReadingItem.self, namespace: context.namespaceKey, key: "home.continue") {
-                    continueReading = .content(cached, isCached: true)
-                } else { continueReading = .failure }
-            } catch { cacheIssue = .readFailed; continueReading = .failure }
+            continueReading = .failure
         }
     }
 
@@ -103,16 +98,11 @@ final class HomeStore: ObservableObject {
             let values = try await client.fetchRecentReading(context: context, limit: 12)
             guard recentReadingGeneration == generation else { return }
             recentReading = values.isEmpty ? .empty : .content(values, isCached: false)
-            await saveCache(values, key: "home.recent-reading")
         } catch {
             guard recentReadingGeneration == generation else { return }
             if handleUnauthorized(error) { return }
             if await handleInaccessible(error) { recentReading = .failure; return }
-            do {
-                if let cached = try await cache.load([WorkCard].self, namespace: context.namespaceKey, key: "home.recent-reading"), !cached.isEmpty {
-                    recentReading = .content(cached, isCached: true)
-                } else { recentReading = .failure }
-            } catch { cacheIssue = .readFailed; recentReading = .failure }
+            recentReading = .failure
         }
     }
 
@@ -122,16 +112,11 @@ final class HomeStore: ObservableObject {
             let values = try await client.fetchRecentAdded(context: context, limit: 12)
             guard recentAddedGeneration == generation else { return }
             recentAdded = values.isEmpty ? .empty : .content(values, isCached: false)
-            await saveCache(values, key: "home.recent-added")
         } catch {
             guard recentAddedGeneration == generation else { return }
             if handleUnauthorized(error) { return }
             if await handleInaccessible(error) { recentAdded = .failure; return }
-            do {
-                if let cached = try await cache.load([WorkCard].self, namespace: context.namespaceKey, key: "home.recent-added"), !cached.isEmpty {
-                    recentAdded = .content(cached, isCached: true)
-                } else { recentAdded = .failure }
-            } catch { cacheIssue = .readFailed; recentAdded = .failure }
+            recentAdded = .failure
         }
     }
 
@@ -148,10 +133,6 @@ final class HomeStore: ObservableObject {
         return true
     }
 
-    private func saveCache<Value: Encodable & Sendable>(_ value: Value, key: String) async {
-        do { try await cache.save(value, namespace: context.namespaceKey, key: key) }
-        catch { cacheIssue = .writeFailed }
-    }
 }
 
 enum LibraryResultItem: Identifiable, Sendable {
@@ -415,39 +396,19 @@ final class LibraryStore: ObservableObject {
         token: ErmaoShared.LibraryRequestToken
     ) async {
         guard let state = scopeStates[scope] else { return }
-        if page == 1 {
-            do {
-                if let cached = try await restore(scope: scope, state: state, page: page),
-                   discoveryRuntime.acceptPage(
-                       token: token,
-                       isEmpty: cached.response.isEmpty,
-                       source: cached.provenance == .cache ? .cache : .network,
-                       isStale: cached.isStale
-                   ) {
-                    apply(cached.response, scope: scope, page: page, isCached: cached.provenance == .cache)
-                    update(scope) {
-                        if case .ready(let items, let total, let cached, _) = $0.results {
-                            $0.results = .ready(items: items, total: total, isCached: cached, isRefreshing: true)
-                        }
-                    }
-                }
-            } catch {
-                cacheIssue = .readFailed
-            }
-        }
         do {
             let fetched = try await fetch(scope: scope, state: state, page: page)
             guard discoveryRuntime.acceptPage(
                 token: token,
                 isEmpty: fetched.response.isEmpty,
-                source: fetched.provenance == .cache ? .cache : .network,
-                isStale: fetched.isStale
+                source: .network,
+                isStale: false
             ) else { return }
             apply(
                 fetched.response,
                 scope: scope,
                 page: page,
-                isCached: fetched.provenance == .cache
+                isCached: false
             )
         } catch {
             if case ContentClientError.unauthorized = error {
@@ -472,15 +433,6 @@ final class LibraryStore: ObservableObject {
                     $0.paginationRequestKey = nil
                 }
                 return
-            }
-            if case ContentClientError.offline = error {
-                if page == 1, case .ready(let items, let total, _, _) = scopeStates[scope]?.results {
-                    _ = discoveryRuntime.fail(token: token, errorCode: "NETWORK_UNAVAILABLE", hasVisibleContent: true)
-                    update(scope) {
-                        $0.results = .ready(items: items, total: total, isCached: true, isRefreshing: false)
-                    }
-                    return
-                }
             }
             if page > 1 {
                 _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED", hasVisibleContent: true)
@@ -547,32 +499,6 @@ final class LibraryStore: ObservableObject {
                 provenance: result.provenance,
                 isStale: result.isStale
             )
-        }
-    }
-
-    private func restore(scope: LibraryScope, state: LibraryScopeState, page: Int) async throws -> PageFetch? {
-        switch scope {
-        case .works:
-            return try await client.restoreWorksResult(
-                context: context,
-                query: WorksQuery(
-                    query: state.query,
-                    sort: state.sort,
-                    filters: state.filters,
-                    page: page,
-                    pageSize: 24
-                )
-            ).map { PageFetch(response: .works($0.value), provenance: $0.provenance, isStale: $0.isStale) }
-        case .series, .authors:
-            return try await client.restoreGroupingsResult(
-                context: context,
-                query: GroupingsQuery(
-                    kind: scope == .series ? .series : .author,
-                    query: state.query,
-                    page: page,
-                    pageSize: 30
-                )
-            ).map { PageFetch(response: .groupings($0.value), provenance: $0.provenance, isStale: $0.isStale) }
         }
     }
 
@@ -728,23 +654,6 @@ final class FacetStore: ObservableObject {
     }
 
     private func loadPage(_ page: Int, generation: UUID) async {
-        if page == 1 {
-            do {
-                let query = FacetQuery(
-                    kind: kind,
-                    facetID: facetID,
-                    sort: kind == .series ? .seriesIndex : .recentRead,
-                    page: page,
-                    pageSize: 24
-                )
-                if let restored = try await client.restoreFacetResult(context: context, query: query),
-                   requestGeneration == generation {
-                    apply(restored.value, appending: false, isCached: false)
-                }
-            } catch {
-                cacheIssue = .readFailed
-            }
-        }
         do {
             let fetched = try await client.fetchFacetResult(
                 context: context,
@@ -757,7 +666,7 @@ final class FacetStore: ObservableObject {
                 )
             )
             guard requestGeneration == generation else { return }
-            apply(fetched.value, appending: page > 1, isCached: fetched.provenance == .cache)
+            apply(fetched.value, appending: page > 1, isCached: false)
         } catch {
             guard requestGeneration == generation else { return }
             if case ContentClientError.unauthorized = error { onUnauthorized(); return }
@@ -765,10 +674,6 @@ final class FacetStore: ObservableObject {
                 do { try await cache.removeNamespace(context.namespaceKey) }
                 catch { cacheIssue = .purgeFailed }
                 state = .inaccessible
-                return
-            }
-            if page == 1, case .ready(let cached, _) = state, case ContentClientError.offline = error {
-                apply(cached, appending: false, isCached: true)
                 return
             }
             if page > 1 {
@@ -810,6 +715,8 @@ enum WorkDetailLoadState: Sendable {
 final class WorkDetailStore: ObservableObject {
     @Published private(set) var state: WorkDetailLoadState = .loading
     @Published private(set) var cacheIssue: ContentCacheIssue?
+    @Published private(set) var isLoadingMoreVolumes = false
+    @Published private(set) var hasVolumePaginationError = false
 
     private let context: ContentRequestContext
     private let client: any ContentClient
@@ -847,7 +754,6 @@ final class WorkDetailStore: ObservableObject {
         requestGeneration = generation
         Task { [weak self] in
             guard let self else { return }
-            let key = "work|\(workID)|\(mediaKind?.rawValue ?? "default")|\(volumeID ?? "default")"
             do {
                 let value = try await client.fetchWorkDetail(
                     context: context,
@@ -858,8 +764,6 @@ final class WorkDetailStore: ObservableObject {
                     .flatMap { latestProgressUpdatesByVolumeID[$0] }
                 let presented = latestProgressUpdate.map { value.applying($0) } ?? value
                 state = .ready(presented, isCached: false)
-                do { try await cache.save(presented, namespace: context.namespaceKey, key: key) }
-                catch { cacheIssue = .writeFailed }
             } catch {
                 guard requestGeneration == generation else { return }
                 if case ContentClientError.unauthorized = error { onUnauthorized(); return }
@@ -869,14 +773,7 @@ final class WorkDetailStore: ObservableObject {
                     state = .inaccessible
                     return
                 }
-                do {
-                    if let cached = try await cache.load(WorkDetailContent.self, namespace: context.namespaceKey, key: key) {
-                        let latestProgressUpdate = cached.selectedVolumeID
-                            .flatMap { latestProgressUpdatesByVolumeID[$0] }
-                        let presented = latestProgressUpdate.map { cached.applying($0) } ?? cached
-                        state = .ready(presented, isCached: true)
-                    } else { state = .failure }
-                } catch { cacheIssue = .readFailed; state = .failure }
+                state = .failure
             }
         }
     }
@@ -884,6 +781,48 @@ final class WorkDetailStore: ObservableObject {
     func refreshIfLoaded() {
         guard currentContent != nil else { return }
         load(mediaKind: activeMediaKind, volumeID: activeVolumeID, showBlockingLoading: false)
+    }
+
+    func loadMoreVolumes() {
+        guard !isLoadingMoreVolumes,
+              let content = currentContent,
+              content.volumes.count < content.volumeCount,
+              let mediaVersionID = content.volumes.first?.mediaVersionID
+        else { return }
+        let pageSize = 24
+        let nextPage = content.volumes.count / pageSize + 1
+        let requestedMediaKind = content.selectedMediaKind
+        isLoadingMoreVolumes = true
+        hasVolumePaginationError = false
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let page = try await client.fetchWorkVolumes(
+                    context: context,
+                    workID: workID,
+                    mediaVersionID: mediaVersionID,
+                    page: nextPage,
+                    pageSize: pageSize
+                )
+                guard case .ready(let current, let isCached) = state else {
+                    isLoadingMoreVolumes = false
+                    return
+                }
+                guard current.selectedMediaKind == requestedMediaKind,
+                      current.volumes.first?.mediaVersionID == mediaVersionID else {
+                    isLoadingMoreVolumes = false
+                    return
+                }
+                state = .ready(current.appending(page), isCached: isCached)
+                isLoadingMoreVolumes = false
+            } catch {
+                isLoadingMoreVolumes = false
+                if currentContent?.selectedMediaKind == requestedMediaKind,
+                   currentContent?.volumes.first?.mediaVersionID == mediaVersionID {
+                    hasVolumePaginationError = true
+                }
+            }
+        }
     }
 
     private var currentContent: WorkDetailContent? {
@@ -899,15 +838,33 @@ final class WorkDetailStore: ObservableObject {
         guard content.selectedVolumeID == update.volumeId else { return }
         let presented = content.applying(update)
         state = .ready(presented, isCached: isCached)
-        let key = "work|\(workID)|\(activeMediaKind?.rawValue ?? "default")|\(activeVolumeID ?? "default")"
-        Task {
-            do { try await cache.save(presented, namespace: context.namespaceKey, key: key) }
-            catch { cacheIssue = .writeFailed }
-        }
     }
 }
 
 private extension WorkDetailContent {
+    func appending(_ page: WorkVolumePage) -> WorkDetailContent {
+        var seen = Set(volumes.map(\.id))
+        let merged = (volumes + page.volumes.filter { seen.insert($0.id).inserted })
+            .sorted { lhs, rhs in
+                lhs.sortOrder == rhs.sortOrder ? lhs.id < rhs.id : lhs.sortOrder < rhs.sortOrder
+            }
+        return WorkDetailContent(
+            work: work,
+            description: description,
+            tags: tags,
+            seriesFacet: seriesFacet,
+            seriesIndex: seriesIndex,
+            authorFacets: authorFacets,
+            availableMediaKinds: availableMediaKinds,
+            selectedMediaKind: selectedMediaKind,
+            selectedVolumeID: selectedVolumeID,
+            readingStatus: readingStatus,
+            volumes: merged,
+            volumeCount: page.total,
+            chapters: chapters
+        )
+    }
+
     func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate) -> WorkDetailContent {
         guard work.id == update.workId,
               selectedVolumeID == update.volumeId,
@@ -933,7 +890,18 @@ private extension WorkDetailContent {
                 sizeLabel: volume.sizeLabel,
                 progress: update.percent,
                 isReadable: volume.isReadable,
-                isSelected: volume.isSelected
+                isSelected: volume.isSelected,
+                sortOrder: volume.sortOrder,
+                publisher: volume.publisher,
+                publishedAt: volume.publishedAt,
+                language: volume.language,
+                isbn: volume.isbn,
+                identifier: volume.identifier,
+                narrator: volume.narrator,
+                pageCount: volume.pageCount,
+                metadataSource: volume.metadataSource,
+                kindleSendAvailable: volume.kindleSendAvailable,
+                files: volume.files
             )
         }
         let readerChapterUnits: [ErmaoShared.ReaderChapterUnit] = chapters.map {
@@ -972,12 +940,14 @@ private extension WorkDetailContent {
             description: description,
             tags: tags,
             seriesFacet: seriesFacet,
+            seriesIndex: seriesIndex,
             authorFacets: authorFacets,
             availableMediaKinds: availableMediaKinds,
             selectedMediaKind: selectedMediaKind,
             selectedVolumeID: selectedVolumeID,
             readingStatus: update.percent >= 100 ? .finished : .reading,
             volumes: updatedVolumes,
+            volumeCount: volumeCount,
             chapters: updatedChapters
         )
     }

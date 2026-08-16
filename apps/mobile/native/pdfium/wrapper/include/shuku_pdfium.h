@@ -4,6 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(__GNUC__)
+#define SHUKU_PDFIUM_EXPORT __attribute__((visibility("default")))
+#else
+#define SHUKU_PDFIUM_EXPORT
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,26 +45,29 @@ typedef struct ShukuPdfiumPageSize {
 
 // The process must balance initialize/shutdown calls. Documents must be
 // closed before the final shutdown.
-ShukuPdfiumStatus shuku_pdfium_initialize(void);
-void shuku_pdfium_shutdown(void);
+SHUKU_PDFIUM_EXPORT ShukuPdfiumStatus shuku_pdfium_initialize(void);
+SHUKU_PDFIUM_EXPORT void shuku_pdfium_shutdown(void);
 
-ShukuPdfiumStatus shuku_pdfium_document_create(
+SHUKU_PDFIUM_EXPORT ShukuPdfiumStatus shuku_pdfium_document_create(
     const ShukuPdfiumByteSource* source,
     ShukuPdfiumDocument** output);
-void shuku_pdfium_document_close(ShukuPdfiumDocument* document);
+SHUKU_PDFIUM_EXPORT void shuku_pdfium_document_close(ShukuPdfiumDocument* document);
 
 // Re-run after every completed Range acquisition. NEED_DATA means one or more
 // request_range() hints were emitted and the caller should retry later.
-ShukuPdfiumStatus shuku_pdfium_document_step(ShukuPdfiumDocument* document);
-ShukuPdfiumStatus shuku_pdfium_page_step(ShukuPdfiumDocument* document,
-                                         int page_index);
-int shuku_pdfium_page_count(const ShukuPdfiumDocument* document);
-ShukuPdfiumStatus shuku_pdfium_page_size(ShukuPdfiumDocument* document,
-                                         int page_index,
-                                         ShukuPdfiumPageSize* output);
+SHUKU_PDFIUM_EXPORT ShukuPdfiumStatus
+shuku_pdfium_document_step(ShukuPdfiumDocument* document);
+SHUKU_PDFIUM_EXPORT ShukuPdfiumStatus
+shuku_pdfium_page_step(ShukuPdfiumDocument* document, int page_index);
+SHUKU_PDFIUM_EXPORT int
+shuku_pdfium_page_count(const ShukuPdfiumDocument* document);
+SHUKU_PDFIUM_EXPORT ShukuPdfiumStatus shuku_pdfium_page_size(
+    ShukuPdfiumDocument* document,
+    int page_index,
+    ShukuPdfiumPageSize* output);
 
 // Renders into caller-owned BGRA memory. max_pixels is an explicit OOM guard.
-ShukuPdfiumStatus shuku_pdfium_render_page_bgra(
+SHUKU_PDFIUM_EXPORT ShukuPdfiumStatus shuku_pdfium_render_page_bgra(
     ShukuPdfiumDocument* document,
     int page_index,
     int width,

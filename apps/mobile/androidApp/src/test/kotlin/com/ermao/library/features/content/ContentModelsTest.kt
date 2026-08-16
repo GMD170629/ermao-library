@@ -41,31 +41,32 @@ class ContentModelsTest {
     }
 
     @Test
-    fun singleEbookVolumeFallsBackToChaptersOnlyWhenReadingUnitsExist() {
-        val ebook = MediaContent(
-            kind = "EBOOK",
-            volumes = listOf(VolumeContent("volume-1", "Book", "EPUB", progressPercent = 34, readable = true, selected = true)),
+    fun onlyReflowableVolumesExposeAChapterDirectory() {
+        val chapter = listOf(ReadingUnitContent("chapter-1", "Chapter 1"))
+        val reflowable = VolumeContent(
+            id = "epub",
+            title = "EPUB",
+            format = "EPUB",
+            readerType = "reflowable",
+            progressPercent = null,
+            readable = true,
+            selected = true,
         )
-        val base = WorkDetailContent(
-            work = WorkCard("work-1", "Title", "Author", "", listOf("EBOOK"), 34),
+        val detail = WorkDetailContent(
+            work = WorkCard("work-1", "Title", "Author", "", listOf("EBOOK"), null),
             seriesId = null,
             seriesName = null,
             authorFacetId = null,
-            description = "Description",
+            description = null,
             tags = emptyList(),
-            media = listOf(ebook),
+            media = listOf(MediaContent("EBOOK", listOf(reflowable))),
             selectedMediaKind = "EBOOK",
+            readingUnits = chapter,
         )
 
-        assertFalse(base.usesEbookChapterFallback("EBOOK"))
-        assertTrue(
-            base.copy(readingUnits = listOf(ReadingUnitContent("chapter-1", "Chapter 1")))
-                .usesEbookChapterFallback("EBOOK"),
-        )
-        assertFalse(
-            base.copy(readingUnits = listOf(ReadingUnitContent("chapter-1", "Chapter 1")))
-                .usesEbookChapterFallback("COMIC"),
-        )
+        assertTrue(detail.supportsChapterDirectory(reflowable.id))
+        assertFalse(detail.copy(media = listOf(MediaContent("EBOOK", listOf(reflowable.copy(format = "PDF", readerType = "pdf", id = "pdf"))))).supportsChapterDirectory("pdf"))
+        assertFalse(detail.copy(media = listOf(MediaContent("COMIC", listOf(reflowable.copy(format = "CBZ", readerType = "comic", id = "comic"))))).supportsChapterDirectory("comic"))
     }
 
     @Test

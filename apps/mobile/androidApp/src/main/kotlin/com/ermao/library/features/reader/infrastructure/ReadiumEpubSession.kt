@@ -2,6 +2,7 @@ package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.application.ReaderResumeNotice
+import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderError
@@ -170,6 +171,7 @@ internal class ReadiumEpubSession(
     private var publicationPositions: List<Locator> = emptyList()
     private var locationJob: Job? = null
     private var bookmarkScope: CoroutineScope? = null
+    private var removedBookmark: AndroidReaderBookmarkRecord? = null
     private var lastPersistedLocation: ReaderLocation? = null
     private var expectedRestoreEnvelope: ReadiumLocatorEnvelope? = null
     private var restoreObservationCount = 0
@@ -426,12 +428,12 @@ internal class ReadiumEpubSession(
 
     override fun goPrevious(): Boolean {
         dismissResumeNotice()
-        return navigator?.goBackward(animated = true) ?: false
+        return navigator?.goBackward(animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goNext(): Boolean {
         dismissResumeNotice()
-        return navigator?.goForward(animated = true) ?: false
+        return navigator?.goForward(animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goTo(location: ReaderLocation): Boolean {
@@ -441,7 +443,7 @@ internal class ReadiumEpubSession(
             ?.takeIf { locator -> openedPublication.contains(locator) }
             ?: locatorMapper.resourceProgressionLocator(location, openedPublication)
             ?: return false
-        return navigator?.go(target, animated = true) ?: false
+        return navigator?.go(target, animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goToTotalProgression(totalProgression: Double): Boolean {
@@ -453,7 +455,7 @@ internal class ReadiumEpubSession(
                 abs(checkNotNull(locator.locations.totalProgression) - totalProgression)
             }
             ?: return false
-        return navigator?.go(target, animated = true) ?: false
+        return navigator?.go(target, animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun dismissResumeNotice() {
@@ -474,7 +476,7 @@ internal class ReadiumEpubSession(
         returningToResumeTarget = true
         expectedRestoreEnvelope = target.envelope
         restoreObservationCount = 0
-        val moved = navigator?.go(target.locator, animated = true) ?: false
+        val moved = navigator?.go(target.locator, animated = navigationAnimationsEnabled()) ?: false
         if (!moved) {
             returningToResumeTarget = false
             expectedRestoreEnvelope = null
@@ -491,12 +493,18 @@ internal class ReadiumEpubSession(
         persistPreferences(updated)
     }
 
-    override fun toggleCurrentBookmark() {
-        if (currentPageUnreadable) return
-        val location = _currentLocation.value as? ReflowReaderLocation ?: return
-        val resourceKey = location.resourceKey ?: return
+    private fun navigationAnimationsEnabled(): Boolean =
+        shouldAnimateAndroidReaderNavigation(_preferences.value, morphology)
+
+    override fun toggleCurrentBookmark(): ReaderBookmarkChange? {
+        if (currentPageUnreadable) return null
+        val location = _currentLocation.value as? ReflowReaderLocation ?: return null
+        val resourceKey = location.resourceKey ?: return null
         val id = bookmarkId(resourceKey, location.totalProgression ?: location.progression ?: 0.0)
-        val next = if (bookmarkRecords.any { it.id == id }) {
+        val existing = bookmarkRecords.firstOrNull { it.id == id }
+        val added = existing == null
+        val next = if (existing != null) {
+            removedBookmark = existing
             bookmarkRecords.filterNot { it.id == id }
         } else {
             bookmarkRecords + AndroidReaderBookmarkRecord(
@@ -514,11 +522,32 @@ internal class ReadiumEpubSession(
             )
         }
         commitBookmarkMutation(next)
+        return ReaderBookmarkChange(id, added)
     }
 
+    override fun undoBookmarkChange(change: ReaderBookmarkChange): Boolean =
+        if (change.added) {
+            if (bookmarkRecords.none { it.id == change.bookmarkId }) {
+                false
+            } else {
+                commitBookmarkMutation(bookmarkRecords.filterNot { it.id == change.bookmarkId })
+                true
+            }
+        } else {
+            undoBookmarkRemoval(change.bookmarkId)
+        }
+
     override fun removeBookmark(id: String) {
-        if (bookmarkRecords.none { it.id == id }) return
+        removedBookmark = bookmarkRecords.firstOrNull { it.id == id } ?: return
         commitBookmarkMutation(bookmarkRecords.filterNot { it.id == id })
+    }
+
+    override fun undoBookmarkRemoval(id: String): Boolean {
+        val bookmark = removedBookmark?.takeIf { it.id == id } ?: return false
+        if (bookmarkRecords.any { it.id == id }) return false
+        removedBookmark = null
+        commitBookmarkMutation(bookmarkRecords + bookmark)
+        return true
     }
 
     override fun goToBookmark(id: String): Boolean {

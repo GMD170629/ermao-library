@@ -74,20 +74,20 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(store.loadProfiles(), payload)
     }
 
-    func testOfflineEntitlementStoreIsIndependentFromProfiles() throws {
+    func testVerifiedSessionStoreIsIndependentFromProfiles() throws {
         let suiteName = "com.ermao.library.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let profiles = UserDefaultsServerProfileStore(defaults: defaults)
-        let entitlements = UserDefaultsOfflineEntitlementStore(defaults: defaults)
+        let sessions = UserDefaultsVerifiedSessionStore(defaults: defaults)
 
         try profiles.saveProfiles(payload: #"{"schemaVersion":2,"profiles":[]}"#)
-        let entitlementPayload = #"{"profile-a":{"userId":"user-a","expiresAt":42}}"#
-        try entitlements.saveEntitlements(payload: entitlementPayload)
+        let sessionPayload = #"{"schemaVersion":1,"records":{"profile-a":{"userId":"user-a"}}}"#
+        try sessions.saveVerifiedSessions(payload: sessionPayload)
 
-        XCTAssertEqual(entitlements.loadEntitlements(), entitlementPayload)
-        entitlements.clear()
-        XCTAssertNil(entitlements.loadEntitlements())
+        XCTAssertEqual(sessions.loadVerifiedSessions(), sessionPayload)
+        sessions.clear()
+        XCTAssertNil(sessions.loadVerifiedSessions())
         XCTAssertNotNil(profiles.loadProfiles())
     }
 }

@@ -3,6 +3,7 @@ package com.ermao.library
 import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -89,6 +90,32 @@ class AndroidShellSmokeTest {
     }
 
     @Test
+    fun startupServerProbeLeavesTheLoginFormUsable() {
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                ErmaoLibraryRoot(
+                    state = MainUiState(
+                        session = AppSession.CheckingServer(
+                            ServerConnectionDraft("127.0.0.1", "http://127.0.0.1:3000"),
+                        ),
+                        loginForm = LoginFormState(
+                            serverAddress = "http://127.0.0.1:3000",
+                            email = "reader@example.com",
+                            password = "password",
+                        ),
+                    ),
+                    actions = noOpMainActions,
+                    contentRepository = createAndroidContentRepository(
+                        InstrumentationRegistry.getInstrumentation().targetContext,
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("login-submit").assertIsDisplayed().assertIsEnabled()
+    }
+
+    @Test
     fun authenticatedServerManagementReusesLoginEntryAndCanReturnToShell() {
         val session = authenticatedSession()
         composeRule.setContent {
@@ -125,6 +152,7 @@ class AndroidShellSmokeTest {
                     administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(
                         InstrumentationRegistry.getInstrumentation().targetContext,
                     ),
+                    workManagementRepository = application.workManagementRepository,
                     downloadCatalog = application.downloadCatalog,
                     downloadFiles = application.downloadFiles,
                     sharedDownloadCatalog = application.sharedDownloadCatalog,
@@ -188,7 +216,6 @@ private val noOpMainActions = MainActions(
     onRefreshSessionAwaiting = {},
     onPurgeCurrentNamespace = {},
     onLogoutAwaiting = {},
-    onEnterOffline = {},
     onLogout = {},
 )
 

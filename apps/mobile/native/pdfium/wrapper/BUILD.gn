@@ -1,5 +1,11 @@
 if (is_android) {
   shared_library("shuku_pdfium") {
+    configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+    inputs = [ "shuku_pdfium.exports" ]
+    ldflags = [
+      "-Wl,--version-script=" +
+          rebase_path("shuku_pdfium.exports", root_build_dir),
+    ]
     sources = [
       "src/shuku_pdfium.cc",
       "src/shuku_pdfium_android_jni.cc",

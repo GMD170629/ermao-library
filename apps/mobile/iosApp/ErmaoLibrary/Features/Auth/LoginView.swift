@@ -153,24 +153,6 @@ struct LoginView: View {
                     }
                     .appTextStyle(.label)
 
-                    if let remainingOfflineDays {
-                        Button {
-                            store.enterOfflineMode()
-                        } label: {
-                            Text(
-                                String(
-                                    format: NSLocalizedString("auth.offline.action.format", comment: ""),
-                                    locale: .current,
-                                    remainingOfflineDays
-                                )
-                            )
-                            .frame(minHeight: .iosMinimumTouchTarget)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(theme.textSecondary)
-                        .accessibilityHint(Text("auth.offline.hint"))
-                    }
-
                     Spacer(minLength: .space3)
                     Label("auth.privateDeployment", systemImage: "lock")
                         .appTextStyle(.caption)
@@ -223,16 +205,6 @@ struct LoginView: View {
     private var hasInvalidServerAddress: Bool {
         store.snapshot.reasonCode == "INVALID_ADDRESS" ||
             store.operationErrorCode == "INVALID_SERVER_ADDRESS"
-    }
-
-    private var remainingOfflineDays: Int? {
-        guard
-            [.sessionExpired, .sessionUnavailable].contains(store.snapshot.phase),
-            let expiry = store.snapshot.entitlementExpiresAt
-        else { return nil }
-        let interval = expiry.timeIntervalSinceNow
-        guard interval > 0 else { return nil }
-        return max(1, Int(ceil(interval / 86_400)))
     }
 
     private func loginIfValid() {
@@ -404,7 +376,6 @@ struct AccountDisabledView: View {
 
 struct ReauthenticateView: View {
     @ObservedObject var store: SessionStore
-    let serverUnavailable: Bool
 
     @Environment(\.appTheme) private var theme
     @FocusState private var passwordFocused: Bool
@@ -413,9 +384,9 @@ struct ReauthenticateView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: .space3) {
-                    Image(systemName: serverUnavailable ? "wifi.exclamationmark" : "lock.rotation")
+                    Image(systemName: "lock.rotation")
                         .font(.largeTitle)
-                        .foregroundStyle(serverUnavailable ? .orange : theme.brandAccent)
+                        .foregroundStyle(theme.brandAccent)
                         .accessibilityHidden(true)
                     Text("auth.reauthenticate.title")
                         .appTextStyle(.title)
@@ -439,13 +410,7 @@ struct ReauthenticateView: View {
                                 .textSelection(.enabled)
                         }
                     }
-                    Text(
-                        LocalizedStringKey(
-                            serverUnavailable
-                                ? "auth.reauthenticate.unavailable"
-                                : "auth.reauthenticate.message"
-                        )
-                    )
+                    Text("auth.reauthenticate.message")
                         .foregroundStyle(theme.textSecondary)
                         .multilineTextAlignment(.center)
 
@@ -475,27 +440,6 @@ struct ReauthenticateView: View {
                         action: loginIfValid
                     )
 
-                    if let remainingDays {
-                        Button {
-                            store.enterOfflineMode()
-                        } label: {
-                            Text(
-                                String(
-                                    format: NSLocalizedString("auth.offline.action.format", comment: ""),
-                                    locale: .current,
-                                    remainingDays
-                                )
-                            )
-                        }
-                        .frame(minHeight: .iosMinimumTouchTarget)
-                        .accessibilityHint(Text("auth.offline.hint"))
-                    } else {
-                        Text("auth.offline.expired")
-                            .appTextStyle(.caption)
-                            .foregroundStyle(theme.textTertiary)
-                            .multilineTextAlignment(.center)
-                    }
-
                     Button("server.switch.action") {
                         store.chooseAnotherServer()
                     }
@@ -513,13 +457,6 @@ struct ReauthenticateView: View {
         .onAppear {
             store.email = store.snapshot.userEmail ?? store.reauthenticationUserEmail ?? store.email
         }
-    }
-
-    private var remainingDays: Int? {
-        guard let expiry = store.snapshot.entitlementExpiresAt else { return nil }
-        let interval = expiry.timeIntervalSinceNow
-        guard interval > 0 else { return nil }
-        return max(1, Int(ceil(interval / 86_400)))
     }
 
     private func loginIfValid() {

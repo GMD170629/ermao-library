@@ -1,0 +1,8 @@
+{
+  global:
+    JNI_OnLoad;
+    Java_com_ermao_library_pdfium_ShukuPdfiumNative_*;
+    shuku_pdfium_*;
+  local:
+    *;
+};

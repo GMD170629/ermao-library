@@ -34,6 +34,8 @@
 		B04500000000000000000045 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04500000000000000000045 /* LibraryView.swift */; };
 		B04600000000000000000046 /* FacetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04600000000000000000046 /* FacetView.swift */; };
 		B04700000000000000000047 /* WorkDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04700000000000000000047 /* WorkDetailView.swift */; };
+		BA0100000000000000000001 /* WorkManagementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0100000000000000000001 /* WorkManagementStore.swift */; };
+		BA0200000000000000000002 /* WorkManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0200000000000000000002 /* WorkManagementView.swift */; };
 		B04800000000000000000048 /* SharedContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000048 /* SharedContentClient.swift */; };
 		B04800000000000000000049 /* SharedShelfClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000049 /* SharedShelfClient.swift */; };
 		B04900000000000000000049 /* ContentUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04900000000000000000049 /* ContentUITestFixture.swift */; };
@@ -188,6 +190,8 @@
 		F04500000000000000000045 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		F04600000000000000000046 /* FacetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacetView.swift; sourceTree = "<group>"; };
 		F04700000000000000000047 /* WorkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailView.swift; sourceTree = "<group>"; };
+		FA0100000000000000000001 /* WorkManagementStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkManagementStore.swift; sourceTree = "<group>"; };
+		FA0200000000000000000002 /* WorkManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkManagementView.swift; sourceTree = "<group>"; };
 		F04800000000000000000048 /* SharedContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContentClient.swift; sourceTree = "<group>"; };
 		F04800000000000000000049 /* SharedShelfClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedShelfClient.swift; sourceTree = "<group>"; };
 		F04900000000000000000049 /* ContentUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentUITestFixture.swift; sourceTree = "<group>"; };
@@ -524,6 +528,8 @@
 			isa = PBXGroup;
 			children = (
 				F04700000000000000000047 /* WorkDetailView.swift */,
+				FA0100000000000000000001 /* WorkManagementStore.swift */,
+				FA0200000000000000000002 /* WorkManagementView.swift */,
 			);
 			path = Work;
 			sourceTree = "<group>";
@@ -847,6 +853,8 @@
 				B04500000000000000000045 /* LibraryView.swift in Sources */,
 				B04600000000000000000046 /* FacetView.swift in Sources */,
 				B04700000000000000000047 /* WorkDetailView.swift in Sources */,
+				BA0100000000000000000001 /* WorkManagementStore.swift in Sources */,
+				BA0200000000000000000002 /* WorkManagementView.swift in Sources */,
 				B04800000000000000000048 /* SharedContentClient.swift in Sources */,
 				B04800000000000000000049 /* SharedShelfClient.swift in Sources */,
 				B04900000000000000000049 /* ContentUITestFixture.swift in Sources */,

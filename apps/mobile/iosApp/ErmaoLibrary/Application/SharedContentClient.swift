@@ -52,15 +52,6 @@ actor SharedContentClient: ContentClient {
         return mapWorksPayload(payload)
     }
 
-    func restoreWorksResult(context: ContentRequestContext, query: WorksQuery) async throws -> ContentFetch<WorkPage>? {
-        guard let result = try await repository.restoreWorks(
-            context: sharedContext(context),
-            query: sharedWorksQuery(query)
-        ) else { return nil }
-        let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.WorkSummary>> = try contentFetch(result)
-        return mapWorksPayload(payload)
-    }
-
     private func mapWorksPayload(
         _ payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.WorkSummary>>
     ) -> ContentFetch<WorkPage> {
@@ -82,15 +73,6 @@ actor SharedContentClient: ContentClient {
             context: sharedContext(context),
             query: sharedGroupingQuery(query)
         )
-        let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.GroupingSummary>> = try contentFetch(result)
-        return mapGroupingsPayload(payload, kind: query.kind)
-    }
-
-    func restoreGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage>? {
-        guard let result = try await repository.restoreGroupings(
-            context: sharedContext(context),
-            query: sharedGroupingQuery(query)
-        ) else { return nil }
         let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.GroupingSummary>> = try contentFetch(result)
         return mapGroupingsPayload(payload, kind: query.kind)
     }
@@ -130,15 +112,6 @@ actor SharedContentClient: ContentClient {
         return mapFacetPayload(payload)
     }
 
-    func restoreFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage>? {
-        guard let result = try await repository.restoreFacet(
-            context: sharedContext(context),
-            query: sharedFacetQuery(query)
-        ) else { return nil }
-        let payload: ContentFetch<ErmaoShared.FacetPage> = try contentFetch(result)
-        return mapFacetPayload(payload)
-    }
-
     private func mapFacetPayload(_ payload: ContentFetch<ErmaoShared.FacetPage>) -> ContentFetch<FacetPage> {
         ContentFetch(value: FacetPage(
             facet: mapFacet(payload.value.facet),
@@ -165,6 +138,7 @@ actor SharedContentClient: ContentClient {
         let selectedVersions = value.mediaVersions.filter {
             mapMediaKind($0.mediaKind) == selectedKind
         }
+        let selectedVolumeCount = selectedVersions.reduce(0) { $0 + Int($1.volumeCount) }
         let selectedVolumeID = query.volumeID
             ?? value.activeMedia?.selectedVolumeId
             ?? value.continueVolumeId
@@ -183,11 +157,28 @@ actor SharedContentClient: ContentClient {
                 ),
                 progress: volume.progress > 0 ? volume.progress : nil,
                 isReadable: volume.readable,
-                isSelected: volume.id == selectedVolumeID
+                isSelected: volume.id == selectedVolumeID,
+                sortOrder: Int(volume.sortOrder),
+                publisher: volume.publisher,
+                publishedAt: volume.publishedAt,
+                language: volume.language,
+                isbn: volume.isbn,
+                identifier: volume.identifier,
+                narrator: volume.narrator,
+                pageCount: volume.pageCount?.intValue,
+                metadataSource: volume.origin,
+                kindleSendAvailable: volume.kindleSendAvailable,
+                files: volume.files.map {
+                    WorkVolumeFile(
+                        id: $0.id,
+                        path: $0.path,
+                        sizeBytes: $0.sizeBytes,
+                        displaySize: $0.displaySize
+                    )
+                }
             )
         }
-        let selectedProgress = volumes.first(where: \.isSelected)?.progress
-            ?? volumes.compactMap(\.progress).max()
+        let selectedProgress = value.continueVolumeProgress > 0 ? value.continueVolumeProgress : nil
         let readingStatus: LibraryReadingStatus = if value.completed {
             .finished
         } else if selectedProgress != nil {
@@ -250,13 +241,67 @@ actor SharedContentClient: ContentClient {
             description: value.description_,
             tags: value.tags,
             seriesFacet: value.seriesFacet.map(mapFacet),
+            seriesIndex: value.seriesIndex?.doubleValue,
             authorFacets: value.authorFacets.map(mapFacet),
             availableMediaKinds: mediaKinds,
             selectedMediaKind: selectedKind,
             selectedVolumeID: selectedVolumeID,
             readingStatus: readingStatus,
             volumes: volumes,
+            volumeCount: selectedVolumeCount,
             chapters: chapters
+        )
+    }
+
+    func fetchWorkVolumes(
+        context: ContentRequestContext,
+        workID: String,
+        mediaVersionID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> WorkVolumePage {
+        let result = try await repository.loadWorkVolumes(
+            context: sharedContext(context),
+            query: ErmaoShared.WorkVolumePageQuery(
+                workId: workID,
+                mediaVersionId: mediaVersionID,
+                page: Int32(page),
+                pageSize: Int32(pageSize)
+            )
+        )
+        let value: ErmaoShared.WorkVolumePage = try contentValue(result)
+        let volumes = value.volumes.map { volume in
+            WorkVolume(
+                id: volume.id,
+                mediaVersionID: volume.mediaVersionId,
+                title: volume.title,
+                formatLabel: volume.format,
+                volumeIndex: volume.volumeIndex?.doubleValue,
+                cover: cover(volume.coverUrl),
+                sizeLabel: ByteCountFormatter.string(fromByteCount: volume.sizeBytes, countStyle: .file),
+                progress: volume.progress > 0 ? volume.progress : nil,
+                isReadable: volume.readable,
+                isSelected: false,
+                sortOrder: Int(volume.sortOrder),
+                publisher: volume.publisher,
+                publishedAt: volume.publishedAt,
+                language: volume.language,
+                isbn: volume.isbn,
+                identifier: volume.identifier,
+                narrator: volume.narrator,
+                pageCount: volume.pageCount?.intValue,
+                metadataSource: volume.origin,
+                kindleSendAvailable: volume.kindleSendAvailable,
+                files: volume.files.map {
+                    WorkVolumeFile(id: $0.id, path: $0.path, sizeBytes: $0.sizeBytes, displaySize: $0.displaySize)
+                }
+            )
+        }
+        return WorkVolumePage(
+            volumes: volumes,
+            page: Int(value.page),
+            total: Int(value.total),
+            totalPages: Int(value.totalPages)
         )
     }
 
@@ -329,8 +374,8 @@ actor SharedContentClient: ContentClient {
               let value = content.value as? Value else { throw ContentClientError.invalidResponse }
         return ContentFetch(
             value: value,
-            provenance: content.source.name == "Cache" ? .cache : .network,
-            isStale: content.isStale
+            provenance: .network,
+            isStale: false
         )
     }
 

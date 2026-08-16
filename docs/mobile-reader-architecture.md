@@ -1,7 +1,7 @@
 # Mobile Reader Architecture
 
 Status: Reader v4 cross-format exact-progress contract implemented; physical-device conformance pending
-Last updated: 2026-08-14
+Last updated: 2026-08-16
 
 This document is the architecture contract for the native Reader and its Reader v4 cross-platform progress integration. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
@@ -44,24 +44,23 @@ fields participates in reading-progress ownership or validation. Progress is
 owned by the server-authorized `workId + volumeId`; a file, parser, or
 normalization change does not create a new progress slot or block restoration.
 
-For EPUB, MOBI-family, and TXT, matching content identity means that all clients
-read the same deterministic server-generated EPUB render artifact and produce the
-same Locator DOM Projection v2, not byte-identical runtime DOM. The
-projection includes reading-order href/media type and the complete author body
-element tree, `id` values, nth-of-type paths, and normalized locator-block text.
-It ignores head decoration, comments, attribute ordering, non-`id` attributes,
-and Navigator runtime nodes. The production identifiers are:
+For EPUB, MOBI-family, and TXT, matching content identity means that every client
+uses the same source-format parser contract and produces stable reading-order hrefs
+and semantic text anchors. Runtime DOM need not be byte-identical. Exact restoration
+uses the same href plus a selector, fragment/CFI or bounded text context. The
+production identifiers are:
 
 - EPUB: `epub-package:1 / shuku-epub-locator-dom-v2`;
 - MOBI family: pinned libmobi parser / `ermao-mobi-core-v1+shuku-locator-dom-v2`;
 - TXT: `shuku-txt-parser-v1 / shuku-txt-publication-v2`.
 
-The original library file is immutable. Strict XML content is preserved; ordinary
-markup failures use server-side WHATWG HTML5 recovery and deterministic XHTML
-serialization. Unrecoverable body resources retain their href as explicit marked
-error pages. They do not invalidate legal Nav/NCX chapters or the rest of the book.
-Only exploit-capable constructs are security rejections. Platform adapters enforce
-CSP and resource policy but do not independently normalize author markup.
+The original library file is immutable and is the only persisted Reader artifact.
+Reader bootstrap, download, cache and recovery never create a derived EPUB, ZIP or
+unpacked publication directory. MOBI-family and TXT parsers expose bounded virtual
+Publication resources in memory. Web streams those resources through authenticated
+Publication routes; native clients parse the downloaded original file. Delivery may
+set CSP and apply the documented head-only security policy but does not rewrite the
+author body.
 
 The exact local progress record identity is:
 
@@ -109,7 +108,6 @@ First-party clients use only:
 
 ```text
 GET /api/reader/v4/volumes/{volumeId}/bootstrap
-GET /api/reader/v4/volumes/{volumeId}/publication/render.epub
 GET /api/reader/v4/volumes/{volumeId}/progress
 PUT /api/reader/v4/volumes/{volumeId}/progress
 PUT /api/reader/v4/volumes/{volumeId}/reading-status
@@ -229,9 +227,9 @@ native progress and sync codecs use document version 5 and reject version 4;
 the server data migration deletes old v4 progress and mutation receipts. No
 Foliate, legacy Reader v4, location, completion, or percentage migration exists.
 
-Publication download keeps the original file hash as progress diagnostics and verifies
-the render artifact with its separate SHA-256. Render artifacts are disposable cache,
-published atomically, and never participate in library backup, export or metadata writeback.
+Publication download stores and verifies the original authorized file. Parser and
+normalization identifiers remain diagnostics and never create a second persisted
+reading representation.
 
 ## 10. Platform adapters
 
@@ -241,10 +239,10 @@ Web uses Readium TS. Its version-locked same-origin iframe bridge is isolated
 behind the adapter until the toolkit exposes a public first-visible-block API;
 failure to read the frame fails closed and disables exact sync.
 
-Native publication downloads reuse authenticated cookie storage, prefer the Reader v4
-render artifact for supported reflowable formats, stream into an app-private staging
-file, validate declared and actual size, artifact SHA-256, MIME/publication type, and
-atomically install the result. They open Readium after package opening and do not
+Native publication downloads reuse authenticated cookie storage, download the original
+source format, stream into an app-private staging file, validate declared and actual
+size, MIME/publication type, and atomically install the result. They open Readium after
+the format adapter creates its Publication and do not
 preflight the complete reading order. Redirect, traversal, symlink, empty-body,
 overflow, truncation, cancellation, and oversized-error cases fail closed.
 
@@ -283,8 +281,8 @@ Automated contracts must cover:
 - v1–v3 `410 Gone` and first-party v4-only paths;
 - process-death recovery for pending state and fresh session reconstruction from bootstrap.
 - Nav-to-NCX fallback, invalid navigation-node filtering, and body failure independence;
-- deterministic render hashes, concurrent generation, source CAS and temporary-file cleanup;
-- marked pages retaining previous/next/contents navigation without progress or bookmarks.
+- source bytes remaining unchanged and no Reader derivative directory being created;
+- MOBI/TXT virtual Publication href and Locator conformance across platforms.
 
 Android acceptance includes building and deploying the debug APK to the dedicated test emulator, cold launching it, and running relevant instrumentation. iOS acceptance must use an `iosArm64`/`iphoneos` build and a connected physical iPhone or iPad. Simulator evidence is prohibited. Linux KMP compilation is useful static evidence but is not iOS runtime acceptance.
 

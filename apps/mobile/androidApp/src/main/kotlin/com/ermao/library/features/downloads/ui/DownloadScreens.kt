@@ -46,6 +46,7 @@ import com.ermao.library.features.downloads.application.DownloadedWorkUiState
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.DownloadedWorkGroup
 import com.ermao.library.features.downloads.model.DownloadedMediaVersionGroup
+import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,7 +63,6 @@ fun DownloadCenterScreen(
     onRemoveDownload: (AndroidDownloadRecord) -> Unit,
     modifier: Modifier = Modifier,
     showBackNavigation: Boolean = true,
-    offlineActions: (@Composable () -> Unit)? = null,
     allowManagementActions: Boolean = true,
 ) {
     val theme = WarmPageThemeValues
@@ -93,7 +93,6 @@ fun DownloadCenterScreen(
                 Modifier.fillMaxSize().padding(padding),
                 verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
             ) {
-                offlineActions?.let { actions -> item { actions() } }
                 item {
                     Column(Modifier.padding(horizontal = theme.spacing.three)) {
                         Text(stringResource(R.string.downloads_storage), style = theme.typography.sectionTitle)
@@ -228,13 +227,14 @@ private fun mediaKindLabel(mediaKind: String): String = stringResource(
 private fun ActiveRow(record: AndroidDownloadRecord, onCancel: ((String) -> Unit)?) {
     val theme = WarmPageThemeValues
     val progress = if (record.expectedBytes == 0L) 0f else record.transferredBytes.toFloat() / record.expectedBytes
+    val animatedProgress = rememberForwardProgress(progress, progressIdentity = record.volumeId)
     Column(Modifier.padding(horizontal = theme.spacing.three), verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.CloudDownload, null); Text(record.workTitle, Modifier.padding(start = theme.spacing.one).weight(1f)); Text("${(progress * 100).toInt()}%") }
         Text(
             stringResource(R.string.downloads_task_context, mediaKindLabel(record.mediaKind), record.volumeTitle),
             color = theme.colors.textSecondary,
         )
-        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(4.dp), color = theme.colors.brandAccent, trackColor = theme.colors.divider)
+        LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth().height(4.dp), color = theme.colors.brandAccent, trackColor = theme.colors.divider)
         if (onCancel != null) {
             TextButton(onClick = { onCancel(record.volumeId) }) { Text(stringResource(R.string.cancel_action)) }
         }

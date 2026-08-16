@@ -58,24 +58,29 @@
 
 ## 5. Work Detail
 
-![Work Detail Multi-volume Cover Grid iOS App Light v3](assets/mobile-app-hifi-v1/work-detail-media-volumes-cover-grid-ios-app-light-v3.png)
+![Work Detail Selected Volume Metadata Light and Dark v6](assets/mobile-app-hifi-v1/work-detail-selected-volume-metadata-light-dark-v6.png)
 
-文件：[简介](assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png) · [媒体版本与多卷封面 v3](assets/mobile-app-hifi-v1/work-detail-media-volumes-cover-grid-ios-app-light-v3.png) · [单卷电子书章节回退](assets/mobile-app-hifi-v1/work-detail-ebook-chapters-ios-app-light-v2.png) · [二级操作 Sheet](assets/mobile-app-hifi-v1/work-detail-actions-sheet-ios-app-light-v2.png)
+文件：[Work Detail 选中卷册元数据 Light/Dark v6](assets/mobile-app-hifi-v1/work-detail-selected-volume-metadata-light-dark-v6.png)
 
-多卷封面 v3 替代原 `work-detail-media-volumes-ios-app-light-v2.png`；其余三张 v2 稿继续有效，共同组成 Work Detail 的当前视觉基线。它们是带 iPhone 展示框的概念稿，冻结 App 自有内容构图、密度和层级；实现截图仍使用真实设备画布，系统导航、Tab、Menu 与 Sheet 外壳不得按展示框逐像素仿制。
+`work-detail-selected-volume-metadata-light-dark-v6.png` 是 Work Detail 唯一页面级视觉基线。详情页 v2–v5 旧图已从权威资产目录删除，禁止作为布局、覆盖层或回归验收依据。v6 是并列 Light/Dark 概念板，冻结 App 自有内容构图、密度和层级；真实实现仍分别使用 iOS/Android 原生画布和系统组件，不按设备外框逐像素仿制。字段、交互和状态的文字合同以 [`mobile-app-work-detail-selected-volume-design.md`](mobile-app-work-detail-selected-volume-design.md) 为准。
 
 冻结项：
 
-- 使用系统返回、折叠标题语义和 overflow，不自绘 Web 式 Header；
-- Cover 与作品名组成第一视觉层，作者、系列和阅读状态依次降级；
-- Cover 全局使用透明展示框，不为真实封面或 Fallback 补充背景色；详情身份区按“标题、作者、方形标签、阅读状态、系列”组织，作者与系列保留整行点击但不显示箭头，系列使用下划线并与封面底部对齐；
-- 主 CTA 之后在简介存在时使用“简介 / 媒体版本”一级 Tab；简介为空时隐藏该 Tab 并直接展示媒体内容；仅有一个媒体版本时隐藏媒体类型控件，直接展示卷册或章节；
-- 多卷 Volume 使用与 Mobile Work card 统一的 2:3 Cover 网格：标准 Compact 三列，大字体或窄屏降为两列；左上显示卷序号，阅读进度以 2pt 轨道紧贴封面底部，当前卷使用 2pt `brandAccent` 描边；单卷电子书直接回退到目录行，不额外显示“图书章节 / 共 N 章”标题行；
+- 使用系统返回与折叠标题语义，不自绘 Web 式 Header，也不在顶部显示 overflow；Work Detail 正常显示 AuthenticatedShell 四项导航，只有 Reader 隐藏；
+- 只显示一张当前作品 Cover，不显示封面轮播、圆点或虚构的备用封面；Cover 与作品名组成第一视觉层，作者、系列和阅读状态依次降级；
+- Cover 全局使用透明展示框，不为真实封面或 Fallback 补充背景色；详情身份区按“标题、作者 / 系列 / 当前媒介、填充背景标签、阅读状态”组织，作者与系列不再拆成独立行；
+- 主 CTA 下方快捷动作固定为“下载 / 阅读状态 / 加入 / 更多”；`加入` 使用书架语义图标并打开 `shelf-picker`，`更多` 展开图书控制菜单。详情页右上角不显示三点或管理入口；
+- 简介、媒介选择、横向卷册轨道和选中卷册元数据在同一滚动流中连续展示，不使用“简介 / 媒体版本”一级 Tab；简介展开控件使用居中 chevron；“媒体版本”在左、真实媒介选项在右，单媒体版本也显示唯一选项；详情页不显示目录；
+- 多卷 Volume 使用与 Mobile Work card 统一的 2:3 横向轨道：标准 Compact 单项约为内容宽度三分之一，首屏完整显示三项并露出下一项；大字体或窄屏可增加单项宽度但不得压缩文字或触摸目标。轨道支持分页加载、尾部行内重试和稳定滚动锚点；
+- 左上显示卷序号，阅读进度以 2pt 轨道紧贴封面底部，当前卷使用 2pt `brandAccent` 描边；单卷也显示同一卷册轨道，保证元数据、下载状态和授权长按管理入口不分叉；
+- 下方“当前卷册元数据信息”严格跟随当前选中卷册，固定显示格式、语言、出版日期、页数、元数据信息来源和文件路径。缺失值显示 `—`；示例 EPUB 无页数，因此 v6 的页数值为 `—`。被动元数据行不显示导航箭头；
+- 媒介控件只显示当前作品真实具备的媒介；v6 示例完整显示电子书、漫画和有声书，三者均为可用媒介，不把有声书画成禁用或“即将支持”；
+- 卷册主视觉不显示编辑按钮。长按卷册封面打开卷册控制菜单，卷册标题不触发管理；平台辅助技术和非触摸输入在封面提供“卷册操作”等价动作；
 - “未开始 / 未读”是默认状态，不在身份区重复显示；只有正在阅读或已完成时显示阅读状态；
 - 下载状态与阅读进度严格分离：云朵直接开始下载，环形控件可暂停/取消，勾选圆圈表示完成；详情行不显示“下载中 68%”一类文字；
 - 格式访问优先级沿用 Phase 1：可重排格式未完成下载时，主动作表达“下载后阅读”且不得进入 Reader；PDF/漫画在线主动作仍是流式阅读，云朵只表示另存完整离线工件。本构图规则不得覆盖这一功能差异；
-- 编辑、下载、设置封面和阅读状态位于平台原生二级操作容器；能力与权限不足时隐藏或提供明确的 Web 管理路径，不使用伪成功状态；
-- Work Detail 仍位于 LibraryStack 的 AuthenticatedShell 内，因此保留四项 Tab；只有 Reader 隐藏 Tab 与 mini player。
+- 编辑、识别、封面和其他管理能力由详情页控制菜单进入聚焦 Sheet；下载、阅读状态、加入书架和更多保持详情页快捷入口。能力与权限不足时隐藏对应操作或给出真实原因，不使用伪成功状态；
+- 图书控制菜单与卷册控制菜单使用触点锚定的紧凑半透明悬浮卡：卷册长按取真实按压坐标，`更多`取触发控件位置，卡片在安全区内自动翻转/夹取，不固定在右上角。宽度、紧凑标题、行密度和任务 Sheet 合同以 [`mobile-app-work-detail-management-interaction-design-v2.md`](mobile-app-work-detail-management-interaction-design-v2.md) v2 为准；[`work-detail-book-control-menu-floating-card-v1.png`](assets/mobile-app-hifi-v1/work-detail-book-control-menu-floating-card-v1.png) 仅继续约束半透明材质、层级和危险项分区，不再约束固定右侧位置或旧宽度。菜单不是底部 Sheet 或独立页面；其内容按需独立滚动，背景详情保持可辨认且不可交互，删除项固定为末尾独立危险区；
 
 ## 6. Reader Paper
 
@@ -169,7 +174,7 @@
 
 ## 12. 本轮验收结论
 
-- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；除 Work Detail 当前四张带设备框评审稿外，主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
+- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；Work Detail 使用 v6 并列 Light/Dark 评审板，其他主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
 - Home 没有第二套搜索，Library 是唯一发现入口；
 - Library 活动筛选已去除大面积胶囊背景；
 - Home 与 Library 在标准 `390pt` Compact 宽度下均保持一行三本的信息密度；

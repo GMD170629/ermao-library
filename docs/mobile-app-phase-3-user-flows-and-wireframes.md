@@ -7,6 +7,8 @@
 > 下游视觉约束：[`mobile-app-phase-4-visual-master.md`](mobile-app-phase-4-visual-master.md)
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
+> v1.0.0 线框修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发断网冷启动仍是普通 Shell；首页、书库、Facet、详情分别显示局部失败；Download Center 与 Reader 保持正常信息架构，不提供独立离线导航、授权期限或服务器 GET 缓存结果。
+
 ## 1. 文档目的
 
 本文件不定义最终品牌视觉、颜色、字体、圆角、阴影或动效风格。它固定低保真阶段必须保持稳定的产品结构：
@@ -75,7 +77,7 @@ Reader、下载和服务器锚点还必须覆盖 conflict、interrupted 与 resu
 | A05 | 作品详情 | `work.detail` | 媒介、卷册、阅读状态、下载和开始/继续动作的决策中心 |
 | A06 | Reader | `reader.session` | EPUB/漫画/PDF 的沉浸消费与进度同步中心 |
 | A07 | Now Playing | `audio.now-playing` | 后台音频、章节、系统媒体和跨 Tab 持续播放中心 |
-| A08 | 下载中心 | `downloads.center` | 受管离线、空间、失败恢复和 401 宽限的可见中心 |
+| A08 | 下载中心 | `downloads.center` | 本地完成工件、空间与下载失败恢复的可见中心 |
 
 未选为视觉锚点不等于没有页面。初始化、重新认证、“我的”根页、搜索结果、Facet 列表和账户页在第 13 节定义支持性线框要求；普通登录就是 A01 的默认内容，不再是独立页面或先选服务器后的展开状态。
 
@@ -88,7 +90,7 @@ Reader、下载和服务器锚点还必须覆盖 conflict、interrupted 与 resu
 | F03 | 发现内容并开始阅读 | 书库 | Reader/Now Playing | A03、A05、A06/A07 |
 | F04 | 创建/使用个人书架 | 作品详情或书架 | 书架详情中的作品 | A05、A04 |
 | F05 | 连续收听有声书 | 首页/详情/mini player | 后台持续播放 | A02/A05、A07 |
-| F06 | 下载并在离线/401 后继续使用 | 作品详情 | 离线 Reader + 待同步状态 | A05、A08、A06 |
+| F06 | 下载并从本地工件继续阅读 | 作品详情 | Reader + 本地完成工件 | A05、A08、A06 |
 | F07 | 切换服务器且不混淆数据 | 我的/服务器中心 | 新服务器首页 | A01、A02 |
 | F08 | 从内容变化或权限变化中安全恢复 | Reader/详情 | 新内容、合法页面或所属 Tab 根 | A05、A06、A08 |
 
@@ -126,7 +128,7 @@ flowchart TD
 4. “登录”是唯一主动作；点击后才执行 `/api/health`、兼容性和 setup status 检查。
 5. 未初始化进入 setup；已初始化提交当前账号与密码。
 6. 成功会话保存 Cookie，随后必须请求 `/me`。
-7. `/me` 成功后自动保存或更新 profile，`displayName` 取标准化 URL hostname，并保存 `serverIdentity + userId + authzVersion` namespace 与 30 天 offline entitlement。
+7. `/me` 成功后自动保存或更新 profile，`displayName` 取标准化 URL hostname，并保存 `serverIdentity + userId + authzVersion` namespace 与不带有效期的 `VerifiedSessionRecord`。
 8. 进入 A02 首页，不恢复旧服务器页面。
 
 ### 5.2 分支与失败
@@ -147,7 +149,7 @@ flowchart TD
 - active profile 唯一；
 - Cookie 持久化成功；
 - `/me` 成功并建立 namespace；
-- entitlement 起始时间写入；
+- 已验证会话快照写入；
 - 首页只加载当前授权范围数据。
 
 ## 6. F02：日常续读
@@ -176,7 +178,7 @@ flowchart LR
 
 失败恢复：
 
-- bootstrap 网络失败且已有完整离线副本：使用本地快照并标记离线。
+- bootstrap 网络失败且已有 completed 本地工件：从下载 manifest 打开本地 Reader，不读取服务器页面快照。
 - bootstrap 网络失败且无副本：回 A05，显示可恢复错误。
 - 本地进度写失败：阻断离开 Reader，提供重试或明确放弃本次本地变更。
 - fingerprint 冲突：进入 F08，不写入旧位置。
@@ -215,7 +217,7 @@ flowchart LR
 ### 7.3 作品决策
 
 - A05 默认选中最近使用媒介，否则选择服务端稳定排序第一项。
-- 主 CTA 对应当前选中 volume；多卷封面网格中的每一项都可选择，并由主 CTA 明确打开当前卷。
+- 主 CTA 对应当前选中 volume；横向多卷封面轨道中的每一项都可选择，并由主 CTA 明确打开当前卷。
 - EBOOK/COMIC/PDF 进入 A06；AUDIOBOOK 进入 A07。
 - 下载、加入书架和阅读状态不能竞争主 CTA 的视觉等级。
 
@@ -267,10 +269,10 @@ flowchart LR
 - 章节 Sheet 选章后保持展开，便于连续浏览。
 - 倍速使用 Menu；睡眠定时使用 Sheet。
 - 锁屏、耳机和蓝牙动作与 A07 状态双向同步。
-- 续流 401 暂停播放并进入 F06 的重新认证/离线判断，不能假装继续播放。
+- 续流 401 暂停播放并进入重新认证；已完成下载仍可由下载中心重新打开，不能伪造在线续流成功。
 - 音频进度同样进入 durable outbox，UI 不依赖网络成功后才更新。
 
-## 10. F06：下载、离线与 401 宽限
+## 10. F06：下载并从本地工件阅读
 
 ```mermaid
 flowchart TD
@@ -280,41 +282,34 @@ flowchart TD
     Complete --> Intent{"来源是开始/继续阅读?"}
     Intent -- "是" --> ReaderReady["自动进入 A06 Reader"]
     Intent -- "否" --> Center
-    Complete --> Offline["网络不可用或明确 401"]
-    Offline --> Gate{"30 天 entitlement 有效?"}
-    Gate -- "否" --> Reauth["必须重新认证"]
-    Gate -- "是" --> Choice["重新登录 / 进入离线模式"]
-    Choice --> Reader["A06 离线 Reader"]
-    Reader --> Pending["本地进度与书签待同步"]
-    Pending --> Reauth
-    Reauth --> Sync["同一 server/user 恢复同步"]
+    Center --> Reader["A06 Reader 打开 completed 工件"]
+    Reader --> Local["本地保存进度、书签与偏好"]
+    Local --> Sync["有网时继续现有 best-effort 同步"]
 ```
 
 ### 10.1 下载
 
 - A05 的下载动作是次级明确动作，不与开始/继续 CTA 合并。
-- 可重排格式的开始/继续动作必须先检查当前 fingerprint 的 completed 本地工件；缺失时进入下载意图并明确“下载完成后阅读”。PDF 与漫画在线时直接进入流式 Reader，下载仍是离线用途的次级动作。
+- 可重排格式的开始/继续动作必须先检查当前 fingerprint 的 completed 本地工件；缺失时进入下载意图并明确“下载完成后阅读”。PDF 与漫画在线时直接进入流式 Reader，下载是保存本地副本的次级动作。
 - 可重排格式由开始/继续阅读触发下载时，单卷流程依次发布“创建任务、传输进度、Ready to Open”；只有临时文件校验、原子发布和 completed manifest 落盘后才能自动进入 Reader。用户单独点击次级“下载”动作时完成后仍停留当前上下文，不擅自跳转。
 - 入队后停留 A05，并提供“查看下载”。
 - A08 显示进行中、已完成、失败三个稳定分组；已完成目录固定为 `作品（书名） → media version → volume`，media version identity/kind 来自 Reader v4 bootstrap，不得按扩展名猜测或把同一作品的电子书、漫画、有声书卷册压成一层。可在本页直接搜索本地已下载书名、作者和卷名。搜索不请求服务器书库，也不将普通缓存视为下载完成。
 - 普通失败行内重试；空间不足引导管理下载。
-- 移除离线副本使用 Dialog，并明确不会删除服务器作品。
+- 移除本地副本使用 Dialog，并明确不会删除服务器作品。
 
-### 10.2 离线
+### 10.2 断网时的正常 Shell
 
-- 服务不可达但 entitlement 有效时直接进入 Offline Shell。
-- 明确 401 时先显示重新认证页；用户可选择进入离线模式。
-- 离线模式不要求设备 PIN/生物识别。
-- 只展示完整可打开的下载，不展示不可用在线作品占位。
-- 顶部持续显示离线状态、剩余宽限期和待同步数量。
-- 30 天从最近一次成功 `/me` 计算，本地使用不能延长；时间异常回拨视为到期。
+- 已有匹配 `VerifiedSessionRecord` 时仍进入普通 Shell，不切换导航树，也不显示网络模式状态。
+- 首页、书库、Facet 和详情请求失败时只保留页面结构与局部错误，不读取旧 GET 页面快照。
+- 下载中心继续列出 completed 本地工件；Reader 可直接打开它们，并继续本地保存进度、书签和偏好。
+- 明确 401 或账户停用进入重新认证；没有手动离线入口、剩余天数或 Offline Shell。
 
 ### 10.3 恢复联网
 
-- 同一 server/user 登录成功后只恢复音频/书签等仍有持久队列的能力；Reader v4 progress 不补发失败快照，下一次真实位置变化再同步。
+- Reader 保持现有同步行为；发送失败不阻断本地阅读，下一次真实位置变化继续正常同步。
 - `authzVersion` 改变后先切换 namespace，再逐个验证下载授权。
 - 不再可访问的内容立即锁定并从可读列表移除。
-- 主动退出登录立即终止 entitlement、删除可读缓存并隔离音频/书签等持久队列。
+- 主动退出登录清除 Cookie 与已验证会话快照，并按既有产品规则处理私有数据与持久队列。
 
 ## 11. F07：多服务器切换
 
@@ -367,8 +362,8 @@ flowchart LR
 | 服务器入口表单 | A01 默认显示地址、账号、密码；登录是主动作；切换 Sheet 与删除当前服务器位于其下；登录时才检查 |
 | Setup | 服务器身份摘要、首位管理员字段、创建动作、字段错误、网络恢复 |
 | 普通 Login | A01 默认内容；地址、账号、密码、登录动作、切换/删除与 setup required 分支 |
-| Reauthenticate | 会话失效说明、登录动作；entitlement 有效时显示离线入口与剩余天数 |
-| 我的根页 | 账户、离线与存储、服务器、偏好、产品分组；P1 整组未交付时隐藏 |
+| Reauthenticate | 会话失效说明、登录动作和切换服务器；不显示网络模式或剩余天数 |
+| 我的根页 | 账户、下载与存储、服务器、偏好、产品分组；P1 整组未交付时隐藏 |
 | 搜索 | 当前 scope、输入、结果、清除、无结果、错误；返回恢复 scope |
 | Facet 作品列表 | 系列/作者身份、作品列表、分页、返回 grouping context |
 | 书架/合集详情 | 身份、规则/成员摘要、作品或书架内容、overflow、空状态 |
@@ -433,7 +428,7 @@ switch-failed
 | 区域 | 内容 |
 |---|---|
 | Navigation | 大标题“首页”；不放搜索；可显示当前服务器的轻量连接状态入口 |
-| Global status | 仅在 offline、stale、待同步时出现 Banner；正常时不占空间 |
+| Global status | 仅在 stale、待同步或当前请求失败时出现局部状态；正常时不占空间 |
 | Continue card | 封面、`work.title`、媒介/volume、当前位置或章节、百分比、上次时间、明确“继续阅读/继续收听”CTA |
 | Recent reading | 标题、查看全部、横向作品列表；卡片展示封面、标题、进度 |
 | Recent added | 标题、查看全部、横向作品列表；卡片展示封面、标题、媒介摘要 |
@@ -453,7 +448,7 @@ switch-failed
 - 无继续目标：移除 Continue card，不显示大面积占位；最近内容上移。
 - 全部为空：一个紧凑空状态，引导进入书库，不显示上传动作。
 - 单区错误：在该区显示重试；其他区正常。
-- Offline：显示缓存时间、剩余 entitlement 和“查看下载”。
+- 网络失败：各区独立显示加载失败与重试；不显示旧缓存时间或全局网络模式 Banner。
 
 ### 15.5 Expanded
 
@@ -557,7 +552,7 @@ switch-failed
 
 ### 18.1 锚点状态
 
-主锚点使用“作品同时具有电子书、漫画和有声书三个媒介、电子书有多个 volume、存在阅读进度”的状态，并以“简介 / 媒体版本”作为详情内容区的一级切换。
+主锚点使用“作品同时具有电子书、漫画和有声书、电子书有多个 volume、存在阅读进度、当前选中 EPUB 卷册”的状态。简介、媒介、卷册和当前卷册元数据采用连续详情流；三个真实媒介均正常可选，不因静态锚点或客户端尚未完成播放器而把有声书渲染为禁用占位。
 
 ### 18.2 Compact 内容顺序
 
@@ -567,10 +562,14 @@ switch-failed
 | Identity header | 封面、`work.title`、作者、系列/出版状态；封面不是唯一点击目标 |
 | Status summary | 当前阅读状态、总进度和最近位置；作者、系列保留为可进入共享 Facet 的触摸入口 |
 | Primary CTA | 固定对应当前媒介/volume 的“开始/继续阅读”或“开始/继续收听” |
-| Detail content tabs | 有简介时显示 `简介 / 媒体版本`；简介为空时隐藏该一级切换并直接展示媒体内容 |
-| Media control | 仅存在两个及以上媒体版本时显示 `电子书 / 漫画 / 有声书` segmented control；单媒体版本直接进入其卷册或章节内容 |
-| Volume / chapter content | 多卷时使用当前媒介的 2:3 封面网格；单卷电子书直接回退到图书章节。卷序号固定在封面左上，阅读进度紧贴封面底部；章节仍使用连续列表 |
+| Secondary actions | `下载 / 阅读状态 / 加入 / 更多`；“加入”打开书架选择器，不在此行放编辑动作 |
+| Description | 有简介时在同一滚动流中显示清理后的纯文本正文，居中向下/向上箭头负责展开与收起；简介为空时整个区域隐藏 |
+| Media control | 左侧固定显示“媒体版本”，右侧显示作品真实存在的电子书/漫画/有声书选项；单媒体版本仍显示唯一选项，不得显示作品不存在的媒介 |
+| Volume rail | 所有卷册数量均使用可横向滚动并分页加载的 2:3 封面轨道；标准 Compact 单项约为内容宽度三分之一，存在多卷时首屏显示约三项并露出下一项；单卷仍保留卷册选择、元数据和长按管理入口 |
+| Selected-volume metadata | 固定显示当前选中卷册的格式、语言、出版日期、页数、元数据信息来源和文件路径；字段值只来自当前 `volumeId`，缺失值显示 `—`，不回退到其他卷册或作品字段 |
+| Directory | Work Detail 不显示章节、音轨或页面目录；目录导航由 Reader / Now Playing 所有 |
 | Mini player | 非 Reader 且有音频会话时显示 |
+| Tab bar | Work Detail 仍在 AuthenticatedShell 中，正常显示四项目的地导航；仅 Reader 隐藏 |
 
 ### 18.3 动作层级
 
@@ -586,11 +585,14 @@ switch-failed
 ### 18.4 交互
 
 - 切媒介只更新当前详情状态。
-- 点击 volume 封面更新选中项，主 CTA 进入 A06/A07；下载状态使用封面右上独立原生图标。单卷电子书不增加无意义的卷册层，直接展示章节并允许从当前章节继续。
+- 点击 volume 封面更新选中项，主 CTA 和卷册元数据必须作为一个原子页面状态同步更新；下载状态使用封面右上独立原生图标。即使只有一个卷册也保留卷册轨道，以承载该卷册的元数据、下载状态和授权长按管理入口。
+- 用户长按卷册封面打开以该 `volumeId` 为对象的卷册控制菜单；卷册标题不触发管理。VoiceOver/TalkBack、键盘和开关控制必须得到等价的“卷册操作”自定义动作，不能要求用户只能发现或执行长按手势。
+- 横向卷册轨道以稳定 `volumeId` 去重；接近已加载尾部时按确定性 `sortOrder + volumeId` 请求下一页，保留当前选中项和滚动锚点。分页失败只在轨道尾部显示行内重试，不清除已加载卷册。
 - 作者/系列进入共享 facet，并保留详情为返回来源。
 - 详情中的下载使用独立图标状态：未下载为云朵、进行中为带暂停符号的环形控件、完成为勾选圆圈；再次点击进行中控件提供暂停与取消。阅读进度不得复用该位置或形态。
 - 加入书架打开 picker Sheet。
-- overflow 只包含次要动作；编辑与设置封面仅在服务端授权和契约支持时出现，否则通过明确的 Web 管理入口承接，不伪造原生成功。
+- 快捷动作行固定使用“下载 / 阅读状态 / 加入 / 更多”；`加入` 打开 `shelf-picker`，`更多` 是唯一图书控制菜单入口。详情页右上角不显示三点菜单。控制菜单按权限过滤，并严格使用 [`mobile-app-work-detail-management.md`](mobile-app-work-detail-management.md) 锁定的操作项与对象范围。
+- 卷册元数据严格来自当前 `volumeId`：格式、语言、出版日期、页数、元数据信息来源和文件路径六行保持稳定；缺失值显示 `—`。页数仅使用服务端返回的真实 `pageCount`，EPUB/MOBI/TXT 等无页数时不得推算或伪造。元数据来源使用服务端返回的卷册级稳定显示名；文件路径使用当前授权详情合同返回的卷册文件显示路径，不拼接客户端本地路径。被动元数据行不显示导航箭头。
 
 ### 18.5 状态
 
@@ -658,7 +660,7 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 - 本地持久化失败：阻断退出。
 - Fingerprint mismatch：Dialog 只提供重新加载新版本或退出。
 - 内容不再授权：关闭覆盖层后显示全屏不可访问状态。
-- 30 天 entitlement 到期：退出 Reader 后进入 reauthenticate；不能继续打开新 session。
+- 明确鉴权失效或账户停用：退出当前受保护流程并进入 reauthenticate；普通网络失败不阻断本地 Reader。
 
 ### 19.8 Expanded
 
@@ -702,7 +704,7 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 - Buffering：保留控制并明确加载，不跳回详情。
 - 网络失败且已下载：无缝使用本地文件。
 - 网络失败且无副本：暂停并显示行内重试。
-- 401：暂停续流，进入 reauthenticate/offline 判断。
+- 401：暂停续流并进入 reauthenticate。
 - 当前内容失权：停止播放、清 mini player、显示统一不可访问状态。
 
 ### 20.6 Expanded
@@ -721,10 +723,10 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 | 区域 | 内容 |
 |---|---|
 | Navigation | 返回“我的”、标题“下载”、本地已下载搜索、选择/管理动作 |
-| Global status | offline/401 宽限 Banner、剩余天数、待同步数量；正常时隐藏 |
+| Global status | 下载任务与待同步数量；不显示离线模式、宽限或剩余天数 |
 | Storage summary | 已用空间、可释放空间、下载设置入口 |
 | Active section | 任务标题、volume/格式、进度、已传输/总量、状态、暂停/继续 |
-| Completed section | 按“作品 → media version → volume”展开的已下载内容；作品层显示书名/作者/总大小，media version 层显示媒介种类与卷数，volume 层显示卷名/格式/大小/离线可用；搜索命中书名、作者或卷名 |
+| Completed section | 按“作品 → media version → volume”展开的已下载内容；作品层显示书名/作者/总大小，media version 层显示媒介种类与卷数，volume 层显示卷名/格式/大小/可本地打开；搜索命中书名、作者或卷名 |
 | Failed section | 稳定错误摘要、重试；不弹逐项 Dialog |
 | Mini player | 有播放会话时显示 |
 
@@ -734,17 +736,17 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 - 搜索仅过滤当前 `serverIdentity + userId + authzVersion` 命名空间中、与记录 fingerprint 一致且已验证完成的本地工件；空查询恢复完整按作品列表。
 - 作品封面是非阻塞增强：首帧先显示缓存封面或统一 fallback，再通过当前 namespace 的 authenticated cover adapter 渐进替换；封面缺失/失败不得阻塞目录、搜索、下载完成或 Reader 跳转，也不得把 cover cache 计为 completed publication。
 - 点击失败任务进入 `downloads.detail` 或行内展开稳定原因。
-- overflow 提供暂停、继续、重试、移除离线副本。
+- overflow 提供暂停、继续、重试、移除本地副本。
 - 移除使用 Dialog；批量移除显示数量和预计释放空间。
 - 蜂窝网络单次越过策略使用 Dialog；长期策略进入下载设置页。
 - 选择模式只承载批量移除/重试，不提供服务器内容删除。
 
-### 21.4 离线与 401 宽限
+### 21.4 网络失败与鉴权失效
 
-- Offline Shell 进入 A08 时只显示完整可打开下载。
-- Banner 同时显示“离线模式”和 entitlement 剩余天数。
+- 普通 Shell 中的 A08 始终只以 completed manifest 与本地文件作为可打开事实来源。
+- 网络失败不切换导航树，也不显示“离线模式”或剩余天数。
 - 待同步 progress/bookmarks 是独立状态，不与下载失败混为一谈。
-- entitlement 到期时内容锁定并进入 reauthenticate；不静默删除。
+- 明确 401 或账户停用进入 reauthenticate；不把服务器 GET 缓存伪装成下载内容。
 - 主动退出登录后可读列表清空，隔离 outbox 不向其他用户展示。
 
 ### 21.5 状态
@@ -759,8 +761,6 @@ failed-retryable
 failed-terminal
 insufficient-space
 waiting-for-wifi
-offline-grace
-entitlement-expired
 permission-revoked
 ```
 
@@ -776,7 +776,7 @@ permission-revoked
 | Work card | A02、A03、A04 | 同一内容模型；可因上下文调整辅助信息，但标题/封面/进入详情语义一致 |
 | Progress | A02、A05、A06、A07 | 同一用户进度；百分比、页码、时间不混用错误格式 |
 | Media/volume identity | A05、A06、A07、A08 | `work → mediaVersion → volume` 层级一致 |
-| Offline badge | A03、A05、A08 | 只表示完整可离线打开，不表示普通缓存命中 |
+| Downloaded badge | A03、A05、A08 | 只表示 completed 本地工件，不表示普通缓存命中 |
 | Sync status | A02、A06、A07、A08 | `synced / pending / failed / conflict` 语义一致 |
 | Server identity | A01、登录/重认证、我的 | 名称与域名一致；不暴露 Cookie 或内部路径 |
 | Mini player | A02、A03、A04、我的、A05、A08 | 同一播放会话；Reader 中隐藏 |
@@ -799,7 +799,7 @@ permission-revoked
 - 返回目的地；
 - 主动作；
 - modal 提交/取消语义；
-- 权限、离线和冲突行为。
+- 权限、网络失败和冲突行为。
 
 ## 24. 文案与本地化锚点
 
@@ -813,9 +813,8 @@ permission-revoked
 | 我的 | Me |
 | 继续阅读 | Continue Reading |
 | 继续收听 | Continue Listening |
-| 下载以供离线使用 | Download for Offline Use |
+| 下载到本机 | Download to Device |
 | 查看下载 | View Downloads |
-| 进入离线模式 | Continue Offline |
 | 内容不存在或当前不可访问 | This content is unavailable or no longer accessible |
 | 接受风险并连接 | Accept Risk and Connect |
 | 重新加载新版本 | Reload Updated Content |
@@ -845,11 +844,11 @@ permission-revoked
 3. A03 Filter/Search → A05 → A06；
 4. A05 Shelf Picker → A04；
 5. A05/A02 → A07 → mini player → 切 Tab → A07；
-6. A05 Download → A08 → Offline A06 → Reauthenticate；
+6. A05 Download → A08 → A06 本地工件；
 7. A01 Server Switch → A02；
 8. A06 Fingerprint Conflict → Reload/Exit。
 
-原型不能只做点击热区跳图。筛选草稿、Tab 状态保留、Reader controls、mini player、下载状态、离线 Banner 和覆盖层关闭顺序必须具有可观察状态变化。
+原型不能只做点击热区跳图。筛选草稿、Tab 状态保留、Reader controls、mini player、下载状态、局部网络错误和覆盖层关闭顺序必须具有可观察状态变化。
 
 ## 27. Wireframe 验收矩阵
 
@@ -870,8 +869,8 @@ permission-revoked
 ### 27.3 状态与数据
 
 - 真实 API 字段映射到正确页面层级。
-- loading、empty、error、offline、permission、success、conflict、stale 不重复呈现。
-- entitlement、authzVersion、fingerprint、音频/书签持久队列和 download 状态均有可见落点；Reader v4 progress 明确为本地精确保存加内存单飞上传。
+- loading、empty、error、permission、success、conflict、stale 不重复呈现。
+- `VerifiedSessionRecord`、authzVersion、fingerprint、音频/书签持久队列和 download 状态均有明确落点；Reader v4 progress 明确为本地精确保存加内存单飞上传。
 - 404 文案不泄露权限或资源存在性。
 
 ### 27.4 原生交互

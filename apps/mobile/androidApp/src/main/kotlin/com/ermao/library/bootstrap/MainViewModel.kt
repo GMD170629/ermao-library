@@ -24,6 +24,8 @@ import com.ermao.library.shared.modules.servers.domain.TlsMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,7 +35,6 @@ import kotlinx.coroutines.withContext
 import android.content.Context
 import com.ermao.library.features.me.platform.AppLocaleController
 import com.ermao.library.features.reader.infrastructure.AndroidPdfRangeCache
-import com.ermao.library.platform.persistence.AndroidContentSnapshotCache
 import com.ermao.library.platform.persistence.AndroidCoverCache
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
@@ -92,8 +93,6 @@ data class MainUiState(
     val isReauthenticating: Boolean = false,
     val reauthUserName: String? = null,
     val reauthUserEmail: String? = null,
-    val reauthEntitlementExpiresAt: Long? = null,
-    val reauthServerUnavailable: Boolean = false,
     val shellEpoch: Int = 0,
 )
 
@@ -106,6 +105,7 @@ class MainViewModel(
     initialLoginForm: LoginFormState = LoginFormState(),
 ) : ViewModel() {
     private var loadedCredentialProfileId: String? = null
+    private var initialSessionRestoreJob: Job? = null
     private val mutableUiState = MutableStateFlow(
         MainUiState(
             session = runtime.currentSession,
@@ -138,19 +138,13 @@ class MainViewModel(
                     },
                     isReauthenticating = if (session is AppSession.Authenticated || session is AppSession.SignedOut) {
                         false
-                    } else if (session is AppSession.SessionExpired || session is AppSession.SessionUnavailable) {
+                    } else if (session is AppSession.SessionExpired) {
                         true
                     } else {
                         current.isReauthenticating
                     },
                     reauthUserName = session.lastKnownName() ?: current.reauthUserName,
                     reauthUserEmail = session.lastKnownEmail() ?: current.reauthUserEmail,
-                    reauthEntitlementExpiresAt = session.entitlementExpiry() ?: current.reauthEntitlementExpiresAt,
-                    reauthServerUnavailable = when (session) {
-                        is AppSession.SessionUnavailable -> true
-                        is AppSession.Authenticated, is AppSession.SignedOut -> false
-                        else -> current.reauthServerUnavailable
-                    },
                     operationErrorCode = null,
                     operationErrorKind = null,
                     loginProfileId = profile?.id ?: current.loginProfileId,
@@ -174,7 +168,20 @@ class MainViewModel(
             loadCredential(activeProfile.id)
             loadSavedAccountEmails(runtime.serverProfiles)
         }
-        viewModelScope.launch { performRuntimeOperation { runtime.start() } }
+        initialSessionRestoreJob = viewModelScope.launch {
+            try {
+                withContext(runtimeDispatcher) { runtime.start() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    it.copy(
+                        operationErrorCode = "RUNTIME_FAILURE",
+                        operationErrorKind = AppErrorKind.ServerFailure,
+                    )
+                }
+            }
+        }
     }
 
     fun updateServerDisplayName(value: String) = mutableUiState.update {
@@ -288,8 +295,6 @@ class MainViewModel(
                     isReauthenticating = true,
                     reauthUserName = session.identity.displayName,
                     reauthUserEmail = session.identity.email,
-                    reauthEntitlementExpiresAt = null,
-                    reauthServerUnavailable = false,
                 )
             }
         }
@@ -300,7 +305,6 @@ class MainViewModel(
         performRuntimeOperation { runtime.refreshCurrentSession() }
     }
 
-    fun enterOfflineMode() = launchOperation { runtime.enterOfflineMode() }
     fun logout() {
         viewModelScope.launch {
             try {
@@ -318,7 +322,6 @@ class MainViewModel(
         if (session != null && appContext != null) {
             val context = ContentRequestContext(session.profile, session.identity.namespace)
             try {
-                AndroidContentSnapshotCache.clearNamespace(appContext, context)
                 AndroidCoverCache.clearNamespace(appContext, context)
                 AndroidPdfRangeCache(File(appContext.cacheDir, "reader/pdf-range-v1")).clearNamespace(
                     ReaderSyncNamespace(
@@ -349,7 +352,7 @@ class MainViewModel(
     fun onForegrounded() {
         if (mutableUiState.value.operationInProgress) return
         when (mutableUiState.value.session) {
-            is AppSession.Authenticated, is AppSession.OfflineGrace ->
+            is AppSession.Authenticated ->
                 launchOperation { runtime.refreshCurrentSession() }
             else -> Unit
         }
@@ -413,10 +416,7 @@ class MainViewModel(
             return
         }
 
-        val validAddress = parsed.baseUrl
-        viewModelScope.launch {
-            submitEntryLogin(validAddress.value, form.email.trim(), form.password, acceptUnsafeTls = false)
-        }
+        launchEntryLogin(parsed.baseUrl.value, form.email.trim(), form.password, acceptUnsafeTls = false)
     }
 
     fun acceptUnsafeTlsAndLogin() {
@@ -424,9 +424,7 @@ class MainViewModel(
         val form = mutableUiState.value.loginForm
         val parsed = ServerBaseUrl.parse(form.serverAddress) as? ServerBaseUrlParseResult.Valid ?: return
         if (form.email.isBlank() || form.password.isBlank()) return
-        viewModelScope.launch {
-            submitEntryLogin(parsed.baseUrl.value, form.email.trim(), form.password, acceptUnsafeTls = true)
-        }
+        launchEntryLogin(parsed.baseUrl.value, form.email.trim(), form.password, acceptUnsafeTls = true)
     }
 
     fun deleteDisplayedServer() {
@@ -476,17 +474,6 @@ class MainViewModel(
             if (result is RuntimeOperationResult.Failure && result.error.kind == AppErrorKind.Unauthorized) {
                 mutableUiState.update {
                     it.copy(loginForm = it.loginForm.copy(invalidCredentials = true))
-                }
-            }
-            if (fixedEmail != null && result is RuntimeOperationResult.Failure) {
-                mutableUiState.update {
-                    it.copy(
-                        reauthServerUnavailable = result.error.kind in setOf(
-                            AppErrorKind.NetworkUnavailable,
-                            AppErrorKind.Timeout,
-                            AppErrorKind.ServiceUnavailable,
-                        ),
-                    )
                 }
             }
         }
@@ -558,6 +545,27 @@ class MainViewModel(
                 it.copy(loginForm = it.loginForm.copy(invalidCredentials = true))
             }
         }
+    }
+
+    private fun launchEntryLogin(
+        baseUrl: String,
+        email: String,
+        password: String,
+        acceptUnsafeTls: Boolean,
+    ) {
+        mutableUiState.update {
+            it.copy(operationInProgress = true, operationErrorCode = null, operationErrorKind = null)
+        }
+        viewModelScope.launch {
+            cancelInitialSessionRestore()
+            submitEntryLogin(baseUrl, email, password, acceptUnsafeTls)
+        }
+    }
+
+    private suspend fun cancelInitialSessionRestore() {
+        val restoreJob = initialSessionRestoreJob ?: return
+        initialSessionRestoreJob = null
+        restoreJob.cancelAndJoin()
     }
 
     private suspend fun saveCredential(profileId: String, email: String, password: String) {
@@ -697,7 +705,6 @@ class MainViewModel(
                             NavigationDirective.RestoreSelectedTab,
                             NavigationDirective.RevalidatePrivateShell,
                             NavigationDirective.HidePrivateShell,
-                            NavigationDirective.EnterOfflineShell,
                             null,
                             -> current.showServerCenter
                         },
@@ -774,9 +781,7 @@ private fun AppSession.keepsSetupSecrets(): Boolean = when (this) {
 
 private fun AppSession.lastKnownEmail(): String? = when (this) {
     is AppSession.Authenticated -> identity.email
-    is AppSession.SessionUnavailable -> lastKnownIdentity?.email
     is AppSession.SessionExpired -> lastKnownIdentity?.email
-    is AppSession.OfflineGrace -> identity.email
     is AppSession.LoginFailed -> email
     is AppSession.AccountDisabled -> email
     else -> null
@@ -791,9 +796,7 @@ private fun AppSession.profileIdOrNull(): String? = when (this) {
     is AppSession.LoginFailed -> profile.id
     is AppSession.AccountDisabled -> profile.id
     is AppSession.Authenticated -> profile.id
-    is AppSession.SessionUnavailable -> profile.id
     is AppSession.SessionExpired -> profile.id
-    is AppSession.OfflineGrace -> profile.id
     else -> null
 }
 
@@ -806,9 +809,7 @@ private fun AppSession.profileBaseUrlOrNull(): String? = when (this) {
     is AppSession.LoginFailed -> profile.baseUrl.value
     is AppSession.AccountDisabled -> profile.baseUrl.value
     is AppSession.Authenticated -> profile.baseUrl.value
-    is AppSession.SessionUnavailable -> profile.baseUrl.value
     is AppSession.SessionExpired -> profile.baseUrl.value
-    is AppSession.OfflineGrace -> profile.baseUrl.value
     is AppSession.CheckingServer -> draft.rawBaseUrl
     is AppSession.ServerConnectionFailed -> draft.rawBaseUrl
     is AppSession.TlsRisk -> draft.rawBaseUrl
@@ -818,16 +819,7 @@ private fun AppSession.profileBaseUrlOrNull(): String? = when (this) {
 
 private fun AppSession.lastKnownName(): String? = when (this) {
     is AppSession.Authenticated -> identity.displayName
-    is AppSession.SessionUnavailable -> lastKnownIdentity?.displayName
     is AppSession.SessionExpired -> lastKnownIdentity?.displayName
-    is AppSession.OfflineGrace -> identity.displayName
-    else -> null
-}
-
-private fun AppSession.entitlementExpiry(): Long? = when (this) {
-    is AppSession.SessionUnavailable -> entitlementExpiresAtEpochMillis
-    is AppSession.SessionExpired -> entitlementExpiresAtEpochMillis
-    is AppSession.OfflineGrace -> entitlementExpiresAtEpochMillis
     else -> null
 }
 

@@ -1,21 +1,18 @@
 package com.ermao.library.features.content.model
 
 import com.ermao.library.shared.modules.library.ContentResult
-import com.ermao.library.shared.modules.library.ContentSource
 import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
 import com.ermao.library.shared.modules.library.domain.WorkSummary
+import com.ermao.library.shared.modules.library.domain.Volume
 import com.ermao.library.shared.modules.reader.ReaderChapterListMetadata
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.resolveReaderChapterStates
+import java.time.Instant
 
-fun ContentResult.Content<*>.freshness(): ContentFreshness = when {
-    isStale -> ContentFreshness.Stale
-    source == ContentSource.Cache -> ContentFreshness.Cached
-    else -> ContentFreshness.Fresh
-}
+fun ContentResult.Content<*>.freshness(): ContentFreshness = ContentFreshness.Fresh
 
 fun WorkSummary.toCard(): WorkCard = WorkCard(
     id = id,
@@ -52,13 +49,19 @@ fun HomeSnapshot.toUiContent(): HomeContent {
                 ),
                 volumeTitle = it.volumeTitle,
                 positionLabel = null,
-                lastReadLabel = it.lastReadAt,
+                lastReadAtEpochMillis = it.lastReadAt.toEpochMillisOrNull(),
+                resumeVolumeId = it.resumeVolumeId,
             )
         },
         recentReading = readingItems.map(WorkSummary::toCard),
         recentAdded = addedItems.map(WorkSummary::toCard),
     )
 }
+
+internal fun String?.toEpochMillisOrNull(): Long? = this
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+    ?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
 
 fun HomeSnapshot.hasSectionFailure(): Boolean =
     continueReading is HomeSection.Failure || recentReading is HomeSection.Failure || recentAdded is HomeSection.Failure
@@ -92,31 +95,19 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent {
         author = author,
         coverUrl = coverUrl,
         mediaKinds = availableMediaKinds.map { it.wireValue },
-        progressPercent = (activeMedia?.progress?.toInt()
-            ?: mediaVersions.flatMap { it.volumes }.maxOfOrNull { it.progress.toInt() })?.takeIf { it > 0 },
+        progressPercent = continueVolumeProgress.toInt().takeIf { it > 0 },
     ),
     seriesId = seriesFacet?.id,
     seriesName = seriesFacet?.name ?: seriesName,
+    seriesIndex = seriesIndex,
     authorFacetId = authorFacets.firstOrNull()?.id,
     description = description,
     tags = tags,
     media = mediaVersions.map { media ->
         MediaContent(
             kind = media.mediaKind.wireValue,
-            volumes = media.volumes.map { volume ->
-                VolumeContent(
-                    id = volume.id,
-                    title = volume.title,
-                    format = volume.format,
-                    readerType = volume.readerType,
-                    volumeIndex = volume.volumeIndex,
-                    coverUrl = volume.coverUrl,
-                    sizeBytes = volume.sizeBytes,
-                    progressPercent = volume.progress.toInt().takeIf { it > 0 },
-                    readable = volume.readable,
-                    selected = volume.id == continueVolumeId,
-                )
-            },
+            volumeCount = media.volumeCount,
+            volumes = media.volumes.map { volume -> volume.toUiContent(volume.id == continueVolumeId) },
         )
     },
     selectedMediaKind = recentMediaKind?.wireValue,
@@ -139,6 +130,31 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent {
         },
     )
 }
+
+fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent(
+    id = id,
+    title = title,
+    format = format,
+    readerType = readerType,
+    mediaVersionId = mediaVersionId,
+    volumeIndex = volumeIndex,
+    sortOrder = sortOrder,
+    publisher = publisher,
+    publishedAt = publishedAt,
+    language = language,
+    isbn = isbn,
+    identifier = identifier,
+    narrator = narrator,
+    pageCount = pageCount,
+    metadataSource = origin,
+    kindleSendAvailable = kindleSendAvailable,
+    files = files.map { file -> VolumeFileContent(file.id, file.path, file.sizeBytes, file.displaySize) },
+    coverUrl = coverUrl,
+    sizeBytes = sizeBytes,
+    progressPercent = progress.toInt().takeIf { it > 0 },
+    readable = readable,
+    selected = selected,
+)
 
 fun ContentSort.toShared(): com.ermao.library.shared.modules.library.LibrarySort = when (this) {
     ContentSort.RecentAdded -> com.ermao.library.shared.modules.library.LibrarySort.RecentlyAdded

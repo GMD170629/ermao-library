@@ -5,7 +5,6 @@ import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
-import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.library.AuthenticatedCover
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentRepository
@@ -17,35 +16,21 @@ import com.ermao.library.shared.modules.library.GroupingQuery
 import com.ermao.library.shared.modules.library.GroupingSummary
 import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
-import com.ermao.library.shared.modules.library.LibraryCacheRepository
 import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.WorkDetailQuery
+import com.ermao.library.shared.modules.library.WorkVolumePageQuery
+import com.ermao.library.shared.modules.library.WorkVolumePageRepository
 import com.ermao.library.shared.modules.library.WorksQuery
-import com.ermao.library.shared.modules.library.application.InMemoryLibrarySnapshotPayloadStore
-import com.ermao.library.shared.modules.library.application.LibrarySnapshotPayloadStore
-import com.ermao.library.shared.modules.library.application.librarySnapshotNamespaceKey
 import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.WorkDetail
 import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
 import com.ermao.library.shared.modules.library.domain.WorkSummary
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 
 class KtorContentRepository(
     private val clients: ApiClientFactory,
-    private val cache: LibraryCacheRepository,
-    private val nowEpochMillis: () -> Long,
-    private val snapshots: LibrarySnapshotPayloadStore = InMemoryLibrarySnapshotPayloadStore(),
-    private val staleAfterMillis: Long = FIVE_MINUTES_MILLIS,
-) : ContentRepository {
-    private val snapshotJson = Json {
-        ignoreUnknownKeys = false
-        explicitNulls = false
-    }
+) : ContentRepository, WorkVolumePageRepository {
     override suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot> = coroutineScope {
         val continueReading = async { requestContinueReading(context) }
         val recentReading = async { requestWorksSection(context, "/api/dashboard/recent-reading") }
@@ -53,12 +38,8 @@ class KtorContentRepository(
         val snapshot = HomeSnapshot(continueReading.await(), recentReading.await(), recentAdded.await())
         val hasNetworkContent = listOf(snapshot.continueReading, snapshot.recentReading, snapshot.recentAdded)
             .any { it is HomeSection.Content<*> }
-        if (hasNetworkContent) {
-            cache.saveHome(context.namespace, snapshot, nowEpochMillis())
-            ContentResult.Content(snapshot, ContentSource.Network)
-        } else {
-            cachedOrFailure(cache.home(context.namespace), firstHomeError(snapshot))
-        }
+        if (hasNetworkContent) ContentResult.Content(snapshot, ContentSource.Network)
+        else ContentResult.Failure(firstHomeError(snapshot))
     }
 
     override suspend fun loadContinueReading(
@@ -92,7 +73,6 @@ class KtorContentRepository(
                 ),
             )
         }
-        val key = query.fingerprint()
         return when (val result = withClient(context) { client ->
             client.execute(
                 ApiRequest(
@@ -103,33 +83,15 @@ class KtorContentRepository(
                 ),
             )
         }) {
-            is ApiResult.Success -> result.value.toPage().let { page ->
-                saveSnapshot(context, "works", key, query.page, result.value, WorkPageWire.serializer())
-                ContentResult.Content(page, ContentSource.Network)
-            }
-            is ApiResult.Failure -> {
-                clearInaccessibleSnapshot(context, "works", key, result.error.kind)
-                restoredOrFailure(restoreWorks(context, query), result.error)
-            }
+            is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
+            is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
     }
-
-    override suspend fun restoreWorks(
-        context: ContentRequestContext,
-        query: WorksQuery,
-    ): ContentResult<LibraryPage<WorkSummary>>? = loadSnapshot(
-        context,
-        "works",
-        query.fingerprint(),
-        query.page,
-        WorkPageWire.serializer(),
-    )?.toContent(WorkPageWire::toPage)
 
     override suspend fun loadGroupings(
         context: ContentRequestContext,
         query: GroupingQuery,
     ): ContentResult<LibraryPage<GroupingSummary>> {
-        val key = "${query.kind}|${query.query.trim()}"
         return when (val result = withClient(context) { client ->
             client.execute(
                 ApiRequest(
@@ -145,33 +107,12 @@ class KtorContentRepository(
                 ),
             )
         }) {
-            is ApiResult.Success -> result.value.toPage().let { page ->
-                saveSnapshot(context, "groupings", key, query.page, result.value, GroupingPageWire.serializer())
-                ContentResult.Content(page, ContentSource.Network)
-            }
-            is ApiResult.Failure -> {
-                clearInaccessibleSnapshot(context, "groupings", key, result.error.kind)
-                restoredOrFailure(restoreGroupings(context, query), result.error)
-            }
+            is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
+            is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
     }
 
-    override suspend fun restoreGroupings(
-        context: ContentRequestContext,
-        query: GroupingQuery,
-    ): ContentResult<LibraryPage<GroupingSummary>>? {
-        val key = "${query.kind}|${query.query.trim()}"
-        return loadSnapshot(
-            context,
-            "groupings",
-            key,
-            query.page,
-            GroupingPageWire.serializer(),
-        )?.toContent(GroupingPageWire::toPage)
-    }
-
     override suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage> {
-        val key = "${query.kind}|${query.facetId}|${query.sort.name}"
         return when (val result = withClient(context) { client ->
             client.execute(
                 ApiRequest(
@@ -191,7 +132,6 @@ class KtorContentRepository(
             )
         }) {
             is ApiResult.Success -> result.value.toFacetPage()?.let { page ->
-                saveSnapshot(context, "facet", key, query.page, result.value, WorkPageWire.serializer())
                 ContentResult.Content(page, ContentSource.Network)
             } ?: ContentResult.Failure(
                 com.ermao.library.shared.core.network.AppError(
@@ -200,25 +140,8 @@ class KtorContentRepository(
                     "Facet response is missing appliedFacet",
                 ),
             )
-            is ApiResult.Failure -> {
-                clearInaccessibleSnapshot(context, "facet", key, result.error.kind)
-                restoredOrFailure(restoreFacet(context, query), result.error)
-            }
+            is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
-    }
-
-    override suspend fun restoreFacet(
-        context: ContentRequestContext,
-        query: FacetQuery,
-    ): ContentResult<FacetPage>? {
-        val key = "${query.kind}|${query.facetId}|${query.sort.name}"
-        return loadSnapshot(
-            context,
-            "facet",
-            key,
-            query.page,
-            WorkPageWire.serializer(),
-        )?.toContent { wire -> wire.toFacetPage() ?: throw SerializationException("Facet identity is missing") }
     }
 
     override suspend fun loadWorkDetail(
@@ -241,11 +164,30 @@ class KtorContentRepository(
             ),
         )
     }) {
-        is ApiResult.Success -> result.value.toDomain().toSummary().let { detail ->
-            cache.saveDetail(context.namespace, detail, nowEpochMillis())
-            ContentResult.Content(detail, ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain().toSummary(), ContentSource.Network)
+        is ApiResult.Failure -> ContentResult.Failure(result.error)
+    }
+
+    override suspend fun loadWorkVolumes(
+        context: ContentRequestContext,
+        query: WorkVolumePageQuery,
+    ): ContentResult<com.ermao.library.shared.modules.library.WorkVolumePage> = when (
+        val result = withClient(context) { client ->
+            client.execute(
+                ApiRequest(
+                    ApiMethod.Get,
+                    "/api/works/${query.workId}/media-versions/${query.mediaVersionId}/volumes",
+                    WorkVolumePageWire.serializer(),
+                    queryParameters = mapOf(
+                        "page" to listOf(query.page.toString()),
+                        "pageSize" to listOf(query.pageSize.toString()),
+                    ),
+                ),
+            )
         }
-        is ApiResult.Failure -> cachedOrFailure(cache.detail(context.namespace, query.workId), result.error)
+    ) {
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
+        is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
     override suspend fun loadCover(
@@ -267,10 +209,7 @@ class KtorContentRepository(
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
-    override suspend fun invalidate(namespace: com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace) {
-        cache.clear(namespace)
-        snapshots.clearLibrarySnapshotPayloads(namespace.librarySnapshotNamespaceKey())
-    }
+    override suspend fun invalidate(namespace: com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace) = Unit
 
     private suspend fun requestContinueReading(context: ContentRequestContext): HomeSection<com.ermao.library.shared.modules.library.ContinueReadingItem?> =
         when (val result = withClient(context) { client ->
@@ -345,6 +284,7 @@ class KtorContentRepository(
         coverUrl = coverUrl,
         recentMediaKind = recentMediaKind,
         continueVolumeId = continueVolumeId,
+        continueVolumeProgress = continueVolumeProgress,
         completed = completed,
         mediaVersions = mediaVersions,
         availableMediaKinds = availableMediaKinds,
@@ -366,116 +306,7 @@ class KtorContentRepository(
         snapshot.recentAdded,
     ).filterIsInstance<HomeSection.Failure>().first().error
 
-    private fun <T> cachedOrFailure(
-        cached: com.ermao.library.shared.modules.library.CachedContent<T>?,
-        error: com.ermao.library.shared.core.network.AppError,
-    ): ContentResult<T> = cached?.takeIf { error.allowsPrivateCacheFallback() }?.let {
-        ContentResult.Content(
-            it.value,
-            ContentSource.Cache,
-            it.savedAtEpochMillis,
-            nowEpochMillis() - it.savedAtEpochMillis >= staleAfterMillis,
-        )
-    } ?: ContentResult.Failure(error)
-
-    private fun <T> restoredOrFailure(
-        restored: ContentResult<T>?,
-        error: com.ermao.library.shared.core.network.AppError,
-    ): ContentResult<T> = if (error.allowsPrivateCacheFallback()) {
-        restored ?: ContentResult.Failure(error)
-    } else {
-        ContentResult.Failure(error)
-    }
-
-    private fun <Wire> saveSnapshot(
-        context: ContentRequestContext,
-        kind: String,
-        queryKey: String,
-        page: Int,
-        value: Wire,
-        serializer: KSerializer<Wire>,
-    ) {
-        val namespaceKey = context.namespace.librarySnapshotNamespaceKey()
-        snapshots.saveLibrarySnapshotPayload(
-            namespaceKey,
-            snapshotKey(kind, queryKey, page),
-            snapshotJson.encodeToString(
-                StoredLibrarySnapshot.serializer(),
-                StoredLibrarySnapshot(nowEpochMillis(), snapshotJson.encodeToString(serializer, value)),
-            ),
-        )
-        val expiredPage = page - MAXIMUM_PAGES_PER_QUERY
-        if (expiredPage > 0) {
-            snapshots.removeLibrarySnapshotPayload(namespaceKey, snapshotKey(kind, queryKey, expiredPage))
-        }
-    }
-
-    private fun <Wire> loadSnapshot(
-        context: ContentRequestContext,
-        kind: String,
-        queryKey: String,
-        page: Int,
-        serializer: KSerializer<Wire>,
-    ): DecodedLibrarySnapshot<Wire>? {
-        val namespaceKey = context.namespace.librarySnapshotNamespaceKey()
-        val payloadKey = snapshotKey(kind, queryKey, page)
-        val rawPayload = snapshots.loadLibrarySnapshotPayload(namespaceKey, payloadKey).value ?: return null
-        return try {
-            val stored = snapshotJson.decodeFromString(StoredLibrarySnapshot.serializer(), rawPayload)
-            DecodedLibrarySnapshot(
-                snapshotJson.decodeFromString(serializer, stored.payload),
-                stored.savedAtEpochMillis,
-            )
-        } catch (_: SerializationException) {
-            snapshots.removeLibrarySnapshotPayload(namespaceKey, payloadKey)
-            null
-        }
-    }
-
-    private fun snapshotKey(kind: String, queryKey: String, page: Int): String = "$kind|$queryKey|$page"
-
-    private fun clearInaccessibleSnapshot(
-        context: ContentRequestContext,
-        kind: String,
-        queryKey: String,
-        errorKind: AppErrorKind,
-    ) {
-        if (errorKind != AppErrorKind.Forbidden && errorKind != AppErrorKind.NotFoundOrUnavailable) return
-        val namespaceKey = context.namespace.librarySnapshotNamespaceKey()
-        (1..MAXIMUM_PAGES_PER_QUERY).forEach { page ->
-            snapshots.removeLibrarySnapshotPayload(namespaceKey, snapshotKey(kind, queryKey, page))
-        }
-    }
-
-    private fun <Wire, Domain> DecodedLibrarySnapshot<Wire>.toContent(
-        transform: (Wire) -> Domain,
-    ): ContentResult<Domain> = ContentResult.Content(
-        transform(value),
-        ContentSource.Cache,
-        savedAtEpochMillis,
-        nowEpochMillis() - savedAtEpochMillis >= staleAfterMillis,
-    )
-
-    private fun com.ermao.library.shared.core.network.AppError.allowsPrivateCacheFallback(): Boolean =
-        kind == com.ermao.library.shared.core.network.AppErrorKind.NetworkUnavailable ||
-            kind == com.ermao.library.shared.core.network.AppErrorKind.Timeout ||
-            kind == com.ermao.library.shared.core.network.AppErrorKind.ServiceUnavailable ||
-            kind == com.ermao.library.shared.core.network.AppErrorKind.TlsFailure
-
     private companion object {
-        const val FIVE_MINUTES_MILLIS = 5 * 60 * 1_000L
         const val DEFAULT_READING_UNITS_PAGE_SIZE = 120
-        const val MAXIMUM_PAGES_PER_QUERY = 3
     }
 }
-
-@Serializable
-private data class StoredLibrarySnapshot(
-    val savedAtEpochMillis: Long,
-    val payload: String,
-)
-
-private data class DecodedLibrarySnapshot<T>(
-    val value: T,
-    val savedAtEpochMillis: Long,
-)

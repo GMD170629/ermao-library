@@ -247,6 +247,25 @@ class MainViewModelTest {
     }
 
     @Test
+    fun entryLoginCancelsStartupSessionRestoreBeforeSubmitting() = runTest(dispatcher) {
+        val startupGate = CompletableDeferred<Unit>()
+        val runtime = FakeMobileRuntime(AppSession.NoServer).apply { startGate = startupGate }
+        val viewModel = viewModel(runtime)
+        runCurrent()
+        viewModel.updateLoginServerAddress("https://books.example.com")
+        viewModel.updateLoginEmail("reader@example.com")
+        viewModel.updateLoginPassword("password")
+
+        viewModel.loginFromEntry()
+        advanceUntilIdle()
+
+        assertEquals(1, runtime.startCalls)
+        assertFalse(startupGate.isCompleted)
+        assertEquals(1, runtime.loginToServerCalls)
+        assertFalse(viewModel.uiState.value.operationInProgress)
+    }
+
+    @Test
     fun selectingAnotherServerOnlyRefillsTheForm() = runTest(dispatcher) {
         val current = profile("home", "https://home.example", active = true)
         val other = profile("office", "https://office.example", active = false)
@@ -393,6 +412,8 @@ class MainViewModelTest {
         var loginToServerPassword: String? = null
         var loginToServerCalls = 0
         var loginGate: CompletableDeferred<Unit>? = null
+        var startCalls = 0
+        var startGate: CompletableDeferred<Unit>? = null
         var switchServerCalls = 0
         var removedProfileId: String? = null
         var authenticatedAfterLogin: AppSession.Authenticated? = null
@@ -405,7 +426,11 @@ class MainViewModelTest {
             return Observation { this.observer = null }
         }
 
-        override suspend fun start(): RuntimeOperationResult = RuntimeOperationResult.Success()
+        override suspend fun start(): RuntimeOperationResult {
+            startCalls += 1
+            startGate?.await()
+            return RuntimeOperationResult.Success()
+        }
 
         override suspend fun connectServer(command: ServerConnectionDraft): RuntimeOperationResult {
             lastConnectionDraft = command
@@ -486,7 +511,6 @@ class MainViewModelTest {
             return RuntimeOperationResult.Success()
         }
 
-        override suspend fun enterOfflineMode(): RuntimeOperationResult = RuntimeOperationResult.Success()
 
         override suspend fun logout(): RuntimeOperationResult = logoutResult
 

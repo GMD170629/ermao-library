@@ -70,6 +70,7 @@ def get_mobile_compatibility(
                 managedOfflineDownloads=(
                     compatibility.capabilities.managed_offline_downloads
                 ),
+                workDetailManagement=True,
             ),
         )
     )

@@ -62,6 +62,7 @@ from app.bootstrap.system import (
     system_event_storage_view,
 )
 from app.contracts.http_errors import ErrorResponses
+from app.contracts.media_capabilities import ReaderType, reader_type_for_format
 from app.contracts.retired_resources import RetiredResourceError, retired_resource_error
 from app.core.authorization import (
     authorization_context,
@@ -362,6 +363,11 @@ def _ensure_detail_navigation(
     user: User,
     volume_id: str,
 ) -> tuple[bool, int | None]:
+    volume_format = db.scalar(
+        select(LibraryVolume.format).where(LibraryVolume.id == volume_id)
+    )
+    if reader_type_for_format(volume_format or "") != ReaderType.REFLOWABLE:
+        return False, None
     scope = _publication_access_scope(db, user)
     try:
         result = ensure_publication_navigation(

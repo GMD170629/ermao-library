@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.LocalReaderSource
@@ -332,14 +333,14 @@ internal class ReadiumPdfSession(
         }
     }
 
-    override fun goPrevious(): Boolean = navigator?.goBackward(animated = true) ?: false
-    override fun goNext(): Boolean = navigator?.goForward(animated = true) ?: false
+    override fun goPrevious(): Boolean = navigator?.goBackward(animated = navigationAnimationsEnabled()) ?: false
+    override fun goNext(): Boolean = navigator?.goForward(animated = navigationAnimationsEnabled()) ?: false
 
     override fun goTo(location: ReaderLocation): Boolean {
         val pdf = location as? PdfReaderLocation ?: return false
         if (!isValidPage(pdf.pageIndex)) return false
         expectedRestorePage = pdf.pageIndex
-        return navigator?.go(positions[pdf.pageIndex], animated = true) ?: false
+        return navigator?.go(positions[pdf.pageIndex], animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goToTotalProgression(totalProgression: Double): Boolean {
@@ -347,6 +348,9 @@ internal class ReadiumPdfSession(
         val page = (positions.lastIndex * totalProgression).toInt().coerceIn(positions.indices)
         return goTo(page.toLocation())
     }
+
+    private fun navigationAnimationsEnabled(): Boolean =
+        shouldAnimateAndroidReaderNavigation(_preferences.value, morphology)
 
     override fun dismissResumeNotice() {
         remoteTarget = null
@@ -366,7 +370,7 @@ internal class ReadiumPdfSession(
         submitNavigatorPreferences?.invoke(updated)
         persistPreferences(updated)
     }
-    override fun toggleCurrentBookmark() = Unit
+    override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
     override fun removeBookmark(id: String) = Unit
     override fun goToBookmark(id: String): Boolean = false
     override suspend fun flush() { (_currentLocation.value as? PdfReaderLocation)?.let { persist(it) } }

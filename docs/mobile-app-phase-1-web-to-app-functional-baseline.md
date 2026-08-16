@@ -6,6 +6,10 @@
 > 事实来源：当前 Web 路由与交互、FastAPI 运行时路由与授权实现、Reader v4、媒体流、PWA/本地同步代码
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
+> v1.0.0 会话与内容回退修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发不提供独立离线模式、30 天授权宽限或服务器 GET 页面持久缓存回退。匹配的已验证会话可先恢复正常 App Shell，再后台验证；暂时网络失败保留 Shell，明确 401、账户停用或服务器身份变化才结束会话。完成下载、Reader、本地进度、书签和偏好继续保留，但不构成单独的离线产品模式。
+
+> 图书详情管理修订（2026-08-16）：经产品确认，具有 `canManageSystem` 权限的用户可在原生 Work Detail 完成与 Web 详情页等价的单册图书/卷册管理；批量选择与全局治理仍为 Web-only。入口、操作清单、兼容门槛及下载归属不变量以 [`mobile-app-work-detail-management.md`](mobile-app-work-detail-management.md) 为准，该限定修订优先于本文“元数据维护全部留在 Web”的旧概括。
+
 ## 1. 基线目的
 
 本文件不是 Web 菜单清单，也不是旧移动端方案的延续。它将当前仓库里的真实能力翻译成可以直接约束 App 产品设计、交互设计和技术实现的功能边界。
@@ -26,7 +30,7 @@
 
 第一阶段 App 定义为：
 
-> 面向自托管服务器的原生阅读、音频与受管离线客户端。
+> 面向自托管服务器的原生阅读、音频与受管下载客户端。
 
 它不是移动版 Web 管理后台。Web 继续承担服务器文件系统管理、批量治理、元数据维护、备份恢复、日志和高风险系统管理。
 
@@ -98,11 +102,11 @@ P0 必须形成以下连续闭环：
 | 静态书架 | `/shelves`；书架 CRUD API | 按 `ownerUserId` 隔离；用户手动管理作品 | P0 | “书架”Tab；详情 Stack；创建/编辑 Sheet；明确选择模式加入作品；禁止依赖右键和桌面拖放 |
 | 智能书架 | `/shelves`；书架 CRUD 与过滤规则 | 规则计算；可能出现不支持规则 | P0 浏览，P1 编辑 | P0 展示规则摘要和计算结果，不能允许手工增删作品；不支持规则必须显式提示 |
 | 书架集合 | `/shelves`；书架 CRUD | `COLLECTION` 只能包含书架，不能直接放作品；非空集合删除冲突 | P0 浏览，P1 复杂整理 | 集合 → 书架 → 作品的层级导航；删除使用系统确认并呈现 `409` 原因 |
-| 作品详情 | `/works/[id]`；work、media versions、volumes、reading units API | 一个作品可能有 `EBOOK / COMIC / AUDIOBOOK` 多媒介和多个 volume；部分章节/卷可失败 | P0 | 折叠头部、媒介 segmented control、多卷封面网格、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
+| 作品详情 | `/works/[id]`；work、media versions、volumes、reading units API | 一个作品可能有 `EBOOK / COMIC / AUDIOBOOK` 多媒介和多个 volume；部分章节/卷可失败 | P0 | 折叠头部、只显示真实媒介的 segmented control、可横向滚动并分页加载的多卷封面轨道、随选中卷册更新的元数据、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
 | 阅读状态 | 作品详情；Reader v4 `PUT .../reading-status` | `UNREAD / READING / FINISHED`；用户级状态 | P0 | 详情动作 Sheet；开始阅读可推进到 READING；标记完成提供可撤销反馈 |
 | 批量加入个人书架 | Web 书库选择模式 | 普通用户可操作自己的书架 | P1 | 原生明确“选择”模式和底部操作栏；不复刻 Ctrl/Cmd 多选、右键菜单 |
 
-### 4.3 阅读、播放与离线
+### 4.3 阅读、播放与本地下载
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
@@ -114,8 +118,8 @@ P0 必须形成以下连续闭环：
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
 | 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `workId + volumeId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作诊断 | P0 | 本地事务先保存，再同步；文件或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复；进度模块异常不得阻止内容打开或退出 |
 | 音频书 | `/listen/[volumeId]` 仅为瞬时深链；bootstrap + file API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
-| 受管离线内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、命名空间、volume 和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量离线书库 |
-| 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有离线缓存是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示离线缓存和文件导出 |
+| 本地下载内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、命名空间、volume 和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量本地书库 |
+| 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有下载工件是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示本地副本和文件导出 |
 
 ### 4.4 导入、发送与系统管理
 
@@ -139,17 +143,22 @@ App 不能用零散布尔值协调启动。根状态至少应建模为互斥状�
 ```text
 no-server
 checking-server
+tls-risk
+server-connection-failed
+incompatible-server
 setup-required
+setting-up
+setup-failed
 signed-out
 authenticating
+login-failed
+account-disabled
 authenticated
-session-unavailable
 session-expired
-incompatible-server
 ```
 
-- `session-unavailable` 表示已知会话在网络/服务器暂不可用时无法刷新，不得自动删除本地数据。
-- `session-expired` 由明确 `401` 驱动，需要重新登录，但不得先删除待同步进度。
+- 匹配的 `VerifiedSessionRecord` 直接恢复 `authenticated`；网络、超时、TLS、`5xx` 或协议解析失败保持该状态，不增加网络模式状态。
+- `session-expired` 由明确 `401` 驱动，需要重新登录；账户停用和 server identity 变化分别进入对应阻断状态。
 - `incompatible-server` 当前缺少正式后端握手，必须在实现前补协议或以最低支持版本白名单实现。
 
 ### 5.2 会话协议
@@ -222,7 +231,7 @@ App 的共享传输层必须统一负责：
 
 OpenAPI 不是当前客户端唯一真相：仓库已有关键端点 request body 不完整的审计记录。P0 端点必须以运行时 schema、显式类型和契约测试共同约束。
 
-## 7. Reader 与离线同步硬约束
+## 7. Reader、本地状态与同步硬约束
 
 ### 7.1 进度 outbox
 
@@ -251,9 +260,9 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 当前服务端书签是整组 PUT，未提供 revision、增量 mutation 或服务端冲突合并。第一阶段可实现 local-first，但设计必须能够表达“待同步/同步失败/被其他设备覆盖的风险”，不能将其描述为强一致多端同步。
 
-### 7.3 离线能力边界
+### 7.3 本地下载工件边界
 
-格式访问策略固定为：可重排格式缺少 completed 本地工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，同一命名空间和 volume 存在 completed 本地工件时优先 `LocalArtifact`，离线且无工件时为 `Unavailable`。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
+格式访问策略固定为：可重排格式缺少 completed 本地工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，同一命名空间和 volume 存在 completed 本地工件时优先 `LocalArtifact`，网络不可用且无工件时为 `Unavailable`。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
 
 第一阶段可以承诺：
 
@@ -261,7 +270,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 - 最近使用的作品详情、封面与必要 bootstrap 快照；
 - 本地进度 durable outbox；
 - 本地书签；
-- 明确的离线、缓存数据、待同步和内容失效状态。
+- 明确的下载、网络失败、待同步和内容失效状态。
 
 第一阶段不能承诺：
 
@@ -277,7 +286,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 1. **日常续读**：首页继续阅读 → 详情/卷 → Reader 或播放器 → 本地耐久进度 → 联网同步 → 首页刷新。
 2. **发现与开始**：搜索 / 书库 / 系列 / 作者 / 书架 → 保留筛选上下文的作品列表 → 详情 → 媒介/卷 → 阅读或播放。
 3. **个人整理**：作品动作或书库选择模式 → 加入个人书架；书架 → 作品 → 返回原上下文。
-4. **下载与离线阅读**：可重排格式从详情下载完成后才能阅读；PDF/漫画可在线流式，也可显式下载后离线使用 → Download Center 按图书管理/搜索本地 completed 内容 → 离线打开 → 产生待同步进度 → 联网恢复。
+4. **下载与本地阅读**：可重排格式从详情下载完成后才能阅读；PDF/漫画可在线流式，也可显式下载到本机 → Download Center 按图书管理/搜索本地 completed 内容 → 从本地打开 → 产生本地进度 → 有网时继续正常同步。
 5. **账户安全**：我的 → 修改账户/语言/密码或退出 → 会话刷新 → 正确保留或清理私有命名空间。
 6. **权限变化**：管理员调整范围 → `authzVersion` 变化 → App 清理旧权限缓存 → 重新拉取书库和资源状态。
 7. **P1 手工导入**：有权用户选择设备文件 → 选择可访问的服务器目标 → 前台上传 → 查看自己的任务结果 → 打开新作品。
@@ -307,7 +316,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 5. **格式与 codec 矩阵**：导入允许的 MOBI/AZW/PRC/FB2、CBR/RAR 与多种音频格式不等于系统 renderer/player 全部支持。
 6. **上传不可恢复**：当前 multipart 无 upload session、分块、幂等与断点续传，P1 首版只能承诺前台上传。
 7. **书签并发覆盖**：如要承诺可靠多端编辑，后端需 revision 或增量 mutation。
-8. **无 catalog delta**：完整离线书库需新增 change token/delta API。
+8. **无 catalog delta**：完整本地书库需新增 change token/delta API。
 9. **密码重置不适配远程 App**：当前流程依赖服务器本地 reset file 与 Web URL，不是普通邮件 magic link。
 10. **远程事件缺失**：没有设备注册、Push token 或事件流，首版仅能提供本地通知和前台轮询。
 

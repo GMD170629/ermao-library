@@ -27,6 +27,10 @@ class MobileCapabilitiesPayload(HttpContractModel):
         default=False,
         alias="managedOfflineDownloads",
     )
+    work_detail_management: Literal[True] = Field(
+        default=True,
+        alias="workDetailManagement",
+    )
 
 
 class MobileCompatibilityPayload(HttpContractModel):

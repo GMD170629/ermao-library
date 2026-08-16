@@ -270,7 +270,16 @@ Navigation、Tab、Sheet、Menu、Dialog 和 Picker 必须由平台创建、展�
 - 真机不可用、未配对、Developer Mode 未开启或签名不可用时，iOS 门禁必须明确标记为等待真机证据，不得回退 Simulator、跳过或降低验收标准；
 - 新增脚本、CI、文档和验收记录不得包含 Simulator 命令或以 Simulator 结果作为证据。本条优先于仓库中尚未迁移的旧说明。
 
-### 12.5 政策检查
+### 12.5 Android 默认真机开发与验收
+
+- Android 本地开发、调试 APK 安装、仪器化测试、视觉检查、截图、性能分析和运行时验收默认使用已连接的真实 Android 设备；有真机时不得自动启动或选择 AVD；
+- 每次运行前必须通过 `adb devices -l` 确认目标处于 `device` 状态，并显式使用不以 `emulator-` 开头的 serial。连接多台真机时不得自动选择第一台，必须指定本次目标 serial；
+- 每次成功生成测试 APK 后，应对精确真机 serial 执行保留数据的 replace-install，随后 force-stop、冷启动，并核对 package、versionCode/versionName、前台 Activity 与启动后的 crash/ANR 日志；禁止为了部署方便卸载应用或清除数据；
+- Compose UI/instrumentation、TalkBack、软键盘、旋转、分屏、predictive back、真实网络与存储、进程终止/恢复以及核心任务旅程的最终证据必须来自真机；仅编译成功或模拟器通过不构成 Android 运行时验收；
+- Android Emulator 仅可在用户明确要求的兼容性矩阵、无法接入硬件的 CI 或专项 API/屏幕尺寸补充测试中使用；它不能替代真机安装，也不能作为最终视觉或运行时通过依据；
+- 真机不可用、未授权、未解锁或 ADB 状态异常时，Android 运行时门禁必须明确标记为等待真机证据，不得静默回退模拟器或降低验收标准。本条优先于仓库中尚未迁移的旧说明。
+
+### 12.6 政策检查
 
 移动工程建立后，应增加自动化政策检查，至少阻止：
 

@@ -16,9 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -52,7 +49,6 @@ import com.ermao.library.bootstrap.SetupFormState
 import com.ermao.library.features.servers.PrimaryActionButton
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.ui.theme.WarmPageThemeValues
-import kotlin.math.ceil
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,20 +152,14 @@ fun ReauthenticateScreen(
     profile: ServerProfile,
     userDisplayName: String?,
     userEmail: String?,
-    entitlementExpiresAtEpochMillis: Long?,
     form: LoginFormState,
     isAuthenticating: Boolean,
-    serverUnavailable: Boolean,
     onPasswordChanged: (String) -> Unit,
     onLogin: () -> Unit,
-    onEnterOffline: () -> Unit,
     onSwitchServer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
-    val remainingDays = entitlementExpiresAtEpochMillis?.let {
-        ceil((it - System.currentTimeMillis()).coerceAtLeast(0).toDouble() / MILLIS_PER_DAY).toInt()
-    }
     var passwordVisible by remember { mutableStateOf(false) }
     Scaffold(
         modifier = modifier,
@@ -194,10 +184,7 @@ fun ReauthenticateScreen(
                 style = theme.typography.callout,
             )
             Text(
-                stringResource(
-                    if (serverUnavailable) R.string.reauthenticate_unavailable_message
-                    else R.string.reauthenticate_expired_message,
-                ),
+                stringResource(R.string.reauthenticate_expired_message),
                 color = theme.colors.textSecondary,
             )
             PasswordField(
@@ -221,48 +208,10 @@ fun ReauthenticateScreen(
                 loading = isAuthenticating,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (remainingDays != null && remainingDays > 0) {
-                Button(onClick = onEnterOffline, enabled = !isAuthenticating, modifier = Modifier.fillMaxWidth()) {
-                    Text(pluralStringResource(R.plurals.offline_enter_action, remainingDays, remainingDays))
-                }
-                Text(stringResource(R.string.offline_scope_message), color = theme.colors.textSecondary)
-            }
             TextButton(onClick = onSwitchServer, enabled = !isAuthenticating) {
                 Text(stringResource(R.string.login_switch_server))
             }
         }
-    }
-}
-
-@Composable
-fun OfflineEmptyShell(
-    profile: ServerProfile,
-    userEmail: String,
-    onRetryAuthentication: () -> Unit,
-    onSwitchServer: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val theme = WarmPageThemeValues
-    Column(
-        modifier = modifier.fillMaxSize().padding(theme.spacing.three),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(Icons.Outlined.CloudOff, null, tint = theme.colors.brandAccent)
-        Spacer(Modifier.height(theme.spacing.two))
-        Text(stringResource(R.string.offline_empty_title), style = theme.typography.title)
-        Spacer(Modifier.height(theme.spacing.one))
-        Text(stringResource(R.string.offline_empty_message), color = theme.colors.textSecondary)
-        Spacer(Modifier.height(theme.spacing.two))
-        ServerIdentity(profile.displayName, profile.baseUrl.value)
-        Text(userEmail, color = theme.colors.textSecondary)
-        Spacer(Modifier.height(theme.spacing.three))
-        PrimaryActionButton(
-            label = stringResource(R.string.offline_retry_authentication),
-            onClick = onRetryAuthentication,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        TextButton(onClick = onSwitchServer) { Text(stringResource(R.string.login_switch_server)) }
     }
 }
 
@@ -345,5 +294,3 @@ private fun SetupFieldError.setupErrorText(): String = stringResource(
         SetupFieldError.Rejected -> R.string.setup_error_rejected
     },
 )
-
-private const val MILLIS_PER_DAY = 86_400_000L

@@ -12,8 +12,8 @@ locations were persisted correctly, but Work Detail could project the same href 
 the wrong chapter because it consulted the import-time rows.
 
 The affected source formats are EPUB, MOBI, AZW, AZW3, PRC, FB2 and TXT. They remain
-the immutable library sources. ADR 0013 subsequently permits disposable EPUB render
-artifacts, but those artifacts never own or generate the navigation projection.
+the immutable library sources. Reader delivery exposes their parser-backed
+Publication directly and never creates a derived reading package.
 
 ## Decision
 

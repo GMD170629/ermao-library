@@ -33,6 +33,20 @@ NEXT_INTERNAL_PORT="${NEXT_INTERNAL_PORT:-3001}"
 WEB_MODE="${WEB_MODE:-dev}"
 STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
 SESSION_SECRET="${SESSION_SECRET:-dev-test-session-secret-change-me-at-least-32-chars}"
+MOBI_CORE_BUILD_DIR="${MOBI_CORE_BUILD_DIR:-$ROOT_DIR/build/mobi-core-runtime}"
+
+run_cmake() {
+  if command -v cmake >/dev/null 2>&1; then
+    cmake "$@"
+    return
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    uvx --from cmake cmake "$@"
+    return
+  fi
+  echo "CMake is required to build the pinned libmobi runtime." >&2
+  exit 1
+}
 
 case "$STORAGE_ROOT" in
   /*) ;;
@@ -42,7 +56,25 @@ esac
 mkdir -p "$STORAGE_ROOT/database"
 DATABASE_PATH="$STORAGE_ROOT/database/shuku.sqlite3"
 
-export STORAGE_ROOT SESSION_SECRET WEB_PORT
+if [ -z "${ERMAO_MOBI_CORE_LIBRARY:-}" ]; then
+  run_cmake \
+    -S "$ROOT_DIR/apps/mobile/native/mobi-core" \
+    -B "$MOBI_CORE_BUILD_DIR" \
+    -DERMAO_MOBI_BUILD_TESTS=OFF \
+    -DERMAO_MOBI_BUILD_FUZZER=OFF
+  run_cmake \
+    --build "$MOBI_CORE_BUILD_DIR" \
+    --config Release \
+    --target ermao_mobi_core_shared
+  ERMAO_MOBI_CORE_LIBRARY="$MOBI_CORE_BUILD_DIR/libermao_mobi_core.so"
+fi
+
+if [ ! -f "$ERMAO_MOBI_CORE_LIBRARY" ]; then
+  echo "Pinned libmobi runtime is unavailable: $ERMAO_MOBI_CORE_LIBRARY" >&2
+  exit 1
+fi
+
+export STORAGE_ROOT SESSION_SECRET WEB_PORT ERMAO_MOBI_CORE_LIBRARY
 
 (
   cd apps/api-python
@@ -56,6 +88,7 @@ echo "  Health check: http://localhost:$WEB_PORT/api/health"
 echo "  Python API:   http://127.0.0.1:$PYTHON_API_PORT"
 echo "  Database:     $DATABASE_PATH"
 echo "  Storage root: $STORAGE_ROOT"
+echo "  MOBI runtime: $ERMAO_MOBI_CORE_LIBRARY"
 LAN_INTERFACE="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}' || true)"
 LAN_IP=""
 if [ -n "$LAN_INTERFACE" ] && command -v ipconfig >/dev/null 2>&1; then
@@ -73,6 +106,7 @@ fi
   exec env \
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
+    ERMAO_MOBI_CORE_LIBRARY="$ERMAO_MOBI_CORE_LIBRARY" \
     uv run --extra dev uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
 PYTHON_API_PID="$!"
@@ -95,6 +129,7 @@ done
   exec env \
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
+    ERMAO_MOBI_CORE_LIBRARY="$ERMAO_MOBI_CORE_LIBRARY" \
     MONITOR_REFRESH_INTERVAL_MS="${MONITOR_REFRESH_INTERVAL_MS:-10000}" \
     uv run --extra dev python -m app.worker.main
 ) &

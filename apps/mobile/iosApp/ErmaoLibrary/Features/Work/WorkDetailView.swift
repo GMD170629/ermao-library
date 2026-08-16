@@ -1,9 +1,25 @@
 import SwiftUI
+import UniformTypeIdentifiers
+@preconcurrency import ErmaoShared
 
 struct WorkReaderSelection: Equatable, Sendable {
     let workID: String
     let volumeID: String
     let displayTitle: String
+}
+
+private enum WorkControlTarget: Equatable {
+    case book
+    case volume(String)
+}
+
+private struct WorkControlAction: Identifiable {
+    let id: String
+    let title: LocalizedStringKey
+    let systemImage: String
+    let enabled: Bool
+    let destructive: Bool
+    let perform: () -> Void
 }
 
 struct WorkDetailView: View {
@@ -16,6 +32,9 @@ struct WorkDetailView: View {
     let openDownloads: () -> Void
     let openReader: (ReaderHandoff) -> Void
     let prepareReader: (ReaderPreparationRequest) -> Void
+    let onWorkDeleted: () -> Void
+    let managementRepository: (any ErmaoShared.WorkManagementRepository)?
+    let canManageSystem: Bool
 
     @StateObject private var store: WorkDetailStore
     @State private var showsShelfPicker = false
@@ -27,8 +46,16 @@ struct WorkDetailView: View {
     @State private var isDescriptionExpanded = false
     @State private var unavailableFeature: UnavailableWorkFeature?
     @State private var readerAccessErrorCode: String?
+    @State private var managementStore: WorkManagementStore?
+    @State private var managedVolumeID: String?
+    @State private var managementTask: WorkManagementTask?
+    @State private var importsCover = false
+    @State private var controlTarget: WorkControlTarget?
+    @State private var controlAnchor = CGPoint(x: 260, y: 220)
+    @State private var latestPointerLocation = CGPoint(x: 260, y: 220)
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.locale) private var locale
 
     init(
         context: ContentRequestContext,
@@ -36,22 +63,28 @@ struct WorkDetailView: View {
         shelfClient: any ShelfClient,
         cache: LibraryCacheStore,
         downloads: DownloadCenterStore,
+        managementRepository: (any ErmaoShared.WorkManagementRepository)? = nil,
+        canManageSystem: Bool = false,
         workID: String,
         onUnauthorized: @escaping @MainActor () -> Void,
         openFacet: @escaping (FacetKind, String) -> Void,
         openDownloads: @escaping () -> Void,
         openReader: @escaping (ReaderHandoff) -> Void,
-        prepareReader: @escaping (ReaderPreparationRequest) -> Void
+        prepareReader: @escaping (ReaderPreparationRequest) -> Void,
+        onWorkDeleted: @escaping () -> Void = {}
     ) {
         self.context = context
         self.client = client
         self.shelfClient = shelfClient
         self.cache = cache
         self.downloads = downloads
+        self.managementRepository = managementRepository
+        self.canManageSystem = canManageSystem
         self.openFacet = openFacet
         self.openDownloads = openDownloads
         self.openReader = openReader
         self.prepareReader = prepareReader
+        self.onWorkDeleted = onWorkDeleted
         _store = StateObject(
             wrappedValue: WorkDetailStore(
                 context: context,
@@ -60,6 +93,11 @@ struct WorkDetailView: View {
                 workID: workID,
                 onUnauthorized: onUnauthorized
             )
+        )
+        _managementStore = State(
+            initialValue: managementRepository.flatMap { repository in
+                WorkManagementStore(repository: repository, context: context, workID: workID)
+            }
         )
     }
 
@@ -72,8 +110,25 @@ struct WorkDetailView: View {
         .navigationTitle("work.detail.title")
         .accessibilityIdentifier("work.detail.screen")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { overflowMenu }
         .sheet(isPresented: $showsShelfPicker) { shelfPicker }
+        .sheet(item: $managementTask) { task in
+            NavigationStack { managementPage(task: task) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .fileImporter(
+            isPresented: $importsCover,
+            allowedContentTypes: [.jpeg, .png, .webP],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url), data.count <= 10 * 1024 * 1024 else { return }
+            let mime = url.pathExtension.lowercased() == "png" ? "image/png"
+                : url.pathExtension.lowercased() == "webp" ? "image/webp" : "image/jpeg"
+            managementStore?.uploadCover(data: data, mimeType: mime, fileName: url.lastPathComponent)
+        }
         .confirmationDialog(
             "work.unavailable.title",
             isPresented: Binding(
@@ -98,38 +153,12 @@ struct WorkDetailView: View {
         } message: {
             Text(readerAccessErrorMessage)
         }
+        .overlay { controlMenuOverlay }
         .appCanvas()
         .task { store.load() }
         .onAppear { store.refreshIfLoaded() }
-    }
-
-    @ToolbarContentBuilder
-    private var overflowMenu: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button("common.refresh", systemImage: "arrow.clockwise") { store.load() }
-                Divider()
-                Button("work.reader.continue.action", systemImage: "book") {
-                    requestReaderAccessForSelectedVolume()
-                }
-                Button("work.action.edit", systemImage: "pencil") {
-                    unavailableFeature = .editing
-                }
-                Button("work.action.setCover", systemImage: "photo") {
-                    unavailableFeature = .cover
-                }
-                Button("work.action.download", systemImage: "icloud.and.arrow.down") {
-                    enqueueSelectedVolume()
-                }
-                Menu("work.action.readingStatus", systemImage: "chart.pie") {
-                    ForEach(LibraryReadingStatus.allCases, id: \.self) { status in
-                        Button(status.title) { unavailableFeature = .readingStatus }
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .accessibilityLabel(Text("common.more"))
+        .onChange(of: managementStore?.completedAction) { action in
+            handleManagementCompletion(action)
         }
     }
 
@@ -152,20 +181,13 @@ struct WorkDetailView: View {
                 title: "content.inaccessible.title",
                 message: "content.inaccessible.message"
             )
-        case .ready(let detail, let cached):
-            readyContent(detail, isCached: cached)
+        case .ready(let detail, _):
+            readyContent(detail)
         }
     }
 
-    private func readyContent(_ detail: WorkDetailContent, isCached: Bool) -> some View {
+    private func readyContent(_ detail: WorkDetailContent) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if isCached {
-                Label("library.offline.cached", systemImage: "wifi.slash")
-                    .appTextStyle(.caption)
-                    .foregroundStyle(theme.textSecondary)
-                    .padding(.bottom, .space2)
-            }
-
             hero(detail)
                 .padding(.top, .spaceHalf)
                 .padding(.bottom, .space2)
@@ -184,17 +206,10 @@ struct WorkDetailView: View {
 
     @ViewBuilder
     private func hero(_ detail: WorkDetailContent) -> some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: .space1Half) {
-                cover(detail).frame(width: 124)
-                identity(detail)
-            }
-        } else {
-            HStack(alignment: .top, spacing: .space2) {
-                cover(detail).frame(width: 128)
-                identity(detail)
-                    .frame(minHeight: 192, alignment: .top)
-            }
+        VStack(alignment: .center, spacing: .space1Half) {
+            cover(detail).frame(width: dynamicTypeSize.isAccessibilitySize ? 124 : 132)
+            identity(detail)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -210,41 +225,55 @@ struct WorkDetailView: View {
     }
 
     private func identity(_ detail: WorkDetailContent) -> some View {
-        VStack(alignment: .leading, spacing: .spaceHalf) {
+        VStack(alignment: .center, spacing: .spaceHalf) {
             Text(detail.work.title)
                 .appTextStyle(.title)
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if detail.authorFacets.isEmpty {
-                Text(detail.work.author)
-                    .appTextStyle(.body)
-                    .foregroundStyle(theme.textSecondary)
-            } else {
-                ForEach(detail.authorFacets, id: \.id) { author in
-                    facetButton(author, kind: .author)
-                }
-            }
+            creatorSeriesLine(detail)
 
             let chips = identityChips(detail)
             if !chips.isEmpty {
                 FlowTags(tags: chips)
             }
 
-            if let series = detail.seriesFacet {
-                facetButton(series, kind: .series)
-            }
-
             Spacer(minLength: .spaceHalf)
             progressSummary(detail)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private func identityChips(_ detail: WorkDetailContent) -> [String] {
-        let format = detail.volumes.first?.formatLabel.lowercased()
-        return ([format].compactMap { $0 } + detail.tags).reduce(into: []) { result, value in
+        detail.tags.reduce(into: []) { result, value in
             guard !result.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else { return }
             result.append(value)
         }
+    }
+
+    private func creatorSeriesLine(_ detail: WorkDetailContent) -> some View {
+        HStack(spacing: .spaceHalf) {
+            if let author = detail.authorFacets.first {
+                facetButton(author, kind: .author)
+            } else {
+                Text(detail.work.author)
+                    .appTextStyle(.body)
+                    .foregroundStyle(theme.textSecondary)
+            }
+            if let series = detail.seriesFacet {
+                Text("/").foregroundStyle(theme.textTertiary)
+                facetButton(series, kind: .series)
+            }
+            if let mediaKind = detail.selectedMediaKind {
+                Text("/").foregroundStyle(theme.textTertiary)
+                Text(mediaKind.title)
+                    .appTextStyle(.body)
+                    .foregroundStyle(theme.textSecondary)
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .accessibilityElement(children: .contain)
     }
 
     private func facetButton(_ facet: FacetIdentity, kind: FacetKind) -> some View {
@@ -252,16 +281,15 @@ struct WorkDetailView: View {
             openFacet(kind, facet.id)
         } label: {
             Text(facet.name)
-                .underline(kind == .series, color: kind == .series ? theme.actionAccent : nil)
             .frame(
                 minHeight: .iosMinimumTouchTarget,
-                alignment: kind == .series ? .bottomLeading : .topLeading
+                alignment: .center
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .appTextStyle(.label)
-        .foregroundStyle(kind == .series ? theme.actionAccent : theme.textSecondary)
+        .foregroundStyle(theme.textSecondary)
         .accessibilityHint(Text(kind == .series ? "work.series.accessibility.hint" : "work.author.accessibility.hint"))
     }
 
@@ -295,24 +323,77 @@ struct WorkDetailView: View {
 
     private func readerAction(_ detail: WorkDetailContent) -> some View {
         let selected = selectedVolume(detail)
-        return HStack(spacing: .space1Half) {
-            Button { openShelfPicker() } label: {
-                Label("work.action.shelf", systemImage: "bookmark")
-                    .appTextStyle(.button)
-                    .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.roundedRectangle(radius: CGFloat(GeneratedDesignTokens.Radii.control)))
-            .tint(theme.accentSoft)
-            .foregroundStyle(theme.actionAccent)
-
+        return VStack(spacing: .space1) {
             PrimaryActionButton(
                 detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action",
                 systemImage: "play.circle",
                 isDisabled: selected == nil || selected?.isReadable == false,
                 action: { requestReaderAccess(detail: detail) }
             )
+            HStack(spacing: 0) {
+                quickAction("work.action.download", systemImage: "icloud.and.arrow.down") {
+                    enqueueSelectedVolume()
+                }
+                Menu {
+                    ForEach(LibraryReadingStatus.manualChoices, id: \.self) { status in
+                        Button(status.title) {
+                            if let managementStore,
+                               let sharedStatus = status.sharedValue,
+                               let volumeID = selected?.id {
+                                managementStore.setReadingStatus(volumeID: volumeID, status: sharedStatus)
+                            } else {
+                                unavailableFeature = .readingStatus
+                            }
+                        }
+                    }
+                } label: {
+                    quickActionLabel("work.action.readingStatus", systemImage: "chart.pie")
+                }
+                .frame(maxWidth: .infinity)
+                quickAction("work.action.add", systemImage: "books.vertical") { openShelfPicker() }
+                anchoredQuickAction("common.more", systemImage: "ellipsis") { anchor in
+                    controlAnchor = anchor
+                    controlTarget = .book
+                }
+            }
         }
+    }
+
+    private func quickAction(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { quickActionLabel(title, systemImage: systemImage) }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func quickActionLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
+        VStack(spacing: .spaceHalf) {
+            Image(systemName: systemImage).font(.body)
+            Text(title).appTextStyle(.caption).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(theme.textSecondary)
+        .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+        .contentShape(Rectangle())
+    }
+
+    private func anchoredQuickAction(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        action: @escaping (CGPoint) -> Void
+    ) -> some View {
+        GeometryReader { proxy in
+            Button {
+                let frame = proxy.frame(in: .global)
+                action(CGPoint(x: frame.midX, y: frame.midY))
+            } label: {
+                quickActionLabel(title, systemImage: systemImage)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
     }
 
     @ViewBuilder
@@ -330,15 +411,14 @@ struct WorkDetailView: View {
                         isDescriptionExpanded.toggle()
                     }
                 } label: {
-                    Label(
-                        isDescriptionExpanded ? "work.description.collapse" : "work.description.expand",
-                        systemImage: isDescriptionExpanded ? "chevron.up" : "chevron.down"
-                    )
-                    .appTextStyle(.label)
+                    Image(systemName: isDescriptionExpanded ? "chevron.up" : "chevron.down")
+                        .font(.body.weight(.medium))
+                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(theme.actionAccent)
-                .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget, alignment: .trailing)
+                .foregroundStyle(theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .accessibilityLabel(Text(isDescriptionExpanded ? "work.description.collapse" : "work.description.expand"))
             }
             .padding(.space2)
             .background(
@@ -358,43 +438,53 @@ struct WorkDetailView: View {
     }
 
     private func normalizedDescription(_ detail: WorkDetailContent) -> String? {
-        guard let value = detail.description?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else { return nil }
-        return value
+        guard let rawValue = detail.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.isEmpty else { return nil }
+        let rendered = rawValue.data(using: .utf8).flatMap { data in
+            try? NSAttributedString(
+                data: data,
+                options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue],
+                documentAttributes: nil
+            ).string
+        } ?? rawValue
+        let value = rendered
+            .replacingOccurrences(of: #"[\t ]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
     private func mediaSection(_ detail: WorkDetailContent) -> some View {
         VStack(alignment: .leading, spacing: .space2) {
             mediaPicker(detail)
-            if usesChapterFallback(detail) {
-                chapterSection(detail)
-            } else {
-                volumeSection(detail)
-            }
+            volumeSection(detail)
+            if let selected = selectedVolume(detail) { selectedVolumeMetadata(selected) }
         }
     }
 
     @ViewBuilder
     private func mediaPicker(_ detail: WorkDetailContent) -> some View {
-        if detail.availableMediaKinds.count > 1 {
-            Picker(
-                "work.media.title",
-                selection: Binding(
-                    get: { detail.selectedMediaKind ?? detail.availableMediaKinds.first ?? .ebook },
-                    set: { store.load(mediaKind: $0) }
-                )
-            ) {
-                ForEach(detail.availableMediaKinds, id: \.self) { kind in
-                    Text(kind.title).tag(kind)
+        if !detail.availableMediaKinds.isEmpty {
+            HStack(spacing: .space2) {
+                Text("work.media.title").appTextStyle(.sectionTitle)
+                Spacer(minLength: .space1)
+                Picker(
+                    "work.media.title",
+                    selection: Binding(
+                        get: { detail.selectedMediaKind ?? detail.availableMediaKinds.first ?? .ebook },
+                        set: { store.load(mediaKind: $0) }
+                    )
+                ) {
+                    ForEach(detail.availableMediaKinds, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .tint(theme.brandAccent)
+                .frame(width: min(CGFloat(detail.availableMediaKinds.count) * 80, 240))
             }
-            .pickerStyle(.segmented)
-            .tint(theme.brandAccent)
         }
-    }
-
-    private func usesChapterFallback(_ detail: WorkDetailContent) -> Bool {
-        detail.selectedMediaKind == .ebook && detail.volumes.count == 1 && !detail.chapters.isEmpty
     }
 
     @ViewBuilder
@@ -407,23 +497,31 @@ struct WorkDetailView: View {
             )
         } else {
             VStack(alignment: .leading, spacing: .space2) {
-                HStack {
-                    Text("work.volumes.all").appTextStyle(.sectionTitle)
-                    Spacer()
-                    Text(String(format: String(localized: "work.volumes.count.format"), detail.volumes.count))
-                        .appTextStyle(.label)
-                        .foregroundStyle(theme.textSecondary)
-                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: .space1Half) {
                         ForEach(Array(detail.volumes.enumerated()), id: \.element.id) { position, volume in
                             volumeCoverItem(volume, position: position, detail: detail)
-                                .frame(width: dynamicTypeSize.isAccessibilitySize ? 160 : 136)
+                                .frame(width: dynamicTypeSize.isAccessibilitySize ? 160 : 108)
+                                .onAppear {
+                                    if position >= detail.volumes.count - 3 { store.loadMoreVolumes() }
+                                }
+                        }
+                        if store.isLoadingMoreVolumes || store.hasVolumePaginationError {
+                            Button {
+                                store.loadMoreVolumes()
+                            } label: {
+                                Text(store.hasVolumePaginationError
+                                     ? "work.volumes.loadMore.failed"
+                                     : "work.volumes.loadMore.loading")
+                                    .appTextStyle(.caption)
+                                    .foregroundStyle(theme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 108, minHeight: .iosMinimumTouchTarget)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!store.hasVolumePaginationError)
                         }
                     }
-                }
-                if !detail.chapters.isEmpty {
-                    chapterSection(detail)
                 }
             }
         }
@@ -466,12 +564,23 @@ struct WorkDetailView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(volume.isReadable == false)
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("work.volume.\(volume.id)")
                 .accessibilityLabel(Text(volumeAccessibilityLabel(volume, index: index)))
                 .accessibilityValue(volumeAccessibilityValue(volume))
                 .accessibilityAddTraits(volume.isSelected ? .isSelected : [])
+                .onLongPressGesture {
+                    controlAnchor = latestPointerLocation
+                    controlTarget = .volume(volume.id)
+                }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                        .onChanged { latestPointerLocation = $0.location }
+                )
+                .accessibilityAction(named: Text("management.volume")) {
+                    controlAnchor = latestPointerLocation
+                    controlTarget = .volume(volume.id)
+                }
 
                 Text(index)
                     .appTextStyle(.caption)
@@ -493,7 +602,7 @@ struct WorkDetailView: View {
                     Image(systemName: downloadSystemImage(volumeID: volume.id))
                         .font(.body.weight(.medium))
                         .foregroundStyle(downloadForeground(volumeID: volume.id))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 24, height: 24)
                         .background(theme.surfaceRaised.opacity(0.92))
                         .clipShape(Circle())
                         .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
@@ -512,77 +621,52 @@ struct WorkDetailView: View {
         }
     }
 
-    private func chapterSection(_ detail: WorkDetailContent) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("work.directory.title").appTextStyle(.sectionTitle)
-                Spacer()
-                Text(String(format: String(localized: "work.chapters.count.format"), detail.chapters.count))
-                    .appTextStyle(.label)
-                    .foregroundStyle(theme.textSecondary)
-            }
-            .padding(.bottom, .space1)
-
-            ForEach(detail.chapters) { chapter in
-                Divider()
-                HStack(spacing: .space1) {
-                    Rectangle()
-                        .fill(chapter.isCurrent ? theme.brandAccent : Color.clear)
-                        .frame(width: 3)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: .spaceHalf) {
-                        Text(chapter.title)
-                            .appTextStyle(.headline)
-                            .foregroundStyle(chapter.isCurrent ? theme.actionAccent : theme.textPrimary)
-                            .lineLimit(2)
-                        if let progress = chapter.progress {
-                            Text(progressLabel(progress))
-                                .appTextStyle(.caption)
-                                .foregroundStyle(theme.textSecondary)
-                                .monospacedDigit()
-                        }
-                    }
+    private func selectedVolumeMetadata(_ volume: WorkVolume) -> some View {
+        let rows: [(LocalizedStringKey, String?)] = [
+            ("work.metadata.format", volume.formatLabel),
+            ("work.metadata.language", volume.language),
+            ("work.metadata.published", formattedMetadataDate(volume.publishedAt)),
+            ("work.metadata.pages", volume.pageCount.map(String.init)),
+            ("work.metadata.source", volume.metadataSource),
+            ("work.metadata.filePath", volume.files.first?.path),
+        ]
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("work.metadata.title").appTextStyle(.sectionTitle)
+                .padding(.bottom, .space1)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .firstTextBaseline, spacing: .space2) {
+                    Text(row.0).appTextStyle(.body).foregroundStyle(theme.textSecondary)
                     Spacer(minLength: .space1)
-                    Text(chapterStateTitle(chapter.state))
-                        .appTextStyle(.label)
-                        .foregroundStyle(chapter.isCurrent ? theme.actionAccent : theme.textSecondary)
-                    Image(systemName: chapterStateImage(chapter.state))
-                        .foregroundStyle(chapter.isCurrent ? theme.brandAccent : theme.textTertiary)
-                        .accessibilityHidden(true)
+                    Text(metadataValue(row.1))
+                        .appTextStyle(.body)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
                 }
-                .frame(minHeight: 64)
-                .padding(.horizontal, .space1)
-                .background(chapter.isCurrent ? theme.accentSoft : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.control)))
+                .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+                Divider()
             }
-            Divider()
         }
-        .padding(.space2)
-        .background(
-            theme.surface,
-            in: RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
-                .stroke(theme.divider.opacity(0.75), lineWidth: 0.5)
-        }
-        .shadow(color: theme.textPrimary.opacity(0.08), radius: 10, x: 0, y: 4)
+        .accessibilityIdentifier("work.selectedVolume.metadata")
     }
 
-    private func chapterStateTitle(_ state: WorkChapterReadingState) -> LocalizedStringKey {
-        switch state {
-        case .current: "work.chapter.current"
-        case .read: "work.chapter.read"
-        case .unread: "work.chapter.unread"
-        }
+    private func metadataValue(_ rawValue: String?) -> String {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return "—" }
+        return value
     }
 
-    private func chapterStateImage(_ state: WorkChapterReadingState) -> String {
-        switch state {
-        case .current: "chart.bar.fill"
-        case .read: "checkmark.circle"
-        case .unread: "chevron.forward"
-        }
+    private func formattedMetadataDate(_ rawValue: String?) -> String? {
+        guard let rawValue, rawValue.count >= 10 else { return rawValue }
+        let input = DateFormatter()
+        input.calendar = Calendar(identifier: .gregorian)
+        input.locale = Locale(identifier: "en_US_POSIX")
+        input.dateFormat = "yyyy-MM-dd"
+        guard let date = input.date(from: String(rawValue.prefix(10))) else { return rawValue }
+        let output = DateFormatter()
+        output.locale = locale
+        output.dateStyle = .medium
+        output.timeStyle = .none
+        return output.string(from: date)
     }
 
     private func progressLabel(_ progress: Double) -> String {
@@ -611,6 +695,309 @@ struct WorkDetailView: View {
 
     private func selectedVolume(_ detail: WorkDetailContent) -> WorkVolume? {
         detail.volumes.first(where: \.isSelected) ?? detail.volumes.first
+    }
+
+    private var currentDetail: WorkDetailContent? {
+        guard case .ready(let detail, _) = store.state else { return nil }
+        return detail
+    }
+
+    @ViewBuilder
+    private var controlMenuOverlay: some View {
+        if let controlTarget, let detail = currentDetail {
+            GeometryReader { geometry in
+                let menuWidth = min(224, geometry.size.width - 24)
+                let estimatedHeight = min(
+                    CGFloat(controlActions(target: controlTarget, detail: detail).count * 48 + 72),
+                    geometry.size.height - 24
+                )
+                let overlayFrame = geometry.frame(in: .global)
+                let localAnchor = CGPoint(
+                    x: controlAnchor.x - overlayFrame.minX,
+                    y: controlAnchor.y - overlayFrame.minY
+                )
+                let proposedX = localAnchor.x + menuWidth <= geometry.size.width - 12
+                    ? localAnchor.x : localAnchor.x - menuWidth
+                let proposedY = localAnchor.y + estimatedHeight <= geometry.size.height - 12
+                    ? localAnchor.y : localAnchor.y - estimatedHeight
+                let originX = min(max(12, proposedX), geometry.size.width - menuWidth - 12)
+                let originY = min(max(12, proposedY), geometry.size.height - estimatedHeight - 12)
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.30)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { self.controlTarget = nil }
+
+                    controlMenuCard(target: controlTarget, detail: detail)
+                        .frame(width: menuWidth)
+                        .frame(maxHeight: estimatedHeight)
+                        .offset(x: originX, y: originY)
+                }
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+            .zIndex(20)
+        }
+    }
+
+    private func controlMenuCard(target: WorkControlTarget, detail: WorkDetailContent) -> some View {
+        let actions = controlActions(target: target, detail: detail)
+        let destructive = actions.first(where: \.destructive)
+        let regular = actions.filter { !$0.destructive }
+        return VStack(spacing: 0) {
+            controlMenuHeader(target: target, detail: detail)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            Divider().overlay(theme.divider.opacity(0.72))
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(regular) { action in
+                        controlMenuRow(action)
+                        if action.id != regular.last?.id {
+                            Divider().overlay(theme.divider.opacity(0.60))
+                        }
+                    }
+                }
+            }
+            if let destructive {
+                Divider().overlay(theme.divider.opacity(0.72))
+                controlMenuRow(destructive)
+            }
+        }
+        .background(.ultraThinMaterial)
+        .background(theme.surfaceRaised.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(theme.divider.opacity(0.72), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 9)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(target == .book ? "work.book.controlMenu" : "work.volume.controlMenu")
+    }
+
+    private func controlMenuRow(_ action: WorkControlAction) -> some View {
+        Button(role: action.destructive ? .destructive : nil, action: action.perform) {
+            HStack(spacing: .space1) {
+                Text(action.title)
+                    .appTextStyle(.callout)
+                    .foregroundStyle(action.destructive ? Color.red : theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: action.systemImage)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(action.destructive ? Color.red : theme.textSecondary)
+                    .frame(width: 20, height: 20)
+            }
+            .frame(minHeight: .iosMinimumTouchTarget)
+            .padding(.horizontal, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!action.enabled)
+        .opacity(action.enabled ? 1 : 0.45)
+    }
+
+    private func controlMenuHeader(target: WorkControlTarget, detail: WorkDetailContent) -> some View {
+        let volume = controlVolume(target: target, detail: detail)
+        return HStack(spacing: .space1) {
+            Group {
+                if let volume {
+                    BookCoverView(
+                        reference: volume.cover,
+                        title: volume.title,
+                        context: context,
+                        client: client,
+                        cache: cache
+                    )
+                } else {
+                    cover(detail)
+                }
+            }
+            .frame(width: 38)
+            VStack(alignment: .leading, spacing: .spaceHalf) {
+                Text(target == .book ? detail.work.title : (volume?.title ?? detail.work.title))
+                    .appTextStyle(.body)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+                if let volume {
+                    Text("\(volume.title) · \(volume.formatLabel)")
+                        .appTextStyle(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func controlActions(
+        target: WorkControlTarget,
+        detail: WorkDetailContent
+    ) -> [WorkControlAction] {
+        let volume = controlVolume(target: target, detail: detail)
+        let download = volume.flatMap { downloads.record(for: $0.id) }
+        let activeDownload = download.map { record in
+            [.queued, .downloading].contains(record.state)
+        } ?? false
+        let downloadTitle: LocalizedStringKey = download?.isVerifiedOfflineCopy == true
+            ? "downloads.remove.action"
+            : activeDownload ? "work.download.pause" : "work.action.download"
+        let downloadIcon = activeDownload ? "pause.circle" : "icloud.and.arrow.down"
+        let kindleEligible = volume?.files.contains(where: kindleFile) == true
+        func action(
+            _ id: String,
+            _ title: LocalizedStringKey,
+            _ icon: String,
+            enabled: Bool = true,
+            destructive: Bool = false,
+            perform: @escaping () -> Void
+        ) -> WorkControlAction {
+            WorkControlAction(
+                id: id,
+                title: title,
+                systemImage: icon,
+                enabled: enabled,
+                destructive: destructive,
+                perform: perform
+            )
+        }
+        var actions: [WorkControlAction] = []
+        if target == .book {
+            if canManageSystem {
+                actions.append(action("series", "work.control.addSeries", "square.stack.3d.up") {
+                    openManagement(.addSeries, volumeID: nil)
+                })
+            }
+            actions.append(action("shelf", "work.control.addShelf", "books.vertical") {
+                controlTarget = nil
+                openShelfPicker()
+            })
+            actions.append(action("unread", "work.control.markUnread", "bookmark", enabled: volume != nil) {
+                markUnread(volume)
+            })
+            actions.append(action("download", downloadTitle, downloadIcon, enabled: volume != nil) {
+                handleControlDownload(volume, detail: detail)
+            })
+            if canManageSystem {
+                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editWork, volumeID: nil) })
+                actions.append(action("recognize", "work.control.recognize", "sparkles") { openManagement(.recognize, volumeID: nil) })
+                actions.append(action("uploadCover", "management.uploadCover", "photo.badge.plus") { openManagement(.cover, volumeID: nil) })
+                actions.append(action("regenerateCover", "management.regenerateCover", "wand.and.stars") { openManagement(.cover, volumeID: nil) })
+                if kindleEligible {
+                    actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume?.id) })
+                }
+                actions.append(action("delete", "work.control.delete", "trash", destructive: true) {
+                    openManagement(.deleteWork, volumeID: nil)
+                })
+            }
+        } else if let volume {
+            actions.append(action("unread", "work.control.markUnread", "bookmark") { markUnread(volume) })
+            actions.append(action("download", downloadTitle, downloadIcon) {
+                handleControlDownload(volume, detail: detail)
+            })
+            if canManageSystem {
+                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editVolume, volumeID: volume.id) })
+                actions.append(action("mediaKind", "work.control.changeMediaType", "square.stack.3d.up", enabled: !activeDownload) { openManagement(.mediaKind, volumeID: volume.id) })
+                actions.append(action("split", "work.control.split", "arrow.triangle.branch", enabled: !activeDownload) { openManagement(.split, volumeID: volume.id) })
+                actions.append(action("move", "work.control.move", "arrow.right", enabled: !activeDownload) { openManagement(.transfer, volumeID: volume.id) })
+                if kindleEligible {
+                    actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume.id) })
+                }
+                actions.append(action("delete", "work.control.delete", "trash", enabled: !activeDownload, destructive: true) { openManagement(.deleteVolume, volumeID: volume.id) })
+            }
+        }
+        return actions
+    }
+
+    private func controlVolume(target: WorkControlTarget, detail: WorkDetailContent) -> WorkVolume? {
+        switch target {
+        case .book: selectedVolume(detail)
+        case .volume(let id): detail.volumes.first { $0.id == id }
+        }
+    }
+
+    private func openManagement(_ task: WorkManagementTask, volumeID: String?) {
+        controlTarget = nil
+        managedVolumeID = volumeID
+        managementTask = task
+    }
+
+    private func markUnread(_ volume: WorkVolume?) {
+        controlTarget = nil
+        guard let volume, let managementStore else {
+            unavailableFeature = .readingStatus
+            return
+        }
+        managementStore.setReadingStatus(volumeID: volume.id, status: .unread)
+    }
+
+    private func handleControlDownload(_ volume: WorkVolume?, detail: WorkDetailContent) {
+        controlTarget = nil
+        guard let volume else { return }
+        if let record = downloads.record(for: volume.id), record.isVerifiedOfflineCopy {
+            downloads.remove(record)
+        } else {
+            handleDownload(volume, detail: detail)
+        }
+    }
+
+    @ViewBuilder
+    private func managementPage(task: WorkManagementTask) -> some View {
+        if let managementStore, let detail = currentDetail {
+            let volume = managedVolumeID.flatMap { id in detail.volumes.first { $0.id == id } }
+            WorkManagementView(
+                store: managementStore,
+                task: task,
+                detail: detail,
+                volume: volume,
+                downloadAction: { selectedVolume in
+                    handleDownload(selectedVolume, detail: detail)
+                    managementTask = nil
+                },
+                removeDownload: { selectedVolume in
+                    if let record = downloads.record(for: selectedVolume.id) {
+                        downloads.remove(record)
+                    }
+                    managementTask = nil
+                },
+                chooseCover: { importsCover = true },
+                workCover: AnyView(cover(detail)),
+                downloadForVolume: { downloads.record(for: $0) },
+                onManagedVolumeChange: { managedVolumeID = $0 }
+            )
+        }
+    }
+
+    private func handleManagementCompletion(_ action: WorkManagementStore.Action?) {
+        guard let action, let managementStore else { return }
+        let detail = currentDetail
+        switch action {
+        case .workDeleted:
+            detail?.volumes.forEach { downloads.remove(volumeID: $0.id) }
+            onWorkDeleted()
+        case .volumeDeleted:
+            if let managedVolumeID { downloads.remove(volumeID: managedVolumeID) }
+        case .volumeReclassified, .volumeSplit, .volumeTransferred:
+            if let pending = managementStore.pendingOwnership,
+               let outcome = managementStore.lastOutcome,
+               let mediaVersionID = outcome.targetMediaVersionId {
+                downloads.rehomeCompleted(
+                    volumeID: pending.volumeID,
+                    targetWorkID: outcome.targetWorkId ?? pending.workID ?? detail?.work.id ?? "",
+                    targetWorkTitle: pending.workTitle,
+                    targetWorkAuthor: pending.workAuthor,
+                    targetMediaVersionID: mediaVersionID,
+                    targetMediaKind: pending.mediaKind
+                )
+            }
+        default: break
+        }
+        managementTask = nil
+        if [.volumeReclassified, .volumeSplit, .volumeTransferred, .volumeDeleted].contains(action) {
+            managedVolumeID = nil
+        }
+        managementStore.consumeCompletion()
+        if action != .workDeleted { store.load() }
     }
 
     private func openShelfPicker() {
@@ -832,10 +1219,7 @@ private struct FlowTags: View {
                 .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, .space1Half)
                 .padding(.vertical, .spaceHalf)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(theme.divider)
-                }
+                .background(theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 3))
         }
     }
 }
@@ -879,13 +1263,21 @@ private extension LibraryMediaKind {
 }
 
 private extension LibraryReadingStatus {
-    static let allCases: [LibraryReadingStatus] = [.unread, .reading, .finished]
+    static let manualChoices: [LibraryReadingStatus] = [.unread, .finished]
 
     var title: LocalizedStringKey {
         switch self {
         case .unread: "work.status.unread"
         case .reading: "work.status.reading"
         case .finished: "work.status.finished"
+        }
+    }
+
+    var sharedValue: ErmaoShared.ManagedReadingStatus? {
+        switch self {
+        case .unread: .unread
+        case .reading: nil
+        case .finished: .finished
         }
     }
 }

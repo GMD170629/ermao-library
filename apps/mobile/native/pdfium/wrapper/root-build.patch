@@ -1,0 +1,15 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 121103f12..6f91520e5 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -10,6 +10,9 @@ group("default") {
+ group("default") {
+   testonly = true
+-  deps = [ ":pdfium" ]
++  deps = [
++    ":pdfium",
++    "//shuku_pdfium_wrapper:shuku_pdfium",
++  ]
+   if (pdf_is_standalone) {
+     deps += [ ":pdfium_all" ]
+   }

@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
                     contentRepository = (application as ErmaoLibraryApplication).contentRepository,
                     personalSettingsRepository = (application as ErmaoLibraryApplication).personalSettingsRepository,
                     administrativeSettingsRepository = (application as ErmaoLibraryApplication).administrativeSettingsRepository,
+                    workManagementRepository = (application as ErmaoLibraryApplication).workManagementRepository,
                     downloadCatalog = (application as ErmaoLibraryApplication).downloadCatalog,
                     downloadFiles = (application as ErmaoLibraryApplication).downloadFiles,
                     sharedDownloadCatalog = (application as ErmaoLibraryApplication).sharedDownloadCatalog,
@@ -64,7 +65,6 @@ class MainActivity : AppCompatActivity() {
                         onRefreshSessionAwaiting = mainViewModel::refreshSessionAwaitingCompletion,
                         onPurgeCurrentNamespace = mainViewModel::purgeCurrentNamespace,
                         onLogoutAwaiting = mainViewModel::logoutAwaitingCompletion,
-                        onEnterOffline = mainViewModel::enterOfflineMode,
                         onLogout = mainViewModel::logout,
                     ),
                 )

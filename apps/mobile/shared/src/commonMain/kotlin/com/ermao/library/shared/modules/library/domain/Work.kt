@@ -25,6 +25,7 @@ data class WorkDetailSummary(
     val coverUrl: String,
     val recentMediaKind: MediaKind?,
     val continueVolumeId: String?,
+    val continueVolumeProgress: Double,
     val completed: Boolean,
     val mediaVersions: List<MediaVersion>,
     val availableMediaKinds: List<MediaKind>,

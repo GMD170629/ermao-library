@@ -1,0 +1,410 @@
+{
+  "schemaVersion": 1,
+  "name": "Android Warm Page v2 design-reference gate",
+  "authority": "docs/mobile-app-phase-1-web-to-app-functional-baseline.md through phase 7, with checked-in high-fidelity PNGs as composition evidence",
+  "canonicalViewport": {
+    "width": 390,
+    "height": 844,
+    "unit": "dp",
+    "includesSystemStatusBar": false
+  },
+  "comparison": {
+    "maximumChannelDifference": 8,
+    "maximumAppOwnedDifferenceRatio": 0.005,
+    "notes": [
+      "Only C/App-owned pixels are blocking in this cross-reference comparison.",
+      "A/System-owned and B/Native-themed regions require Android API-specific behavior and platform-baseline review.",
+      "This manifest is not an Android golden and must never be generated from an implementation capture."
+    ]
+  },
+  "ownershipProfiles": {
+    "home-shell": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform top navigation",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "A",
+          "name": "platform bottom navigation",
+          "bounds": [0, 774, 390, 70]
+        }
+      ]
+    },
+    "library-shell": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform top navigation and overflow",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "B",
+          "name": "Material search field",
+          "bounds": [16, 64, 358, 58]
+        },
+        {
+          "ownership": "B",
+          "name": "Material scope segmented control",
+          "bounds": [16, 122, 358, 46]
+        },
+        {
+          "ownership": "A",
+          "name": "platform bottom navigation",
+          "bounds": [0, 774, 390, 70]
+        }
+      ]
+    },
+    "library-sort-menu": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform top navigation and overflow",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "B",
+          "name": "Material search field",
+          "bounds": [16, 64, 200, 58]
+        },
+        {
+          "ownership": "B",
+          "name": "Material scope segmented control visible under menu",
+          "bounds": [16, 122, 200, 46]
+        },
+        {
+          "ownership": "A",
+          "name": "platform sort menu shell",
+          "bounds": [212, 60, 166, 232]
+        },
+        {
+          "ownership": "A",
+          "name": "platform bottom navigation",
+          "bounds": [0, 774, 390, 70]
+        }
+      ]
+    },
+    "library-view-menu": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform top navigation and overflow",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "B",
+          "name": "Material search field",
+          "bounds": [16, 64, 200, 58]
+        },
+        {
+          "ownership": "B",
+          "name": "Material scope segmented control visible under menu",
+          "bounds": [16, 122, 200, 46]
+        },
+        {
+          "ownership": "A",
+          "name": "platform view menu shell",
+          "bounds": [212, 60, 166, 190]
+        },
+        {
+          "ownership": "A",
+          "name": "platform bottom navigation",
+          "bounds": [0, 774, 390, 70]
+        }
+      ]
+    },
+    "library-filter-sheet": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform top navigation and dim layer",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "B",
+          "name": "disabled Material search and scope underlay",
+          "bounds": [16, 64, 358, 104]
+        },
+        {
+          "ownership": "A",
+          "name": "platform modal sheet chrome and drag handle",
+          "bounds": [0, 380, 390, 40]
+        },
+        {
+          "ownership": "B",
+          "name": "Material multi-select rows",
+          "bounds": [16, 480, 358, 310]
+        }
+      ]
+    },
+    "facet-shell": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform pushed navigation",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "A",
+          "name": "platform bottom navigation",
+          "bounds": [0, 774, 390, 70]
+        }
+      ]
+    },
+    "work-detail-shell": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform pushed navigation and overflow",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "B",
+          "name": "Material media segmented control when present",
+          "bounds": [16, 430, 358, 52]
+        },
+        {
+          "ownership": "A",
+          "name": "platform bottom navigation",
+          "bounds": [0, 774, 390, 70]
+        }
+      ]
+    },
+    "work-actions-sheet": {
+      "defaultOwnership": "C",
+      "regions": [
+        {
+          "ownership": "A",
+          "name": "platform pushed navigation and dim layer",
+          "bounds": [0, 0, 390, 64]
+        },
+        {
+          "ownership": "A",
+          "name": "platform actions sheet chrome",
+          "bounds": [0, 500, 390, 344]
+        }
+      ]
+    }
+  },
+  "scenes": [
+    {
+      "id": "home-default-zh-CN-light",
+      "actualFile": "home-default-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/home-app-light-v1.png",
+      "referenceSha256": "4ba597bdb48c77c736a933e43c3565dfcb23a23e434b3ba1309bdb2872f0d060",
+      "ownershipProfile": "home-shell",
+      "anchors": [
+        {"id": "page-title", "ownership": "A", "role": "platformNavigationTitle", "expectedRegion": "top"},
+        {"id": "continue-task", "ownership": "C", "role": "uniqueTaskContainer", "order": 1},
+        {"id": "primary-action", "ownership": "C", "role": "singleSolidCTA", "maximumCount": 1},
+        {"id": "recent-reading", "ownership": "C", "role": "horizontalWorkStrip", "scanTargets": 3},
+        {"id": "recent-added", "ownership": "C", "role": "horizontalWorkStrip", "scanTargets": 3},
+        {"id": "compact-gutter", "ownership": "C", "token": "space.2", "valueDp": 16, "toleranceDp": 1}
+      ]
+    },
+    {
+      "id": "library-works-zh-CN-light",
+      "actualFile": "library-works-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-app-light-v1.png",
+      "referenceSha256": "b42706c51feae20e548d22aeff24dcbff5efedcadde14fdeb9189e86f239bea7",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "task-order", "ownership": "C", "roles": ["search", "scope", "resultContext", "content"]},
+        {"id": "search", "ownership": "B", "role": "MaterialTextInput", "minimumTouchDp": 48},
+        {"id": "scope", "ownership": "B", "role": "MaterialSegmentedControl", "segments": 3},
+        {"id": "work-grid", "ownership": "C", "columns": 3, "coverAspectRatio": "2:3", "coverRadiusDp": 8},
+        {"id": "compact-gutter", "ownership": "C", "token": "space.2", "valueDp": 16, "toleranceDp": 1}
+      ]
+    },
+    {
+      "id": "library-search-works-zh-CN-light",
+      "actualFile": "library-search-works-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-search-works-results-app-light-v1.png",
+      "referenceSha256": "129e39efa8eabcbb5b80bb5729d942666c06809ac9d3241a5e893327a2001879",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "query-preserved", "ownership": "B", "role": "MaterialTextInput", "state": "nonEmpty"},
+        {"id": "result-context", "ownership": "C", "role": "resultCountAndFilter", "order": 3},
+        {"id": "work-grid", "ownership": "C", "columns": 3, "coverAspectRatio": "2:3"},
+        {"id": "bottom-navigation", "ownership": "A", "selectedDestination": "library"}
+      ]
+    },
+    {
+      "id": "library-series-scope-zh-CN-light",
+      "actualFile": "library-series-scope-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-series-scope-app-light-v1.png",
+      "referenceSha256": "051619fb57a970d542ac1fa7c488ed77569ebe53684704c9a017bcd412ec7c18",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "scope", "ownership": "B", "selected": "series", "segments": 3},
+        {"id": "grouping-list", "ownership": "C", "presentation": "flatListWithDividers"},
+        {"id": "cover-stack", "ownership": "C", "visibleCovers": 3},
+        {"id": "row-chevron", "ownership": "A", "role": "systemChevron"}
+      ]
+    },
+    {
+      "id": "library-authors-scope-zh-CN-light",
+      "actualFile": "library-authors-scope-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-authors-scope-app-light-v1.png",
+      "referenceSha256": "f5b9488b030bcc84f8181036ea6e7734cf8beec271256c1e079d56ecf3bfe7af",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "scope", "ownership": "B", "selected": "authors", "segments": 3},
+        {"id": "grouping-list", "ownership": "C", "presentation": "flatListWithDividers"},
+        {"id": "author-identity", "ownership": "C", "usesAvatar": false},
+        {"id": "row-target", "ownership": "C", "minimumTouchDp": 48}
+      ]
+    },
+    {
+      "id": "library-series-facet-zh-CN-light",
+      "actualFile": "library-series-facet-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-series-facet-app-light-v1.png",
+      "referenceSha256": "4f189d1ab4cd8437b25fa2285dc2655d1a208232267c58ff051ff4542ae2af47",
+      "ownershipProfile": "facet-shell",
+      "anchors": [
+        {"id": "facet-identity", "ownership": "C", "roles": ["seriesName", "workCount"]},
+        {"id": "ordered-content", "ownership": "C", "presentation": "orderedFlatList"},
+        {"id": "work-cover", "ownership": "C", "coverAspectRatio": "2:3", "coverRadiusDp": 8},
+        {"id": "back", "ownership": "A", "role": "platformBack"}
+      ]
+    },
+    {
+      "id": "library-author-facet-zh-CN-light",
+      "actualFile": "library-author-facet-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-author-facet-app-light-v1.png",
+      "referenceSha256": "187d64442f8880617034373c24ed6264f27289d53ba6ea8ca15dd40831c951bf",
+      "ownershipProfile": "facet-shell",
+      "anchors": [
+        {"id": "facet-identity", "ownership": "C", "roles": ["authorName", "workCount", "sortSummary"]},
+        {"id": "work-grid", "ownership": "C", "columns": 3, "coverAspectRatio": "2:3"},
+        {"id": "author-avatar", "ownership": "C", "maximumCount": 0},
+        {"id": "back", "ownership": "A", "role": "platformBack"}
+      ]
+    },
+    {
+      "id": "library-filter-zh-CN-light",
+      "actualFile": "library-filter-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-filter-sheet-app-light-v1.png",
+      "referenceSha256": "a5c8919bcdcd50a40e87e1cf3193566fb1ea4de640fbfcd1f5425a094af9509f",
+      "ownershipProfile": "library-filter-sheet",
+      "anchors": [
+        {"id": "sheet-shell", "ownership": "A", "role": "MaterialModalBottomSheet"},
+        {"id": "filter-draft", "ownership": "C", "commitMode": "applyOnce"},
+        {"id": "multi-select", "ownership": "B", "role": "MaterialCheckboxRows"},
+        {"id": "sheet-actions", "ownership": "C", "roles": ["cancel", "clearAll", "apply"]}
+      ]
+    },
+    {
+      "id": "library-sort-menu-zh-CN-light",
+      "actualFile": "library-sort-menu-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-sort-menu-app-light-v1.png",
+      "referenceSha256": "bd5303dc97956cafa05a2025521dc40c8e7ddb437a9de854c14f60f08e04444b",
+      "ownershipProfile": "library-sort-menu",
+      "anchors": [
+        {"id": "menu-shell", "ownership": "A", "role": "MaterialDropdownMenu"},
+        {"id": "sort-options", "ownership": "A", "optionCount": 4, "selection": "single"},
+        {"id": "selected-glyph", "ownership": "A", "role": "systemCheck"},
+        {"id": "view-options", "ownership": "A", "maximumCount": 0}
+      ]
+    },
+    {
+      "id": "library-view-menu-zh-CN-light",
+      "actualFile": "library-view-menu-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-view-menu-app-light-v1.png",
+      "referenceSha256": "de66795d26d0569f1d9cdc2e5d86708bff461da1a515496cff84675b10ad9af3",
+      "ownershipProfile": "library-view-menu",
+      "anchors": [
+        {"id": "menu-shell", "ownership": "A", "role": "MaterialDropdownMenu"},
+        {"id": "view-options", "ownership": "A", "optionCount": 2, "selection": "single"},
+        {"id": "selected-glyph", "ownership": "A", "role": "systemCheck"},
+        {"id": "sort-options", "ownership": "A", "maximumCount": 0}
+      ]
+    },
+    {
+      "id": "library-search-empty-zh-CN-light",
+      "actualFile": "library-search-empty-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-search-empty-app-light-v1.png",
+      "referenceSha256": "7c0c016f88de81b3eb4eb954680a39c9def74101d58b4a4efc738fead30f6596",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "query-preserved", "ownership": "B", "state": "nonEmpty"},
+        {"id": "empty-layer", "ownership": "C", "presentationCount": 1},
+        {"id": "empty-copy", "ownership": "C", "roles": ["title", "suggestion", "clearSearch"]},
+        {"id": "error-color", "ownership": "C", "usesErrorColor": false}
+      ]
+    },
+    {
+      "id": "library-network-error-zh-CN-light",
+      "actualFile": "library-network-error-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-network-error-app-light-v1.png",
+      "referenceSha256": "e43b68d4c4bb3b880ceb82e72489ec2c52e4a22c69988350f4fc781fdc542530",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "library-context", "ownership": "C", "preserves": ["search", "scope", "filter", "tab"]},
+        {"id": "error-layer", "ownership": "C", "presentationCount": 1, "region": "results"},
+        {"id": "retry", "ownership": "C", "role": "inlineAction"},
+        {"id": "modal-error", "ownership": "A", "maximumCount": 0}
+      ]
+    },
+    {
+      "id": "library-offline-cached-zh-CN-light",
+      "actualFile": "library-offline-cached-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-offline-cached-results-app-light-v1.png",
+      "referenceSha256": "45fe9b77ff2e94dc2ed225ab752631a20674ec6f0d45cd6fbd6eba2d989df729",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "offline-banner", "ownership": "C", "presentationCount": 1, "tone": "neutral"},
+        {"id": "cached-results", "ownership": "C", "remainsVisible": true},
+        {"id": "downloaded-status", "ownership": "C", "truthful": true},
+        {"id": "duplicate-feedback", "ownership": "C", "maximumCount": 0}
+      ]
+    },
+    {
+      "id": "library-pagination-error-zh-CN-light",
+      "actualFile": "library-pagination-error-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-pagination-error-app-light-v1.png",
+      "referenceSha256": "3a9953a6248420b993d598ddc950675462cbf9a7cd54a1f46fc40825f41d844f",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "loaded-results", "ownership": "C", "remainsVisible": true},
+        {"id": "pagination-error", "ownership": "C", "position": "resultTail", "presentationCount": 1},
+        {"id": "retry", "ownership": "C", "role": "inlineAction"},
+        {"id": "full-page-error", "ownership": "C", "maximumCount": 0}
+      ]
+    },
+    {
+      "id": "library-permission-revalidation-zh-CN-light",
+      "actualFile": "library-permission-revalidation-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-permission-revalidation-app-light-v1.png",
+      "referenceSha256": "a87828b30c985f9b50d31af89e5150ea8726af88835d61a3c0c60e3dd1291010",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "private-content", "ownership": "C", "visible": false},
+        {"id": "disabled-controls", "ownership": "B", "roles": ["search", "scope", "overflow", "filter"]},
+        {"id": "permission-gate", "ownership": "C", "presentationCount": 1},
+        {"id": "manual-action", "ownership": "C", "maximumCount": 0}
+      ]
+    },
+    {
+      "id": "library-stale-refresh-zh-CN-light",
+      "actualFile": "library-stale-refresh-zh-CN-light.png",
+      "reference": "docs/assets/mobile-app-hifi-v1/library-stale-refresh-app-light-v1.png",
+      "referenceSha256": "f638b80c0aaeb25e2866fadd9212ecd632bb913159cbbd19bf3d5aedbdea2f81",
+      "ownershipProfile": "library-shell",
+      "anchors": [
+        {"id": "stale-results", "ownership": "C", "remainsVisible": true},
+        {"id": "refresh-status", "ownership": "C", "presentation": "compactInline", "presentationCount": 1},
+        {"id": "blocking-overlay", "ownership": "C", "maximumCount": 0},
+        {"id": "spinner", "ownership": "B", "tone": "brandAccent"}
+      ]
+    }
+  ]
+}

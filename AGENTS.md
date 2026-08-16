@@ -417,6 +417,39 @@ For every implementation:
 
 `docs/mobile-reader-architecture.md` is the authoritative native Mobile Reader architecture and phase contract. Read it before designing or changing Reader domain models, location/progress persistence, publication storage, native Reader navigation or UI, Readium/libmobi/PDF/Comic engine adapters, or Reader server synchronization. It fixes the reading-morphology boundaries, dependency direction, shared JSON schema, fingerprint and restoration policy, native UI boundary, security rules, Android R2 opening chain, and the interfaces reserved for later phases. It does not override the Mobile phase 1–5 product, navigation, flow, visual, localization, accessibility, or platform-native requirements.
 
+Reader code must preserve the original publication format. It must not create,
+cache, advertise, download, or restore from a derived EPUB, ZIP, unpacked
+publication directory, or equivalent format-conversion artifact. MOBI-family and
+TXT support must use their parser-backed in-memory Publication directly. The
+existing dormant import conversion subsystem is not a Reader fallback and must
+not be connected to Reader bootstrap, delivery, download, cache, or progress.
+
+### Android Physical-Device-Default Development
+
+Android local development, debugging, test APK installation, instrumentation, visual
+inspection, screenshots, performance work, and runtime acceptance default to a connected
+physical Android device. Do not automatically start or select an AVD while a physical device
+is available.
+
+- Before every install or test, run `adb devices -l`, require the target to be in `device`
+  state, and address an exact serial that does not start with `emulator-`. If more than one
+  physical device is connected, do not select the first device implicitly.
+- After every successful test APK build, use a data-preserving replace-install on the exact
+  physical serial, then force-stop and cold-launch the app. Verify the package and version,
+  resumed activity, and post-launch crash/ANR logs. Never uninstall the app or clear its data
+  as part of normal deployment.
+- Run final Compose UI/instrumentation, TalkBack, keyboard, rotation, split-screen,
+  predictive-back, real-network/storage, process-death/recovery, screenshot, and core-journey
+  checks on the physical device. A compile-only or emulator-only result is not runtime
+  acceptance.
+- Android Emulator is allowed only when explicitly requested for a supplementary device/API
+  matrix or when hardware cannot be attached to CI. Emulator evidence never replaces the
+  physical-device installation and final runtime/visual gate.
+- If no suitable authorized, unlocked ADB device is available, stop the Android runtime gate
+  and report that physical-device evidence is pending. Do not silently fall back to an
+  emulator or weaken the gate. Existing conflicting local guidance is migration debt and this
+  policy takes precedence.
+
 ### iOS Physical-Device-Only Development
 
 iOS development, debugging, testing, visual inspection, screenshots, performance work,

@@ -106,8 +106,8 @@ struct LibraryView: View {
                         .appTextStyle(.label)
                         .foregroundStyle(theme.textSecondary)
                 }
-                if case .ready(_, _, let cached, let refreshing) = store.current.results,
-                   !cached, refreshing {
+                if case .ready(_, _, _, let refreshing) = store.current.results,
+                   refreshing {
                     ProgressView()
                         .controlSize(.small)
                         .tint(theme.brandAccent)
@@ -154,11 +154,6 @@ struct LibraryView: View {
                 }
             }
 
-            if case .ready(_, _, let cached, _) = store.current.results {
-                if cached {
-                    ContentOfflineNotice(retry: store.refresh)
-                }
-            }
         }
         .frame(minHeight: .iosMinimumTouchTarget, alignment: .top)
     }
@@ -484,10 +479,7 @@ struct WorkCollectionView: View {
                 actionTitle: "common.retry",
                 action: store.reload
             )
-        case .ready(let items, _, let cached, _):
-            if cached {
-                Label("library.offline.cached", systemImage: "wifi.slash")
-            }
+        case .ready(let items, _, _, _):
             WorkGrid(
                 works: items.compactMap(\.work),
                 context: context,

@@ -6,9 +6,6 @@ from app.core.config import Settings
 from app.modules.publications.application.ensure_navigation import (
     EnsurePublicationNavigation,
 )
-from app.modules.publications.application.ensure_render_artifact import (
-    EnsurePublicationRenderArtifact,
-)
 from app.modules.publications.application.navigation_ports import (
     PublicationNavigationLookupUnitOfWork,
     PublicationNavigationUnitOfWork,
@@ -31,12 +28,6 @@ from app.modules.publications.infrastructure.mobi_adapter import (
 from app.modules.publications.infrastructure.navigation_cache import (
     ConfiguredPublicationParserProfiles,
 )
-from app.modules.publications.infrastructure.render_artifact import (
-    ConfiguredPublicationRenderArtifactBuilder,
-)
-from app.modules.publications.infrastructure.render_cache import (
-    LocalPublicationRenderFileStore,
-)
 from app.modules.publications.infrastructure.source_repository import (
     SqlAlchemyPublicationSourceRepository,
 )
@@ -47,8 +38,6 @@ from app.modules.publications.infrastructure.txt_adapter import (
 from app.modules.publications.infrastructure.uow import (
     SqlAlchemyPublicationNavigationLookupUnitOfWork,
     SqlAlchemyPublicationNavigationUnitOfWork,
-    SqlAlchemyPublicationRenderLookupUnitOfWork,
-    SqlAlchemyPublicationRenderUnitOfWork,
 )
 
 
@@ -131,30 +120,7 @@ def ensure_publication_navigation(
     )
 
 
-def ensure_publication_render_artifact(
-    session_factory: sessionmaker[Session],
-    settings: Settings,
-) -> EnsurePublicationRenderArtifact:
-    adapter, _profiles = _publication_adapter_and_profiles(settings)
-
-    def lookup_unit_of_work() -> SqlAlchemyPublicationRenderLookupUnitOfWork:
-        return SqlAlchemyPublicationRenderLookupUnitOfWork(session_factory)
-
-    def unit_of_work() -> SqlAlchemyPublicationRenderUnitOfWork:
-        return SqlAlchemyPublicationRenderUnitOfWork(session_factory)
-
-    return EnsurePublicationRenderArtifact(
-        lookup_unit_of_work_factory=lookup_unit_of_work,
-        unit_of_work_factory=unit_of_work,
-        artifact_builder=ConfiguredPublicationRenderArtifactBuilder(adapter),
-        file_store=LocalPublicationRenderFileStore(
-            settings.publication_render_cache_root
-        ),
-    )
-
-
 __all__ = [
     "ensure_publication_navigation",
-    "ensure_publication_render_artifact",
     "open_publication",
 ]

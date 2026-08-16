@@ -60,8 +60,6 @@ interface MobileRuntime {
 
     suspend fun refreshCurrentSession(): RuntimeOperationResult
 
-    suspend fun enterOfflineMode(): RuntimeOperationResult
-
     suspend fun logout(): RuntimeOperationResult
 
     fun close()
@@ -82,7 +80,6 @@ enum class NavigationDirective {
     ResetAllStacksHome,
     RevalidatePrivateShell,
     HidePrivateShell,
-    EnterOfflineShell,
     ShowServerProfiles,
 }
 
@@ -176,8 +173,6 @@ interface MobileRuntimeBridge {
     ): Observation
 
     fun refreshCurrentSession(completion: OperationCompletion): Observation
-
-    fun enterOfflineMode(completion: OperationCompletion): Observation
 
     fun logout(completion: OperationCompletion): Observation
 

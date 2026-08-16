@@ -7,6 +7,7 @@ readonly OUTPUT_ROOT="${2:?Output root is required}"
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PDFIUM_DIRECTORY="$(cd "${SCRIPT_DIRECTORY}/.." && pwd)"
 readonly WRAPPER_DESTINATION="${PDFIUM_CHECKOUT}/shuku_pdfium_wrapper"
+readonly ROOT_BUILD_PATCH="${PDFIUM_DIRECTORY}/wrapper/root-build.patch"
 
 [[ "$(uname -s)" == "Darwin" ]] || { echo "iOS PDFium builds require macOS" >&2; exit 2; }
 [[ "$(git -C "${PDFIUM_CHECKOUT}" rev-parse HEAD)" == "${EXPECTED_REVISION}" ]] || {
@@ -30,10 +31,12 @@ command -v xcodebuild >/dev/null
 }
 
 cleanup() {
+  git -C "${PDFIUM_CHECKOUT}" apply --reverse "${ROOT_BUILD_PATCH}" 2>/dev/null || true
   rm -rf -- "${WRAPPER_DESTINATION}"
 }
 trap cleanup EXIT
 cp -R "${PDFIUM_DIRECTORY}/wrapper" "${WRAPPER_DESTINATION}"
+git -C "${PDFIUM_CHECKOUT}" apply "${ROOT_BUILD_PATCH}"
 
 readonly OUTPUT="${OUTPUT_ROOT}/ios-arm64"
 mkdir -p "${OUTPUT}"
@@ -71,6 +74,9 @@ xcodebuild -create-xcframework \
 ditto -c -k --keepParent "${FRAMEWORK_PATH}" \
   "${ARTIFACT_DIRECTORY}/ShukuPdfium.xcframework.zip"
 "${SCRIPT_DIRECTORY}/package-licenses.sh" "${PDFIUM_CHECKOUT}" "${PDFIUM_DIRECTORY}/artifacts"
+
+git -C "${PDFIUM_CHECKOUT}" apply --reverse "${ROOT_BUILD_PATCH}"
+rm -rf -- "${WRAPPER_DESTINATION}"
 
 [[ -z "$(git -C "${PDFIUM_CHECKOUT}" status --porcelain --untracked-files=no)" ]] || {
   echo "PDFium checkout changed during the build" >&2

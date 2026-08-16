@@ -134,9 +134,6 @@ export type ReaderPreferences = {
 type ReaderSourceBase = {
   workId: string;
   volumeId: string;
-  contentUrl: string;
-  /** Absolute RWPM manifest URL. Required by the Readium Web adapter. */
-  publicationManifestUrl?: string;
   totalPages?: number | null;
 };
 
@@ -144,16 +141,19 @@ export type ReaderSource = ReaderSourceBase & (
   | {
     kind: 'reflowable';
     sourceFormat: ReflowableFormat;
+    /** Absolute RWPM manifest URL consumed directly by the Readium Web adapter. */
+    publicationManifestUrl: string;
     navigation: ReaderNavigationEntry[];
     navigationFingerprint?: string;
   }
   | {
       kind: 'comic';
+      contentUrl: string;
       sourceFormat: 'cbz' | 'zip' | 'cbr' | 'rar';
       comicManifestUrl: string;
       comicPageUrlTemplate: string;
     }
-  | { kind: 'pdf'; sourceFormat?: never }
+  | { kind: 'pdf'; contentUrl: string; sourceFormat?: never }
 );
 
 export type OperationToken = {

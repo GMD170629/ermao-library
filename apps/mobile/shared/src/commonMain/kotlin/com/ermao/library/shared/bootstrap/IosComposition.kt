@@ -7,15 +7,13 @@ import com.ermao.library.shared.modules.auth.MobileRuntimeBridge
 import com.ermao.library.shared.modules.auth.application.DefaultMobileRuntime
 import com.ermao.library.shared.modules.auth.application.DefaultMobileRuntimeBridge
 import com.ermao.library.shared.modules.auth.infrastructure.KtorAuthGateway
-import com.ermao.library.shared.modules.auth.infrastructure.OfflineEntitlementPayloadStore
-import com.ermao.library.shared.modules.auth.infrastructure.SerializedOfflineEntitlementRepository
+import com.ermao.library.shared.modules.auth.infrastructure.SerializedVerifiedSessionRepository
+import com.ermao.library.shared.modules.auth.infrastructure.VerifiedSessionPayloadStore
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
 import com.ermao.library.shared.modules.servers.infrastructure.SerializedServerProfileRepository
 import com.ermao.library.shared.modules.servers.infrastructure.ServerProfilePayloadStore
 import com.ermao.library.shared.modules.library.ContentRepository
-import com.ermao.library.shared.modules.library.InMemoryLibraryCacheRepository
 import com.ermao.library.shared.modules.library.infrastructure.KtorContentRepository
-import com.ermao.library.shared.modules.library.application.LibrarySnapshotPayloadStore
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
 import com.ermao.library.shared.modules.personalsettings.infrastructure.KtorPersonalSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
@@ -24,10 +22,11 @@ import com.ermao.library.shared.modules.downloads.KtorDownloadsGateway
 import com.ermao.library.shared.modules.downloads.createDownloadsGateway
 import com.ermao.library.shared.modules.shelf.application.ShelfRepository
 import com.ermao.library.shared.modules.shelf.infrastructure.KtorShelfRepository
+import com.ermao.library.shared.modules.workmanagement.WorkManagementRepository
+import com.ermao.library.shared.modules.workmanagement.KtorWorkManagementRepository
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.TlsMode
-import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
@@ -44,18 +43,18 @@ import com.ermao.library.shared.modules.servers.domain.ServerProfile
 fun createIosMobileRuntimeBridge(
     cookieStore: SecureCookiePayloadStore,
     profileStore: ServerProfilePayloadStore,
-    entitlementStore: OfflineEntitlementPayloadStore,
+    verifiedSessionStore: VerifiedSessionPayloadStore,
 ): MobileRuntimeBridge {
     val cookieVault = SerializedCookieVault(cookieStore)
     val profiles = SerializedServerProfileRepository(profileStore)
-    val entitlements = SerializedOfflineEntitlementRepository(entitlementStore)
+    val verifiedSessions = SerializedVerifiedSessionRepository(verifiedSessionStore)
     val clients = ApiClientFactory(cookieVault)
     val clientProvider = clients::create
     return DefaultMobileRuntimeBridge(
         DefaultMobileRuntime(
             profileRepository = profiles,
             cookieVault = cookieVault,
-            entitlementRepository = entitlements,
+            verifiedSessionRepository = verifiedSessions,
             serverProbe = KtorServerProbe(clientProvider = clientProvider),
             authGateway = KtorAuthGateway(clients, clientProvider),
         ),
@@ -65,18 +64,20 @@ fun createIosMobileRuntimeBridge(
 /** Independent content composition; it shares the persisted authenticated Cookie vault. */
 fun createIosContentRepository(
     cookieStore: SecureCookiePayloadStore,
-    snapshotStore: LibrarySnapshotPayloadStore,
 ): ContentRepository =
     KtorContentRepository(
         clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
-        cache = InMemoryLibraryCacheRepository(),
-        nowEpochMillis = ::currentEpochMillis,
-        snapshots = snapshotStore,
     )
 
 fun createIosShelfRepository(
     cookieStore: SecureCookiePayloadStore,
 ): ShelfRepository = KtorShelfRepository(
+    ApiClientFactory(SerializedCookieVault(cookieStore)),
+)
+
+fun createIosWorkManagementRepository(
+    cookieStore: SecureCookiePayloadStore,
+): WorkManagementRepository = KtorWorkManagementRepository(
     ApiClientFactory(SerializedCookieVault(cookieStore)),
 )
 

@@ -27,15 +27,6 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
-private val REFLOWABLE_SIDECAR_SOURCE_FORMATS = setOf(
-    ReaderSourceFormat.Epub,
-    ReaderSourceFormat.Mobi,
-    ReaderSourceFormat.Azw,
-    ReaderSourceFormat.Azw3,
-    ReaderSourceFormat.Prc,
-    ReaderSourceFormat.Txt,
-)
-
 class KtorReaderBootstrapGateway internal constructor(
     private val createClient: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
     private val json: Json = Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = true },
@@ -181,14 +172,6 @@ class KtorReaderBootstrapGateway internal constructor(
                 file.url.startsWith("/api/") && !file.url.contains('#') &&
                 file.sizeBytes > 0
         } ?: return ReaderBootstrapResult.Failure("READER_PUBLICATION_FILE_MISSING", recoverable = false)
-        val renderArtifact = publication?.renderArtifact?.takeIf {
-            exactSourceFormat in REFLOWABLE_SIDECAR_SOURCE_FORMATS &&
-                it.schemaVersion == 1 &&
-                it.url == "/api/reader/v4/volumes/${volume.id}/publication/render.epub" &&
-                it.mimeType == "application/epub+zip" &&
-                it.sizeBytes > 0
-        }
-        val downloadSourceFormat = if (renderArtifact != null) ReaderSourceFormat.Epub else exactSourceFormat
         val orderedUnits = units.asSequence()
             .filter(ReaderBootstrapUnitWire::isStructurallyValid)
             .sortedBy { requireNotNull(it.index) }
@@ -200,7 +183,7 @@ class KtorReaderBootstrapGateway internal constructor(
                 namespace = request.namespace,
                 workId = book.id,
                 volumeId = volume.id,
-                sourceFormat = downloadSourceFormat.readerFormat,
+                sourceFormat = exactSourceFormat.readerFormat,
             )
         } catch (_: IllegalArgumentException) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
@@ -276,11 +259,11 @@ class KtorReaderBootstrapGateway internal constructor(
                     displayTitle = volume.title.ifBlank { book.title },
                     workId = book.id,
                     volumeId = volume.id,
-                    apiPath = renderArtifact?.url ?: comicArtifact?.url ?: fileUrl,
+                    apiPath = comicArtifact?.url ?: fileUrl,
                     originalSourceFormat = exactSourceFormat,
-                    sourceFormat = downloadSourceFormat,
-                    mimeType = renderArtifact?.mimeType ?: comicArtifact?.mimeType ?: publicationFile.mimeType.lowercase(),
-                    expectedSizeBytes = renderArtifact?.sizeBytes ?: comicArtifact?.sizeBytes ?: publicationFile.sizeBytes,
+                    sourceFormat = exactSourceFormat,
+                    mimeType = comicArtifact?.mimeType ?: publicationFile.mimeType.lowercase(),
+                    expectedSizeBytes = comicArtifact?.sizeBytes ?: publicationFile.sizeBytes,
                 ),
                 remoteSnapshot = remoteSnapshot,
                 units = orderedUnits.map { unit ->
@@ -405,7 +388,6 @@ private data class ReaderPublicationAccessWire(
     val pageUrlTemplate: String? = null,
     val imageVariants: List<String> = emptyList(),
     val downloadArtifact: ReaderComicDownloadArtifactWire? = null,
-    val renderArtifact: ReaderRenderArtifactWire? = null,
 )
 
 @Serializable
@@ -441,14 +423,6 @@ private sealed interface ComicManifestLoad {
     data class Content(val value: ReaderComicManifestWire?) : ComicManifestLoad
     data class Failure(val code: String, val recoverable: Boolean) : ComicManifestLoad
 }
-
-@Serializable
-private data class ReaderRenderArtifactWire(
-    val schemaVersion: Int,
-    val url: String,
-    val mimeType: String,
-    val sizeBytes: Long,
-)
 
 @Serializable
 private data class ReaderBootstrapBookWire(val id: String, val title: String, val author: String? = null, val coverUrl: String? = null)

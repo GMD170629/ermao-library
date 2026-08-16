@@ -70,14 +70,14 @@ class LibraryDiscoveryRuntimeTest {
     }
 
     @Test
-    fun cachedAndStalePhasesRemainMutuallyExclusive() {
+    fun firstPageFailureDoesNotKeepOldServerContent() {
         val runtime = LibraryDiscoveryRuntime()
         val request = runtime.beginInitialRequest(LibraryScope.Works, retainsVisibleContent = false)
 
-        runtime.acceptPage(request, isEmpty = false, ContentSource.Cache, isStale = true)
+        runtime.fail(request, "NETWORK_UNAVAILABLE", hasVisibleContent = true)
 
-        assertIs<LibraryContentPhase.OfflineCached>(runtime.state.current.contentPhase)
-        assertIs<RefreshPhase.StaleRefreshing>(runtime.state.current.refreshPhase)
+        assertIs<LibraryContentPhase.InitialError>(runtime.state.current.contentPhase)
+        assertIs<RefreshPhase.Idle>(runtime.state.current.refreshPhase)
     }
 
     @Test

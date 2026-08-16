@@ -1,0 +1,52 @@
+{
+  "runId": "20260816-work-detail-v6",
+  "authoritativeTarget": {
+    "path": "docs/assets/mobile-app-hifi-v1/work-detail-selected-volume-metadata-light-dark-v6.png",
+    "sha256": "E899B9DF249711C67EE65C7082A53B90C692EB333A9C194886CD1A478D640460"
+  },
+  "previousImplementation": {
+    "path": "baseline/android/physical-9e896bbc-zh-CN-light/01-work-detail-before.png",
+    "sha256": "BD45253529B818D0940D3CC0C135FA9DFC55EAB78827EB174BFB78DF21834101"
+  },
+  "device": {
+    "platform": "android",
+    "serial": "9e896bbc",
+    "model": "M2102K1AC",
+    "resolution": "1440x3200",
+    "densityDpi": 560,
+    "locale": "zh-CN",
+    "fontScale": 1.0,
+    "appearance": "light"
+  },
+  "candidate": {
+    "status": "android-physical-v6.1-captured",
+    "directory": "final/android/physical-9e896bbc-zh-CN-light",
+    "apkSha256": "C880FA0A6DC48FC6ECAF8EEB09A98552DAE1A27E27D43FE8A6C4FCCE615C471C",
+    "captures": [
+      {
+        "path": "01-work-detail-v61-top.png",
+        "sha256": "7AEEE8E4852F6E5BCD81F3ED6D02846F71D6F009F3C9DE1FAD8877E7BBFFC628"
+      },
+      {
+        "path": "01-work-detail-v61-top.xml",
+        "sha256": "CEB2DDE98C3F4D09A9B8424C61156C9887614F663860D17F13A7795DE674AEC7"
+      },
+      {
+        "path": "02-work-detail-v61-selected-volume-metadata.png",
+        "sha256": "5792065528A08A80562FB88187494644B047D2B6CA11288910BC63784099E044"
+      },
+      {
+        "path": "02-work-detail-v61-selected-volume-metadata.xml",
+        "sha256": "9C6C5792E13EB35773D9CCA5C1CDF61CC512A05020C4E44078A71951703F0B86"
+      },
+      {
+        "path": "03-work-detail-v61-fixed-media-width.png",
+        "sha256": "B0DA7866ECC9D43F8A78668E81EFCD2F7AD3A3E6613F26E57FC6B1EE63154E62"
+      },
+      {
+        "path": "03-work-detail-v61-fixed-media-width.xml",
+        "sha256": "457BFD1CD4B83AB1F035D5AC5D81398DD6E27BB3E5714DD50300945D676D1F05"
+      }
+    ]
+  }
+}

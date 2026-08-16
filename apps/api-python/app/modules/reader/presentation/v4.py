@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.publications import (
     ensure_publication_navigation,
-    ensure_publication_render_artifact,
 )
 from app.bootstrap.reader import reader_volume_service
 from app.contracts.http_errors import ErrorResponses
@@ -27,15 +26,10 @@ from app.modules.media import public as media_public
 from app.modules.publications.application.ensure_navigation import (
     PublicationNavigationSourceChangedError,
 )
-from app.modules.publications.application.ensure_render_artifact import (
-    PublicationRenderSourceChangedError,
-)
 from app.modules.publications.application.ports import PublicationAccessScope
 from app.modules.publications.domain.model import (
     PublicationCorruptError,
     PublicationNotFoundError,
-    PublicationSecurityError,
-    PublicationStructureError,
     PublicationUnsupportedError,
 )
 from app.modules.reader.application.dto import (
@@ -106,7 +100,6 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderReadingStatusData,
     ReaderReadingStatusPut,
     ReaderReadingStatusResponse,
-    ReaderRenderArtifact,
     ReaderSourceFormat,
     ReaderUnauthorizedError,
     ReaderUnitSummary,
@@ -477,24 +470,6 @@ def _raise_service_error(error: Exception) -> Never:
     raise error
 
 
-def _raise_publication_render_error(error: Exception) -> Never:
-    if isinstance(error, PublicationSecurityError):
-        raise ReaderValidationError(
-            ReaderErrorBody(
-                message="出版物包含明确不安全的活动内容，已拒绝打开",
-                code="PUBLICATION_SECURITY_REJECTED",
-            )
-        ) from error
-    if isinstance(error, PublicationStructureError):
-        raise ReaderValidationError(
-            ReaderErrorBody(
-                message="出版物包结构无效，无法建立阅读内容",
-                code="PUBLICATION_STRUCTURE_INVALID",
-            )
-        ) from error
-    raise error
-
-
 @router.get(
     "/volumes/{volume_id}/bootstrap",
     response_model=ReaderBootstrapResponse,
@@ -551,34 +526,6 @@ def reader_bootstrap_v4(
     progress = bootstrap.progress_by_volume_id.get(volume_id)
     capabilities = capabilities_for_reader_type(reader_type)
     normalized_format = context.volume.format.lower()
-    render_artifact = None
-    if normalized_format in _PUBLICATION_SERVER_FORMATS:
-        try:
-            artifact, _artifact_path = ensure_publication_render_artifact(
-                _runtime_session_factory(request),
-                settings,
-            ).execute(volume_id=volume_id, access_scope=publication_scope)
-            render_artifact = ReaderRenderArtifact(
-                schemaVersion=1,
-                url=(f"/api/reader/v4/volumes/{volume_id}/publication/render.epub"),
-                mimeType="application/epub+zip",
-                sizeBytes=artifact.size_bytes,
-            )
-        except (PublicationSecurityError, PublicationStructureError) as error:
-            _raise_publication_render_error(error)
-        except (
-            OSError,
-            PublicationCorruptError,
-            PublicationNotFoundError,
-            PublicationRenderSourceChangedError,
-            PublicationUnsupportedError,
-        ) as error:
-            LOGGER.warning(
-                "reader_render_generation outcome=unavailable volume_id=%s "
-                "error_type=%s",
-                volume_id,
-                type(error).__name__,
-            )
     publication_access = None
     if normalized_format in _PUBLICATION_SERVER_FORMATS:
         publication_access = ReaderPublicationAccess(
@@ -589,7 +536,6 @@ def reader_bootstrap_v4(
             positionsUrl=(
                 f"/api/reader/v4/volumes/{volume_id}/publication/positions.json"
             ),
-            renderArtifact=render_artifact,
         )
     elif normalized_format in _COMIC_SOURCE_FORMATS:
         comic_source, comic_source_format = _comic_source(bootstrap)

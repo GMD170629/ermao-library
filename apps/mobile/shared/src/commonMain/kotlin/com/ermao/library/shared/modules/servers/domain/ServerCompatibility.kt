@@ -16,6 +16,7 @@ data class ServerCapabilities(
     val readerV4: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
+    val workDetailManagement: Boolean,
 )
 
 sealed interface ServerCompatibilityDecision {

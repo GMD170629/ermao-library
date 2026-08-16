@@ -44,15 +44,15 @@ enum ManagedDownloadVerification: String, Codable, Hashable, Sendable {
 struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let namespace: String
-    let workID: String
-    let workTitle: String
-    let workAuthor: String
+    var workID: String
+    var workTitle: String
+    var workAuthor: String
     /// Nil only for manifests written before media-version grouping shipped.
-    let mediaVersionID: String?
+    var mediaVersionID: String?
     let volumeID: String
     let volumeTitle: String
     let format: String
-    let mediaKind: LibraryMediaKind
+    var mediaKind: LibraryMediaKind
     let readerType: ManagedDownloadReaderType
     var state: ManagedDownloadState
     var verification: ManagedDownloadVerification

@@ -11,11 +11,12 @@ import com.ermao.library.features.content.model.HomeContent
 import com.ermao.library.features.content.model.freshness
 import com.ermao.library.features.content.model.toUiContent
 import com.ermao.library.features.content.model.hasSectionFailure
+import com.ermao.library.ErmaoLibraryApplication
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.core.network.AppErrorKind
-import com.ermao.library.platform.persistence.AndroidContentSnapshotCache
+import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,8 +40,22 @@ class HomeViewModel(
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = mutableUiState.asStateFlow()
+    private val latestProgressUpdatesByVolumeId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
 
-    init { load() }
+    init {
+        viewModelScope.launch {
+            (appContext as ErmaoLibraryApplication).readerProgressPresentationCenter.updates.collect { update ->
+                if (update.namespaceKey == context.presentationKey()) {
+                    latestProgressUpdatesByVolumeId[update.volumeId] = update
+                    mutableUiState.update { state ->
+                        val content = state.content?.applying(update) ?: return@update state
+                        if (content === state.content) state else state.copy(content = content)
+                    }
+                }
+            }
+        }
+        load()
+    }
 
     fun refresh() = load(isRefresh = true)
 
@@ -57,17 +72,11 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             try {
-                if (mutableUiState.value.content == null) {
-                    AndroidContentSnapshotCache.loadHome(appContext, context)?.let { cached ->
-                        mutableUiState.update {
-                            it.copy(isLoading = false, content = cached.content, freshness = ContentFreshness.Stale)
-                        }
-                    }
-                }
                 when (val result = repository.loadHome(context)) {
                     is ContentResult.Content -> {
-                        val content = result.value.toUiContent()
-                        AndroidContentSnapshotCache.saveHome(appContext, context, content)
+                        val content = latestProgressUpdatesByVolumeId.values.fold(result.value.toUiContent()) {
+                            current, update -> current.applying(update)
+                        }
                         mutableUiState.update { it.copy(
                             isLoading = false,
                             isRefreshing = false,
@@ -102,3 +111,21 @@ class HomeViewModel(
         }
     }
 }
+
+internal fun HomeContent.applying(update: ReaderProgressPresentationUpdate): HomeContent {
+    val current = continueReading ?: return this
+    if (current.work.id != update.workId || current.resumeVolumeId != update.volumeId) return this
+    val progress = update.percent.toInt().coerceIn(0, 100).takeIf { it > 0 }
+    return copy(
+        continueReading = current.copy(work = current.work.copy(progressPercent = progress)),
+        recentReading = recentReading.map { work ->
+            if (work.id == update.workId) work.copy(progressPercent = progress) else work
+        },
+        recentAdded = recentAdded.map { work ->
+            if (work.id == update.workId) work.copy(progressPercent = progress) else work
+        },
+    )
+}
+
+private fun ContentRequestContext.presentationKey(): String =
+    "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"

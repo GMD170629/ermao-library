@@ -21,18 +21,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.NavigationDrawerItemDefaults
-import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
@@ -45,7 +40,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -110,9 +104,19 @@ import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.shared.modules.downloads.DownloadRequestContext
 import com.ermao.library.shared.modules.downloads.createDownloadsGateway
 import com.ermao.library.shared.modules.downloads.toDownloadNamespace
+import com.ermao.library.shared.modules.downloads.DownloadsRuntime
+import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
+import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementContext
+import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
+import com.ermao.library.features.content.ui.WorkCover
+import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ContentAreaMessage
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.administrativesettings.createAdministrativeSettingsContext
+import com.ermao.library.ui.components.WarmPageNavigationItem
+import com.ermao.library.ui.components.WarmPageNavigationSuite
+import com.ermao.library.ui.components.WarmPageScaffold
+import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlinx.serialization.Serializable
 
@@ -155,12 +159,21 @@ data class ReaderUnavailableRoute(
     val accessKind: String,
 ) : NavKey
 
+internal fun <T : NavKey> navigateToShelvesRoot(
+    shelvesBackStack: MutableList<T>,
+    selectTab: (TabId) -> Unit,
+) {
+    while (shelvesBackStack.size > 1) shelvesBackStack.removeAt(shelvesBackStack.lastIndex)
+    selectTab(TabId.Shelves)
+}
+
 @Composable
 fun MainShell(
     session: AppSession.Authenticated,
     contentRepository: ContentRepository,
     personalSettingsRepository: PersonalSettingsRepository,
     administrativeSettingsRepository: AdministrativeSettingsRepository,
+    workManagementRepository: WorkManagementRepository,
     downloadCatalog: AndroidDownloadCatalog,
     downloadFiles: AtomicDownloadFileSink,
     sharedDownloadCatalog: DownloadCatalogRepository,
@@ -171,12 +184,17 @@ fun MainShell(
     onLogout: suspend (purgeNamespace: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val theme = WarmPageThemeValues
     val homeBackStack = rememberNavBackStack(HomeRoot)
     val libraryBackStack = rememberNavBackStack(LibraryRoot)
     val shelvesBackStack = rememberNavBackStack(ShelvesRoot)
     val meBackStack = rememberNavBackStack(MeRoot)
     var selectedTabValue by rememberSaveable { mutableStateOf(TabId.Home.stableValue) }
+    val onViewShelves = {
+        navigateToShelvesRoot(
+            shelvesBackStack = shelvesBackStack,
+            selectTab = { selectedTabValue = it.stableValue },
+        )
+    }
     val selectedTab = MobileNavigation.tabIdOrDefault(selectedTabValue)
     val contentContext = ContentRequestContext(session.profile, session.identity.namespace)
     val downloadNamespace = AndroidDownloadNamespace(
@@ -186,6 +204,9 @@ fun MainShell(
     )
     val appContext = LocalContext.current.applicationContext
     val shelfRepository = remember(appContext) { com.ermao.library.shared.createAndroidShelfRepository(appContext) }
+    val sharedDownloadsRuntime = remember(sharedDownloadCatalog) { DownloadsRuntime(sharedDownloadCatalog) }
+    val sharedDownloadNamespace = session.identity.namespace.toDownloadNamespace()
+    val workManagementContext = WorkManagementContext(session.profile, session.identity.namespace)
     val contentKey = listOf(
         session.identity.namespace.serverIdentity,
         session.identity.namespace.userId,
@@ -294,61 +315,27 @@ fun MainShell(
         TabId.Shelves -> shelvesBackStack
         TabId.Me -> meBackStack
     }
-    val navigationItemColors = NavigationSuiteDefaults.itemColors(
-        navigationBarItemColors = NavigationBarItemDefaults.colors(
-            selectedIconColor = theme.colors.brandAccent,
-            selectedTextColor = theme.colors.brandAccent,
-            indicatorColor = theme.colors.accentSoft,
-            unselectedIconColor = theme.colors.textSecondary,
-            unselectedTextColor = theme.colors.textSecondary,
-        ),
-        navigationRailItemColors = NavigationRailItemDefaults.colors(
-            selectedIconColor = theme.colors.brandAccent,
-            selectedTextColor = theme.colors.brandAccent,
-            indicatorColor = theme.colors.accentSoft,
-            unselectedIconColor = theme.colors.textSecondary,
-            unselectedTextColor = theme.colors.textSecondary,
-        ),
-        navigationDrawerItemColors = NavigationDrawerItemDefaults.colors(
-            selectedIconColor = theme.colors.brandAccent,
-            selectedTextColor = theme.colors.brandAccent,
-            selectedContainerColor = theme.colors.accentSoft,
-            unselectedIconColor = theme.colors.textSecondary,
-            unselectedTextColor = theme.colors.textSecondary,
-        ),
-    )
-
-    NavigationSuiteScaffold(
-        modifier = modifier,
-        navigationSuiteItems = {
-            MobileNavigation.orderedRootTabs.forEach { tab ->
-                val selected = tab == selectedTab
-                val presentation = tab.presentation
-                item(
-                    modifier = Modifier.testTag("tab-select-${tab.stableValue}"),
-                    selected = selected,
-                    onClick = {
-                        if (selected) {
-                            while (currentBackStack.size > 1) currentBackStack.removeLastOrNull()
-                        } else {
-                            selectedTabValue = tab.stableValue
-                        }
-                    },
-                    icon = {
-                        androidx.compose.material3.Icon(
-                            imageVector = if (selected) {
-                                presentation.selectedIcon
-                            } else {
-                                presentation.unselectedIcon
-                            },
-                            contentDescription = null,
-                        )
-                    },
-                    label = { Text(stringResource(presentation.labelResource)) },
-                    colors = navigationItemColors,
-                )
+    val navigationItems = MobileNavigation.orderedRootTabs.map { tab ->
+        val presentation = tab.presentation
+        WarmPageNavigationItem(
+            id = tab,
+            labelResource = presentation.labelResource,
+            selectedIcon = presentation.selectedIcon,
+            unselectedIcon = presentation.unselectedIcon,
+            testTag = "tab-select-${tab.stableValue}",
+        )
+    }
+    WarmPageNavigationSuite(
+        items = navigationItems,
+        selected = selectedTab,
+        onSelect = { tab ->
+            if (tab == selectedTab) {
+                while (currentBackStack.size > 1) currentBackStack.removeLastOrNull()
+            } else {
+                selectedTabValue = tab.stableValue
             }
         },
+        modifier = modifier,
     ) {
         NavDisplay(
             backStack = currentBackStack,
@@ -380,7 +367,7 @@ fun MainShell(
                     )
                     val libraryState by libraryViewModel.uiState.collectAsState()
                     BoxWithConstraints {
-                        val expanded = maxWidth >= 840.dp
+                        val expanded = maxWidth >= WarmPageThemeValues.components.page.expandedBreakpoint
                         val openWork: (String) -> Unit = { workId ->
                             if (expanded) {
                                 libraryViewModel.selectWork(workId)
@@ -444,6 +431,17 @@ fun MainShell(
                                             ),
                                         )
                                         val detailState by detailViewModel.uiState.collectAsState()
+                                        val managementViewModel = viewModel<WorkManagementViewModel>(
+                                            key = "expanded-work-management-$contentKey-$workId",
+                                            factory = WorkManagementViewModel.factory(
+                                                workManagementRepository,
+                                                workManagementContext,
+                                                workId,
+                                                sharedDownloadsRuntime,
+                                                sharedDownloadNamespace,
+                                                onSessionUnauthorized,
+                                            ),
+                                        )
                                         WorkDetailScreen(
                                             state = detailState,
                                             repository = contentRepository,
@@ -451,10 +449,13 @@ fun MainShell(
                                             onBack = { libraryViewModel.selectWork(null) },
                                             onSelectMedia = detailViewModel::selectMedia,
                                             onSelectVolume = detailViewModel::selectVolume,
+                                            onLoadMoreVolumes = detailViewModel::loadMoreVolumes,
                                             onOpenShelfPicker = detailViewModel::openShelfPicker,
                                             onDismissShelfPicker = detailViewModel::dismissShelfPicker,
                                             onToggleShelf = detailViewModel::toggleShelf,
                                             onSaveShelves = detailViewModel::saveShelves,
+                                            onShelfSaveFeedbackShown = detailViewModel::consumeShelfSaveCompleted,
+                                            onViewShelves = onViewShelves,
                                             onOpenFacet = { kind, id -> libraryBackStack.add(FacetRoute(kind.name, id)) },
                                             onRetry = detailViewModel::retry,
                                             onRefresh = detailViewModel::refresh,
@@ -462,6 +463,9 @@ fun MainShell(
                                             downloadFailuresByVolume = downloadFailuresByVolume,
                                             onDownloadVolume = downloadActionsViewModel::requestDownload,
                                             onCancelDownload = downloadActionsViewModel::cancelDownload,
+                                            onRemoveDownload = downloadActionsViewModel::removeDownload,
+                                            managementViewModel = managementViewModel,
+                                            canManageSystem = session.authorization.canManageSystem,
                                             onOpenSelectedVolume = { volume ->
                                                 detailState.content?.work?.let { work ->
                                                     openWorkVolume(
@@ -564,8 +568,8 @@ fun MainShell(
                         onOpenWork = { workId -> meBackStack.add(DownloadedWorkRoute(workId)) },
                         onRetry = downloadsViewModel::retry,
                         onCancelDownload = downloadActionsViewModel::cancelDownload,
-                        onRetryDownload = downloadActionsViewModel::requestDownload,
                         onRemoveDownload = downloadActionsViewModel::removeDownload,
+                        onRetryDownload = downloadActionsViewModel::requestDownload,
                     )
                 }
                 entry<DownloadedWorkRoute> { route ->
@@ -697,6 +701,17 @@ fun MainShell(
                         factory = WorkDetailViewModel.factory(contentRepository, shelfRepository, contentContext, appContext, route.workId, onSessionUnauthorized),
                     )
                     val detailState by detailViewModel.uiState.collectAsState()
+                    val managementViewModel = viewModel<WorkManagementViewModel>(
+                        key = "work-management-$contentKey-${route.workId}",
+                        factory = WorkManagementViewModel.factory(
+                            workManagementRepository,
+                            workManagementContext,
+                            route.workId,
+                            sharedDownloadsRuntime,
+                            sharedDownloadNamespace,
+                            onSessionUnauthorized,
+                        ),
+                    )
                     WorkDetailScreen(
                         state = detailState,
                         repository = contentRepository,
@@ -704,10 +719,13 @@ fun MainShell(
                         onBack = { currentBackStack.removeLastOrNull() },
                         onSelectMedia = detailViewModel::selectMedia,
                         onSelectVolume = detailViewModel::selectVolume,
+                        onLoadMoreVolumes = detailViewModel::loadMoreVolumes,
                         onOpenShelfPicker = detailViewModel::openShelfPicker,
                         onDismissShelfPicker = detailViewModel::dismissShelfPicker,
                         onToggleShelf = detailViewModel::toggleShelf,
                         onSaveShelves = detailViewModel::saveShelves,
+                        onShelfSaveFeedbackShown = detailViewModel::consumeShelfSaveCompleted,
+                        onViewShelves = onViewShelves,
                         onOpenFacet = { kind, id ->
                             val route = FacetRoute(kind.name, id)
                             val existingIndex = currentBackStack.indexOf(route)
@@ -723,6 +741,9 @@ fun MainShell(
                         downloadFailuresByVolume = downloadFailuresByVolume,
                         onDownloadVolume = downloadActionsViewModel::requestDownload,
                         onCancelDownload = downloadActionsViewModel::cancelDownload,
+                        onRemoveDownload = downloadActionsViewModel::removeDownload,
+                        managementViewModel = managementViewModel,
+                        canManageSystem = session.authorization.canManageSystem,
                         onOpenSelectedVolume = { volume ->
                             detailState.content?.work?.let { work ->
                                 openWorkVolume(
@@ -895,28 +916,12 @@ private fun AdministrativeDestination(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EmptyTabRoot(tab: TabId) {
-    val theme = WarmPageThemeValues
     val presentation = tab.presentation
-    Scaffold(
-        containerColor = theme.colors.canvas,
-        topBar = {
-            LargeTopAppBar(
-                title = {
-                    Text(
-                        text = stringResource(presentation.labelResource),
-                        color = theme.colors.textPrimary,
-                        style = theme.typography.display,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = theme.colors.canvas,
-                    scrolledContainerColor = theme.colors.surface,
-                ),
-            )
-        },
+    WarmPageScaffold(
+        role = WarmPageTopBarRole.Root,
+        title = stringResource(presentation.labelResource),
     ) { contentPadding ->
         Box(
             modifier = Modifier

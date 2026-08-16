@@ -5,6 +5,8 @@
 > 决策日期：2026-08-12
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
+> v1.0.0 修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。本阶段删除离线宽限、entitlement 到期与进入离线模式的高保真分支；已验证会话恢复到普通 Shell，明确鉴权失效才显示 Reauthenticate。
+
 ## 1. 目的与替换范围
 
 本文件在 Phase 1–5 约束之上冻结服务器登录、保存与切换、按需连接检查、初始化和重新认证的 Compact 高保真基线。
@@ -33,7 +35,7 @@ App 启动且没有有效登录会话
 → 删除成功后清空三个输入框并停留当前页
 ```
 
-当前交付八张 iOS `390 × 844` App Light PNG 与两张 Android `412 × 915` App Light PNG。Setup、Reauthenticate、账户停用与 entitlement 到期继续使用不与本决策冲突的 v1 资产。
+当前交付八张 iOS `390 × 844` App Light PNG 与两张 Android `412 × 915` App Light PNG。Setup、Reauthenticate 与账户停用继续使用不与本决策冲突的 v1 资产；离线宽限和 entitlement 到期资产不再属于 v1.0.0 实现基线。
 
 ## 2. 共同视觉与交互约束
 
@@ -78,7 +80,7 @@ unsafe-ssl-alert(profileId?)
 - 同时最多一个系统 Sheet 或 Alert；覆盖层关闭后焦点回到触发控件；
 - `authenticating` 只锁定当前表单与主动作，必须能被视图销毁或新意图取消，旧结果不得覆盖新表单；
 - 登录成功且 `/me` 成功后才保存/更新 profile 并离开 Gate；失败不得制造“已保存”假象；
-- profile 的 Cookie、凭证、缓存、outbox 与 entitlement 始终使用 `serverIdentity + userId` namespace 隔离。
+- profile 的 Cookie、凭证、`VerifiedSessionRecord`、缓存与 outbox 始终使用 `serverIdentity + userId` namespace 隔离。
 
 ## 4. iOS 登录主页面
 
@@ -209,11 +211,10 @@ unsafe-ssl-alert(profileId?)
 - 成功建立 Cookie 会话并继续 `/me`；只有 `/me` 成功后才按 hostname 自动保存 profile；
 - setup 409 重新检查状态后回到 `server.entry`，回填刚才的服务器与账号，不跳到旧网格或独立 Login 页。
 
-## 12. Reauthenticate、账户停用与 entitlement 到期
+## 12. Reauthenticate 与账户停用
 
 以下既有高保真资产继续有效：
 
-- [Reauthenticate Offline Grace App Light v1](assets/mobile-app-hifi-v1/auth-reauthenticate-offline-grace-app-light-v1.png)
 - [Reauthenticate Expired App Light v1](assets/mobile-app-hifi-v1/auth-reauthenticate-expired-app-light-v1.png)
 - [Account Disabled App Light v1](assets/mobile-app-hifi-v1/auth-account-disabled-app-light-v1.png)
 - [Setup Conflict Redirect App Light v1](assets/mobile-app-hifi-v1/auth-setup-conflict-redirect-app-light-v1.png)
@@ -221,10 +222,9 @@ unsafe-ssl-alert(profileId?)
 v3 语义调整：
 
 - 鉴权过期时默认回填 active/最近成功 profile 的服务器地址、账号与安全存储中可用的密码；
-- Reauthenticate 保留离线宽限说明与“进入离线模式”分支，但在线重新登录的表单和主次动作遵循 v3；
+- Reauthenticate 只显示失效说明、密码、重新登录和切换服务器，不显示离线入口、剩余天数或网络模式；
 - “选择其他服务器”改为登录主按钮下方的“切换服务器”并打开原生 Sheet；
 - Setup 409 回到回填后的 `server.entry`；
-- entitlement 有效时仍可选择进入受限离线模式；到期后只允许重新认证或切换服务器；
 - 账户停用不得通过切换表单继续展示旧服务器的私有内容。
 
 ## 13. 组件所有权与平台适配
@@ -249,6 +249,6 @@ iOS 与 Android 共享任务和内容，但系统栏、Sheet、Alert、图标、
 - 可达性、兼容性、setup status 与不安全 SSL 只在点击登录后检查或提示；
 - 页面完全移除网格、添加/编辑模式、名称输入、持久连接状态、证书验证行与 TLS 设置；
 - 普通 401 保持字段级错误和反枚举语义；
-- Setup、Reauthenticate、离线宽限、账户停用和 entitlement 到期契约保持兼容；
+- Setup、Reauthenticate 和账户停用契约保持兼容；v1.0.0 不包含离线宽限或 entitlement 到期分支；
 - iOS 与 Android 分别使用原生系统组件，不将一张平台无关稿作为共同像素基准；
 - 当前交付仍需在实现中完成 `zh-CN`/`en-US`、Dynamic Type、VoiceOver/TalkBack、App Dark、Reduced Motion/Transparency 与物理真机验收。

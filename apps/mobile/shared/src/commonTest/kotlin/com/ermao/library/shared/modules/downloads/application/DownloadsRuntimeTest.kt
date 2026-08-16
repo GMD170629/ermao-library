@@ -18,6 +18,31 @@ import kotlinx.coroutines.runBlocking
 
 class DownloadsRuntimeTest {
     @Test
+    fun rehomesCompletedArtifactWithoutChangingItsLocalFile() = runBlocking {
+        val catalog = InMemoryDownloadCatalogRepository()
+        val runtime = DownloadsRuntime(catalog)
+        val artifact = artifact()
+        catalog.saveArtifact(artifact)
+
+        val moved = runtime.rehomeCompletedArtifact(
+            namespace = artifact.identity.namespace,
+            volumeId = artifact.identity.volumeId,
+            targetWorkId = "work-b",
+            targetMediaVersionId = "media-b",
+            targetMediaKind = "COMIC",
+            targetWorkTitle = "Moved work",
+            targetWorkAuthor = "Author B",
+            targetCoverApiPath = "/api/works/work-b/cover",
+        )
+
+        assertEquals("work-b", moved?.identity?.workId)
+        assertEquals("media-b", moved?.descriptor?.mediaVersionId)
+        assertEquals("COMIC", moved?.descriptor?.mediaKind)
+        assertEquals(artifact.localReference, moved?.localReference)
+        assertEquals(listOf(moved), catalog.listArtifacts(artifact.identity.namespace))
+    }
+
+    @Test
     fun completingTaskPublishesArtifactOnlyAfterExplicitCompletion() = runBlocking {
         val repository = InMemoryDownloadCatalogRepository()
         val runtime = DownloadsRuntime(repository)

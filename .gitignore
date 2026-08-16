@@ -53,3 +53,15 @@ data
 # Local runtime and acceptance outputs
 apps/api-python/tmp/
 docs/testing/screenshots/
+
+# Local native builds and device/visual-test evidence
+/build/
+/NUL/
+classes.jar
+apps/mobile/native/pdfium/artifacts/
+apps/mobile/design-qa/evidence/*.xml
+apps/mobile/design-qa/android-warm-page-v2/__pycache__/
+apps/mobile/design-qa/android-warm-page-v2/runs/**/*.png
+apps/mobile/design-qa/android-warm-page-v2/runs/**/*.xml
+apps/mobile/design-qa/visual-runs/**/*.png
+apps/mobile/design-qa/visual-runs/**/*.xml

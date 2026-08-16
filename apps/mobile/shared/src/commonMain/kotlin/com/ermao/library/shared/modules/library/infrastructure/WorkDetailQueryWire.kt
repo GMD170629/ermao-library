@@ -38,6 +38,30 @@ data class WorkDetailPayloadWire(
 )
 
 @Serializable
+data class WorkVolumePageWire(
+    val mediaVersionId: String,
+    val mediaKind: String,
+    val volumes: List<LibraryVolumeWire>,
+    val page: Int,
+    val pageSize: Int,
+    val total: Int,
+    val totalPages: Int,
+)
+
+fun WorkVolumePageWire.toDomain(): com.ermao.library.shared.modules.library.WorkVolumePage {
+    require(mediaVersionId.isNotBlank() && page > 0 && pageSize in 1..100 && total >= 0 && totalPages > 0)
+    return com.ermao.library.shared.modules.library.WorkVolumePage(
+        mediaVersionId = mediaVersionId,
+        mediaKind = MediaKind(mediaKind),
+        volumes = volumes.map(LibraryVolumeWire::toDomain),
+        page = page,
+        pageSize = pageSize,
+        total = total,
+        totalPages = totalPages,
+    )
+}
+
+@Serializable
 data class WorkViewWire(
     val id: String,
     val title: String,

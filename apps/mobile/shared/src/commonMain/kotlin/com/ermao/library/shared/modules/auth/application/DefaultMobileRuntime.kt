@@ -11,13 +11,9 @@ import com.ermao.library.shared.modules.auth.RuntimeOperationResult
 import com.ermao.library.shared.modules.auth.SessionObserver
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import com.ermao.library.shared.modules.auth.domain.EpochMillisClock
-import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementEvaluation
-import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
-import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementPolicy
-import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.auth.domain.SessionIdentity
 import com.ermao.library.shared.modules.auth.domain.SystemEpochMillisClock
-import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
+import com.ermao.library.shared.modules.auth.domain.VerifiedSessionRecord
 import com.ermao.library.shared.modules.servers.ProfileIdGenerator
 import com.ermao.library.shared.modules.servers.RandomProfileIdGenerator
 import com.ermao.library.shared.modules.servers.application.DuplicateServerIdentityException
@@ -35,16 +31,15 @@ import kotlinx.coroutines.CancellationException
 
 /**
  * Platform facade for the bootstrap gate. Business work is delegated to the server probe,
- * authentication gateway, repositories, and entitlement policy; no transport wire crosses here.
+ * authentication gateway and repositories; no transport wire crosses here.
  */
 class DefaultMobileRuntime(
     private val profileRepository: ServerProfileRepository,
     private val cookieVault: CookieVault,
-    private val entitlementRepository: OfflineEntitlementRepository,
+    private val verifiedSessionRepository: VerifiedSessionRepository,
     private val serverProbe: ServerProbe,
     private val authGateway: AuthGateway,
     private val clock: EpochMillisClock = SystemEpochMillisClock,
-    private val entitlementPolicy: OfflineEntitlementPolicy = OfflineEntitlementPolicy(),
     private val profileIdGenerator: ProfileIdGenerator = RandomProfileIdGenerator(),
 ) : MobileRuntime {
     private val observers = mutableSetOf<SessionObserver>()
@@ -69,9 +64,7 @@ class DefaultMobileRuntime(
         if (profile == null) {
             transition(AppSession.NoServer)
             success("NO_ACTIVE_SERVER", NavigationDirective.ShowServerProfiles)
-        } else {
-            restore(profile, allowAutomaticOffline = true)
-        }
+        } else restoreSavedProfile(profile)
     }
 
     override suspend fun connectServer(command: ServerConnectionDraft): RuntimeOperationResult {
@@ -129,9 +122,12 @@ class DefaultMobileRuntime(
                 storageGuard {
                     try {
                         profileRepository.upsert(candidate)
-                        if (candidate.baseUrl != existing.baseUrl) cookieVault.clear(profileId)
+                        if (candidate.baseUrl != existing.baseUrl) {
+                            cookieVault.clear(profileId)
+                            verifiedSessionRepository.removeSession(profileId)
+                        }
                         reloadProfiles()
-                        if (candidate.isActive) restore(candidate, allowAutomaticOffline = false)
+                        if (candidate.isActive) restore(candidate)
                         else success("SERVER_UPDATED")
                     } catch (cancelled: CancellationException) {
                         profileRepository.upsert(existing)
@@ -181,7 +177,7 @@ class DefaultMobileRuntime(
         val profile = findProfile(profileId) ?: return unknownProfile(profileId)
         return storageGuard {
             cookieVault.clear(profileId)
-            entitlementRepository.removeEntitlement(profileId)
+            verifiedSessionRepository.removeSession(profileId)
             profileRepository.remove(profileId)
             reloadProfiles()
             if (profile.isActive) transition(AppSession.NoServer)
@@ -195,8 +191,9 @@ class DefaultMobileRuntime(
         return storageGuard {
             profileRepository.upsert(updated)
             cookieVault.clear(profileId)
+            verifiedSessionRepository.removeSession(profileId)
             reloadProfiles()
-            if (updated.isActive) restore(updated, allowAutomaticOffline = false)
+            if (updated.isActive) restore(updated)
             else success("SYSTEM_TRUST_RESTORED")
         }
     }
@@ -301,27 +298,18 @@ class DefaultMobileRuntime(
         val profile = currentProfile() ?: return noActiveServer()
         return when (val result = authGateway.verifyCurrentSession(profile)) {
             is ApiResult.Success -> authenticate(profile, result.value, lastKnownIdentity())
-            is ApiResult.Failure -> handleSessionFailure(profile, result.error, allowAutomaticOffline = false)
+            is ApiResult.Failure -> handleSessionFailure(profile, result.error)
         }
-    }
-
-    override suspend fun enterOfflineMode(): RuntimeOperationResult {
-        val profile = currentProfile() ?: return noActiveServer()
-        val record = validEntitlement(profile)
-            ?: return failure(AppError(AppErrorKind.Unauthorized, "OFFLINE_ENTITLEMENT_EXPIRED"))
-        val identity = record.toIdentity()
-        transition(AppSession.OfflineGrace(profile, identity, record.expiresAtEpochMillis))
-        return success("OFFLINE_MODE_ENTERED", NavigationDirective.EnterOfflineShell)
     }
 
     override suspend fun logout(): RuntimeOperationResult {
         val profile = currentProfile() ?: return noActiveServer()
         try {
-            entitlementRepository.revoke(profile.id)
+            verifiedSessionRepository.removeSession(profile.id)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            return storageFailure(error.message ?: "Unable to revoke local offline access")
+            return storageFailure(error.message ?: "Unable to clear the verified session")
         }
         transition(AppSession.SignedOut(profile))
         var remote: ApiResult<Unit>? = null
@@ -351,26 +339,70 @@ class DefaultMobileRuntime(
         observers.clear()
     }
 
-    private suspend fun restore(
-        profile: ServerProfile,
-        allowAutomaticOffline: Boolean,
-    ): RuntimeOperationResult {
+    private suspend fun restoreSavedProfile(profile: ServerProfile): RuntimeOperationResult {
+        val record = verifiedSessionRepository.load(profile.id)
+        if (record == null || !record.matches(profile.id, profile.serverIdentity)) {
+            if (record != null) {
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
+            }
+            return restore(profile)
+        }
+
+        val restoredIdentity = record.toIdentity()
+        transition(AppSession.Authenticated(profile, restoredIdentity, record.toAuthorization()))
+        val draft = profile.toDraft()
+        return when (val probe = serverProbe.probe(profile)) {
+            is ServerProbeResult.Failure -> success(
+                "SESSION_RESTORED_VALIDATION_DEFERRED",
+                NavigationDirective.RestoreSelectedTab,
+            )
+            is ServerProbeResult.Compatible -> if (probe.serverIdentity != profile.serverIdentity) {
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
+                transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
+                failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
+            } else {
+                when (val resolution = preflightGate(profile)) {
+                    is GateResolution.Failed -> success(
+                        "SESSION_RESTORED_VALIDATION_DEFERRED",
+                        NavigationDirective.RestoreSelectedTab,
+                    )
+                    GateResolution.SetupRequired -> success(
+                        "SESSION_RESTORED_VALIDATION_DEFERRED",
+                        NavigationDirective.RestoreSelectedTab,
+                    )
+                    else -> {
+                        applyGateResolution(profile, resolution)
+                        when (resolution) {
+                            is GateResolution.Authenticated -> success(
+                                "AUTHENTICATED",
+                                resolution.navigationDirective,
+                            )
+                            GateResolution.SetupRequired -> error("Handled above")
+                            is GateResolution.SignedOut -> failure(resolution.error)
+                            is GateResolution.AccountDisabled -> success(
+                                "ACCOUNT_DISABLED",
+                                NavigationDirective.HidePrivateShell,
+                            )
+                            is GateResolution.Failed -> error("Handled above")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun restore(profile: ServerProfile): RuntimeOperationResult {
         val draft = profile.toDraft()
         transition(AppSession.CheckingServer(draft))
         return when (val probe = serverProbe.probe(profile)) {
-            is ServerProbeResult.Failure -> handleSavedProbeFailure(
-                profile,
-                draft,
-                probe.error,
-                allowAutomaticOffline,
-            )
+            is ServerProbeResult.Failure -> handleSavedProbeFailure(profile, draft, probe.error)
             is ServerProbeResult.Compatible -> if (probe.serverIdentity != profile.serverIdentity) {
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
                 transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
                 failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
-            } else if (isLocallyRevoked(profile)) {
-                cookieVault.clear(profile.id)
-                transition(AppSession.SignedOut(profile))
-                success("SIGNED_OUT", NavigationDirective.HidePrivateShell)
             } else {
                 resolveGate(profile, activateBeforeTransition = false)
             }
@@ -529,11 +561,7 @@ class DefaultMobileRuntime(
         profile: ServerProfile,
         activateBeforeTransition: Boolean,
     ): RuntimeOperationResult = when (val resolution = preflightGate(profile)) {
-        is GateResolution.Failed -> handleSessionFailure(
-            profile,
-            resolution.error,
-            allowAutomaticOffline = false,
-        )
+        is GateResolution.Failed -> handleSessionFailure(profile, resolution.error)
         else -> {
             if (activateBeforeTransition) profileRepository.activate(profile.id)
             applyGateResolution(profile, resolution)
@@ -601,7 +629,7 @@ class DefaultMobileRuntime(
         previousSession: AppSession,
     ) {
         runCatching { cookieVault.clear(newProfileId) }
-        runCatching { entitlementRepository.removeEntitlement(newProfileId) }
+        runCatching { verifiedSessionRepository.removeSession(newProfileId) }
         runCatching { profileRepository.remove(newProfileId) }
         if (previousActiveId != null) runCatching { profileRepository.activate(previousActiveId) }
         reloadProfiles()
@@ -615,7 +643,7 @@ class DefaultMobileRuntime(
         previousSession: AppSession,
     ) {
         runCatching { cookieVault.clear(candidateId) }
-        runCatching { entitlementRepository.removeEntitlement(candidateId) }
+        runCatching { verifiedSessionRepository.removeSession(candidateId) }
         if (existingProfile == null) {
             runCatching { profileRepository.remove(candidateId) }
         } else {
@@ -656,20 +684,21 @@ class DefaultMobileRuntime(
 
     private suspend fun applyGateResolution(profile: ServerProfile, resolution: GateResolution) {
         when (resolution) {
-            GateResolution.SetupRequired -> transition(AppSession.SetupRequired(profile))
+            GateResolution.SetupRequired -> {
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
+                transition(AppSession.SetupRequired(profile))
+            }
             is GateResolution.SignedOut -> {
-                val entitlement = validEntitlement(profile)
-                transition(
-                    AppSession.SessionExpired(
-                        profile,
-                        entitlement?.toIdentity(),
-                        entitlement?.expiresAtEpochMillis,
-                    ),
-                )
+                val previousIdentity = lastKnownIdentity()
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
+                transition(AppSession.SessionExpired(profile, previousIdentity))
             }
             is GateResolution.Authenticated -> authenticate(profile, resolution.session, lastKnownIdentity())
             is GateResolution.AccountDisabled -> {
-                entitlementRepository.revoke(profile.id)
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
                 transition(AppSession.AccountDisabled(profile, resolution.email.orEmpty()))
             }
             is GateResolution.Failed -> Unit
@@ -681,7 +710,7 @@ class DefaultMobileRuntime(
         previousIdentity: SessionIdentity?,
     ): RuntimeOperationResult = when (val verified = authGateway.verifyCurrentSession(profile)) {
         is ApiResult.Success -> authenticate(profile, verified.value, previousIdentity)
-        is ApiResult.Failure -> handleSessionFailure(profile, verified.error, allowAutomaticOffline = false)
+        is ApiResult.Failure -> handleSessionFailure(profile, verified.error)
     }
 
     private suspend fun authenticate(
@@ -690,9 +719,13 @@ class DefaultMobileRuntime(
         previousIdentity: SessionIdentity?,
     ): RuntimeOperationResult {
         val now = clock.now()
-        val previousEntitlement = entitlementRepository.load(profile.id)
-        entitlementRepository.save(
-            entitlementPolicy.validated(profile.id, verified.identity, now, previousEntitlement),
+        verifiedSessionRepository.save(
+            VerifiedSessionRecord.from(
+                profileId = profile.id,
+                identity = verified.identity,
+                authorization = verified.authorization,
+                validatedAtEpochMillis = now,
+            ),
         )
         transition(AppSession.Authenticated(profile, verified.identity, verified.authorization))
         val directive = when {
@@ -717,7 +750,8 @@ class DefaultMobileRuntime(
                 AppSession.LoginFailed(profile, email, "INVALID_CREDENTIALS"),
             )
             error.code == "ACCOUNT_DISABLED" -> {
-                entitlementRepository.revoke(profile.id)
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
                 transition(AppSession.AccountDisabled(profile, email))
             }
             else -> transition(AppSession.LoginFailed(profile, email, error.code))
@@ -728,32 +762,20 @@ class DefaultMobileRuntime(
     private suspend fun handleSessionFailure(
         profile: ServerProfile,
         error: AppError,
-        allowAutomaticOffline: Boolean,
     ): RuntimeOperationResult {
-        val entitlement = validEntitlement(profile)
+        val previousIdentity = lastKnownIdentity()
         when {
             error.code == "ACCOUNT_DISABLED" -> {
-                entitlementRepository.revoke(profile.id)
-                transition(AppSession.AccountDisabled(profile, lastKnownIdentity()?.email.orEmpty()))
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
+                transition(AppSession.AccountDisabled(profile, previousIdentity?.email.orEmpty()))
             }
-            error.kind == AppErrorKind.Unauthorized -> transition(
-                AppSession.SessionExpired(
-                    profile,
-                    entitlement?.toIdentity() ?: lastKnownIdentity(),
-                    entitlement?.expiresAtEpochMillis,
-                ),
-            )
-            error.kind in TEMPORARY_FAILURES && allowAutomaticOffline && entitlement != null -> transition(
-                AppSession.OfflineGrace(profile, entitlement.toIdentity(), entitlement.expiresAtEpochMillis),
-            )
-            error.kind in TEMPORARY_FAILURES -> transition(
-                AppSession.SessionUnavailable(
-                    profile,
-                    entitlement?.toIdentity() ?: lastKnownIdentity(),
-                    entitlement?.expiresAtEpochMillis,
-                ),
-            )
-            else -> transition(AppSession.SignedOut(profile))
+            error.kind == AppErrorKind.Unauthorized -> {
+                verifiedSessionRepository.removeSession(profile.id)
+                cookieVault.clear(profile.id)
+                transition(AppSession.SessionExpired(profile, previousIdentity))
+            }
+            currentSession !is AppSession.Authenticated -> transition(AppSession.SignedOut(profile))
         }
         return failure(error)
     }
@@ -762,7 +784,6 @@ class DefaultMobileRuntime(
         profile: ServerProfile,
         draft: ServerConnectionDraft,
         error: AppError,
-        allowAutomaticOffline: Boolean,
     ): RuntimeOperationResult = when {
         error.kind == AppErrorKind.TlsFailure && profile.tlsMode == TlsMode.SystemTrust -> {
             transition(AppSession.TlsRisk(draft, "TLS_SYSTEM_TRUST_FAILED"))
@@ -772,7 +793,7 @@ class DefaultMobileRuntime(
             transition(AppSession.IncompatibleServer(draft, error.code))
             failure(error)
         }
-        else -> handleSessionFailure(profile, error, allowAutomaticOffline)
+        else -> handleSessionFailure(profile, error)
     }
 
     private fun handleProbeFailure(
@@ -788,26 +809,6 @@ class DefaultMobileRuntime(
         }
         return failure(error)
     }
-
-    private suspend fun validEntitlement(profile: ServerProfile): ValidatedSessionRecord? {
-        val record = entitlementRepository.load(profile.id) ?: return null
-        if (record.serverIdentity != profile.serverIdentity) return null
-        return when (val evaluation = entitlementPolicy.evaluate(record, clock.now())) {
-            is OfflineEntitlementEvaluation.Valid -> {
-                entitlementRepository.save(evaluation.updatedRecord)
-                evaluation.updatedRecord
-            }
-            OfflineEntitlementEvaluation.Expired,
-            OfflineEntitlementEvaluation.Revoked,
-            -> null
-        }
-    }
-
-    private suspend fun isLocallyRevoked(profile: ServerProfile): Boolean =
-        entitlementRepository.load(profile.id)?.let { record ->
-            record.serverIdentity == profile.serverIdentity &&
-                record.status == OfflineEntitlementStatus.RevokedLocally
-        } == true
 
     private fun validateSetup(
         name: String,
@@ -851,16 +852,12 @@ class DefaultMobileRuntime(
         is AppSession.LoginFailed -> session.profile
         is AppSession.AccountDisabled -> session.profile
         is AppSession.Authenticated -> session.profile
-        is AppSession.SessionUnavailable -> session.profile
         is AppSession.SessionExpired -> session.profile
-        is AppSession.OfflineGrace -> session.profile
         else -> cachedProfiles.singleOrNull(ServerProfile::isActive)
     }
 
     private fun lastKnownIdentity(): SessionIdentity? = when (val session = currentSession) {
         is AppSession.Authenticated -> session.identity
-        is AppSession.OfflineGrace -> session.identity
-        is AppSession.SessionUnavailable -> session.lastKnownIdentity
         is AppSession.SessionExpired -> session.lastKnownIdentity
         else -> null
     }
@@ -906,15 +903,6 @@ class DefaultMobileRuntime(
 
     private fun ServerProfile.toDraft() = ServerConnectionDraft(displayName, baseUrl.value, tlsMode)
 
-    private fun ValidatedSessionRecord.toIdentity() = SessionIdentity(
-        userId = userId,
-        email = email,
-        displayName = displayName,
-        avatarUrl = avatarUrl,
-        locale = locale,
-        namespace = PrivateDataNamespace(serverIdentity, userId, authorizationVersion),
-    )
-
     private sealed interface GateResolution {
         data object SetupRequired : GateResolution
         data class SignedOut(val error: AppError) : GateResolution
@@ -924,13 +912,5 @@ class DefaultMobileRuntime(
         ) : GateResolution
         data class AccountDisabled(val email: String?) : GateResolution
         data class Failed(val error: AppError) : GateResolution
-    }
-
-    private companion object {
-        val TEMPORARY_FAILURES = setOf(
-            AppErrorKind.NetworkUnavailable,
-            AppErrorKind.Timeout,
-            AppErrorKind.ServiceUnavailable,
-        )
     }
 }

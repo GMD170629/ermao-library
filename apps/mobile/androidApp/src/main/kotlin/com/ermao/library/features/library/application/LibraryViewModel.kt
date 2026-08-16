@@ -242,22 +242,6 @@ class LibraryViewModel(
                 val snapshot = mutableUiState.value.scopes.getValue(scope)
                 val worksQuery = snapshot.toWorksQuery(page)
                 val groupingQuery = snapshot.toGroupingQuery(scope, page)
-                val restored = if (scope == LibraryScope.Works) {
-                    repository.restoreWorks(context, worksQuery)
-                } else {
-                    repository.restoreGroupings(context, groupingQuery)
-                }
-                if (restored is ContentResult.Content) {
-                    if (discoveryRuntime.acceptPage(
-                            requestToken,
-                            restored.value.items.isEmpty(),
-                            restored.source,
-                            restored.isStale,
-                        )
-                    ) {
-                        applyPage(scope, restored.value, restored.freshness(), reset)
-                    }
-                }
                 val result = if (scope == LibraryScope.Works) {
                     repository.loadWorks(context, worksQuery)
                 } else {
@@ -294,16 +278,6 @@ class LibraryViewModel(
                                 it.copy(
                                     works = emptyList(), groups = emptyList(), isLoading = false,
                                     isLoadingMore = false, errorCode = "CONTENT_NOT_ACCESSIBLE",
-                                )
-                            }
-                        } else if (result.error.kind.allowsPrivateCacheFallback() && hasVisibleContent(scope)) {
-                            discoveryRuntime.fail(requestToken, result.error.code, hasVisibleContent = true)
-                            updateScope(scope) {
-                                it.copy(
-                                    isLoading = false,
-                                    isLoadingMore = false,
-                                    errorCode = null,
-                                    freshness = ContentFreshness.Cached,
                                 )
                             }
                         } else {
@@ -379,12 +353,6 @@ class LibraryViewModel(
     private fun hasVisibleContent(scope: LibraryScope): Boolean = mutableUiState.value.scopes.getValue(scope).let {
         it.works.isNotEmpty() || it.groups.isNotEmpty()
     }
-
-    private fun AppErrorKind.allowsPrivateCacheFallback(): Boolean =
-        this == AppErrorKind.NetworkUnavailable ||
-            this == AppErrorKind.Timeout ||
-            this == AppErrorKind.ServiceUnavailable ||
-            this == AppErrorKind.TlsFailure
 
     private fun updateCurrent(transform: (ScopeUiState) -> ScopeUiState) =
         updateScope(mutableUiState.value.selectedScope, transform)

@@ -1,6 +1,8 @@
 # Content Discovery Design QA
 
-Status: content-discovery compact/light smoke review passed. Work Detail v2 implementation, signed build, and its updated physical-device journey have passed.
+Status: the historical content-discovery compact/light smoke review passed. Work Detail v6 is now the authoritative target and requires a new physical-device visual and interaction acceptance run before implementation can be called current.
+
+Latest Work Detail control-menu run: option 1 was tightened into a 224 dp pointer-anchored translucent card, and direct task Sheets replaced the standalone management route. Android physical-device visual and runtime QA passed for the book menu, volume-cover long press, and in-detail edit flow. Evidence and the remaining iOS physical-device gate are recorded in `design-qa/visual-runs/20260816-work-detail-control-menu-v2/report.md`.
 
 ## Reference set
 
@@ -12,11 +14,8 @@ Status: content-discovery compact/light smoke review passed. Work Detail v2 impl
 - `docs/assets/mobile-app-hifi-v1/library-series-facet-app-light-v1.png`
 - `docs/assets/mobile-app-hifi-v1/library-author-facet-app-light-v1.png`
 - `docs/assets/mobile-app-hifi-v1/library-filter-sheet-app-light-v1.png`
-- `docs/assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png`
-- `docs/assets/mobile-app-hifi-v1/work-detail-media-volumes-ios-app-light-v2.png`
-- `docs/assets/mobile-app-hifi-v1/work-detail-ebook-chapters-ios-app-light-v2.png`
-- `docs/assets/mobile-app-hifi-v1/work-detail-actions-sheet-ios-app-light-v2.png`
-- Phase 5 and Phase 7 specifications are authoritative for composition and state behavior.
+- `docs/assets/mobile-app-hifi-v1/work-detail-selected-volume-metadata-light-dark-v6.png`
+- Phase 3, Phase 5, and `docs/mobile-app-work-detail-selected-volume-design.md` are authoritative for Work Detail composition and state behavior. The v6 asset is the only retained Work Detail design reference; v2–v5 design images have been deleted.
 
 ## Implementation review
 
@@ -28,6 +27,11 @@ Status: content-discovery compact/light smoke review passed. Work Detail v2 impl
 - iOS and Android strings are complete for zh-CN and en-US in the implementation catalogs.
 
 ## Runtime comparison
+
+Current Android execution policy: local APK installation, instrumentation, screenshots, visual review, and final runtime acceptance default to an explicitly selected physical Android device. Emulator runs recorded below are historical milestone evidence only; they must not be reused as current final acceptance or cause automation to start an AVD when a physical device is available.
+
+- Latest physical-device deployment: serial `9e896bbc`, model `M2102K1AC`, Android API 31. The current debug APK was replace-installed without clearing app data, cold-launched into `com.ermao.library/.MainActivity`, and produced no app `FATAL EXCEPTION` or ANR signature in the post-launch log scan.
+- Android Emulator remains permitted only for an explicitly requested supplementary API/device matrix or CI without attached hardware.
 
 - iOS physical device: `00008150-0011112211A0C01C`, iPhone 17 Pro Max, iOS 26.6. Simulator use was prohibited and no simulator was used.
 - All 26 XCTest cases passed on the device. After the visual smoke check exposed an unregistered `ContentRoute` destination, the modifier was moved inside each `NavigationStack`; all 26 tests passed again and the affected journey was rerun.
@@ -47,16 +51,9 @@ Status: content-discovery compact/light smoke review passed. Work Detail v2 impl
 - `verifyDesignTokens`, `:shared:testAndroidHostTest`, the focused metrics/progress unit tests, debug APK assembly, Android-test APK assembly, replace-install, cold launch, version verification, and crash-log verification passed.
 - The repository-wide Android unit and lint gates are not green for unrelated Reader work already present in the working tree: the full unit suite has one `DownloadReaderEntryPolicyTest` expectation mismatch, and `lintDebug` crashes inside the lifecycle lint detector while analyzing the dirty `ReaderActivity.kt`. A prior full instrumentation run also retained three Reader-only failures after the visual fixture was fixed. These failures were not skipped, weakened, or changed by this UI milestone.
 
-### Work Detail v2 verification
+### Work Detail v6 verification
 
-- The iOS and Android implementations now use first-level “About / Media Versions” tabs, three media kinds, title-adjacent facet navigation, title-under progress, and single-volume EPUB chapter fallback.
-- Download progress and reading progress are separate. Because managed mobile downloads, reader launch, editing, cover updates, and reading-status mutation are not exposed by the current mobile capability contract, both clients render those actions unavailable instead of simulating completion.
-- Shared KMP `iosArm64` compilation, design-token verification, signed physical-device `iphoneos` build, localization parsing, and source whitespace checks passed.
-- The updated physical-device XCUITest passed on iPhone 17 Pro Max / iOS 26.6. It verified Library → Work Detail, disabled truthful reader CTA, About, Media Versions, single-volume EPUB chapter fallback, native back, Series scope, and Series Facet navigation.
-- Passing-run evidence:
-  - `design-qa/screenshots/ios-work-detail-v2-about-physical-en.png`
-  - `design-qa/screenshots/ios-work-detail-v2-media-chapters-physical-en.png`
-- No simulator was used.
+Work Detail v2–v5 design and verification images were deleted to prevent design regression. Only the v6 design, specification, and evidence under `design-qa/visual-runs/20260816-work-detail-v6/` may be used for current Work Detail acceptance.
 
 ## Required follow-up evidence
 

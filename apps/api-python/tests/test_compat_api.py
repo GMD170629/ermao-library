@@ -1355,7 +1355,9 @@ def test_work_detail_epub_reading_units_are_paginated_and_clamped(client, db_ses
     ]
 
 
-def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_session):
+def test_work_detail_loads_directory_only_for_reflowable_volumes(
+    client, db_session, monkeypatch
+):
     create_worker_tables(db_session)
     _login(client, db_session)
     for work_id, media_id, volume_id, fmt, work_type, media_kind in [
@@ -1374,6 +1376,14 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
             "CBZ",
             "COMIC",
             "COMIC",
+        ),
+        (
+            "pdf-detail",
+            "pdf-detail-media",
+            "pdf-detail-volume",
+            "PDF",
+            "PDF",
+            "EBOOK",
         ),
     ]:
         db_session.execute(
@@ -1423,7 +1433,7 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
         )
     db_session.commit()
 
-    for work_id in ("empty-epub", "comic-detail"):
+    for work_id in ("empty-epub", "comic-detail", "pdf-detail"):
         detail = client.get(
             f"/api/works/{work_id}", params={"chapterPageSize": 50}
         ).json()["data"]
@@ -1434,10 +1444,24 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
             "total": 0,
             "totalPages": 1,
         }
+
+    def fail_if_publication_navigation_is_requested(*_args, **_kwargs):
+        raise AssertionError("non-reflowable work detail must not prepare a directory")
+
+    monkeypatch.setattr(
+        "app.modules.library.presentation.http.ensure_publication_navigation",
+        fail_if_publication_navigation_is_requested,
+    )
     comic = client.get("/api/works/comic-detail", params={"detailTab": "COMIC"}).json()[
         "data"
     ]
     assert comic["activeMedia"]["selectedVolumeId"] == "comic-detail-volume"
+    assert comic["readingUnits"] == []
+    pdf = client.get("/api/works/pdf-detail", params={"detailTab": "EBOOK"}).json()[
+        "data"
+    ]
+    assert pdf["activeMedia"]["selectedVolumeId"] == "pdf-detail-volume"
+    assert pdf["readingUnits"] == []
 
 
 def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(

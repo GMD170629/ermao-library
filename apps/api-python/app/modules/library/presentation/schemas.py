@@ -330,6 +330,7 @@ class WorkDetailBook(HttpContractModel):
     cover_url: str = Field(alias="coverUrl")
     recent_media_kind: MediaKind | None = Field(alias="recentMediaKind")
     continue_volume_id: str | None = Field(alias="continueVolumeId")
+    continue_volume_progress: float = Field(alias="continueVolumeProgress")
     completed: bool
     media_versions: list[WorkDetailMediaVersion] = Field(alias="mediaVersions")
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")

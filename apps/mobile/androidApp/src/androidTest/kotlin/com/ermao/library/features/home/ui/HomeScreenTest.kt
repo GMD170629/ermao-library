@@ -2,13 +2,17 @@ package com.ermao.library.features.home.ui
 
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertLeftPositionInRootIsEqualTo
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.R
@@ -36,8 +40,12 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.ui.theme.WarmPageTheme
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -65,6 +73,7 @@ class HomeScreenTest {
                     onOpenLibrary = {},
                     onRetry = {},
                     onRefresh = {},
+                    lastReadClock = FixedHomeTestClock,
                 )
             }
         }
@@ -84,14 +93,68 @@ class HomeScreenTest {
 
         assertEquals("continue-work", openedWorkId)
     }
+
+    @Test
+    fun defaultFontContinueCardCompactsDuplicateMetadataAndNeverShowsWireTimestamp() {
+        val longTitle = "A Deliberately Long Work Title That Needs Two Lines"
+        val wireTimestamp = "2026-08-15T13:47:38.286000Z"
+        compose.setContent {
+            WarmPageTheme {
+                HomeScreen(
+                    state = HomeUiState(
+                        isLoading = false,
+                        content = HomeContent(
+                            continueReading = ContinueReadingCard(
+                                work = work("long-work", longTitle, progress = 72),
+                                volumeTitle = "  $longTitle  ",
+                                positionLabel = " $longTitle ",
+                                lastReadAtEpochMillis = Instant.parse(wireTimestamp).toEpochMilli(),
+                            ),
+                            recentReading = emptyList(),
+                            recentAdded = emptyList(),
+                        ),
+                    ),
+                    repository = StubContentRepository,
+                    context = contentRequestContext(),
+                    onOpenWork = {},
+                    onOpenLibrary = {},
+                    onRetry = {},
+                    onRefresh = {},
+                    lastReadClock = FixedHomeTestClock,
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        val continueCard = compose.onNodeWithTag("home-continue").assertIsDisplayed()
+        val continueCardBounds = continueCard.getUnclippedBoundsInRoot()
+        assertTrue(
+            "Continue card should stay within the compact default-font height budget",
+            continueCardBounds.bottom - continueCardBounds.top <= 248.dp,
+        )
+        compose.onAllNodesWithText(longTitle).assertCountEquals(1)
+        compose.onNodeWithTag("home-continue-position").assertDoesNotExist()
+        compose.onNodeWithText(wireTimestamp).assertDoesNotExist()
+        compose.onNodeWithTag(
+            testTag = "home-continue-progress-summary",
+            useUnmergedTree = true,
+        )
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
 }
+
+private val FixedHomeTestClock: Clock = Clock.fixed(
+    Instant.parse("2026-08-15T14:00:00Z"),
+    ZoneId.of("Asia/Shanghai"),
+)
 
 private fun dailyHomeContent(): HomeContent = HomeContent(
     continueReading = ContinueReadingCard(
         work = work("continue-work", "The Three-Body Problem", progress = 34),
         volumeTitle = "Volume 1",
         positionLabel = "Chapter 2",
-        lastReadLabel = "Today 09:18",
+        lastReadAtEpochMillis = Instant.parse("2026-08-15T01:18:00Z").toEpochMilli(),
     ),
     recentReading = listOf(
         work("recent-1", "Dune", progress = 12),
@@ -149,30 +212,15 @@ private object StubContentRepository : ContentRepository {
         query: WorksQuery,
     ): ContentResult<LibraryPage<WorkSummary>> = unused()
 
-    override suspend fun restoreWorks(
-        context: ContentRequestContext,
-        query: WorksQuery,
-    ): ContentResult<LibraryPage<WorkSummary>>? = unused()
-
     override suspend fun loadGroupings(
         context: ContentRequestContext,
         query: GroupingQuery,
     ): ContentResult<LibraryPage<GroupingSummary>> = unused()
 
-    override suspend fun restoreGroupings(
-        context: ContentRequestContext,
-        query: GroupingQuery,
-    ): ContentResult<LibraryPage<GroupingSummary>>? = unused()
-
     override suspend fun loadFacet(
         context: ContentRequestContext,
         query: FacetQuery,
     ): ContentResult<FacetPage> = unused()
-
-    override suspend fun restoreFacet(
-        context: ContentRequestContext,
-        query: FacetQuery,
-    ): ContentResult<FacetPage>? = unused()
 
     override suspend fun loadWorkDetail(
         context: ContentRequestContext,
@@ -185,7 +233,7 @@ private object StubContentRepository : ContentRepository {
         etag: String?,
     ): ContentResult<AuthenticatedCover> = ContentResult.Content(
         value = AuthenticatedCover(ByteArray(0), null, null),
-        source = ContentSource.Cache,
+        source = ContentSource.Network,
     )
 
     override suspend fun invalidate(namespace: PrivateDataNamespace) = Unit

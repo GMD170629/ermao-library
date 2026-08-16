@@ -31,6 +31,11 @@ internal data class ReaderResumeNotice(
     val pageNumber: Int? = null,
 )
 
+internal data class ReaderBookmarkChange(
+    val bookmarkId: String,
+    val added: Boolean,
+)
+
 internal interface ReaderScreenController {
     val morphology: ReaderMorphology
     val capabilities: ReaderCapabilities
@@ -86,9 +91,13 @@ internal interface ReaderScreenController {
         }
     }
 
-    fun toggleCurrentBookmark()
+    fun toggleCurrentBookmark(): ReaderBookmarkChange?
+
+    fun undoBookmarkChange(change: ReaderBookmarkChange): Boolean = false
 
     fun removeBookmark(id: String)
+
+    fun undoBookmarkRemoval(id: String): Boolean = false
 
     fun goToBookmark(id: String): Boolean
 

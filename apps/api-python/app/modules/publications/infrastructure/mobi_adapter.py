@@ -34,10 +34,21 @@ _OK = 0
 _NOT_FOUND = 11
 _BUFFER_TOO_SMALL = 13
 _INDEX_NONE = 2**32 - 1
+_MARKUP_CATEGORY = 1
 _MAX_READ_BYTES = 256 * 1024
 _MAX_RESOURCE_BYTES = 64 * 1024 * 1024
 _MOBI_FORMATS = frozenset({"mobi", "azw", "azw3", "prc"})
 MOBI_NORMALIZATION_IDENTIFIER = "ermao-mobi-core-v1+shuku-locator-dom-v2"
+
+
+def _publication_media_type(*, category: int, core_media_type: str) -> str:
+    # libmobi reconstructs legacy Mobipocket markup as HTML. Some sources retain
+    # private prefixes such as ``mbp:pagebreak`` without XML namespace
+    # declarations, so advertising these unchanged bytes as XHTML makes XML
+    # consumers reject otherwise valid reading content.
+    if category == _MARKUP_CATEGORY:
+        return "text/html"
+    return core_media_type
 
 
 class _BookInfo(ctypes.Structure):
@@ -370,7 +381,10 @@ def _snapshot(
             descriptor = _MobiResourceDescriptor(
                 index=index,
                 href=href,
-                media_type=core.copy_resource_type(book, index),
+                media_type=_publication_media_type(
+                    category=resource_info.category,
+                    core_media_type=core.copy_resource_type(book, index),
+                ),
                 category=resource_info.category,
                 decoded_length=resource_info.decoded_length,
             )

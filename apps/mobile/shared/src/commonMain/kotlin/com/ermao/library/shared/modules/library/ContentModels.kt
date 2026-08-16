@@ -98,6 +98,27 @@ data class WorkDetailQuery(
     init { require(workId.isNotBlank()) }
 }
 
+data class WorkVolumePageQuery(
+    val workId: String,
+    val mediaVersionId: String,
+    val page: Int,
+    val pageSize: Int = 24,
+) {
+    init { require(workId.isNotBlank() && mediaVersionId.isNotBlank() && page > 0 && pageSize in 1..100) }
+}
+
+data class WorkVolumePage(
+    val mediaVersionId: String,
+    val mediaKind: MediaKind,
+    val volumes: List<com.ermao.library.shared.modules.library.domain.Volume>,
+    val page: Int,
+    val pageSize: Int,
+    val total: Int,
+    val totalPages: Int,
+) {
+    val hasNext: Boolean get() = page < totalPages
+}
+
 data class LibraryPage<T>(
     val items: List<T>,
     val page: Int,
@@ -154,7 +175,7 @@ data class ContentRequestContext(
     }
 }
 
-enum class ContentSource { Network, Cache }
+enum class ContentSource { Network }
 
 sealed interface ContentResult<out T> {
     data class Content<T>(
@@ -173,14 +194,28 @@ interface ContentRepository {
     suspend fun loadRecentReading(context: ContentRequestContext, limit: Int = 10): ContentResult<List<WorkSummary>>
     suspend fun loadRecentAdded(context: ContentRequestContext, limit: Int = 10): ContentResult<List<WorkSummary>>
     suspend fun loadWorks(context: ContentRequestContext, query: WorksQuery): ContentResult<LibraryPage<WorkSummary>>
-    suspend fun restoreWorks(context: ContentRequestContext, query: WorksQuery): ContentResult<LibraryPage<WorkSummary>>?
     suspend fun loadGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>>
-    suspend fun restoreGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>>?
     suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage>
-    suspend fun restoreFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage>?
     suspend fun loadWorkDetail(context: ContentRequestContext, query: WorkDetailQuery): ContentResult<WorkDetailSummary>
+    suspend fun loadWorkVolumes(
+        context: ContentRequestContext,
+        query: WorkVolumePageQuery,
+    ): ContentResult<WorkVolumePage> = ContentResult.Failure(
+        com.ermao.library.shared.core.network.AppError(
+            com.ermao.library.shared.core.network.AppErrorKind.ProtocolViolation,
+            "VOLUME_PAGINATION_UNAVAILABLE",
+            "Volume pagination is unavailable",
+        ),
+    )
     suspend fun loadCover(context: ContentRequestContext, apiPath: String, etag: String? = null): ContentResult<AuthenticatedCover>
     suspend fun invalidate(namespace: PrivateDataNamespace)
+}
+
+interface WorkVolumePageRepository {
+    suspend fun loadWorkVolumes(
+        context: ContentRequestContext,
+        query: WorkVolumePageQuery,
+    ): ContentResult<WorkVolumePage>
 }
 
 data class AuthenticatedCover(

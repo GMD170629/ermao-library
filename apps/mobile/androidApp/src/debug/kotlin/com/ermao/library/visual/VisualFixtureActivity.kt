@@ -1,6 +1,7 @@
 package com.ermao.library.visual
 
 import android.app.Activity
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -10,11 +11,22 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.core.graphics.createBitmap
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.ermao.library.features.content.model.ChapterReadingState
 import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.ContentSort
@@ -27,6 +39,7 @@ import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.ReadingUnitContent
 import com.ermao.library.features.content.model.VolumeContent
+import com.ermao.library.features.content.model.VolumeFileContent
 import com.ermao.library.features.content.model.WorkCard
 import com.ermao.library.features.content.model.WorkDetailContent
 import com.ermao.library.features.content.model.WorksFilters
@@ -58,8 +71,13 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
+import com.ermao.library.shared.modules.shelf.domain.ShelfKind
+import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
 import com.ermao.library.ui.theme.WarmPageTheme
 import java.io.ByteArrayOutputStream
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -79,20 +97,9 @@ class VisualFixtureActivity : ComponentActivity() {
     var isCaptureReady: Boolean = false
         private set
 
-    override fun attachBaseContext(newBase: Context) {
-        val variant = VisualFixtureContract.variantFrom(intent)
-        val fixtureContext = variant?.let {
-            newBase.createConfigurationContext(
-                it.overrideConfiguration(newBase.resources.configuration).apply {
-                    fontScale = intent.getFloatExtra(VisualFixtureContract.EXTRA_FONT_SCALE, 1f)
-                },
-            )
-        } ?: newBase
-        super.attachBaseContext(fixtureContext)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         val variant = VisualFixtureContract.variantFrom(intent)
+        val fontScale = intent.getFloatExtra(VisualFixtureContract.EXTRA_FONT_SCALE, 1f)
         // A fixture launch is a new golden sample, never a continuation of the
         // previous scenario's scroll or modal state.
         super.onCreate(null)
@@ -102,25 +109,75 @@ class VisualFixtureActivity : ComponentActivity() {
             return
         }
 
-        enableEdgeToEdge()
+        val systemBarPolicy = visualFixtureSystemBarPolicy(variant.appearance)
+        val fixtureSystemBarStyle = if (systemBarPolicy.useDarkForeground) {
+            SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.dark(Color.TRANSPARENT)
+        }
+        enableEdgeToEdge(
+            statusBarStyle = fixtureSystemBarStyle,
+            navigationBarStyle = fixtureSystemBarStyle,
+        )
+        applySystemBarPolicy(systemBarPolicy)
         renderedVariant = variant
         prewarmFixtureCovers(variant.scenario)
         setContent {
-            WarmPageTheme(darkTheme = variant.appearance == VisualFixtureAppearance.Dark) {
-                when (variant.scenario) {
-                    VisualFixtureScenario.HomeDefault -> FixtureHome()
-                    VisualFixtureScenario.LibraryWorks -> FixtureLibrary(showFilter = false)
-                    VisualFixtureScenario.LibraryFilter -> FixtureLibrary(showFilter = true)
-                    VisualFixtureScenario.WorkAbout -> FixtureWorkDetail(fixtureDetail)
-                    VisualFixtureScenario.WorkVolumes -> FixtureWorkDetail(
-                        fixtureDetail.copy(description = null),
-                    )
-                    VisualFixtureScenario.WorkSingleEbook -> FixtureWorkDetail(fixtureSingleEbookDetail)
-                    VisualFixtureScenario.WorkActions -> FixtureWorkDetail(fixtureDetail)
+            val baseContext = LocalContext.current
+            val baseConfiguration = LocalConfiguration.current
+            val fixtureConfiguration = remember(variant, fontScale, baseConfiguration) {
+                variant.overrideConfiguration(baseConfiguration, fontScale)
+            }
+            val fixtureContext = remember(baseContext, fixtureConfiguration) {
+                baseContext.createConfigurationContext(fixtureConfiguration)
+            }
+            // Activity.intent is assigned after attachBaseContext on API 31, so
+            // the deterministic fixture locale/font scale must be scoped to the
+            // composition instead of mutating the Activity resources lifecycle.
+            CompositionLocalProvider(
+                LocalContext provides fixtureContext,
+                LocalConfiguration provides fixtureConfiguration,
+                LocalDensity provides Density(
+                    density = fixtureContext.resources.displayMetrics.density,
+                    fontScale = fontScale,
+                ),
+            ) {
+                WarmPageTheme(darkTheme = variant.appearance == VisualFixtureAppearance.Dark) {
+                    when (variant.scenario) {
+                        VisualFixtureScenario.HomeDefault -> FixtureHome()
+                        VisualFixtureScenario.LibraryWorks -> FixtureLibrary(showFilter = false)
+                        VisualFixtureScenario.LibraryFilter -> FixtureLibrary(showFilter = true)
+                        VisualFixtureScenario.WorkAbout -> FixtureWorkDetail(fixtureDetail)
+                        VisualFixtureScenario.WorkVolumes -> FixtureWorkDetail(
+                            fixtureDetail.copy(description = null),
+                        )
+                        VisualFixtureScenario.WorkSingleEbook -> FixtureWorkDetail(fixtureSingleEbookDetail)
+                        VisualFixtureScenario.WorkActions -> FixtureWorkDetail(fixtureDetail)
+                    }
                 }
             }
         }
         markCaptureReadyAfterFrames()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            renderedVariant?.appearance
+                ?.let(::visualFixtureSystemBarPolicy)
+                ?.let(::applySystemBarPolicy)
+        }
+    }
+
+    private fun applySystemBarPolicy(policy: VisualFixtureSystemBarPolicy) {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = policy.useDarkForeground
+            isAppearanceLightNavigationBars = policy.useDarkForeground
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            if (policy.visible) {
+                show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
     }
 
     private fun prewarmFixtureCovers(scenario: VisualFixtureScenario) {
@@ -137,6 +194,10 @@ class VisualFixtureActivity : ComponentActivity() {
                 fixtureSingleEbookDetail.coverPaths()
         }.distinct()
         runBlocking(Dispatchers.IO) {
+            // Replace-install intentionally preserves app data. Clear this
+            // debug-only namespace before every fixture launch so a changed
+            // cover renderer can never reuse pixels from an older APK.
+            AndroidCoverCache.clearNamespace(applicationContext, fixtureRequestContext)
             paths.forEach { path ->
                 AndroidCoverCache.load(applicationContext, fixtureRequestContext, path, fixtureRepository)
             }
@@ -197,13 +258,16 @@ data class VisualFixtureVariant(
     val outputName: String
         get() = "${scenario.wireValue}-${locale.wireValue}-${appearance.wireValue}.png"
 
-    fun overrideConfiguration(base: Configuration): Configuration = Configuration(base).apply {
+    // Debug fixtures package both locales in one APK and never ship as an app bundle.
+    @SuppressLint("AppBundleLocaleChanges")
+    fun overrideConfiguration(base: Configuration, fontScale: Float): Configuration = Configuration(base).apply {
         setLocale(Locale.forLanguageTag(this@VisualFixtureVariant.locale.languageTag))
         val nightMode = when (appearance) {
             VisualFixtureAppearance.Light -> Configuration.UI_MODE_NIGHT_NO
             VisualFixtureAppearance.Dark -> Configuration.UI_MODE_NIGHT_YES
         }
         uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightMode
+        this.fontScale = fontScale
     }
 }
 
@@ -241,7 +305,7 @@ private fun FixtureHome() {
                     work = fixtureWorks.first(),
                     volumeTitle = "第二卷 黑暗森林",
                     positionLabel = "第二章 黑暗森林",
-                    lastReadLabel = "今天 09:18",
+                    lastReadAtEpochMillis = Instant.parse("2026-08-15T01:18:00Z").toEpochMilli(),
                 ),
                 recentReading = fixtureWorks.take(3),
                 recentAdded = fixtureWorks.drop(3).take(3),
@@ -254,8 +318,14 @@ private fun FixtureHome() {
         onOpenLibrary = {},
         onRetry = {},
         onRefresh = {},
+        lastReadClock = VisualFixtureClock,
     )
 }
+
+private val VisualFixtureClock: Clock = Clock.fixed(
+    Instant.parse("2026-08-15T02:00:00Z"),
+    ZoneId.of("Asia/Shanghai"),
+)
 
 @androidx.compose.runtime.Composable
 private fun FixtureLibrary(showFilter: Boolean) {
@@ -311,26 +381,42 @@ private fun FixtureLibrary(showFilter: Boolean) {
 
 @androidx.compose.runtime.Composable
 private fun FixtureWorkDetail(content: WorkDetailContent) {
+    var showShelfPicker by remember { mutableStateOf(false) }
     WorkDetailScreen(
         state = WorkDetailUiState(
             isLoading = false,
             content = content,
             selectedMediaKind = "EBOOK",
-            selectedVolumeId = content.media.firstOrNull()?.volumes?.firstOrNull()?.id,
+            selectedVolumeId = content.media.firstOrNull()?.volumes?.getOrNull(1)?.id
+                ?: content.media.firstOrNull()?.volumes?.firstOrNull()?.id,
+            shelves = fixtureShelves,
+            selectedShelfIds = setOf(fixtureShelves.first().id),
+            isShelfPickerVisible = showShelfPicker,
         ),
         repository = fixtureRepository,
         context = fixtureRequestContext,
         onBack = {},
         onSelectMedia = {},
         onSelectVolume = {},
-        onOpenShelfPicker = {},
-        onDismissShelfPicker = {},
+        onOpenShelfPicker = { showShelfPicker = true },
+        onDismissShelfPicker = { showShelfPicker = false },
         onToggleShelf = {},
         onSaveShelves = {},
+        onShelfSaveFeedbackShown = {},
+        onViewShelves = {},
         onOpenFacet = { _, _ -> },
         onRetry = {},
     )
 }
+
+private val fixtureShelves = listOf(
+    ShelfSummary(
+        id = "shelf-reading-list",
+        name = "稍后阅读",
+        kind = ShelfKind.Static,
+        containsWork = true,
+    ),
+)
 
 private const val CAPTURE_SETTLE_FRAMES = 30
 
@@ -366,6 +452,7 @@ private val fixtureDetail = WorkDetailContent(
                 fixtureVolume("volume-1", "第一卷 地球往事", 100, true),
                 fixtureVolume("volume-2", "第二卷 黑暗森林", 34, true),
                 fixtureVolume("volume-3", "第三卷 死神永生", null, true),
+                fixtureVolume("volume-4", "第四卷 宇宙回声", null, true),
             ),
         ),
         MediaContent(kind = "COMIC", volumes = listOf(fixtureVolume("comic-1", "漫画版 第一卷", null, true))),
@@ -409,11 +496,23 @@ private fun fixtureVolume(id: String, title: String, progress: Int?, readable: B
     format = "EPUB",
     readerType = "reflowable",
     volumeIndex = id.substringAfterLast('-').toDoubleOrNull(),
+    publishedAt = "2010-11-01",
+    language = "zh-CN",
+    pageCount = 428,
+    metadataSource = "内嵌元数据",
+    files = listOf(
+        VolumeFileContent(
+            id = "file-$id",
+            path = "/library/三体系列/$title.epub",
+            sizeBytes = 3_200_000,
+            displaySize = "3.2 MB",
+        ),
+    ),
     coverUrl = "fixture://cover/$id",
     sizeBytes = 3_200_000,
     progressPercent = progress,
     readable = readable,
-    selected = id == "volume-1",
+    selected = id == "volume-2",
 )
 
 private val fixtureRequestContext: ContentRequestContext = run {
@@ -443,7 +542,7 @@ private val fixtureRepository: ContentRepository = object : ContentRepository {
             mimeType = "image/png",
             etag = "fixture-${apiPath.hashCode()}",
         ),
-        source = com.ermao.library.shared.modules.library.ContentSource.Cache,
+        source = com.ermao.library.shared.modules.library.ContentSource.Network,
     )
 
     override suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot> = forbidden("loadHome")
@@ -451,11 +550,8 @@ private val fixtureRepository: ContentRepository = object : ContentRepository {
     override suspend fun loadRecentReading(context: ContentRequestContext, limit: Int) = forbidden("loadRecentReading")
     override suspend fun loadRecentAdded(context: ContentRequestContext, limit: Int) = forbidden("loadRecentAdded")
     override suspend fun loadWorks(context: ContentRequestContext, query: WorksQuery): ContentResult<LibraryPage<WorkSummary>> = forbidden("loadWorks")
-    override suspend fun restoreWorks(context: ContentRequestContext, query: WorksQuery): ContentResult<LibraryPage<WorkSummary>>? = forbidden("restoreWorks")
     override suspend fun loadGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>> = forbidden("loadGroupings")
-    override suspend fun restoreGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>>? = forbidden("restoreGroupings")
     override suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage> = forbidden("loadFacet")
-    override suspend fun restoreFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage>? = forbidden("restoreFacet")
     override suspend fun loadWorkDetail(context: ContentRequestContext, query: WorkDetailQuery): ContentResult<WorkDetailSummary> = forbidden("loadWorkDetail")
     override suspend fun invalidate(namespace: PrivateDataNamespace) = Unit
 }
@@ -470,7 +566,7 @@ private fun fixtureCoverPng(key: String): ByteArray {
         Color.rgb(86, 91, 70),
     )
     val color = palette[(key.hashCode() and Int.MAX_VALUE) % palette.size]
-    val bitmap = Bitmap.createBitmap(400, 600, Bitmap.Config.ARGB_8888)
+    val bitmap = createBitmap(400, 600)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     canvas.drawColor(color)

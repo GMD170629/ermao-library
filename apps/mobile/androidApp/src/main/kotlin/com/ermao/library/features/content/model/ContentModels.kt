@@ -54,7 +54,8 @@ data class ContinueReadingCard(
     val work: WorkCard,
     val volumeTitle: String?,
     val positionLabel: String?,
-    val lastReadLabel: String?,
+    val lastReadAtEpochMillis: Long?,
+    val resumeVolumeId: String? = null,
 )
 
 @Immutable
@@ -66,7 +67,7 @@ data class HomeContent(
 )
 
 @Serializable
-enum class ContentFreshness { Fresh, Cached, Stale }
+enum class ContentFreshness { Fresh, Stale }
 
 @Immutable
 @Serializable
@@ -75,7 +76,19 @@ data class VolumeContent(
     val title: String,
     val format: String,
     val readerType: String = "reflowable",
+    val mediaVersionId: String = "",
     val volumeIndex: Double? = null,
+    val sortOrder: Int = 0,
+    val publisher: String? = null,
+    val publishedAt: String? = null,
+    val language: String? = null,
+    val isbn: String? = null,
+    val identifier: String? = null,
+    val narrator: String? = null,
+    val pageCount: Int? = null,
+    val metadataSource: String? = null,
+    val kindleSendAvailable: Boolean = false,
+    val files: List<VolumeFileContent> = emptyList(),
     val coverUrl: String = "",
     val sizeBytes: Long = 0,
     val progressPercent: Int?,
@@ -92,6 +105,15 @@ data class VolumeContent(
         return value.padStart(2, '0')
     }
 }
+
+@Immutable
+@Serializable
+data class VolumeFileContent(
+    val id: String,
+    val path: String,
+    val sizeBytes: Long,
+    val displaySize: String,
+)
 
 @Immutable
 @Serializable
@@ -114,6 +136,7 @@ enum class ChapterReadingState { Current, Read, Unread }
 data class MediaContent(
     val kind: String,
     val volumes: List<VolumeContent>,
+    val volumeCount: Int = volumes.size,
 )
 
 @Immutable
@@ -122,6 +145,7 @@ data class WorkDetailContent(
     val work: WorkCard,
     val seriesId: String?,
     val seriesName: String?,
+    val seriesIndex: Double? = null,
     val authorFacetId: String?,
     val description: String?,
     val tags: List<String>,
@@ -134,8 +158,10 @@ data class WorkDetailContent(
 
     val showsMediaPicker: Boolean get() = media.map { it.kind.uppercase() }.distinct().size > 1
 
-    fun usesEbookChapterFallback(selectedMediaKind: String?): Boolean =
-        selectedMediaKind.equals("EBOOK", ignoreCase = true) &&
-            media.firstOrNull { it.kind.equals("EBOOK", ignoreCase = true) }?.volumes?.size == 1 &&
+    fun supportsChapterDirectory(volumeId: String?): Boolean =
+        volumeId != null &&
+            media.asSequence().flatMap { it.volumes.asSequence() }
+                .firstOrNull { it.id == volumeId }
+                ?.readerType.equals("reflowable", ignoreCase = true) &&
             readingUnits.isNotEmpty()
 }

@@ -13,6 +13,7 @@ struct ErmaoLibraryApp: App {
     private let contentCache: LibraryCacheStore
     private let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     private let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
+    private let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
     private let settingsClientOverride: (any SettingsClient)?
     private let readerComposition: IosReaderComposition?
 
@@ -45,6 +46,9 @@ struct ErmaoLibraryApp: App {
         administrativeSettingsRepository = usesContentFixture
             ? nil
             : IosCompositionKt.createIosAdministrativeSettingsRepository(cookieStore: cookieStore)
+        workManagementRepository = usesContentFixture
+            ? nil
+            : IosCompositionKt.createIosWorkManagementRepository(cookieStore: cookieStore)
         settingsClientOverride = usesContentFixture
             ? ContentUITestFixture.makeSettingsClient()
             : nil
@@ -76,6 +80,7 @@ struct ErmaoLibraryApp: App {
                 downloads: downloadCenter,
                 settingsRepository: settingsRepository,
                 administrativeSettingsRepository: administrativeSettingsRepository,
+                workManagementRepository: workManagementRepository,
                 settingsClientOverride: settingsClientOverride,
                 readerComposition: readerComposition
             )

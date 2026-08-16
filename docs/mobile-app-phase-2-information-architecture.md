@@ -7,6 +7,10 @@
 > 下游规范：[`mobile-app-phase-3-user-flows-and-wireframes.md`](mobile-app-phase-3-user-flows-and-wireframes.md)
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
+> v1.0.0 修订（2026-08-15）：[`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 取代本文所有 `offline-grace`、30 天 entitlement、Offline Shell、手动进入离线模式和 GET 页面缓存回退条款。首发只有正常 App Shell 与鉴权 Gate；完成下载仍通过 Download Center 和正常 Reader 打开。
+
+> Work Detail 管理修订（2026-08-16）：详情页删除右上角三点管理入口；主阅读按钮下方的“更多”打开图书控制菜单。长按卷册封面打开以该 `volumeId` 为对象的卷册控制菜单，卷册标题不触发管理。复杂任务使用聚焦 Sheet，简单任务在菜单内执行或确认；长按必须同时暴露平台辅助技术自定义动作。成功写入后保留详情上下文并重新请求受影响数据。完整菜单与对象范围详见 [`mobile-app-work-detail-management.md`](mobile-app-work-detail-management.md)。
+
 ## 1. 文档目的与优先级
 
 本文件把第一阶段功能基线收敛为可直接指导低保真设计、路由建模和原生实现的 App 信息架构。它定义：
@@ -15,7 +19,7 @@
 - 完整页面树、页面层级和 canonical route；
 - 启动、认证、跨 Tab、Reader、播放、下载和 deep link 跳转；
 - 页面、Sheet、Menu、Dialog、系统界面的选择规则；
-- 多服务器、离线宽限、权限变化和状态恢复边界；
+- 多服务器、已验证会话恢复、权限变化和状态恢复边界；
 - 导航层公共类型和设计验收矩阵。
 
 优先级从高到低：
@@ -37,8 +41,9 @@
 | 书库结构 | 根页用顶部分段控件切换 `全部 / 系列 / 作者`；搜索归书库，不在首页建立第二套搜索 |
 | 首页续读 | 目标唯一且可验证时直达 Reader/Now Playing；否则进入作品详情 |
 | 冷启动 | 普通冷启动进入首页；只有 OS 短时状态恢复可以直接恢复 Reader |
-| 401 离线宽限 | 最近一次成功 `/api/auth/me` 后 30 天；只开放已下载内容；不要求额外设备解锁 |
-| 主动退出 | 立即终止宽限并清除可读私有缓存；待同步 outbox 加密隔离 |
+| 会话恢复 | 存在匹配 `VerifiedSessionRecord` 时先进入正常 Shell，再执行兼容性与 `/me` 验证；暂时网络失败不退出 Shell |
+| 明确失效 | `401`、账户停用或服务器 identity 变化时清 Cookie 和会话快照并离开私有 Shell |
+| 主动退出 | 清除 Cookie 与已验证会话；下载和其他私有数据仍遵循各自既有清理规则 |
 | 连接检查 | 填写、回填和切换服务器时不请求网络；只在点击登录后检查可达性、兼容性、setup status 与 TLS |
 | TLS 例外 | 页面不展示证书设置；只有登录连接遇到不受信任的 SSL 证书时，才用平台原生 Alert 询问是否接受风险并连接，接受只绑定当前标准化服务器 identity |
 | P1 入口 | 可以在路由规范中预留归属，但交付前不显示占位或“即将推出”入口 |
@@ -179,14 +184,18 @@ O2 Blocking or System Presentation
 ```text
 no-server
 checking-server
+tls-risk
+server-connection-failed
+incompatible-server
 setup-required
+setting-up
+setup-failed
 signed-out
 authenticating
+login-failed
+account-disabled
 authenticated
-session-unavailable
 session-expired
-incompatible-server
-offline-grace
 ```
 
 ### 5.2 L1：首页
@@ -241,7 +250,7 @@ offline-grace
 | 分组 | 页面/动作 |
 |---|---|
 | 账户 | 资料、头像、密码、退出登录 |
-| 离线与存储 | 下载中心、下载设置、空间与网络策略 |
+| 下载与存储 | 下载中心、下载设置、空间与网络策略 |
 | 服务器 | 当前服务器登录表单、切换已保存服务器、删除当前服务器、Web 管理入口 |
 | 偏好 | 语言 |
 | 产品 | 关于、App 版本、服务器版本 |
@@ -258,30 +267,28 @@ Web 管理只在 `canManageSystem` 或 `isAdmin` 时显示，使用系统浏览�
 | `audio.now-playing` | L4 Cover | 播放状态独立于页面；关闭后回到精确来源并保留 mini player |
 | `downloads.detail` | L2/L3 | 展示一个持久下载任务的状态、错误和恢复动作；不使用临时 Sheet 代替 |
 
-## 6. 启动、认证与离线宽限
+## 6. 启动与认证恢复
 
 ### 6.1 固定启动顺序
 
 ```mermaid
 flowchart TD
-    A["读取 activeServer 与持久 Cookie"] --> B{"存在可验证的既有会话?"}
-    B -- "否" --> C["server.entry 登录表单；可回填最近 profile"]
-    B -- "是" --> D["GET /api/auth/me"]
-    D -- "401" --> R["auth.reauthenticate；回填 active profile"]
+    A["读取 activeServer、Cookie 与 VerifiedSessionRecord"] --> B{"快照匹配 profile + serverIdentity?"}
+    B -- "否" --> C["server.entry；必须在线登录"]
+    B -- "是" --> S["立即进入正常 App Shell"]
+    S --> D["后台 compatibility + GET /api/auth/me"]
+    D -- "401 / ACCOUNT_DISABLED" --> R["清 Cookie 与快照；auth.reauthenticate"]
+    D -- "identity 变化" --> X["清快照；incompatible-server"]
+    D -- "网络/TLS/5xx/解析失败" --> S
     C --> E{"用户点击登录?"}
     E -- "否" --> C
     E -- "是" --> F["health → compatibility → setup status"]
-    R --> RE{"重新登录或有效离线宽限?"}
-    RE -- "重新登录" --> F
-    RE -- "进入离线模式" --> M
+    R --> F
     F -- "不可达/不兼容/TLS" --> G["原生 Alert，关闭后保留表单"]
     F -- "未初始化" --> H["auth.setup"]
     F -- "已初始化" --> I["POST /api/auth/login"]
     I --> J["GET /api/auth/me"]
-    D -- "成功" --> K["校验 server/user/authz namespace"]
-    D -- "不可达" --> L{"有效离线 entitlement?"}
-    L -- "是" --> M["Offline Shell"]
-    L -- "否" --> C
+    D -- "成功" --> K["刷新 VerifiedSessionRecord 与权限"]
     H --> K
     J --> Q["自动保存/更新 profile；名称取 hostname"]
     Q --> K
@@ -290,29 +297,17 @@ flowchart TD
     N -- "否" --> P["tab.home"]
 ```
 
-### 6.2 离线 entitlement
+### 6.2 已验证会话快照
 
-每次 `/api/auth/me` 成功后写入：
+每次 `/api/auth/me` 成功后写入不带有效期的记录：
 
 ```text
-lastValidatedAt = current trusted wall time
-expiresAt = lastValidatedAt + 30 days
-status = valid
+profileId + serverIdentity
+profile + user identity + authorization
+lastValidatedAt
 ```
 
-401 后：
-
-- 进入全屏 `auth.reauthenticate`，不能使用 Dialog 覆盖现有页面；
-- entitlement 未到期时提供“重新登录”和“进入离线模式，剩余 X 天”；
-- 不要求额外系统 PIN、生物识别或 App 锁；
-- Offline Shell 只展示已下载 volume、本地书签和待同步状态；
-- 在线书库、搜索、书架刷新、账户写操作、服务器写操作不可用；
-- 到期后只允许重新认证；本地使用不能延长到期时间；
-- 相同 server/user 登录成功后恢复被验证的导航 intent；
-- 主动退出登录立即设置 `revoked-locally` 并删除可读私有缓存；
-- 账户停用或服务端撤权可能在剩余 30 天内无法影响离线副本，这是本决策接受的安全风险。
-
-时间回拨不能延长 entitlement；实现阶段必须使用可检测回拨的持久时间策略，并把异常回拨视为到期。
+该记录只用于立即恢复正常 Shell、权限显隐和下载 namespace，不创建新的授权期限。无记录时断网不能进入私有 Shell。明确失效时清除记录；暂时网络错误只让对应网络页面显示局部加载失败。首发没有 Offline Shell、模式切换、剩余天数或缓存服务器页面。
 
 ## 7. Tab、内容与跨层跳转
 
@@ -346,7 +341,9 @@ flowchart LR
 
 - 任意作品卡进入共享 `work.detail`，携带 origin context。
 - 从作品详情点击作者/系列时，在当前 Stack 压入共享 `works.facet`；返回仍回详情，不强制切换 Tab。
-- 作品详情以“简介 / 媒体版本”切换内容；媒体版本内的媒介 segmented control 和 volume 选择只更新当前页面状态。电子书仅有一个 volume 时直接展示其章节目录。
+- 作品详情使用连续详情流：身份与主动作之后依次展示简介、媒介选择、横向卷册轨道、当前卷册元数据，以及适用时的章节目录；不再使用“简介 / 媒体版本”一级切换。
+- 媒介 segmented control 只显示作品真实具备的媒介；单媒介时隐藏。volume 选择只更新当前页面的选中卷册、主动作、章节和卷册元数据，不增加导航历史。
+- 多卷使用可横向滚动且支持分页加载的卷册轨道；Compact 下每个卷册约占内容宽度三分之一，并保留尾部下一项露出作为可滚动提示。电子书仅有一个 volume 时直接展示其章节目录。
 - 有效 resume 使用最近 volume；无 resume 使用当前媒介第一个可读 volume。
 
 ### 7.4 下载
@@ -456,11 +453,11 @@ Deep link 优先于已保存 route；普通冷启动无 deep link 时进入首�
 
 | 事件 | 导航规则 |
 |---|---|
-| `401` | 进入全屏 reauthenticate；宽限有效时可选择 Offline Shell |
+| `401` | 清除当前 Cookie 与已验证会话快照，进入全屏 reauthenticate |
 | `403` 动作失败 | 留在当前页，刷新 `/me`；能力已撤销时回最近合法页面 |
 | `404` | 统一“内容不存在或当前不可访问”；提供返回和所属 Tab 根，不泄露存在性 |
 | `authzVersion` 变化 | 遮蔽旧 UI、暂停媒体、切 namespace、逐页重验；不可访问走统一 404 |
-| `session-unavailable` | 保留 Stack；允许打开 entitlement 内已下载内容；在线区显示可恢复状态 |
+| 网络、超时、TLS、`5xx` 或协议解析失败 | 已恢复会话保留普通 Shell；请求页面各自显示局部可恢复错误 |
 | `CONTENT_FINGERPRINT_MISMATCH` | 阻止旧进度写入；Dialog 只允许重新加载新版本或退出 Reader |
 | P1 能力未交付 | 完全隐藏入口，不显示 disabled/coming soon |
 | Web-only 能力 | 不创建 App route；有权用户只看到“在 Web 管理”外部链接 |
@@ -475,7 +472,7 @@ Deep link 优先于已保存 route；普通冷启动无 deep link 时进入首�
 2–7 个即时命令或简单单选 → Menu
 不可逆动作或必须阻断的冲突 → Dialog
 文件、照片、分享、系统权限 → System UI
-普通成功、撤销、离线、可恢复错误 → Snackbar / Banner / Inline
+普通成功、撤销、可恢复错误 → Snackbar / Banner / Inline
 ```
 
 ### 11.1 通用覆盖层约束
@@ -515,7 +512,7 @@ Deep link 优先于已保存 route；普通冷启动无 deep link 时进入首�
 | `library-view` | Grid/List 单选；点击立即生效 |
 | `work-overflow` | 阅读状态、加入书架、离线下载；编辑与设置封面仅在授权且移动契约可用时出现，否则提供明确的 Web 管理入口；P1 Kindle/导出入口 |
 | `shelf-overflow` | 编辑、删除入口；删除必须转 Dialog |
-| `download-overflow` | 暂停、继续、重试、移除离线副本入口 |
+| `download-overflow` | 暂停、继续、重试、移除本地副本入口 |
 | `audio-speed` | 有限倍速预设；自定义倍速以后使用 Sheet |
 | `reader-more` | 不属于主工具栏的即时动作；核心阅读导航不得只藏在这里 |
 
@@ -620,7 +617,7 @@ OfflineEntitlementStatus =
 - modal 打开时焦点进入标题，关闭后回到触发控件。
 - Sheet 拖拽柄、滑动、边缘返回均不能成为唯一操作方式。
 - 动态字体导致内容不足时 Sheet 自动升为 full-height，不截断提交按钮。
-- VoiceOver/TalkBack 必须读出标题、选择状态、结果数量、剩余离线宽限期、同步状态和错误。
+- VoiceOver/TalkBack 必须读出标题、选择状态、结果数量、下载状态、同步状态和错误。
 - segmented control、多选、scrubber、漫画缩放和 Snackbar 撤销必须提供辅助技术可操作的替代动作。
 - 支持 reduced motion；转场不能成为理解状态的必要条件。
 - 所有可见文案在 `zh-CN` 和 `en-US` 中具有等价语义；危险级别不能因翻译被弱化。
@@ -646,8 +643,8 @@ OfflineEntitlementStatus =
 - 新服务器只在登录和 `/me` 成功后自动保存，名称取标准化 URL hostname；失败草稿不覆盖最后成功 profile。
 - 填写、回填和 Sheet 选择不做网络检查，也不展示在线、兼容性或证书状态。
 - 不安全 SSL 只在点击登录且证书验证失败时用一个平台原生 Alert 提示，接受只作用于明确服务器 identity。
-- `/me` 成功刷新 30 天 entitlement。
-- 401 后离线入口、无设备解锁、到期边界和主动登出清除符合规范。
+- `/me` 成功刷新不带有效期的 `VerifiedSessionRecord`；冷启动先恢复普通 Shell，再后台验证。
+- 明确 401、账户停用或服务器 identity 变化会清除 Cookie 与会话快照；暂时网络失败不会退出 Shell。
 - `authzVersion` 变化后旧内容立即遮蔽并逐页重验。
 - 403/404 保持防枚举，不泄露资源存在性。
 
@@ -664,9 +661,9 @@ OfflineEntitlementStatus =
 
 - 同时最多一个 App modal；无 Sheet 套 Sheet。
 - Menu/Sheet/Dialog 选择符合注册表。
-- loading、empty、error、offline、permission、success、conflict、stale 各有且只有一个主要呈现层。
+- loading、empty、error、permission、success、conflict、stale 各有且只有一个主要呈现层。
 - 表单 422 贴近字段；普通成功使用 Snackbar/播报；可恢复错误保留输入。
 - 动态字体、VoiceOver/TalkBack、reduced motion、`zh-CN`、`en-US` 均完成验收。
 - P1 未交付前无占位入口；排除和 Web-only 能力没有 App route。
 
-本规范完成后，移动端下一设计阶段应从四个 Tab 根页面和三个核心任务流开始低保真设计：续读、发现并开始阅读、下载并离线恢复。
+本规范完成后，移动端下一设计阶段应从四个 Tab 根页面和三个核心任务流开始低保真设计：续读、发现并开始阅读、下载并从本地工件打开。

@@ -102,9 +102,6 @@ class DefaultMobileRuntimeBridge(
     override fun refreshCurrentSession(completion: OperationCompletion) =
         launch(completion) { runtime.refreshCurrentSession() }
 
-    override fun enterOfflineMode(completion: OperationCompletion) =
-        launch(completion) { runtime.enterOfflineMode() }
-
     override fun logout(completion: OperationCompletion) = launch(completion) { runtime.logout() }
 
     override fun close() {

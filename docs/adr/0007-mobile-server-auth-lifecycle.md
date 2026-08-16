@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-08-12
 
+> The 30-day entitlement, entitlement repository, and restricted offline-shell decisions in items 4–8 are superseded for v1.0.0 by [ADR 0015](0015-mobile-v1-verified-session-without-offline-mode.md). Profile identity, switching, TLS, and Swift-boundary decisions remain active.
+
 ## Context
 
 Stage 0 proved the KMP transport, native shells, compatibility handshake, profile-scoped

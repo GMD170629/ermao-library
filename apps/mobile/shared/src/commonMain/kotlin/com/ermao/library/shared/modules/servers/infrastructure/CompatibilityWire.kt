@@ -28,6 +28,7 @@ data class ServerCapabilitiesWire(
     val readerV4: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
+    val workDetailManagement: Boolean = false,
 )
 
 fun ServerCompatibilityWire.toDomain(): ServerCompatibility = ServerCompatibility(
@@ -43,5 +44,6 @@ fun ServerCompatibilityWire.toDomain(): ServerCompatibility = ServerCompatibilit
         readerV4 = capabilities.readerV4,
         mediaRange = capabilities.mediaRange,
         managedOfflineDownloads = capabilities.managedOfflineDownloads,
+        workDetailManagement = capabilities.workDetailManagement,
     ),
 )

@@ -52,6 +52,7 @@ import com.ermao.library.ui.components.WarmPageContentMessage
 import com.ermao.library.ui.components.WarmPageContentMessageKind
 import com.ermao.library.ui.components.WarmPageStatusBanner
 import com.ermao.library.ui.components.WarmPageStatusBannerKind
+import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.text.NumberFormat
 import kotlinx.coroutines.Dispatchers
@@ -126,7 +127,13 @@ fun ContentCover(
     }
     Box(
         modifier = modifier
-            .aspectRatio(theme.metrics.coverAspectRatio)
+            .aspectRatio(
+                if (role == CoverRole.Hero) {
+                    theme.components.covers.heroAspectRatio
+                } else {
+                    theme.metrics.coverAspectRatio
+                },
+            )
             .clip(
                 RoundedCornerShape(
                     if (role == CoverRole.Hero) theme.radii.coverHero else theme.radii.coverCompact,
@@ -264,6 +271,7 @@ fun CoverProgress(
 ) {
     val theme = WarmPageThemeValues
     val progress = normalizedProgress(progressPercent)
+    val animatedProgress = rememberForwardProgress(progress)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -288,10 +296,10 @@ fun CoverProgress(
                     .clip(CircleShape)
                     .background(theme.colors.divider),
             ) {
-                if (progress > 0f) {
+                if (animatedProgress > 0f) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(progress)
+                            .fillMaxWidth(animatedProgress)
                             .height(theme.metrics.coverProgressHeight)
                             .clip(CircleShape)
                             .background(theme.colors.brandAccent),
@@ -323,29 +331,43 @@ fun ReadingProgress(
             .withOptionalStateDescription(stateDescription),
         verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(theme.metrics.readingProgressHeight)
-                .clip(CircleShape)
-                .background(theme.colors.divider),
-        ) {
-            if (progress > 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress)
-                        .height(theme.metrics.readingProgressHeight)
-                        .clip(CircleShape)
-                        .background(theme.colors.brandAccent),
-                )
-            }
-        }
+        ReadingProgressTrack(progressPercent)
         Text(
             text = percentLabel,
             color = theme.colors.textSecondary,
             style = theme.typography.caption.copy(fontFamily = FontFamily.Monospace),
             modifier = Modifier.align(Alignment.End),
         )
+    }
+}
+
+@Composable
+fun ReadingProgressTrack(
+    progressPercent: Int,
+    modifier: Modifier = Modifier,
+    stateDescription: String? = null,
+) {
+    val theme = WarmPageThemeValues
+    val progress = normalizedProgress(progressPercent)
+    val animatedProgress = rememberForwardProgress(progress)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(theme.metrics.readingProgressHeight)
+            .clip(CircleShape)
+            .background(theme.colors.divider)
+            .progressSemantics(progress)
+            .withOptionalStateDescription(stateDescription),
+    ) {
+        if (animatedProgress > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(animatedProgress)
+                    .height(theme.metrics.readingProgressHeight)
+                    .clip(CircleShape)
+                    .background(theme.colors.brandAccent),
+            )
+        }
     }
 }
 
@@ -356,18 +378,8 @@ internal fun responsiveCoverColumnCount(availableWidth: Dp, fontScale: Float): I
 fun ContentStatusBanner(freshness: ContentFreshness, modifier: Modifier = Modifier) {
     if (freshness == ContentFreshness.Fresh) return
     WarmPageStatusBanner(
-        kind = if (freshness == ContentFreshness.Cached) {
-            WarmPageStatusBannerKind.Offline
-        } else {
-            WarmPageStatusBannerKind.Stale
-        },
-        message = stringResource(
-            if (freshness == ContentFreshness.Cached) {
-                R.string.content_cached_banner
-            } else {
-                R.string.content_stale_banner
-            },
-        ),
+        kind = WarmPageStatusBannerKind.Stale,
+        message = stringResource(R.string.content_stale_banner),
         modifier = modifier,
     )
 }

@@ -514,12 +514,11 @@ class ReaderActivity : AppCompatActivity() {
     private suspend fun openManagedDownload(request: ManagedDownloadReaderRequest) {
         val application = application as ErmaoLibraryApplication
         val runtime = application.mobileRuntime
-        if (runtime.currentSession !is AppSession.Authenticated && runtime.currentSession !is AppSession.OfflineGrace) {
+        if (runtime.currentSession !is AppSession.Authenticated) {
             runtime.start()
         }
         val activeSession = when (val current = runtime.currentSession) {
             is AppSession.Authenticated -> ActiveReaderSession(current.profile, current.identity, current)
-            is AppSession.OfflineGrace -> ActiveReaderSession(current.profile, current.identity, null)
             else -> null
         }
         if (activeSession == null || activeSession.profile.id != request.profileId) {
@@ -793,7 +792,6 @@ class ReaderActivity : AppCompatActivity() {
         val runtime = (application as ErmaoLibraryApplication).mobileRuntime
         val namespace = when (val current = runtime.currentSession) {
             is AppSession.Authenticated -> current.identity.namespace
-            is AppSession.OfflineGrace -> current.identity.namespace
             else -> return
         }
         (application as ErmaoLibraryApplication).sharedDownloadCatalog.deleteArtifact(

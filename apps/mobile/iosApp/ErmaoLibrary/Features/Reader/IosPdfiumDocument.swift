@@ -10,8 +10,8 @@ enum IosPdfiumFeatureFlags {
     static let expectedRevision = "875172eae557a308d0c5b2be43822814c8a885bb"
     static let expectedWrapperABI: Int32 = 1
 
-    /// Flip only after the locked Android and iOS artifacts and both physical-device gates pass.
-    private static let rolloutEnabled = false
+    /// Enabled for physical-device acceptance; the locked native artifact and ABI check remain mandatory.
+    private static let rolloutEnabled = true
 
     static var nativePdfiumRangeV1: Bool {
         rolloutEnabled && nativeLibraryMatchesLock

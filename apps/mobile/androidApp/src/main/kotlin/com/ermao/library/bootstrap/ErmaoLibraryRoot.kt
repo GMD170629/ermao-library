@@ -17,7 +17,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ermao.library.R
 import com.ermao.library.features.auth.LoginScreen
 import com.ermao.library.features.auth.LoginEntryAlert
-import com.ermao.library.features.auth.OfflineEmptyShell
 import com.ermao.library.features.auth.ReauthenticateScreen
 import com.ermao.library.features.auth.SetupScreen
 import com.ermao.library.shared.modules.library.ContentRepository
@@ -31,21 +30,7 @@ import com.ermao.library.features.me.platform.AppLocaleController
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
 import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
 import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
-import com.ermao.library.features.downloads.application.DownloadCenterViewModel
-import com.ermao.library.features.downloads.application.DownloadedWorkViewModel
-import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
-import com.ermao.library.features.downloads.model.isSupportedNativeDownloadReader
-import com.ermao.library.features.downloads.ui.DownloadCenterScreen
-import com.ermao.library.features.downloads.ui.DownloadedWorkScreen
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import com.ermao.library.ui.theme.WarmPageThemeValues
-import kotlin.math.ceil
+import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
 
 @Composable
 fun ErmaoLibraryRoot(
@@ -55,6 +40,7 @@ fun ErmaoLibraryRoot(
     contentRepository: ContentRepository,
     personalSettingsRepository: PersonalSettingsRepository? = null,
     administrativeSettingsRepository: AdministrativeSettingsRepository? = null,
+    workManagementRepository: WorkManagementRepository? = null,
     downloadCatalog: AndroidDownloadCatalog? = null,
     downloadFiles: AtomicDownloadFileSink? = null,
     sharedDownloadCatalog: DownloadCatalogRepository? = null,
@@ -63,7 +49,6 @@ fun ErmaoLibraryRoot(
     val shellStateHolder = rememberSaveableStateHolder()
     val accountLocale = when (val session = state.session) {
         is AppSession.Authenticated -> PersonalSettingsLocale.fromWireValue(session.identity.locale.orEmpty())
-        is AppSession.OfflineGrace -> PersonalSettingsLocale.fromWireValue(session.identity.locale.orEmpty())
         else -> null
     }
     LaunchedEffect(accountLocale) {
@@ -80,7 +65,7 @@ fun ErmaoLibraryRoot(
             actions = actions,
             alert = null,
             modifier = modifier,
-            canClose = state.session is AppSession.Authenticated || state.session is AppSession.OfflineGrace,
+            canClose = state.session is AppSession.Authenticated,
         )
         return
     }
@@ -147,13 +132,10 @@ fun ErmaoLibraryRoot(
                 profile = session.profile,
                 userDisplayName = state.reauthUserName,
                 userEmail = state.reauthUserEmail,
-                entitlementExpiresAtEpochMillis = state.reauthEntitlementExpiresAt,
                 form = state.loginForm,
                 isAuthenticating = true,
-                serverUnavailable = state.reauthServerUnavailable,
                 onPasswordChanged = actions.onLoginPasswordChanged,
                 onLogin = {},
-                onEnterOffline = actions.onEnterOffline,
                 onSwitchServer = actions.onOpenServerCenter,
                 modifier = modifier,
             )
@@ -165,13 +147,10 @@ fun ErmaoLibraryRoot(
                 profile = session.profile,
                 userDisplayName = state.reauthUserName,
                 userEmail = state.reauthUserEmail ?: session.email,
-                entitlementExpiresAtEpochMillis = state.reauthEntitlementExpiresAt,
                 form = state.loginForm.copy(invalidCredentials = session.failureCode == INVALID_CREDENTIALS),
                 isAuthenticating = false,
-                serverUnavailable = state.reauthServerUnavailable,
                 onPasswordChanged = actions.onLoginPasswordChanged,
                 onLogin = { actions.onLogin(state.reauthUserEmail ?: session.email) },
-                onEnterOffline = actions.onEnterOffline,
                 onSwitchServer = actions.onOpenServerCenter,
                 modifier = modifier,
             )
@@ -202,6 +181,7 @@ fun ErmaoLibraryRoot(
             if (
                 personalSettingsRepository != null &&
                 administrativeSettingsRepository != null &&
+                workManagementRepository != null &&
                 localeController != null &&
                 downloadCatalog != null &&
                 downloadFiles != null &&
@@ -219,6 +199,7 @@ fun ErmaoLibraryRoot(
                         contentRepository = contentRepository,
                         personalSettingsRepository = personalSettingsRepository,
                         administrativeSettingsRepository = administrativeSettingsRepository,
+                        workManagementRepository = workManagementRepository,
                         downloadCatalog = downloadCatalog,
                         downloadFiles = downloadFiles,
                         sharedDownloadCatalog = sharedDownloadCatalog,
@@ -232,161 +213,23 @@ fun ErmaoLibraryRoot(
                 }
             }
         }
-        is AppSession.SessionUnavailable -> ReauthenticateScreen(
-            profile = session.profile,
-            userDisplayName = state.reauthUserName ?: session.lastKnownIdentity?.displayName,
-            userEmail = state.reauthUserEmail ?: session.lastKnownIdentity?.email,
-            entitlementExpiresAtEpochMillis = state.reauthEntitlementExpiresAt
-                ?: session.entitlementExpiresAtEpochMillis,
-            form = state.loginForm,
-            isAuthenticating = false,
-            serverUnavailable = true,
-            onPasswordChanged = actions.onLoginPasswordChanged,
-            onLogin = { actions.onLogin(state.reauthUserEmail ?: session.lastKnownIdentity?.email) },
-            onEnterOffline = actions.onEnterOffline,
-            onSwitchServer = actions.onOpenServerCenter,
-            modifier = modifier,
-        )
         is AppSession.SessionExpired -> ReauthenticateScreen(
             profile = session.profile,
             userDisplayName = state.reauthUserName ?: session.lastKnownIdentity?.displayName,
             userEmail = state.reauthUserEmail ?: session.lastKnownIdentity?.email,
-            entitlementExpiresAtEpochMillis = state.reauthEntitlementExpiresAt
-                ?: session.entitlementExpiresAtEpochMillis,
             form = state.loginForm,
             isAuthenticating = false,
-            serverUnavailable = false,
             onPasswordChanged = actions.onLoginPasswordChanged,
             onLogin = { actions.onLogin(state.reauthUserEmail ?: session.lastKnownIdentity?.email) },
-            onEnterOffline = actions.onEnterOffline,
             onSwitchServer = actions.onOpenServerCenter,
             modifier = modifier,
         )
-        is AppSession.OfflineGrace -> if (downloadCatalog != null && downloadFiles != null) {
-            OfflineDownloadsShell(
-                session = session,
-                downloadCatalog = downloadCatalog,
-                downloadFiles = downloadFiles,
-                onRetryAuthentication = actions.onRetrySession,
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        } else {
-            OfflineEmptyShell(
-                profile = session.profile,
-                userEmail = session.identity.email,
-                onRetryAuthentication = actions.onRetrySession,
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        }
         is AppSession.IncompatibleServer -> LoginEntry(
             state, actions,
             LoginEntryAlert.IncompatibleServer.takeIf { state.operationErrorCode != null },
             modifier,
         )
     }
-}
-
-@Composable
-private fun OfflineDownloadsShell(
-    session: AppSession.OfflineGrace,
-    downloadCatalog: AndroidDownloadCatalog,
-    downloadFiles: AtomicDownloadFileSink,
-    onRetryAuthentication: () -> Unit,
-    onSwitchServer: () -> Unit,
-    modifier: Modifier,
-) {
-    val namespace = AndroidDownloadNamespace(
-        session.identity.namespace.serverIdentity,
-        session.identity.namespace.userId,
-        session.identity.namespace.authorizationVersion,
-    )
-    val namespaceKey = "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
-    val appContext = LocalContext.current.applicationContext
-    var selectedWorkId by rememberSaveable(namespaceKey) { mutableStateOf<String?>(null) }
-    var showReaderUnavailable by rememberSaveable(namespaceKey) { mutableStateOf(false) }
-    if (showReaderUnavailable) {
-        BlockingServerStateScreen(
-            title = stringResource(R.string.reader_not_implemented_title),
-            message = stringResource(R.string.reader_not_implemented_message),
-            primaryLabel = stringResource(R.string.navigate_back),
-            onPrimary = { showReaderUnavailable = false },
-            modifier = modifier,
-        )
-        return
-    }
-    val workId = selectedWorkId
-    if (workId != null) {
-        val workViewModel: DownloadedWorkViewModel = viewModel(
-            key = "offline-download-work-$namespaceKey-$workId",
-            factory = DownloadedWorkViewModel.factory(downloadCatalog, namespace, workId) { record ->
-                downloadFiles.hasLocalArtifact(record.localReference)
-            },
-        )
-        val workState by workViewModel.uiState.collectAsStateWithLifecycle()
-        DownloadedWorkScreen(
-            state = workState,
-            onBack = { selectedWorkId = null },
-            onOpenVolume = { record ->
-                if (isSupportedNativeDownloadReader(record.readerType, record.format)) {
-                    appContext.startActivity(
-                        com.ermao.library.features.reader.presentation.ReaderActivity.createManagedDownloadIntent(
-                            context = appContext,
-                            profileId = session.profile.id,
-                            workId = record.workId,
-                            volumeId = record.volumeId,
-                            displayTitle = record.workTitle,
-                            localReference = checkNotNull(record.localReference),
-                            sourceFormat = record.format,
-                        ),
-                    )
-                } else {
-                    showReaderUnavailable = true
-                }
-            },
-            modifier = modifier,
-        )
-        return
-    }
-    val centerViewModel: DownloadCenterViewModel = viewModel(
-        key = "offline-downloads-$namespaceKey",
-        factory = DownloadCenterViewModel.factory(downloadCatalog, namespace) { record ->
-            downloadFiles.hasLocalArtifact(record.localReference)
-        },
-    )
-    val centerState by centerViewModel.uiState.collectAsStateWithLifecycle()
-    DownloadCenterScreen(
-        state = centerState,
-        onBack = {},
-        onQueryChanged = centerViewModel::updateQuery,
-        onClearQuery = centerViewModel::clearQuery,
-        onOpenWork = { selectedWorkId = it },
-        onRetry = centerViewModel::retry,
-        onCancelDownload = {},
-        onRetryDownload = {},
-        onRemoveDownload = {},
-        modifier = modifier,
-        showBackNavigation = false,
-        allowManagementActions = false,
-        offlineActions = {
-            val theme = WarmPageThemeValues
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three),
-                verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
-            ) {
-                Text(stringResource(R.string.offline_scope_message), color = theme.colors.textSecondary)
-                Row {
-                    TextButton(onClick = onRetryAuthentication) {
-                        Text(stringResource(R.string.offline_retry_authentication))
-                    }
-                    TextButton(onClick = onSwitchServer) {
-                        Text(stringResource(R.string.server_choose_other_action))
-                    }
-                }
-            }
-        },
-    )
 }
 
 private const val INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
@@ -413,7 +256,6 @@ data class MainActions(
     val onRefreshSessionAwaiting: suspend () -> Unit,
     val onPurgeCurrentNamespace: suspend () -> Unit,
     val onLogoutAwaiting: suspend (purgeNamespace: Boolean) -> Unit,
-    val onEnterOffline: () -> Unit,
     val onLogout: () -> Unit,
 )
 
@@ -430,8 +272,7 @@ private fun LoginEntry(
         currentProfileId = state.loginProfileId,
         savedAccountEmails = state.savedAccountEmails,
         form = state.loginForm,
-        isAuthenticating = state.operationInProgress || state.session is AppSession.CheckingServer ||
-            state.session is AppSession.Authenticating,
+        isAuthenticating = state.operationInProgress,
         alert = alert,
         unexpectedFailure = state.operationErrorCode == "RUNTIME_FAILURE",
         onServerAddressChanged = actions.onLoginServerAddressChanged,
@@ -443,16 +284,8 @@ private fun LoginEntry(
         onDismissAlert = actions.onDismissOperationError,
         onRetry = actions.onLoginEntry,
         onAcceptUnsafeSsl = actions.onAcceptLoginUnsafeTls,
-        offlineDaysRemaining = (state.session as? AppSession.SessionUnavailable)
-            ?.entitlementExpiresAtEpochMillis
-            ?.let {
-                ceil((it - System.currentTimeMillis()).coerceAtLeast(0).toDouble() / MILLIS_PER_DAY).toInt()
-            },
-        onEnterOffline = actions.onEnterOffline,
         canClose = canClose,
         onClose = actions.onCloseServerCenter,
         modifier = modifier,
     )
 }
-
-private const val MILLIS_PER_DAY = 86_400_000.0

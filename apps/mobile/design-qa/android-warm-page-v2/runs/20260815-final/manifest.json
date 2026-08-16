@@ -1,0 +1,27 @@
+{
+  "date": "2026-08-15",
+  "gitHead": "de3d303e4a7eb692e622c33bb29e748b4637e9ac",
+  "apk": "apps/mobile/androidApp/build/outputs/apk/debug/androidApp-debug.apk",
+  "apkSha256": "c07b79fea5b77f9463e71e18f9304f60ef7c58ec65c6551baad0840d0cdbfb49",
+  "packageName": "com.ermao.library",
+  "versionCode": 1,
+  "versionName": "0.1.0",
+  "avd": "Shuku_API_36",
+  "serial": "emulator-5554",
+  "api": 36,
+  "resolution": "1080x2400",
+  "densityDpi": 420,
+  "fontScale": 1.0,
+  "visualInstrumentation": {
+    "tests": 3,
+    "failures": 0,
+    "skipped": 0,
+    "fixtureCaptures": 34
+  },
+  "platformJourney": [
+    "home",
+    "library",
+    "work-detail"
+  ],
+  "designFidelityGate": "blocked-by-missing-authoritative-work-detail-references"
+}

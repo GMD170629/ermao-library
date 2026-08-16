@@ -30,9 +30,7 @@ class AppSessionSnapshotTest {
                 AppSessionKind.LoginFailed,
             AppSession.AccountDisabled(profile, "reader@example.com") to AppSessionKind.AccountDisabled,
             AppSession.Authenticated(profile, identity, authorization) to AppSessionKind.Authenticated,
-            AppSession.SessionUnavailable(profile, identity) to AppSessionKind.SessionUnavailable,
             AppSession.SessionExpired(profile, identity) to AppSessionKind.SessionExpired,
-            AppSession.OfflineGrace(profile, identity, 1_900_000_000_000) to AppSessionKind.OfflineGrace,
             AppSession.IncompatibleServer(draft, "UNSUPPORTED_SERVER_PROTOCOL") to
                 AppSessionKind.IncompatibleServer,
         )

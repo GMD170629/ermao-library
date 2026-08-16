@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shutil
 import zipfile
 from pathlib import Path
@@ -218,7 +219,10 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     assert resource_response.status_code == 200
     assert resource_response.headers["cache-control"] == "private, no-cache"
     assert "default-src 'none'" in resource_response.headers["content-security-policy"]
-    assert 'data-shuku-security-profile="web-v2"' in resource_response.text
+    source_path = test_settings.resolved_storage_root / source.path
+    with zipfile.ZipFile(source_path) as archive:
+        assert resource_response.content == archive.read("OEBPS/Text/chapter.xhtml")
+    assert 'data-shuku-security-profile="web-v2"' not in resource_response.text
     assert "天地玄黄" in resource_response.text
 
     head_response = client.head(
@@ -328,7 +332,7 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
     assert db_session.get(LibraryReadingUnit, "stale-publication-chapter") is None
 
 
-def test_reader_bootstrap_reports_invalid_publication_structure(
+def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
     client: TestClient,
     db_session: Session,
     test_settings: Settings,
@@ -343,9 +347,13 @@ def test_reader_bootstrap_reports_invalid_publication_structure(
     db_session.commit()
 
     response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    manifest_response = client.get(
+        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+    )
 
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "PUBLICATION_STRUCTURE_INVALID"
+    assert response.status_code == 200
+    assert "renderArtifact" not in response.json()["data"]["publication"]
+    assert manifest_response.status_code == 404
 
 
 def test_epub_publication_rejects_unindexed_and_traversal_resources(
@@ -379,6 +387,7 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     target = test_settings.resolved_storage_root / "library" / "exact.azw3"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixture, target)
+    source_hash_before = hashlib.sha256(target.read_bytes()).hexdigest()
     work = LibraryWork(
         id="work-mobi-publication",
         origin="MANUAL",
@@ -422,6 +431,7 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     assert manifest_response.status_code == 200
     manifest = manifest_response.json()
     assert manifest["readingOrder"][0]["href"] == "part00000.html"
+    assert manifest["readingOrder"][0]["type"] == "text/html"
     runtime = manifest["https://shuku.app/reader/runtime"]
     assert runtime == {
         "sourceSizeBytes": target.stat().st_size,
@@ -434,8 +444,13 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
         f"/api/reader/v4/volumes/{volume.id}/publication/part00000.html"
     )
     assert resource_response.status_code == 200
+    assert resource_response.headers["content-type"].startswith("text/html")
     assert "天地玄黄" in resource_response.text
+    assert hashlib.sha256(target.read_bytes()).hexdigest() == source_hash_before
     assert not list(test_settings.resolved_storage_root.rglob("*.epub"))
+    assert not (
+        test_settings.resolved_storage_root / "cache" / "publication-render"
+    ).exists()
 
 
 def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
@@ -445,6 +460,9 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
 ) -> None:
     _login(client, db_session)
     volume = _seed_txt(db_session, test_settings)
+    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_path = test_settings.resolved_storage_root / source.path
+    source_hash_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
 
     bootstrap_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
     manifest_response = client.get(
@@ -463,27 +481,16 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     assert publication_access["positionsUrl"] == (
         f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
     )
-    render_access = publication_access["renderArtifact"]
-    assert render_access["schemaVersion"] == 1
-    assert render_access["url"] == (
+    assert "renderArtifact" not in publication_access
+    retired_response = client.get(
         f"/api/reader/v4/volumes/{volume.id}/publication/render.epub"
     )
-    assert render_access["mimeType"] == "application/epub+zip"
-    assert render_access["sizeBytes"] > 0
-    assert "contentHash" not in render_access
-
-    render_response = client.get(render_access["url"])
-    assert render_response.status_code == 200
-    assert render_response.headers["content-type"].startswith("application/epub+zip")
-    assert len(render_response.content) == render_access["sizeBytes"]
-    assert render_response.headers["etag"].startswith('W/"')
+    assert retired_response.status_code == 404
     assert "publicationFingerprint" not in bootstrap
     assert "contentHash" not in bootstrap["files"][0]
 
     assert manifest_response.status_code == 200
     manifest = manifest_response.json()
-    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_path = test_settings.resolved_storage_root / source.path
     assert manifest["metadata"]["identifier"] == (
         f"urn:shuku:txt:{source.size_bytes}:{source_path.stat().st_mtime_ns}"
     )
@@ -545,3 +552,7 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     )
     assert missing_response.status_code == 404
     assert traversal_response.status_code == 404
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == source_hash_before
+    assert not (
+        test_settings.resolved_storage_root / "cache" / "publication-render"
+    ).exists()

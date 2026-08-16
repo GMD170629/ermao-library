@@ -144,27 +144,6 @@ final class PreviewMobileRuntime: MobileRuntimeClient {
     func retry() async throws -> RuntimeOperationOutcome { .success }
     func refreshCurrentSession() async throws -> RuntimeOperationOutcome { .success }
 
-    func enterOfflineMode() async throws -> RuntimeOperationOutcome {
-        guard let profile = currentSnapshot.profile else { throw previewFailure("NO_ACTIVE_SERVER") }
-        transition(
-            to: RuntimeSessionSnapshot(
-                phase: .offlineGrace,
-                profile: profile,
-                userID: currentSnapshot.userID,
-                userDisplayName: currentSnapshot.userDisplayName,
-                userEmail: currentSnapshot.userEmail,
-                entitlementExpiresAt: currentSnapshot.entitlementExpiresAt,
-                reasonCode: nil
-            )
-        )
-        return RuntimeOperationOutcome(
-            outcomeCode: "OFFLINE_MODE_ENTERED",
-            fieldViolations: [],
-            parameters: [:],
-            navigationDirective: .enterOfflineShell
-        )
-    }
-
     func logout() async throws -> RuntimeOperationOutcome {
         guard let profile = currentSnapshot.profile else { return .success }
         transition(to: signedOut(profile))

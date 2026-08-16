@@ -21,6 +21,8 @@ import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.modules.library.FacetQuery
 import com.ermao.library.shared.modules.library.FacetSort
 import com.ermao.library.shared.modules.library.WorkDetailQuery
+import com.ermao.library.shared.modules.library.WorkVolumePageQuery
+import com.ermao.library.shared.modules.library.WorkVolumePageRepository
 import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
@@ -34,7 +36,6 @@ import com.ermao.library.shared.modules.shelf.domain.ShelfResult
 import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
 import com.ermao.library.shared.modules.shelf.domain.ShelfErrorKind
 import com.ermao.library.ErmaoLibraryApplication
-import com.ermao.library.platform.persistence.AndroidContentSnapshotCache
 import com.ermao.library.shared.core.network.AppErrorKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,25 +84,6 @@ class FacetViewModel(
             try {
                 val facetSort = if (kind == LibraryScope.Series) FacetSort.SeriesIndex else FacetSort.RecentlyRead
                 val query = FacetQuery(kind.toFacetKind(), facetId, facetSort, nextPage)
-                when (val restored = repository.restoreFacet(context, query)) {
-                    is ContentResult.Content -> {
-                        val cached = restored.value
-                        val cachedWorks = cached.works.items.map { it.toCard() }
-                        mutableUiState.update { state ->
-                            state.copy(
-                                works = mergeWorks(if (reset) emptyList() else state.works, cachedWorks),
-                                facetName = cached.facet.name,
-                                total = cached.works.total,
-                                page = cached.works.page,
-                                totalPages = cached.works.totalPages,
-                                isLoading = false,
-                                isLoadingMore = false,
-                                freshness = restored.freshness(),
-                            )
-                        }
-                    }
-                    is ContentResult.Failure, null -> Unit
-                }
                 when (val result = repository.loadFacet(context, query)) {
                     is ContentResult.Content -> {
                         val works = result.value.works.items.map { it.toCard() }
@@ -167,6 +149,8 @@ data class WorkDetailUiState(
     val isSavingShelves: Boolean = false,
     val shelfErrorCode: String? = null,
     val shelfSaveCompleted: Boolean = false,
+    val isLoadingMoreVolumes: Boolean = false,
+    val volumePaginationErrorCode: String? = null,
 )
 
 class WorkDetailViewModel(
@@ -190,7 +174,6 @@ class WorkDetailViewModel(
                     mutableUiState.update { state ->
                         val content = state.content?.applying(update, state.selectedVolumeId) ?: return@update state
                         if (content === state.content) return@update state
-                        AndroidContentSnapshotCache.saveDetail(appContext, context, workId, content)
                         state.copy(content = content)
                     }
                 }
@@ -220,6 +203,57 @@ class WorkDetailViewModel(
     fun selectVolume(volumeId: String) {
         mutableUiState.update { it.copy(selectedVolumeId = volumeId) }
         load(mutableUiState.value.selectedMediaKind, volumeId, showBlockingLoading = false)
+    }
+
+    fun loadMoreVolumes() {
+        val state = mutableUiState.value
+        if (state.isLoadingMoreVolumes) return
+        val loader = repository as? WorkVolumePageRepository ?: return
+        val media = state.content?.media?.firstOrNull { it.kind == state.selectedMediaKind } ?: return
+        if (media.volumes.size >= media.volumeCount) return
+        val mediaVersionId = media.volumes.firstOrNull()?.mediaVersionId ?: return
+        val requestedMediaKind = media.kind
+        val pageSize = 24
+        val nextPage = (media.volumes.size / pageSize) + 1
+        mutableUiState.update { it.copy(isLoadingMoreVolumes = true, volumePaginationErrorCode = null) }
+        viewModelScope.launch {
+            when (val result = loader.loadWorkVolumes(
+                context,
+                WorkVolumePageQuery(workId, mediaVersionId, nextPage, pageSize),
+            )) {
+                is ContentResult.Content -> mutableUiState.update { current ->
+                    val currentContent = current.content ?: return@update current.copy(isLoadingMoreVolumes = false)
+                    val currentMedia = currentContent.media.firstOrNull { it.kind == requestedMediaKind }
+                    if (current.selectedMediaKind != requestedMediaKind ||
+                        currentMedia?.volumes?.firstOrNull()?.mediaVersionId != mediaVersionId
+                    ) return@update current.copy(isLoadingMoreVolumes = false)
+                    current.copy(
+                        isLoadingMoreVolumes = false,
+                        content = currentContent.copy(
+                            media = currentContent.media.map { candidate ->
+                                if (candidate.kind != requestedMediaKind) candidate else candidate.copy(
+                                    volumeCount = result.value.total,
+                                    volumes = (candidate.volumes + result.value.volumes.map { it.toUiContent() })
+                                        .distinctBy { it.id }
+                                        .sortedWith(compareBy({ it.sortOrder }, { it.id })),
+                                )
+                            },
+                        ),
+                    )
+                }
+                is ContentResult.Failure -> mutableUiState.update { current ->
+                    val currentMediaVersionId = current.content?.media
+                        ?.firstOrNull { it.kind == requestedMediaKind }
+                        ?.volumes?.firstOrNull()?.mediaVersionId
+                    current.copy(
+                        isLoadingMoreVolumes = false,
+                        volumePaginationErrorCode = result.error.code.takeIf {
+                            current.selectedMediaKind == requestedMediaKind && currentMediaVersionId == mediaVersionId
+                        },
+                    )
+                }
+            }
+        }
     }
 
     fun openShelfPicker() {
@@ -253,6 +287,10 @@ class WorkDetailViewModel(
 
     fun dismissShelfPicker() = mutableUiState.update {
         it.copy(isShelfPickerVisible = false, shelfErrorCode = null, shelfSaveCompleted = false)
+    }
+
+    fun consumeShelfSaveCompleted() = mutableUiState.update {
+        it.copy(shelfSaveCompleted = false)
     }
 
     fun toggleShelf(shelfId: String) = mutableUiState.update { state ->
@@ -310,15 +348,6 @@ class WorkDetailViewModel(
         mutableUiState.update { it.copy(isLoading = showBlockingLoading, errorCode = null) }
         viewModelScope.launch {
             try {
-                if (mediaKind == null && volumeId == null) AndroidContentSnapshotCache.loadDetail(appContext, context, workId)?.let { cached ->
-                    mutableUiState.update {
-                        it.copy(
-                            isLoading = false,
-                            content = cached.content,
-                            selectedMediaKind = cached.content.selectedMediaKind ?: cached.content.media.firstOrNull()?.kind,
-                        )
-                    }
-                }
                 val requestedKind = mediaKind?.let(::MediaKind)
                 when (val result = repository.loadWorkDetail(context, WorkDetailQuery(workId, requestedKind, volumeId))) {
                     is ContentResult.Content -> {
@@ -335,7 +364,6 @@ class WorkDetailViewModel(
                             ?.let(latestProgressUpdatesByVolumeId::get)
                             ?.let { baseContent.applying(it, selectedVolumeId) }
                             ?: baseContent
-                        AndroidContentSnapshotCache.saveDetail(appContext, context, workId, uiContent)
                         val shelfState = mutableUiState.value
                         mutableUiState.value = WorkDetailUiState(
                             isLoading = false,

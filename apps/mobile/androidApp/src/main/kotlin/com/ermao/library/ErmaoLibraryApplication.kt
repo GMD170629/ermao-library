@@ -10,6 +10,7 @@ import com.ermao.library.shared.createAndroidMobileRuntime
 import com.ermao.library.shared.modules.auth.MobileRuntime
 import com.ermao.library.shared.createAndroidPersonalSettingsRepository
 import com.ermao.library.shared.createAndroidAdministrativeSettingsRepository
+import com.ermao.library.shared.createAndroidWorkManagementRepository
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
@@ -17,6 +18,7 @@ import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSin
 import com.ermao.library.features.downloads.infrastructure.SharedDownloadCatalogAdapter
 import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.application.ReaderProgressPresentationCenter
+import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
 
 class ErmaoLibraryApplication : Application() {
     lateinit var mobileRuntime: MobileRuntime
@@ -28,6 +30,8 @@ class ErmaoLibraryApplication : Application() {
     lateinit var personalSettingsRepository: PersonalSettingsRepository
         private set
     lateinit var administrativeSettingsRepository: AdministrativeSettingsRepository
+        private set
+    lateinit var workManagementRepository: WorkManagementRepository
         private set
     lateinit var downloadCatalog: AndroidDownloadCatalog
         private set
@@ -45,6 +49,7 @@ class ErmaoLibraryApplication : Application() {
         contentRepository = createAndroidContentRepository(this)
         personalSettingsRepository = createAndroidPersonalSettingsRepository(this)
         administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(this)
+        workManagementRepository = createAndroidWorkManagementRepository(this)
         val downloadRoot = java.io.File(filesDir, "managed-downloads-v1")
         downloadCatalog = AndroidDownloadCatalog(downloadRoot)
         downloadFiles = AtomicDownloadFileSink(downloadRoot)
@@ -53,7 +58,7 @@ class ErmaoLibraryApplication : Application() {
         mobileRuntime = createAndroidMobileRuntime(
             context = this,
             profileRepository = mobileStore,
-            entitlementRepository = mobileStore,
+            verifiedSessionRepository = mobileStore,
         )
     }
 

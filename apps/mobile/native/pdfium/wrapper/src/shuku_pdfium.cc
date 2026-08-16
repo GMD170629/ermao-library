@@ -12,8 +12,14 @@
 
 namespace {
 
-std::mutex g_library_mutex;
 int g_library_references = 0;
+
+std::mutex& LibraryMutex() {
+  // PDFium treats exit-time destructors as build errors. This lock protects a
+  // process-wide library lifecycle and intentionally lives until process exit.
+  static std::mutex* const mutex = new std::mutex();
+  return *mutex;
+}
 
 struct FileAvailabilityContext {
   FX_FILEAVAIL api{};
@@ -116,7 +122,7 @@ ShukuPdfiumStatus LoadPage(ShukuPdfiumDocument* document,
 }  // namespace
 
 ShukuPdfiumStatus shuku_pdfium_initialize(void) {
-  std::lock_guard<std::mutex> lock(g_library_mutex);
+  std::lock_guard<std::mutex> lock(LibraryMutex());
   if (g_library_references++ == 0) {
     FPDF_LIBRARY_CONFIG config{};
     config.version = 2;
@@ -126,7 +132,7 @@ ShukuPdfiumStatus shuku_pdfium_initialize(void) {
 }
 
 void shuku_pdfium_shutdown(void) {
-  std::lock_guard<std::mutex> lock(g_library_mutex);
+  std::lock_guard<std::mutex> lock(LibraryMutex());
   if (g_library_references <= 0) {
     return;
   }

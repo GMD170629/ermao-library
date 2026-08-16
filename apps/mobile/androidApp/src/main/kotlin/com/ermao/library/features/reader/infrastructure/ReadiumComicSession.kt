@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
@@ -244,9 +245,9 @@ internal class ReadiumComicSession(
         }
     }
 
-    override fun goPrevious(): Boolean = navigator?.goBackward(animated = true) ?: false
+    override fun goPrevious(): Boolean = navigator?.goBackward(animated = navigationAnimationsEnabled()) ?: false
 
-    override fun goNext(): Boolean = navigator?.goForward(animated = true) ?: false
+    override fun goNext(): Boolean = navigator?.goForward(animated = navigationAnimationsEnabled()) ?: false
 
     override fun goTo(location: ReaderLocation): Boolean {
         val comic = location as? ComicReaderLocation ?: return false
@@ -255,7 +256,7 @@ internal class ReadiumComicSession(
             ?: return false
         val locator = publication?.let { locatorFor(page, it) } ?: return false
         expectedRestore = page
-        return navigator?.go(locator, animated = true) ?: false
+        return navigator?.go(locator, animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goToTotalProgression(totalProgression: Double): Boolean {
@@ -263,6 +264,9 @@ internal class ReadiumComicSession(
         val index = ((canonicalPages.lastIndex * totalProgression).toInt()).coerceIn(canonicalPages.indices)
         return goTo(canonicalPages[index].toLocation())
     }
+
+    private fun navigationAnimationsEnabled(): Boolean =
+        shouldAnimateAndroidReaderNavigation(_preferences.value, morphology)
 
     override fun dismissResumeNotice() {
         remoteTarget = null
@@ -285,7 +289,7 @@ internal class ReadiumComicSession(
         persistPreferences(updated)
     }
 
-    override fun toggleCurrentBookmark() = Unit
+    override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
 
     override fun removeBookmark(id: String) = Unit
 

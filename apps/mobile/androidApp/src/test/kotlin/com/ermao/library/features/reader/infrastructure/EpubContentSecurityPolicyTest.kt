@@ -54,8 +54,8 @@ class EpubContentSecurityPolicyTest {
         assertTrue(output.contains("onload="))
         assertTrue(output.contains("javascript:"))
         assertTrue(output.contains("href=\"https://example.com\""))
-        assertTrue(output.contains("data-shuku-security-profile=\"android-v2\""))
-        assertTrue(output.contains("script-src https://readium_assets"))
+        assertTrue(output.contains("data-shuku-security-profile=\"android-v3\""))
+        assertTrue(output.contains("script-src https://*/readium/scripts/readium-reflowable.js"))
         assertTrue(!output.contains("http-equiv=\"refresh\""))
     }
 
@@ -104,7 +104,7 @@ class EpubContentSecurityPolicyTest {
         """.trimIndent()
 
         val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
-        val profileIndex = decorated.indexOf("data-shuku-security-profile=\"android-v2\"")
+        val profileIndex = decorated.indexOf("data-shuku-security-profile=\"android-v3\"")
 
         assertTrue(profileIndex > decorated.indexOf("<!-- <head>"))
         assertTrue(profileIndex < decorated.indexOf("<title>Real</title>"))

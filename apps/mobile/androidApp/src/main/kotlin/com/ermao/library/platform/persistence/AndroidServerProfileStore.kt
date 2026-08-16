@@ -6,9 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.ermao.library.shared.modules.auth.application.OfflineEntitlementRepository
-import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
-import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
+import com.ermao.library.shared.modules.auth.application.VerifiedSessionRepository
+import com.ermao.library.shared.modules.auth.domain.VerifiedSessionRecord
 import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
@@ -70,7 +69,7 @@ class AndroidServerProfileStore(
         explicitNulls = false
         encodeDefaults = true
     },
-) : ServerProfileRepository, OfflineEntitlementRepository {
+) : ServerProfileRepository, VerifiedSessionRepository {
     private val dataStore = dataStoreOverride ?: context.applicationContext.serverProfilesDataStore
 
     override suspend fun profiles(): List<ServerProfile> {
@@ -99,28 +98,18 @@ class AndroidServerProfileStore(
         }
     }
 
-    override suspend fun load(profileId: String): ValidatedSessionRecord? = dataStore.data.first()[ENTITLEMENTS]
-        ?.let(::decodeEntitlements)
+    override suspend fun load(profileId: String): VerifiedSessionRecord? = dataStore.data.first()[VERIFIED_SESSIONS]
+        ?.let(::decodeVerifiedSessions)
         ?.get(profileId)
 
-    override suspend fun save(record: ValidatedSessionRecord) {
+    override suspend fun save(record: VerifiedSessionRecord) {
         dataStore.edit { preferences ->
-            val existing = preferences[ENTITLEMENTS]?.let(::decodeEntitlements).orEmpty()
-            preferences[ENTITLEMENTS] = json.encodeToString(existing + (record.profileId to record))
+            val existing = preferences[VERIFIED_SESSIONS]?.let(::decodeVerifiedSessions).orEmpty()
+            preferences[VERIFIED_SESSIONS] = json.encodeToString(existing + (record.profileId to record))
         }
     }
 
-    override suspend fun revoke(profileId: String) {
-        dataStore.edit { preferences ->
-            val existing = preferences[ENTITLEMENTS]?.let(::decodeEntitlements).orEmpty()
-            val record = existing[profileId] ?: return@edit
-            preferences[ENTITLEMENTS] = json.encodeToString(
-                existing + (profileId to record.copy(status = OfflineEntitlementStatus.RevokedLocally)),
-            )
-        }
-    }
-
-    /** Removing a server profile also removes its entitlement in the same DataStore transaction. */
+    /** Removing a server profile also removes its verified session in the same DataStore transaction. */
     override suspend fun remove(profileId: String) {
         require(profileId.isNotBlank()) { "profileId must not be blank" }
         dataStore.edit { preferences ->
@@ -133,17 +122,17 @@ class AndroidServerProfileStore(
                     profiles = remaining,
                 ),
             )
-            val entitlements = preferences[ENTITLEMENTS]?.let(::decodeEntitlements).orEmpty() - profileId
-            preferences[ENTITLEMENTS] = json.encodeToString(entitlements)
+            val sessions = preferences[VERIFIED_SESSIONS]?.let(::decodeVerifiedSessions).orEmpty() - profileId
+            preferences[VERIFIED_SESSIONS] = json.encodeToString(sessions)
         }
     }
 
-    /** Entitlement cleanup must never remove the owning server profile. */
-    override suspend fun removeEntitlement(profileId: String) {
+    /** Verified-session cleanup must never remove the owning server profile. */
+    override suspend fun removeSession(profileId: String) {
         require(profileId.isNotBlank()) { "profileId must not be blank" }
         dataStore.edit { preferences ->
-            val entitlements = preferences[ENTITLEMENTS]?.let(::decodeEntitlements).orEmpty() - profileId
-            preferences[ENTITLEMENTS] = json.encodeToString(entitlements)
+            val sessions = preferences[VERIFIED_SESSIONS]?.let(::decodeVerifiedSessions).orEmpty() - profileId
+            preferences[VERIFIED_SESSIONS] = json.encodeToString(sessions)
         }
     }
 
@@ -185,10 +174,10 @@ class AndroidServerProfileStore(
         preferences.remove(LEGACY_PROFILES)
     }
 
-    private fun decodeEntitlements(payload: String): Map<String, ValidatedSessionRecord> = storageDecode {
-        json.decodeFromString<Map<String, ValidatedSessionRecord>>(payload).also { records ->
+    private fun decodeVerifiedSessions(payload: String): Map<String, VerifiedSessionRecord> = storageDecode {
+        json.decodeFromString<Map<String, VerifiedSessionRecord>>(payload).also { records ->
             require(records.all { (profileId, record) -> profileId == record.profileId }) {
-                "Entitlement profile key mismatch"
+                "Verified-session profile key mismatch"
             }
         }
     }
@@ -227,7 +216,7 @@ class AndroidServerProfileStore(
         const val PROFILE_SCHEMA_VERSION = 2
         val LEGACY_PROFILES = legacyProfilesPayloadKey
         val PROFILES_V2 = profilesV2PayloadKey
-        val ENTITLEMENTS = stringPreferencesKey("offline_entitlements_json_v1")
+        val VERIFIED_SESSIONS = stringPreferencesKey("verified_sessions_json_v1")
     }
 }
 

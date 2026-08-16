@@ -77,11 +77,6 @@ class Settings(BaseSettings):
     def conversion_temp_root(self) -> Path:
         return self.resolved_storage_root / "temp" / "conversions"
 
-    @property
-    def publication_render_cache_root(self) -> Path:
-        return self.resolved_storage_root / "cache" / "publication-render"
-
-
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

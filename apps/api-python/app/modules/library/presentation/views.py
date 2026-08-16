@@ -22,6 +22,7 @@ from app.bootstrap.library import (
 from app.bootstrap.organize import organize_jobs
 from app.bootstrap.system import get_setting
 from app.contracts.media_capabilities import (
+    ReaderType,
     kindle_send_available_for_format,
     reader_type_for_format,
 )
@@ -646,6 +647,7 @@ def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
         "coverUrl": book["coverUrl"],
         "recentMediaKind": book.get("recentMediaKind"),
         "continueVolumeId": book.get("continueVolumeId"),
+        "continueVolumeProgress": book.get("continueVolumeProgress", 0.0),
         "completed": book["completed"],
         "mediaVersions": [
             {
@@ -1134,11 +1136,16 @@ def _active_media_view(
     )
     if selected_volume is None:
         return None, empty_navigation
-    unit_rows = db.scalars(
-        select(LibraryReadingUnit)
-        .where(LibraryReadingUnit.volume_id == volume_id)
-        .order_by(LibraryReadingUnit.sort_order, LibraryReadingUnit.id)
-    ).all()
+    reader_type = str(selected_volume.get("readerType") or ReaderType.REFLOWABLE)
+    unit_rows = (
+        db.scalars(
+            select(LibraryReadingUnit)
+            .where(LibraryReadingUnit.volume_id == volume_id)
+            .order_by(LibraryReadingUnit.sort_order, LibraryReadingUnit.id)
+        ).all()
+        if reader_type == ReaderType.REFLOWABLE
+        else []
+    )
     total = len(unit_rows)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, unit_page), total_pages)
@@ -1162,7 +1169,6 @@ def _active_media_view(
     )
     percent = float(selected_volume.get("progress") or 0)
     files = list(selected_volume.get("files") or [])
-    reader_type = str(selected_volume.get("readerType") or "reflowable")
     action_href = (
         f"/listen/{quote(volume_id, safe='')}"
         if reader_type == "audio"

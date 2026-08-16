@@ -7,7 +7,6 @@ final class SessionStore: ObservableObject {
     @Published private(set) var serverProfiles: [RuntimeServerProfile]
     @Published private(set) var isSelectingServer = false
     @Published private(set) var isReauthenticating = false
-    @Published private(set) var reauthenticationServerUnavailable = false
     @Published private(set) var reauthenticationUserDisplayName: String?
     @Published private(set) var reauthenticationUserEmail: String?
     @Published private(set) var operationFailure: RuntimeOperationFailure?
@@ -93,7 +92,6 @@ final class SessionStore: ObservableObject {
     func requireReauthentication() {
         captureReauthenticationIdentity(from: snapshot)
         isReauthenticating = true
-        reauthenticationServerUnavailable = false
         refreshForForeground()
     }
 
@@ -256,10 +254,6 @@ final class SessionStore: ObservableObject {
         perform { [runtime] in try await runtime.retry() }
     }
 
-    func enterOfflineMode() {
-        perform { [runtime] in try await runtime.enterOfflineMode() }
-    }
-
     func logout() {
         Task {
             do {
@@ -358,7 +352,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func receive(_ newSnapshot: RuntimeSessionSnapshot) {
-        if [.sessionExpired, .sessionUnavailable].contains(newSnapshot.phase) {
+        if newSnapshot.phase == .sessionExpired {
             captureReauthenticationIdentity(from: newSnapshot)
         }
         snapshot = newSnapshot
@@ -367,7 +361,7 @@ final class SessionStore: ObservableObject {
             serverDisplayName = profile.displayName
             serverBaseURL = profile.baseURL
             selectedLoginProfileID = profile.id
-            if [.signedOut, .sessionExpired, .sessionUnavailable].contains(newSnapshot.phase) {
+            if [.signedOut, .sessionExpired].contains(newSnapshot.phase) {
                 populateLoginForm(from: profile)
             }
         }
@@ -376,20 +370,15 @@ final class SessionStore: ObservableObject {
             editingProfileID = nil
             isSelectingServer = false
         }
-        if [.authenticated, .offlineGrace, .accountDisabled].contains(newSnapshot.phase) {
+        if [.authenticated, .accountDisabled].contains(newSnapshot.phase) {
             isSelectingServer = false
             password = ""
         }
         switch newSnapshot.phase {
         case .sessionExpired:
             isReauthenticating = true
-            reauthenticationServerUnavailable = false
-        case .sessionUnavailable:
-            isReauthenticating = true
-            reauthenticationServerUnavailable = true
-        case .authenticated, .signedOut, .accountDisabled, .offlineGrace:
+        case .authenticated, .signedOut, .accountDisabled:
             isReauthenticating = false
-            reauthenticationServerUnavailable = false
         default:
             break
         }
@@ -523,7 +512,7 @@ final class SessionStore: ObservableObject {
             isSelectingServer = false
         case .showServerProfiles:
             isSelectingServer = true
-        case .hidePrivateShell, .enterOfflineShell:
+        case .hidePrivateShell:
             navigationGeneration += 1
             isSelectingServer = false
         case .keepCurrentStacks, .restoreSelectedTab, .revalidatePrivateShell:
@@ -544,7 +533,7 @@ private extension SessionPhase {
 
     var canRefreshSession: Bool {
         switch self {
-        case .authenticated, .offlineGrace, .sessionUnavailable:
+        case .authenticated:
             true
         default:
             false

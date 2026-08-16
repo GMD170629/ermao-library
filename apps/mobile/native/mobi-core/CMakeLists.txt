@@ -5,7 +5,7 @@ option(ERMAO_MOBI_BUILD_TESTS "Build host ABI and corpus tests" ON)
 option(ERMAO_MOBI_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(ERMAO_MOBI_BUILD_FUZZER "Build the Clang libFuzzer parsing entry point" OFF)
 
-find_package(ZLIB REQUIRED)
+find_package(ZLIB QUIET)
 
 set(ERMAO_MOBI_VENDOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/Sources/CLibMobi")
 set(ERMAO_MOBI_SOURCES
@@ -24,6 +24,10 @@ set(ERMAO_MOBI_SOURCES
     "${ERMAO_MOBI_VENDOR_ROOT}/src/xmlwriter.c"
     "${ERMAO_MOBI_VENDOR_ROOT}/src/ermao_mobi.c"
 )
+
+if(NOT ZLIB_FOUND)
+    list(APPEND ERMAO_MOBI_SOURCES "${ERMAO_MOBI_VENDOR_ROOT}/src/miniz.c")
+endif()
 
 add_library(ermao_mobi_core STATIC ${ERMAO_MOBI_SOURCES})
 add_library(Ermao::MobiCore ALIAS ermao_mobi_core)
@@ -54,7 +58,6 @@ target_include_directories(ermao_mobi_core_shared
 target_compile_definitions(ermao_mobi_core PRIVATE
     PACKAGE_VERSION="0.12"
     USE_XMLWRITER
-    USE_ZLIB
     HAVE_STRDUP
     HAVE_UNISTD_H
     MOBI_INLINE=inline
@@ -62,13 +65,19 @@ target_compile_definitions(ermao_mobi_core PRIVATE
 target_compile_definitions(ermao_mobi_core_shared PRIVATE
     PACKAGE_VERSION="0.12"
     USE_XMLWRITER
-    USE_ZLIB
     HAVE_STRDUP
     HAVE_UNISTD_H
     MOBI_INLINE=inline
 )
-target_link_libraries(ermao_mobi_core PUBLIC ZLIB::ZLIB)
-target_link_libraries(ermao_mobi_core_shared PUBLIC ZLIB::ZLIB)
+if(ZLIB_FOUND)
+    target_compile_definitions(ermao_mobi_core PRIVATE USE_ZLIB)
+    target_compile_definitions(ermao_mobi_core_shared PRIVATE USE_ZLIB)
+    target_link_libraries(ermao_mobi_core PUBLIC ZLIB::ZLIB)
+    target_link_libraries(ermao_mobi_core_shared PUBLIC ZLIB::ZLIB)
+else()
+    target_compile_definitions(ermao_mobi_core PRIVATE USE_MINIZ)
+    target_compile_definitions(ermao_mobi_core_shared PRIVATE USE_MINIZ)
+endif()
 
 if(ERMAO_MOBI_ENABLE_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(ermao_mobi_core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)

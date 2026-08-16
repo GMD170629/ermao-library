@@ -197,9 +197,9 @@ def test_0024_upgrade_clears_only_reflowable_chapters_and_adds_empty_cache_state
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
 
-        assert head_revision(engine) == "0026_publication_render_cache"
+        assert head_revision(engine) == "0028_remove_publication_render_cache"
         assert "PublicationNavigationCache" in inspect(engine).get_table_names()
-        assert "PublicationRenderCache" in inspect(engine).get_table_names()
+        assert "PublicationRenderCache" not in inspect(engine).get_table_names()
         with Session(engine) as session:
             assert session.get(LibraryReadingUnit, "epub-chapter") is None
             assert session.get(LibraryReadingUnit, "epub-page") is not None

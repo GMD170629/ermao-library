@@ -52,7 +52,6 @@ sealed interface LibraryContentPhase {
     data object Ready : LibraryContentPhase
     data object Empty : LibraryContentPhase
     data class InitialError(val errorCode: String) : LibraryContentPhase
-    data object OfflineCached : LibraryContentPhase
     data object PermissionRevalidating : LibraryContentPhase
     data object Inaccessible : LibraryContentPhase
 }
@@ -219,11 +218,7 @@ class LibraryDiscoveryRuntime(
             }
             current.copy(
                 snapshot = current.snapshot.copy(loadedPageWindow = nextWindow),
-                contentPhase = when {
-                    isEmpty -> LibraryContentPhase.Empty
-                    source == ContentSource.Cache -> LibraryContentPhase.OfflineCached
-                    else -> LibraryContentPhase.Ready
-                },
+                contentPhase = if (isEmpty) LibraryContentPhase.Empty else LibraryContentPhase.Ready,
                 refreshPhase = if (isStale) RefreshPhase.StaleRefreshing else RefreshPhase.Idle,
                 paginationPhase = PaginationPhase.Idle,
             )
@@ -236,11 +231,6 @@ class LibraryDiscoveryRuntime(
         updateScope(token.scope) { current ->
             if (token.page > 1) {
                 current.copy(paginationPhase = PaginationPhase.Failed(token.requestKey, errorCode))
-            } else if (hasVisibleContent) {
-                current.copy(
-                    refreshPhase = RefreshPhase.Idle,
-                    contentPhase = LibraryContentPhase.OfflineCached,
-                )
             } else {
                 current.copy(
                     refreshPhase = RefreshPhase.Idle,

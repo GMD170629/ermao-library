@@ -1,7 +1,7 @@
 import type { FetchImplementation } from '@readium/shared';
 
-const WEB_SECURITY_PROFILE = 'data-shuku-security-profile="web-v2"';
 const REQUIRED_CSP_DIRECTIVES = [
+  "default-src 'none'",
   "connect-src 'none'",
   "form-action 'none'",
   "frame-src 'none'",
@@ -14,10 +14,11 @@ function isMarkup(response: Response) {
   return mediaType === 'application/xhtml+xml' || mediaType === 'text/html';
 }
 
-async function assertSecureMarkup(response: Response) {
-  const markup = await response.clone().text();
-  if (!markup.includes(WEB_SECURITY_PROFILE)
-    || REQUIRED_CSP_DIRECTIVES.some((directive) => !markup.includes(directive))) {
+function assertSecureMarkupResponse(response: Response) {
+  const contentSecurityPolicy = response.headers.get('content-security-policy') ?? '';
+  const contentTypeOptions = response.headers.get('x-content-type-options')?.toLowerCase();
+  if (contentTypeOptions !== 'nosniff'
+    || REQUIRED_CSP_DIRECTIVES.some((directive) => !contentSecurityPolicy.includes(directive))) {
     throw new Error('READIUM_PUBLICATION_SECURITY_PROFILE_MISSING');
   }
 }
@@ -27,7 +28,7 @@ export function createSecurePublicationFetch(fetchImplementation: FetchImplement
   return async (input, init) => {
     const response = await fetchImplementation(input, init);
     const method = init?.method?.toUpperCase() ?? 'GET';
-    if (method === 'GET' && response.ok && isMarkup(response)) await assertSecureMarkup(response);
+    if (method === 'GET' && response.ok && isMarkup(response)) assertSecureMarkupResponse(response);
     return response;
   };
 }

@@ -451,11 +451,6 @@ class ReaderPublicationAccess(ReaderWireModel):
         default=None,
         alias="downloadArtifact",
     )
-    render_artifact: ReaderRenderArtifact | None = Field(
-        default=None,
-        alias="renderArtifact",
-    )
-
     @model_validator(mode="after")
     def validate_kind(self) -> ReaderPublicationAccess:
         if self.kind == "reflowable":
@@ -468,7 +463,6 @@ class ReaderPublicationAccess(ReaderWireModel):
             or self.page_url_template is None
             or self.image_variants != ["original", "data-saver"]
             or self.download_artifact is None
-            or self.render_artifact is not None
         ):
             raise ValueError("Invalid comic publication access")
         return self
@@ -513,13 +507,6 @@ class ReaderComicManifestData(ReaderWireModel):
 class ReaderComicManifestResponse(ReaderWireModel):
     ok: Literal[True] = True
     data: ReaderComicManifestData
-
-
-class ReaderRenderArtifact(ReaderWireModel):
-    schema_version: Literal[1] = Field(1, alias="schemaVersion")
-    url: str
-    mime_type: Literal["application/epub+zip"] = Field(alias="mimeType")
-    size_bytes: int = Field(alias="sizeBytes", gt=0)
 
 
 class ReaderProgressSnapshot(ReaderWireModel):

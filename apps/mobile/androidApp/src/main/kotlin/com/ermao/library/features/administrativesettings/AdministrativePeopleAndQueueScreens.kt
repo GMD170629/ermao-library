@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.rememberForwardProgress
 
 private enum class QueueFilter { All, Running, Failed }
 
@@ -123,7 +124,10 @@ private fun QueueTaskRow(
             }
             Text(task.status.copy().text(locale), color = task.status.color())
         }
-        task.progress?.let { LinearProgressIndicator(progress = { it }, Modifier.fillMaxWidth().padding(top = 8.dp)) }
+        task.progress?.let { progress ->
+            val animatedProgress = rememberForwardProgress(progress, progressIdentity = task.id)
+            LinearProgressIndicator(progress = { animatedProgress }, Modifier.fillMaxWidth().padding(top = 8.dp))
+        }
         task.statusCode?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running)) TextButton(onClick = onCancel) { Text(AdministrativeCopy.CancelTask.text(locale)) }

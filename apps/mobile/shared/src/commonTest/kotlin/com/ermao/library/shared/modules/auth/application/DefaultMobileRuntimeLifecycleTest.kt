@@ -10,10 +10,9 @@ import com.ermao.library.shared.modules.auth.RuntimeOperationResult
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import com.ermao.library.shared.modules.auth.domain.Authorization
 import com.ermao.library.shared.modules.auth.domain.EpochMillisClock
-import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.auth.domain.SessionIdentity
-import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
+import com.ermao.library.shared.modules.auth.domain.VerifiedSessionRecord
 import com.ermao.library.shared.modules.servers.application.InMemoryServerProfileRepository
 import com.ermao.library.shared.modules.servers.application.ServerProbe
 import com.ermao.library.shared.modules.servers.application.ServerProbeResult
@@ -24,9 +23,102 @@ import com.ermao.library.shared.modules.servers.domain.TlsMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 
 class DefaultMobileRuntimeLifecycleTest {
+    @Test
+    fun savedVerifiedSessionPublishesAuthenticatedBeforeNetworkValidationCompletes() = runBlocking {
+        val activeProfile = profile("profile-a", "server-a", true)
+        val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
+        val verifiedSessions = InMemoryVerifiedSessionRepository()
+        val identity = identity(activeProfile)
+        val authorization = authorization()
+        verifiedSessions.save(
+            VerifiedSessionRecord.from(activeProfile.id, identity, authorization, validatedAtEpochMillis = 500),
+        )
+        val probeGate = CompletableDeferred<Unit>()
+        val runtime = runtime(
+            profiles = profiles,
+            verifiedSessions = verifiedSessions,
+            probe = ServerProbe {
+                probeGate.await()
+                ServerProbeResult.Failure(AppError(AppErrorKind.Timeout, "TIMEOUT"))
+            },
+        )
+
+        val startup = async { runtime.start() }
+        while (runtime.currentSession !is AppSession.Authenticated) yield()
+
+        val restored = assertIs<AppSession.Authenticated>(runtime.currentSession)
+        assertEquals(identity, restored.identity)
+        assertEquals(authorization, restored.authorization)
+        probeGate.complete(Unit)
+        assertIs<RuntimeOperationResult.Success>(startup.await())
+        assertIs<AppSession.Authenticated>(runtime.currentSession)
+        Unit
+    }
+
+    @Test
+    fun serverIdentityMismatchClearsSavedSessionAndCookie() = runBlocking {
+        val activeProfile = profile("profile-a", "server-a", true)
+        val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
+        val verifiedSessions = InMemoryVerifiedSessionRepository().also {
+            it.save(
+                VerifiedSessionRecord.from(
+                    activeProfile.id,
+                    identity(activeProfile),
+                    authorization(),
+                    validatedAtEpochMillis = 500,
+                ),
+            )
+        }
+        val cookies = RecordingCookieVault()
+        val runtime = runtime(
+            profiles = profiles,
+            verifiedSessions = verifiedSessions,
+            cookieVault = cookies,
+            probe = ServerProbe { ServerProbeResult.Compatible("different-server") },
+        )
+
+        assertIs<RuntimeOperationResult.Failure>(runtime.start())
+
+        assertIs<AppSession.IncompatibleServer>(runtime.currentSession)
+        assertEquals(null, verifiedSessions.load(activeProfile.id))
+        assertEquals(true, cookies.cleared)
+    }
+
+    @Test
+    fun setupStatusRegressionDoesNotInvalidateAnAlreadyVerifiedSession() = runBlocking {
+        val activeProfile = profile("profile-a", "server-a", true)
+        val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
+        val verifiedSessions = InMemoryVerifiedSessionRepository().also {
+            it.save(
+                VerifiedSessionRecord.from(
+                    activeProfile.id,
+                    identity(activeProfile),
+                    authorization(),
+                    validatedAtEpochMillis = 500,
+                ),
+            )
+        }
+        val cookies = RecordingCookieVault()
+        val runtime = runtime(
+            profiles = profiles,
+            verifiedSessions = verifiedSessions,
+            cookieVault = cookies,
+            gateway = FakeAuthGateway(setupCompleted = false),
+        )
+
+        assertIs<RuntimeOperationResult.Success>(runtime.start())
+
+        assertIs<AppSession.Authenticated>(runtime.currentSession)
+        assertEquals(false, cookies.cleared)
+        assertEquals(true, verifiedSessions.load(activeProfile.id) != null)
+    }
+
     @Test
     fun failedTargetPreflightKeepsThePreviousServerActive() = runBlocking {
         val profiles = profiles()
@@ -49,10 +141,10 @@ class DefaultMobileRuntimeLifecycleTest {
     }
 
     @Test
-    fun entitlementFailureAfterActivationCompensatesToThePreviousServer() = runBlocking {
+    fun verifiedSessionFailureAfterActivationCompensatesToThePreviousServer() = runBlocking {
         val profiles = profiles()
-        val entitlements = FailingTargetEntitlements("profile-b")
-        val runtime = runtime(profiles = profiles, entitlements = entitlements)
+        val verifiedSessions = FailingTargetVerifiedSessions("profile-b")
+        val runtime = runtime(profiles = profiles, verifiedSessions = verifiedSessions)
         assertIs<RuntimeOperationResult.Success>(runtime.start())
 
         assertIs<RuntimeOperationResult.Failure>(runtime.switchServer("profile-b"))
@@ -62,39 +154,36 @@ class DefaultMobileRuntimeLifecycleTest {
     }
 
     @Test
-    fun logoutCallsTheServerBeforeClearingTheCookieAndRevokesOfflineAccessOnRemoteFailure() = runBlocking {
+    fun logoutCallsTheServerBeforeClearingTheCookieAndRemovesVerifiedSessionOnRemoteFailure() = runBlocking {
         val profiles = profiles()
-        val entitlements = InMemoryOfflineEntitlementRepository()
+        val verifiedSessions = InMemoryVerifiedSessionRepository()
         val cookieVault = RecordingCookieVault()
         val gateway = FakeAuthGateway(
             onLogout = { check(!cookieVault.cleared) { "Cookie cleared before remote logout" } },
             logoutResult = ApiResult.Failure(AppError(AppErrorKind.ServiceUnavailable, "UNAVAILABLE")),
         )
-        val runtime = runtime(profiles, entitlements, cookieVault = cookieVault, gateway = gateway)
+        val runtime = runtime(profiles, verifiedSessions, cookieVault = cookieVault, gateway = gateway)
         assertIs<RuntimeOperationResult.Success>(runtime.start())
 
         val result = assertIs<RuntimeOperationResult.Success>(runtime.logout())
 
         assertEquals("LOGGED_OUT_REMOTE_UNCONFIRMED", result.outcomeCode)
         assertEquals(true, cookieVault.cleared)
-        assertEquals(
-            OfflineEntitlementStatus.RevokedLocally,
-            entitlements.load("profile-a")?.status,
-        )
+        assertEquals(null, verifiedSessions.load("profile-a"))
         assertIs<AppSession.SignedOut>(runtime.currentSession)
         Unit
     }
 
     private fun runtime(
         profiles: InMemoryServerProfileRepository,
-        entitlements: OfflineEntitlementRepository = InMemoryOfflineEntitlementRepository(),
+        verifiedSessions: VerifiedSessionRepository = InMemoryVerifiedSessionRepository(),
         probe: ServerProbe = ServerProbe { ServerProbeResult.Compatible(it.serverIdentity) },
         cookieVault: CookieVault = InMemoryCookieVault(),
         gateway: AuthGateway = FakeAuthGateway(),
     ) = DefaultMobileRuntime(
         profileRepository = profiles,
         cookieVault = cookieVault,
-        entitlementRepository = entitlements,
+        verifiedSessionRepository = verifiedSessions,
         serverProbe = probe,
         authGateway = gateway,
         clock = EpochMillisClock { 1_000 },
@@ -113,8 +202,10 @@ class DefaultMobileRuntimeLifecycleTest {
     private class FakeAuthGateway(
         private val onLogout: () -> Unit = {},
         private val logoutResult: ApiResult<Unit> = ApiResult.Success(Unit),
+        private val setupCompleted: Boolean = true,
     ) : AuthGateway {
-        override suspend fun setupStatus(profile: ServerProfile): ApiResult<Boolean> = ApiResult.Success(true)
+        override suspend fun setupStatus(profile: ServerProfile): ApiResult<Boolean> =
+            ApiResult.Success(setupCompleted)
 
         override suspend fun setupInitialAdmin(
             profile: ServerProfile,
@@ -167,20 +258,27 @@ class DefaultMobileRuntimeLifecycleTest {
         }
     }
 
-    private class FailingTargetEntitlements(
+    private fun identity(profile: ServerProfile) = SessionIdentity(
+        userId = "user-${profile.id}",
+        email = "${profile.id}@example.com",
+        displayName = profile.displayName,
+        namespace = PrivateDataNamespace(profile.serverIdentity, "user-${profile.id}", 1),
+    )
+
+    private fun authorization() = Authorization(false, false, true, emptySet(), false, 1)
+
+    private class FailingTargetVerifiedSessions(
         private val failingProfileId: String,
-    ) : OfflineEntitlementRepository {
-        private val delegate = InMemoryOfflineEntitlementRepository()
+    ) : VerifiedSessionRepository {
+        private val delegate = InMemoryVerifiedSessionRepository()
 
-        override suspend fun load(profileId: String): ValidatedSessionRecord? = delegate.load(profileId)
+        override suspend fun load(profileId: String): VerifiedSessionRecord? = delegate.load(profileId)
 
-        override suspend fun save(record: ValidatedSessionRecord) {
-            if (record.profileId == failingProfileId) error("Injected entitlement failure")
+        override suspend fun save(record: VerifiedSessionRecord) {
+            if (record.profileId == failingProfileId) error("Injected verified-session failure")
             delegate.save(record)
         }
 
-        override suspend fun revoke(profileId: String) = delegate.revoke(profileId)
-
-        override suspend fun removeEntitlement(profileId: String) = delegate.removeEntitlement(profileId)
+        override suspend fun removeSession(profileId: String) = delegate.removeSession(profileId)
     }
 }

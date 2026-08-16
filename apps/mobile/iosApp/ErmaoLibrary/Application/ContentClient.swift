@@ -40,7 +40,6 @@ enum ContentClientError: Error, Equatable, Sendable {
 
 enum ContentProvenance: Sendable {
     case network
-    case cache
 }
 
 struct ContentFetch<Value: Sendable>: Sendable {
@@ -201,6 +200,17 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
     let progress: Double?
     let isReadable: Bool?
     let isSelected: Bool
+    let sortOrder: Int
+    let publisher: String?
+    let publishedAt: String?
+    let language: String?
+    let isbn: String?
+    let identifier: String?
+    let narrator: String?
+    let pageCount: Int?
+    let metadataSource: String?
+    let kindleSendAvailable: Bool
+    let files: [WorkVolumeFile]
 
     init(
         id: String,
@@ -212,7 +222,18 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
         sizeLabel: String?,
         progress: Double?,
         isReadable: Bool?,
-        isSelected: Bool
+        isSelected: Bool,
+        sortOrder: Int = 0,
+        publisher: String? = nil,
+        publishedAt: String? = nil,
+        language: String? = nil,
+        isbn: String? = nil,
+        identifier: String? = nil,
+        narrator: String? = nil,
+        pageCount: Int? = nil,
+        metadataSource: String? = nil,
+        kindleSendAvailable: Bool = false,
+        files: [WorkVolumeFile] = []
     ) {
         self.id = id
         self.mediaVersionID = mediaVersionID
@@ -224,6 +245,17 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
         self.progress = progress
         self.isReadable = isReadable
         self.isSelected = isSelected
+        self.sortOrder = sortOrder
+        self.publisher = publisher
+        self.publishedAt = publishedAt
+        self.language = language
+        self.isbn = isbn
+        self.identifier = identifier
+        self.narrator = narrator
+        self.pageCount = pageCount
+        self.metadataSource = metadataSource
+        self.kindleSendAvailable = kindleSendAvailable
+        self.files = files
     }
 
     func displayIndex(position: Int) -> String {
@@ -241,6 +273,20 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
         }
         return value.count >= 2 ? value : "0\(value)"
     }
+}
+
+struct WorkVolumeFile: Identifiable, Codable, Equatable, Sendable {
+    let id: String
+    let path: String
+    let sizeBytes: Int64
+    let displaySize: String
+}
+
+struct WorkVolumePage: Equatable, Sendable {
+    let volumes: [WorkVolume]
+    let page: Int
+    let total: Int
+    let totalPages: Int
 }
 
 enum WorkChapterReadingState: String, Codable, Equatable, Sendable {
@@ -285,13 +331,45 @@ struct WorkDetailContent: Codable, Equatable, Sendable {
     let description: String?
     let tags: [String]
     let seriesFacet: FacetIdentity?
+    let seriesIndex: Double?
     let authorFacets: [FacetIdentity]
     let availableMediaKinds: [LibraryMediaKind]
     let selectedMediaKind: LibraryMediaKind?
     let selectedVolumeID: String?
     let readingStatus: LibraryReadingStatus?
     let volumes: [WorkVolume]
+    let volumeCount: Int
     let chapters: [WorkChapter]
+
+    init(
+        work: WorkCard,
+        description: String?,
+        tags: [String],
+        seriesFacet: FacetIdentity?,
+        seriesIndex: Double? = nil,
+        authorFacets: [FacetIdentity],
+        availableMediaKinds: [LibraryMediaKind],
+        selectedMediaKind: LibraryMediaKind?,
+        selectedVolumeID: String?,
+        readingStatus: LibraryReadingStatus?,
+        volumes: [WorkVolume],
+        volumeCount: Int? = nil,
+        chapters: [WorkChapter]
+    ) {
+        self.work = work
+        self.description = description
+        self.tags = tags
+        self.seriesFacet = seriesFacet
+        self.seriesIndex = seriesIndex
+        self.authorFacets = authorFacets
+        self.availableMediaKinds = availableMediaKinds
+        self.selectedMediaKind = selectedMediaKind
+        self.selectedVolumeID = selectedVolumeID
+        self.readingStatus = readingStatus
+        self.volumes = volumes
+        self.volumeCount = volumeCount ?? volumes.count
+        self.chapters = chapters
+    }
 }
 
 protocol ContentClient: Sendable {
@@ -300,35 +378,44 @@ protocol ContentClient: Sendable {
     func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [WorkCard]
     func fetchWorks(context: ContentRequestContext, query: WorksQuery) async throws -> WorkPage
     func fetchWorksResult(context: ContentRequestContext, query: WorksQuery) async throws -> ContentFetch<WorkPage>
-    func restoreWorksResult(context: ContentRequestContext, query: WorksQuery) async throws -> ContentFetch<WorkPage>?
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage
     func fetchGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage>
-    func restoreGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage>?
     func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage
     func fetchFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage>
-    func restoreFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage>?
     func fetchWorkDetail(context: ContentRequestContext, query: WorkDetailQuery) async throws -> WorkDetailContent
+    func fetchWorkVolumes(
+        context: ContentRequestContext,
+        workID: String,
+        mediaVersionID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> WorkVolumePage
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data
 }
 
 extension ContentClient {
+    func fetchWorkVolumes(
+        context: ContentRequestContext,
+        workID: String,
+        mediaVersionID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> WorkVolumePage {
+        throw ContentClientError.invalidResponse
+    }
+
     func fetchWorksResult(context: ContentRequestContext, query: WorksQuery) async throws -> ContentFetch<WorkPage> {
         ContentFetch(value: try await fetchWorks(context: context, query: query), provenance: .network, isStale: false)
     }
-
-    func restoreWorksResult(context: ContentRequestContext, query: WorksQuery) async throws -> ContentFetch<WorkPage>? { nil }
 
     func fetchGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage> {
         ContentFetch(value: try await fetchGroupings(context: context, query: query), provenance: .network, isStale: false)
     }
 
-    func restoreGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage>? { nil }
-
     func fetchFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage> {
         ContentFetch(value: try await fetchFacet(context: context, query: query), provenance: .network, isStale: false)
     }
 
-    func restoreFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage>? { nil }
 }
 
 struct UnavailableContentClient: ContentClient {
@@ -369,10 +456,7 @@ enum ContentCompositionRoot {
     static func makeClient(
         cookieStore: KeychainCookiePayloadStore = KeychainCookiePayloadStore()
     ) -> any ContentClient {
-        let repository = IosCompositionKt.createIosContentRepository(
-            cookieStore: cookieStore,
-            snapshotStore: LibrarySnapshotFilePayloadStore()
-        )
+        let repository = IosCompositionKt.createIosContentRepository(cookieStore: cookieStore)
         return SharedContentClient(repository: repository)
     }
 }

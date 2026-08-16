@@ -29,7 +29,7 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
         assert (
             head_revision(engine)
-            == "0026_publication_render_cache"
+            == "0028_remove_publication_render_cache"
         )
         inspector = inspect(engine)
         assert "revision" in {
@@ -44,7 +44,6 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
             "clientId",
             "revision",
             "locatorJson",
-            "contentFingerprint",
             "displayPercent",
             "capturedAt",
             "receivedAt",
@@ -65,7 +64,7 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
         _run_alembic(engine, lambda config: command.upgrade(config, "head"))
         assert (
             head_revision(engine)
-            == "0026_publication_render_cache"
+            == "0028_remove_publication_render_cache"
         )
     finally:
         engine.dispose()

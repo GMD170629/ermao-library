@@ -7,11 +7,11 @@ enum AppCompositionRoot {
         cookieStore: KeychainCookiePayloadStore = KeychainCookiePayloadStore()
     ) -> MobileRuntimeClient {
         let profiles = UserDefaultsServerProfileStore()
-        let entitlements = UserDefaultsOfflineEntitlementStore()
+        let verifiedSessions = UserDefaultsVerifiedSessionStore()
         let bridge = IosCompositionKt.createIosMobileRuntimeBridge(
             cookieStore: cookieStore,
             profileStore: profiles,
-            entitlementStore: entitlements
+            verifiedSessionStore: verifiedSessions
         )
         return SharedMobileRuntimeClient(bridge: bridge)
     }
@@ -37,9 +37,9 @@ extension UserDefaultsServerProfileStore: ServerProfilePayloadStore {
     }
 }
 
-extension UserDefaultsOfflineEntitlementStore: OfflineEntitlementPayloadStore {
-    func loadEntitlementsPayload() throws -> PlatformStoragePayload {
-        PlatformStoragePayload(value: loadEntitlements())
+extension UserDefaultsVerifiedSessionStore: VerifiedSessionPayloadStore {
+    func loadVerifiedSessionsPayload() throws -> PlatformStoragePayload {
+        PlatformStoragePayload(value: loadVerifiedSessions())
     }
 }
 
@@ -168,10 +168,6 @@ final class SharedMobileRuntimeClient: MobileRuntimeClient {
         try await run { bridge.refreshCurrentSession(completion: $0) }
     }
 
-    func enterOfflineMode() async throws -> RuntimeOperationOutcome {
-        try await run { bridge.enterOfflineMode(completion: $0) }
-    }
-
     func logout() async throws -> RuntimeOperationOutcome {
         try await run { bridge.logout(completion: $0) }
     }
@@ -212,9 +208,6 @@ private enum SharedSessionMapper {
                 authorizationVersion: $0
             )
         }
-        let entitlementExpiresAt = snapshot.entitlementExpiresAtEpochMillis.map {
-            Date(timeIntervalSince1970: TimeInterval($0.int64Value) / 1_000)
-        }
         return RuntimeSessionSnapshot(
             phase: mapKind(snapshot.kind.name),
             profile: makeCurrentProfile(snapshot),
@@ -224,7 +217,6 @@ private enum SharedSessionMapper {
             userAvatarURL: snapshot.userAvatarUrl,
             userLocale: snapshot.userLocale,
             authorization: authorization,
-            entitlementExpiresAt: entitlementExpiresAt,
             reasonCode: snapshot.reasonCode
         )
     }
@@ -243,11 +235,9 @@ private enum SharedSessionMapper {
         case "LoginFailed": .loginFailed
         case "AccountDisabled": .accountDisabled
         case "Authenticated": .authenticated
-        case "SessionUnavailable": .sessionUnavailable
         case "SessionExpired": .sessionExpired
-        case "OfflineGrace": .offlineGrace
         case "IncompatibleServer": .incompatibleServer
-        default: .sessionUnavailable
+        default: .signedOut
         }
     }
 

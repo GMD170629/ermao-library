@@ -258,7 +258,6 @@ export type ReaderPublicationAccess = {
   pageUrlTemplate?: string | null;
   imageVariants?: Array<"original" | "data-saver">;
   downloadArtifact?: ReaderComicDownloadArtifact | null;
-  renderArtifact?: ReaderRenderArtifact | null;
 };
 
 export type ReaderReadingStatusData = {
@@ -274,13 +273,6 @@ export type ReaderReadingStatusPut = {
 export type ReaderReadingStatusResponse = {
   ok?: true;
   data: ReaderReadingStatusData;
-};
-
-export type ReaderRenderArtifact = {
-  schemaVersion?: 1;
-  url: string;
-  mimeType: "application/epub+zip";
-  sizeBytes: number;
 };
 
 export type ReaderUnitSummary = {

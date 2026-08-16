@@ -257,7 +257,7 @@ class DefaultMobileRuntimeTest {
     }
 
     @Test
-    fun setupCreatesSessionThenRequiresMeAndWritesOfflineEntitlement() = runBlocking {
+    fun setupCreatesSessionThenRequiresMeAndWritesVerifiedSession() = runBlocking {
         val harness = RuntimeHarness(
             Response(200, HEALTHY),
             Response(200, COMPATIBLE),
@@ -273,8 +273,8 @@ class DefaultMobileRuntimeTest {
         )
 
         val authenticated = assertIs<AppSession.Authenticated>(runtime.currentSession)
-        val entitlement = requireNotNull(harness.entitlements.load(authenticated.profile.id))
-        assertEquals(harness.now + 30L * 24L * 60L * 60L * 1_000L, entitlement.expiresAtEpochMillis)
+        val verifiedSession = requireNotNull(harness.verifiedSessions.load(authenticated.profile.id))
+        assertEquals(harness.now, verifiedSession.lastValidatedAtEpochMillis)
         assertEquals(
             listOf(
                 "/api/health",
@@ -309,7 +309,7 @@ class DefaultMobileRuntimeTest {
     }
 
     @Test
-    fun explicit401OffersOfflineModeOnlyWhileEntitlementIsValid() = runBlocking {
+    fun explicit401ClearsVerifiedSessionAndRequiresLogin() = runBlocking {
         val harness = RuntimeHarness(
             Response(200, HEALTHY),
             Response(200, COMPATIBLE),
@@ -323,11 +323,8 @@ class DefaultMobileRuntimeTest {
 
         assertIs<RuntimeOperationResult.Failure>(runtime.refreshCurrentSession())
         val expired = assertIs<AppSession.SessionExpired>(runtime.currentSession)
-        assertTrue(expired.entitlementExpiresAtEpochMillis != null)
-        assertIs<RuntimeOperationResult.Success>(runtime.enterOfflineMode())
-        val offline = assertIs<AppSession.OfflineGrace>(runtime.currentSession)
-        assertEquals("/api/auth/avatar", offline.identity.avatarUrl)
-        assertEquals("zh-CN", offline.identity.locale)
+        assertEquals("/api/auth/avatar", expired.lastKnownIdentity?.avatarUrl)
+        assertEquals(null, harness.verifiedSessions.load("server-fixture"))
         Unit
     }
 
@@ -339,9 +336,8 @@ class DefaultMobileRuntimeTest {
 
         assertIs<RuntimeOperationResult.Failure>(runtime.start())
 
-        val unavailable = assertIs<AppSession.SessionUnavailable>(runtime.currentSession)
+        val unavailable = assertIs<AppSession.SignedOut>(runtime.currentSession)
         assertEquals("server-fixture", unavailable.profile.id)
-        assertEquals(null, unavailable.lastKnownIdentity)
         assertEquals(listOf("/api/health"), harness.requestPaths)
     }
 
@@ -383,7 +379,7 @@ class DefaultMobileRuntimeTest {
 
             assertEquals(AppErrorKind.ProtocolViolation, failure.error.kind)
             assertEquals("UNSUPPORTED_LOCALE", failure.error.code)
-            assertEquals(null, harness.entitlements.load("server-fixture"))
+            assertEquals(null, harness.verifiedSessions.load("server-fixture"))
         }
     }
 
@@ -397,7 +393,7 @@ class DefaultMobileRuntimeTest {
 
     private class RuntimeHarness(vararg responses: Response) {
         val profiles = InMemoryServerProfileRepository()
-        val entitlements = InMemoryOfflineEntitlementRepository()
+        val verifiedSessions = InMemoryVerifiedSessionRepository()
         var now = 1_000L
         val requestPaths = mutableListOf<String>()
         private val remaining = ArrayDeque(responses.toList())
@@ -406,7 +402,7 @@ class DefaultMobileRuntimeTest {
         fun runtime(): DefaultMobileRuntime = DefaultMobileRuntime(
             profileRepository = profiles,
             cookieVault = cookieVault,
-            entitlementRepository = entitlements,
+            verifiedSessionRepository = verifiedSessions,
             serverProbe = KtorServerProbe(clientProvider = clientProvider),
             authGateway = KtorAuthGateway(ApiClientFactory(cookieVault), clientProvider),
             clock = EpochMillisClock { now },

@@ -52,6 +52,13 @@ class ServerCompatibilityCheckerTest {
         protocolVersion = protocol,
         minimumSupportedClientVersion = minimumClient,
         readerSchemaVersion = 4,
-        capabilities = ServerCapabilities(true, true, true, true, false),
+        capabilities = ServerCapabilities(
+            setup = true,
+            cookieSession = true,
+            readerV4 = true,
+            mediaRange = true,
+            managedOfflineDownloads = false,
+            workDetailManagement = true,
+        ),
     )
 }

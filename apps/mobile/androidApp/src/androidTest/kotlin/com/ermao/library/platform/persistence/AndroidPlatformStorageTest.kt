@@ -10,11 +10,7 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
-import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
-import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
-import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
-import com.ermao.library.shared.modules.library.ContentRequestContext
-import com.ermao.library.features.content.model.HomeContent
+import com.ermao.library.shared.modules.auth.domain.VerifiedSessionRecord
 import java.util.UUID
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -91,29 +87,6 @@ class AndroidPlatformStorageTest {
     }
 
     @Test
-    fun clearingCurrentContentNamespaceDoesNotAffectAnotherUser() = runBlocking {
-        val currentProfile = profile("current-${UUID.randomUUID()}", isActive = true)
-        val otherProfile = profile("other-${UUID.randomUUID()}", isActive = false)
-        val current = ContentRequestContext(
-            currentProfile,
-            PrivateDataNamespace(currentProfile.serverIdentity, "current-user", 1),
-        )
-        val other = ContentRequestContext(
-            otherProfile,
-            PrivateDataNamespace(otherProfile.serverIdentity, "other-user", 1),
-        )
-        val emptyHome = HomeContent(null, emptyList(), emptyList())
-
-        AndroidContentSnapshotCache.saveHome(context, current, emptyHome)
-        AndroidContentSnapshotCache.saveHome(context, other, emptyHome)
-        AndroidContentSnapshotCache.clearNamespace(context, current)
-
-        assertNull(AndroidContentSnapshotCache.loadHome(context, current))
-        assertEquals(emptyHome, AndroidContentSnapshotCache.loadHome(context, other)?.content)
-        AndroidContentSnapshotCache.clearNamespace(context, other)
-    }
-
-    @Test
     fun serverProfileStoreRoundTripsActivationAndRemoval() = runBlocking {
         val store = AndroidServerProfileStore(context)
         val first = profile("first-${UUID.randomUUID()}", isActive = true)
@@ -132,17 +105,21 @@ class AndroidPlatformStorageTest {
             )
 
             store.save(
-                ValidatedSessionRecord(
+                VerifiedSessionRecord(
                     profileId = second.id,
                     serverIdentity = second.serverIdentity,
                     userId = "user-test",
                     email = "reader@example.com",
                     displayName = "Reader",
                     authorizationVersion = 1,
+                    isAdmin = false,
+                    canManageSystem = false,
+                    allLibraryScopes = true,
+                    canViewManualImports = false,
+                    monitorFolderIds = emptyList(),
                     lastValidatedAtEpochMillis = 1_000,
-                    expiresAtEpochMillis = 2_000,
-                    maxObservedWallClockEpochMillis = 1_000,
-                    status = OfflineEntitlementStatus.Valid,
+                    avatarUrl = null,
+                    locale = "en-US",
                 ),
             )
             store.remove(second.id)

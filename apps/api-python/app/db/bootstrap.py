@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.db.runner import _apply_schema_once, apply_schema
 from app.db.seed import seed_baseline_data
+from app.modules.publications.infrastructure.legacy_derivative_cleanup import (
+    remove_retired_reader_derivatives,
+)
 
 __all__ = [
     "_apply_schema_once",
@@ -22,6 +25,7 @@ def bootstrap_database(engine: Engine, settings: Settings) -> None:
 
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     apply_schema(engine, settings)
+    remove_retired_reader_derivatives(settings.resolved_storage_root)
     with Session(engine) as db:
         seed_baseline_data(db)
 

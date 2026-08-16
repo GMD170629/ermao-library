@@ -29,7 +29,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.heading
@@ -84,8 +82,6 @@ fun LoginScreen(
     onRetry: () -> Unit,
     onAcceptUnsafeSsl: () -> Unit,
     modifier: Modifier = Modifier,
-    offlineDaysRemaining: Int? = null,
-    onEnterOffline: () -> Unit = {},
     canClose: Boolean = false,
     onClose: () -> Unit = {},
 ) {
@@ -238,26 +234,6 @@ fun LoginScreen(
                 ) {
                     Text(stringResource(R.string.login_delete_current_server))
                 }
-            }
-            if (offlineDaysRemaining != null && offlineDaysRemaining > 0) {
-                OutlinedButton(
-                    onClick = onEnterOffline,
-                    enabled = !isAuthenticating,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) {
-                    Text(
-                        pluralStringResource(
-                            R.plurals.offline_enter_action,
-                            offlineDaysRemaining,
-                            offlineDaysRemaining,
-                        ),
-                    )
-                }
-                Text(
-                    text = stringResource(R.string.offline_scope_message),
-                    color = theme.colors.textSecondary,
-                    style = theme.typography.caption,
-                )
             }
             Spacer(Modifier.height(theme.spacing.two))
             Text(

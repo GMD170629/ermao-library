@@ -48,22 +48,9 @@ sealed interface AppSession {
         val authorization: Authorization,
     ) : AppSession
 
-    data class SessionUnavailable(
-        val profile: ServerProfile,
-        val lastKnownIdentity: SessionIdentity?,
-        val entitlementExpiresAtEpochMillis: Long? = null,
-    ) : AppSession
-
     data class SessionExpired(
         val profile: ServerProfile,
-        val lastKnownIdentity: SessionIdentity?,
-        val entitlementExpiresAtEpochMillis: Long? = null,
-    ) : AppSession
-
-    data class OfflineGrace(
-        val profile: ServerProfile,
-        val identity: SessionIdentity,
-        val entitlementExpiresAtEpochMillis: Long,
+        val lastKnownIdentity: SessionIdentity? = null,
     ) : AppSession
 
     data class IncompatibleServer(
@@ -85,9 +72,7 @@ enum class AppSessionKind {
     LoginFailed,
     AccountDisabled,
     Authenticated,
-    SessionUnavailable,
     SessionExpired,
-    OfflineGrace,
     IncompatibleServer,
 }
 
@@ -113,7 +98,6 @@ data class AppSessionSnapshot(
     val canViewManualImports: Boolean = false,
     val authorizationVersion: Long? = null,
     val monitorFolderIds: List<String> = emptyList(),
-    val entitlementExpiresAtEpochMillis: Long? = null,
 )
 
 fun AppSession.toSnapshot(): AppSessionSnapshot = when (this) {
@@ -147,22 +131,11 @@ fun AppSession.toSnapshot(): AppSessionSnapshot = when (this) {
         identity,
         authorization,
     )
-    is AppSession.SessionUnavailable -> profileSnapshot(
-        AppSessionKind.SessionUnavailable,
-        profile,
-        lastKnownIdentity,
-    ).copy(entitlementExpiresAtEpochMillis = entitlementExpiresAtEpochMillis)
     is AppSession.SessionExpired -> profileSnapshot(
         AppSessionKind.SessionExpired,
         profile,
         lastKnownIdentity,
-    ).copy(entitlementExpiresAtEpochMillis = entitlementExpiresAtEpochMillis)
-    is AppSession.OfflineGrace -> authenticatedSnapshot(
-        AppSessionKind.OfflineGrace,
-        profile,
-        identity,
-        authorization = null,
-    ).copy(entitlementExpiresAtEpochMillis = entitlementExpiresAtEpochMillis)
+    )
 }
 
 private fun draftSnapshot(

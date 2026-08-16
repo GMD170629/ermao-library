@@ -133,6 +133,7 @@ struct MainTabView: View {
     let cache: LibraryCacheStore
     var settingsViewModel: SettingsViewModel? = nil
     var administrativeSettingsStore: AdministrativeSettingsStore? = nil
+    var workManagementRepository: (any ErmaoShared.WorkManagementRepository)? = nil
     var readerComposition: IosReaderComposition? = nil
     private let rootTabs = RootTabContract.definitions
 
@@ -302,12 +303,15 @@ struct MainTabView: View {
                             shelfClient: shelfClient,
                             cache: cache,
                             downloads: downloads,
+                            managementRepository: workManagementRepository,
+                            canManageSystem: store.snapshot.authorization?.canManageSystem == true,
                             workID: workID,
                             onUnauthorized: store.refreshForForeground,
                             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
                             openDownloads: openDownloadsCenter,
                             openReader: { openReader($0, context: context, fallbackTab: .library) },
-                            prepareReader: { readerPreparation = $0 }
+                            prepareReader: { readerPreparation = $0 },
+                            onWorkDeleted: { expandedLibraryWorkID = nil }
                         )
                         .id(workID)
                     } else {
@@ -339,12 +343,15 @@ struct MainTabView: View {
                 shelfClient: shelfClient,
                 cache: cache,
                 downloads: downloads,
+                managementRepository: workManagementRepository,
+                canManageSystem: store.snapshot.authorization?.canManageSystem == true,
                 workID: workID,
                 onUnauthorized: store.refreshForForeground,
                 openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
                 openDownloads: openDownloadsCenter,
                 openReader: { openReader($0, context: context, fallbackTab: presentation) },
-                prepareReader: { readerPreparation = $0 }
+                prepareReader: { readerPreparation = $0 },
+                onWorkDeleted: { closeCurrentRoute(in: presentation) }
             )
         case .downloads:
             DownloadCenterView(
@@ -409,6 +416,12 @@ struct MainTabView: View {
 
     private func open(_ route: AppRoute, in tab: TabPresentation) {
         paths.open(route, in: tab)
+    }
+
+    private func closeCurrentRoute(in tab: TabPresentation) {
+        var path = paths.path(for: tab)
+        _ = path.popLast()
+        paths.setPath(path, for: tab)
     }
 
     private func openReader(
@@ -506,89 +519,5 @@ private extension ServerDirectoryPurpose {
         case .updateSource(let sourceID): "update:\(sourceID)"
         case .scanDirectory: "scan"
         }
-    }
-}
-
-struct OfflineShellView: View {
-    @ObservedObject var store: SessionStore
-    @ObservedObject var downloads: DownloadCenterStore
-    let readerComposition: IosReaderComposition?
-    @Environment(\.appTheme) private var theme
-
-    var body: some View {
-        NavigationStack {
-            DownloadCenterView(store: downloads) { handoff in
-                // Offline access only reaches already verified records in DownloadCenterView.
-                if ManagedReaderAccessPolicy.supportsNativeReader(
-                       readerType: handoff.readerType,
-                       format: handoff.format
-                   ),
-                   readerComposition != nil,
-                   let offlineContext,
-                   case .verifiedLocal(let recordID) = handoff.source {
-                    readerLaunch = IosReaderLaunchRequest(
-                        context: offlineContext,
-                        workID: handoff.workID,
-                        volumeID: handoff.volumeID,
-                        displayTitle: handoff.title,
-                        managedDownloadRecordID: recordID
-                    )
-                } else {
-                    selectedHandoff = handoff
-                }
-            }
-            .navigationDestination(
-                isPresented: Binding(
-                    get: { selectedHandoff != nil },
-                    set: { if !$0 { selectedHandoff = nil } }
-                )
-            ) {
-                if let selectedHandoff {
-                    ReaderHandoffView(handoff: selectedHandoff)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        if let email = store.snapshot.userEmail {
-                            Text(email)
-                        }
-                        Button("offline.reauthenticate.action") { store.retry() }
-                        Button("auth.chooseServer") { store.chooseAnotherServer() }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel(Text("common.more"))
-                }
-            }
-            .task(id: offlineContext?.namespaceKey) {
-                if let offlineContext {
-                    downloads.activate(context: offlineContext)
-                }
-            }
-        }
-        .fullScreenCover(item: $readerLaunch) { request in
-            if let readerComposition {
-                IosReaderBootstrapView(request: request, composition: readerComposition)
-            }
-        }
-    }
-
-    @State private var selectedHandoff: ReaderHandoff?
-    @State private var readerLaunch: IosReaderLaunchRequest?
-
-    private var offlineContext: ContentRequestContext? {
-        guard let profile = store.snapshot.profile,
-              let userID = store.snapshot.userID,
-              let authorization = store.snapshot.authorization else { return nil }
-        return ContentRequestContext(
-            profileID: profile.id,
-            profileDisplayName: profile.displayName,
-            serverIdentity: profile.serverIdentity,
-            userID: userID,
-            authorizationVersion: authorization.authorizationVersion,
-            baseURL: profile.baseURL,
-            acceptsInsecureTLS: profile.tlsMode == .insecureSkipAllValidation
-        )
     }
 }

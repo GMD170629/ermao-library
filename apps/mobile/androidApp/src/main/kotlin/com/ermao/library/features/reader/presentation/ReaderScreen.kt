@@ -3,7 +3,6 @@ package com.ermao.library.features.reader.presentation
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,6 +46,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -107,6 +109,7 @@ import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import com.ermao.library.ui.theme.ReaderWarmPageTheme
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import com.ermao.library.ui.components.WarmPageSnackbarHost
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
@@ -156,6 +159,10 @@ internal fun ReaderScreen(
     var pendingNavigationId by remember(controller) { mutableStateOf<String?>(null) }
     var navigationFailed by remember(controller) { mutableStateOf(false) }
     var preferencesApplyFailed by remember(controller) { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val bookmarkAddedMessage = stringResource(R.string.reader_bookmark_added)
+    val bookmarkRemovedMessage = stringResource(R.string.reader_bookmark_removed)
+    val undoLabel = stringResource(R.string.undo_action)
 
     KeepScreenAwake(preferences.interaction.keepScreenAwake)
     ReaderWarmPageTheme(preferences.appearance.theme, preferences.appearance.themeMode) {
@@ -182,13 +189,30 @@ internal fun ReaderScreen(
                 Box(Modifier.size(1.dp).alpha(0f).testTag(READER_READY_TEST_TAG))
             }
 
-            AnimatedVisibility(controlsVisible) {
+            ReaderControlsVisibility(controlsVisible) {
                 ReaderControlOverlay(
                     title = title,
                     controller = controller,
                     location = currentLocation,
                     preferences = preferences,
                     bookmarks = bookmarks,
+                    onToggleBookmark = {
+                        controller?.let { activeController ->
+                            val change = activeController.toggleCurrentBookmark() ?: return@let
+                            snackbarHostState.currentSnackbarData?.dismiss()
+                            coroutineScope.launch {
+                                val result = snackbarHostState.showSnackbar(
+                                    message = if (change.added) bookmarkAddedMessage else bookmarkRemovedMessage,
+                                    actionLabel = undoLabel,
+                                    withDismissAction = true,
+                                    duration = SnackbarDuration.Short,
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    activeController.undoBookmarkChange(change)
+                                }
+                            }
+                        }
+                    },
                     onClose = onClose,
                     onPanel = {
                         if (it == ReaderPanel.Contents) navigationFailed = false
@@ -228,6 +252,20 @@ internal fun ReaderScreen(
                 )
                 opening -> ReaderOpeningIndicator()
             }
+
+            if (panel == null) {
+                WarmPageSnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(
+                            start = 16.dp,
+                            end = 16.dp,
+                            bottom = if (controlsVisible) 112.dp else 16.dp,
+                        ),
+                )
+            }
         }
 
         when (panel) {
@@ -259,7 +297,24 @@ internal fun ReaderScreen(
                 bookmarks = bookmarks,
                 syncPending = bookmarkSyncPending,
                 onJump = { controller?.goToBookmark(it); panel = null },
-                onRemove = { controller?.removeBookmark(it) },
+                onRemove = { bookmarkId ->
+                    controller?.let { activeController ->
+                        activeController.removeBookmark(bookmarkId)
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        coroutineScope.launch {
+                            val result = snackbarHostState.showSnackbar(
+                                message = bookmarkRemovedMessage,
+                                actionLabel = undoLabel,
+                                withDismissAction = true,
+                                duration = SnackbarDuration.Short,
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                activeController.undoBookmarkRemoval(bookmarkId)
+                            }
+                        }
+                    }
+                },
+                snackbarHostState = snackbarHostState,
                 onDismiss = { panel = null },
             )
             ReaderPanel.Appearance -> ReaderAppearanceSheet(
@@ -367,6 +422,7 @@ private fun ReaderControlOverlay(
     location: ReaderLocation?,
     preferences: ReaderPreferences,
     bookmarks: List<ReaderBookmark>,
+    onToggleBookmark: () -> Unit,
     onClose: () -> Unit,
     onPanel: (ReaderPanel) -> Unit,
     onHide: () -> Unit,
@@ -387,7 +443,7 @@ private fun ReaderControlOverlay(
                 Text(title, Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.titleMedium)
                 if (controller?.capabilities?.supportsBookmarks == true) {
                     val activeBookmark = currentBookmark(bookmarks, location)
-                    IconButton(onClick = { controller.toggleCurrentBookmark() }, enabled = location != null) {
+                    IconButton(onClick = onToggleBookmark, enabled = location != null) {
                         Icon(
                             if (activeBookmark) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             stringResource(R.string.reader_bookmark),
@@ -746,9 +802,10 @@ private fun ReaderNotesSheet(
     syncPending: Boolean,
     onJump: (String) -> Unit,
     onRemove: (String) -> Unit,
+    snackbarHostState: SnackbarHostState,
     onDismiss: () -> Unit,
 ) =
-    ReaderSheet(R.string.reader_notes, onDismiss) { scroll ->
+    ReaderSheet(R.string.reader_notes, onDismiss, snackbarHostState) { scroll ->
         Column(Modifier.verticalScroll(scroll)) {
             ChoiceRow(R.string.reader_notes, listOf("bookmarks", "annotations"), "bookmarks", {
                 stringResource(if (it == "bookmarks") R.string.reader_bookmarks else R.string.reader_annotations)
@@ -827,15 +884,30 @@ private fun ReaderContentsSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderSheet(title: Int, onDismiss: () -> Unit, content: @Composable (ScrollState) -> Unit) {
+private fun ReaderSheet(
+    title: Int,
+    onDismiss: () -> Unit,
+    snackbarHostState: SnackbarHostState? = null,
+    content: @Composable (ScrollState) -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                TextButton(onDismiss) { Text(stringResource(R.string.reader_done)) }
+        Box(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    TextButton(onDismiss) { Text(stringResource(R.string.reader_done)) }
+                }
+                content(rememberScrollState())
+                Spacer(Modifier.height(24.dp))
             }
-            content(rememberScrollState())
-            Spacer(Modifier.height(24.dp))
+            snackbarHostState?.let { hostState ->
+                WarmPageSnackbarHost(
+                    hostState = hostState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
         }
     }
 }

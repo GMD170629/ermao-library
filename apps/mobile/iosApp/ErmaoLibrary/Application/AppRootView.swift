@@ -9,6 +9,7 @@ struct AppRootView: View {
     @ObservedObject var downloads: DownloadCenterStore
     let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
+    let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
     let settingsClientOverride: (any SettingsClient)?
     let readerComposition: IosReaderComposition?
     @Environment(\.colorScheme) private var colorScheme
@@ -21,6 +22,7 @@ struct AppRootView: View {
         downloads: DownloadCenterStore = DownloadCenterStore(),
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)? = nil,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)? = nil,
+        workManagementRepository: (any ErmaoShared.WorkManagementRepository)? = nil,
         settingsClientOverride: (any SettingsClient)? = nil,
         readerComposition: IosReaderComposition? = nil
     ) {
@@ -31,6 +33,7 @@ struct AppRootView: View {
         self.downloads = downloads
         self.settingsRepository = settingsRepository
         self.administrativeSettingsRepository = administrativeSettingsRepository
+        self.workManagementRepository = workManagementRepository
         self.settingsClientOverride = settingsClientOverride
         self.readerComposition = readerComposition
     }
@@ -66,7 +69,7 @@ struct AppRootView: View {
     }
 
     private var activeLocale: Locale {
-        guard [.authenticated, .offlineGrace].contains(store.snapshot.phase) else {
+        guard store.snapshot.phase == .authenticated else {
             return .autoupdatingCurrent
         }
         switch store.snapshot.userLocale {
@@ -102,19 +105,14 @@ struct AppRootView: View {
                 LoginView(store: store)
             case .authenticating, .loginFailed:
                 if store.isReauthenticating {
-                    ReauthenticateView(
-                        store: store,
-                        serverUnavailable: store.reauthenticationServerUnavailable
-                    )
+                    ReauthenticateView(store: store)
                 } else {
                     LoginView(store: store)
                 }
             case .sessionExpired:
-                ReauthenticateView(store: store, serverUnavailable: false)
+                ReauthenticateView(store: store)
             case .accountDisabled:
                 AccountDisabledView(store: store)
-            case .sessionUnavailable:
-                ReauthenticateView(store: store, serverUnavailable: true)
             case .authenticated:
                 if settingsRepository != nil || settingsClientOverride != nil {
                     AuthenticatedShellHost(
@@ -125,6 +123,7 @@ struct AppRootView: View {
                         downloads: downloads,
                         settingsRepository: settingsRepository,
                         administrativeSettingsRepository: administrativeSettingsRepository,
+                        workManagementRepository: workManagementRepository,
                         settingsClientOverride: settingsClientOverride,
                         readerComposition: readerComposition
                     )
@@ -136,17 +135,11 @@ struct AppRootView: View {
                         contentClient: contentClient,
                         shelfClient: shelfClient,
                         cache: contentCache,
+                        workManagementRepository: workManagementRepository,
                         readerComposition: readerComposition
                     )
                     .id(authenticatedShellIdentity)
                 }
-            case .offlineGrace:
-                OfflineShellView(
-                    store: store,
-                    downloads: downloads,
-                    readerComposition: readerComposition
-                )
-                    .id(store.navigationGeneration)
             }
         }
     }
@@ -170,6 +163,7 @@ private struct AuthenticatedShellHost: View {
     let cache: LibraryCacheStore
     @ObservedObject var downloads: DownloadCenterStore
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
+    let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
     let readerComposition: IosReaderComposition?
     @StateObject private var settingsViewModel: SettingsViewModel
     @State private var administrativeSettingsStore: AdministrativeSettingsStore?
@@ -183,6 +177,7 @@ private struct AuthenticatedShellHost: View {
         downloads: DownloadCenterStore,
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?,
+        workManagementRepository: (any ErmaoShared.WorkManagementRepository)?,
         settingsClientOverride: (any SettingsClient)?,
         readerComposition: IosReaderComposition?
     ) {
@@ -192,6 +187,7 @@ private struct AuthenticatedShellHost: View {
         self.cache = cache
         self.downloads = downloads
         self.administrativeSettingsRepository = administrativeSettingsRepository
+        self.workManagementRepository = workManagementRepository
         self.readerComposition = readerComposition
         guard
             let profile = store.snapshot.profile,
@@ -290,6 +286,7 @@ private struct AuthenticatedShellHost: View {
             cache: cache,
             settingsViewModel: settingsViewModel,
             administrativeSettingsStore: administrativeSettingsStore,
+            workManagementRepository: workManagementRepository,
             readerComposition: readerComposition
         )
     }

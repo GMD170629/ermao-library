@@ -97,8 +97,7 @@ struct HomeView: View {
                     actionTitle: "common.retry",
                     action: store.retryContinueReading
                 )
-            case .content(let item, let cached):
-                if cached { cachedNotice }
+            case .content(let item, _):
                 VStack(spacing: .space1Half) {
                     Button { openWork(item.work.id) } label: {
                         HStack(spacing: .space2) {
@@ -191,8 +190,7 @@ struct HomeView: View {
                     actionTitle: "common.retry",
                     action: retry
                 )
-            case .content(let works, let cached):
-                if cached { cachedNotice }
+            case .content(let works, _):
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: .space2) {
                         ForEach(works) { work in
@@ -225,9 +223,4 @@ struct HomeView: View {
         }
     }
 
-    private var cachedNotice: some View {
-        Label("library.offline.cached", systemImage: "wifi.slash")
-            .appTextStyle(.caption)
-            .foregroundStyle(theme.textSecondary)
-    }
 }

@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.rememberForwardProgress
 
 @Composable
 fun OrganizeQueueScreen(
@@ -153,10 +154,12 @@ fun RecognitionPolicyScreen(
             AdministrativeSwitchRow(AdministrativeCopy.RunAfterImport.text(locale), runAfterImport, { runAfterImport = it })
             AdministrativeSwitchRow(AdministrativeCopy.SaveMetadataToOpf.text(locale), saveOpf, { saveOpf = it })
             if (initial.opfQueueTotal > 0) {
+                val progress = initial.opfQueueCompleted.toFloat() / initial.opfQueueTotal.toFloat()
+                val animatedProgress = rememberForwardProgress(progress)
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text("${initial.opfQueueCompleted} / ${initial.opfQueueTotal}")
                     LinearProgressIndicator(
-                        progress = { initial.opfQueueCompleted.toFloat() / initial.opfQueueTotal.toFloat() },
+                        progress = { animatedProgress },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

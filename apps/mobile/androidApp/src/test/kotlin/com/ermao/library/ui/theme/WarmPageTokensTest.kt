@@ -25,4 +25,46 @@ class WarmPageTokensTest {
         assertEquals(Color(0xFF151311), ReaderNightColors.canvas)
         assertEquals(Color(0xFFEFE7DD), ReaderNightColors.textPrimary)
     }
+
+    @Test
+    fun materialSchemesExplicitlyMapWarmPageSurfaceAndInteractionRoles() {
+        assertEquals(AppLightColors.actionAccent, AppLightColorScheme.primary)
+        assertEquals(AppLightColors.brandAccent, AppLightColorScheme.secondary)
+        assertEquals(AppLightColors.brandAccent, AppLightColorScheme.tertiary)
+        assertEquals(AppLightColors.canvas, AppLightColorScheme.background)
+        assertEquals(AppLightColors.surface, AppLightColorScheme.surface)
+        assertEquals(AppLightColors.surface, AppLightColorScheme.surfaceContainer)
+        assertEquals(AppLightColors.surfaceRaised, AppLightColorScheme.surfaceContainerHighest)
+        assertEquals(AppLightColors.divider, AppLightColorScheme.outlineVariant)
+        assertEquals(AppDarkColors.actionAccent, AppLightColorScheme.inversePrimary)
+
+        assertEquals(AppDarkColors.actionAccent, AppDarkColorScheme.primary)
+        assertEquals(AppDarkColors.brandAccent, AppDarkColorScheme.secondary)
+        assertEquals(AppDarkColors.brandAccent, AppDarkColorScheme.tertiary)
+        assertEquals(AppDarkColors.canvas, AppDarkColorScheme.background)
+        assertEquals(AppDarkColors.surface, AppDarkColorScheme.surface)
+        assertEquals(AppDarkColors.surface, AppDarkColorScheme.surfaceContainer)
+        assertEquals(AppDarkColors.surfaceRaised, AppDarkColorScheme.surfaceContainerHighest)
+        assertEquals(AppDarkColors.divider, AppDarkColorScheme.outlineVariant)
+        assertEquals(AppLightColors.actionAccent, AppDarkColorScheme.inversePrimary)
+    }
+
+    @Test
+    fun everyMaterialTypographySlotUsesAnIntentionalWarmPageRole() {
+        assertEquals(WarmPageTypographyTokens.display, AppMaterialTypography.displayLarge)
+        assertEquals(WarmPageTypographyTokens.display, AppMaterialTypography.displayMedium)
+        assertEquals(WarmPageTypographyTokens.title, AppMaterialTypography.displaySmall)
+        assertEquals(WarmPageTypographyTokens.title, AppMaterialTypography.headlineLarge)
+        assertEquals(WarmPageTypographyTokens.sectionTitle, AppMaterialTypography.headlineMedium)
+        assertEquals(WarmPageTypographyTokens.headline, AppMaterialTypography.headlineSmall)
+        assertEquals(WarmPageTypographyTokens.sectionTitle, AppMaterialTypography.titleLarge)
+        assertEquals(WarmPageTypographyTokens.headline, AppMaterialTypography.titleMedium)
+        assertEquals(WarmPageTypographyTokens.label, AppMaterialTypography.titleSmall)
+        assertEquals(WarmPageTypographyTokens.body, AppMaterialTypography.bodyLarge)
+        assertEquals(WarmPageTypographyTokens.callout, AppMaterialTypography.bodyMedium)
+        assertEquals(WarmPageTypographyTokens.caption, AppMaterialTypography.bodySmall)
+        assertEquals(WarmPageTypographyTokens.button, AppMaterialTypography.labelLarge)
+        assertEquals(WarmPageTypographyTokens.label, AppMaterialTypography.labelMedium)
+        assertEquals(WarmPageTypographyTokens.caption, AppMaterialTypography.labelSmall)
+    }
 }

@@ -12,7 +12,6 @@ from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.publications import (
     ensure_publication_navigation,
-    ensure_publication_render_artifact,
     open_publication,
 )
 from app.contracts.http import MessageError
@@ -27,9 +26,6 @@ from app.db.session import get_db
 from app.models.auth import User
 from app.modules.publications.application.ensure_navigation import (
     PublicationNavigationSourceChangedError,
-)
-from app.modules.publications.application.ensure_render_artifact import (
-    PublicationRenderSourceChangedError,
 )
 from app.modules.publications.application.ports import PublicationAccessScope
 from app.modules.publications.domain.model import (
@@ -46,10 +42,6 @@ from app.modules.publications.domain.model import (
     PublicationTocEntry as DomainPublicationTocEntry,
 )
 from app.modules.publications.infrastructure.locator_dom import WEB_SECURITY_PROFILE
-from app.modules.publications.infrastructure.render_artifact import (
-    RENDER_ARTIFACT_MEDIA_TYPE,
-)
-from app.modules.publications.infrastructure.render_markup import canonicalize_markup
 from app.modules.publications.presentation.schemas import (
     PositionLocations,
     PublicationLink,
@@ -57,7 +49,6 @@ from app.modules.publications.presentation.schemas import (
     PublicationMetadata,
     PublicationPosition,
     PublicationPositions,
-    PublicationRenderArtifactResponse,
     PublicationResourceResponse,
     PublicationRuntimeMetadata,
     PublicationTocEntry,
@@ -254,42 +245,6 @@ def publication_positions(
     return PublicationPositions(total=total, positions=positions)
 
 
-@router.get("/render.epub", response_class=PublicationRenderArtifactResponse)
-def publication_render_artifact(
-    volume_id: str,
-    request: Request,
-    db: DatabaseSession,
-    settings: ApplicationSettings,
-) -> Annotated[PublicationRenderArtifactResponse, PUBLICATION_ERROR_RESPONSES]:
-    _user, scope = _authenticated_scope(db, request, settings)
-    try:
-        artifact, path = ensure_publication_render_artifact(
-            _runtime_session_factory(request),
-            settings,
-        ).execute(volume_id=volume_id, access_scope=scope)
-    except (
-        OSError,
-        PublicationCorruptError,
-        PublicationNotFoundError,
-        PublicationRenderSourceChangedError,
-        PublicationUnsupportedError,
-    ) as error:
-        raise _not_found() from error
-    return PublicationRenderArtifactResponse(
-        path,
-        media_type=RENDER_ARTIFACT_MEDIA_TYPE,
-        filename=f"{volume_id}.epub",
-        headers={
-            "Cache-Control": "private, no-cache",
-            "ETag": (
-                f'W/"render-{artifact.source_size_bytes}-'
-                f'{artifact.source_mtime_ms}-{artifact.size_bytes}"'
-            ),
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
-
-
 @router.get("/{resource_href:path}", response_class=PublicationResourceResponse)
 @router.head("/{resource_href:path}", response_class=PublicationResourceResponse)
 def publication_resource(
@@ -306,11 +261,7 @@ def publication_resource(
             href=resource_href,
             access_scope=scope,
         )
-        content = (
-            canonicalize_markup(resource.content, href=resource.href).content
-            if resource.media_type in {"application/xhtml+xml", "text/html"}
-            else resource.content
-        )
+        content = resource.content
     except (
         PublicationNotFoundError,
         PublicationUnsupportedError,

@@ -34,8 +34,8 @@ def test_mobile_compatibility_is_public_and_uses_the_typed_contract(
             "serverIdentity": "server_contract_identity",
             "serverVersion": test_settings.app_version,
             "protocol": {
-                "version": 1,
-                "minimumSupportedClientVersion": 1,
+                "version": 2,
+                "minimumSupportedClientVersion": 2,
             },
             "readerSchemaVersion": 4,
             "capabilities": {
@@ -44,6 +44,7 @@ def test_mobile_compatibility_is_public_and_uses_the_typed_contract(
                 "readerV4": True,
                 "mediaRange": True,
                 "managedOfflineDownloads": False,
+                "workDetailManagement": True,
             },
         },
     }

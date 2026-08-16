@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.rememberForwardProgress
 
 @Composable
 fun LibrarySourcesScreen(
@@ -209,7 +210,10 @@ fun ImportTasksScreen(
                     }
                     Text(task.sourcePath)
                     Text(task.createdAtLabel, style = MaterialTheme.typography.bodySmall)
-                    task.progress?.let { LinearProgressIndicator(progress = { it }, Modifier.fillMaxWidth().padding(top = 8.dp)) }
+                    task.progress?.let { progress ->
+                        val animatedProgress = rememberForwardProgress(progress, progressIdentity = task.id)
+                        LinearProgressIndicator(progress = { animatedProgress }, Modifier.fillMaxWidth().padding(top = 8.dp))
+                    }
                     task.statusCode?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         if (task.status == QueueStatus.Failed) TextButton({ onCommand(AdministrativeCommand.RetryImportTask(task.id)) }) { Text(AdministrativeCopy.Retry.text(locale)) }

@@ -8,6 +8,7 @@ readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PDFIUM_DIRECTORY="$(cd "${SCRIPT_DIRECTORY}/.." && pwd)"
 readonly MOBILE_DIRECTORY="$(cd "${PDFIUM_DIRECTORY}/../.." && pwd)"
 readonly WRAPPER_DESTINATION="${PDFIUM_CHECKOUT}/shuku_pdfium_wrapper"
+readonly ROOT_BUILD_PATCH="${PDFIUM_DIRECTORY}/wrapper/root-build.patch"
 readonly JNI_DESTINATION="${PDFIUM_DIRECTORY}/artifacts/android/jni"
 
 [[ "$(uname -s)" == "Linux" ]] || { echo "Android PDFium builds require Linux" >&2; exit 2; }
@@ -27,10 +28,12 @@ command -v autoninja >/dev/null
 }
 
 cleanup() {
+  git -C "${PDFIUM_CHECKOUT}" apply --reverse "${ROOT_BUILD_PATCH}" 2>/dev/null || true
   rm -rf -- "${WRAPPER_DESTINATION}"
 }
 trap cleanup EXIT
 cp -R "${PDFIUM_DIRECTORY}/wrapper" "${WRAPPER_DESTINATION}"
+git -C "${PDFIUM_CHECKOUT}" apply "${ROOT_BUILD_PATCH}"
 rm -rf -- "${JNI_DESTINATION}"
 mkdir -p "${JNI_DESTINATION}"
 
@@ -52,16 +55,13 @@ configure() {
     use_remoteexec=false
   "
   autoninja -C "${output}" shuku_pdfium_wrapper:shuku_pdfium
-  local libraries=()
-  while IFS= read -r path; do libraries+=("${path}"); done < <(
-    find "${output}" -type f -name 'libshuku_pdfium.so' -print
-  )
-  [[ "${#libraries[@]}" -eq 1 ]] || {
-    echo "Expected one libshuku_pdfium.so for ${abi}, found ${#libraries[@]}" >&2
+  local library="${output}/libshuku_pdfium.so"
+  [[ -f "${library}" ]] || {
+    echo "Missing stripped libshuku_pdfium.so for ${abi}" >&2
     exit 6
   }
   mkdir -p "${JNI_DESTINATION}/${abi}"
-  cp "${libraries[0]}" "${JNI_DESTINATION}/${abi}/libshuku_pdfium.so"
+  cp "${library}" "${JNI_DESTINATION}/${abi}/libshuku_pdfium.so"
 }
 
 configure arm64-v8a arm64
@@ -73,6 +73,9 @@ mkdir -p "${PDFIUM_DIRECTORY}/artifacts/android"
 cp "${MOBILE_DIRECTORY}/pdfiumNative/build/outputs/aar/pdfiumNative-release.aar" \
   "${PDFIUM_DIRECTORY}/artifacts/android/shuku-pdfium.aar"
 "${SCRIPT_DIRECTORY}/package-licenses.sh" "${PDFIUM_CHECKOUT}" "${PDFIUM_DIRECTORY}/artifacts"
+
+git -C "${PDFIUM_CHECKOUT}" apply --reverse "${ROOT_BUILD_PATCH}"
+rm -rf -- "${WRAPPER_DESTINATION}"
 
 [[ -z "$(git -C "${PDFIUM_CHECKOUT}" status --porcelain --untracked-files=no)" ]] || {
   echo "PDFium checkout changed during the build" >&2

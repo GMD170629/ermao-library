@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.downloads.application.DownloadPreparationUiState
+import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 @Composable
@@ -102,8 +103,9 @@ fun DownloadPreparationScreen(
             }
             is DownloadPreparationUiState.Downloading -> {
                 val progress = (state.transferredBytes.toFloat() / state.totalBytes).coerceIn(0f, 1f)
+                val animatedProgress = rememberForwardProgress(progress, progressIdentity = title)
                 LinearProgressIndicator(
-                    progress = { progress },
+                    progress = { animatedProgress },
                     modifier = Modifier.fillMaxWidth().testTag("download-preparation-progress"),
                     color = theme.colors.brandAccent,
                     trackColor = theme.colors.divider,

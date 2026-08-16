@@ -3,13 +3,17 @@ import test from 'node:test';
 import { createSecurePublicationFetch } from './readium-publication-security';
 
 const secureMarkup = `<?xml version="1.0"?>
-<html><head><meta http-equiv="Content-Security-Policy"
-content="connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src blob:"
-data-shuku-security-profile="web-v2"/></head><body><script>bookCode()</script><p>Text</p></body></html>`;
+<html><head></head><body><script>bookCode()</script><p>Text</p></body></html>`;
+
+const secureHeaders = {
+  'content-type': 'application/xhtml+xml; charset=utf-8',
+  'content-security-policy': "default-src 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src blob:",
+  'x-content-type-options': 'nosniff',
+};
 
 test('accepts a head-decorated resource without rewriting author body content', async () => {
   const fetcher = createSecurePublicationFetch(async () => new Response(secureMarkup, {
-    headers: { 'content-type': 'application/xhtml+xml; charset=utf-8' },
+    headers: secureHeaders,
   }));
 
   const response = await fetcher('https://reader.test/chapter.xhtml');
@@ -18,7 +22,7 @@ test('accepts a head-decorated resource without rewriting author body content', 
   assert.match(secureMarkup, /<body><script>bookCode\(\)<\/script><p>Text<\/p><\/body>/);
 });
 
-test('rejects markup before Readium blob creation when the security profile is absent', async () => {
+test('rejects markup before Readium blob creation when response security headers are absent', async () => {
   const fetcher = createSecurePublicationFetch(async () => new Response(
     '<html><head></head><body><p>Unsafe boundary</p></body></html>',
     { headers: { 'content-type': 'application/xhtml+xml' } },

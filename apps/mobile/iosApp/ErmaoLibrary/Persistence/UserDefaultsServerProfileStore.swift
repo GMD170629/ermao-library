@@ -36,26 +36,26 @@ final class UserDefaultsServerProfileStore {
     }
 }
 
-final class UserDefaultsOfflineEntitlementStore {
+final class UserDefaultsVerifiedSessionStore {
     private let defaults: UserDefaults
     private let storageKey: String
     private let lock = NSLock()
 
     init(
         defaults: UserDefaults = .standard,
-        storageKey: String = "com.ermao.library.offline-entitlements.v1"
+        storageKey: String = "com.ermao.library.verified-sessions.v1"
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
     }
 
-    func loadEntitlements() -> String? {
+    func loadVerifiedSessions() -> String? {
         lock.lock()
         defer { lock.unlock() }
         return defaults.string(forKey: storageKey)
     }
 
-    func saveEntitlements(payload: String) throws {
+    func saveVerifiedSessions(payload: String) throws {
         try validateJSONPayload(payload)
         lock.lock()
         defer { lock.unlock() }

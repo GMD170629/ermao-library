@@ -187,14 +187,11 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(seriesRequestCount, 2)
     }
 
-    func testGroupingProtocolFailureDoesNotMasqueradeAsOfflineCachedContent() async throws {
+    func testGroupingProtocolFailureDoesNotMasqueradeAsCachedContent() async throws {
         let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
         let store = LibraryStore(
             context: contentContext,
-            client: FailingGroupingContentClient(
-                error: .invalidResponse,
-                restored: groupingPage(name: "Cached Series")
-            ),
+            client: FailingGroupingContentClient(error: .invalidResponse),
             cache: cache,
             onUnauthorized: {}
         )
@@ -206,26 +203,23 @@ final class ContentStoreTests: XCTestCase {
         }
 
         guard case .failure = store.current.results else {
-            return XCTFail("A protocol failure must not be presented as offline cached content")
+            return XCTFail("A protocol failure must not be presented as cached content")
         }
     }
 
-    func testGroupingOfflineFailureFallsBackToCachedContent() async throws {
+    func testGroupingNetworkFailureShowsFailureWithoutPersistentFallback() async throws {
         let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
         let store = LibraryStore(
             context: contentContext,
-            client: FailingGroupingContentClient(
-                error: .offline,
-                restored: groupingPage(name: "Cached Series")
-            ),
+            client: FailingGroupingContentClient(error: .offline),
             cache: cache,
             onUnauthorized: {}
         )
 
         store.selectScope(.series)
         try await waitUntil {
-            guard case .ready(let items, _, let isCached, _) = store.current.results else { return false }
-            return isCached && items.compactMap(\.groupingValue).map(\.name) == ["Cached Series"]
+            if case .failure = store.current.results { return true }
+            return false
         }
     }
 
@@ -618,11 +612,9 @@ private extension LibraryResultItem {
 
 private actor FailingGroupingContentClient: ContentClient {
     private let error: ContentClientError
-    private let restored: GroupingPage?
 
-    init(error: ContentClientError, restored: GroupingPage? = nil) {
+    init(error: ContentClientError) {
         self.error = error
-        self.restored = restored
     }
 
     func fetchContinueReading(context: ContentRequestContext) async throws -> ContinueReadingItem? { nil }
@@ -630,12 +622,6 @@ private actor FailingGroupingContentClient: ContentClient {
     func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [WorkCard] { [] }
     func fetchWorks(context: ContentRequestContext, query: WorksQuery) async throws -> WorkPage { throw error }
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage { throw error }
-    func restoreGroupingsResult(
-        context: ContentRequestContext,
-        query: GroupingsQuery
-    ) async throws -> ContentFetch<GroupingPage>? {
-        restored.map { ContentFetch(value: $0, provenance: .cache, isStale: true) }
-    }
     func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage { throw error }
     func fetchWorkDetail(context: ContentRequestContext, query: WorkDetailQuery) async throws -> WorkDetailContent { throw error }
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { throw error }

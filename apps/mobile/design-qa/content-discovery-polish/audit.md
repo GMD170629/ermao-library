@@ -16,10 +16,7 @@ Status: implementation complete; targeted physical-device XCTest and the critica
   - `docs/assets/mobile-app-hifi-v1/library-authors-scope-app-light-v1.png`
   - `docs/assets/mobile-app-hifi-v1/library-series-facet-app-light-v1.png`
   - `docs/assets/mobile-app-hifi-v1/library-author-facet-app-light-v1.png`
-  - `docs/assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png`
-  - `docs/assets/mobile-app-hifi-v1/work-detail-media-volumes-ios-app-light-v2.png`
-  - `docs/assets/mobile-app-hifi-v1/work-detail-ebook-chapters-ios-app-light-v2.png`
-  - `docs/assets/mobile-app-hifi-v1/work-detail-actions-sheet-ios-app-light-v2.png`
+  - Work Detail 的历史 v2 参考已删除；当前唯一参考见 Phase 5 的 v6 资产。
 
 ## Step health
 
@@ -31,7 +28,7 @@ Status: implementation complete; targeted physical-device XCTest and the critica
 | Library | Weak result/filter hierarchy and undersized grouping imagery | Result header, applied-filter summary, offline/stale states, three-cover grouping rows, spacing and typography retuned | `library-after-physical.png` |
 | Filter Sheet | Selection and primary action lacked clarity | Native Sheet/List retained; native checkmarks, draft semantics, clear/cancel and full-width branded Apply restored | Physical tap-through passed |
 | Facet | Identity and item hierarchy were too flat | Identity/count/sort header, denser series rows, media/progress details and accessible ordering added | Post-change screenshot pending |
-| Work Detail | Description and media structure competed in one long flow; download and reading progress were easy to conflate | Replaced by the v2 hierarchy: hero/status/progress/CTA, first-level About/Media tabs, three media kinds, continuous volumes with progress below the title, single-volume EPUB chapter fallback, and native secondary actions with truthful capability gating | Physical-device XCUITest passed; About and Media/Chapters screenshots archived |
+| Work Detail | Historical v2 layout used competing tabs and a single-volume fallback | Superseded by v6 continuous layout: normal navigation, centered identity, primary CTA plus Download/Reading Status/Add/More, always-present horizontal paginated volume rail, selected-volume metadata, and accessible authorized long-press management | v2–v5 detail images deleted; v6 is the sole current baseline |
 
 ## Root cause and regression coverage
 

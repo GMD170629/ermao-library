@@ -69,7 +69,6 @@ from app.models.settings import (
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.publications.infrastructure.models import (
     PublicationNavigationCache,
-    PublicationRenderCache,
 )
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
@@ -111,7 +110,6 @@ __all__ = [
     "OrganizeRun",
     "PasswordResetToken",
     "PublicationNavigationCache",
-    "PublicationRenderCache",
     "QueueControlOperation",
     "QueueRuntimeState",
     "ReaderBookPreference",

@@ -1,10 +1,11 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "common.back" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Back" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "返回" } } } },
     "downloads.active.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在下载" } } } },
     "downloads.completed.detail.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$@" } } } },
     "downloads.completed.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded by Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按图书管理" } } } },
-    "downloads.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Download a volume from its work page to read it offline." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从作品详情下载分册，即可离线阅读。" } } } },
+    "downloads.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Download a volume from its work page to read it on this device." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从作品详情下载分册，即可在此设备阅读。" } } } },
     "downloads.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No downloads" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无下载" } } } },
     "downloads.error.generic" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The download couldn’t be completed." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法完成下载。" } } } },
     "downloads.error.inaccessible" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This volume is no longer available to this account." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前账户已无法访问这个分册。" } } } },
@@ -29,7 +30,7 @@
     "downloads.storage.used" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded content" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载内容" } } } },
     "downloads.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloads" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载中心" } } } },
     "downloads.view.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "View Downloads" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看下载" } } } },
-    "me.offline.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline & Storage" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线与存储" } } } },
+    "me.offline.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloads & Storage" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载与存储" } } } },
     "reader.handoff.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This volume can’t be prepared for reading right now." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂时无法准备这个分册。" } } } },
     "reader.handoff.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to Open" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法打开" } } } },
     "reader.handoff.localUnavailable.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The local file is verified and ready. The native reader renderer is not included in this build." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地文件已校验并可用，但此版本尚未包含原生阅读渲染器。" } } } },
@@ -91,7 +92,7 @@
     "library.filter.downloaded" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载" } } } },
     "library.filter.downloaded.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded (Unavailable)" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载（暂不可用）" } } } },
     "library.filter.media.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒介类型" } } } },
-    "library.filter.offline.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线" } } } },
+    "library.filter.offline.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载" } } } },
     "library.filter.reading.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading Status" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态" } } } },
     "library.filter.remove.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove filter: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除筛选条件：%@" } } } },
     "library.filter.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Filter Library" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "筛选书库" } } } },
@@ -100,9 +101,6 @@
     "library.media.audiobook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Audiobook" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有声书" } } } },
     "library.media.comic" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Comic" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "漫画" } } } },
     "library.media.ebook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "E-book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电子书" } } } },
-    "library.offline.cached" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Showing cached results; they may be incomplete" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅显示上次缓存结果，内容可能不完整" } } } },
-    "library.offline.retry" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reconnect" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新连接" } } } },
-    "library.offline.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线模式" } } } },
     "library.pagination.error" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load more works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载更多作品" } } } },
     "library.pagination.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and retry" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络后重试" } } } },
     "library.permission.revalidating.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Private results are hidden while access is checked again." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检查访问权限期间，私有结果将保持隐藏。" } } } },
@@ -132,6 +130,7 @@
     "library.view.list" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "List" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "列表" } } } },
     "library.view.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "View" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "视图" } } } },
     "library.work.accessibility.progress" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@, %2$@, %3$lld percent read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@，%2$@，已阅读 %3$lld%%" } } } },
+    "work.action.add" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加入" } } } },
     "work.action.edit" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Work" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑图书" } } } },
     "work.action.edit.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Editing is not available in this build." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本尚未接入图书编辑。" } } } },
     "work.action.setCover" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Set Cover" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置封面" } } } },
@@ -155,7 +154,7 @@
     "work.description.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Description" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无简介" } } } },
     "work.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and reload this work." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络连接并重新加载这部作品。" } } } },
     "work.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load details" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载作品详情" } } } },
-    "work.media.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒介" } } } },
+    "work.media.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media versions" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒体版本" } } } },
     "work.mediaVolumeCount.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$lld volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · 共 %2$lld 卷" } } } },
     "work.progress.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld%% read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读进度 %lld%%" } } } },
     "work.reader.continue.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Continue Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续阅读" } } } },
@@ -169,10 +168,19 @@
     "work.status.finished" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Finished" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已读完" } } } },
     "work.status.reading" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在阅读" } } } },
     "work.status.unread" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unread" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未开始" } } } },
+    "work.metadata.filePath" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "File path" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件路径" } } } },
+    "work.metadata.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Format" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "格式" } } } },
+    "work.metadata.language" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Language" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语言" } } } },
+    "work.metadata.pages" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Pages" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "页数" } } } },
+    "work.metadata.published" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Publication date" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "出版日期" } } } },
+    "work.metadata.source" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata source" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据信息来源" } } } },
+    "work.metadata.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Selected Volume Metadata" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前卷册元数据信息" } } } },
+    "work.volumes.loadMore.failed" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn’t load more. Tap to retry." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载更多，点击重试" } } } },
+    "work.volumes.loadMore.loading" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading more volumes…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在加载更多卷册…" } } } },
     "work.volumes.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "卷册" } } } },
     "work.unavailable.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Available" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂不可用" } } } },
     "work.volume.download.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Download this volume" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载此卷" } } } },
-    "work.volume.download.completed" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Available offline" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可离线使用" } } } },
+    "work.volume.download.completed" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Download complete" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载完成" } } } },
     "work.volume.download.pause" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause this download" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂停此卷下载" } } } },
     "work.volume.download.retry" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry this download" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试此卷下载" } } } },
     "work.volume.accessibility.label" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volume %1$@, %2$@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "第 %1$@ 卷，%2$@" } } } },
@@ -464,38 +472,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请求未能完成，请检查连接后重试。"
-          }
-        }
-      }
-    },
-    "offline.deferred.message" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The offline entitlement state is frozen in Stage 0, but the offline content UI will be delivered in a later phase."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "阶段 0 已冻结离线授权状态，但离线内容界面将在后续阶段交付。"
-          }
-        }
-      }
-    },
-    "offline.deferred.title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline Access Isn’t Available Yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "离线访问尚未开放"
           }
         }
       }
@@ -1338,24 +1314,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择其他服务器" } }
       }
     },
-    "auth.offline.action.format" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter Offline Mode · %d days left" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "进入离线模式 · 剩余 %d 天" } }
-      }
-    },
-    "auth.offline.expired" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline access has expired. Connect to the server to continue." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线访问已过期，请连接服务器后继续。" } }
-      }
-    },
-    "auth.offline.hint" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline mode only opens downloaded content and its synchronized state." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线模式仅开放已下载内容及其同步状态。" } }
-      }
-    },
     "auth.reauthenticate.action" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in again" } },
@@ -1378,12 +1336,6 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in required" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要重新登录" } }
-      }
-    },
-    "auth.reauthenticate.unavailable" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server is temporarily unavailable. You can retry or use a valid offline entitlement." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器暂时不可用。你可以重试，或使用有效的离线权限。" } }
       }
     },
     "me.account.section" : {
@@ -1412,8 +1364,8 @@
     },
     "me.logout.confirm.message" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Signing out immediately ends offline access on this device." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出后，此设备的离线访问权限会立即失效。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Signing out clears this server’s saved session and private data from this device." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出后会清除此服务器在本设备上保存的会话和私有数据。" } }
       }
     },
     "me.logout.confirm.title" : {
@@ -1438,30 +1390,6 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Server" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器" } }
-      }
-    },
-    "offline.empty.message" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded books will appear here when offline content is available." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有可用的已下载内容时，它们会显示在这里。" } }
-      }
-    },
-    "offline.empty.title" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "No downloaded content" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无已下载内容" } }
-      }
-    },
-    "offline.reauthenticate.action" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reconnect and sign in" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新连接并登录" } }
-      }
-    },
-    "offline.shell.title" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线模式" } }
       }
     },
     "server.activate.action" : {
@@ -1508,8 +1436,8 @@
     },
     "server.delete.confirm.message.format" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %@ from this device? Its local session and offline entitlement will no longer be available." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从此设备移除“%@”？其本地会话和离线权限将不再可用。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %@ from this device? Its verified session, downloads, and readable private data will be removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从此设备移除“%@”？其已验证会话、下载和可读私有数据将被移除。" } }
       }
     },
     "server.delete.confirm.title" : {
@@ -2018,8 +1946,8 @@
     },
     "settings.security.logout.footer" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Signing out removes this server’s private offline data from this device." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出登录会移除此设备上当前服务器的私有离线数据。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Signing out removes this server’s saved session and private data from this device." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出登录会移除此设备上当前服务器的已保存会话和私有数据。" } }
       }
     },
     "settings.security.newPassword" : {
@@ -2096,7 +2024,7 @@
     "reader.error.PARSE_FAILED" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The EPUB could not be read." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取此 EPUB。" } } } },
     "reader.error.RESOURCE_MISSING" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The downloaded book is no longer available." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载的图书不再可用。" } } } },
     "reader.error.NETWORK_UNAVAILABLE" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The book is not downloaded and the server is unavailable." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图书尚未下载，且服务器当前不可用。" } } } },
-    "reader.error.PDF_RANGE_UNSUPPORTED" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This server does not support on-demand PDF access. Download the PDF before reading offline." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器不支持 PDF 按需读取，请先下载后离线阅读。" } } } },
+    "reader.error.PDF_RANGE_UNSUPPORTED" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This server does not support on-demand PDF access. Download the PDF before reading." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器不支持 PDF 按需读取，请先下载后阅读。" } } } },
     "reader.error.PDF_RANGE_INVALID" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The server returned an invalid PDF byte range. Try again." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PDF 字节区间响应无效，请重试。" } } } },
     "reader.error.PDF_RESOURCE_CHANGED" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The PDF has changed. Open it again." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PDF 文件已更新，请重新打开。" } } } },
     "reader.error.PDF_CACHE_IO" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The PDF cache could not be read or written." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PDF 缓存读写失败。" } } } },
@@ -2241,6 +2169,79 @@
     "reader.settings.pdfCrop" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Crop margins" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "\u88c1\u526a\u767d\u8fb9" } } } },
     "reader.settings.pdfCrop.off" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Off" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "\u5173\u95ed" } } } },
     "reader.settings.pdfCrop.auto" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "\u81ea\u52a8" } } } },
+    "management.work" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理图书" } } } },
+    "management.volume" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Volume" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理卷册" } } } },
+    "work.control.addSeries" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add to Series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加到系列" } } } },
+    "work.control.addShelf" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add to Shelf" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加到书架" } } } },
+    "work.control.markUnread" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Mark as Unread" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标记为未读" } } } },
+    "work.control.edit" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑" } } } },
+    "work.control.recognize" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Recognize" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "识别" } } } },
+    "work.control.changeMediaType" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Media Type" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改媒体类型" } } } },
+    "work.control.split" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Split" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拆分" } } } },
+    "work.control.move" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Move" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移动" } } } },
+    "work.control.delete" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除" } } } },
+    "work.download.pause" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause Download" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂停下载" } } } },
+    "management.editWork" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Book Information" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑图书信息" } } } },
+    "management.editVolume" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Volume Information" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑卷册信息" } } } },
+    "management.metadata" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Look Up Metadata" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "识别元数据" } } } },
+    "management.applyMetadata" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Apply Selected Metadata" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用所选元数据" } } } },
+    "management.applyAllVolumes" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Apply volume fields to all volumes in this media version" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将卷册字段应用到当前媒体版本全部卷册" } } } },
+    "management.cover" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cover" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "封面" } } } },
+    "management.tagsLabel" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tags" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标签" } } } },
+    "management.publishedAt" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Publication Date" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "出版时间" } } } },
+    "management.uploadCover" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Upload Cover" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上传封面" } } } },
+    "management.regenerateCover" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Regenerate Cover" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新生成封面" } } } },
+    "management.kindle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Send to Kindle" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发送到 Kindle" } } } },
+    "management.deleteWork" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete Book Record" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除图书记录" } } } },
+    "management.deleteVolume" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete Volume" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除卷册" } } } },
+    "management.mediaKind" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Media Type" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改媒体类型" } } } },
+    "management.split" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Split into a New Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拆分为新图书" } } } },
+    "management.transfer" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Move to Another Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移动到其他图书" } } } },
+    "management.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Title" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标题" } } } },
+    "management.author" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Author" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "作者" } } } },
+    "management.description" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Description" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简介" } } } },
+    "management.series" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系列" } } } },
+    "management.seriesIndex" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Series Index" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系列序号" } } } },
+    "management.tags" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tags, Separated by Commas" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标签（用逗号分隔）" } } } },
+    "management.volumeIndex" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volume Index" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "卷册序号" } } } },
+    "management.sortOrder" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sort Order" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "排序值" } } } },
+    "management.publisher" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Publisher" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "出版社" } } } },
+    "management.language" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Language" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语言" } } } },
+    "management.isbn" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "ISBN" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ISBN" } } } },
+    "management.identifier" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Identifier" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标识符" } } } },
+    "management.narrator" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Narrator" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "演播者" } } } },
+    "management.query" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Book Title, Series, or Keyword" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "书名、系列名或关键词" } } } },
+    "management.provider" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata Source" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据来源" } } } },
+    "management.search" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Search" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索" } } } },
+    "management.save" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Save" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存" } } } },
+    "management.ebook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "E-book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电子书" } } } },
+    "management.comic" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Comic" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "漫画" } } } },
+    "management.audiobook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Audiobook" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有声书" } } } },
+    "management.confirmDeleteWork" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete this book record? Source files will be kept; local offline downloads will be removed." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确定删除此图书记录吗？源文件会保留，本机离线下载会移除。" } } } },
+    "management.confirmDeleteVolume" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete this volume? Its local offline download will also be removed." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确定删除此卷册吗？本机离线下载也会一并移除。" } } } },
+    "management.activeDownloadBlocked" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause or cancel this download before changing the volume structure." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先暂停或取消下载，再修改卷册结构。" } } } },
+    "management.kindleNotReady" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure SMTP and a Kindle recipient address in Settings first." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先在设置中配置 SMTP 和 Kindle 收件邮箱。" } } } },
+    "management.kindleReady" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready to send" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已可发送" } } } },
+    "management.kindleSender" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sender" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发件邮箱" } } } },
+    "management.kindleRecipient" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Kindle recipient" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kindle 收件邮箱" } } } },
+    "management.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This server version doesn’t support native book management." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前服务端版本不支持 App 原生图书管理。" } } } },
+    "management.failed.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The operation failed (%@)." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作未完成（%@）。" } } } },
+    "management.scope" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Management scope" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理范围" } } } },
+    "management.scopeBook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图书" } } } },
+    "management.scopeVolumes" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "卷册" } } } },
+    "management.volumeList" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "卷册列表" } } } },
+    "management.coverManagement" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cover Management" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "封面管理" } } } },
+    "management.readingStatus" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading Status" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态" } } } },
+    "management.coverUploadHint" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "JPEG, PNG, or WebP, up to 10 MiB." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "支持 JPEG、PNG 或 WebP，最大 10 MiB。" } } } },
+    "management.regenerateCoverConfirmTitle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Regenerate cover?" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新生成封面？" } } } },
+    "management.regenerateCoverConfirmMessage" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The current cover will be replaced with one rebuilt from the source." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前封面会被根据源文件重新生成的封面替换。" } } } },
+    "management.noVolume" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No manageable volume is available." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可管理的卷册。" } } } },
+    "management.moveToSelectedWork" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Move to Selected Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移动到所选图书" } } } },
+    "management.addToKindleQueue" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add to Send Queue" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加入发送队列" } } } },
+    "management.downloadActive" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在下载" } } } },
+    "management.downloadPaused" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Paused" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已暂停" } } } },
+    "management.notDownloaded" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Downloaded" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未下载" } } } },
+    "downloads.failed" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "失败" } } } },
     "settings.validation.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Check Your Information" } },

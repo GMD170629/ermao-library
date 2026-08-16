@@ -6,6 +6,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.ermao.library.features.reader.infrastructure.AndroidPdfiumFeatureFlags
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
@@ -52,6 +53,11 @@ class ReaderPdfInstrumentedTest {
     fun removeArtifacts() = runBlocking {
         progressStore.delete(sourceId)
         publicationStore.delete(sourceId)
+    }
+
+    @Test
+    fun nativePdfiumRangeRolloutIsAvailable() {
+        assertEquals(true, AndroidPdfiumFeatureFlags.NATIVE_PDFIUM_RANGE_V1)
     }
 
     @Test
