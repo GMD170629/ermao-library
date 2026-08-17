@@ -9,12 +9,16 @@
 时必须选择 `FLAT`、`VOLUMES` 或 `AUDIOBOOK`。文件系统决定作品、版本、卷册和源文件
 的隶属关系；识别、OPF、嵌入标签和在线元数据只负责描述。
 
-这是一次全新数据代际：
+这是一次全新数据代际。本文所说的“必须重新安装”有严格定义：清空应用自有的全部
+数据库和软件数据（服务端 app-data、配置、日志/临时文件、派生缓存/任务/会话、Web/PWA
+存储、移动端本地存储及本应用命名空间的凭据），然后按空系统重新初始化；它与用户书库
+目录完全无关。
 
-- 用户必须清理应用数据并重新安装、重新创建首个管理员/用户与授权、重新扫描源目录；
+- 用户必须执行上述完整 app-owned reset，重新安装，重新创建首个管理员/用户与授权，之后
+  再手工登记并扫描书库目录；
 - 不迁移旧数据库、用户记录、进度、书签、下载、智能书架规则或任务；
 - 不导入旧备份，不保留旧 API，不返回旧字段，不做 ID alias；
-- 不修改或自动删除用户的书库源目录；
+- 重装流程不记录、不迁移、不校验、不清理、不修改用户的书库源目录；
 - 前后端与移动端按一个大版本同步发布。
 
 本方案优先定义业务不变量、数据结构、扫描与事务、接口边界和 PR 切片。页面布局、
@@ -34,7 +38,7 @@
 | 删除数据库记录可保留源文件 | 下次扫描会复活 | 不提供 DB-only 或源删除；用户在文件系统管理删除 |
 | ACL 依附监控目录 | 作品可能跨多个监控目录推导权限 | 每个作品必须属于一个书库，授权直接使用 `libraryId` |
 | 有声书被当成分类 | 音轨组合和媒体类别混在一起 | `AUDIOBOOK` 只是一种多资产目录协议；音频技术能力来自格式探测 |
-| “重装”被误解为数据必然清空 | 服务端卷、PWA 存储、Android 备份、iOS Keychain 可保留 | generation guard 只拒绝或清理 app-owned state，绝不解析旧数据 |
+| “重新安装”被误解为只卸载程序 | 平台可能保留服务端卷、PWA 存储、移动端备份或凭据 | 强制清空全部 app-owned 数据后按空系统初始化；用户书库目录不属于 reset 范围，generation guard 只做旧状态拒绝，不解析或迁移旧数据 |
 
 代码盘点中的主要耦合点：
 
@@ -853,8 +857,10 @@ migration、trigger、seed、worker 和 HTTP 前以 read-only inspection 判定�
 | generation marker 不一致 | `DATABASE_REINSTALL_REQUIRED`，零写入 |
 | marker=2 但 revision 不属于当前已知 lineage | `APPLICATION_UPGRADE_REQUIRED`，零写入 |
 
-不自动 drop、不自动备份、不静默换一个 DB 文件。重装/重置工具只允许删除已验证位于
-app-data root 下的数据库和派生缓存，绝不把 library root 纳入候选。
+应用启动不会自动 drop、备份或静默替换旧 DB；发现非空旧 DB 时只 fail closed。只有离线
+重装/reset 工具才能在明确的 app-data root 边界内清空全部 app-owned 数据（数据库、派生
+缓存、任务、会话、客户端存储和本应用凭据），随后从空库初始化；用户书库目录从不属于
+重装/reset 的输入、候选或校验对象。
 
 所有 schema write（空库初始化和已知 v2 revision 升级）都必须持有“按 canonical DB path
 定位”的跨进程 exclusive schema lock；持锁后重新做 read-only inspection，其他 API/worker
@@ -881,12 +887,14 @@ derived data 和 secret exclusion；不能在本重构中用一个版本字段�
 
 ### 8.3 客户端与部署
 
-“卸载重装”不天然保证数据消失：
+“必须重新安装”不是只卸载二进制，而是完成一次全平台 app-owned reset，再按空系统安装：
 
-- Docker/服务端 app-data volume 需要显式重建；
-- PWA 需要注销旧 service worker 并清除 origin Cache/IndexedDB/localStorage；
-- Android 需排除旧 app data 的 Auto Backup 恢复或要求 clear data；
-- iOS Keychain 可能跨卸载保留，只清理已知旧 service，新的 namespace 不读取旧 key；
+- Docker/服务端必须重建 app-data volume，并清空数据库、派生缓存、任务和会话；
+- PWA 必须注销旧 service worker 并清除 origin Cache/IndexedDB/localStorage；
+- Android 必须清空本应用私有数据并禁止旧 app data 通过 Auto Backup 恢复；
+- iOS 必须清空本应用沙箱数据和本应用命名空间的 Keychain 凭据；
+- 其他平台存储也必须清空本应用拥有的数据库、缓存、任务、会话、凭据和客户端状态；
+- 上述清理不读取、不记录、不迁移、不校验用户书库目录；
 - generation handshake 分开返回 schemaGeneration、API major、Reader v5 和随机
   serverDataEpoch；首次 generation-2 使用、登录与 cutover 必须在线验证并持久化最后一次成功
   verified envelope。响应 `Cache-Control: no-store` 且绕过 Service Worker/HTTP cache；
@@ -904,21 +912,21 @@ VerifiedSession -> 用其中 grant scope epochs 门禁各 Library protected stor
 发起 live handshake。临时网络失败不撤权、不锁住已下载内容；live 成功但 epoch 不同才 reset。
 VerifiedSession 自身不依赖内部尚未解码的 scope。
 
-这不是兼容迁移：系统只检测 generation 并拒绝旧状态。所有重置说明都必须把“应用派生
-数据”和“用户源书目录”分开，任何自动化不得删除后者。
+这不是兼容迁移：系统只检测 generation 并拒绝旧状态。强制重装完成后不保留任何旧
+app-owned 数据；所有重置说明都必须把“应用软件数据”和“用户源书目录”分开，任何自动化
+不得读取、记录、校验、迁移或删除后者。
 
 ### 8.4 Cutover runbook
 
-1. 发布前由管理员在外部记录 source roots 与计划采用的 organization mode；不从旧库自动导入。
-2. 停止并锁住旧 API、worker、watcher、scheduler，验证无旧进程持有 DB/root 写权限。
-3. 离线 reset CLI 先 dry-run，只列出带 app-owned marker 的精确 DB/cache/client targets；拒绝
-   `/`、home、workspace、app-data root 本身、symlink 和任何已声明 source root。
-4. 管理员显式确认后清理 app-owned state；再次校验 source roots 的目录/抽样摘要未变化。
-5. 初始化 v2 head 与新 serverDataEpoch，离线执行 `BootstrapFirstAdministrator`；HTTP/worker
+1. 停止并锁住旧 API、worker、watcher、scheduler，验证无旧进程持有 app-data 写权限。
+2. 离线 reset CLI 先 dry-run，只列出带 app-owned marker 的精确 DB/cache/client targets；拒绝
+   `/`、home、workspace、app-data root 本身和 symlink 等非精确 app-owned 目标。
+3. 管理员显式确认后清空全部 app-owned state；该流程不读取、不记录、不校验用户书库目录。
+4. 初始化 v2 head 与新 serverDataEpoch，离线执行 `BootstrapFirstAdministrator`；HTTP/worker
    只在 `identityBootstrapCompletedAt` 成功提交后启动。
-6. 清理并安装 generation-2 Web/PWA/Android/iOS，先完成 compatibility handshake，再登录。
-7. 手工新建 Library、选择 mode/ACL，运行首次 scan；旧 DB/backup 不再参与任何步骤。
-8. 验证旧 client header 得到 426、旧 worker 无法启动、source roots 从未被重置工具改写。
+5. 清理并安装 generation-2 Web/PWA/Android/iOS，先完成 generation-2 handshake，再登录。
+6. 手工新建 Library、选择 mode/ACL，运行首次 scan；旧 DB/backup 不再参与任何步骤。
+7. 验证旧 client header 得到 426、旧 worker 无法启动；重装工具从未接触用户书库目录。
 
 ## 9. 渐进式 PR 链
 
@@ -1065,10 +1073,11 @@ head 都必须保持旧 production stack smoke green，不能让半套新合同�
 - 停止旧 server/worker，离线 reset app-owned data，创建 serverDataEpoch/管理员，启动新栈；
 - 所有业务请求要求 client generation 2，混代请求在进入业务 route 前返回
   `426 CLIENT_REINSTALL_REQUIRED`；
-- 发布清理 app data、保留 library roots 的离线 reset CLI 与重装手册。
+- 发布清空全部 app-owned data、且固定不接触用户书库目录的离线 reset CLI 与重装手册。
 
 这是 coordinated release 边界。旧客户端和旧 worker 不得连接新服务；主应用拒绝旧 DB 后，
-reset 必须由离线维护工具执行，并再次证明删除候选不含任何 Library root。
+reset 必须由离线维护工具执行，删除候选只能来自预先固定的 app-data-owned 路径集合；用户
+书库目录既不是候选，也不作为 reset 的输入或校验对象。
 
 ### PR 12 — 非运行时死代码与旧资产清除
 

@@ -39,8 +39,9 @@ structural mutations.
 
 This is a greenfield data generation. Upgrading an existing installation is not
 supported. Server, Web, Android, and iOS data from previous generations are not
-migrated, aliased, imported, or interpreted. Users must perform a clean reinstall
-and rebuild the catalog from their unchanged source directories.
+migrated, aliased, imported, or interpreted. Users must perform the complete
+app-owned reset defined below, then manually register and scan any library
+directories; those directories are not part of reinstall.
 
 ## Decision
 
@@ -536,6 +537,14 @@ its own completed publish from an external collision; ambiguous cases become
 
 ### 6. Use a new data and API generation with no compatibility layer
 
+For this ADR, “reinstall” means a complete app-owned reset: delete all
+application databases and software data (server app-data, configuration,
+logs/temporary files, derived caches, tasks, sessions, Web/PWA stores, mobile
+local stores, and credentials owned by this application), then initialize the
+system as empty. A user’s library directory is unrelated to reinstall: the reset flow does not
+read, record, validate, migrate, modify, or delete it. The directory is registered and
+scanned only later as a new Library input.
+
 All released migration files remain immutable, but they are not the active
 lineage for this generation. A new Alembic lineage uses the fixed version table
 `alembic_version_v2` and marker table `application_schema_generation`. It owns an
@@ -580,9 +589,12 @@ workers, schedulers, and Library creation refuse to start before that marker;
 later administrators use ordinary authenticated commands. A database reset
 necessarily creates a new epoch and requires this bootstrap again.
 
-The reset operation may delete only application-owned database and derived-cache
-paths after resolving them under the configured application-data root. It must
-never recursively delete a configured library root.
+The reset operation may delete only the complete set of application-owned
+database and software-data paths after resolving them under the configured
+application-data root. It must never recursively delete, inspect, record, or
+validate a configured library root. Startup is not a reset operation: it never
+automatically drops or replaces a non-empty legacy database; it fails closed
+and leaves that database untouched until the offline reset tool is run.
 
 The new server publishes only generation-2 contracts:
 
@@ -591,7 +603,7 @@ The new server publishes only generation-2 contracts:
 - work/version/volume contracts without media-kind projections;
 - a new Reader contract that keeps exact locator morphologies but removes
   `mediaVersionId` and `mediaKind`;
-- a compatibility handshake that independently reports `schemaGeneration = 2`,
+- a generation-2 handshake that independently reports `schemaGeneration = 2`,
   API major, Reader schema version, and `serverDataEpoch`.
 
 There is no dual read, dual write, alias table, legacy endpoint, old backup
@@ -603,18 +615,20 @@ same-generation backup requires a separate decision for opaque catalog IDs, root
 remapping, user state, and secret exclusion; old backup envelopes are never
 accepted by the new runtime.
 
-A reinstall is not assumed to erase every platform store. Server data volumes,
-PWA origin storage, Android automatic backup, and iOS Keychain can survive an
-application reinstall. First generation-2 use, login, and cutover require a live
-generation handshake. The client persists the last successfully verified
-generation envelope. On a later offline cold start it compares that envelope
-with the bounded private-store header; a match permits VerifiedSession restore
-and local Reader use while a live handshake runs asynchronously. Temporary
-network failure preserves that local state. A successful live response with a
-different `serverDataEpoch` fails with `LOCAL_DATA_RESET_REQUIRED` before any
-server-backed action. The handshake response uses `Cache-Control: no-store` and
-bypasses Service Worker and HTTP caches so a rebuilt server cannot be masked by
-a stale epoch.
+The reinstall procedure must explicitly erase every app-owned platform store:
+rebuild server app-data volumes, clear PWA origin storage and service workers,
+clear mobile private data and automatic-backup restoration, and clear this
+application’s Keychain namespace. Uninstalling a binary alone is insufficient.
+First generation-2 use, login, and cutover require a live generation handshake.
+The client persists the last successfully verified generation envelope. On a
+later offline cold start it compares that envelope with the bounded
+private-store header; a match permits VerifiedSession restore and local Reader
+use while a live handshake runs asynchronously. Temporary network failure
+preserves that local state. A successful live response with a different
+`serverDataEpoch` fails with `LOCAL_DATA_RESET_REQUIRED` before any server-backed
+action. The handshake response uses `Cache-Control: no-store` and bypasses
+Service Worker and HTTP caches so a rebuilt server cannot be masked by a stale
+epoch.
 
 Each store namespace includes `serverIdentity + serverDataEpoch +
 schemaGeneration + userId + storeCodecVersion`. Progress/bookmark stores also
@@ -623,10 +637,12 @@ store versions. Progress and bookmark identity add Volume (and client ID where
 required) but never a grant scope epoch. Protected cache/download namespaces
 additionally use the relevant Library scope epoch as an access boundary. No store
 decodes an older or mismatched blob, and there is no codec migration: mismatch
-resets only the corresponding app-owned namespace. Android Auto Backup excludes
-generation-1 stores, PWA reset removes the old service
-worker/Cache/IndexedDB/localStorage, and iOS removes only the known legacy
-Keychain services. Source library directories are outside this reset.
+resets only the corresponding app-owned namespace. A full reinstall/reset still
+clears all app-owned stores rather than attempting any codec migration. Android
+Auto Backup excludes generation-1 stores, PWA reset removes the old service
+worker/Cache/IndexedDB/localStorage, and iOS removes the complete Keychain
+namespace owned by this application. Source library directories are outside this
+reset and are not reset inputs or validation targets.
 
 ### 7. Separate Library control, health, and authorization
 
@@ -789,5 +805,5 @@ change increments `configRevision`, cancels stale work, and requires a full scan
 - Multi-track audio requires an ordered multi-asset Reader/download contract;
   indexing alone must not be advertised as playable support.
 - A legacy installation cannot start this release. The failure is deliberate and
-  non-destructive, and the only supported path is a clean application-data reset
-  followed by a source rescan.
+  non-destructive, and the only supported path is a complete app-owned reset
+  followed by manual Library registration and source scanning.
