@@ -4,19 +4,19 @@
 - Date: 2026-08-17
 - Owner: Catalog capability
 
-When accepted for generation 2, this ADR changes earlier decisions as follows:
+When accepted for the current release, this ADR changes earlier decisions as follows:
 
 | Earlier authority | Generation-2 treatment |
 | --- | --- |
 | ADR 0002 | Supersede the singleton `ImportWorkItem`, old import-history API, and absolute-path deduplication. Preserve the 5,000-entry, 500-candidate, 250-ms slice limits, high-water backpressure, lease recovery, and restart-from-subtree-root behavior. |
 | ADR 0003 | Preserve one 10,000-track budget across an entire `AUDIOBOOK` Work, including all of its Volumes and transparent disc directories. |
-| ADR 0004 and `docs/media-version-volume-upgrade.md` | Supersede the media-version topology, structural mutations, old schema migration, and old backup decisions. |
+| ADR 0004 and `docs/media-version-volume-upgrade.md` | Supersede the media-version topology and structural mutation decisions. |
 | ADR 0008 and ADR 0015 | Preserve authorization-version invalidation, verified-session behavior, and the rule that transient network failure is not explicit revocation. Replace monitor-folder authorization with Library grants. |
 | ADR 0010 | Supersede the single-file download manifest and Reader-v4 identity. Preserve private authorization namespaces, validated temporary storage, atomic publication, and bounded revocation for already stored bytes. |
 | ADR 0011 | Preserve exact locator morphologies, `baseRevision`, idempotent `mutationId`, durable pending writes, conflict handling, and post-navigation verification. Replace `workId + volumeId` ownership with Volume ownership and bind mutations to `contentRevision`; audio file identity becomes `assetId`. |
 | ADR 0016 | Preserve original source formats. A local multi-track publication is a set of unchanged original assets, never a derived archive or unpacked conversion artifact. |
 
-The generation-2 Reader authority will replace the Reader-v4 identity,
+The current Reader authority will replace the previous Reader identity,
 bootstrap, storage-key, and single-file download sections of
 `docs/mobile-reader-architecture.md` before cutover. Its security, parser,
 source-preservation, exact-location, and physical-device requirements remain in
@@ -37,11 +37,11 @@ the authority for work, version, and volume membership. Metadata may describe a
 node but must never regroup it. The system no longer exposes catalog-only
 structural mutations.
 
-This is a greenfield data generation. Upgrading an existing installation is not
-supported. Server, Web, Android, and iOS data from previous generations are not
-migrated, aliased, imported, or interpreted. Users must perform the complete
-app-owned reset defined below, then manually register and scan any library
-directories; those directories are not part of reinstall.
+This is a greenfield data generation. In-place upgrade from a previous
+installation is `UNSUPPORTED/UNSPECIFIED`: it is not implemented, tested, or
+promised to return an error, migrate data, or happen to work. Server, Web,
+Android, and iOS start with current empty state. Source directories are external
+inputs and are not managed by the installation flow.
 
 ## Decision
 
@@ -535,114 +535,47 @@ staged digest and recorded filesystem identity with the final slot to distinguis
 its own completed publish from an external collision; ambiguous cases become
 `NEEDS_ATTENTION`. The system never guesses a Work from a filename.
 
-### 6. Use a new data and API generation with no compatibility layer
+### 6. Use a fresh current schema and client contract
 
-For this ADR, “reinstall” means a complete app-owned reset: delete all
-application databases and software data (server app-data, configuration,
-logs/temporary files, derived caches, tasks, sessions, Web/PWA stores, mobile
-local stores, and credentials owned by this application), then initialize the
-system as empty. A user’s library directory is unrelated to reinstall: the reset flow does not
-read, record, validate, migrate, modify, or delete it. The directory is registered and
-scanned only later as a new Library input.
+This release is defined only for an empty database and fresh current client
+state. In-place upgrade from any previous installation is
+`UNSUPPORTED/UNSPECIFIED`: it is not implemented, tested, or promised to return
+an error, migrate data, or happen to work. No compatibility path, old-state
+decoder, alias, or reset behavior is part of the product.
 
-All released migration files remain immutable, but they are not the active
-lineage for this generation. A new Alembic lineage uses the fixed version table
-`alembic_version_v2` and marker table `application_schema_generation`. It owns an
-independent declarative registry/metadata; neither migrations nor tests import
-the legacy global `Base.metadata`. Its first deterministic revision establishes
-generation-2 system/catalog core tables, and every later schema change adds an
-immutable revision rather than editing that baseline.
+The current Alembic lineage uses `alembic_version_v2` and an independent
+declarative registry/metadata. Its first deterministic revision creates the
+current system, User/Auth/Session, and catalog core. Later current schema work
+adds immutable revisions. Fresh installation runs the current head against an
+empty database; migrations do not import runtime services, use raw SQL, or
+backfill another schema.
 
-The generation inspector is the first database action. It uses a read-only
-connection before WAL/PRAGMA changes, a migration connection, triggers, seeds,
-workers, or HTTP startup:
+Empty-schema initialization acquires one cross-process exclusive lock keyed by
+the canonical database path, runs the current migration head, and commits the
+required system and identity bootstrap rows in one typed ORM transaction. The
+offline `BootstrapFirstAdministrator` command is the normal first-admin setup;
+business HTTP, workers, schedulers, and Library creation start after that
+normal bootstrap state. No old-schema inspection, upgrade branch, or special
+reinstall handling is defined.
 
-- an empty database may initialize generation 2;
-- a database with marker `2` and a known generation-2 revision may upgrade
-  within that lineage;
-- any legacy revision, legacy business table, unversioned non-empty schema, or
-  mismatched generation fails with `DATABASE_REINSTALL_REQUIRED`;
-- the application never drops, rewrites, migrates, backs up, or silently ignores
-  a legacy database during startup.
-
-Every schema-writing startup path acquires one cross-process exclusive schema
-lock keyed by the canonical database path, including both empty initialization
-and an upgrade from a known older generation-2 revision. Other API/worker
-processes wait and then inspect again; they never run Alembic concurrently.
-
-- Empty branch: re-inspect and prove the schema is empty, migrate to the v2 head,
-  insert marker `2` plus `SystemInstance/serverDataEpoch` in one typed ORM
-  transaction, verify all three, then release the lock.
-- Known-v2 upgrade branch: verify the existing marker and `SystemInstance`, run
-  only the known v2 lineage to head, verify revision/marker/SystemInstance again,
-  then release the lock.
-
-The initial head includes the minimal generation-2 User/Auth/Session schema as
-well as system and catalog core; grants never point at a legacy identity table.
-
-A non-empty database left by an interrupted first initialization without both a
-valid marker and known revision is rejected with `DATABASE_REINSTALL_REQUIRED`;
-it is not automatically repaired or deleted. After schema bootstrap, the offline
-`BootstrapFirstAdministrator` CLI atomically creates exactly one first global
-administrator and records `identityBootstrapCompletedAt`. Business HTTP routes,
-workers, schedulers, and Library creation refuse to start before that marker;
-later administrators use ordinary authenticated commands. A database reset
-necessarily creates a new epoch and requires this bootstrap again.
-
-The reset operation may delete only the complete set of application-owned
-database and software-data paths after resolving them under the configured
-application-data root. It must never recursively delete, inspect, record, or
-validate a configured library root. Startup is not a reset operation: it never
-automatically drops or replaces a non-empty legacy database; it fails closed
-and leaves that database untouched until the offline reset tool is run.
-
-The new server publishes only generation-2 contracts:
+The current server publishes only current contracts:
 
 - `/api/libraries`, not `/api/monitor-folders`;
 - `libraryIds`, not `monitorFolderIds`;
 - work/version/volume contracts without media-kind projections;
-- a new Reader contract that keeps exact locator morphologies but removes
-  `mediaVersionId` and `mediaKind`;
-- a generation-2 handshake that independently reports `schemaGeneration = 2`,
-  API major, Reader schema version, and `serverDataEpoch`.
+- a Reader contract that keeps exact locator morphologies but removes
+  `mediaVersionId` and `mediaKind`.
 
-There is no dual read, dual write, alias table, legacy endpoint, old backup
-import, old progress/download migration, or fallback response shape. API,
-worker, Web, Android, and iOS cut over as one release.
+The current release does not expose application backup/restore. A future
+same-current-generation backup requires a separate decision for opaque catalog
+IDs, root remapping, user state, derived data, and secret exclusion.
 
-Generation 2 initially exposes no application backup/restore API. Designing a
-same-generation backup requires a separate decision for opaque catalog IDs, root
-remapping, user state, and secret exclusion; old backup envelopes are never
-accepted by the new runtime.
-
-The reinstall procedure must explicitly erase every app-owned platform store:
-rebuild server app-data volumes, clear PWA origin storage and service workers,
-clear mobile private data and automatic-backup restoration, and clear this
-application’s Keychain namespace. Uninstalling a binary alone is insufficient.
-First generation-2 use, login, and cutover require a live generation handshake.
-The client persists the last successfully verified generation envelope. On a
-later offline cold start it compares that envelope with the bounded
-private-store header; a match permits VerifiedSession restore and local Reader
-use while a live handshake runs asynchronously. Temporary network failure
-preserves that local state. A successful live response with a different
-`serverDataEpoch` fails with `LOCAL_DATA_RESET_REQUIRED` before any server-backed
-action. The handshake response uses `Cache-Control: no-store` and bypasses
-Service Worker and HTTP caches so a rebuilt server cannot be masked by a stale
-epoch.
-
-Each store namespace includes `serverIdentity + serverDataEpoch +
-schemaGeneration + userId + storeCodecVersion`. Progress/bookmark stores also
-carry Reader schema version; download catalogs carry their download-manifest and
-store versions. Progress and bookmark identity add Volume (and client ID where
-required) but never a grant scope epoch. Protected cache/download namespaces
-additionally use the relevant Library scope epoch as an access boundary. No store
-decodes an older or mismatched blob, and there is no codec migration: mismatch
-resets only the corresponding app-owned namespace. A full reinstall/reset still
-clears all app-owned stores rather than attempting any codec migration. Android
-Auto Backup excludes generation-1 stores, PWA reset removes the old service
-worker/Cache/IndexedDB/localStorage, and iOS removes the complete Keychain
-namespace owned by this application. Source library directories are outside this
-reset and are not reset inputs or validation targets.
+Current Web, Android, and iOS clients start with fresh local state and use the
+current API, Reader, progress, bookmark, and download contracts directly.
+Private stores use current app, user, Volume, Library scope, and codec
+identifiers; no other-generation data is decoded or converted. Normal login
+creates the current VerifiedSession. No special handling for non-current state
+is specified.
 
 ### 7. Separate Library control, health, and authorization
 
@@ -708,19 +641,14 @@ Lock order is fixed: a publisher holds its operation lock before briefly taking
 the source-mutation gate; removal commits and releases the gate before waiting
 for any operation lock. Removal never holds the gate while draining.
 
-Online client bootstrap is two-stage. A non-private server profile contains only
-the base address/profile ID. After the live handshake validates generation and
-epoch, the client reads a bounded private-envelope header containing only epoch,
-schema, per-store codec versions, and a user selector; only then may it decode
-that user's VerifiedSession and Library stores. A later offline cold start uses
-the persisted verified envelope and the same header checks, never an unvalidated
-payload. Scope epochs inside the verified grant snapshot gate protected stores
-but are not required to locate or decode VerifiedSession itself.
+Current client bootstrap uses the authenticated current server profile and
+session, then opens the current Reader, progress, bookmark, and Library stores.
+Scope epochs inside the verified grant snapshot gate protected stores but are not
+required to locate or decode the current VerifiedSession itself.
 
-### 8. Define the generation-2 Reader and download boundary
+### 8. Define the current Reader and download boundary
 
-The new language-neutral contract is Reader v5. Schema generation, API major,
-and Reader schema version are independent values. Reader v5 uses exactly
+The new language-neutral contract is Reader v5. Reader v5 uses exactly
 `REFLOWABLE | PDF | COMIC | AUDIO`, matching the four exact locator variants.
 The server publishes source format, morphology, content/manifest revisions, and
 delivery capabilities. Each platform intersects them with its local
@@ -804,6 +732,7 @@ change increments `configRevision`, cancels stale work, and requires a full scan
   is adopted.
 - Multi-track audio requires an ordered multi-asset Reader/download contract;
   indexing alone must not be advertised as playable support.
-- A legacy installation cannot start this release. The failure is deliberate and
-  non-destructive, and the only supported path is a complete app-owned reset
-  followed by manual Library registration and source scanning.
+- In-place upgrade from a previous installation is `UNSUPPORTED/UNSPECIFIED`.
+  This release starts from an empty database and fresh current client state;
+  no upgrade behavior, error contract, migration, or compatibility path is
+  promised.

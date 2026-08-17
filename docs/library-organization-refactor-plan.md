@@ -9,17 +9,11 @@
 时必须选择 `FLAT`、`VOLUMES` 或 `AUDIOBOOK`。文件系统决定作品、版本、卷册和源文件
 的隶属关系；识别、OPF、嵌入标签和在线元数据只负责描述。
 
-这是一次全新数据代际。本文所说的“必须重新安装”有严格定义：清空应用自有的全部
-数据库和软件数据（服务端 app-data、配置、日志/临时文件、派生缓存/任务/会话、Web/PWA
-存储、移动端本地存储及本应用命名空间的凭据），然后按空系统重新初始化；它与用户书库
-目录完全无关。
-
-- 用户必须执行上述完整 app-owned reset，重新安装，重新创建首个管理员/用户与授权，之后
-  再手工登记并扫描书库目录；
-- 不迁移旧数据库、用户记录、进度、书签、下载、智能书架规则或任务；
-- 不导入旧备份，不保留旧 API，不返回旧字段，不做 ID alias；
-- 重装流程不记录、不迁移、不校验、不清理、不修改用户的书库源目录；
-- 前后端与移动端按一个大版本同步发布。
+这是一次只面向空数据库和全新客户端状态的新数据代际。旧版本原地升级行为
+`UNSUPPORTED/UNSPECIFIED`：不实现、不测试，也不承诺错误码、迁移结果或偶然运行结果。
+不导入旧数据库、备份、用户状态、客户端状态或旧 API，不保留 alias 或兼容路径。
+source directories 是外部输入，不由安装流程管理；它们只在用户显式创建 Library 后参与
+正常扫描。前后端与移动端按一个大版本同步发布。
 
 本方案优先定义业务不变量、数据结构、扫描与事务、接口边界和 PR 切片。页面布局、
 视觉样式和具体交互稿不在本轮范围内。
@@ -38,7 +32,6 @@
 | 删除数据库记录可保留源文件 | 下次扫描会复活 | 不提供 DB-only 或源删除；用户在文件系统管理删除 |
 | ACL 依附监控目录 | 作品可能跨多个监控目录推导权限 | 每个作品必须属于一个书库，授权直接使用 `libraryId` |
 | 有声书被当成分类 | 音轨组合和媒体类别混在一起 | `AUDIOBOOK` 只是一种多资产目录协议；音频技术能力来自格式探测 |
-| “重新安装”被误解为只卸载程序 | 平台可能保留服务端卷、PWA 存储、移动端备份或凭据 | 强制清空全部 app-owned 数据后按空系统初始化；用户书库目录不属于 reset 范围，generation guard 只做旧状态拒绝，不解析或迁移旧数据 |
 
 代码盘点中的主要耦合点：
 
@@ -419,11 +412,10 @@ operationId、稳定 code、actor/system、时间和脱敏 evidence；不保存�
 
 ### 3.10 Reader 与系统关联表
 
-- `SystemInstance`：单例 `schemaGeneration=2`、不可变随机 `serverDataEpoch`、createdAt、
-  `identityBootstrapCompletedAt`；schema migration 只建表，typed bootstrap 在首个业务写入前
-  创建 generation marker + row。
-- generation-2 `User`、credential/identity、`Session` 是 fresh schema 的最小组成，不引用或读取
-  旧用户表；`BootstrapFirstAdministrator` 离线 CLI 完成前业务 HTTP/worker/scheduler 不启动。
+- `SystemInstance`：单例 `createdAt`、`identityBootstrapCompletedAt`；schema migration 只建表，
+  typed bootstrap 在首个业务写入前创建 system row。
+- current `User`、credential/identity、`Session` 是 fresh schema 的最小组成；
+  `BootstrapFirstAdministrator` 完成前业务 HTTP/worker/scheduler 不启动。
 - `UserVolumeProgress`：唯一 `(userId, volumeId)`，含 `contentRevision`、validated exact
   location、单调 progress revision、display projection 和时间戳；Work 不进入主键。
 - `ReaderMutationReceipt`：唯一 `(userId, volumeId, mutationId)`，保存 base/result revision、
@@ -666,13 +658,12 @@ worker 只拥有 lease/retry/ack/shutdown 等进程边界责任。
 
 ## 7. 新 API 与外围合同
 
-本次没有兼容期。新 OpenAPI 只发布 generation-2 合同，所有 JSON 在 presentation 层用
+本次没有兼容期。新 OpenAPI 只发布 current 合同，所有 JSON 在 presentation 层用
 Pydantic 校验，Web/KMP 重新生成 wire types。
 
 ### 7.1 核心路径
 
 ```text
-GET    /api/system/compatibility
 POST   /api/libraries
 GET    /api/libraries
 GET    /api/libraries/{libraryId}
@@ -744,16 +735,16 @@ rename；不会先留下半个空 Work/Version 再发布文件。
 - `mediaKind`, `availableMediaKinds`, `mediaVersions`, `recentMediaKind`；
 - `organized`, `organizeStatus`, classification suggestion；
 - 接受任意绝对目标路径的 upload/manual import；
-- 旧 backup v3、Reader v1-v4 和旧 mobile/web wire DTO。
+- backup/restore、非当前 Reader 和非当前 mobile/web wire DTO。
 
-智能书架不迁移旧规则。新安装仅支持书库、格式、Reader capability、作者、系列、标签、
+智能书架使用当前 rule schema，仅支持书库、格式、Reader capability、作者、系列、标签、
 进度等仍有明确语义的规则。元数据 provider 可按 format/capability 声明支持范围，但不能
 通过 media kind 决定结构。
 
 ### 7.3 Reader 与下载
 
 Reader v5 精确位置仍是 discriminated union：`REFLOWABLE | PDF | COMIC | AUDIO`。
-schema generation、API major 和 Reader schema version 是三个独立值。bootstrap 以
+当前 Reader schema version 固定在当前合同中。bootstrap 以
 `volumeId` 为资源入口，至少返回：
 
 ```text
@@ -827,106 +818,48 @@ artwork 只递增 optional-manifest/metadata revision。外部 required bytes �
 PRESENT + READY Volume 匹配”，facet 计 distinct Work。MISSING/INVALID 的静态 shelf link
 休眠不删；继续阅读忽略，恢复后重新参与。
 
-## 8. 全新安装与 schema generation 2
+## 8. 全新安装与当前 schema
 
 ### 8.1 数据库
 
-保留已发布 migration 文件为只读历史，新建独立 generation-2 Alembic lineage：
+新建当前代独立 Alembic lineage：
 
 ```text
-apps/api-python/app/db/alembic_v2/
+apps/api-python/app/db/alembic_current/
   env.py
-  versions/0001_generation_system_and_catalog_core.py
+  versions/0001_system_and_catalog_core.py
 ```
 
-v2 固定使用 `alembic_version_v2` 与 `application_schema_generation`。它有独立 declarative
-registry/metadata，不导入旧全局 `Base.metadata`，migration 也不导入 runtime service。0001
-只创建 generation-2 system/catalog core；后续能力各自追加 immutable v2 revision，fresh DB
-在 cutover 应用到当时 head。任何 revision 都不执行 `INSERT ... SELECT`、raw SQL、
+它有独立 declarative registry/metadata，不导入其他模块的 ORM metadata，migration 也不导入
+runtime service。当前 head 只创建 system/catalog core；后续能力各自追加 immutable current
+revision。每次安装只针对空数据库执行到当前 head，任何 revision 都不执行 raw SQL、
 `sqlite3` cursor 或旧数据 backfill。
 
-generation inspector 是 bootstrap 的第一个数据库动作，在 write connection、WAL/PRAGMA、
-migration、trigger、seed、worker 和 HTTP 前以 read-only inspection 判定：
-
-| 状态 | 行为 |
-| --- | --- |
-| 完全空库 | 创建 generation 2 baseline |
-| marker=2 且 revision 属于已知 v2 lineage | 仅执行 v2 lineage 内升级 |
-| 旧 Alembic revision | `DATABASE_REINSTALL_REQUIRED`，零写入 |
-| 无 revision 但有任意业务表 | `DATABASE_REINSTALL_REQUIRED`，零写入 |
-| generation marker 不一致 | `DATABASE_REINSTALL_REQUIRED`，零写入 |
-| marker=2 但 revision 不属于当前已知 lineage | `APPLICATION_UPGRADE_REQUIRED`，零写入 |
-
-应用启动不会自动 drop、备份或静默替换旧 DB；发现非空旧 DB 时只 fail closed。只有离线
-重装/reset 工具才能在明确的 app-data root 边界内清空全部 app-owned 数据（数据库、派生
-缓存、任务、会话、客户端存储和本应用凭据），随后从空库初始化；用户书库目录从不属于
-重装/reset 的输入、候选或校验对象。
-
-所有 schema write（空库初始化和已知 v2 revision 升级）都必须持有“按 canonical DB path
-定位”的跨进程 exclusive schema lock；持锁后重新做 read-only inspection，其他 API/worker
-进程等待释放后再检查，绝不并发运行 Alembic。两条顺序不能混用：
-
-- empty：持锁复检为空 -> migrate v2 head -> typed ORM transaction 原子插入 marker=2 与
-  `SystemInstance/serverDataEpoch` -> 验证三者 -> release；
-- known v2 upgrade：持锁验证已有 marker/SystemInstance -> migrate known v2 lineage to head ->
-  再验证 revision/marker/SystemInstance -> release。
-
-首次初始化若在 marker/head 完整提交前中断，残留非空库在下次启动返回
-`DATABASE_REINSTALL_REQUIRED`；不自动续建或清理。
-
-schema bootstrap 后必须由离线 `BootstrapFirstAdministrator` CLI 原子创建唯一首个全局管理员并
-设置 `identityBootstrapCompletedAt`。在此之前 business HTTP、worker、scheduler 与 Library
-创建都拒绝启动；正常 CreateLibrary 再为 authenticated creator 创建显式 ADMIN grant。epoch
-缺失或 identity marker 与业务数据矛盾属于 fatal corruption，不能静默补造。
+空库初始化持有按 canonical DB path 定位的跨进程 schema lock，完成 current migration head
+和 typed ORM bootstrap transaction 后再启动业务进程。bootstrap transaction 创建当前系统所需
+的 system、User/Auth/Session 与 catalog 基础数据；`BootstrapFirstAdministrator` 是正常的
+首次管理员初始化命令。旧版本原地升级行为 `UNSUPPORTED/UNSPECIFIED`，不提供检测、迁移、
+回滚、兼容错误码或恢复路径。
 
 ### 8.2 备份
 
-generation 2 初版不暴露应用 backup/restore endpoint。旧 v3 及任何旧 envelope 都不被新
-runtime 读取。未来同代备份必须另写 ADR，解决 catalog opaque ID、root remap、用户状态、
-derived data 和 secret exclusion；不能在本重构中用一个版本字段假装问题已解决。
+当前代初版不暴露应用 backup/restore endpoint。未来同代备份必须另写 ADR，解决 catalog
+opaque ID、root remap、用户状态、derived data 和 secret exclusion；不能在本重构中用一个
+版本字段假装问题已解决。
 
 ### 8.3 客户端与部署
 
-“必须重新安装”不是只卸载二进制，而是完成一次全平台 app-owned reset，再按空系统安装：
+当前代客户端按全新状态启动，直接使用当前 API、Reader、progress、bookmark 和 download
+合同；不读取或转换任何其他代客户端状态。登录后正常建立 VerifiedSession，私有 store
+只使用当前 app、用户、Volume 和 codec 标识。旧客户端状态和旧版本原地升级行为均为
+`UNSUPPORTED/UNSPECIFIED`，不实现、不测试，也不承诺运行结果。
 
-- Docker/服务端必须重建 app-data volume，并清空数据库、派生缓存、任务和会话；
-- PWA 必须注销旧 service worker 并清除 origin Cache/IndexedDB/localStorage；
-- Android 必须清空本应用私有数据并禁止旧 app data 通过 Auto Backup 恢复；
-- iOS 必须清空本应用沙箱数据和本应用命名空间的 Keychain 凭据；
-- 其他平台存储也必须清空本应用拥有的数据库、缓存、任务、会话、凭据和客户端状态；
-- 上述清理不读取、不记录、不迁移、不校验用户书库目录；
-- generation handshake 分开返回 schemaGeneration、API major、Reader v5 和随机
-  serverDataEpoch；首次 generation-2 使用、登录与 cutover 必须在线验证并持久化最后一次成功
-  verified envelope。响应 `Cache-Control: no-store` 且绕过 Service Worker/HTTP cache；
-- 每个 private store header/namespace 使用 serverIdentity + serverDataEpoch + schemaGeneration +
-  userId + 自己的 `storeCodecVersion`。progress/bookmark 另带 Reader schema version 与
-  Volume/client ID；download catalog 另带 download-manifest/store version；都不含 scopeEpoch；
-  protected cache/download 再加入 Library scopeEpoch 作为访问隔离；
-- generation/epoch/codec 不匹配返回 `LOCAL_DATA_RESET_REQUIRED`，只 reset 对应 app-owned
-  namespace，不解析、转换或迁移旧 blob。
+### 8.4 Initial release runbook
 
-首次在线启动顺序固定为：非私有 server profile -> live generation handshake -> 持久化 verified
-envelope -> 读取仅含 epoch/schema/codec versions/user selector 的有界 private header -> 打开该用户
-VerifiedSession -> 用其中 grant scope epochs 门禁各 Library protected store。后续离线冷启动先
-比较本地 verified envelope 与 header；匹配即可恢复 VerifiedSession 和本地 Reader，同时异步
-发起 live handshake。临时网络失败不撤权、不锁住已下载内容；live 成功但 epoch 不同才 reset。
-VerifiedSession 自身不依赖内部尚未解码的 scope。
-
-这不是兼容迁移：系统只检测 generation 并拒绝旧状态。强制重装完成后不保留任何旧
-app-owned 数据；所有重置说明都必须把“应用软件数据”和“用户源书目录”分开，任何自动化
-不得读取、记录、校验、迁移或删除后者。
-
-### 8.4 Cutover runbook
-
-1. 停止并锁住旧 API、worker、watcher、scheduler，验证无旧进程持有 app-data 写权限。
-2. 离线 reset CLI 先 dry-run，只列出带 app-owned marker 的精确 DB/cache/client targets；拒绝
-   `/`、home、workspace、app-data root 本身和 symlink 等非精确 app-owned 目标。
-3. 管理员显式确认后清空全部 app-owned state；该流程不读取、不记录、不校验用户书库目录。
-4. 初始化 v2 head 与新 serverDataEpoch，离线执行 `BootstrapFirstAdministrator`；HTTP/worker
-   只在 `identityBootstrapCompletedAt` 成功提交后启动。
-5. 清理并安装 generation-2 Web/PWA/Android/iOS，先完成 generation-2 handshake，再登录。
-6. 手工新建 Library、选择 mode/ACL，运行首次 scan；旧 DB/backup 不再参与任何步骤。
-7. 验证旧 client header 得到 426、旧 worker 无法启动；重装工具从未接触用户书库目录。
+1. 使用空数据库应用 current schema head 和 typed bootstrap transaction。
+2. 执行正常的 `BootstrapFirstAdministrator`，随后启动当前 API、worker 和 scheduler。
+3. 安装当前 Web/PWA/Android/iOS 客户端，并从全新本地状态完成登录。
+4. 用户显式创建 Library、选择 mode/ACL，再运行首次 scan。
 
 ## 9. 渐进式 PR 链
 
@@ -937,7 +870,7 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 ### PR 0 — ADR 与实施基线（本 PR）
 
 - 新增 ADR 0017 和本文；
-- 固定术语、目录 grammar、身份、扫描、删除、重装与 schema 代际；
+- 固定术语、目录 grammar、身份、扫描、删除、fresh install 与当前 schema；
 - 只改文档，不改变 runtime、数据库或 API。
 
 验收：文档链接和格式检查通过；评审确认本文列出的硬决策。
@@ -951,17 +884,17 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 
 验收：domain unit tests 无框架/数据库即可运行；所有 error code 稳定。
 
-### PR 2 — generation-2 ORM 与 fresh schema
+### PR 2 — current ORM 与 fresh schema
 
-- 独立 v2 registry/metadata；新 System、最小 User/Auth/Session、Catalog、ACL、scan、diagnostic、
+- 独立 current registry/metadata；新 System、最小 User/Auth/Session、Catalog、ACL、scan、diagnostic、
   typed-owner TopologyUnit/projection、operation、outbox、aggregate-external audit ORM，含同库
   composite FK、synthetic root 与 active-slot partial unique；
-- 固定 `alembic_version_v2`、generation marker 与首个 core revision；后续 schema 只加 revision；
-- 旧库 fail-closed runner 的只读检测、覆盖 empty-init 与 v2 upgrade 的跨进程 schema lock、
-  marker + SystemInstance typed bootstrap transaction 与离线 `BootstrapFirstAdministrator` CLI；
-- fresh、重复启动、半初始化 fail-closed、旧 schema 零写入拒绝测试。
+- 固定 `alembic_version_v2` 与首个 core revision；后续 current schema 只加 revision；
+- 空库 migration 的跨进程 schema lock、System typed bootstrap transaction 与正常的
+  `BootstrapFirstAdministrator` CLI；
+- fresh schema、bootstrap transaction、当前代启动和 catalog 基础约束测试。
 
-验收：只允许空库创建；不存在旧数据迁移、raw SQL 或 runtime service import。
+验收：从空库创建 current schema；不存在旧数据迁移、旧版本检测、raw SQL 或 runtime service import。
 
 ### PR 3 — 书库配置与授权用例
 
@@ -1026,7 +959,7 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 - provenance metadata enrichment 只依赖 Catalog public API；topology v1 不提供任何 source
   metadata writeback；
 - 新路径没有 smart grouping、duplicate merge、organized 消费者；
-- generation 2 不注册 backup/restore endpoint。
+- current schema 不注册 backup/restore endpoint。
 
 验收：没有跨 capability private import；查询无 N+1、分页稳定、ACL 不泄漏。
 
@@ -1036,53 +969,46 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 - server bootstrap/access union、Volume-only progress、content revision mutation；
 - assetId audio locator、baseRevision/mutationId/conflict；
 - immutable single/multi-asset download manifest 与 authorized asset endpoints；
-- 更新 generation-2 Reader 权威文档，明确替代旧 v4 段落。
-- 提供仅测试构建可用的 v2 server acceptance composition root，显式不进入 production image；
+- 更新 current Reader 权威文档，明确当前 Reader 合同。
+- 提供仅测试构建可用的 current server acceptance composition root，显式不进入 production image；
 
 验收：四种 locator round-trip、ACL/anti-enumeration、revision mismatch 和 manifest fixtures。
 
-### PR 10 — 客户端新合同子栈
+### PR 10 — 当前客户端合同子栈
 
 拆为 language-neutral adapter 之后的 Web、KMP shared、Android、iOS、多资产下载/播放子 PR：
 
-- 只读取 v2 generated contract，不解析旧 DTO；
-- 首次在线 handshake + versioned envelope header 早于 VerifiedSession restore；后续 offline cold
-  start 使用最后 verified envelope，live revalidation 异步；progress identity 不含 scopeEpoch，
-  protected cache/download 才加入 serverDataEpoch + Library scopeEpoch；
-- 每个 store 自有 codec version，Reader/download schema 独立 fail-closed，不做本地数据转换；
+- 只读取 current generated contract，不解析其他代 DTO；
+- 从全新本地状态建立当前登录、VerifiedSession、Reader、progress、bookmark 和 download store；
+- 当前 store 使用明确的 app、user、Volume、Library scope 和 codec 标识，不提供旧状态转换；
 - Volume/Asset 下载与平台 EngineCapability；
 - 移除客户端 mediaKind 业务判断和 transfer/split/reclassify 动作依赖；
-- Android Auto Backup、PWA storage、iOS Keychain 的 reset 责任与测试。
-- Web/KMP/Android/iOS 提供 test-only v2 acceptance launcher/flavor，release 构建若包含该入口即
-  fail；连接 PR 9 的测试 composition root，并记录 schemaGeneration=2、serverDataEpoch、Reader
-  v5 与新 endpoint 证据。
+- Web/KMP/Android/iOS 提供 test-only current acceptance launcher/flavor，release 构建若包含该入口即
+  fail；连接 PR 9 的测试 composition root，并记录 current schema、Reader v5 与新 endpoint 证据。
 
-PR 10 只增加 dormant、不可发布的 generation-2 client entrypoint/substack；production 默认仍走
-旧客户端入口，直到 PR 11 在同一 coordinated cutover 中切换并删除旧活动路径。PR 1–10 每个
-head 都必须保持旧 production stack smoke green，不能让半套新合同进入制品。
+PR 10 只增加 dormant、不可发布的 current client entrypoint/substack；production 组合根仍保持
+不变，直到 PR 11 在同一 coordinated cutover 中启用 current 路径。PR 1–10 每个 head 都必须
+保持现有 production smoke green，不能让半套新合同进入制品。
 
 验收：单文件/多资产下载、进度 conflict、explicit revoke；Android/iOS 物理设备门禁。
 
 ### PR 11 — 原子 cutover 与活动旧 runtime 删除
 
-- generation-2 runner、router、worker、scheduler、OpenAPI、clients 同步接入 composition root；
-- 旧数据库稳定拒绝，空库完整启动；
+- current runner、router、worker、scheduler、OpenAPI、clients 同步接入 composition root；
+- current schema 从空库完整启动；
 - 删除旧 monitor/import/organize/merge/structural mutation 路由、models、services、workers、
-  legacy-only tests 和启动项；用 generation-2 contract/behavior tests 替代覆盖，停止导入旧
+  不可达 tests 和启动项；用 current contract/behavior tests 替代覆盖，停止导入非当前
   ORM model 到任何 active metadata；
-- 停止旧 server/worker，离线 reset app-owned data，创建 serverDataEpoch/管理员，启动新栈；
-- 所有业务请求要求 client generation 2，混代请求在进入业务 route 前返回
-  `426 CLIENT_REINSTALL_REQUIRED`；
-- 发布清空全部 app-owned data、且固定不接触用户书库目录的离线 reset CLI 与重装手册。
+- 正常执行 current schema/bootstrap/管理员初始化，启动 current server/worker；
+- current API、Web、Android、iOS 同步启用，不增加旧版本检测或兼容分支。
 
-这是 coordinated release 边界。旧客户端和旧 worker 不得连接新服务；主应用拒绝旧 DB 后，
-reset 必须由离线维护工具执行，删除候选只能来自预先固定的 app-data-owned 路径集合；用户
-书库目录既不是候选，也不作为 reset 的输入或校验对象。
+这是 coordinated release 边界。旧版本原地升级行为保持 `UNSUPPORTED/UNSPECIFIED`；不实现、
+不测试，也不承诺错误码、迁移结果或偶然运行结果。
 
 ### PR 12 — 非运行时死代码与旧资产清除
 
-- 删除旧生成合同、历史文案、设计说明、测试 fixture 和不再可达的设置资产；
-- 旧 Alembic history 保持原地、不可修改且不由 v2 runtime 加载；
+- 删除非当前生成合同、历史文案、设计说明、测试 fixture 和不再可达的设置资产；
+- current Alembic history 保持不可变；不建立旧版本 upgrade path；
 - 运行全仓依赖、重复实现和私有 import 审计。
 
 验收：没有 monitor folder/media kind/organize structural 语义残留，没有临时 gate 或双实现。
@@ -1135,10 +1061,9 @@ PR 11 与 PR 12 是不可分别发布的 stack；只有 PR 12 head 可以生成�
 - upload 的 containment、symlink escape、TOCTOU、atomic no-replace、unsupported filesystem、
   parent fsync、Work-level track limit 并发与 external-collision recovery；
 - topology v1 没有 source delete/restore/backup endpoint；
-- legacy/unknown/半初始化 DB 的 generation 拒绝发生在任何 WAL/seed/write 之前；并发 empty-init
-  和 v2 upgrade schema lock、marker/SystemInstance 原子性、first-admin CLI 与 pre-identity
-  startup gate；
-- serverDataEpoch 重建、grant revoke、admin/ordinary DTO anti-enumeration。
+- 空库 current schema 初始化、并发 empty-init schema lock、System/User/Auth/Session/catalog
+  bootstrap 原子性、first-admin CLI 与 pre-identity startup gate；
+- grant revoke、admin/ordinary DTO anti-enumeration。
 
 ### 10.4 Reader 与客户端
 
@@ -1146,12 +1071,10 @@ PR 11 与 PR 12 是不可分别发布的 stack；只有 PR 12 head 可以生成�
 - reflowable/PDF/comic/audio locator round-trip 与 content replacement；
 - 单文件下载、多音轨断点续传、完整校验、原子发布、revision 失效；
 - `baseRevision`/`mutationId`/`CONTENT_REVISION_MISMATCH` 与 audio assetId；
-- 同地址 fresh generation-2 serverDataEpoch 变化不会读取旧私有 store；
-- 首次在线 bootstrap、后续 offline cold start、异步 live handshake、no-store/cache bypass 与
-  epoch-change reset；各 storeCodec/Reader/download schema mismatch 只清对应 app-owned namespace；
-- 新服务器只与 generation-2 Web/Mobile 配套；不建立旧客户端矩阵；
+- fresh current client 从空本地状态完成登录、Reader、progress、bookmark、download 初始化；
+- current store codec、Reader/download schema 和 Volume/Asset manifest contract；
 - Android 和 iOS 最终验收使用已连接物理设备，不以 emulator/simulator 代替。
-- PR10 test-only launcher 的设备证据必须证明命中 v2 acceptance server；release artifact 反向测试
+- PR10 test-only launcher 的设备证据必须证明命中 current acceptance server；release artifact 反向测试
   保证不包含 launcher，同时旧 production stack smoke 继续通过。
 
 ### 10.5 每个适用 PR 的 gate
@@ -1167,8 +1090,8 @@ pnpm test
 pnpm i18n:check
 ```
 
-另执行 fresh schema、migration、worker、PWA、Reader、Playwright 和物理设备 smoke。不能通过
-降低严格度、跳过测试、全局 ignore 或保留“以后清理”的兼容层换取通过。
+另执行 fresh schema、current worker、PWA、Reader、Playwright 和物理设备 smoke。不能通过
+降低严格度、跳过测试、全局 ignore 或引入旧版本兼容层换取通过。
 
 ## 11. 完成定义
 
@@ -1180,8 +1103,8 @@ pnpm i18n:check
 4. scan、watcher、missing、rename、content revision 和故障恢复均有覆盖。
 5. 不存在 media-kind 版本桶、智能结构归组或 DB-only 结构命令。
 6. Reader/下载保留格式与形态能力，多音轨不产生派生出版物。
-7. generation 2 只从空库创建，所有旧 DB/backup/client state 都 fail closed，serverDataEpoch
-   可区分同地址数据库重建。
-8. 重装/reset 从未删除或修改用户书库根目录。
+7. current schema 只从空库创建；旧版本原地升级行为为 `UNSUPPORTED/UNSPECIFIED`，不实现、不
+   测试，也不承诺错误码、迁移结果或偶然运行结果。
+8. current Web、Android、iOS 客户端均从 fresh local state 启动并通过当前合同验收。
 9. API、worker、Web、Android、iOS 同代发布并通过适用质量门槛。
 10. 没有双读、双写、alias、旧端点、临时 gate、重复实现或未归属的 follow-up。
