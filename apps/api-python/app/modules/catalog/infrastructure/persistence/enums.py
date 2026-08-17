@@ -1,0 +1,118 @@
+from enum import StrEnum
+
+
+class WritePolicy(StrEnum):
+    READ_ONLY = "READ_ONLY"
+    READ_WRITE = "READ_WRITE"
+
+
+class LibraryControlState(StrEnum):
+    DRAFT = "DRAFT"
+    ACTIVATING = "ACTIVATING"
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    REMOVING = "REMOVING"
+
+
+class LibraryHealth(StrEnum):
+    UNKNOWN = "UNKNOWN"
+    HEALTHY = "HEALTHY"
+    UNAVAILABLE = "UNAVAILABLE"
+    ERROR = "ERROR"
+
+
+class GrantLevel(StrEnum):
+    READ = "READ"
+    CURATE = "CURATE"
+    ADMIN = "ADMIN"
+
+
+class IgnoreRuleKind(StrEnum):
+    NAME = "NAME"
+    PATH = "PATH"
+
+
+class SourceEntryType(StrEnum):
+    SYNTHETIC_ROOT = "SYNTHETIC_ROOT"
+    DIRECTORY = "DIRECTORY"
+    FILE = "FILE"
+
+
+class LayoutState(StrEnum):
+    PRESENT = "PRESENT"
+    INVALID = "INVALID"
+
+
+class SlotState(StrEnum):
+    ACTIVE = "ACTIVE"
+    RETIRED = "RETIRED"
+
+
+class ScanState(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class ScanStage(StrEnum):
+    DISCOVER = "DISCOVER"
+    RECONCILE = "RECONCILE"
+    FINALIZE = "FINALIZE"
+
+
+class VersionKind(StrEnum):
+    IMPLICIT = "IMPLICIT"
+    DIRECTORY = "DIRECTORY"
+
+
+class TopologyUnitKind(StrEnum):
+    WORK_CONTAINER = "WORK_CONTAINER"
+    AUDIOBOOK_WORK = "AUDIOBOOK_WORK"
+    VERSION_CONTAINER = "VERSION_CONTAINER"
+    FLAT_VOLUME = "FLAT_VOLUME"
+    SINGLE_FILE_VOLUME = "SINGLE_FILE_VOLUME"
+    MULTI_ASSET_VOLUME = "MULTI_ASSET_VOLUME"
+
+
+class RevisionState(StrEnum):
+    STAGING = "STAGING"
+    ACTIVE = "ACTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    ABANDONED = "ABANDONED"
+
+
+class AssetRole(StrEnum):
+    PRIMARY = "PRIMARY"
+    AUDIO_TRACK = "AUDIO_TRACK"
+    READER_SIDECAR = "READER_SIDECAR"
+
+
+class AssetValidationState(StrEnum):
+    PENDING = "PENDING"
+    READY = "READY"
+    UNREADABLE = "UNREADABLE"
+
+
+class AttachmentRole(StrEnum):
+    COVER = "COVER"
+    OPF = "OPF"
+    CUE = "CUE"
+    LRC = "LRC"
+
+
+class OperationState(StrEnum):
+    PREPARED = "PREPARED"
+    FILESYSTEM_APPLIED = "FILESYSTEM_APPLIED"
+    RECONCILE_QUEUED = "RECONCILE_QUEUED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    ABANDONED_BY_LIBRARY_REMOVAL = "ABANDONED_BY_LIBRARY_REMOVAL"
+    FAILED = "FAILED"
+    NEEDS_ATTENTION = "NEEDS_ATTENTION"
+
+
+class AuditActorKind(StrEnum):
+    USER = "USER"
+    SYSTEM = "SYSTEM"

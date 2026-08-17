@@ -6,6 +6,16 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).parents[2] / "app"
 TRANSACTION_METHODS = frozenset({"begin", "commit", "rollback"})
+# These files are the schema-initialization kernel boundary, not business
+# transaction code.  Keep this allowlist exact so new application code cannot
+# opt out of the transaction contract by living under a broad directory.
+SCHEMA_INITIALIZATION_TRANSACTION_PATHS = frozenset(
+    {
+        APP_ROOT / "db" / "runner.py",
+        APP_ROOT / "db" / "current" / "runner.py",
+        APP_ROOT / "db" / "current" / "bootstrap.py",
+    }
+)
 SESSION_FLUSH_RECEIVERS = frozenset({"db", "session", "probe", "uow", "unit_of_work"})
 WRITE_SCOPE_BUSINESS_CALLS = frozenset(
     {
@@ -284,7 +294,7 @@ def test_transaction_wrappers_do_not_execute_unknown_callbacks() -> None:
 def test_explicit_begin_scopes_contain_only_prepared_sql_execution() -> None:
     violations: list[str] = []
     for path in _python_files(APP_ROOT):
-        if path == APP_ROOT / "db" / "runner.py":
+        if path in SCHEMA_INITIALIZATION_TRANSACTION_PATHS:
             continue
         if "db/alembic/versions" in path.as_posix():
             continue

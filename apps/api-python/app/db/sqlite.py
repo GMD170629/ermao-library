@@ -5,12 +5,24 @@ from time import monotonic
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Engine
 
-from app.db.maintenance import (
-    acquire_database_writer_lease,
-    release_database_maintenance_lock,
-)
-
 logger = logging.getLogger(__name__)
+
+
+def register_sqlite_foreign_keys(engine: Engine) -> None:
+    """Enable SQLite foreign-key enforcement on every DBAPI connection.
+
+    SQLite exposes this as a per-connection PRAGMA; SQLAlchemy URL and
+    ``connect_args`` options cannot replace it.  This is deliberately kept at
+    the database connection-initialization boundary described by ADR 0001.
+    """
+
+    @event.listens_for(engine, "connect")
+    def configure_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys = ON")
+        finally:
+            cursor.close()
 
 
 def create_sqlite_engine(
@@ -20,17 +32,22 @@ def create_sqlite_engine(
     transaction_time_budget_seconds: float | None = None,
     slow_write_threshold_seconds: float | None = 0.1,
 ) -> Engine:
+    from app.db.maintenance import (
+        acquire_database_writer_lease,
+        release_database_maintenance_lock,
+    )
+
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=str(database_path)),
         connect_args={"timeout": timeout_seconds},
         pool_pre_ping=True,
     )
+    register_sqlite_foreign_keys(engine)
 
     @event.listens_for(engine, "connect")
     def configure_sqlite(dbapi_connection, connection_record) -> None:
         cursor = dbapi_connection.cursor()
         try:
-            cursor.execute("PRAGMA foreign_keys = ON")
             cursor.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
             cursor.execute("PRAGMA synchronous = NORMAL")
         finally:

@@ -39,6 +39,7 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 "app.db" = ["alembic.ini", "alembic/**/*.py", "alembic/**/*.mako"]
+"app.db.alembic_current" = ["alembic.ini", "env.py", "script.py.mako", "versions/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

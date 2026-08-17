@@ -1,0 +1,1301 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import cast
+
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    and_,
+    func,
+    or_,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.current.registry import CurrentBase
+from app.modules.catalog.public import OrganizationMode, PathComparison, SourceKind
+
+from .enums import (
+    AssetRole,
+    AssetValidationState,
+    AttachmentRole,
+    AuditActorKind,
+    GrantLevel,
+    IgnoreRuleKind,
+    LayoutState,
+    LibraryControlState,
+    LibraryHealth,
+    OperationState,
+    RevisionState,
+    ScanStage,
+    ScanState,
+    SlotState,
+    SourceEntryType,
+    TopologyUnitKind,
+    VersionKind,
+    WritePolicy,
+)
+
+_ID = String(191)
+_ENUM = {"native_enum": False, "create_constraint": True}
+
+
+class CatalogLibrary(CurrentBase):
+    __tablename__ = "CatalogLibrary"
+    __table_args__ = (
+        UniqueConstraint("rootPathKey", name="CatalogLibrary_rootPathKey_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    root_path: Mapped[str] = mapped_column("rootPath", Text, nullable=False)
+    root_path_key: Mapped[str] = mapped_column("rootPathKey", Text, nullable=False)
+    organization_mode: Mapped[OrganizationMode] = mapped_column(
+        "organizationMode", Enum(OrganizationMode, **_ENUM), nullable=False
+    )
+    topology_version: Mapped[int] = mapped_column(
+        "topologyVersion", Integer, nullable=False, default=1
+    )
+    path_comparison: Mapped[PathComparison] = mapped_column(
+        "pathComparison", Enum(PathComparison, **_ENUM), nullable=False
+    )
+    write_policy: Mapped[WritePolicy] = mapped_column(
+        "writePolicy", Enum(WritePolicy, **_ENUM), nullable=False
+    )
+    control_state: Mapped[LibraryControlState] = mapped_column(
+        "controlState", Enum(LibraryControlState, **_ENUM), nullable=False
+    )
+    observed_health: Mapped[LibraryHealth] = mapped_column(
+        "observedHealth", Enum(LibraryHealth, **_ENUM), nullable=False
+    )
+    config_revision: Mapped[int] = mapped_column(
+        "configRevision", Integer, nullable=False, default=1
+    )
+    topology_writer_fence: Mapped[int] = mapped_column(
+        "topologyWriterFence", BigInteger, nullable=False, default=0
+    )
+    source_mutation_fence: Mapped[int] = mapped_column(
+        "sourceMutationFence", BigInteger, nullable=False, default=0
+    )
+    next_scan_generation: Mapped[int] = mapped_column(
+        "nextScanGeneration", BigInteger, nullable=False, default=1
+    )
+    last_successful_generation: Mapped[int | None] = mapped_column(
+        "lastSuccessfulGeneration", BigInteger
+    )
+    last_successful_scan_at: Mapped[datetime | None] = mapped_column(
+        "lastSuccessfulScanAt", DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryIgnoreRule(CurrentBase):
+    __tablename__ = "LibraryIgnoreRule"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint(
+            "libraryId", "ruleKey", name="LibraryIgnoreRule_library_rule_key"
+        ),
+        Index("LibraryIgnoreRule_library_enabled_idx", "libraryId", "enabled"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    rule_key: Mapped[str] = mapped_column("ruleKey", Text, nullable=False)
+    pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[IgnoreRuleKind] = mapped_column(
+        Enum(IgnoreRuleKind, **_ENUM), nullable=False
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    config_revision: Mapped[int] = mapped_column(
+        "configRevision", BigInteger, nullable=False, default=1
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class UserLibraryGrant(CurrentBase):
+    __tablename__ = "UserLibraryGrant"
+    __table_args__ = (
+        ForeignKeyConstraint(["userId"], ["User.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint(
+            "userId", "libraryId", name="UserLibraryGrant_user_library_key"
+        ),
+        Index("UserLibraryGrant_library_level_idx", "libraryId", "level"),
+    )
+
+    user_id: Mapped[str] = mapped_column("userId", _ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, primary_key=True)
+    level: Mapped[GrantLevel] = mapped_column(Enum(GrantLevel, **_ENUM), nullable=False)
+    scope_epoch: Mapped[int] = mapped_column(
+        "scopeEpoch", BigInteger, nullable=False, default=1
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryRootRegistryLock(CurrentBase):
+    __tablename__ = "LibraryRootRegistryLock"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    owner_token: Mapped[str | None] = mapped_column("ownerToken", _ID)
+    fence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True)
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        "heartbeatAt", DateTime(timezone=True)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryWork(CurrentBase):
+    __tablename__ = "LibraryWork"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint("libraryId", "id", name="LibraryWork_library_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    metadata_revision: Mapped[int] = mapped_column(
+        "metadataRevision", BigInteger, nullable=False, default=0
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class WorkVersion(CurrentBase):
+    __tablename__ = "WorkVersion"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint("libraryId", "id", name="WorkVersion_library_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    metadata_revision: Mapped[int] = mapped_column(
+        "metadataRevision", BigInteger, nullable=False, default=0
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryVolume(CurrentBase):
+    __tablename__ = "LibraryVolume"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint("libraryId", "id", name="LibraryVolume_library_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    reading_morphology: Mapped[str] = mapped_column(
+        "readingMorphology", String(32), nullable=False
+    )
+    content_state: Mapped[str] = mapped_column(
+        "contentState", String(32), nullable=False
+    )
+    content_revision: Mapped[int] = mapped_column(
+        "contentRevision", BigInteger, nullable=False, default=0
+    )
+    required_manifest_revision: Mapped[int] = mapped_column(
+        "requiredManifestRevision", BigInteger, nullable=False, default=0
+    )
+    optional_manifest_revision: Mapped[int] = mapped_column(
+        "optionalManifestRevision", BigInteger, nullable=False, default=0
+    )
+    metadata_revision: Mapped[int] = mapped_column(
+        "metadataRevision", BigInteger, nullable=False, default=0
+    )
+    required_manifest_digest: Mapped[str | None] = mapped_column(
+        "requiredManifestDigest", String(191)
+    )
+    publication_fingerprint: Mapped[str | None] = mapped_column(
+        "publicationFingerprint", String(191)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class VolumeAsset(CurrentBase):
+    __tablename__ = "VolumeAsset"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint("libraryId", "id", name="VolumeAsset_library_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    source_format: Mapped[str] = mapped_column(
+        "sourceFormat", String(64), nullable=False
+    )
+    mime_type: Mapped[str | None] = mapped_column("mimeType", String(191))
+    size_bytes: Mapped[int | None] = mapped_column("sizeBytes", BigInteger)
+    content_digest: Mapped[str | None] = mapped_column("contentDigest", String(191))
+    embedded_track_number: Mapped[int | None] = mapped_column(
+        "embeddedTrackNumber", Integer
+    )
+    validation_state: Mapped[AssetValidationState] = mapped_column(
+        "validationState", Enum(AssetValidationState, **_ENUM), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibrarySourceEntry(CurrentBase):
+    __tablename__ = "LibrarySourceEntry"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["libraryId", "parentEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("libraryId", "id", name="LibrarySourceEntry_library_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    parent_entry_id: Mapped[str | None] = mapped_column("parentEntryId", _ID)
+    local_name: Mapped[str] = mapped_column("localName", Text, nullable=False)
+    local_name_key: Mapped[str] = mapped_column("localNameKey", Text, nullable=False)
+    entry_type: Mapped[SourceEntryType] = mapped_column(
+        "entryType", Enum(SourceEntryType, **_ENUM), nullable=False
+    )
+    filesystem_identity: Mapped[str | None] = mapped_column(
+        "filesystemIdentity", String(191)
+    )
+    size_bytes: Mapped[int | None] = mapped_column("sizeBytes", BigInteger)
+    modified_ns: Mapped[int | None] = mapped_column("modifiedNs", BigInteger)
+    last_seen_generation: Mapped[int | None] = mapped_column(
+        "lastSeenGeneration", BigInteger
+    )
+    absence_confirmed_at: Mapped[datetime | None] = mapped_column(
+        "absenceConfirmedAt", DateTime(timezone=True)
+    )
+    children_presence_epoch: Mapped[int] = mapped_column(
+        "childrenPresenceEpoch", BigInteger, default=0
+    )
+    observed_parent_presence_epoch: Mapped[int | None] = mapped_column(
+        "observedParentPresenceEpoch", BigInteger
+    )
+    layout_state: Mapped[LayoutState] = mapped_column(
+        "layoutState", Enum(LayoutState, **_ENUM), nullable=False
+    )
+    slot_state: Mapped[SlotState] = mapped_column(
+        "slotState", Enum(SlotState, **_ENUM), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class SourceAttachment(CurrentBase):
+    __tablename__ = "SourceAttachment"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["libraryId", "sourceEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "workId"],
+            ["LibraryWork.libraryId", "LibraryWork.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "versionId"],
+            ["WorkVersion.libraryId", "WorkVersion.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "volumeId"],
+            ["LibraryVolume.libraryId", "LibraryVolume.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "libraryId", "sourceEntryId", name="SourceAttachment_entry_key"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    source_entry_id: Mapped[str] = mapped_column("sourceEntryId", _ID, nullable=False)
+    work_id: Mapped[str | None] = mapped_column("workId", _ID)
+    version_id: Mapped[str | None] = mapped_column("versionId", _ID)
+    volume_id: Mapped[str | None] = mapped_column("volumeId", _ID)
+    role: Mapped[AttachmentRole] = mapped_column(
+        Enum(AttachmentRole, **_ENUM), nullable=False
+    )
+    source_format: Mapped[str | None] = mapped_column("sourceFormat", String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryScanRun(CurrentBase):
+    __tablename__ = "LibraryScanRun"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["createdByUserId"], ["User.id"], ondelete="SET NULL"),
+        UniqueConstraint("libraryId", "id", name="LibraryScanRun_library_id_key"),
+        UniqueConstraint(
+            "libraryId", "generation", name="LibraryScanRun_library_generation_key"
+        ),
+        Index("LibraryScanRun_library_state_idx", "libraryId", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    config_revision: Mapped[int] = mapped_column(
+        "configRevision", BigInteger, nullable=False
+    )
+    mode_snapshot: Mapped[OrganizationMode] = mapped_column(
+        "modeSnapshot", Enum(OrganizationMode, **_ENUM), nullable=False
+    )
+    topology_version_snapshot: Mapped[int] = mapped_column(
+        "topologyVersionSnapshot", Integer, nullable=False
+    )
+    root_identity_snapshot: Mapped[str | None] = mapped_column(
+        "rootIdentitySnapshot", String(191)
+    )
+    topology_writer_fence: Mapped[int] = mapped_column(
+        "topologyWriterFence", BigInteger, nullable=False
+    )
+    state: Mapped[ScanState] = mapped_column(Enum(ScanState, **_ENUM), nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column("leaseOwner", _ID)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True)
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        "heartbeatAt", DateTime(timezone=True)
+    )
+    stage: Mapped[ScanStage] = mapped_column(Enum(ScanStage, **_ENUM), nullable=False)
+    discovered_count: Mapped[int] = mapped_column(
+        "discoveredCount", BigInteger, nullable=False, default=0
+    )
+    diagnostic_count: Mapped[int] = mapped_column(
+        "diagnosticCount", BigInteger, nullable=False, default=0
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        "startedAt", DateTime(timezone=True)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        "finishedAt", DateTime(timezone=True)
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column("createdByUserId", _ID)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryScanWorkItem(CurrentBase):
+    __tablename__ = "LibraryScanWorkItem"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "scanRunId"],
+            ["LibraryScanRun.libraryId", "LibraryScanRun.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "subtreeRootEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("libraryId", "id", name="LibraryScanWorkItem_library_id_key"),
+        UniqueConstraint(
+            "libraryId", "idempotencyKey", name="LibraryScanWorkItem_idempotency_key"
+        ),
+        Index("LibraryScanWorkItem_lease_idx", "libraryId", "state", "availableAt"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    scan_run_id: Mapped[str] = mapped_column("scanRunId", _ID, nullable=False)
+    subtree_root_entry_id: Mapped[str | None] = mapped_column("subtreeRootEntryId", _ID)
+    scope_relative_path: Mapped[str] = mapped_column(
+        "scopeRelativePath", Text, nullable=False
+    )
+    state: Mapped[ScanState] = mapped_column(Enum(ScanState, **_ENUM), nullable=False)
+    stage: Mapped[ScanStage] = mapped_column(Enum(ScanStage, **_ENUM), nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column("leaseOwner", _ID)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True)
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(
+        "availableAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        "idempotencyKey", String(191), nullable=False
+    )
+    discovered_count: Mapped[int] = mapped_column(
+        "discoveredCount", BigInteger, nullable=False, default=0
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class PathCollisionObservation(CurrentBase):
+    __tablename__ = "PathCollisionObservation"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "scanRunId"],
+            ["LibraryScanRun.libraryId", "LibraryScanRun.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "parentEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "scanRunId",
+            "parentEntryId",
+            "localNameKey",
+            "localName",
+            name="PathCollisionObservation_scan_slot_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    scan_run_id: Mapped[str] = mapped_column("scanRunId", _ID, nullable=False)
+    parent_entry_id: Mapped[str] = mapped_column("parentEntryId", _ID, nullable=False)
+    local_name: Mapped[str] = mapped_column("localName", Text, nullable=False)
+    local_name_key: Mapped[str] = mapped_column("localNameKey", Text, nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        "observedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LayoutDiagnostic(CurrentBase):
+    __tablename__ = "LayoutDiagnostic"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["libraryId", "scanRunId"],
+            ["LibraryScanRun.libraryId", "LibraryScanRun.id"],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "LayoutDiagnostic_library_generation_idx",
+            "libraryId",
+            "generation",
+            "scopeRelativePath",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    scan_run_id: Mapped[str | None] = mapped_column("scanRunId", _ID)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    config_revision: Mapped[int] = mapped_column(
+        "configRevision", BigInteger, nullable=False
+    )
+    scope_relative_path: Mapped[str] = mapped_column(
+        "scopeRelativePath", Text, nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(96), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False)
+    parameters: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    first_observed_at: Mapped[datetime] = mapped_column(
+        "firstObservedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    last_observed_at: Mapped[datetime] = mapped_column(
+        "lastObservedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        "resolvedAt", DateTime(timezone=True)
+    )
+
+
+class TopologyUnit(CurrentBase):
+    __tablename__ = "TopologyUnit"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["libraryId", "workOwnerId"],
+            ["LibraryWork.libraryId", "LibraryWork.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "versionOwnerId"],
+            ["WorkVersion.libraryId", "WorkVersion.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "volumeOwnerId"],
+            ["LibraryVolume.libraryId", "LibraryVolume.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "id", "activeRevisionId"],
+            [
+                "TopologyUnitRevision.libraryId",
+                "TopologyUnitRevision.unitId",
+                "TopologyUnitRevision.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("libraryId", "id", name="TopologyUnit_library_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    unit_kind: Mapped[TopologyUnitKind] = mapped_column(
+        "unitKind", Enum(TopologyUnitKind, **_ENUM), nullable=False
+    )
+    work_owner_id: Mapped[str | None] = mapped_column("workOwnerId", _ID)
+    version_owner_id: Mapped[str | None] = mapped_column("versionOwnerId", _ID)
+    volume_owner_id: Mapped[str | None] = mapped_column("volumeOwnerId", _ID)
+    active_revision_id: Mapped[str | None] = mapped_column("activeRevisionId", _ID)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class TopologyUnitRevision(CurrentBase):
+    __tablename__ = "TopologyUnitRevision"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "unitId"],
+            ["TopologyUnit.libraryId", "TopologyUnit.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "scanRunId"],
+            ["LibraryScanRun.libraryId", "LibraryScanRun.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "unitRootEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("libraryId", "id", name="TopologyUnitRevision_library_id_key"),
+        UniqueConstraint(
+            "libraryId", "unitId", "id", name="TopologyUnitRevision_unit_id_key"
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "unitId",
+            "revision",
+            name="TopologyUnitRevision_unit_revision_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    unit_id: Mapped[str] = mapped_column("unitId", _ID, nullable=False)
+    scan_run_id: Mapped[str] = mapped_column("scanRunId", _ID, nullable=False)
+    unit_root_entry_id: Mapped[str] = mapped_column(
+        "unitRootEntryId", _ID, nullable=False
+    )
+    revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    state: Mapped[RevisionState] = mapped_column(
+        Enum(RevisionState, **_ENUM), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class TopologyWorkProjection(CurrentBase):
+    __tablename__ = "TopologyWorkProjection"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "unitRevisionId"],
+            ["TopologyUnitRevision.libraryId", "TopologyUnitRevision.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "workId"],
+            ["LibraryWork.libraryId", "LibraryWork.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "rootEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "libraryId", "unitRevisionId", name="TopologyWorkProjection_revision_key"
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "unitRevisionId",
+            "workId",
+            name="TopologyWorkProjection_parent_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    unit_revision_id: Mapped[str] = mapped_column("unitRevisionId", _ID, nullable=False)
+    work_id: Mapped[str] = mapped_column("workId", _ID, nullable=False)
+    root_entry_id: Mapped[str] = mapped_column("rootEntryId", _ID, nullable=False)
+    structure_key: Mapped[str] = mapped_column("structureKey", Text, nullable=False)
+    source_name: Mapped[str] = mapped_column("sourceName", Text, nullable=False)
+    sort_key: Mapped[str] = mapped_column("sortKey", Text, nullable=False)
+
+
+class TopologyVersionProjection(CurrentBase):
+    __tablename__ = "TopologyVersionProjection"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "unitRevisionId"],
+            ["TopologyUnitRevision.libraryId", "TopologyUnitRevision.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "versionId"],
+            ["WorkVersion.libraryId", "WorkVersion.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "workId"],
+            ["LibraryWork.libraryId", "LibraryWork.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "rootEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "libraryId", "unitRevisionId", name="TopologyVersionProjection_revision_key"
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "unitRevisionId",
+            "versionId",
+            name="TopologyVersionProjection_parent_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    unit_revision_id: Mapped[str] = mapped_column("unitRevisionId", _ID, nullable=False)
+    version_id: Mapped[str] = mapped_column("versionId", _ID, nullable=False)
+    work_id: Mapped[str] = mapped_column("workId", _ID, nullable=False)
+    root_entry_id: Mapped[str | None] = mapped_column("rootEntryId", _ID)
+    kind: Mapped[VersionKind] = mapped_column(
+        Enum(VersionKind, **_ENUM), nullable=False
+    )
+    structure_key: Mapped[str] = mapped_column("structureKey", Text, nullable=False)
+    source_name: Mapped[str] = mapped_column("sourceName", Text, nullable=False)
+    sort_key: Mapped[str] = mapped_column("sortKey", Text, nullable=False)
+
+
+class TopologyVolumeProjection(CurrentBase):
+    __tablename__ = "TopologyVolumeProjection"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "unitRevisionId"],
+            ["TopologyUnitRevision.libraryId", "TopologyUnitRevision.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "volumeId"],
+            ["LibraryVolume.libraryId", "LibraryVolume.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "versionId"],
+            ["WorkVersion.libraryId", "WorkVersion.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "rootEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "libraryId", "unitRevisionId", name="TopologyVolumeProjection_revision_key"
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "unitRevisionId",
+            "volumeId",
+            name="TopologyVolumeProjection_parent_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    unit_revision_id: Mapped[str] = mapped_column("unitRevisionId", _ID, nullable=False)
+    volume_id: Mapped[str] = mapped_column("volumeId", _ID, nullable=False)
+    version_id: Mapped[str | None] = mapped_column("versionId", _ID)
+    root_entry_id: Mapped[str] = mapped_column("rootEntryId", _ID, nullable=False)
+    source_kind: Mapped[SourceKind] = mapped_column(
+        "sourceKind", Enum(SourceKind, **_ENUM), nullable=False
+    )
+    structure_key: Mapped[str] = mapped_column("structureKey", Text, nullable=False)
+    source_name: Mapped[str] = mapped_column("sourceName", Text, nullable=False)
+    sort_key: Mapped[str] = mapped_column("sortKey", Text, nullable=False)
+
+
+class TopologyAssetMembership(CurrentBase):
+    __tablename__ = "TopologyAssetMembership"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "unitRevisionId"],
+            ["TopologyUnitRevision.libraryId", "TopologyUnitRevision.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "assetId"],
+            ["VolumeAsset.libraryId", "VolumeAsset.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "volumeId"],
+            ["LibraryVolume.libraryId", "LibraryVolume.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "sourceEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "unitRevisionId",
+            "volumeId",
+            "sourceEntryId",
+            "role",
+            name="TopologyAssetMembership_source_role_key",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "unitRevisionId",
+            "volumeId",
+            "assetOrder",
+            name="TopologyAssetMembership_volume_order_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    unit_revision_id: Mapped[str] = mapped_column("unitRevisionId", _ID, nullable=False)
+    asset_id: Mapped[str] = mapped_column("assetId", _ID, nullable=False)
+    volume_id: Mapped[str] = mapped_column("volumeId", _ID, nullable=False)
+    source_entry_id: Mapped[str] = mapped_column("sourceEntryId", _ID, nullable=False)
+    role: Mapped[AssetRole] = mapped_column(Enum(AssetRole, **_ENUM), nullable=False)
+    source_format: Mapped[str] = mapped_column(
+        "sourceFormat", String(64), nullable=False
+    )
+    disc_number: Mapped[int | None] = mapped_column("discNumber", Integer)
+    asset_order: Mapped[int] = mapped_column("assetOrder", Integer, nullable=False)
+    required_for_reading: Mapped[bool] = mapped_column(
+        "requiredForReading", Boolean, nullable=False, default=True
+    )
+
+
+class SourceWriteOperation(CurrentBase):
+    __tablename__ = "SourceWriteOperation"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["actorUserId"], ["User.id"], ondelete="SET NULL"),
+        UniqueConstraint(
+            "libraryId", "idempotencyKey", name="SourceWriteOperation_idempotency_key"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    actor_user_id: Mapped[str | None] = mapped_column("actorUserId", _ID)
+    idempotency_key: Mapped[str] = mapped_column(
+        "idempotencyKey", String(191), nullable=False
+    )
+    organization_mode: Mapped[OrganizationMode] = mapped_column(
+        "organizationMode", Enum(OrganizationMode, **_ENUM), nullable=False
+    )
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    target_slot_key: Mapped[str] = mapped_column("targetSlotKey", Text, nullable=False)
+    state: Mapped[OperationState] = mapped_column(
+        Enum(OperationState, **_ENUM), nullable=False
+    )
+    expected_config_revision: Mapped[int] = mapped_column(
+        "expectedConfigRevision", BigInteger, nullable=False
+    )
+    expected_content_revision: Mapped[int | None] = mapped_column(
+        "expectedContentRevision", BigInteger
+    )
+    staging_fence: Mapped[int] = mapped_column(
+        "stagingFence", BigInteger, nullable=False, default=0
+    )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        "cancelRequestedAt", DateTime(timezone=True)
+    )
+    owner_token: Mapped[str | None] = mapped_column("ownerToken", _ID)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        "heartbeatAt", DateTime(timezone=True)
+    )
+    temporary_structure: Mapped[dict[str, object]] = mapped_column(
+        "temporaryStructure", JSON, nullable=False, default=dict
+    )
+    final_structure: Mapped[dict[str, object]] = mapped_column(
+        "finalStructure", JSON, nullable=False, default=dict
+    )
+    evidence: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    recovery_note: Mapped[str | None] = mapped_column("recoveryNote", Text)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class OperationStagingLock(CurrentBase):
+    __tablename__ = "OperationStagingLock"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["operationId"], ["SourceWriteOperation.id"], ondelete="CASCADE"
+        ),
+    )
+
+    operation_id: Mapped[str] = mapped_column("operationId", _ID, primary_key=True)
+    owner_token: Mapped[str] = mapped_column("ownerToken", _ID, nullable=False)
+    fence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        "heartbeatAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    lease_expires_at: Mapped[datetime] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True), nullable=False
+    )
+
+
+class CatalogOutbox(CurrentBase):
+    __tablename__ = "CatalogOutbox"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        Index("CatalogOutbox_delivery_idx", "deliveredAt", "availableAt"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str | None] = mapped_column("libraryId", _ID)
+    aggregate_type: Mapped[str] = mapped_column(
+        "aggregateType", String(64), nullable=False
+    )
+    aggregate_id: Mapped[str] = mapped_column("aggregateId", _ID, nullable=False)
+    event_type: Mapped[str] = mapped_column("eventType", String(96), nullable=False)
+    event_version: Mapped[int] = mapped_column(
+        "eventVersion", Integer, nullable=False, default=1
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        "availableAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        "deliveredAt", DateTime(timezone=True)
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column("lastError", Text)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class AdministrativeAuditEvent(CurrentBase):
+    __tablename__ = "AdministrativeAuditEvent"
+    __table_args__ = (
+        ForeignKeyConstraint(["actorUserId"], ["User.id"], ondelete="SET NULL"),
+        ForeignKeyConstraint(
+            ["operationId"], ["SourceWriteOperation.id"], ondelete="SET NULL"
+        ),
+        Index("AdministrativeAuditEvent_time_idx", "occurredAt"),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    former_library_id: Mapped[str | None] = mapped_column("formerLibraryId", _ID)
+    operation_id: Mapped[str | None] = mapped_column("operationId", _ID)
+    code: Mapped[str] = mapped_column(String(96), nullable=False)
+    actor_kind: Mapped[AuditActorKind] = mapped_column(
+        "actorKind", Enum(AuditActorKind, **_ENUM), nullable=False
+    )
+    actor_user_id: Mapped[str | None] = mapped_column("actorUserId", _ID)
+    occurred_at: Mapped[datetime] = mapped_column(
+        "occurredAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    evidence: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+
+
+# SQLAlchemy cannot reference a mapped class in a class body before the class is
+# complete.  These expression constraints are still schema objects, not SQL text.
+cast(Table, CatalogLibrary.__table__).append_constraint(
+    CheckConstraint(
+        CatalogLibrary.topology_version > 0, name="CatalogLibrary_topology_version_ck"
+    )
+)
+cast(Table, CatalogLibrary.__table__).append_constraint(
+    CheckConstraint(
+        CatalogLibrary.config_revision > 0, name="CatalogLibrary_config_revision_ck"
+    )
+)
+cast(Table, CatalogLibrary.__table__).append_constraint(
+    CheckConstraint(
+        CatalogLibrary.topology_writer_fence >= 0, name="CatalogLibrary_writer_fence_ck"
+    )
+)
+cast(Table, CatalogLibrary.__table__).append_constraint(
+    CheckConstraint(
+        CatalogLibrary.source_mutation_fence >= 0,
+        name="CatalogLibrary_mutation_fence_ck",
+    )
+)
+cast(Table, CatalogLibrary.__table__).append_constraint(
+    CheckConstraint(
+        CatalogLibrary.next_scan_generation > 0,
+        name="CatalogLibrary_scan_generation_ck",
+    )
+)
+cast(Table, LibraryRootRegistryLock.__table__).append_constraint(
+    CheckConstraint(
+        LibraryRootRegistryLock.id == 1, name="LibraryRootRegistryLock_singleton_ck"
+    )
+)
+cast(Table, LibrarySourceEntry.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            LibrarySourceEntry.entry_type != SourceEntryType.SYNTHETIC_ROOT,
+            and_(
+                LibrarySourceEntry.parent_entry_id.is_(None),
+                LibrarySourceEntry.local_name == "$root",
+            ),
+        ),
+        name="LibrarySourceEntry_root_shape_ck",
+    )
+)
+cast(Table, LibrarySourceEntry.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            LibrarySourceEntry.entry_type == SourceEntryType.SYNTHETIC_ROOT,
+            LibrarySourceEntry.parent_entry_id.is_not(None),
+        ),
+        name="LibrarySourceEntry_parent_required_ck",
+    )
+)
+Index(
+    "LibrarySourceEntry_one_root_idx",
+    LibrarySourceEntry.library_id,
+    unique=True,
+    sqlite_where=LibrarySourceEntry.entry_type == SourceEntryType.SYNTHETIC_ROOT,
+)
+Index(
+    "LibrarySourceEntry_active_slot_idx",
+    LibrarySourceEntry.library_id,
+    LibrarySourceEntry.parent_entry_id,
+    LibrarySourceEntry.local_name_key,
+    unique=True,
+    sqlite_where=LibrarySourceEntry.slot_state == SlotState.ACTIVE,
+)
+cast(Table, SourceAttachment.__table__).append_constraint(
+    CheckConstraint(
+        (
+            (SourceAttachment.work_id.is_not(None)).cast(Integer)
+            + (SourceAttachment.version_id.is_not(None)).cast(Integer)
+            + (SourceAttachment.volume_id.is_not(None)).cast(Integer)
+            == 1
+        ),
+        name="SourceAttachment_one_owner_ck",
+    )
+)
+cast(Table, TopologyUnit.__table__).append_constraint(
+    CheckConstraint(
+        (
+            (TopologyUnit.work_owner_id.is_not(None)).cast(Integer)
+            + (TopologyUnit.version_owner_id.is_not(None)).cast(Integer)
+            + (TopologyUnit.volume_owner_id.is_not(None)).cast(Integer)
+            == 1
+        ),
+        name="TopologyUnit_one_owner_ck",
+    )
+)
+cast(Table, TopologyUnit.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                TopologyUnit.unit_kind.in_(
+                    [TopologyUnitKind.WORK_CONTAINER, TopologyUnitKind.AUDIOBOOK_WORK]
+                ),
+                TopologyUnit.work_owner_id.is_not(None),
+                TopologyUnit.version_owner_id.is_(None),
+                TopologyUnit.volume_owner_id.is_(None),
+            ),
+            and_(
+                TopologyUnit.unit_kind == TopologyUnitKind.VERSION_CONTAINER,
+                TopologyUnit.work_owner_id.is_(None),
+                TopologyUnit.version_owner_id.is_not(None),
+                TopologyUnit.volume_owner_id.is_(None),
+            ),
+            and_(
+                TopologyUnit.unit_kind.in_(
+                    [
+                        TopologyUnitKind.FLAT_VOLUME,
+                        TopologyUnitKind.SINGLE_FILE_VOLUME,
+                        TopologyUnitKind.MULTI_ASSET_VOLUME,
+                    ]
+                ),
+                TopologyUnit.work_owner_id.is_(None),
+                TopologyUnit.version_owner_id.is_(None),
+                TopologyUnit.volume_owner_id.is_not(None),
+            ),
+        ),
+        name="TopologyUnit_owner_kind_ck",
+    )
+)
+Index(
+    "TopologyUnit_work_owner_idx",
+    TopologyUnit.library_id,
+    TopologyUnit.work_owner_id,
+    unique=True,
+    sqlite_where=TopologyUnit.work_owner_id.is_not(None),
+)
+Index(
+    "TopologyUnit_version_owner_idx",
+    TopologyUnit.library_id,
+    TopologyUnit.version_owner_id,
+    unique=True,
+    sqlite_where=TopologyUnit.version_owner_id.is_not(None),
+)
+Index(
+    "TopologyUnit_volume_owner_idx",
+    TopologyUnit.library_id,
+    TopologyUnit.volume_owner_id,
+    unique=True,
+    sqlite_where=TopologyUnit.volume_owner_id.is_not(None),
+)
+cast(Table, TopologyUnitRevision.__table__).append_constraint(
+    CheckConstraint(
+        TopologyUnitRevision.revision > 0, name="TopologyUnitRevision_revision_ck"
+    )
+)
+Index(
+    "TopologyUnitRevision_one_active_idx",
+    TopologyUnitRevision.library_id,
+    TopologyUnitRevision.unit_id,
+    unique=True,
+    sqlite_where=TopologyUnitRevision.state == RevisionState.ACTIVE,
+)
+cast(Table, TopologyAssetMembership.__table__).append_constraint(
+    CheckConstraint(
+        TopologyAssetMembership.asset_order >= 0,
+        name="TopologyAssetMembership_order_ck",
+    )
+)
+cast(Table, TopologyAssetMembership.__table__).append_constraint(
+    CheckConstraint(
+        TopologyAssetMembership.disc_number.is_(None)
+        | (TopologyAssetMembership.disc_number >= 1),
+        name="TopologyAssetMembership_disc_ck",
+    )
+)
+cast(Table, SourceWriteOperation.__table__).append_constraint(
+    CheckConstraint(
+        SourceWriteOperation.expected_config_revision > 0,
+        name="SourceWriteOperation_config_revision_ck",
+    )
+)
+Index(
+    "SourceWriteOperation_active_slot_idx",
+    SourceWriteOperation.library_id,
+    SourceWriteOperation.target_slot_key,
+    unique=True,
+    sqlite_where=~SourceWriteOperation.state.in_(
+        [
+            OperationState.COMPLETED,
+            OperationState.CANCELLED,
+            OperationState.ABANDONED_BY_LIBRARY_REMOVAL,
+            OperationState.FAILED,
+        ]
+    ),
+)
+
+
+__all__ = [
+    "AdministrativeAuditEvent",
+    "CatalogLibrary",
+    "CatalogOutbox",
+    "LayoutDiagnostic",
+    "LibraryIgnoreRule",
+    "LibraryRootRegistryLock",
+    "LibraryScanRun",
+    "LibraryScanWorkItem",
+    "LibrarySourceEntry",
+    "LibraryVolume",
+    "LibraryWork",
+    "OperationStagingLock",
+    "PathCollisionObservation",
+    "SourceAttachment",
+    "SourceWriteOperation",
+    "TopologyAssetMembership",
+    "TopologyUnit",
+    "TopologyUnitRevision",
+    "TopologyVersionProjection",
+    "TopologyVolumeProjection",
+    "TopologyWorkProjection",
+    "UserLibraryGrant",
+    "VolumeAsset",
+    "WorkVersion",
+]
