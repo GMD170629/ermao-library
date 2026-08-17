@@ -60,6 +60,7 @@ fun HomeScreen(
     repository: ContentRepository,
     context: ContentRequestContext,
     onOpenWork: (String) -> Unit,
+    onContinueReading: (ContinueReadingCard) -> Unit,
     onOpenLibrary: () -> Unit,
     onRetry: () -> Unit,
     onRefresh: () -> Unit,
@@ -115,6 +116,7 @@ fun HomeScreen(
                                     repository = repository,
                                     context = context,
                                     onOpenWork = onOpenWork,
+                                    onContinueReading = onContinueReading,
                                     lastReadClock = lastReadClock,
                                 )
                             }
@@ -181,6 +183,7 @@ private fun ContinueReadingTask(
     repository: ContentRepository,
     context: ContentRequestContext,
     onOpenWork: (String) -> Unit,
+    onContinueReading: (ContinueReadingCard) -> Unit,
     lastReadClock: Clock,
 ) {
     val theme = WarmPageThemeValues
@@ -283,8 +286,10 @@ private fun ContinueReadingTask(
                 }
                 WarmPagePrimaryAction(
                     label = stringResource(R.string.home_view_detail_action),
-                    onClick = { onOpenWork(item.work.id) },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onContinueReading(item) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home-continue-action"),
                 )
             }
         }

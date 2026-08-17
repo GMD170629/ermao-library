@@ -14,7 +14,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -162,22 +162,56 @@ class VisualFixtureActivityTest {
             assertScenarioRoot(variant)
             revealRequestedOverlay(variant, scenario)
 
-            val addToShelf = scenario.localizedString(variant, R.string.work_action_add_shelf)
-            listOf(
-                R.string.work_actions_title,
-                R.string.work_action_download,
-                R.string.cancel_action,
-            ).forEach { resourceId ->
-                awaitTextDisplayed(scenario.localizedString(variant, resourceId))
-            }
+            val addToShelf = scenario.localizedString(variant, R.string.work_control_add_shelf)
+            awaitTextDisplayed(addToShelf)
             composeRule.onNode(
-                matcher = hasText(addToShelf) and hasAnyAncestor(hasTestTag("work-actions-sheet")),
+                matcher = hasText(addToShelf) and hasAnyAncestor(hasTestTag("work-book-control-menu")),
                 useUnmergedTree = true,
             ).performClick()
             awaitTagDisplayed("work-shelf-picker-sheet")
             awaitTagDisplayed("work-shelf-picker-title")
             awaitTextDisplayed(scenario.localizedString(variant, R.string.work_shelf_picker_title))
             awaitTextDisplayed(scenario.localizedString(variant, R.string.work_shelf_save))
+        }
+    }
+
+    @Test
+    fun workDetailQuickControlsAndFullPathDialogAreInteractive() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val variant = VisualFixtureVariant(
+            scenario = VisualFixtureScenario.WorkVolumes,
+            locale = VisualFixtureLocale.ZhCn,
+            appearance = VisualFixtureAppearance.Light,
+        )
+        ActivityScenario.launch<VisualFixtureActivity>(
+            VisualFixtureContract.intent(instrumentation.targetContext, variant),
+        ).use { scenario ->
+            lateinit var fixtureActivity: VisualFixtureActivity
+            scenario.onActivity { activity -> fixtureActivity = activity }
+            composeRule.waitUntil(CAPTURE_READY_TIMEOUT_MILLIS) { fixtureActivity.isCaptureReady }
+
+            composeRule.onNodeWithTag("work-reading-status-action")
+                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_reading_unread))
+                .performClick()
+                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_reading_read))
+
+            composeRule.onNodeWithTag("work-download-action")
+                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_downloaded))
+                .performTouchInput { longClick() }
+            awaitTextDisplayed(scenario.localizedString(variant, R.string.downloads_remove_title))
+        }
+
+        val pathVariant = variant.copy(scenario = VisualFixtureScenario.WorkAbout)
+        ActivityScenario.launch<VisualFixtureActivity>(
+            VisualFixtureContract.intent(instrumentation.targetContext, pathVariant),
+        ).use { scenario ->
+            lateinit var fixtureActivity: VisualFixtureActivity
+            scenario.onActivity { activity -> fixtureActivity = activity }
+            composeRule.waitUntil(CAPTURE_READY_TIMEOUT_MILLIS) { fixtureActivity.isCaptureReady }
+            val fullPath = "/library/三体系列/第二卷 黑暗森林.epub"
+            composeRule.onNodeWithTag("work-detail-list").performScrollToIndex(5)
+            composeRule.onNodeWithText(fullPath).performScrollTo().performClick()
+            awaitTextDisplayed(scenario.localizedString(pathVariant, R.string.work_metadata_file_path_full_title))
         }
     }
 
@@ -292,11 +326,9 @@ class VisualFixtureActivityTest {
                 composeRule.onNodeWithTag("library-filter-title").assertTextEquals(filterTitle)
             }
             VisualFixtureScenario.WorkActions -> {
-                val moreActions = scenario.localizedString(variant, R.string.work_more_actions)
-                composeRule.onNodeWithContentDescription(moreActions).performClick()
+                composeRule.onNodeWithTag("work-more-action").performClick()
                 composeRule.waitForIdle()
-                val actionsTitle = scenario.localizedString(variant, R.string.work_actions_title)
-                awaitTextDisplayed(actionsTitle)
+                awaitTagDisplayed("work-book-control-menu")
             }
             VisualFixtureScenario.WorkAbout,
             VisualFixtureScenario.WorkVolumes,

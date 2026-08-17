@@ -45,6 +45,9 @@ import com.ermao.library.features.content.model.WorkDetailContent
 import com.ermao.library.features.content.model.WorksFilters
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.features.home.ui.HomeScreen
+import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
+import com.ermao.library.features.downloads.model.AndroidDownloadRecord
+import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.library.application.LibraryUiState
 import com.ermao.library.features.library.application.ScopeUiState
 import com.ermao.library.features.library.application.WorkDetailUiState
@@ -315,6 +318,7 @@ private fun FixtureHome() {
         repository = fixtureRepository,
         context = fixtureRequestContext,
         onOpenWork = {},
+        onContinueReading = {},
         onOpenLibrary = {},
         onRetry = {},
         onRefresh = {},
@@ -382,13 +386,14 @@ private fun FixtureLibrary(showFilter: Boolean) {
 @androidx.compose.runtime.Composable
 private fun FixtureWorkDetail(content: WorkDetailContent) {
     var showShelfPicker by remember { mutableStateOf(false) }
+    val selectedVolume = content.media.firstOrNull()?.volumes?.getOrNull(1)
+        ?: content.media.firstOrNull()?.volumes?.firstOrNull()
     WorkDetailScreen(
         state = WorkDetailUiState(
             isLoading = false,
             content = content,
             selectedMediaKind = "EBOOK",
-            selectedVolumeId = content.media.firstOrNull()?.volumes?.getOrNull(1)?.id
-                ?: content.media.firstOrNull()?.volumes?.firstOrNull()?.id,
+            selectedVolumeId = selectedVolume?.id,
             shelves = fixtureShelves,
             selectedShelfIds = setOf(fixtureShelves.first().id),
             isShelfPickerVisible = showShelfPicker,
@@ -406,8 +411,36 @@ private fun FixtureWorkDetail(content: WorkDetailContent) {
         onViewShelves = {},
         onOpenFacet = { _, _ -> },
         onRetry = {},
+        downloadRecordsByVolume = selectedVolume?.let { volume ->
+            mapOf(volume.id to fixtureCompletedDownload(content, volume))
+        }.orEmpty(),
     )
 }
+
+private fun fixtureCompletedDownload(
+    content: WorkDetailContent,
+    volume: VolumeContent,
+): AndroidDownloadRecord = AndroidDownloadRecord(
+    taskId = "fixture-download-${volume.id}",
+    namespace = AndroidDownloadNamespace("visual-fixture-server", "visual-fixture-user", 1),
+    workId = content.work.id,
+    workTitle = content.work.title,
+    author = content.work.author,
+    coverUrl = volume.coverUrl,
+    volumeId = volume.id,
+    volumeTitle = volume.title,
+    format = volume.format,
+    readerType = volume.readerType,
+    sourceApiPath = "/api/volumes/${volume.id}/file",
+    sourceMimeType = "application/epub+zip",
+    expectedBytes = volume.sizeBytes,
+    transferredBytes = volume.sizeBytes,
+    status = AndroidDownloadStatus.Completed,
+    localReference = "fixture-${volume.id}.epub",
+    verified = true,
+    createdAtEpochMillis = 1,
+    updatedAtEpochMillis = 2,
+)
 
 private val fixtureShelves = listOf(
     ShelfSummary(

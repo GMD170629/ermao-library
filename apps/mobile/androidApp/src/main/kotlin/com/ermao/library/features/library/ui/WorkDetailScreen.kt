@@ -4,6 +4,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.selection.selectable
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.outlined.Source
 import androidx.compose.material.icons.outlined.Splitscreen
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -61,6 +63,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,6 +95,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.text.selection.SelectionContainer
 import android.text.Html
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -202,28 +206,18 @@ fun WorkDetailScreen(
     managementViewModel: WorkManagementViewModel? = null,
     canManageSystem: Boolean = managementViewModel != null,
 ) {
-    var showActions by remember { mutableStateOf(false) }
     var controlMenuState by remember { mutableStateOf<WorkControlMenuState?>(null) }
     var managementSheetState by remember { mutableStateOf<WorkManagementSheetState?>(null) }
-    var readingStatusOverride by remember(state.content?.work?.id) {
+    val selectedVolume = state.resolveSelectedVolume()
+    var readingStatusOverride by remember(state.content?.work?.id, selectedVolume?.id) {
         mutableStateOf<WorkReadingStatus?>(null)
     }
+    var pendingDownloadRemoval by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
     val shelvesUpdatedMessage = stringResource(R.string.work_shelves_updated)
     val managementUpdatedMessage = stringResource(R.string.management_updated)
     val viewShelvesLabel = stringResource(R.string.view_shelves_action)
-    val workActionsSheetStrings = WorkActionsSheetStrings(
-        title = stringResource(R.string.work_actions_title),
-        addToShelf = stringResource(R.string.work_action_add_shelf),
-        download = stringResource(R.string.work_action_download),
-        pauseDownload = stringResource(R.string.work_download_pause),
-        readingStatus = stringResource(R.string.library_filter_reading),
-        unread = stringResource(R.string.reading_unread),
-        reading = stringResource(R.string.reading_reading),
-        finished = stringResource(R.string.reading_finished),
-        cancel = stringResource(R.string.cancel_action),
-    )
     val shelfPickerSheetStrings = ShelfPickerSheetStrings(
         title = stringResource(R.string.work_shelf_picker_title),
         loadFailed = stringResource(R.string.work_shelf_load_failed),
@@ -231,7 +225,12 @@ fun WorkDetailScreen(
         empty = stringResource(R.string.work_shelf_empty),
         save = stringResource(R.string.work_shelf_save),
     )
-    val selectedVolume = state.resolveSelectedVolume()
+    val currentReadingStatus = readingStatusOverride ?: selectedVolume?.let { volume ->
+        workReadingStatus(
+            completed = state.content?.completed == true || (volume.progressPercent ?: 0) >= 100,
+            progressPercent = volume.progressPercent,
+        )
+    } ?: WorkReadingStatus.Unread
     val managementState by managementViewModel?.uiState?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(null) }
     val managementFailureMessage = stringResource(
@@ -287,7 +286,21 @@ fun WorkDetailScreen(
                 onSelectVolume = onSelectVolume,
                 onLoadMoreVolumes = onLoadMoreVolumes,
                 onOpenShelfPicker = onOpenShelfPicker,
-                onOpenReadingStatus = { showActions = true },
+                readingStatus = currentReadingStatus,
+                onToggleReadingStatus = {
+                    val next = nextWorkReadingStatus(currentReadingStatus)
+                    readingStatusOverride = next
+                    val managedStatus = if (next == WorkReadingStatus.Finished) {
+                        ManagedReadingStatus.Finished
+                    } else {
+                        ManagedReadingStatus.Unread
+                    }
+                    if (selectedVolume != null && managementViewModel != null) {
+                        managementViewModel.setReadingStatus(selectedVolume.id, managedStatus)
+                    } else {
+                        onSelectReadingStatus(next)
+                    }
+                },
                 onOpenBookControl = { anchor ->
                     controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Book, anchor)
                 },
@@ -296,6 +309,7 @@ fun WorkDetailScreen(
                 downloadFailuresByVolume = downloadFailuresByVolume,
                 onDownloadVolume = onDownloadVolume,
                 onCancelDownload = onCancelDownload,
+                onRequestRemoveDownload = { pendingDownloadRemoval = it },
                 onOpenSelectedVolume = onOpenSelectedVolume,
                 onOpenVolumeControl = { volume, anchor ->
                     controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Volume(volume), anchor)
@@ -305,42 +319,24 @@ fun WorkDetailScreen(
         }
     }
 
-    if (showActions && state.content != null) {
-        WorkActionsSheet(
-            content = state.content,
-            strings = workActionsSheetStrings,
-            selectedVolume = selectedVolume,
-            selectedDownload = selectedVolume?.let { downloadRecordsByVolume[it.id] },
-            selectedReadingStatus = readingStatusOverride ?: workReadingStatus(
-                completed = state.content.completed,
-                progressPercent = state.content.work.progressPercent,
-            ),
-            onOpenShelfPicker = {
-                showActions = false
-                onOpenShelfPicker()
+    pendingDownloadRemoval?.let { download ->
+        AlertDialog(
+            onDismissRequest = { pendingDownloadRemoval = null },
+            title = { Text(stringResource(R.string.downloads_remove_title)) },
+            text = { Text(stringResource(R.string.downloads_remove_message, download.volumeTitle)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDownloadRemoval = null
+                        onRemoveDownload(download)
+                    },
+                ) { Text(stringResource(R.string.downloads_remove_action)) }
             },
-            onDownloadVolume = { volumeId ->
-                showActions = false
-                onDownloadVolume(volumeId)
-            },
-            onCancelDownload = { volumeId ->
-                showActions = false
-                onCancelDownload(volumeId)
-            },
-            onSelectReadingStatus = { readingStatus ->
-                val status = when (readingStatus) {
-                    WorkReadingStatus.Unread -> ManagedReadingStatus.Unread
-                    WorkReadingStatus.Finished -> ManagedReadingStatus.Finished
-                    WorkReadingStatus.Reading -> null
-                }
-                if (status != null && selectedVolume != null && managementViewModel != null) {
-                    readingStatusOverride = readingStatus
-                    managementViewModel.setReadingStatus(selectedVolume.id, status)
-                } else {
-                    onSelectReadingStatus(readingStatus)
+            dismissButton = {
+                TextButton(onClick = { pendingDownloadRemoval = null }) {
+                    Text(stringResource(R.string.cancel_action))
                 }
             },
-            onDismiss = { showActions = false },
         )
     }
     if (controlMenuState != null && state.content != null) {
@@ -479,13 +475,15 @@ private fun WorkDetailBody(
     onSelectVolume: (String) -> Unit,
     onLoadMoreVolumes: () -> Unit,
     onOpenShelfPicker: () -> Unit,
-    onOpenReadingStatus: () -> Unit,
+    readingStatus: WorkReadingStatus,
+    onToggleReadingStatus: () -> Unit,
     onOpenBookControl: (Offset) -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
     downloadRecordsByVolume: Map<String, AndroidDownloadRecord>,
     downloadFailuresByVolume: Map<String, String>,
     onDownloadVolume: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
+    onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedVolume: (VolumeContent) -> Unit,
     onOpenVolumeControl: (VolumeContent, Offset) -> Unit,
     modifier: Modifier,
@@ -518,10 +516,12 @@ private fun WorkDetailBody(
                 selectedVolume = selectedVolume,
                 selectedDownload = selectedVolume?.let { volume -> downloadRecordsByVolume[volume.id] },
                 onOpenShelfPicker = onOpenShelfPicker,
-                onOpenReadingStatus = onOpenReadingStatus,
+                readingStatus = readingStatus,
+                onToggleReadingStatus = onToggleReadingStatus,
                 onOpenBookControl = onOpenBookControl,
                 onDownloadVolume = onDownloadVolume,
                 onCancelDownload = onCancelDownload,
+                onRequestRemoveDownload = onRequestRemoveDownload,
                 onOpenSelectedVolume = onOpenSelectedVolume,
             )
         }
@@ -556,8 +556,6 @@ private fun WorkDetailBody(
                     downloadFailuresByVolume = downloadFailuresByVolume,
                     onSelectVolume = onSelectVolume,
                     onLoadMore = onLoadMoreVolumes,
-                    onDownloadVolume = onDownloadVolume,
-                    onCancelDownload = onCancelDownload,
                     onManageVolume = onOpenVolumeControl,
                     managementAvailable = true,
                 )
@@ -573,10 +571,12 @@ private fun WorkDetailActionRow(
     selectedVolume: VolumeContent?,
     selectedDownload: AndroidDownloadRecord?,
     onOpenShelfPicker: () -> Unit,
-    onOpenReadingStatus: () -> Unit,
+    readingStatus: WorkReadingStatus,
+    onToggleReadingStatus: () -> Unit,
     onOpenBookControl: (Offset) -> Unit,
     onDownloadVolume: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
+    onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedVolume: (VolumeContent) -> Unit,
 ) {
     val theme = WarmPageThemeValues
@@ -586,6 +586,7 @@ private fun WorkDetailActionRow(
         download = selectedDownload,
     )
     val primaryLabel = primaryActionLabel(primaryAction.label)
+    val downloadAction = workDetailDownloadActionPresentation(selectedDownload)
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         WarmPagePrimaryAction(
             label = primaryLabel,
@@ -610,26 +611,60 @@ private fun WorkDetailActionRow(
         )
         Row(Modifier.fillMaxWidth()) {
             WorkDetailQuickAction(
-                icon = Icons.Outlined.CloudDownload,
-                label = stringResource(R.string.work_quick_download),
+                icon = when (downloadAction) {
+                    WorkDetailDownloadAction.Downloading -> Icons.Outlined.PauseCircle
+                    WorkDetailDownloadAction.Downloaded -> Icons.Outlined.CheckCircle
+                    WorkDetailDownloadAction.NotDownloaded,
+                    WorkDetailDownloadAction.Paused,
+                    WorkDetailDownloadAction.Failed,
+                    -> Icons.Outlined.CloudDownload
+                },
+                label = stringResource(
+                    when (downloadAction) {
+                        WorkDetailDownloadAction.NotDownloaded -> R.string.work_quick_download
+                        WorkDetailDownloadAction.Downloading -> R.string.work_quick_downloading
+                        WorkDetailDownloadAction.Paused -> R.string.work_quick_download_paused
+                        WorkDetailDownloadAction.Failed -> R.string.work_quick_download_retry
+                        WorkDetailDownloadAction.Downloaded -> R.string.work_quick_downloaded
+                    },
+                ),
                 onClick = {
                     selectedVolume?.let { volume ->
-                        if (selectedDownload?.status in setOf(
-                                AndroidDownloadStatus.Queued,
-                                AndroidDownloadStatus.Downloading,
-                                AndroidDownloadStatus.Verifying,
-                            )
-                        ) onCancelDownload(volume.id) else onDownloadVolume(volume.id)
+                        when (downloadAction) {
+                            WorkDetailDownloadAction.Downloading -> onCancelDownload(volume.id)
+                            WorkDetailDownloadAction.NotDownloaded,
+                            WorkDetailDownloadAction.Paused,
+                            WorkDetailDownloadAction.Failed,
+                            -> onDownloadVolume(volume.id)
+                            WorkDetailDownloadAction.Downloaded -> Unit
+                        }
                     }
                 },
+                onLongClick = selectedDownload?.takeIf { it.isReadable }?.let { download ->
+                    { onRequestRemoveDownload(download) }
+                },
+                longClickLabel = stringResource(R.string.work_quick_remove_download),
                 enabled = selectedVolume != null,
                 modifier = Modifier.weight(1f),
+                testTag = "work-download-action",
             )
             WorkDetailQuickAction(
-                icon = Icons.Outlined.Equalizer,
-                label = stringResource(R.string.work_quick_reading_status),
-                onClick = onOpenReadingStatus,
+                icon = if (readingStatus == WorkReadingStatus.Finished) {
+                    Icons.Outlined.CheckCircle
+                } else {
+                    Icons.Outlined.Equalizer
+                },
+                label = stringResource(
+                    if (readingStatus == WorkReadingStatus.Finished) {
+                        R.string.work_quick_reading_read
+                    } else {
+                        R.string.work_quick_reading_unread
+                    },
+                ),
+                onClick = onToggleReadingStatus,
+                enabled = selectedVolume != null,
                 modifier = Modifier.weight(1f),
+                testTag = "work-reading-status-action",
             )
             WorkDetailQuickAction(
                 icon = Icons.Outlined.BookmarkBorder,
@@ -644,6 +679,7 @@ private fun WorkDetailActionRow(
                 onClick = {},
                 onClickAt = onOpenBookControl,
                 modifier = Modifier.weight(1f),
+                testTag = "work-more-action",
             )
         }
         val captionResource = when {
@@ -663,6 +699,7 @@ private fun WorkDetailActionRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WorkDetailQuickAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -670,6 +707,8 @@ private fun WorkDetailQuickAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onClickAt: ((Offset) -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    longClickLabel: String? = null,
     enabled: Boolean = true,
     testTag: String? = null,
 ) {
@@ -683,19 +722,24 @@ private fun WorkDetailQuickAction(
                 positionInWindow = coordinates.positionInWindow()
                 measuredSize = coordinates.size
             }
-            .clickable(enabled = enabled) {
-                val anchoredClick = onClickAt
-                if (anchoredClick == null) {
-                    onClick()
-                } else {
-                    anchoredClick(
-                        positionInWindow + Offset(
-                            measuredSize.width / 2f,
-                            measuredSize.height / 2f,
-                        ),
-                    )
-                }
-            }
+            .combinedClickable(
+                enabled = enabled,
+                onClick = {
+                    val anchoredClick = onClickAt
+                    if (anchoredClick == null) {
+                        onClick()
+                    } else {
+                        anchoredClick(
+                            positionInWindow + Offset(
+                                measuredSize.width / 2f,
+                                measuredSize.height / 2f,
+                            ),
+                        )
+                    }
+                },
+                onLongClick = onLongClick,
+                onLongClickLabel = longClickLabel,
+            )
             .then(if (testTag == null) Modifier else Modifier.testTag(testTag)),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -1089,8 +1133,6 @@ private fun WorkVolumeRail(
     downloadFailuresByVolume: Map<String, String>,
     onSelectVolume: (String) -> Unit,
     onLoadMore: () -> Unit,
-    onDownloadVolume: (String) -> Unit,
-    onCancelDownload: (String) -> Unit,
     onManageVolume: (VolumeContent, Offset) -> Unit,
     managementAvailable: Boolean,
 ) {
@@ -1120,8 +1162,6 @@ private fun WorkVolumeRail(
                         download = downloadRecordsByVolume[volume.id],
                         downloadFailure = downloadFailuresByVolume[volume.id],
                         onSelectVolume = onSelectVolume,
-                        onDownloadVolume = onDownloadVolume,
-                        onCancelDownload = onCancelDownload,
                         onManageVolume = onManageVolume,
                         managementAvailable = managementAvailable,
                         modifier = Modifier.width(itemWidth),
@@ -1166,26 +1206,35 @@ internal fun workDetailVolumeRailItemWidth(
 @Composable
 private fun SelectedVolumeMetadata(volume: VolumeContent) {
     val locale = LocalConfiguration.current.locales[0]
+    var fullPath by remember(volume.id) { mutableStateOf<String?>(null) }
     val rows = listOf(
-        R.string.work_metadata_format to volume.format,
-        R.string.work_metadata_language to volume.language,
-        R.string.work_metadata_published to formatWorkMetadataDate(volume.publishedAt, locale),
-        R.string.work_metadata_page_count to volume.pageCount?.let {
+        Triple(R.string.work_metadata_format, volume.format, false),
+        Triple(R.string.work_metadata_language, volume.language, false),
+        Triple(R.string.work_metadata_published, formatWorkMetadataDate(volume.publishedAt, locale), false),
+        Triple(R.string.work_metadata_page_count, volume.pageCount?.let {
             pluralStringResource(R.plurals.work_metadata_page_count_value, it, it)
-        },
-        R.string.work_metadata_source to volume.metadataSource,
-        R.string.work_metadata_file_path to volume.files.firstOrNull()?.path,
+        }, false),
+        Triple(R.string.work_metadata_source, volume.metadataSource, false),
+        Triple(R.string.work_metadata_file_path, volume.files.firstOrNull()?.path, true),
     )
     val theme = WarmPageThemeValues
     Column(Modifier.fillMaxWidth().testTag("work-selected-volume-metadata")) {
         Text(stringResource(R.string.work_volume_metadata_title), style = theme.typography.sectionTitle)
-        rows.forEach { (label, rawValue) ->
+        rows.forEach { (label, rawValue, isFilePath) ->
             val value = rawValue?.trim()?.takeIf(String::isNotEmpty)
                 ?: stringResource(R.string.work_metadata_missing)
+            val rowModifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = theme.components.controls.minimumTouchTarget)
+                .then(
+                    if (isFilePath && rawValue?.isNotBlank() == true) {
+                        Modifier.clickable { fullPath = value }
+                    } else {
+                        Modifier
+                    },
+                )
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = theme.components.controls.minimumTouchTarget),
+                modifier = rowModifier,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -1197,7 +1246,7 @@ private fun SelectedVolumeMetadata(volume: VolumeContent) {
                 Text(
                     text = value,
                     style = theme.typography.body,
-                    maxLines = 2,
+                    maxLines = if (isFilePath) 1 else 2,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.End,
                     modifier = Modifier.weight(1.4f),
@@ -1208,6 +1257,22 @@ private fun SelectedVolumeMetadata(volume: VolumeContent) {
                 color = theme.colors.divider,
             )
         }
+    }
+    fullPath?.let { path ->
+        AlertDialog(
+            onDismissRequest = { fullPath = null },
+            title = { Text(stringResource(R.string.work_metadata_file_path_full_title)) },
+            text = {
+                SelectionContainer {
+                    Text(path, style = theme.typography.body)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { fullPath = null }) {
+                    Text(stringResource(R.string.close_action))
+                }
+            },
+        )
     }
 }
 
@@ -1290,6 +1355,28 @@ internal enum class WorkDetailVolumeDownloadState {
     Downloaded,
 }
 
+internal enum class WorkDetailDownloadAction {
+    NotDownloaded,
+    Downloading,
+    Paused,
+    Failed,
+    Downloaded,
+}
+
+internal fun workDetailDownloadActionPresentation(
+    download: AndroidDownloadRecord?,
+): WorkDetailDownloadAction = when {
+    download?.isReadable == true -> WorkDetailDownloadAction.Downloaded
+    download == null -> WorkDetailDownloadAction.NotDownloaded
+    download.status in setOf(
+        AndroidDownloadStatus.Queued,
+        AndroidDownloadStatus.Downloading,
+        AndroidDownloadStatus.Verifying,
+    ) -> WorkDetailDownloadAction.Downloading
+    download.status == AndroidDownloadStatus.Paused -> WorkDetailDownloadAction.Paused
+    else -> WorkDetailDownloadAction.Failed
+}
+
 internal data class WorkDetailVolumePresentation(
     val selected: Boolean,
     val readingState: WorkDetailVolumeReadingState,
@@ -1304,20 +1391,14 @@ internal fun workDetailIdentityPresentation(
     val visibleTags = tags
         .filter(String::isNotBlank)
         .distinctBy { tag -> tag.lowercase(Locale.ROOT) }
-    val status = when {
-        completed -> WorkDetailIdentityStatus.Finished
-        (progressPercent ?: 0) > 0 -> WorkDetailIdentityStatus.Reading
-        else -> null
-    }
     val elements = buildList {
         add(WorkDetailIdentityElement.Title)
         add(WorkDetailIdentityElement.AuthorAndSeries)
         if (visibleTags.isNotEmpty()) add(WorkDetailIdentityElement.Tags)
-        if (status != null) add(WorkDetailIdentityElement.ReadingStatus)
     }
     return WorkDetailIdentityPresentation(
         tags = visibleTags,
-        status = status,
+        status = null,
         elements = elements,
     )
 }
@@ -1335,6 +1416,9 @@ internal fun workReadingStatus(
     (progressPercent ?: 0) > 0 -> WorkReadingStatus.Reading
     else -> WorkReadingStatus.Unread
 }
+
+internal fun nextWorkReadingStatus(current: WorkReadingStatus): WorkReadingStatus =
+    if (current == WorkReadingStatus.Finished) WorkReadingStatus.Unread else WorkReadingStatus.Finished
 
 internal fun workReadingStatusChoices(): List<WorkReadingStatus> = listOf(
     WorkReadingStatus.Unread,
@@ -1527,7 +1611,7 @@ internal fun workDetailMediaControlWidth(optionCount: Int): Dp =
 private const val WORK_DETAIL_STACKED_LAYOUT_FONT_SCALE = 1.5f
 private val WORK_DETAIL_MIN_INLINE_WIDTH = 328.dp
 private val WORK_DETAIL_MEDIA_OPTION_WIDTH = 80.dp
-internal val WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH = 2.dp
+internal val WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH = 3.dp
 
 internal fun workDetailVolumeColumnCount(
     availableWidth: Dp,
@@ -1564,8 +1648,6 @@ private fun VolumeCoverItem(
     download: AndroidDownloadRecord?,
     downloadFailure: String?,
     onSelectVolume: (String) -> Unit,
-    onDownloadVolume: (String) -> Unit,
-    onCancelDownload: (String) -> Unit,
     onManageVolume: (VolumeContent, Offset) -> Unit,
     managementAvailable: Boolean,
     modifier: Modifier = Modifier,
@@ -1579,11 +1661,6 @@ private fun VolumeCoverItem(
         WorkDetailVolumeReadingState.Reading -> stringResource(R.string.work_volume_accessibility_progress, progress)
         WorkDetailVolumeReadingState.Unread -> stringResource(R.string.work_volume_accessibility_not_started)
     }
-    val downloadLabel = when (presentation.downloadState) {
-        WorkDetailVolumeDownloadState.Downloaded -> stringResource(R.string.downloads_offline_available)
-        WorkDetailVolumeDownloadState.Downloading -> stringResource(R.string.work_download_pause)
-        WorkDetailVolumeDownloadState.NotDownloaded -> stringResource(R.string.work_volume_download_action)
-    }
     val manageVolumeLabel = stringResource(R.string.management_volume)
     val volumeLabel = stringResource(R.string.work_volume_accessibility_label, index, volume.title)
     var coverPositionInWindow by remember(volume.id) { mutableStateOf(Offset.Zero) }
@@ -1592,7 +1669,12 @@ private fun VolumeCoverItem(
         coverPositionInWindow + Offset(coverSize.width / 2f, coverSize.height / 2f)
     }
     Column(
-        modifier = modifier,
+        modifier = modifier
+            .background(
+                color = if (selected) theme.colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent,
+                shape = RoundedCornerShape(theme.radii.coverCompact),
+            )
+            .padding(theme.spacing.half),
         verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
     ) {
         Box {
@@ -1672,41 +1754,19 @@ private fun VolumeCoverItem(
                         .padding(horizontal = theme.spacing.half, vertical = theme.spacing.half),
                 )
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(theme.metrics.androidMinimumTouchTarget)
-                    .clickable(enabled = presentation.downloadState != WorkDetailVolumeDownloadState.Downloaded) {
-                        if (presentation.downloadState == WorkDetailVolumeDownloadState.Downloading) {
-                            onCancelDownload(volume.id)
-                        } else {
-                            onDownloadVolume(volume.id)
-                        }
-                    }
-                    .semantics {
-                        contentDescription = downloadLabel
-                        stateDescription = downloadLabel
-                        if (presentation.downloadState == WorkDetailVolumeDownloadState.Downloaded) disabled()
-                    },
+            if (selected) Box(
+                modifier = Modifier.align(Alignment.TopEnd).padding(theme.spacing.half),
                 contentAlignment = Alignment.Center,
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = theme.colors.surfaceRaised,
+                    color = theme.colors.accentSoft,
                     modifier = Modifier.size(theme.components.workDetail.statusBadgeMinimumHeight),
                 ) {
                     Icon(
-                        imageVector = when (presentation.downloadState) {
-                            WorkDetailVolumeDownloadState.Downloaded -> Icons.Outlined.CheckCircle
-                            WorkDetailVolumeDownloadState.Downloading -> Icons.Outlined.PauseCircle
-                            WorkDetailVolumeDownloadState.NotDownloaded -> Icons.Outlined.CloudDownload
-                        },
-                        contentDescription = null,
-                        tint = if (presentation.downloadState == WorkDetailVolumeDownloadState.Downloaded) {
-                            theme.colors.brandAccent
-                        } else {
-                            theme.colors.textSecondary
-                        },
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = stringResource(R.string.work_volume_selected),
+                        tint = theme.colors.brandAccent,
                         modifier = Modifier.padding(theme.spacing.half),
                     )
                 }

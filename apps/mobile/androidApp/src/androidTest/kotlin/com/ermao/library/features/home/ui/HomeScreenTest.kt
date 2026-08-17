@@ -1,7 +1,5 @@
 package com.ermao.library.features.home.ui
 
-import android.content.Context
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -43,7 +41,6 @@ import com.ermao.library.ui.theme.WarmPageTheme
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
-import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -57,10 +54,9 @@ class HomeScreenTest {
 
     @Test
     fun dailyStateUsesCompactGutterThreeScanTargetsAndOneTruthfulPrimaryAction() {
-        val renderedContext = AtomicReference<Context>()
         var openedWorkId: String? = null
+        var continuedVolumeId: String? = null
         compose.setContent {
-            renderedContext.set(LocalContext.current)
             WarmPageTheme {
                 HomeScreen(
                     state = HomeUiState(
@@ -70,6 +66,7 @@ class HomeScreenTest {
                     repository = StubContentRepository,
                     context = contentRequestContext(),
                     onOpenWork = { openedWorkId = it },
+                    onContinueReading = { continuedVolumeId = it.resumeVolumeId },
                     onOpenLibrary = {},
                     onRetry = {},
                     onRefresh = {},
@@ -79,19 +76,19 @@ class HomeScreenTest {
         }
 
         compose.waitForIdle()
-        val context = checkNotNull(renderedContext.get())
         compose.onNodeWithTag("home-continue")
             .assertIsDisplayed()
             .assertLeftPositionInRootIsEqualTo(16.dp)
         compose.onNodeWithTag("work-recent-1").assertIsDisplayed()
         compose.onNodeWithTag("work-recent-2").assertIsDisplayed()
         compose.onNodeWithTag("work-recent-3").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.home_view_detail_action))
+        compose.onNodeWithTag("home-continue-action")
             .assertIsDisplayed()
             .assertHeightIsAtLeast(48.dp)
             .performClick()
 
-        assertEquals("continue-work", openedWorkId)
+        assertEquals("resume-volume", continuedVolumeId)
+        assertEquals(null, openedWorkId)
     }
 
     @Test
@@ -109,6 +106,7 @@ class HomeScreenTest {
                                 volumeTitle = "  $longTitle  ",
                                 positionLabel = " $longTitle ",
                                 lastReadAtEpochMillis = Instant.parse(wireTimestamp).toEpochMilli(),
+                                resumeVolumeId = "long-volume",
                             ),
                             recentReading = emptyList(),
                             recentAdded = emptyList(),
@@ -117,6 +115,7 @@ class HomeScreenTest {
                     repository = StubContentRepository,
                     context = contentRequestContext(),
                     onOpenWork = {},
+                    onContinueReading = {},
                     onOpenLibrary = {},
                     onRetry = {},
                     onRefresh = {},
@@ -155,6 +154,7 @@ private fun dailyHomeContent(): HomeContent = HomeContent(
         volumeTitle = "Volume 1",
         positionLabel = "Chapter 2",
         lastReadAtEpochMillis = Instant.parse("2026-08-15T01:18:00Z").toEpochMilli(),
+        resumeVolumeId = "resume-volume",
     ),
     recentReading = listOf(
         work("recent-1", "Dune", progress = 12),

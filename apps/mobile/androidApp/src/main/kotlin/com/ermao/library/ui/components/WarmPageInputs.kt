@@ -1,7 +1,6 @@
 package com.ermao.library.ui.components
 
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,7 +14,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -31,7 +29,6 @@ fun WarmPageSearchField(
     enabled: Boolean = true,
 ) {
     val theme = WarmPageThemeValues
-    val usesLargeText = LocalDensity.current.fontScale > 1.3f
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -88,12 +85,6 @@ fun WarmPageSearchField(
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (usesLargeText) {
-                    Modifier.heightIn(min = theme.components.controls.searchMinimumHeight)
-                } else {
-                    Modifier.height(theme.components.controls.searchMinimumHeight)
-                },
-            ),
+            .heightIn(min = theme.components.controls.searchMinimumHeight),
     )
 }

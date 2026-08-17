@@ -28,13 +28,12 @@ class WorkDetailLayoutTest {
         )
 
         assertEquals(listOf("科幻", "Long-form"), presentation.tags)
-        assertEquals(WorkDetailIdentityStatus.Reading, presentation.status)
+        assertEquals(null, presentation.status)
         assertEquals(
             listOf(
                 WorkDetailIdentityElement.Title,
                 WorkDetailIdentityElement.AuthorAndSeries,
                 WorkDetailIdentityElement.Tags,
-                WorkDetailIdentityElement.ReadingStatus,
             ),
             presentation.elements,
         )
@@ -51,7 +50,7 @@ class WorkDetailLayoutTest {
             ).elements,
         )
         assertEquals(
-            WorkDetailIdentityStatus.Finished,
+            null,
             workDetailIdentityPresentation(
                 tags = emptyList(),
                 completed = true,
@@ -102,7 +101,7 @@ class WorkDetailLayoutTest {
         assertTrue(volume.selected)
         assertEquals(WorkDetailVolumeReadingState.Reading, volume.readingState)
         assertEquals(WorkDetailVolumeDownloadState.NotDownloaded, volume.downloadState)
-        assertEquals(2.dp, WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH)
+        assertEquals(3.dp, WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH)
         assertEquals(WorkDetailPrimaryActionIntent.DownloadThenRead, primaryAction.intent)
         assertEquals(WorkDetailPrimaryActionLabel.DownloadToRead, primaryAction.label)
         assertTrue(primaryAction.enabled)
@@ -157,10 +156,30 @@ class WorkDetailLayoutTest {
         assertEquals(WorkReadingStatus.Unread, workReadingStatus(completed = false, progressPercent = 0))
         assertEquals(WorkReadingStatus.Reading, workReadingStatus(completed = false, progressPercent = 34))
         assertEquals(WorkReadingStatus.Finished, workReadingStatus(completed = true, progressPercent = 34))
+        assertEquals(WorkReadingStatus.Finished, nextWorkReadingStatus(WorkReadingStatus.Unread))
+        assertEquals(WorkReadingStatus.Finished, nextWorkReadingStatus(WorkReadingStatus.Reading))
+        assertEquals(WorkReadingStatus.Unread, nextWorkReadingStatus(WorkReadingStatus.Finished))
         assertEquals(
             listOf(WorkReadingStatus.Unread, WorkReadingStatus.Finished),
             workReadingStatusChoices(),
         )
+    }
+
+    @Test
+    fun controlDownloadStateReflectsTheSelectedVolumeAndKeepsCompletedRemovalExplicit() {
+        val volume = testVolume(readerType = "reflowable", format = "EPUB", progressPercent = 34)
+        val completed = completedDownload(volume)
+        val paused = completed.copy(
+            status = AndroidDownloadStatus.Paused,
+            verified = false,
+            localReference = null,
+        )
+        val failed = paused.copy(status = AndroidDownloadStatus.FailedRetryable)
+
+        assertEquals(WorkDetailDownloadAction.NotDownloaded, workDetailDownloadActionPresentation(null))
+        assertEquals(WorkDetailDownloadAction.Paused, workDetailDownloadActionPresentation(paused))
+        assertEquals(WorkDetailDownloadAction.Failed, workDetailDownloadActionPresentation(failed))
+        assertEquals(WorkDetailDownloadAction.Downloaded, workDetailDownloadActionPresentation(completed))
     }
 
     @Test

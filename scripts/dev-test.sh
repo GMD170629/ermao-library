@@ -48,6 +48,31 @@ run_cmake() {
   exit 1
 }
 
+find_host_compiler() {
+  override="$1"
+  shift
+
+  if [ -n "$override" ]; then
+    if command -v "$override" >/dev/null 2>&1; then
+      command -v "$override"
+      return
+    fi
+    echo "Configured MOBI host compiler is not executable: $override" >&2
+    exit 1
+  fi
+
+  for compiler in "$@"; do
+    if command -v "$compiler" >/dev/null 2>&1; then
+      command -v "$compiler"
+      return
+    fi
+  done
+
+  echo "A host C/C++ toolchain is required to build the pinned libmobi runtime." >&2
+  echo "On Ubuntu/Debian, install it with: sudo apt-get install build-essential" >&2
+  exit 1
+}
+
 case "$STORAGE_ROOT" in
   /*) ;;
   *) STORAGE_ROOT="$ROOT_DIR/$STORAGE_ROOT" ;;
@@ -57,9 +82,19 @@ mkdir -p "$STORAGE_ROOT/database"
 DATABASE_PATH="$STORAGE_ROOT/database/shuku.sqlite3"
 
 if [ -z "${ERMAO_MOBI_CORE_LIBRARY:-}" ]; then
+  # Select the host toolchain explicitly. CMake build directories are persistent,
+  # and may otherwise retain an Android or PDFium compiler from another workflow.
+  MOBI_CORE_C_COMPILER="$(
+    find_host_compiler "${MOBI_CORE_C_COMPILER:-}" cc gcc clang
+  )"
+  MOBI_CORE_CXX_COMPILER="$(
+    find_host_compiler "${MOBI_CORE_CXX_COMPILER:-}" c++ g++ clang++
+  )"
   run_cmake \
     -S "$ROOT_DIR/apps/mobile/native/mobi-core" \
     -B "$MOBI_CORE_BUILD_DIR" \
+    -DCMAKE_C_COMPILER="$MOBI_CORE_C_COMPILER" \
+    -DCMAKE_CXX_COMPILER="$MOBI_CORE_CXX_COMPILER" \
     -DERMAO_MOBI_BUILD_TESTS=OFF \
     -DERMAO_MOBI_BUILD_FUZZER=OFF
   run_cmake \

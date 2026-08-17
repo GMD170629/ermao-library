@@ -355,6 +355,17 @@ fun MainShell(
                             val route = WorkDetailRoute(workId)
                             if (homeBackStack.lastOrNull() != route) homeBackStack.add(route)
                         },
+                        onContinueReading = { item ->
+                            val volumeId = item.resumeVolumeId
+                            if (volumeId.isNullOrBlank()) {
+                                val route = WorkDetailRoute(item.work.id)
+                                if (homeBackStack.lastOrNull() != route) homeBackStack.add(route)
+                            } else {
+                                appContext.startActivity(
+                                    ReaderActivity.createServerIntent(appContext, session.profile.id, volumeId),
+                                )
+                            }
+                        },
                         onOpenLibrary = { selectedTabValue = TabId.Library.stableValue },
                         onRetry = homeViewModel::retry,
                         onRefresh = homeViewModel::refresh,
