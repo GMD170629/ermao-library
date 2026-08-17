@@ -14,6 +14,7 @@ class EntryType(StrEnum):
     FILE = "FILE"
     DIRECTORY = "DIRECTORY"
     SYMLINK = "SYMLINK"
+    JUNCTION = "JUNCTION"
 
 
 class AdmissionKind(StrEnum):
@@ -22,6 +23,35 @@ class AdmissionKind(StrEnum):
     SIDECAR = "SIDECAR"
     UNSUPPORTED = "UNSUPPORTED"
     IGNORED = "IGNORED"
+
+
+class SourceFormat(StrEnum):
+    EPUB = "EPUB"
+    MOBI = "MOBI"
+    AZW = "AZW"
+    AZW3 = "AZW3"
+    PRC = "PRC"
+    TXT = "TXT"
+    PDF = "PDF"
+    CBZ = "CBZ"
+    CBR = "CBR"
+    RAR = "RAR"
+    ZIP = "ZIP"
+    MP3 = "MP3"
+    M4A = "M4A"
+    M4B = "M4B"
+
+
+class SidecarRole(StrEnum):
+    OPF = "OPF"
+    ARTWORK = "ARTWORK"
+    LYRICS = "LYRICS"
+    CUE = "CUE"
+
+
+_AUDIO_SOURCE_FORMATS = frozenset(
+    {SourceFormat.MP3, SourceFormat.M4A, SourceFormat.M4B}
+)
 
 
 class PathComparison(StrEnum):
@@ -81,8 +111,8 @@ class ProbedEntry:
     relative_path: tuple[str, ...]
     entry_type: EntryType
     admission: AdmissionKind
-    source_format: str | None = None
-    sidecar_role: str | None = None
+    source_format: SourceFormat | None = None
+    sidecar_role: SidecarRole | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.entry_type, EntryType):
@@ -91,49 +121,61 @@ class ProbedEntry:
             raise TypeError("admission must be an AdmissionKind")
         _validate_relative_path(self.relative_path, "relative_path")
 
-        if self.source_format is not None:
-            if not isinstance(self.source_format, str):
-                raise TypeError("source_format must be a string")
-            if not self.source_format.strip():
-                raise ValueError("source_format must be a non-empty string")
-            object.__setattr__(
-                self, "source_format", self.source_format.strip().lower()
-            )
-        if self.sidecar_role is not None:
-            if not isinstance(self.sidecar_role, str):
-                raise TypeError("sidecar_role must be a string")
-            if not self.sidecar_role.strip():
-                raise ValueError("sidecar_role must be a non-empty string")
-            object.__setattr__(self, "sidecar_role", self.sidecar_role.strip().upper())
+        if self.source_format is not None and not isinstance(
+            self.source_format, SourceFormat
+        ):
+            raise TypeError("source_format must be a SourceFormat")
+        if self.sidecar_role is not None and not isinstance(
+            self.sidecar_role, SidecarRole
+        ):
+            raise TypeError("sidecar_role must be a SidecarRole")
+
+        if self.entry_type in {EntryType.SYMLINK, EntryType.JUNCTION}:
+            if self.source_format is not None or self.sidecar_role is not None:
+                raise ValueError("links cannot carry format or sidecar evidence")
+            if self.admission is not AdmissionKind.IGNORED:
+                raise ValueError("links must be ignored by source admission")
 
         if self.admission is AdmissionKind.SIDECAR:
-            if self.entry_type is not EntryType.FILE or self.sidecar_role is None:
+            if (
+                self.entry_type is not EntryType.FILE
+                or self.sidecar_role is None
+                or self.source_format is not None
+            ):
                 raise ValueError("sidecars must be files with a sidecar_role")
         elif self.sidecar_role is not None:
             raise ValueError("only sidecars may carry sidecar_role")
 
         if self.admission in {AdmissionKind.PRIMARY, AdmissionKind.AUDIO_TRACK}:
-            if self.entry_type not in {EntryType.FILE, EntryType.SYMLINK}:
-                raise ValueError("primary admissions must be files or symlinks")
+            if self.entry_type is not EntryType.FILE:
+                raise ValueError("primary admissions must be files")
             if self.source_format is None:
                 raise ValueError("primary admissions require source_format")
-        elif self.entry_type is not EntryType.FILE and self.source_format is not None:
-            raise ValueError("directory observations cannot carry source_format")
+            if (
+                self.admission is AdmissionKind.AUDIO_TRACK
+                and self.source_format not in _AUDIO_SOURCE_FORMATS
+            ):
+                raise ValueError("audio admissions require an audio source format")
+            if (
+                self.admission is AdmissionKind.PRIMARY
+                and self.source_format in _AUDIO_SOURCE_FORMATS
+            ):
+                raise ValueError("audio source formats require AUDIO_TRACK admission")
+        elif self.source_format is not None:
+            raise ValueError("only primary admissions may carry source_format")
 
 
 @dataclass(frozen=True, slots=True)
 class AssetCandidate:
     path: tuple[str, ...]
-    source_format: str
+    source_format: SourceFormat
     order: int
     disc_number: int = 0
 
     def __post_init__(self) -> None:
         _validate_relative_path(self.path, "path")
-        if not isinstance(self.source_format, str):
-            raise TypeError("source_format must be a string")
-        if not self.source_format.strip():
-            raise ValueError("source_format must be a non-empty string")
+        if not isinstance(self.source_format, SourceFormat):
+            raise TypeError("source_format must be a SourceFormat")
         if isinstance(self.order, bool) or not isinstance(self.order, int):
             raise TypeError("order must be an integer")
         if self.order < 0:

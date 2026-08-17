@@ -11,6 +11,8 @@ from app.modules.catalog.public import (
     AssetCandidate,
     EntryType,
     ProbedEntry,
+    SidecarRole,
+    SourceFormat,
     SourceKind,
     VolumeCandidate,
 )
@@ -65,16 +67,16 @@ def test_probed_entry_requires_sidecar_role_and_file_entry_type() -> None:
         relative_path=("book.opf",),
         entry_type=EntryType.FILE,
         admission=AdmissionKind.SIDECAR,
-        sidecar_role="OPF",
+        sidecar_role=SidecarRole.OPF,
     )
-    assert sidecar.sidecar_role == "OPF"
+    assert sidecar.sidecar_role is SidecarRole.OPF
 
     with pytest.raises(ValueError):
         ProbedEntry(
             relative_path=("nested",),
             entry_type=EntryType.DIRECTORY,
             admission=AdmissionKind.SIDECAR,
-            sidecar_role="COVER",
+            sidecar_role=SidecarRole.ARTWORK,
         )
 
     with pytest.raises(ValueError):
@@ -82,13 +84,13 @@ def test_probed_entry_requires_sidecar_role_and_file_entry_type() -> None:
             relative_path=("book.epub",),
             entry_type=EntryType.FILE,
             admission=AdmissionKind.PRIMARY,
-            source_format="epub",
-            sidecar_role="OPF",
+            source_format=SourceFormat.EPUB,
+            sidecar_role=SidecarRole.OPF,
         )
 
 
 def _asset(path: tuple[str, ...], order: int = 0) -> AssetCandidate:
-    return AssetCandidate(path=path, source_format="epub", order=order)
+    return AssetCandidate(path=path, source_format=SourceFormat.EPUB, order=order)
 
 
 def _candidate(

@@ -1,9 +1,9 @@
 """Pure topology-v1 directory grammar interpreters for the catalog."""
 
-import re
 from collections import defaultdict
 from collections.abc import Iterable
 
+from app.modules.catalog.domain.admission import parse_disc_component
 from app.modules.catalog.domain.model import (
     AdmissionKind,
     AssetCandidate,
@@ -22,7 +22,6 @@ from app.modules.catalog.domain.ordering import (
     natural_path_key,
 )
 
-_DISC_NAME = re.compile(r"(?i)^(disc|cd|disk)[ _.-]?([1-9][0-9]*)$")
 _MAX_AUDIO_TRACKS = 10_000
 _PRIMARY_ADMISSIONS = frozenset({AdmissionKind.PRIMARY, AdmissionKind.AUDIO_TRACK})
 _EntryIndex = dict[tuple[str, ...], tuple[ProbedEntry, ...]]
@@ -53,33 +52,31 @@ def interpret_layout(
     entries_without_collisions, collision_violations = _remove_collisions(
         ordered, mode, path_comparison
     )
-    entries_without_symlinks, symlink_violations = _preprocess_symlinks(
+    entries_without_links, link_violations = _preprocess_links(
         entries_without_collisions, mode, path_comparison
     )
-    children_index = _build_children_index(entries_without_symlinks, path_comparison)
+    children_index = _build_children_index(entries_without_links, path_comparison)
     if mode is OrganizationMode.FLAT:
-        result = _interpret_flat(
-            entries_without_symlinks, children_index, path_comparison
-        )
+        result = _interpret_flat(entries_without_links, children_index, path_comparison)
     elif mode is OrganizationMode.VOLUMES:
         result = _interpret_volumes(
-            entries_without_symlinks, children_index, path_comparison
+            entries_without_links, children_index, path_comparison
         )
     else:
         result = _interpret_audiobook(
-            entries_without_symlinks, children_index, path_comparison
+            entries_without_links, children_index, path_comparison
         )
     return LayoutResult(
         candidates=result.candidates,
         violations=_sort_violations(
-            (*symlink_violations, *collision_violations, *result.violations),
+            (*link_violations, *collision_violations, *result.violations),
             path_comparison,
         ),
     )
 
 
 def _structural(entry: ProbedEntry) -> bool:
-    if entry.entry_type is EntryType.SYMLINK:
+    if entry.entry_type in {EntryType.SYMLINK, EntryType.JUNCTION}:
         return False
     if entry.entry_type is EntryType.DIRECTORY:
         # Directories have no primary format. The admission probe may use
@@ -97,7 +94,7 @@ def _is_primary_file(entry: ProbedEntry) -> bool:
     return entry.entry_type is EntryType.FILE and entry.admission in _PRIMARY_ADMISSIONS
 
 
-def _symlink_unit(mode: OrganizationMode, path: tuple[str, ...]) -> tuple[str, ...]:
+def _link_unit(mode: OrganizationMode, path: tuple[str, ...]) -> tuple[str, ...]:
     if mode is OrganizationMode.AUDIOBOOK and len(path) >= 2:
         return path[:1]
     if mode is OrganizationMode.VOLUMES and len(path) >= 3:
@@ -105,28 +102,28 @@ def _symlink_unit(mode: OrganizationMode, path: tuple[str, ...]) -> tuple[str, .
     return path
 
 
-def _preprocess_symlinks(
+def _preprocess_links(
     entries: tuple[ProbedEntry, ...],
     mode: OrganizationMode,
     comparison: PathComparison,
 ) -> tuple[tuple[ProbedEntry, ...], tuple[LayoutViolation, ...]]:
-    symlinks = tuple(
+    links = tuple(
         entry
         for entry in entries
-        if entry.entry_type is EntryType.SYMLINK
+        if entry.entry_type in {EntryType.SYMLINK, EntryType.JUNCTION}
         and not (mode is OrganizationMode.FLAT and len(entry.relative_path) != 1)
     )
-    if not symlinks:
+    if not links:
         return entries, ()
 
     blocked_units = tuple(
-        comparison_path(_symlink_unit(mode, entry.relative_path), comparison)
-        for entry in symlinks
+        comparison_path(_link_unit(mode, entry.relative_path), comparison)
+        for entry in links
     )
     remaining = tuple(
         entry
         for entry in entries
-        if entry.entry_type is not EntryType.SYMLINK
+        if entry.entry_type not in {EntryType.SYMLINK, EntryType.JUNCTION}
         and not any(
             comparison_path(entry.relative_path, comparison)[: len(unit)] == unit
             for unit in blocked_units
@@ -135,10 +132,10 @@ def _preprocess_symlinks(
     violations = tuple(
         LayoutViolation(
             code=ViolationCode.SYMLINK_NOT_ALLOWED,
-            unit_path=_symlink_unit(mode, entry.relative_path),
+            unit_path=_link_unit(mode, entry.relative_path),
             related_paths=(entry.relative_path,),
         )
-        for entry in symlinks
+        for entry in links
     )
     return remaining, violations
 
@@ -363,10 +360,12 @@ def _interpret_audiobook_work(
     disc_dirs = tuple(
         entry
         for entry in directories
-        if _disc_number(entry.relative_path[-1]) is not None
+        if parse_disc_component(entry.relative_path[-1]) is not None
     )
     volume_dirs = tuple(
-        entry for entry in directories if _disc_number(entry.relative_path[-1]) is None
+        entry
+        for entry in directories
+        if parse_disc_component(entry.relative_path[-1]) is None
     )
 
     if direct_non_audio:
@@ -491,14 +490,14 @@ def _collect_audio_volume(
         for entry in direct
         if entry.entry_type is EntryType.DIRECTORY
         and _structural(entry)
-        and _disc_number(entry.relative_path[-1]) is not None
+        and parse_disc_component(entry.relative_path[-1]) is not None
     )
     other_dirs = tuple(
         entry
         for entry in direct
         if entry.entry_type is EntryType.DIRECTORY
         and _structural(entry)
-        and _disc_number(entry.relative_path[-1]) is None
+        and parse_disc_component(entry.relative_path[-1]) is None
     )
     if other_dirs:
         return (), depth_code
@@ -507,7 +506,7 @@ def _collect_audio_volume(
         _asset(entry, order=0, disc_number=0) for entry in direct_audio
     ]
     for disc_dir in disc_dirs:
-        disc_number = _disc_number(disc_dir.relative_path[-1])
+        disc_number = parse_disc_component(disc_dir.relative_path[-1])
         if disc_number is None:
             return (), depth_code
         disc_children = _children(index, disc_dir.relative_path, comparison)
@@ -550,11 +549,6 @@ def _collect_audio_volume(
         for index, asset in enumerate(assets)
     )
     return ordered, None
-
-
-def _disc_number(name: str) -> int | None:
-    match = _DISC_NAME.fullmatch(name)
-    return int(match.group(2)) if match else None
 
 
 def _collision_unit(mode: OrganizationMode, path: tuple[str, ...]) -> tuple[str, ...]:

@@ -8,6 +8,8 @@ from app.modules.catalog.public import (
     OrganizationMode,
     PathComparison,
     ProbedEntry,
+    SidecarRole,
+    SourceFormat,
     SourceKind,
     ViolationCode,
     interpret_layout,
@@ -22,10 +24,12 @@ def _file(
     path: str,
     *,
     admission: AdmissionKind = AdmissionKind.PRIMARY,
-    source_format: str | None = None,
+    source_format: SourceFormat | None = None,
 ) -> ProbedEntry:
-    if source_format is None:
-        source_format = path.rsplit(".", 1)[-1].lower()
+    if source_format is None and admission is AdmissionKind.PRIMARY:
+        source_format = SourceFormat.EPUB
+    if source_format is None and admission is AdmissionKind.AUDIO_TRACK:
+        source_format = SourceFormat.MP3
     return ProbedEntry(
         relative_path=_parts(path),
         entry_type=EntryType.FILE,
@@ -34,12 +38,15 @@ def _file(
     )
 
 
-def _audio(path: str) -> ProbedEntry:
-    return _file(path, admission=AdmissionKind.AUDIO_TRACK)
+def _audio(path: str, source_format: SourceFormat = SourceFormat.MP3) -> ProbedEntry:
+    return _file(
+        path,
+        admission=AdmissionKind.AUDIO_TRACK,
+        source_format=source_format,
+    )
 
 
-def _sidecar(path: str) -> ProbedEntry:
-    role = "OPF" if path.lower().endswith(".opf") else "COVER"
+def _sidecar(path: str, role: SidecarRole) -> ProbedEntry:
     return ProbedEntry(
         relative_path=_parts(path),
         entry_type=EntryType.FILE,
@@ -91,7 +98,11 @@ def _paths(result) -> set[str]:
 def test_flat_accepts_root_files_and_keeps_same_stem_formats_separate() -> None:
     result = _interpret(
         OrganizationMode.FLAT,
-        [_file("book.epub"), _file("book.pdf"), _audio("recording.m4b")],
+        [
+            _file("book.epub"),
+            _file("book.pdf", source_format=SourceFormat.PDF),
+            _audio("recording.m4b", SourceFormat.M4B),
+        ],
     )
 
     assert not result.violations
@@ -112,8 +123,8 @@ def test_flat_rejects_directories_but_ignores_sidecars_and_unsupported_files() -
         [
             _file("book.epub"),
             _directory("nested"),
-            _sidecar("book.opf"),
-            _sidecar("cover.png"),
+            _sidecar("book.opf", SidecarRole.OPF),
+            _sidecar("cover.png", SidecarRole.ARTWORK),
             _unsupported("notes.docx"),
         ],
     )
@@ -222,7 +233,10 @@ def test_empty_and_sidecar_only_layouts_create_no_nodes() -> None:
     assert not _interpret(OrganizationMode.FLAT, []).candidates
     assert not _interpret(
         OrganizationMode.FLAT,
-        [_sidecar("metadata.opf"), _sidecar("cover.jpg")],
+        [
+            _sidecar("metadata.opf", SidecarRole.OPF),
+            _sidecar("cover.jpg", SidecarRole.ARTWORK),
+        ],
     ).candidates
 
 
@@ -385,7 +399,10 @@ def test_volumes_version_collision_isolates_version_not_sibling_version() -> Non
 
 
 def test_audiobook_accepts_root_audio_file() -> None:
-    result = _interpret(OrganizationMode.AUDIOBOOK, [_audio("single-book.m4b")])
+    result = _interpret(
+        OrganizationMode.AUDIOBOOK,
+        [_audio("single-book.m4b", SourceFormat.M4B)],
+    )
 
     assert not result.violations
     assert len(result.candidates) == 1
@@ -596,10 +613,18 @@ def test_audiobook_named_volume_track_limit_invalidates_work_not_sibling() -> No
         (OrganizationMode.AUDIOBOOK, "book/track-01.mp3"),
     ],
 )
-def test_symlink_never_becomes_a_primary_asset(
+@pytest.mark.parametrize("entry_type", [EntryType.SYMLINK, EntryType.JUNCTION])
+def test_links_never_become_primary_assets_in_any_layout_mode(
     mode: OrganizationMode,
     path: str,
+    entry_type: EntryType,
 ) -> None:
-    result = _interpret(mode, [_symlink(path)])
+    link = ProbedEntry(
+        relative_path=_parts(path),
+        entry_type=entry_type,
+        admission=AdmissionKind.IGNORED,
+    )
+    result = _interpret(mode, [link])
 
     assert not result.candidates
+    assert _codes(result) == {ViolationCode.SYMLINK_NOT_ALLOWED.value}
