@@ -36,6 +36,9 @@ class SourceEntryType(StrEnum):
     SYNTHETIC_ROOT = "SYNTHETIC_ROOT"
     DIRECTORY = "DIRECTORY"
     FILE = "FILE"
+    SYMLINK = "SYMLINK"
+    JUNCTION = "JUNCTION"
+    SPECIAL = "SPECIAL"
 
 
 class LayoutState(StrEnum):
@@ -45,12 +48,14 @@ class LayoutState(StrEnum):
 
 class SlotState(StrEnum):
     ACTIVE = "ACTIVE"
+    COLLIDING = "COLLIDING"
     RETIRED = "RETIRED"
 
 
 class ScanState(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
+    FINALIZING = "FINALIZING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
@@ -60,6 +65,15 @@ class ScanStage(StrEnum):
     DISCOVER = "DISCOVER"
     RECONCILE = "RECONCILE"
     FINALIZE = "FINALIZE"
+
+
+class ScanFailureCode(StrEnum):
+    ROOT_UNAVAILABLE = "ROOT_UNAVAILABLE"
+    PERMISSION_DENIED = "PERMISSION_DENIED"
+    IO_ERROR = "IO_ERROR"
+    DIRECTORY_CHANGED = "DIRECTORY_CHANGED"
+    INVALID_RELATIVE_PATH = "INVALID_RELATIVE_PATH"
+    ROOT_IDENTITY_CHANGED = "ROOT_IDENTITY_CHANGED"
 
 
 class VersionKind(StrEnum):

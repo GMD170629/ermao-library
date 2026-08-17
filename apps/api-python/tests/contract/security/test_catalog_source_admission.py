@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import unicodedata
 import warnings
 import zipfile
 from dataclasses import fields
@@ -122,7 +123,6 @@ def _tree_snapshot(root: Path) -> dict[str, tuple[int, int, int, int, str | None
         ("nested/book.pdf",),
         (r"nested\book.pdf",),
         ("book\x00.pdf",),
-        ("e\u0301.pdf",),
     ],
     ids=(
         "empty",
@@ -134,7 +134,6 @@ def _tree_snapshot(root: Path) -> dict[str, tuple[int, int, int, int, str | None
         "forward-separator",
         "back-separator",
         "nul",
-        "non-nfc",
     ),
 )
 def test_external_relative_paths_cannot_escape_or_change_interpretation(
@@ -146,6 +145,25 @@ def test_external_relative_paths_cannot_escape_or_change_interpretation(
 
     assert caught.value.code == "INVALID_SOURCE_RELATIVE_PATH"
     assert str(tmp_path) not in str(caught.value)
+
+
+def test_nfd_name_is_probed_by_raw_spelling_without_selecting_nfc_sibling(
+    tmp_path: Path,
+) -> None:
+    nfc_name = unicodedata.normalize("NFC", "café.txt")
+    nfd_name = unicodedata.normalize("NFD", "café.txt")
+    assert nfd_name != nfc_name
+    (tmp_path / nfd_name).write_bytes(b"NFD text\n")
+    (tmp_path / nfc_name).write_bytes(b"\x00\x01\xff")
+
+    nfd_result = _probe(tmp_path, (nfd_name,))
+    nfc_result = _probe(tmp_path, (nfc_name,))
+
+    assert isinstance(nfd_result, SourceAdmissionEvidence)
+    assert nfd_result.relative_path == (nfd_name,)
+    assert nfd_result.source_format is SourceFormat.TXT
+    assert isinstance(nfc_result, SourceAdmissionRejection)
+    assert nfc_result.relative_path == (nfc_name,)
 
 
 def test_child_symlink_is_reported_without_following_its_target(tmp_path: Path) -> None:

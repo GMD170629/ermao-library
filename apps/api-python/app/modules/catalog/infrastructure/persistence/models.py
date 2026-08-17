@@ -38,6 +38,7 @@ from .enums import (
     LibraryHealth,
     OperationState,
     RevisionState,
+    ScanFailureCode,
     ScanStage,
     ScanState,
     SlotState,
@@ -456,6 +457,12 @@ class LibraryScanRun(CurrentBase):
     mode_snapshot: Mapped[OrganizationMode] = mapped_column(
         "modeSnapshot", Enum(OrganizationMode, **_ENUM), nullable=False
     )
+    root_path_snapshot: Mapped[str] = mapped_column(
+        "rootPathSnapshot", Text, nullable=False
+    )
+    path_comparison_snapshot: Mapped[PathComparison] = mapped_column(
+        "pathComparisonSnapshot", Enum(PathComparison, **_ENUM), nullable=False
+    )
     topology_version_snapshot: Mapped[int] = mapped_column(
         "topologyVersionSnapshot", Integer, nullable=False
     )
@@ -466,6 +473,9 @@ class LibraryScanRun(CurrentBase):
         "topologyWriterFence", BigInteger, nullable=False
     )
     state: Mapped[ScanState] = mapped_column(Enum(ScanState, **_ENUM), nullable=False)
+    failure_code: Mapped[ScanFailureCode | None] = mapped_column(
+        "failureCode", Enum(ScanFailureCode, **_ENUM)
+    )
     lease_owner: Mapped[str | None] = mapped_column("leaseOwner", _ID)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         "leaseExpiresAt", DateTime(timezone=True)
@@ -495,6 +505,95 @@ class LibraryScanRun(CurrentBase):
     )
 
 
+cast(Table, LibraryScanRun.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryScanRun.state == ScanState.FAILED,
+                LibraryScanRun.failure_code.is_not(None),
+            ),
+            and_(
+                LibraryScanRun.state != ScanState.FAILED,
+                LibraryScanRun.failure_code.is_(None),
+            ),
+        ),
+        name="LibraryScanRun_failure_shape_ck",
+    )
+)
+cast(Table, LibraryScanRun.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            LibraryScanRun.generation > 0,
+            LibraryScanRun.config_revision > 0,
+            LibraryScanRun.topology_version_snapshot > 0,
+            LibraryScanRun.topology_writer_fence > 0,
+            LibraryScanRun.discovered_count >= 0,
+            LibraryScanRun.diagnostic_count >= 0,
+        ),
+        name="LibraryScanRun_positive_ck",
+    )
+)
+cast(Table, LibraryScanRun.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryScanRun.state == ScanState.PENDING,
+                LibraryScanRun.stage == ScanStage.DISCOVER,
+                LibraryScanRun.lease_owner.is_not(None),
+                LibraryScanRun.lease_expires_at.is_not(None),
+                LibraryScanRun.root_identity_snapshot.is_(None),
+                LibraryScanRun.started_at.is_(None),
+                LibraryScanRun.finished_at.is_(None),
+            ),
+            and_(
+                LibraryScanRun.state == ScanState.RUNNING,
+                LibraryScanRun.stage.in_([ScanStage.DISCOVER, ScanStage.RECONCILE]),
+                LibraryScanRun.lease_owner.is_not(None),
+                LibraryScanRun.lease_expires_at.is_not(None),
+                LibraryScanRun.root_identity_snapshot.is_not(None),
+                LibraryScanRun.started_at.is_not(None),
+                LibraryScanRun.finished_at.is_(None),
+            ),
+            and_(
+                LibraryScanRun.state == ScanState.FINALIZING,
+                LibraryScanRun.stage == ScanStage.FINALIZE,
+                LibraryScanRun.lease_owner.is_not(None),
+                LibraryScanRun.lease_expires_at.is_not(None),
+                LibraryScanRun.root_identity_snapshot.is_not(None),
+                LibraryScanRun.started_at.is_not(None),
+                LibraryScanRun.finished_at.is_(None),
+            ),
+            and_(
+                LibraryScanRun.state == ScanState.COMPLETED,
+                LibraryScanRun.stage == ScanStage.FINALIZE,
+                LibraryScanRun.lease_owner.is_(None),
+                LibraryScanRun.lease_expires_at.is_(None),
+                LibraryScanRun.root_identity_snapshot.is_not(None),
+                LibraryScanRun.started_at.is_not(None),
+                LibraryScanRun.finished_at.is_not(None),
+            ),
+            and_(
+                LibraryScanRun.state.in_([ScanState.FAILED, ScanState.CANCELLED]),
+                LibraryScanRun.lease_owner.is_(None),
+                LibraryScanRun.lease_expires_at.is_(None),
+                LibraryScanRun.finished_at.is_not(None),
+                or_(
+                    and_(
+                        LibraryScanRun.root_identity_snapshot.is_(None),
+                        LibraryScanRun.started_at.is_(None),
+                    ),
+                    and_(
+                        LibraryScanRun.root_identity_snapshot.is_not(None),
+                        LibraryScanRun.started_at.is_not(None),
+                    ),
+                ),
+            ),
+        ),
+        name="LibraryScanRun_state_shape_ck",
+    )
+)
+
+
 class LibraryScanWorkItem(CurrentBase):
     __tablename__ = "LibraryScanWorkItem"
     __table_args__ = (
@@ -513,11 +612,20 @@ class LibraryScanWorkItem(CurrentBase):
             "libraryId", "idempotencyKey", name="LibraryScanWorkItem_idempotency_key"
         ),
         Index("LibraryScanWorkItem_lease_idx", "libraryId", "state", "availableAt"),
+        Index(
+            "LibraryScanWorkItem_lease_recovery_idx",
+            "libraryId",
+            "state",
+            "leaseExpiresAt",
+        ),
     )
 
     id: Mapped[str] = mapped_column(_ID, primary_key=True)
     library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
     scan_run_id: Mapped[str] = mapped_column("scanRunId", _ID, nullable=False)
+    root_path_snapshot: Mapped[str] = mapped_column(
+        "rootPathSnapshot", Text, nullable=False
+    )
     subtree_root_entry_id: Mapped[str | None] = mapped_column("subtreeRootEntryId", _ID)
     scope_relative_path: Mapped[str] = mapped_column(
         "scopeRelativePath", Text, nullable=False
@@ -547,6 +655,31 @@ class LibraryScanWorkItem(CurrentBase):
         server_default=func.current_timestamp(),
         nullable=False,
     )
+
+
+cast(Table, LibraryScanWorkItem.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            LibraryScanWorkItem.subtree_root_entry_id.is_(None),
+            LibraryScanWorkItem.scope_relative_path == "",
+            LibraryScanWorkItem.attempt >= 0,
+            LibraryScanWorkItem.discovered_count >= 0,
+            or_(
+                and_(
+                    LibraryScanWorkItem.state == ScanState.PENDING,
+                    LibraryScanWorkItem.lease_owner.is_(None),
+                    LibraryScanWorkItem.lease_expires_at.is_(None),
+                ),
+                and_(
+                    LibraryScanWorkItem.state == ScanState.RUNNING,
+                    LibraryScanWorkItem.lease_owner.is_not(None),
+                    LibraryScanWorkItem.lease_expires_at.is_not(None),
+                ),
+            ),
+        ),
+        name="LibraryScanWorkItem_root_shape_ck",
+    )
+)
 
 
 class PathCollisionObservation(CurrentBase):
@@ -818,7 +951,7 @@ class TopologyVersionProjection(CurrentBase):
         Enum(VersionKind, **_ENUM), nullable=False
     )
     structure_key: Mapped[str] = mapped_column("structureKey", Text, nullable=False)
-    source_name: Mapped[str] = mapped_column("sourceName", Text, nullable=False)
+    source_name: Mapped[str | None] = mapped_column("sourceName", Text)
     sort_key: Mapped[str] = mapped_column("sortKey", Text, nullable=False)
 
 
@@ -846,9 +979,6 @@ class TopologyVolumeProjection(CurrentBase):
             ondelete="CASCADE",
         ),
         UniqueConstraint(
-            "libraryId", "unitRevisionId", name="TopologyVolumeProjection_revision_key"
-        ),
-        UniqueConstraint(
             "libraryId",
             "unitRevisionId",
             "volumeId",
@@ -860,10 +990,13 @@ class TopologyVolumeProjection(CurrentBase):
     library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
     unit_revision_id: Mapped[str] = mapped_column("unitRevisionId", _ID, nullable=False)
     volume_id: Mapped[str] = mapped_column("volumeId", _ID, nullable=False)
-    version_id: Mapped[str | None] = mapped_column("versionId", _ID)
+    version_id: Mapped[str] = mapped_column("versionId", _ID, nullable=False)
     root_entry_id: Mapped[str] = mapped_column("rootEntryId", _ID, nullable=False)
     source_kind: Mapped[SourceKind] = mapped_column(
         "sourceKind", Enum(SourceKind, **_ENUM), nullable=False
+    )
+    reading_morphology: Mapped[str] = mapped_column(
+        "readingMorphology", String(32), nullable=False
     )
     structure_key: Mapped[str] = mapped_column("structureKey", Text, nullable=False)
     source_name: Mapped[str] = mapped_column("sourceName", Text, nullable=False)
@@ -1150,6 +1283,19 @@ Index(
     unique=True,
     sqlite_where=LibrarySourceEntry.slot_state == SlotState.ACTIVE,
 )
+Index(
+    "LibrarySourceEntry_generation_idx",
+    LibrarySourceEntry.library_id,
+    LibrarySourceEntry.last_seen_generation,
+)
+Index(
+    "LibraryScanRun_one_active_idx",
+    LibraryScanRun.library_id,
+    unique=True,
+    sqlite_where=LibraryScanRun.state.in_(
+        [ScanState.PENDING, ScanState.RUNNING, ScanState.FINALIZING]
+    ),
+)
 cast(Table, SourceAttachment.__table__).append_constraint(
     CheckConstraint(
         (
@@ -1237,6 +1383,23 @@ Index(
     TopologyUnitRevision.unit_id,
     unique=True,
     sqlite_where=TopologyUnitRevision.state == RevisionState.ACTIVE,
+)
+cast(Table, TopologyVersionProjection.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                TopologyVersionProjection.kind == VersionKind.IMPLICIT,
+                TopologyVersionProjection.root_entry_id.is_(None),
+                TopologyVersionProjection.source_name.is_(None),
+            ),
+            and_(
+                TopologyVersionProjection.kind == VersionKind.DIRECTORY,
+                TopologyVersionProjection.root_entry_id.is_not(None),
+                TopologyVersionProjection.source_name.is_not(None),
+            ),
+        ),
+        name="TopologyVersionProjection_shape_ck",
+    )
 )
 cast(Table, TopologyAssetMembership.__table__).append_constraint(
     CheckConstraint(

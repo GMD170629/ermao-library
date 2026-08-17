@@ -15,6 +15,7 @@ from .enums import (
     LibraryHealth,
     OperationState,
     RevisionState,
+    ScanFailureCode,
     ScanStage,
     ScanState,
     SlotState,
@@ -63,6 +64,22 @@ from .root_registry import (
     SqlAlchemyRootRegistry,
     SqlAlchemyRootRegistryLease,
 )
+from .scan_run_repositories import (
+    SqlAlchemyFullScanRepository,
+    SqlAlchemyRootScanWorkRepository,
+    SqlAlchemyScanLibraryRepository,
+)
+from .scan_uow import SqlAlchemyScanUnitOfWork, SqlAlchemyScanUowFactory
+from .source_observation_repositories import (
+    SqlAlchemyPathCollisionRepository,
+    SqlAlchemyScanDiagnosticRepository,
+    SqlAlchemySourceObservationRepository,
+)
+from .topology_repository import (
+    SqlAlchemyTopologyRepository,
+    disc_number_from_storage,
+    disc_number_to_storage,
+)
 from .uow import SqlAlchemyLibraryUnitOfWork
 
 __all__ = [
@@ -91,6 +108,7 @@ __all__ = [
     "PathCollisionObservation",
     "RevisionState",
     "RootRegistryBusy",
+    "ScanFailureCode",
     "ScanStage",
     "ScanState",
     "SecureScopeEpochGenerator",
@@ -99,6 +117,7 @@ __all__ = [
     "SourceEntryType",
     "SourceWriteOperation",
     "SqlAlchemyAuditPort",
+    "SqlAlchemyFullScanRepository",
     "SqlAlchemyIgnoreRuleRepository",
     "SqlAlchemyLibraryGrantRepository",
     "SqlAlchemyLibraryQueryRepository",
@@ -106,8 +125,16 @@ __all__ = [
     "SqlAlchemyLibraryUnitOfWork",
     "SqlAlchemyLibraryWritePolicy",
     "SqlAlchemyOutboxPort",
+    "SqlAlchemyPathCollisionRepository",
     "SqlAlchemyRootRegistry",
     "SqlAlchemyRootRegistryLease",
+    "SqlAlchemyRootScanWorkRepository",
+    "SqlAlchemyScanDiagnosticRepository",
+    "SqlAlchemyScanLibraryRepository",
+    "SqlAlchemyScanUnitOfWork",
+    "SqlAlchemyScanUowFactory",
+    "SqlAlchemySourceObservationRepository",
+    "SqlAlchemyTopologyRepository",
     "TopologyAssetMembership",
     "TopologyUnit",
     "TopologyUnitKind",
@@ -122,4 +149,6 @@ __all__ = [
     "VolumeAsset",
     "WorkVersion",
     "WritePolicy",
+    "disc_number_from_storage",
+    "disc_number_to_storage",
 ]

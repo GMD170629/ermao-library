@@ -916,23 +916,42 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 
 验收：`.zip`/EPUB/漫画归档、音频/非音频、sidecar 不会被扩展名误判。
 
-### PR 5 — generation 扫描、对账与拓扑物化
+### PR 5A — full generation 扫描、对账与拓扑物化（当前）
 
-- bounded discovery、带 fencing token 的 single-writer lease、2,000 行有界
-  watermark/journal/overflow rescan fence、配置快照；
+- bounded full discovery、带 fencing token 的 single-writer lease、配置快照；
 - ProbedEntry -> LayoutInterpreter -> bounded short transactions；VOLUMES 逐 Volume，所有
   multi-asset Volume 与 AUDIOBOOK Work 使用 batched hidden TopologyUnitRevision + active-pointer
   fenced activation；
 - incrementally visible units、CAS finalize、generation-derived missing；
-- watcher intents 覆盖 create/modify/delete/file move/directory move；
+- typed OPF/artwork/LRC/CUE sidecar 在本阶段经 SourceObservation port 将源项标为 seen；
+  0002 不持久化 SidecarRole，也不生成 topology candidate、Catalog 节点或 SourceAttachment；
 - crash、lease expiry、取消、NAS 离线、root identity 改变恢复。
 
 验收：百万级 fixture 内存有界；失败扫描不产生 missing 风暴；混合格式不生成媒体桶。
+
+### [PR 5B/12] — watcher journal 与 subtree reconcile（下一独立 PR）
+
+- bounded watcher journal、scan-start watermark、每 Library 2,000 行上限与 constant-size
+  overflow rescan fence；
+- full scan RUNNING/FINALIZING 期间 watcher 只追加/合并 journal，不直接发布 topology；
+- create/modify/delete/file move/directory move 转成幂等 subtree reconcile intent，按序 replay；
+- targeted subtree reconcile 不推进 full generation；watcher 断开、溢出或不可信只触发新的
+  full scan，不自行猜测全局 missing。
+
+验收：journal/replay/overflow 与 subtree recovery 独立门禁；PR 5A 的 full-scan 测试不宣称
+watcher 已实现。
 
 ### PR 6 — 深度内容索引与 revision
 
 - 接入现有 parser 的公开能力，禁止深引旧 grouping helper；
 - content/required-manifest/optional-manifest/metadata revisions 与 canonical source digest；
+- 新增纯结构 `SidecarOwnerResolver`：只按 frozen SourceEntry/topology、filename scope 与
+  OPF/artwork/LRC/CUE 固定规则挂 SourceAttachment；同优先级 owner ambiguous 时不挂载并写
+  `SIDECAR_OWNER_AMBIGUOUS`。resolver 不读取 sidecar 内容或 metadata 来改组，并按角色推进
+  content/optional-manifest/metadata revision；
+- 在同一 fenced SourceObservation flush 中，从内存里的 typed admission evidence 写幂等、
+  policy-versioned sidecar-resolution intent；不得由 persistence 根据文件名重猜角色，也不得依赖
+  PR5 事后无法恢复的瞬时 DTO；
 - processor/policy-versioned navigation、cover、metadata、search jobs；
 - parser failure 只更新 readiness/diagnostic，不改变 topology；
 - 新路径从未实现标题、兄弟、AI、mediaKind 结构决策，旧生产路径暂不改。

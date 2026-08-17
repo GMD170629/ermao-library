@@ -385,9 +385,21 @@ library's `organizationMode`, `topologyVersion`, `pathComparison`,
    owning `TopologyUnit.activeRevisionId` only after complete validation;
    incomplete staging is invisible and the previous active revision remains.
    Revision-keyed index jobs and outbox records are published with activation.
-6. Expensive parsing, navigation, metadata, cover, and search indexing run after
+6. The PR 5 generation scan passes recognized sidecars to the source-observation
+   port so their source entry is recorded as seen, but its schema does not yet
+   persist `SidecarRole`. They are not topology candidates and do not create a
+   `SourceAttachment` during structural reconciliation. PR 6 extends the same
+   fenced observation flush to enqueue an idempotent, policy-versioned typed
+   sidecar-resolution intent; it must use the admission evidence already in
+   memory and must not infer a role in the repository from a filename. The
+   post-commit `SidecarOwnerResolver` uses only that typed intent, the frozen
+   source topology, and filename scope to select one unambiguous owner for
+   OPF/artwork/LRC/CUE. Ambiguous candidates remain unattached with
+   `SIDECAR_OWNER_AMBIGUOUS`; neither sidecar bytes nor descriptive metadata may
+   change grouping, parentage, or order.
+7. Expensive parsing, navigation, metadata, cover, and search indexing run after
    structural commit. A parse failure changes content readiness, not parentage.
-7. Only a fully successful scan of the still-accessible root may advance the
+8. Only a fully successful scan of the still-accessible root may advance the
    successful generation from which unseen nodes project as `MISSING`.
 
 A layout diagnostic means discovery completed with an invalid unit; it is not an
@@ -427,6 +439,12 @@ or a full scan. The gate is a crash-released OS/database lock, not a TTL lease
 that can expire while rename/fsync is executing. Control commands can therefore invalidate a topology writer by
 incrementing its fence without waiting for a long scan, while a revocation waits
 at most for an already-linearized atomic publish window rather than racing it.
+
+Delivery is intentionally split without changing this terminal design. PR 5A
+implements dormant bounded full-generation scanning, topology materialization,
+and generation finalization only. The watcher journal, overflow fence, replay,
+and targeted subtree reconciliation described below are a separate PR 5B/12;
+PR 5A does not expose or imply watcher behavior.
 
 While a full scan is running or finalizing, watcher events are durably journaled
 after a scan-start watermark and do not write topology. The journal coalesces by

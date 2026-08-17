@@ -92,7 +92,7 @@ def test_preflight_resolves_root_symlink_without_traversing_children(
     assert observation.filesystem_identity
 
 
-def test_preflight_root_identity_uses_nfc_and_host_path_semantics(
+def test_preflight_preserves_host_spelling_and_normalizes_identity_keys(
     tmp_path: Path,
 ) -> None:
     decomposed = "Cafe\u0301"
@@ -102,7 +102,10 @@ def test_preflight_root_identity_uses_nfc_and_host_path_semantics(
     observation = _adapter().preflight(
         str(root), path_comparison=PathComparison.INSENSITIVE
     )
-    assert observation.canonical_path == unicodedata.normalize("NFC", str(root))
+    assert observation.canonical_path == str(root.resolve())
+    assert unicodedata.normalize("NFC", observation.canonical_path) != (
+        observation.canonical_path
+    )
     expected_name = unicodedata.normalize("NFC", os.path.normcase(decomposed))
     assert observation.components[-1] == expected_name
     assert observation.root_path_key == unicodedata.normalize(

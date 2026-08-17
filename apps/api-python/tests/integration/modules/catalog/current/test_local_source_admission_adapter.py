@@ -172,10 +172,10 @@ def _write_image_zip(path: Path, member_name: str = "pages/001.jpg") -> None:
         ("nested/book.pdf",),
         ("nested\\book.pdf",),
         ("C:escape",),
-        (unicodedata.normalize("NFD", "café.txt"),),
+        ("invalid-\udcff",),
     ],
 )
-def test_probe_rejects_non_nfc_and_injectable_relative_components(
+def test_probe_rejects_injectable_relative_components(
     tmp_path: Path,
     relative_path: tuple[str, ...],
 ) -> None:
@@ -183,6 +183,19 @@ def test_probe_rejects_non_nfc_and_injectable_relative_components(
         _probe(tmp_path, relative_path)
 
     assert str(caught.value) == "INVALID_SOURCE_RELATIVE_PATH"
+
+
+def test_probe_preserves_nfd_host_name_and_opens_its_exact_spelling(
+    tmp_path: Path,
+) -> None:
+    decomposed_name = unicodedata.normalize("NFD", "café.txt")
+    _write(tmp_path, decomposed_name, b"plain text\n")
+
+    result = _probe(tmp_path, (decomposed_name,))
+
+    assert isinstance(result, SourceAdmissionEvidence)
+    assert result.relative_path == (decomposed_name,)
+    assert result.source_format is SourceFormat.TXT
 
 
 def test_invalid_canonical_root_is_a_path_free_operational_error() -> None:

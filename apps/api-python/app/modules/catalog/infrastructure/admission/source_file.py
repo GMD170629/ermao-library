@@ -5,7 +5,6 @@ from __future__ import annotations
 import errno
 import os
 import stat
-import unicodedata
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import BinaryIO, NoReturn, Self
@@ -44,14 +43,18 @@ def validate_relative_path(relative_path: tuple[str, ...]) -> None:
     if not isinstance(relative_path, tuple) or not relative_path:
         raise InvalidSourceRelativePath()
     for component in relative_path:
+        if not isinstance(component, str):
+            raise InvalidSourceRelativePath()
+        try:
+            component.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as error:
+            raise InvalidSourceRelativePath() from error
         if (
-            not isinstance(component, str)
-            or not component
+            not component
             or component in {".", ".."}
             or "\x00" in component
             or "/" in component
             or "\\" in component
-            or unicodedata.normalize("NFC", component) != component
             or os.path.isabs(component)
             or (len(component) >= 2 and component[0].isalpha() and component[1] == ":")
         ):

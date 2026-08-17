@@ -37,6 +37,6 @@ def test_current_upgrade_is_idempotent(tmp_path: Path) -> None:
         )
         with engine.connect() as connection:
             versions = connection.scalars(select(version_table.c.version_num)).all()
-        assert versions == ["0001_system_and_catalog_core"]
+        assert versions == ["0002_catalog_scan_topology"]
     finally:
         engine.dispose()

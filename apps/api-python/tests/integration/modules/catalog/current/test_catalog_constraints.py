@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from app.modules.catalog.infrastructure.persistence import (
     LibraryHealth,
     LibraryRootRegistryLock,
     LibraryScanRun,
+    LibraryScanWorkItem,
     LibrarySourceEntry,
     LibraryVolume,
     LibraryWork,
@@ -122,16 +124,22 @@ def _volume(library_id: str, volume_id: str = "volume") -> LibraryVolume:
 
 
 def _scan(library_id: str, scan_id: str = "scan") -> LibraryScanRun:
+    now = datetime.now(UTC)
     return LibraryScanRun(
         id=scan_id,
         library_id=library_id,
         generation=1,
         config_revision=1,
         mode_snapshot=OrganizationMode.FLAT,
+        root_path_snapshot=f"/srv/{library_id}",
+        path_comparison_snapshot=PathComparison.SENSITIVE,
         topology_version_snapshot=1,
-        topology_writer_fence=0,
+        root_identity_snapshot="dev:root",
+        topology_writer_fence=1,
         state=ScanState.COMPLETED,
         stage=ScanStage.FINALIZE,
+        started_at=now,
+        finished_at=now,
     )
 
 
@@ -409,6 +417,7 @@ def test_projection_and_asset_membership_structural_uniqueness(engine) -> None:
             _work("library-a"),
             _version("library-a"),
             _volume("library-a"),
+            _volume("library-a", "volume-2"),
             VolumeAsset(
                 id="asset",
                 library_id="library-a",
@@ -431,8 +440,10 @@ def test_projection_and_asset_membership_structural_uniqueness(engine) -> None:
                 library_id="library-a",
                 unit_revision_id="revision",
                 volume_id="volume",
+                version_id="version",
                 root_entry_id="source",
                 source_kind=SourceKind.MULTI_ASSET_AUDIO,
+                reading_morphology="AUDIO",
                 structure_key="volume",
                 source_name="volume",
                 sort_key="volume",
@@ -455,19 +466,37 @@ def test_projection_and_asset_membership_structural_uniqueness(engine) -> None:
                 work_id="work",
                 kind=VersionKind.IMPLICIT,
                 structure_key="version",
-                source_name="version",
+                source_name=None,
                 sort_key="version",
             ),
         )
-        _commit_fails(
+        _commit(
             session,
             TopologyVolumeProjection(
                 id="volume-projection-2",
                 library_id="library-a",
                 unit_revision_id="revision",
-                volume_id="volume",
+                volume_id="volume-2",
+                version_id="version",
                 root_entry_id="source",
                 source_kind=SourceKind.MULTI_ASSET_AUDIO,
+                reading_morphology="AUDIO",
+                structure_key="volume-2",
+                source_name="volume-2",
+                sort_key="volume-2",
+            ),
+        )
+        _commit_fails(
+            session,
+            TopologyVolumeProjection(
+                id="volume-projection-duplicate",
+                library_id="library-a",
+                unit_revision_id="revision",
+                volume_id="volume",
+                version_id="version",
+                root_entry_id="source",
+                source_kind=SourceKind.MULTI_ASSET_AUDIO,
+                reading_morphology="AUDIO",
                 structure_key="volume-2",
                 source_name="volume-2",
                 sort_key="volume-2",
@@ -499,6 +528,299 @@ def test_projection_and_asset_membership_structural_uniqueness(engine) -> None:
                 role=AssetRole.AUDIO_TRACK,
                 source_format="mp3",
                 asset_order=1,
+            ),
+        )
+
+
+def test_version_projection_shape_distinguishes_implicit_and_directory(
+    engine,
+) -> None:
+    with Session(engine) as session:
+        _commit(
+            session,
+            _library("library-a"),
+            _root("library-a"),
+            _work("library-a"),
+            _version("library-a", "version-implicit"),
+            _version("library-a", "version-directory"),
+            _version("library-a", "version-invalid"),
+            _volume("library-a", "volume-implicit"),
+            _volume("library-a", "volume-directory"),
+            _volume("library-a", "volume-invalid"),
+            _scan("library-a"),
+        )
+        for suffix in ("implicit", "directory", "invalid"):
+            _commit(
+                session,
+                TopologyUnit(
+                    id=f"unit-{suffix}",
+                    library_id="library-a",
+                    unit_kind=TopologyUnitKind.MULTI_ASSET_VOLUME,
+                    volume_owner_id=f"volume-{suffix}",
+                ),
+            )
+            _commit(
+                session,
+                _revision(
+                    "library-a",
+                    f"unit-{suffix}",
+                    revision_id=f"revision-{suffix}",
+                ),
+            )
+
+        _commit(
+            session,
+            TopologyVersionProjection(
+                id="implicit",
+                library_id="library-a",
+                unit_revision_id="revision-implicit",
+                version_id="version-implicit",
+                work_id="work",
+                kind=VersionKind.IMPLICIT,
+                structure_key="implicit",
+                source_name=None,
+                sort_key="implicit",
+            ),
+            TopologyVersionProjection(
+                id="directory",
+                library_id="library-a",
+                unit_revision_id="revision-directory",
+                version_id="version-directory",
+                work_id="work",
+                root_entry_id="root",
+                kind=VersionKind.DIRECTORY,
+                structure_key="directory",
+                source_name="directory",
+                sort_key="directory",
+            ),
+        )
+        _commit_fails(
+            session,
+            TopologyVersionProjection(
+                id="invalid-implicit",
+                library_id="library-a",
+                unit_revision_id="revision-invalid",
+                version_id="version-invalid",
+                work_id="work",
+                kind=VersionKind.IMPLICIT,
+                structure_key="invalid",
+                source_name="must-be-null",
+                sort_key="invalid",
+            ),
+        )
+        _commit_fails(
+            session,
+            TopologyVersionProjection(
+                id="invalid-directory",
+                library_id="library-a",
+                unit_revision_id="revision-invalid",
+                version_id="version-invalid",
+                work_id="work",
+                kind=VersionKind.DIRECTORY,
+                structure_key="invalid",
+                source_name="directory",
+                sort_key="invalid",
+            ),
+        )
+
+
+def test_only_one_pending_running_or_finalizing_scan_per_library(engine) -> None:
+    now = datetime.now(UTC)
+    with Session(engine) as session:
+        _commit(session, _library("library-a"))
+        first = LibraryScanRun(
+            id="scan-1",
+            library_id="library-a",
+            generation=1,
+            config_revision=1,
+            mode_snapshot=OrganizationMode.FLAT,
+            root_path_snapshot="/srv/library-a",
+            path_comparison_snapshot=PathComparison.SENSITIVE,
+            topology_version_snapshot=1,
+            topology_writer_fence=1,
+            state=ScanState.PENDING,
+            stage=ScanStage.DISCOVER,
+            lease_owner="worker-1",
+            lease_expires_at=now + timedelta(minutes=5),
+        )
+        _commit(session, first)
+        _commit_fails(
+            session,
+            LibraryScanRun(
+                id="scan-2",
+                library_id="library-a",
+                generation=2,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=2,
+                root_identity_snapshot="dev:root",
+                state=ScanState.RUNNING,
+                stage=ScanStage.DISCOVER,
+                lease_owner="worker-2",
+                lease_expires_at=now + timedelta(minutes=5),
+                started_at=now,
+            ),
+        )
+
+        first = session.get(LibraryScanRun, "scan-1")
+        assert first is not None
+        first.state = ScanState.COMPLETED
+        first.stage = ScanStage.FINALIZE
+        first.root_identity_snapshot = "dev:root"
+        first.started_at = now
+        first.finished_at = now
+        first.lease_owner = None
+        first.lease_expires_at = None
+        session.commit()
+        _commit(
+            session,
+            LibraryScanRun(
+                id="scan-2",
+                library_id="library-a",
+                generation=2,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=2,
+                root_identity_snapshot="dev:root",
+                state=ScanState.FINALIZING,
+                stage=ScanStage.FINALIZE,
+                lease_owner="worker-2",
+                lease_expires_at=now + timedelta(minutes=5),
+                started_at=now,
+            ),
+        )
+        _commit_fails(
+            session,
+            LibraryScanRun(
+                id="scan-3",
+                library_id="library-a",
+                generation=3,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=3,
+                state=ScanState.PENDING,
+                stage=ScanStage.DISCOVER,
+                lease_owner="worker-3",
+                lease_expires_at=now + timedelta(minutes=5),
+            ),
+        )
+
+
+def test_scan_run_and_root_work_item_shapes_are_database_invariants(engine) -> None:
+    now = datetime.now(UTC)
+    with Session(engine) as session:
+        _commit(session, _library("library-a"))
+        _commit_fails(
+            session,
+            LibraryScanRun(
+                id="pending-without-lease",
+                library_id="library-a",
+                generation=1,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=1,
+                state=ScanState.PENDING,
+                stage=ScanStage.DISCOVER,
+            ),
+        )
+        _commit_fails(
+            session,
+            LibraryScanRun(
+                id="negative-count",
+                library_id="library-a",
+                generation=1,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=1,
+                state=ScanState.PENDING,
+                stage=ScanStage.DISCOVER,
+                lease_owner="worker",
+                lease_expires_at=now + timedelta(minutes=5),
+                discovered_count=-1,
+            ),
+        )
+        _commit_fails(
+            session,
+            LibraryScanRun(
+                id="failed-without-code",
+                library_id="library-a",
+                generation=1,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=1,
+                state=ScanState.FAILED,
+                stage=ScanStage.DISCOVER,
+                finished_at=now,
+            ),
+        )
+        _commit(
+            session,
+            LibraryScanRun(
+                id="scan",
+                library_id="library-a",
+                generation=1,
+                config_revision=1,
+                mode_snapshot=OrganizationMode.FLAT,
+                root_path_snapshot="/srv/library-a",
+                path_comparison_snapshot=PathComparison.SENSITIVE,
+                topology_version_snapshot=1,
+                topology_writer_fence=1,
+                state=ScanState.PENDING,
+                stage=ScanStage.DISCOVER,
+                lease_owner="worker",
+                lease_expires_at=now + timedelta(minutes=5),
+            ),
+        )
+        _commit_fails(
+            session,
+            LibraryScanWorkItem(
+                id="non-root-work",
+                library_id="library-a",
+                scan_run_id="scan",
+                root_path_snapshot="/srv/library-a",
+                scope_relative_path="child",
+                state=ScanState.PENDING,
+                stage=ScanStage.DISCOVER,
+                attempt=0,
+                available_at=now,
+                idempotency_key="scan:child",
+                discovered_count=0,
+            ),
+        )
+        _commit_fails(
+            session,
+            LibraryScanWorkItem(
+                id="pending-root-with-lease",
+                library_id="library-a",
+                scan_run_id="scan",
+                root_path_snapshot="/srv/library-a",
+                scope_relative_path="",
+                state=ScanState.PENDING,
+                stage=ScanStage.DISCOVER,
+                lease_owner="worker",
+                lease_expires_at=now + timedelta(minutes=5),
+                attempt=0,
+                available_at=now,
+                idempotency_key="scan:root",
+                discovered_count=0,
             ),
         )
 

@@ -108,7 +108,11 @@ class LocalLibraryFilesystem:
         ):
             raise RootProtected()
 
-        canonical_path = _nfc_path(resolved)
+        # Keep the exact spelling returned by the host filesystem.  NFC is
+        # appropriate for comparison keys, but changing the physical path can
+        # point at a different (or nonexistent) entry on normalization-sensitive
+        # filesystems.
+        canonical_path = str(resolved)
         try:
             stat_result = resolved.stat()
         except (OSError, ValueError) as exc:
@@ -138,12 +142,6 @@ def _overlaps(candidate: Path, protected: Path) -> bool:
     return (
         candidate_components[: len(protected_components)] == protected_components
         or protected_components[: len(candidate_components)] == candidate_components
-    )
-
-
-def _nfc_path(path: Path) -> str:
-    return _without_redundant_trailing_separator(
-        unicodedata.normalize("NFC", _portable_separators(path.as_posix()))
     )
 
 

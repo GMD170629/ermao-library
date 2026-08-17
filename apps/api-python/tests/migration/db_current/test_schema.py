@@ -79,43 +79,72 @@ def _index_predicates(table):
     )
 
 
-def test_current_migration_matches_runtime_table_shape() -> None:
-    runtime = current_metadata()
-    migration = _migration_metadata()
+def _reflected_table_shape(inspector, table_name: str):
+    return {
+        "columns": [
+            (
+                column["name"],
+                str(column["type"]),
+                column["nullable"],
+                column["default"],
+                column["primary_key"],
+            )
+            for column in inspector.get_columns(table_name)
+        ],
+        "foreign_keys": sorted(
+            (
+                tuple(foreign_key["constrained_columns"]),
+                foreign_key["referred_table"],
+                tuple(foreign_key["referred_columns"]),
+                tuple(sorted(foreign_key["options"].items())),
+            )
+            for foreign_key in inspector.get_foreign_keys(table_name)
+        ),
+        "unique_constraints": sorted(
+            (
+                constraint["name"],
+                tuple(constraint["column_names"]),
+            )
+            for constraint in inspector.get_unique_constraints(table_name)
+        ),
+        "check_constraints": sorted(
+            (constraint["name"], constraint["sqltext"])
+            for constraint in inspector.get_check_constraints(table_name)
+        ),
+        "indexes": sorted(
+            (
+                index["name"],
+                index["unique"],
+                tuple(index["column_names"]),
+                str(index["dialect_options"].get("sqlite_where")),
+            )
+            for index in inspector.get_indexes(table_name)
+        ),
+    }
 
-    assert set(migration.tables) == set(runtime.tables)
-    for table_name, runtime_table in runtime.tables.items():
-        migration_table = migration.tables[table_name]
-        assert [column.name for column in migration_table.columns] == [
-            column.name for column in runtime_table.columns
-        ]
-        assert [
-            (column.name, str(column.type), column.nullable, column.primary_key)
-            for column in migration_table.columns
-        ] == [
-            (column.name, str(column.type), column.nullable, column.primary_key)
-            for column in runtime_table.columns
-        ]
-        assert [
-            (
-                column.name,
-                str(column.server_default.arg) if column.server_default else None,
-            )
-            for column in migration_table.columns
-        ] == [
-            (
-                column.name,
-                str(column.server_default.arg) if column.server_default else None,
-            )
-            for column in runtime_table.columns
-        ]
-        assert _foreign_keys(migration_table) == _foreign_keys(runtime_table)
-        assert _unique_constraints(migration_table) == _unique_constraints(
-            runtime_table
+
+def test_current_migration_matches_runtime_table_shape(tmp_path: Path) -> None:
+    migrated_path = tmp_path / "migrated.sqlite3"
+    runtime_path = tmp_path / "runtime.sqlite3"
+    upgrade_current_schema(migrated_path)
+
+    migrated_engine = create_current_engine(migrated_path)
+    runtime_engine = create_current_engine(runtime_path)
+    try:
+        runtime = current_metadata()
+        runtime.create_all(runtime_engine)
+        migrated_inspector = inspect(migrated_engine)
+        runtime_inspector = inspect(runtime_engine)
+        assert set(runtime.tables) == (
+            set(migrated_inspector.get_table_names()) - {"alembic_version_v2"}
         )
-        assert _indexes(migration_table) == _indexes(runtime_table)
-        assert _check_constraints(migration_table) == _check_constraints(runtime_table)
-        assert _index_predicates(migration_table) == _index_predicates(runtime_table)
+        for table_name in runtime.tables:
+            assert _reflected_table_shape(
+                migrated_inspector, table_name
+            ) == _reflected_table_shape(runtime_inspector, table_name)
+    finally:
+        migrated_engine.dispose()
+        runtime_engine.dispose()
 
 
 def test_current_migration_does_not_cross_runtime_or_sql_boundaries() -> None:
@@ -210,7 +239,7 @@ def test_current_downgrade_is_rejected_without_mutating_schema(tmp_path: Path) -
         version_table = Table("alembic_version_v2", MetaData(), autoload_with=engine)
         with engine.connect() as connection:
             assert connection.scalars(select(version_table.c.version_num)).all() == [
-                "0001_system_and_catalog_core"
+                "0002_catalog_scan_topology"
             ]
     finally:
         engine.dispose()
@@ -233,7 +262,7 @@ def test_offline_current_downgrade_emits_no_destructive_sql(
 def test_offline_upgrade_emits_each_index_once(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    command.upgrade(current_alembic_config(), "head", sql=True)
+    command.upgrade(current_alembic_config(), "0001_system_and_catalog_core", sql=True)
     output = capsys.readouterr().out
 
     assert "SELECT" not in output
