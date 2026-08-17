@@ -1,3 +1,8 @@
+from .adapters import (
+    SecureScopeEpochGenerator,
+    UtcClock,
+    UuidIdGenerator,
+)
 from .enums import (
     AssetRole,
     AssetValidationState,
@@ -44,6 +49,21 @@ from .models import (
     VolumeAsset,
     WorkVersion,
 )
+from .repositories import (
+    SqlAlchemyAuditPort,
+    SqlAlchemyIgnoreRuleRepository,
+    SqlAlchemyLibraryGrantRepository,
+    SqlAlchemyLibraryQueryRepository,
+    SqlAlchemyLibraryRepository,
+    SqlAlchemyLibraryWritePolicy,
+    SqlAlchemyOutboxPort,
+)
+from .root_registry import (
+    RootRegistryBusy,
+    SqlAlchemyRootRegistry,
+    SqlAlchemyRootRegistryLease,
+)
+from .uow import SqlAlchemyLibraryUnitOfWork
 
 __all__ = [
     "AdministrativeAuditEvent",
@@ -70,12 +90,24 @@ __all__ = [
     "OperationState",
     "PathCollisionObservation",
     "RevisionState",
+    "RootRegistryBusy",
     "ScanStage",
     "ScanState",
+    "SecureScopeEpochGenerator",
     "SlotState",
     "SourceAttachment",
     "SourceEntryType",
     "SourceWriteOperation",
+    "SqlAlchemyAuditPort",
+    "SqlAlchemyIgnoreRuleRepository",
+    "SqlAlchemyLibraryGrantRepository",
+    "SqlAlchemyLibraryQueryRepository",
+    "SqlAlchemyLibraryRepository",
+    "SqlAlchemyLibraryUnitOfWork",
+    "SqlAlchemyLibraryWritePolicy",
+    "SqlAlchemyOutboxPort",
+    "SqlAlchemyRootRegistry",
+    "SqlAlchemyRootRegistryLease",
     "TopologyAssetMembership",
     "TopologyUnit",
     "TopologyUnitKind",
@@ -84,6 +116,8 @@ __all__ = [
     "TopologyVolumeProjection",
     "TopologyWorkProjection",
     "UserLibraryGrant",
+    "UtcClock",
+    "UuidIdGenerator",
     "VersionKind",
     "VolumeAsset",
     "WorkVersion",

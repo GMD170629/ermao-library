@@ -1,0 +1,2170 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Shuku Starship current Library API",
+    "version": "current-v2"
+  },
+  "paths": {
+    "/api/libraries": {
+      "post": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Create Library",
+        "operationId": "create_library_api_libraries_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLibraryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryAdminPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Create Library Api Libraries Post"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "List Libraries",
+        "operationId": "list_libraries_api_libraries_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibrariesPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 List Libraries Api Libraries Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}": {
+      "get": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Get Library",
+        "operationId": "get_library_api_libraries__library_id__get",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Get Library Api Libraries  Library Id  Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Update Library Config",
+        "operationId": "update_library_config_api_libraries__library_id__patch",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLibraryConfigRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryAdminPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Update Library Config Api Libraries  Library Id  Patch"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/management": {
+      "get": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Get Admin Library",
+        "operationId": "get_admin_library_api_libraries__library_id__management_get",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryAdminPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Get Admin Library Api Libraries  Library Id  Management Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/activate": {
+      "post": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Activate Library",
+        "operationId": "activate_library_api_libraries__library_id__activate_post",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryStateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryActionPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Activate Library Api Libraries  Library Id  Activate Post"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/pause": {
+      "post": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Pause Library",
+        "operationId": "pause_library_api_libraries__library_id__pause_post",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryStateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryActionPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Pause Library Api Libraries  Library Id  Pause Post"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/resume": {
+      "post": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Resume Library",
+        "operationId": "resume_library_api_libraries__library_id__resume_post",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryStateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryActionPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Resume Library Api Libraries  Library Id  Resume Post"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/grants": {
+      "get": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "List Grants",
+        "operationId": "list_grants_api_libraries__library_id__grants_get",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryGrantsPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 List Grants Api Libraries  Library Id  Grants Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/grants/{target_user_id}": {
+      "put": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Set Grant",
+        "operationId": "set_grant_api_libraries__library_id__grants__target_user_id__put",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          },
+          {
+            "name": "target_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertLibraryGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_LibraryGrantPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Set Grant Api Libraries  Library Id  Grants  Target User Id  Put"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Revoke Grant",
+        "operationId": "revoke_grant_api_libraries__library_id__grants__target_user_id__delete",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          },
+          {
+            "name": "target_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeletedLibraryGrantPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Revoke Grant Api Libraries  Library Id  Grants  Target User Id  Delete"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{library_id}/ignore-rules": {
+      "get": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Get Ignore Rules",
+        "operationId": "get_ignore_rules_api_libraries__library_id__ignore_rules_get",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_IgnoreRulesPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Get Ignore Rules Api Libraries  Library Id  Ignore Rules Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "current-libraries"
+        ],
+        "summary": "Replace Ignore Rules",
+        "operationId": "replace_ignore_rules_api_libraries__library_id__ignore_rules_put",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Library Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceIgnoreRulesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_IgnoreRulesPayload_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_RequestValidationErrorBody_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                    }
+                  ],
+                  "title": "Response 422 Replace Ignore Rules Api Libraries  Library Id  Ignore Rules Put"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Typed error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope_LibraryErrorBody_"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateLibraryRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 191,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "rootPath": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Rootpath"
+          },
+          "organizationMode": {
+            "type": "string",
+            "enum": [
+              "FLAT",
+              "VOLUMES",
+              "AUDIOBOOK"
+            ],
+            "title": "Organizationmode"
+          },
+          "pathComparison": {
+            "type": "string",
+            "enum": [
+              "SENSITIVE",
+              "INSENSITIVE"
+            ],
+            "title": "Pathcomparison"
+          },
+          "writePolicy": {
+            "type": "string",
+            "enum": [
+              "READ_ONLY",
+              "READ_WRITE"
+            ],
+            "title": "Writepolicy",
+            "default": "READ_ONLY"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "rootPath",
+          "organizationMode",
+          "pathComparison"
+        ],
+        "title": "CreateLibraryRequest",
+        "description": "Input for registering a new external source root."
+      },
+      "DeletedLibraryGrantPayload": {
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted"
+          },
+          "userId": {
+            "type": "string",
+            "title": "Userid"
+          },
+          "libraryId": {
+            "type": "string",
+            "title": "Libraryid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "deleted",
+          "userId",
+          "libraryId"
+        ],
+        "title": "DeletedLibraryGrantPayload"
+      },
+      "ErrorEnvelope_LibraryErrorBody_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": false,
+            "title": "Ok",
+            "default": false
+          },
+          "error": {
+            "$ref": "#/components/schemas/LibraryErrorBody"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope[LibraryErrorBody]"
+      },
+      "ErrorEnvelope_RequestValidationErrorBody_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": false,
+            "title": "Ok",
+            "default": false
+          },
+          "error": {
+            "$ref": "#/components/schemas/RequestValidationErrorBody"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope[RequestValidationErrorBody]"
+      },
+      "IgnoreRule": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "NAME",
+              "PATH"
+            ],
+            "title": "Kind"
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Pattern"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "pattern"
+        ],
+        "title": "IgnoreRule",
+        "description": "A validated root-relative exact ignore rule."
+      },
+      "IgnoreRulesPayload": {
+        "properties": {
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/IgnoreRule"
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "configRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Configrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rules",
+          "configRevision"
+        ],
+        "title": "IgnoreRulesPayload"
+      },
+      "LibrariesPayload": {
+        "properties": {
+          "libraries": {
+            "items": {
+              "$ref": "#/components/schemas/LibrarySummary"
+            },
+            "type": "array",
+            "title": "Libraries"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "libraries"
+        ],
+        "title": "LibrariesPayload"
+      },
+      "LibraryActionPayload": {
+        "properties": {
+          "library": {
+            "$ref": "#/components/schemas/LibraryAdminView"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "library"
+        ],
+        "title": "LibraryActionPayload"
+      },
+      "LibraryAdminPayload": {
+        "properties": {
+          "library": {
+            "$ref": "#/components/schemas/LibraryAdminView"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "library"
+        ],
+        "title": "LibraryAdminPayload"
+      },
+      "LibraryAdminView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "organizationMode": {
+            "type": "string",
+            "enum": [
+              "FLAT",
+              "VOLUMES",
+              "AUDIOBOOK"
+            ],
+            "title": "Organizationmode"
+          },
+          "topologyVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Topologyversion"
+          },
+          "pathComparison": {
+            "type": "string",
+            "enum": [
+              "SENSITIVE",
+              "INSENSITIVE"
+            ],
+            "title": "Pathcomparison"
+          },
+          "writePolicy": {
+            "type": "string",
+            "enum": [
+              "READ_ONLY",
+              "READ_WRITE"
+            ],
+            "title": "Writepolicy"
+          },
+          "controlState": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACTIVATING",
+              "ACTIVE",
+              "PAUSED",
+              "REMOVING"
+            ],
+            "title": "Controlstate"
+          },
+          "observedHealth": {
+            "type": "string",
+            "enum": [
+              "UNKNOWN",
+              "HEALTHY",
+              "UNAVAILABLE",
+              "ERROR"
+            ],
+            "title": "Observedhealth"
+          },
+          "configRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Configrevision"
+          },
+          "grantLevel": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CURATE",
+              "ADMIN"
+            ],
+            "title": "Grantlevel"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "rootPath": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Rootpath"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "organizationMode",
+          "topologyVersion",
+          "pathComparison",
+          "writePolicy",
+          "controlState",
+          "observedHealth",
+          "configRevision",
+          "grantLevel",
+          "createdAt",
+          "updatedAt",
+          "rootPath"
+        ],
+        "title": "LibraryAdminView",
+        "description": "Administrator-only projection that includes the canonical root."
+      },
+      "LibraryErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "LibraryErrorBody",
+        "description": "Stable error code; message is display-only and never parsed by clients."
+      },
+      "LibraryGrant": {
+        "properties": {
+          "userId": {
+            "type": "string",
+            "maxLength": 191,
+            "minLength": 1,
+            "title": "Userid"
+          },
+          "libraryId": {
+            "type": "string",
+            "maxLength": 191,
+            "minLength": 1,
+            "title": "Libraryid"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CURATE",
+              "ADMIN"
+            ],
+            "title": "Level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "userId",
+          "libraryId",
+          "level"
+        ],
+        "title": "LibraryGrant"
+      },
+      "LibraryGrantPayload": {
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/LibraryGrant"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "grant"
+        ],
+        "title": "LibraryGrantPayload"
+      },
+      "LibraryGrantsPayload": {
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryGrant"
+            },
+            "type": "array",
+            "title": "Grants"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "grants"
+        ],
+        "title": "LibraryGrantsPayload"
+      },
+      "LibraryPayload": {
+        "properties": {
+          "library": {
+            "$ref": "#/components/schemas/LibrarySummary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "library"
+        ],
+        "title": "LibraryPayload"
+      },
+      "LibraryStateRequest": {
+        "properties": {
+          "expectedConfigRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedconfigrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedConfigRevision"
+        ],
+        "title": "LibraryStateRequest"
+      },
+      "LibrarySummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "organizationMode": {
+            "type": "string",
+            "enum": [
+              "FLAT",
+              "VOLUMES",
+              "AUDIOBOOK"
+            ],
+            "title": "Organizationmode"
+          },
+          "topologyVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Topologyversion"
+          },
+          "pathComparison": {
+            "type": "string",
+            "enum": [
+              "SENSITIVE",
+              "INSENSITIVE"
+            ],
+            "title": "Pathcomparison"
+          },
+          "writePolicy": {
+            "type": "string",
+            "enum": [
+              "READ_ONLY",
+              "READ_WRITE"
+            ],
+            "title": "Writepolicy"
+          },
+          "controlState": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACTIVATING",
+              "ACTIVE",
+              "PAUSED",
+              "REMOVING"
+            ],
+            "title": "Controlstate"
+          },
+          "observedHealth": {
+            "type": "string",
+            "enum": [
+              "UNKNOWN",
+              "HEALTHY",
+              "UNAVAILABLE",
+              "ERROR"
+            ],
+            "title": "Observedhealth"
+          },
+          "configRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Configrevision"
+          },
+          "grantLevel": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CURATE",
+              "ADMIN"
+            ],
+            "title": "Grantlevel"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "organizationMode",
+          "topologyVersion",
+          "pathComparison",
+          "writePolicy",
+          "controlState",
+          "observedHealth",
+          "configRevision",
+          "grantLevel",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "LibrarySummary",
+        "description": "Safe library projection for ordinary readers and scoped users."
+      },
+      "ReplaceIgnoreRulesRequest": {
+        "properties": {
+          "expectedConfigRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedconfigrevision"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/IgnoreRule"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Rules"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedConfigRevision",
+          "rules"
+        ],
+        "title": "ReplaceIgnoreRulesRequest"
+      },
+      "RequestValidationErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "REQUEST_VALIDATION_ERROR",
+              "READER_LOCATOR_NOT_EXACT"
+            ],
+            "title": "Code",
+            "default": "REQUEST_VALIDATION_ERROR"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "items": {
+              "$ref": "#/components/schemas/RequestValidationIssue"
+            },
+            "type": "array",
+            "title": "Details"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message",
+          "details"
+        ],
+        "title": "RequestValidationErrorBody"
+      },
+      "RequestValidationIssue": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Loc"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "input": {
+            "$ref": "#/components/schemas/ValidationInputSummary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "loc",
+          "message",
+          "type",
+          "input"
+        ],
+        "title": "RequestValidationIssue"
+      },
+      "SuccessEnvelope_DeletedLibraryGrantPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeletedLibraryGrantPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[DeletedLibraryGrantPayload]"
+      },
+      "SuccessEnvelope_IgnoreRulesPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/IgnoreRulesPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[IgnoreRulesPayload]"
+      },
+      "SuccessEnvelope_LibrariesPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LibrariesPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[LibrariesPayload]"
+      },
+      "SuccessEnvelope_LibraryActionPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LibraryActionPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[LibraryActionPayload]"
+      },
+      "SuccessEnvelope_LibraryAdminPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LibraryAdminPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[LibraryAdminPayload]"
+      },
+      "SuccessEnvelope_LibraryGrantPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LibraryGrantPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[LibraryGrantPayload]"
+      },
+      "SuccessEnvelope_LibraryGrantsPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LibraryGrantsPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[LibraryGrantsPayload]"
+      },
+      "SuccessEnvelope_LibraryPayload_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true,
+            "title": "Ok",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LibraryPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessEnvelope[LibraryPayload]"
+      },
+      "UpdateLibraryConfigRequest": {
+        "properties": {
+          "expectedConfigRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedconfigrevision"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 191,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "organizationMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "FLAT",
+                  "VOLUMES",
+                  "AUDIOBOOK"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organizationmode"
+          },
+          "pathComparison": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SENSITIVE",
+                  "INSENSITIVE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pathcomparison"
+          },
+          "writePolicy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "READ_ONLY",
+                  "READ_WRITE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writepolicy"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedConfigRevision"
+        ],
+        "title": "UpdateLibraryConfigRequest",
+        "description": "Mutable config; root is never client-editable through this endpoint."
+      },
+      "UpsertLibraryGrantRequest": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "READ",
+              "CURATE",
+              "ADMIN"
+            ],
+            "title": "Level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "level"
+        ],
+        "title": "UpsertLibraryGrantRequest"
+      },
+      "ValidationInputSummary": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "null",
+              "boolean",
+              "integer",
+              "number",
+              "string",
+              "array",
+              "object"
+            ],
+            "title": "Kind"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length"
+          },
+          "keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keys"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "ValidationInputSummary"
+      }
+    }
+  },
+  "x-current-contract": {
+    "successEnvelope": {
+      "ok": true,
+      "field": "data"
+    },
+    "errorEnvelope": {
+      "ok": false,
+      "field": "error",
+      "stableCode": true
+    },
+    "ordinaryProjectionExcludes": [
+      "rootPath",
+      "rootPathKey"
+    ],
+    "administrativeProjectionIncludes": [
+      "rootPath"
+    ],
+    "conflictCodes": [
+      "ACL_CONFLICT",
+      "ROOT_PATH_OVERLAP",
+      "ROOT_UNAVAILABLE"
+    ],
+    "excludedLegacyConcepts": [
+      "monitorFolder",
+      "mediaKind",
+      "relocate",
+      "scan",
+      "configPath"
+    ]
+  }
+}
