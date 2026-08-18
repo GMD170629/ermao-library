@@ -302,6 +302,22 @@ def test_volumes_direct_file_under_work_rejected() -> None:
     assert result.violations[0].relative_path == "三体/三体.pdf"
 
 
+def test_volumes_deeper_publication_rejected() -> None:
+    result = _interpret(
+        LibraryOrganizationMode.VOLUMES,
+        _directory("Work"),
+        _directory("Work/Version"),
+        _file("Work/Version/valid.epub"),
+        _directory("Work/Version/Extra"),
+        _file("Work/Version/Extra/invalid.epub"),
+    )
+
+    assert _work_keys(result) == ["work:Work"]
+    assert _asset_paths(result) == ["Work/Version/valid.epub"]
+    assert result.violations[0].code is LayoutViolationCode.VOLUME_NESTING_NOT_ALLOWED
+    assert result.violations[0].relative_path == "Work/Version/Extra/invalid.epub"
+
+
 def test_audiobook_root_single_m4b() -> None:
     result = _interpret(LibraryOrganizationMode.AUDIOBOOK, _audio("魔戒.m4b"))
 
@@ -421,9 +437,29 @@ def test_audiobook_invalid_nesting_rejected() -> None:
         _audio("有声书/第一卷/disc/002.mp3"),
     )
 
-    assert _asset_paths(result) == ["有声书/第一卷/001.mp3"]
+    assert result.works == ()
+    assert _asset_paths(result) == []
     assert result.violations[0].code is LayoutViolationCode.AUDIO_INVALID_NESTING
     assert result.violations[0].relative_path == "有声书/第一卷/disc"
+
+
+def test_audiobook_invalid_volume_does_not_block_sibling() -> None:
+    result = _interpret(
+        LibraryOrganizationMode.AUDIOBOOK,
+        _directory("有声书"),
+        _directory("有声书/Volume1"),
+        _audio("有声书/Volume1/001.mp3"),
+        _directory("有声书/Volume1/nested"),
+        _audio("有声书/Volume1/nested/002.mp3"),
+        _directory("有声书/Volume2"),
+        _audio("有声书/Volume2/001.mp3"),
+    )
+
+    work = result.works[0]
+    assert [volume.source_name for volume in work.versions[0].volumes] == ["Volume2"]
+    assert _asset_paths(result) == ["有声书/Volume2/001.mp3"]
+    assert result.violations[0].code is LayoutViolationCode.AUDIO_INVALID_NESTING
+    assert result.violations[0].relative_path == "有声书/Volume1/nested"
 
 
 def test_absolute_path_rejected() -> None:
@@ -468,21 +504,58 @@ def test_nfc_deterministic() -> None:
 
     assert nfd_result.works[0].source_key == nfc_result.works[0].source_key
     assert nfd_result.works[0].source_key == f"work:{nfc_name}"
-    assert nfd_result.works[0].source_name == nfc_result.works[0].source_name
+    assert _asset_paths(nfd_result) == [nfd_name]
+    assert _asset_paths(nfc_result) == [nfc_name]
 
 
 def test_normalized_collision_detected() -> None:
     nfd_name = unicodedata.normalize("NFD", "café.epub")
     nfc_name = unicodedata.normalize("NFC", "café.epub")
-    result = _interpret(
+    first = _interpret(
         LibraryOrganizationMode.FLAT,
         _file(nfd_name),
         _file(nfc_name),
     )
+    second = _interpret(
+        LibraryOrganizationMode.FLAT,
+        _file(nfc_name),
+        _file(nfd_name),
+    )
 
-    assert len(result.works) == 1
-    assert result.works[0].source_key == f"work:{nfc_name}"
-    assert result.violations[0].code is LayoutViolationCode.NORMALIZED_PATH_COLLISION
+    assert first == second
+    assert first.works == ()
+    assert {violation.relative_path for violation in first.violations} == {
+        nfd_name,
+        nfc_name,
+    }
+    assert _violation_codes(first) == [
+        LayoutViolationCode.NORMALIZED_PATH_COLLISION,
+        LayoutViolationCode.NORMALIZED_PATH_COLLISION,
+    ]
+
+
+def test_normalized_collision_preserves_sibling() -> None:
+    nfd_name = unicodedata.normalize("NFD", "café.epub")
+    nfc_name = unicodedata.normalize("NFC", "café.epub")
+    first = _interpret(
+        LibraryOrganizationMode.FLAT,
+        _file(nfd_name),
+        _file(nfc_name),
+        _file("活着.epub"),
+    )
+    second = _interpret(
+        LibraryOrganizationMode.FLAT,
+        _file("活着.epub"),
+        _file(nfc_name),
+        _file(nfd_name),
+    )
+
+    assert first == second
+    assert _work_keys(first) == ["work:活着.epub"]
+    assert _asset_paths(first) == ["活着.epub"]
+    assert LayoutViolationCode.NORMALIZED_PATH_COLLISION in _violation_codes(first)
+    assert "café.epub" not in _asset_paths(first)
+    assert nfd_name not in _asset_paths(first)
 
 
 def test_backslash_normalized_and_same_input_is_stable() -> None:

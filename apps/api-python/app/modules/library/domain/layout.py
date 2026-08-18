@@ -34,6 +34,7 @@ class LayoutViolationCode(str, Enum):
     NORMALIZED_PATH_COLLISION = "NORMALIZED_PATH_COLLISION"
     FLAT_NESTING_NOT_ALLOWED = "FLAT_NESTING_NOT_ALLOWED"
     VERSION_DIRECTORY_REQUIRED = "VERSION_DIRECTORY_REQUIRED"
+    VOLUME_NESTING_NOT_ALLOWED = "VOLUME_NESTING_NOT_ALLOWED"
     AUDIO_MIXED_LAYOUT = "AUDIO_MIXED_LAYOUT"
     AUDIO_INVALID_NESTING = "AUDIO_INVALID_NESTING"
 
@@ -86,7 +87,8 @@ class LayoutResult:
 
 @dataclass(frozen=True, slots=True)
 class _NormalizedEntry:
-    relative_path: str
+    physical_path: str
+    canonical_path: str
     entry_type: LayoutEntryType
     source_type: LayoutSourceType
 
@@ -96,6 +98,7 @@ class _LayoutIndex:
     files: dict[str, _NormalizedEntry]
     directories: frozenset[str]
     children: dict[str, tuple[str, ...]]
+    directory_physical: dict[str, str]
 
 
 _ROOT = ""
@@ -125,34 +128,38 @@ def interpret_library_layout(
     )
 
 
-def canonicalize_relative_path(relative_path: str) -> str | None:
-    """Return a logical relative path, or None when the path is not safe."""
+def _logical_relative_path(relative_path: str) -> str | None:
+    """Return a slash-normalized physical relative path, preserving Unicode spelling."""
 
     if "\x00" in relative_path:
         return None
-    normalized = unicodedata.normalize("NFC", relative_path.replace("\\", "/"))
-    if not normalized or normalized.startswith("/"):
+    physical = relative_path.replace("\\", "/")
+    if not physical or physical.startswith("/"):
         return None
-    if _has_windows_drive_prefix(normalized):
+    if _has_windows_drive_prefix(physical):
         return None
-    if normalized.endswith("/"):
-        normalized = normalized.rstrip("/")
-        if not normalized:
+    if physical.endswith("/"):
+        physical = physical.rstrip("/")
+        if not physical:
             return None
-    parts = normalized.split("/")
+    parts = physical.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         return None
     return "/".join(parts)
+
+
+def _canonical_path(physical_path: str) -> str:
+    return unicodedata.normalize("NFC", physical_path)
 
 
 def _normalize_entries(
     entries: Iterable[LayoutEntry],
 ) -> tuple[list[_NormalizedEntry], list[LayoutViolation]]:
     violations: list[LayoutViolation] = []
-    candidates: list[tuple[int, str, LayoutEntry]] = []
-    for index, entry in enumerate(entries):
-        canonical = canonicalize_relative_path(entry.relative_path)
-        if canonical is None:
+    grouped: dict[str, list[_NormalizedEntry]] = {}
+    for entry in entries:
+        physical = _logical_relative_path(entry.relative_path)
+        if physical is None:
             violations.append(
                 LayoutViolation(
                     code=LayoutViolationCode.INVALID_RELATIVE_PATH,
@@ -160,56 +167,57 @@ def _normalize_entries(
                 )
             )
             continue
-        candidates.append((index, canonical, entry))
+        normalized = _NormalizedEntry(
+            physical_path=physical,
+            canonical_path=_canonical_path(physical),
+            entry_type=entry.entry_type,
+            source_type=entry.source_type,
+        )
+        grouped.setdefault(normalized.canonical_path, []).append(normalized)
 
-    selected: dict[str, _NormalizedEntry] = {}
-    first_seen: dict[str, tuple[int, str]] = {}
-    for index, canonical, entry in candidates:
-        previous = first_seen.get(canonical)
-        if previous is None:
-            first_seen[canonical] = (index, entry.relative_path)
-            selected[canonical] = _NormalizedEntry(
-                relative_path=canonical,
-                entry_type=entry.entry_type,
-                source_type=entry.source_type,
+    accepted: list[_NormalizedEntry] = []
+    for group in grouped.values():
+        physicals = {item.physical_path for item in group}
+        if len(physicals) > 1:
+            violations.extend(
+                LayoutViolation(
+                    code=LayoutViolationCode.NORMALIZED_PATH_COLLISION,
+                    relative_path=physical,
+                )
+                for physical in physicals
             )
             continue
-        previous_index, previous_original = previous
-        keep_current = (entry.relative_path, index) < (
-            previous_original,
-            previous_index,
-        )
-        dropped_original = previous_original if keep_current else entry.relative_path
-        if keep_current:
-            first_seen[canonical] = (index, entry.relative_path)
-            selected[canonical] = _NormalizedEntry(
-                relative_path=canonical,
-                entry_type=entry.entry_type,
-                source_type=entry.source_type,
-            )
-        violations.append(
-            LayoutViolation(
-                code=LayoutViolationCode.NORMALIZED_PATH_COLLISION,
-                relative_path=dropped_original,
-            )
-        )
-    return list(selected.values()), violations
+        accepted.append(group[0])
+    return accepted, violations
 
 
 def _build_index(entries: Sequence[_NormalizedEntry]) -> _LayoutIndex:
     files: dict[str, _NormalizedEntry] = {}
     directories: set[str] = set()
     children: dict[str, set[str]] = {}
+    directory_physical: dict[str, str] = {}
     for entry in entries:
         if entry.entry_type is LayoutEntryType.DIRECTORY:
-            directories.add(entry.relative_path)
-            _register_ancestors(entry.relative_path, directories, children)
+            _register_ancestors(
+                entry.canonical_path,
+                entry.physical_path,
+                directories,
+                children,
+                directory_physical,
+            )
             continue
-        files[entry.relative_path] = entry
-        parent = _parent_path(entry.relative_path)
-        if parent:
-            _register_ancestors(parent, directories, children)
-        _add_child(children, parent, entry.relative_path)
+        files[entry.canonical_path] = entry
+        parent_canonical = _parent_path(entry.canonical_path)
+        parent_physical = _parent_path(entry.physical_path)
+        if parent_canonical:
+            _register_ancestors(
+                parent_canonical,
+                parent_physical,
+                directories,
+                children,
+                directory_physical,
+            )
+        _add_child(children, parent_canonical, entry.canonical_path)
     return _LayoutIndex(
         files=files,
         directories=frozenset(directories),
@@ -217,6 +225,7 @@ def _build_index(entries: Sequence[_NormalizedEntry]) -> _LayoutIndex:
             parent: tuple(_sort_paths(child_paths))
             for parent, child_paths in children.items()
         },
+        directory_physical=directory_physical,
     )
 
 
@@ -241,7 +250,7 @@ def _interpret_flat(
     for path, entry in index.files.items():
         if "/" in path or entry.source_type is not LayoutSourceType.PUBLICATION:
             continue
-        works.append(_single_file_work(path))
+        works.append(_single_file_work(entry))
     return works, violations
 
 
@@ -253,27 +262,27 @@ def _interpret_volumes(
     for path, entry in index.files.items():
         if entry.source_type is not LayoutSourceType.PUBLICATION:
             continue
-        if "/" not in path:
+        segments = path.count("/") + 1
+        if segments < 3:
             violations.append(
                 LayoutViolation(
                     code=LayoutViolationCode.VERSION_DIRECTORY_REQUIRED,
-                    relative_path=path,
+                    relative_path=entry.physical_path,
                 )
             )
             continue
-        _work_path, remainder = path.split("/", 1)
-        if "/" not in remainder:
+        if segments > 3:
             violations.append(
                 LayoutViolation(
-                    code=LayoutViolationCode.VERSION_DIRECTORY_REQUIRED,
-                    relative_path=path,
+                    code=LayoutViolationCode.VOLUME_NESTING_NOT_ALLOWED,
+                    relative_path=entry.physical_path,
                 )
             )
     for work_path in _child_directories(index, _ROOT):
         versions: list[LayoutVersion] = []
         for version_path in _child_directories(index, work_path):
             volumes = [
-                _publication_volume(file_path)
+                _publication_volume(index.files[file_path])
                 for file_path in _child_files(index, version_path)
                 if index.files[file_path].source_type is LayoutSourceType.PUBLICATION
             ]
@@ -282,7 +291,7 @@ def _interpret_volumes(
             versions.append(
                 LayoutVersion(
                     source_key=_version_key(version_path),
-                    source_name=_entry_name(version_path),
+                    source_name=_directory_name(index, version_path),
                     volumes=_sort_volumes(volumes),
                 )
             )
@@ -291,7 +300,7 @@ def _interpret_volumes(
         works.append(
             LayoutWork(
                 source_key=_work_key(work_path),
-                source_name=_entry_name(work_path),
+                source_name=_directory_name(index, work_path),
                 versions=_sort_versions(versions),
             )
         )
@@ -306,7 +315,7 @@ def _interpret_audiobook(
     for path, entry in index.files.items():
         if "/" in path or entry.source_type is not LayoutSourceType.AUDIO:
             continue
-        works.append(_single_file_work(path))
+        works.append(_single_file_work(entry))
     for work_path in _child_directories(index, _ROOT):
         work, structural = _interpret_audiobook_work(index, work_path)
         violations.extend(structural)
@@ -332,17 +341,17 @@ def _interpret_audiobook_work(
             [
                 LayoutViolation(
                     code=LayoutViolationCode.AUDIO_MIXED_LAYOUT,
-                    relative_path=work_path,
+                    relative_path=index.directory_physical.get(work_path, work_path),
                 )
             ],
         )
     if direct_tracks:
         volume = LayoutVolume(
             source_key=_volume_key(work_path),
-            source_name=_entry_name(work_path),
-            assets=_assets_for(direct_tracks),
+            source_name=_directory_name(index, work_path),
+            assets=_assets_for(index, direct_tracks),
         )
-        return _work_with_implicit_version(work_path, (volume,)), violations
+        return _work_with_implicit_version(index, work_path, (volume,)), violations
     volumes: list[LayoutVolume] = []
     for volume_path in volume_directories:
         interpreted, nested = _interpret_audiobook_volume(index, volume_path)
@@ -352,6 +361,7 @@ def _interpret_audiobook_work(
     if not volumes:
         return None, violations
     return _work_with_implicit_version(
+        index,
         work_path,
         _sort_volumes(volumes),
     ), violations
@@ -361,47 +371,60 @@ def _interpret_audiobook_volume(
     index: _LayoutIndex,
     volume_path: str,
 ) -> tuple[LayoutVolume | None, list[LayoutViolation]]:
-    violations = [
-        LayoutViolation(
-            code=LayoutViolationCode.AUDIO_INVALID_NESTING,
-            relative_path=descendant,
-        )
+    nested = [
+        descendant
         for descendant in _descendant_directories(index, volume_path)
         if _has_audio_descendant(index, descendant)
     ]
+    if nested:
+        return None, [
+            LayoutViolation(
+                code=LayoutViolationCode.AUDIO_INVALID_NESTING,
+                relative_path=index.directory_physical.get(descendant, descendant),
+            )
+            for descendant in nested
+        ]
     tracks = _audio_files(index, volume_path)
     if not tracks:
-        return None, violations
+        return None, []
     return (
         LayoutVolume(
             source_key=_volume_key(volume_path),
-            source_name=_entry_name(volume_path),
-            assets=_assets_for(tracks),
+            source_name=_directory_name(index, volume_path),
+            assets=_assets_for(index, tracks),
         ),
-        violations,
+        [],
     )
 
 
-def _single_file_work(path: str) -> LayoutWork:
-    source_name = _file_stem(path)
+def _single_file_work(entry: _NormalizedEntry) -> LayoutWork:
+    source_name = _file_stem(entry.physical_path)
     volume = LayoutVolume(
-        source_key=_volume_key(path),
+        source_key=_volume_key(entry.canonical_path),
         source_name=source_name,
-        assets=_assets_for((path,)),
+        assets=(LayoutAsset(relative_path=entry.physical_path, order=0),),
     )
-    return _work_with_implicit_version(path, (volume,), source_name=source_name)
+    return LayoutWork(
+        source_key=_work_key(entry.canonical_path),
+        source_name=source_name,
+        versions=(
+            LayoutVersion(
+                source_key=_version_key(entry.canonical_path),
+                source_name=None,
+                volumes=(volume,),
+            ),
+        ),
+    )
 
 
 def _work_with_implicit_version(
+    index: _LayoutIndex,
     work_path: str,
     volumes: tuple[LayoutVolume, ...],
-    *,
-    source_name: str | None = None,
 ) -> LayoutWork:
-    name = source_name if source_name is not None else _entry_name(work_path)
     return LayoutWork(
         source_key=_work_key(work_path),
-        source_name=name,
+        source_name=_directory_name(index, work_path),
         versions=(
             LayoutVersion(
                 source_key=_version_key(work_path),
@@ -412,19 +435,25 @@ def _work_with_implicit_version(
     )
 
 
-def _publication_volume(path: str) -> LayoutVolume:
+def _publication_volume(entry: _NormalizedEntry) -> LayoutVolume:
     return LayoutVolume(
-        source_key=_volume_key(path),
-        source_name=_file_stem(path),
-        assets=_assets_for((path,)),
+        source_key=_volume_key(entry.canonical_path),
+        source_name=_file_stem(entry.physical_path),
+        assets=(LayoutAsset(relative_path=entry.physical_path, order=0),),
     )
 
 
-def _assets_for(paths: Sequence[str]) -> tuple[LayoutAsset, ...]:
-    ordered = _sort_paths(paths)
+def _assets_for(
+    index: _LayoutIndex,
+    canonical_paths: Sequence[str],
+) -> tuple[LayoutAsset, ...]:
+    ordered = _sort_paths(canonical_paths)
     return tuple(
-        LayoutAsset(relative_path=path, order=index)
-        for index, path in enumerate(ordered)
+        LayoutAsset(
+            relative_path=index.files[path].physical_path,
+            order=order,
+        )
+        for order, path in enumerate(ordered)
     )
 
 
@@ -513,16 +542,23 @@ def _descendant_directories(index: _LayoutIndex, directory: str) -> tuple[str, .
 
 
 def _register_ancestors(
-    path: str,
+    canonical_path: str,
+    physical_path: str,
     directories: set[str],
     children: dict[str, set[str]],
+    directory_physical: dict[str, str],
 ) -> None:
-    current = path
-    while current:
-        directories.add(current)
-        parent = _parent_path(current)
-        _add_child(children, parent, current)
-        current = parent
+    current_canonical = canonical_path
+    current_physical = physical_path
+    while current_canonical:
+        directories.add(current_canonical)
+        previous_physical = directory_physical.get(current_canonical)
+        if previous_physical is None or current_physical < previous_physical:
+            directory_physical[current_canonical] = current_physical
+        parent_canonical = _parent_path(current_canonical)
+        _add_child(children, parent_canonical, current_canonical)
+        current_physical = _parent_path(current_physical)
+        current_canonical = parent_canonical
 
 
 def _add_child(children: dict[str, set[str]], parent: str, child: str) -> None:
@@ -537,6 +573,10 @@ def _parent_path(path: str) -> str:
 
 def _entry_name(path: str) -> str:
     return path.rsplit("/", 1)[-1]
+
+
+def _directory_name(index: _LayoutIndex, canonical_path: str) -> str:
+    return _entry_name(index.directory_physical.get(canonical_path, canonical_path))
 
 
 def _root_segment(path: str) -> str:
