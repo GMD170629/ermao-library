@@ -115,7 +115,8 @@ export type ReaderBootstrapData = {
   readerType: "reflowable" | "comic" | "pdf" | "audio";
   sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "zip" | "cbr" | "rar" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
   book: ReaderBookSummary;
-  mediaVersion: ReaderMediaVersionSummary;
+  version: ReaderVersionSchema;
+  versionCompleted: boolean;
   volume: ReaderVolumeSummary;
   availableVolumes: Array<ReaderVolumeSummary>;
   files: Array<ReaderFileSummary>;
@@ -204,13 +205,6 @@ export type ReaderJsonValue_Output = string | number | boolean | Array<ReaderJso
   [key: string]: ReaderJsonValue_Output | null | undefined;
 } | null;
 
-export type ReaderMediaVersionSummary = {
-  id: string;
-  workId: string;
-  mediaKind: "EBOOK" | "COMIC" | "AUDIOBOOK";
-  completed: boolean;
-};
-
 export type ReaderProgressConflictBody = {
   message: string;
   code?: "READER_PROGRESS_CONFLICT";
@@ -289,9 +283,16 @@ export type ReaderUnitSummary = {
   };
 };
 
+export type ReaderVersionSchema = {
+  id: string;
+  workId: string;
+  sourceKey: string;
+  sourceName?: string | null;
+};
+
 export type ReaderVolumeSummary = {
   id: string;
-  mediaVersionId: string;
+  versionId: string;
   title: string;
   volumeIndex?: number | null;
   sortOrder: number;

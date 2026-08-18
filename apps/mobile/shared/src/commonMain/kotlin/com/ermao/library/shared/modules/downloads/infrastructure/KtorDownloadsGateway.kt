@@ -203,21 +203,26 @@ class KtorDownloadsGateway(
         val userId = requiredString("userId")
         require(userId == context.namespace.userId) { "Bootstrap user does not match download namespace" }
         val work = requiredObject("book")
-        val mediaVersion = requiredObject("mediaVersion")
+        val version = requiredObject("version")
         val volume = requiredObject("volume")
-        require(mediaVersion.requiredString("workId") == work.requiredString("id")) {
-            "Bootstrap media version does not match work"
+        require(version.requiredString("workId") == work.requiredString("id")) {
+            "Bootstrap version does not match work"
         }
         require(volume.requiredString("id") == expectedVolumeId) { "Bootstrap volume does not match request" }
-        require(volume.requiredString("mediaVersionId") == mediaVersion.requiredString("id")) {
-            "Bootstrap volume does not match media version"
+        require(volume.requiredString("versionId") == version.requiredString("id")) {
+            "Bootstrap volume does not match version"
         }
         val readerType = parseDownloadReaderType(requiredString("readerType"))
         require(parseDownloadReaderType(volume.requiredString("readerType")) == readerType) {
             "Bootstrap reader type is inconsistent"
         }
-        val mediaKind = parseDownloadMediaKind(mediaVersion.requiredString("mediaKind"))
-        require(mediaKind.isCompatibleWith(readerType)) { "Bootstrap media kind is inconsistent" }
+        val mediaKind = when (readerType) {
+            DownloadReaderType.Reflowable,
+            DownloadReaderType.Pdf,
+            -> DownloadMediaKind.Ebook
+            DownloadReaderType.Comic -> DownloadMediaKind.Comic
+            DownloadReaderType.Audio -> DownloadMediaKind.Audiobook
+        }
         val files = this["files"] as? JsonArray ?: throw IllegalArgumentException("Bootstrap files are missing")
         val fileUrl = requiredString("fileUrl")
         require(fileUrl.isSafeMediaApiPath()) { "Bootstrap file URL is invalid" }
@@ -276,9 +281,9 @@ class KtorDownloadsGateway(
                 mimeType = sourceMime,
                 totalBytes = sourceSize,
             ),
-            mediaVersionId = mediaVersion.requiredString("id"),
+            mediaVersionId = version.requiredString("id"),
             mediaKind = mediaKind.wireValue,
-            mediaVersionCompleted = mediaVersion.requiredBoolean("completed"),
+            mediaVersionCompleted = requiredBoolean("versionCompleted"),
             volumeIndex = volume.optionalDouble("volumeIndex"),
             volumeSortOrder = volume.requiredNonNegativeInt("sortOrder"),
         )
@@ -360,12 +365,4 @@ fun parseDownloadMediaKind(value: String): DownloadMediaKind = when (value.trim(
     "COMIC" -> DownloadMediaKind.Comic
     "AUDIOBOOK" -> DownloadMediaKind.Audiobook
     else -> throw IllegalArgumentException("Unsupported media kind")
-}
-
-private fun DownloadMediaKind.isCompatibleWith(readerType: DownloadReaderType): Boolean = when (readerType) {
-    DownloadReaderType.Reflowable,
-    DownloadReaderType.Pdf,
-    -> this == DownloadMediaKind.Ebook
-    DownloadReaderType.Comic -> this == DownloadMediaKind.Comic
-    DownloadReaderType.Audio -> this == DownloadMediaKind.Audiobook
 }

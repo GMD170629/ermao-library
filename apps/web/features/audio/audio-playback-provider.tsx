@@ -157,7 +157,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     return runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
-      workId: bootstrap.mediaVersion.workId,
+      workId: bootstrap.version.workId,
       volumeId: bootstrap.volume.id,
       baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.volume.id)?.revision
         ?? bootstrap.progressRevision,
@@ -344,7 +344,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           serverIdentity: currentReaderServerIdentity(),
           userId: bootstrap.userId,
           clientId,
-          workId: bootstrap.mediaVersion.workId,
+          workId: bootstrap.version.workId,
           volumeId: bootstrap.volume.id
         }).catch(() => null);
         const localAudioLocation = localExact?.locator.kind === 'audio' ? localExact.locator : null;
@@ -368,7 +368,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           };
         }
         bootstrapRef.current = bootstrap;
-        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.mediaVersion.workId);
+        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.version.workId);
         const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
         const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
         const requestedChapter = request.chapterId
@@ -386,7 +386,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           pendingVolumeId: null,
           pendingSummary: null,
           loadError: null,
-          workId: bootstrap.mediaVersion.workId,
+          workId: bootstrap.version.workId,
           totalDurationMs: bootstrap.totalDurationMs,
           playbackRate,
           skipBackwardSeconds: bootstrap.preferences.skipBackwardSeconds,
@@ -524,7 +524,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.playbackRate = normalized;
     updateState({ playbackRate: normalized });
     const bootstrap = bootstrapRef.current;
-    writeAudioDevicePreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.mediaVersion.workId);
+    writeAudioDevicePreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.version.workId);
     void persistProgress();
   }, [persistProgress, updateState]);
 
@@ -533,7 +533,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.volume = normalized;
     updateState({ volume: normalized });
     const bootstrap = bootstrapRef.current;
-    writeAudioDevicePreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.mediaVersion.workId);
+    writeAudioDevicePreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.version.workId);
   }, [updateState]);
 
   const setSleepTimer = useCallback((value: number | 'chapter' | null) => {

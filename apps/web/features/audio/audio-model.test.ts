@@ -11,11 +11,12 @@ const payload = {
     userId: 'user-1',
     readerType: 'audio',
     book: { id: 'work-1', title: '有声书', author: '作者' },
-    mediaVersion: { id: 'media-audio', workId: 'work-1', mediaKind: 'AUDIOBOOK', completed: false },
-    volume: { id: 'volume-1', mediaVersionId: 'media-audio', title: '第一卷', sortOrder: 0, durationMs: 30_000 },
+    version: { id: 'version-audio', workId: 'work-1', sourceKey: '__implicit__', sourceName: null },
+    versionCompleted: false,
+    volume: { id: 'volume-1', versionId: 'version-audio', title: '第一卷', sortOrder: 0, durationMs: 30_000 },
     availableVolumes: [
-      { id: 'volume-1', mediaVersionId: 'media-audio', title: '第一卷', sortOrder: 0 },
-      { id: 'volume-2', mediaVersionId: 'media-audio', title: '第二卷', sortOrder: 1 }
+      { id: 'volume-1', versionId: 'version-audio', title: '第一卷', sortOrder: 0 },
+      { id: 'volume-2', versionId: 'version-audio', title: '第二卷', sortOrder: 1 }
     ],
     files: [
       { id: 'file-1', mimeType: 'audio/mpeg', codec: 'mp3', durationMs: 10_000, sortOrder: 0, url: '/api/files/file-1' },
@@ -74,7 +75,7 @@ test('lets the media element decide unknown codec support', () => {
 
 test('volume switching keeps the previous playback until the request commits or fails', () => {
   const bootstrap = normalizeAudioBootstrap(payload, 'volume-1');
-  const previous: AudioPlaybackState = { lifecycle: 'playing', bootstrap, volumeId: bootstrap.volume.id, pendingVolumeId: null, pendingSummary: null, loadError: null, workId: bootstrap.mediaVersion.workId, trackIndex: 0, track: bootstrap.tracks[0] ?? null, chapter: null, positionMs: 0, durationMs: 10_000, absolutePositionMs: 0, totalDurationMs: 30_000, playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1, sleepTimerEndsAt: null, sleepTimerMode: null, error: null };
+  const previous: AudioPlaybackState = { lifecycle: 'playing', bootstrap, volumeId: bootstrap.volume.id, pendingVolumeId: null, pendingSummary: null, loadError: null, workId: bootstrap.version.workId, trackIndex: 0, track: bootstrap.tracks[0] ?? null, chapter: null, positionMs: 0, durationMs: 10_000, absolutePositionMs: 0, totalDurationMs: 30_000, playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1, sleepTimerEndsAt: null, sleepTimerMode: null, error: null };
   const loading = beginAudioVolumeSwitch(previous, 'volume-2');
   assert.equal(loading.volumeId, 'volume-1');
   assert.equal(loading.pendingVolumeId, 'volume-2');

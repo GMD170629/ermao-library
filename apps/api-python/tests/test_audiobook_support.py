@@ -1113,6 +1113,9 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "audio"
+    assert bootstrap["version"]["id"] == bootstrap["volume"]["versionId"]
+    assert "mediaKind" not in bootstrap["version"]
+    assert "mediaVersion" not in bootstrap
     assert "publicationFingerprint" not in bootstrap
     assert [track["trackNumber"] for track in bootstrap["files"]] == [2, 10]
     assert {track["codec"] for track in bootstrap["files"]} == {"mp3"}
@@ -1180,7 +1183,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert (
         client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
-        ]["mediaVersion"]["completed"]
+        ]["versionCompleted"]
         is False
     )
 
@@ -1202,7 +1205,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert (
         client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
-        ]["mediaVersion"]["completed"]
+        ]["versionCompleted"]
         is True
     )
 
@@ -1224,7 +1227,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert (
         client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
             "data"
-        ]["mediaVersion"]["completed"]
+        ]["versionCompleted"]
         is False
     )
 

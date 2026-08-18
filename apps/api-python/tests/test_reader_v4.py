@@ -42,12 +42,14 @@ def _login(client: TestClient, db_session: Session) -> User:
     return user
 
 
-def _ebook_volume(db_session: Session) -> LibraryVolume:
+def _ebook_volume(
+    db_session: Session, *, include_media_version: bool = True
+) -> LibraryVolume:
     source_path = (
         Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="work-reader-v3",
         origin="MANUAL",
         title="Reader v4",
@@ -56,10 +58,14 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
         normalized_author="测试作者",
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id="media-reader-v3",
-        work_id=work.id,
-        media_kind="EBOOK",
+    media_version = (
+        LibraryMediaVersion(
+            id="media-reader-v3",
+            work_id=work.id,
+            media_kind="EBOOK",
+        )
+        if include_media_version
+        else None
     )
     version = LibraryVersion(
         id="version-reader-v3",
@@ -88,7 +94,9 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add_all([version, media_version, volume])
+    db_session.add_all(
+        [version, volume] if media_version is None else [version, media_version, volume]
+    )
     db_session.flush()
     db_session.add(file)
     db_session.commit()
@@ -247,12 +255,17 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
         "progressSnapshot": None,
     }
     assert bootstrap["volume"]["id"] == volume.id
-    assert bootstrap["mediaVersion"] == {
-        "id": "media-reader-v3",
+    assert bootstrap["version"] == {
+        "id": "version-reader-v3",
         "workId": "work-reader-v3",
-        "mediaKind": "EBOOK",
-        "completed": False,
+        "sourceKey": IMPLICIT_VERSION_SOURCE_KEY,
+        "sourceName": None,
     }
+    assert bootstrap["volume"]["versionId"] == "version-reader-v3"
+    assert bootstrap["versionCompleted"] is False
+    assert "mediaVersion" not in bootstrap
+    assert "mediaCompleted" not in bootstrap
+    assert "mediaVersionId" not in bootstrap["volume"]
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
     assert "publicationFingerprint" not in bootstrap
@@ -387,6 +400,10 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
         "data"
     ]
     assert bootstrap["sourceFormat"] == "pdf"
+    assert bootstrap["readerType"] == "pdf"
+    assert bootstrap["version"]["id"] == "version-reader-v3"
+    assert bootstrap["volume"]["versionId"] == "version-reader-v3"
+    assert "mediaKind" not in bootstrap["version"]
 
     nullable_locator = _exact_pdf_locator(
         bootstrap, page_index=2, page_progression=0.25
@@ -454,6 +471,9 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
         "data"
     ]
     assert bootstrap["sourceFormat"] == "cbz"
+    assert bootstrap["readerType"] == "comic"
+    assert bootstrap["version"]["id"] == "version-reader-v3"
+    assert bootstrap["volume"]["versionId"] == "version-reader-v3"
 
     accepted = client.put(
         f"/api/reader/v4/volumes/{volume.id}/progress",
@@ -630,6 +650,9 @@ def test_reader_v4_bootstrap_does_not_expose_file_hashes(
     assert "publicationFingerprint" not in bootstrap
     assert "contentFingerprint" not in bootstrap
     assert all("contentHash" not in item for item in bootstrap["files"])
+    assert "mediaVersion" not in bootstrap
+    assert "mediaCompleted" not in bootstrap
+    assert all("mediaVersionId" not in item for item in bootstrap["availableVolumes"])
 
 
 @pytest.mark.parametrize(
@@ -1177,8 +1200,8 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     assert source_save.status_code == 200
     assert (
         client.get(f"/api/reader/v4/volumes/{source.id}/bootstrap").json()["data"][
-            "mediaVersion"
-        ]["completed"]
+            "versionCompleted"
+        ]
         is False
     )
 
@@ -1200,8 +1223,8 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     assert derived_save.status_code == 200, derived_save.json()
     assert (
         client.get(f"/api/reader/v4/volumes/{source.id}/bootstrap").json()["data"][
-            "mediaVersion"
-        ]["completed"]
+            "versionCompleted"
+        ]
         is True
     )
     progresses = db_session.query(LibraryReadingProgress).all()
@@ -1209,6 +1232,117 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
         source.id,
         derived.id,
     }
+
+
+def test_reader_v4_bootstrap_succeeds_without_library_media_version(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session, include_media_version=False)
+
+    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+
+    assert response.status_code == 200
+    bootstrap = response.json()["data"]
+    assert bootstrap["version"] == {
+        "id": "version-reader-v3",
+        "workId": "work-reader-v3",
+        "sourceKey": IMPLICIT_VERSION_SOURCE_KEY,
+        "sourceName": None,
+    }
+    assert bootstrap["volume"]["versionId"] == volume.version_id
+    assert bootstrap["readerType"] == "reflowable"
+    assert "mediaVersion" not in bootstrap
+    assert "mediaCompleted" not in bootstrap
+    assert all(
+        item["versionId"] == volume.version_id for item in bootstrap["availableVolumes"]
+    )
+
+
+def test_reader_v4_reader_type_follows_volume_format(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    volume.format = "AUDIO"
+    db_session.commit()
+
+    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+        "data"
+    ]
+
+    assert bootstrap["readerType"] == "audio"
+    assert bootstrap["sourceFormat"] == "audio"
+    assert "mediaKind" not in bootstrap["version"]
+    assert bootstrap["version"]["id"] == volume.version_id
+
+
+def test_reader_v4_version_completed_ignores_other_versions(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login(client, db_session)
+    current = _ebook_volume(db_session)
+    other_path = tmp_path / "other-version.epub"
+    _write_reader_epub(other_path)
+    other_version = LibraryVersion(
+        id="version-reader-other",
+        work_id="work-reader-v3",
+        source_key="other-source",
+        source_name="Other",
+    )
+    other_volume = LibraryVolume(
+        id="volume-reader-other",
+        version_id=other_version.id,
+        title="另一版本",
+        sort_order=1,
+        format="EPUB",
+        resource_key="manual:reader-other",
+        import_status="COMPLETED",
+    )
+    db_session.add(other_version)
+    db_session.flush()
+    db_session.add(other_volume)
+    db_session.flush()
+    db_session.add(
+        LibraryFile(
+            id="file-reader-other",
+            volume_id=other_volume.id,
+            path=str(other_path),
+            mtime_ms=2,
+            kind="EPUB",
+            mime_type="application/epub+zip",
+            size_bytes=other_path.stat().st_size,
+            sort_order=0,
+        )
+    )
+    db_session.commit()
+
+    finished = client.put(
+        f"/api/reader/v4/volumes/{other_volume.id}/reading-status",
+        json={"status": "FINISHED"},
+    )
+    assert finished.status_code == 200
+
+    current_bootstrap = client.get(
+        f"/api/reader/v4/volumes/{current.id}/bootstrap"
+    ).json()["data"]
+    other_bootstrap = client.get(
+        f"/api/reader/v4/volumes/{other_volume.id}/bootstrap"
+    ).json()["data"]
+
+    assert current_bootstrap["version"]["id"] == current.version_id
+    assert other_bootstrap["version"]["id"] == other_version.id
+    assert current_bootstrap["versionCompleted"] is False
+    assert other_bootstrap["versionCompleted"] is True
+    assert {item["versionId"] for item in current_bootstrap["availableVolumes"]} == {
+        current.version_id,
+        other_version.id,
+    }
+    assert "mediaVersionId" not in current_bootstrap["availableVolumes"][0]
 
 
 def test_reader_v4_openapi_requires_no_edition_or_user_identity(

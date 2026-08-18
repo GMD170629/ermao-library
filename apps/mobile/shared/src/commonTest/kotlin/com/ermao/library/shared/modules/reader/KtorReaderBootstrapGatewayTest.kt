@@ -137,8 +137,8 @@ class KtorReaderBootstrapGatewayTest {
                         .replace(REFLOWABLE_PUBLICATION, COMIC_PUBLICATION)
                     else if (format.sourceFormat == "pdf") value
                         .replace(
-                            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\"}",
-                            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\",\"pageCount\":1}",
+                            "\"volume\":{\"id\":\"volume-1\",\"versionId\":\"version-1\",\"title\":\"Volume\",\"format\":\"pdf\"}",
+                            "\"volume\":{\"id\":\"volume-1\",\"versionId\":\"version-1\",\"title\":\"Volume\",\"format\":\"pdf\",\"pageCount\":1}",
                         )
                         .replace("\"units\":[]", "\"units\":[$PDF_UNIT]")
                         .replace(REFLOWABLE_PUBLICATION, "\"publication\":null")
@@ -250,8 +250,8 @@ class KtorReaderBootstrapGatewayTest {
             "\"kind\":\"PDF\",\"mimeType\":\"application/pdf\"",
         )
         .replace(
-            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\"}",
-            "\"volume\":{\"id\":\"volume-1\",\"title\":\"Volume\",\"format\":\"pdf\",\"pageCount\":1}",
+            "\"volume\":{\"id\":\"volume-1\",\"versionId\":\"version-1\",\"title\":\"Volume\",\"format\":\"pdf\"}",
+            "\"volume\":{\"id\":\"volume-1\",\"versionId\":\"version-1\",\"title\":\"Volume\",\"format\":\"pdf\",\"pageCount\":1}",
         )
         .replace("\"units\":[]", "\"units\":[$units]")
         .replace(REFLOWABLE_PUBLICATION, "\"publication\":null")
@@ -274,8 +274,9 @@ class KtorReaderBootstrapGatewayTest {
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
               "book":{"id":"work-1","title":"Book"},
-              "mediaVersion":{"id":"media-1","workId":"work-1","mediaKind":"EBOOK","completed":true},
-              "volume":{"id":"volume-1","title":"Volume","format":"epub"},"availableVolumes":[],
+              "version":{"id":"version-1","workId":"work-1","sourceKey":"__implicit__","sourceName":null},
+              "versionCompleted":true,
+              "volume":{"id":"volume-1","versionId":"version-1","title":"Volume","format":"epub"},"availableVolumes":[],
               "files":[{"id":"file-1","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":1234,"url":"/api/files/file-1","sortOrder":0}],
               "units":[],"fileUrl":"/api/volumes/volume-1/file","capabilities":{},$REFLOWABLE_PUBLICATION,
               "progressSnapshot":{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":{"kind":"reflowable","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}

@@ -41,7 +41,7 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         encoding="utf-8",
     )
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="work-fb2-publication",
         origin="MANUAL",
         title="直接读取 FB2",
@@ -120,3 +120,4 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     )
     assert resource_response.status_code == 200
     assert "正文内容" in resource_response.text
+    assert 'data-shuku-security-profile="web-v2"' in resource_response.text

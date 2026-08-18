@@ -26,16 +26,17 @@ class ReaderWorkDto:
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderMediaVersionDto:
+class ReaderVersionDto:
     id: str
     work_id: str
-    media_kind: str
+    source_key: str
+    source_name: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class ReaderVolumeDto:
     id: str
-    media_version_id: str
+    version_id: str
     title: str
     volume_index: float | None
     sort_order: int
@@ -167,7 +168,7 @@ class ReaderBookmarkDto:
 @dataclass(frozen=True, slots=True)
 class ReaderVolumeContextDto:
     work: ReaderWorkDto
-    media_version: ReaderMediaVersionDto
+    version: ReaderVersionDto
     volume: ReaderVolumeDto
 
 
@@ -179,4 +180,4 @@ class ReaderBootstrapDto:
     units: tuple[ReaderUnitDto, ...]
     progress_by_volume_id: dict[str, ReaderProgressDto]
     resume_location_json: str | None
-    media_completed: bool
+    version_completed: bool

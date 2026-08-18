@@ -87,7 +87,6 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderFileSummary,
     ReaderJsonValue,
     ReaderLocation,
-    ReaderMediaVersionSummary,
     ReaderNotFoundError,
     ReaderProgressConflictBody,
     ReaderProgressConflictError,
@@ -104,6 +103,7 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderUnauthorizedError,
     ReaderUnitSummary,
     ReaderValidationError,
+    ReaderVersionSchema,
     ReaderVolumeSummary,
     ReadiumEngineLocator,
     ReadiumLocatorPayload,
@@ -384,7 +384,7 @@ def _volume_summary(
     reader_type = _reader_type(volume.format)
     return ReaderVolumeSummary(
         id=volume.id,
-        mediaVersionId=volume.media_version_id,
+        versionId=volume.version_id,
         title=volume.title,
         volumeIndex=volume.volume_index,
         sortOrder=volume.sort_order,
@@ -570,15 +570,13 @@ def reader_bootstrap_v4(
                 author=context.work.author,
                 coverUrl=f"/api/works/{context.work.id}/cover",
             ),
-            mediaVersion=ReaderMediaVersionSummary(
-                id=context.media_version.id,
-                workId=context.work.id,
-                mediaKind=cast(
-                    Literal["EBOOK", "COMIC", "AUDIOBOOK"],
-                    context.media_version.media_kind,
-                ),
-                completed=bootstrap.media_completed,
+            version=ReaderVersionSchema(
+                id=context.version.id,
+                workId=context.version.work_id,
+                sourceKey=context.version.source_key,
+                sourceName=context.version.source_name,
             ),
+            versionCompleted=bootstrap.version_completed,
             volume=_volume_summary(context.volume, progress),
             availableVolumes=[
                 _volume_summary(

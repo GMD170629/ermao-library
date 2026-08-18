@@ -32,7 +32,7 @@ import {
 import { withBasePath } from '../../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../lib/pwa/update-coordination';
 import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '../reader-theme';
-import { fetchReaderBootstrap, ReaderBootstrapError, type ReaderBootstrap } from './api';
+import { fetchReaderBootstrap, ReaderBootstrapError, workDetailTabForReaderType, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
 import { resolveRequestedPublicationHref } from './publication-direct-target';
 import { decidePendingVsServer, resolveStartupResume } from './local-resume';
@@ -368,14 +368,14 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         clientId,
-        workId: bootstrap.mediaVersion.workId,
+        workId: bootstrap.version.workId,
         volumeId: bootstrap.volume.id
       }).catch(() => null);
       const pending = await runtime.storage.getPendingProgressForIdentity({
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         clientId,
-        workId: bootstrap.mediaVersion.workId,
+        workId: bootstrap.version.workId,
         volumeId: bootstrap.volume.id
       }).catch(() => null);
       const pendingDecision = decidePendingVsServer({
@@ -434,7 +434,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       activateReaderUser(bootstrap.userId);
       emitReaderDebug('info', 'Reader v4 启动完成', {
         volumeId: bootstrap.volume.id,
-        workId: bootstrap.mediaVersion.workId,
+        workId: bootstrap.version.workId,
         preferences: 'device-default'
       });
       dispatch({ type: 'ready', requestId, bootstrap, preferences });
@@ -499,7 +499,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const cancelStartupConflict = useCallback(() => {
     const conflict = startupConflict;
     if (!conflict) return;
-    router.push(`/works/${conflict.bootstrap.mediaVersion.workId}?detailTab=${conflict.bootstrap.mediaVersion.mediaKind}&volumeId=${encodeURIComponent(conflict.bootstrap.volume.id)}`);
+    router.push(`/works/${conflict.bootstrap.version.workId}?detailTab=${workDetailTabForReaderType(conflict.bootstrap.readerType)}&volumeId=${encodeURIComponent(conflict.bootstrap.volume.id)}`);
   }, [router, startupConflict]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
@@ -603,7 +603,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       pendingLocationWriteRef.current = runtime.progress.acceptVerifiedRemote({
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
-        workId: bootstrap.mediaVersion.workId,
+        workId: bootstrap.version.workId,
         volumeId: bootstrap.volume.id,
         pendingKey: startupCloud.pendingKey,
         snapshot: startupCloud.snapshot
@@ -625,7 +625,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     const write = runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
-      workId: bootstrap.mediaVersion.workId,
+      workId: bootstrap.version.workId,
       volumeId: bootstrap.volume.id,
       baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.volume.id)?.revision
         ?? bootstrap.serverProgressSnapshot?.revision ?? 0,
@@ -673,9 +673,9 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     pendingLocationWriteRef.current = clientIdPromise.then((clientId) => runtime.progress.acceptVerifiedRemote({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
-      workId: bootstrap.mediaVersion.workId,
+      workId: bootstrap.version.workId,
       volumeId: bootstrap.volume.id,
-      pendingKey: syncStateKey({ serverIdentity: currentReaderServerIdentity(), userId: bootstrap.userId, clientId, workId: bootstrap.mediaVersion.workId, volumeId: bootstrap.volume.id }),
+      pendingKey: syncStateKey({ serverIdentity: currentReaderServerIdentity(), userId: bootstrap.userId, clientId, workId: bootstrap.version.workId, volumeId: bootstrap.volume.id }),
       snapshot
     }));
   }, [externalNavigation, runtime.progress, runtime.storage, state.bootstrap, translate]);
@@ -737,7 +737,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
           onPreferencesChange={savePreferences}
           onResetPreferences={resetPreferences}
           onLocationChange={saveLocation}
-          onBack={() => router.push(`/works/${bootstrap.mediaVersion.workId}?detailTab=${bootstrap.mediaVersion.mediaKind}&volumeId=${encodeURIComponent(bootstrap.volume.id)}`)}
+          onBack={() => router.push(`/works/${bootstrap.version.workId}?detailTab=${workDetailTabForReaderType(bootstrap.readerType)}&volumeId=${encodeURIComponent(bootstrap.volume.id)}`)}
           onRetry={() => setRetry((value) => value + 1)}
           onSelectVolume={(nextVolumeId, pageIndex) => router.push(readerHref(nextVolumeId, pageIndex))}
           onIndexProgress={setIndexProgress}

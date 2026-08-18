@@ -365,16 +365,16 @@ class ReaderBookSummary(ReaderWireModel):
     cover_url: str | None = Field(default=None, alias="coverUrl")
 
 
-class ReaderMediaVersionSummary(ReaderWireModel):
+class ReaderVersionSchema(ReaderWireModel):
     id: str
     work_id: str = Field(alias="workId")
-    media_kind: Literal["EBOOK", "COMIC", "AUDIOBOOK"] = Field(alias="mediaKind")
-    completed: bool
+    source_key: str = Field(alias="sourceKey")
+    source_name: str | None = Field(default=None, alias="sourceName")
 
 
 class ReaderVolumeSummary(ReaderWireModel):
     id: str
-    media_version_id: str = Field(alias="mediaVersionId")
+    version_id: str = Field(alias="versionId")
     title: str
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     sort_order: int = Field(alias="sortOrder")
@@ -533,7 +533,8 @@ class ReaderBootstrapData(ReaderWireModel):
     reader_type: ReaderFormat = Field(alias="readerType")
     source_format: ReaderSourceFormat = Field(alias="sourceFormat")
     book: ReaderBookSummary
-    media_version: ReaderMediaVersionSummary = Field(alias="mediaVersion")
+    version: ReaderVersionSchema
+    version_completed: bool = Field(alias="versionCompleted")
     volume: ReaderVolumeSummary
     available_volumes: list[ReaderVolumeSummary] = Field(alias="availableVolumes")
     files: list[ReaderFileSummary]

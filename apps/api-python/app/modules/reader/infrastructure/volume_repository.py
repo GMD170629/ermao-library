@@ -14,7 +14,6 @@ from app.models.auth import ReaderBookmark
 from app.models.common import cuid
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVersion,
@@ -27,10 +26,10 @@ from app.modules.reader.application.dto import (
     ReaderBookmarkDto,
     ReaderExactLocationDto,
     ReaderFileDto,
-    ReaderMediaVersionDto,
     ReaderProgressDto,
     ReaderReadingStatus,
     ReaderUnitDto,
+    ReaderVersionDto,
     ReaderVolumeContextDto,
     ReaderVolumeDto,
     ReaderWorkDto,
@@ -41,28 +40,11 @@ from app.modules.reader.infrastructure.exact_location_codec import (
     encode_exact_location,
 )
 
-_AUDIO_FORMATS = frozenset({"AUDIO", "AUDIOBOOK", "MP3", "M4A", "M4B"})
-_COMIC_FORMATS = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP"})
-_ASSIGNED_KINDS = frozenset({"EBOOK", "COMIC", "AUDIOBOOK"})
-_MEDIA_KIND_ORDER = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
 
-
-def _media_kind_for_volume(volume: LibraryVolume) -> str:
-    assigned = (volume.suggested_media_kind or "").strip().upper()
-    if volume.classification_source == "USER" and assigned in _ASSIGNED_KINDS:
-        return assigned
-    normalized = volume.format.strip().upper()
-    if normalized in _AUDIO_FORMATS:
-        return "AUDIOBOOK"
-    if normalized in _COMIC_FORMATS:
-        return "COMIC"
-    return "EBOOK"
-
-
-def _volume_dto(volume: LibraryVolume, media_version_id: str) -> ReaderVolumeDto:
+def _volume_dto(volume: LibraryVolume) -> ReaderVolumeDto:
     return ReaderVolumeDto(
         id=volume.id,
-        media_version_id=media_version_id,
+        version_id=volume.version_id,
         title=volume.title,
         volume_index=volume.volume_index,
         sort_order=volume.sort_order,
@@ -161,7 +143,7 @@ class SqlAlchemyReaderVolumeRepository:
 
     def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
         row = self._session.execute(
-            select(LibraryWork, LibraryVolume)
+            select(LibraryWork, LibraryVersion, LibraryVolume)
             .join(
                 LibraryVersion,
                 LibraryVersion.id == LibraryVolume.version_id,
@@ -171,18 +153,16 @@ class SqlAlchemyReaderVolumeRepository:
         ).one_or_none()
         if row is None:
             return None
-        work, volume = row
-        media_version = self._media_version_for_volume(work.id, volume)
-        if media_version is None:
-            return None
+        work, version, volume = row
         return ReaderVolumeContextDto(
             work=ReaderWorkDto(id=work.id, title=work.title, author=work.author),
-            media_version=ReaderMediaVersionDto(
-                id=media_version.id,
-                work_id=media_version.work_id,
-                media_kind=media_version.media_kind,
+            version=ReaderVersionDto(
+                id=version.id,
+                work_id=version.work_id,
+                source_key=version.source_key,
+                source_name=version.source_name,
             ),
-            volume=_volume_dto(volume, media_version.id),
+            volume=_volume_dto(volume),
         )
 
     def list_visible_volumes_for_work(
@@ -213,61 +193,15 @@ class SqlAlchemyReaderVolumeRepository:
                 )
             ).all()
         )
-        media_versions = {
-            item.media_kind: item
-            for item in self._session.scalars(
-                select(LibraryMediaVersion).where(
-                    LibraryMediaVersion.work_id == work_id
-                )
-            )
-        }
         ordered = sorted(
             volumes,
             key=lambda volume: (
-                _MEDIA_KIND_ORDER.get(_media_kind_for_volume(volume), 3),
                 volume.sort_order,
                 volume.created_at,
                 volume.id,
             ),
         )
-        visible: list[ReaderVolumeDto] = []
-        fallback_media = next(
-            (
-                media_versions[kind]
-                for kind in ("EBOOK", "COMIC", "AUDIOBOOK")
-                if kind in media_versions
-            ),
-            None,
-        )
-        for volume in ordered:
-            media_version = (
-                media_versions.get(_media_kind_for_volume(volume)) or fallback_media
-            )
-            if media_version is None:
-                continue
-            visible.append(_volume_dto(volume, media_version.id))
-        return visible
-
-    def _media_version_for_volume(
-        self, work_id: str, volume: LibraryVolume
-    ) -> LibraryMediaVersion | None:
-        media_kind = _media_kind_for_volume(volume)
-        matched = self._session.scalar(
-            select(LibraryMediaVersion).where(
-                LibraryMediaVersion.work_id == work_id,
-                LibraryMediaVersion.media_kind == media_kind,
-            )
-        )
-        if matched is not None:
-            return matched
-        return self._session.scalar(
-            select(LibraryMediaVersion)
-            .where(LibraryMediaVersion.work_id == work_id)
-            .order_by(
-                LibraryMediaVersion.media_kind,
-                LibraryMediaVersion.id,
-            )
-        )
+        return [_volume_dto(volume) for volume in ordered]
 
     def list_files(self, volume_id: str) -> list[ReaderFileDto]:
         files = self._session.scalars(

@@ -162,7 +162,7 @@ export function AudioMiniPlayer() {
   const coverUrl = bootstrap.book.coverUrl
     ? withBasePath(bootstrap.book.coverUrl)
     : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
-  const workHref = `/works/${encodeURIComponent(bootstrap.mediaVersion.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`;
+  const workHref = `/works/${encodeURIComponent(bootstrap.version.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`;
   const isPlaying = player.lifecycle === 'playing';
   const isLoading = player.lifecycle === 'loading';
   const playbackError = player.loadError ?? player.error;

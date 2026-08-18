@@ -60,10 +60,10 @@ export function normalizeAudioBootstrap(input: unknown, requestedVolumeId = ''):
   if (raw.schemaVersion !== 4) throw new Error('当前客户端不支持该有声书协议');
   if (raw.readerType !== 'audio') throw new Error('该卷册不是可播放的有声书');
   const book = record(raw.book);
-  const mediaVersion = record(raw.mediaVersion);
+  const version = record(raw.version);
   const volumeValue = record(raw.volume);
   const volume = normalizeVolume(volumeValue, 0);
-  const workId = stringValue(mediaVersion.workId ?? book.id).trim();
+  const workId = stringValue(version.workId ?? book.id).trim();
   if (!volume || volume.id !== requestedVolumeId || !workId) throw new Error('有声书启动信息缺少卷册或作品标识');
   const tracks = orderedTracks((Array.isArray(raw.files) ? raw.files : []).map(normalizeTrack).filter((track): track is AudioTrack => track !== null));
   if (tracks.length === 0) throw new Error('这个有声书卷册还没有可播放的音频文件');
@@ -84,7 +84,13 @@ export function normalizeAudioBootstrap(input: unknown, requestedVolumeId = ''):
     readerType: 'audio',
     progressRevision: Math.max(0, numberValue(progressSnapshot.revision)),
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名有声书'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
-    mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind: 'AUDIOBOOK', completed: mediaVersion.completed === true },
+    version: {
+      id: stringValue(version.id),
+      workId,
+      sourceKey: stringValue(version.sourceKey),
+      sourceName: nullableString(version.sourceName)
+    },
+    versionCompleted: raw.versionCompleted === true,
     volume,
     availableVolumes: (Array.isArray(raw.availableVolumes) ? raw.availableVolumes : []).map(normalizeVolume).filter((item): item is AudioVolumeSummary => item !== null),
     tracks,

@@ -13,11 +13,10 @@ import { parseReaderV4ProgressSnapshot, v4LocationToDomain, type ReaderProgressS
 import type { ReaderBookmark } from './bookmarks';
 
 type VisualReaderType = 'reflowable' | 'comic' | 'pdf';
-type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 
 export type ReaderVolume = Readonly<{
   id: string;
-  mediaVersionId: string;
+  versionId: string;
   title: string;
   volumeIndex: number | null;
   sortOrder: number;
@@ -60,7 +59,8 @@ export type ReaderBootstrap = Readonly<{
   readerType: VisualReaderType;
   sourceFormat: SupportedReaderSourceFormat;
   book: Readonly<{ id: string; title: string; author: string | null; coverUrl: string | null }>;
-  mediaVersion: Readonly<{ id: string; workId: string; mediaKind: MediaKind; completed: boolean }>;
+  version: Readonly<{ id: string; workId: string; sourceKey: string; sourceName: string | null }>;
+  versionCompleted: boolean;
   volume: ReaderVolume;
   availableVolumes: ReaderVolume[];
   files: ReadonlyArray<Readonly<{ id: string; kind: string; mimeType: string; sizeBytes: number; durationMs: number | null; discNumber: number | null; trackNumber: number | null; sortOrder: number; url: string }>>;
@@ -106,15 +106,19 @@ function visualReaderType(value: unknown): VisualReaderType | null {
   return value === 'reflowable' || value === 'comic' || value === 'pdf' ? value : null;
 }
 
+export function workDetailTabForReaderType(readerType: VisualReaderType): 'EBOOK' | 'COMIC' {
+  return readerType === 'comic' ? 'COMIC' : 'EBOOK';
+}
+
 function mapVolume(value: unknown): ReaderVolume | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
-  const mediaVersionId = stringValue(item.mediaVersionId).trim();
+  const versionId = stringValue(item.versionId).trim();
   const readerType = item.readerType === 'audio' ? 'audio' : visualReaderType(item.readerType);
-  if (!id || !mediaVersionId || !readerType) return null;
+  if (!id || !versionId || !readerType) return null;
   return {
     id,
-    mediaVersionId,
+    versionId,
     title: stringValue(item.title, id),
     volumeIndex: nullableNumber(item.volumeIndex),
     sortOrder: numberValue(item.sortOrder),
@@ -207,10 +211,9 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   const readerType = visualReaderType(data.readerType);
   const volume = mapVolume(data.volume);
   const book = record(data.book);
-  const mediaVersion = record(data.mediaVersion);
-  const workId = stringValue(mediaVersion.workId).trim();
-  const mediaKind = mediaVersion.mediaKind;
-  if (!readerType || !volume || !workId || (mediaKind !== 'EBOOK' && mediaKind !== 'COMIC' && mediaKind !== 'AUDIOBOOK')) throw new Error('阅读器启动信息不完整');
+  const version = record(data.version);
+  const workId = stringValue(version.workId).trim();
+  if (!readerType || !volume || !workId) throw new Error('阅读器启动信息不完整');
   const format = parseSupportedReaderSourceFormat(data.sourceFormat);
   if (!format) throw new ReaderBootstrapError('VOLUME_FORMAT_UNSUPPORTED', '当前文件格式不受阅读器支持');
   if (readerFormatCapability(format).readerKind !== readerType) {
@@ -302,7 +305,13 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     readerType,
     sourceFormat: format,
     book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名作品'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
-    mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind, completed: mediaVersion.completed === true },
+    version: {
+      id: stringValue(version.id),
+      workId,
+      sourceKey: stringValue(version.sourceKey),
+      sourceName: nullableString(version.sourceName)
+    },
+    versionCompleted: data.versionCompleted === true,
     volume,
     availableVolumes: (Array.isArray(data.availableVolumes) ? data.availableVolumes : []).map(mapVolume).filter((item): item is ReaderVolume => item !== null),
     files,

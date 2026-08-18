@@ -28,12 +28,13 @@ function exactLocator(cssSelector: string, highlight: string, progression = 0, h
 }
 
 function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legacyPercent = 0) {
-  const volume = { id: 'epub-volume', mediaVersionId: 'epub-media', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', derivedFromVolumeId: null, pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
+  const volume = { id: 'epub-volume', versionId: 'epub-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', derivedFromVolumeId: null, pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
   return { ok: true, data: {
     schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
     publication: { manifestUrl: '/api/reader/v4/volumes/epub-volume/publication/manifest.json', positionsUrl: '/api/reader/v4/volumes/epub-volume/publication/positions.json' },
     book: { id: 'work-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
-    mediaVersion: { id: 'epub-media', workId: 'work-epub', mediaKind: 'EBOOK', completed: false },
+    version: { id: 'epub-version', workId: 'work-epub', sourceKey: '__implicit__', sourceName: null },
+    versionCompleted: false,
     volume, availableVolumes: [volume],
     files: [{ id: 'epub-file', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/volumes/epub-volume/file' }],
     units: [

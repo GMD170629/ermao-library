@@ -27,7 +27,10 @@ from app.modules.publications.domain.model import (
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
-from app.modules.publications.infrastructure.locator_dom import validate_xhtml
+from app.modules.publications.infrastructure.locator_dom import (
+    WEB_SECURITY_PROFILE,
+    decorate_markup_head,
+)
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
 )
@@ -410,8 +413,7 @@ def _section_xhtml(
 <head><meta charset="utf-8"/><title>{_escape(section.title)}</title>
 <link rel="stylesheet" type="text/css" href="reader.css"/></head>
 <body>{body}</body></html>""".encode()
-    validate_xhtml(document)
-    return document
+    return decorate_markup_head(document, WEB_SECURITY_PROFILE)
 
 
 def _toc_entry(section: _Fb2Section) -> PublicationTocEntry:

@@ -36,7 +36,7 @@ export function AudioListenRedirect({ volumeId }: { volumeId: string }) {
       }
       appliedTrackRef.current = targetKey;
     }
-    router.replace(`/works/${encodeURIComponent(bootstrap.mediaVersion.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`);
+    router.replace(`/works/${encodeURIComponent(bootstrap.version.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`);
   }, [chapterId, playerBootstrap, router, selectTrack, trackParam, volumeId]);
 
   const failed = player.pendingVolumeId === volumeId && Boolean(player.loadError);

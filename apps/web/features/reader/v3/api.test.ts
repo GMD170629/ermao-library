@@ -13,9 +13,10 @@ function bootstrapPayload(sourceFormat: 'mobi' | 'txt') {
       readerType: 'reflowable',
       sourceFormat,
       book: { id: 'work-1', title: 'Book' },
-      mediaVersion: { id: 'media-1', workId: 'work-1', mediaKind: 'EBOOK', completed: false },
+      version: { id: 'version-1', workId: 'work-1', sourceKey: '__implicit__', sourceName: null },
+      versionCompleted: false,
       volume: {
-        id: 'volume-1', mediaVersionId: 'media-1', title: 'Volume', format: sourceFormat,
+        id: 'volume-1', versionId: 'version-1', title: 'Volume', format: sourceFormat,
         readerType: 'reflowable', sortOrder: 0,
       },
       availableVolumes: [],

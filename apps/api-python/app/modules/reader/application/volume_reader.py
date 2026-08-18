@@ -163,15 +163,15 @@ class VolumeReaderService:
             progress.volume_id: progress for progress in progresses
         }
         selected_progress = progress_by_volume_id.get(volume_id)
-        selected_media_volumes = [
+        selected_version_volumes = [
             volume
             for volume in available_volumes
-            if volume.media_version_id == context.media_version.id
+            if volume.version_id == context.version.id
         ]
-        media_completed = bool(selected_media_volumes) and all(
+        version_completed = bool(selected_version_volumes) and all(
             progress_by_volume_id.get(volume.id) is not None
             and progress_by_volume_id[volume.id].percent >= 100
-            for volume in selected_media_volumes
+            for volume in selected_version_volumes
         )
         return ReaderBootstrapDto(
             context=context,
@@ -184,7 +184,7 @@ class VolumeReaderService:
                 if selected_progress is not None
                 else None
             ),
-            media_completed=media_completed,
+            version_completed=version_completed,
         )
 
     def load_progress(
@@ -412,6 +412,7 @@ class VolumeReaderService:
             self._unit_of_work.rollback()
             raise
         return result
+
 
 def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:

@@ -130,6 +130,23 @@ def _seed_catalog(
     return volume
 
 
+def test_reader_production_code_does_not_use_media_version_contract() -> None:
+    forbidden = (
+        "LibraryMediaVersion",
+        "ReaderMediaVersionDto",
+        "mediaVersionId",
+        "mediaVersion",
+        "mediaCompleted",
+    )
+    violations = [
+        f"{path.relative_to(_API_ROOT)}:{token}"
+        for path in _READER_ROOT.rglob("*.py")
+        for token in forbidden
+        if token in path.read_text(encoding="utf-8")
+    ]
+    assert violations == []
+
+
 def test_reader_production_queries_do_not_use_volume_media_version_id() -> None:
     violations = [
         str(path.relative_to(_API_ROOT))
@@ -199,7 +216,10 @@ def test_reader_resolves_work_and_source_through_library_version(
 
     assert context is not None
     assert context.work.id == f"work-{suffix}"
+    assert context.version.id == f"version-{suffix}"
+    assert context.version.work_id == f"work-{suffix}"
     assert context.volume.id == volume.id
+    assert context.volume.version_id == f"version-{suffix}"
     assert source is not None
     assert source.volume_id == volume.id
     assert source.path == str(source_path)
@@ -268,11 +288,21 @@ def test_reader_source_lookup_does_not_require_library_media_version(
         volume_id=volume.id,
         access_scope=_ADMIN_PUBLICATION,
     )
-    files = SqlAlchemyReaderVolumeRepository(db_session).list_files(volume.id)
+    repository = SqlAlchemyReaderVolumeRepository(db_session)
+    context = repository.get_context(volume.id)
+    files = repository.list_files(volume.id)
+    visible = repository.list_visible_volumes_for_work(
+        "work-orphan",
+        _ADMIN_READER,
+    )
 
+    assert context is not None
+    assert context.version.id == "version-orphan"
+    assert context.volume.version_id == "version-orphan"
     assert source is not None
     assert source.path == str(source_path)
     assert [file.id for file in files] == ["file-orphan"]
+    assert [item.version_id for item in visible] == ["version-orphan"]
 
 
 def test_missing_source_file_keeps_unavailable_error(

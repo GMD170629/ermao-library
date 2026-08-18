@@ -153,7 +153,7 @@ class KtorReaderBootstrapGateway internal constructor(
         if (userId != request.namespace.userId) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_USER_MISMATCH", recoverable = false)
         }
-        if (volume.id != request.volumeId || mediaVersion.workId != book.id) {
+        if (volume.id != request.volumeId || version.workId != book.id || volume.versionId != version.id) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
         }
         if (!volume.format.equals(exactSourceFormat.wireValue, ignoreCase = true)) {
@@ -334,7 +334,8 @@ private data class ReaderBootstrapWire(
     val readerType: String,
     val sourceFormat: String? = null,
     val book: ReaderBootstrapBookWire,
-    val mediaVersion: ReaderBootstrapMediaVersionWire,
+    val version: ReaderBootstrapVersionWire,
+    val versionCompleted: Boolean = false,
     val volume: ReaderBootstrapVolumeWire,
     val availableVolumes: List<JsonObject>,
     val files: List<ReaderBootstrapFileWire>,
@@ -428,11 +429,17 @@ private sealed interface ComicManifestLoad {
 private data class ReaderBootstrapBookWire(val id: String, val title: String, val author: String? = null, val coverUrl: String? = null)
 
 @Serializable
-private data class ReaderBootstrapMediaVersionWire(val id: String, val workId: String, val mediaKind: String, val completed: Boolean)
+private data class ReaderBootstrapVersionWire(
+    val id: String,
+    val workId: String,
+    val sourceKey: String,
+    val sourceName: String? = null,
+)
 
 @Serializable
 private data class ReaderBootstrapVolumeWire(
     val id: String,
+    val versionId: String,
     val title: String,
     val format: String,
     val pageCount: Int? = null,

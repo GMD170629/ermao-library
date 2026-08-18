@@ -34,11 +34,11 @@ export type AudioBookSummary = {
   coverUrl: string | null;
 };
 
-export type AudioMediaVersionSummary = {
+export type AudioVersionSummary = {
   id: string;
   workId: string;
-  mediaKind: 'AUDIOBOOK';
-  completed: boolean;
+  sourceKey: string;
+  sourceName: string | null;
 };
 
 export type AudioVolumeSummary = {
@@ -66,7 +66,8 @@ export type AudioBootstrap = {
   readerType: 'audio';
   progressRevision: number;
   book: AudioBookSummary;
-  mediaVersion: AudioMediaVersionSummary;
+  version: AudioVersionSummary;
+  versionCompleted: boolean;
   volume: AudioVolumeSummary;
   availableVolumes: AudioVolumeSummary[];
   tracks: AudioTrack[];
