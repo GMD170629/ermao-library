@@ -27,6 +27,7 @@ from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
     _clean_title_part,
+    _ensure_implicit_version,
     _ensure_work,
     _file_resource_key,
     _finalize_work_cover,
@@ -190,6 +191,7 @@ def _import_comic(
             "libraryId": options.library_id,
         },
     )
+    version = _ensure_implicit_version(store, work["id"])
     media_version = (
         _select_volume_media_version(
             queries,
@@ -227,7 +229,7 @@ def _import_comic(
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "mediaVersionId": media_version["id"],
+                "versionId": version["id"],
                 "title": volume_title,
                 "volumeIndex": volume_index,
                 "sortOrder": sort_order,

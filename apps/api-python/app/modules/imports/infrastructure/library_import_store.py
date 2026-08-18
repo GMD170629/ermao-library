@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from sqlalchemy import bindparam, delete, exists, select
+from sqlalchemy import bindparam, delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
@@ -25,6 +25,7 @@ from app.models.library import (
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -56,6 +57,7 @@ class SqlAlchemyLibraryImportStore:
             ImportWriteTarget.IMPORT_ASSET: ImportAsset.__table__,
             ImportWriteTarget.IMPORT_LOG: ImportLog.__table__,
             ImportWriteTarget.LIBRARY_WORK: LibraryWork.__table__,
+            ImportWriteTarget.LIBRARY_VERSION: LibraryVersion.__table__,
             ImportWriteTarget.LIBRARY_MEDIA_VERSION: LibraryMediaVersion.__table__,
             ImportWriteTarget.LIBRARY_VOLUME: LibraryVolume.__table__,
             ImportWriteTarget.LIBRARY_FILE: LibraryFile.__table__,
@@ -186,6 +188,7 @@ class SqlAlchemyLibraryImportStore:
         parent_targets = (
             ImportWriteTarget.IMPORT_TASK,
             ImportWriteTarget.LIBRARY_WORK,
+            ImportWriteTarget.LIBRARY_VERSION,
             ImportWriteTarget.LIBRARY_MEDIA_VERSION,
             ImportWriteTarget.LIBRARY_VOLUME,
             ImportWriteTarget.LIBRARY_FILE,
@@ -263,28 +266,27 @@ class SqlAlchemyLibraryImportStore:
         *,
         task_updates: tuple[tuple[str, Mapping[str, object]], ...],
         volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
-        media_versions_to_prune: tuple[str, ...],
     ) -> None:
         executions = [
             *self._prepare_bulk_update_by_id(ImportTask.__table__, task_updates),
             *self._prepare_bulk_update_by_id(LibraryVolume.__table__, volume_updates),
         ]
-        for chunk in sqlite_parameter_chunks(
-            media_versions_to_prune, parameters_per_row=1
-        ):
-            executions.append(
-                _PreparedSqlExecution(
-                    delete(LibraryMediaVersion).where(
-                        LibraryMediaVersion.id.in_(chunk),
-                        ~exists(
-                            select(LibraryVolume.id).where(
-                                LibraryVolume.media_version_id == LibraryMediaVersion.id
-                            )
-                        ),
-                    )
+        self._execute_prepared_sql(tuple(executions))
+
+    def find_library_version(
+        self, work_id: str, source_key: str
+    ) -> dict[str, object] | None:
+        existing = (
+            self._db.execute(
+                select(LibraryVersion.__table__).where(
+                    LibraryVersion.work_id == work_id,
+                    LibraryVersion.source_key == source_key,
                 )
             )
-        self._execute_prepared_sql(tuple(executions))
+            .mappings()
+            .first()
+        )
+        return dict(existing) if existing is not None else None
 
     def find_library_media_version(
         self, work_id: str, media_kind: str

@@ -31,6 +31,7 @@ from app.modules.imports.application.dto import (
 from app.modules.imports.application.identity_policy import UNKNOWN_AUTHOR
 from app.modules.imports.application.import_support import (
     _classification_columns,
+    _ensure_implicit_version,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -184,6 +185,7 @@ def _import_audio(
             work, created = _ensure_audio_work(
                 store, queries, options, identity, merge_key
             )
+            version = _ensure_implicit_version(store, work["id"])
             media_version = store.ensure_library_media_version(
                 columns={
                     "id": _id(),
@@ -212,7 +214,7 @@ def _import_audio(
                     store.insert_library_volume(
                         columns={
                             "id": _id(),
-                            "mediaVersionId": media_version["id"],
+                            "versionId": version["id"],
                             "title": group.title if group is not None else "正文",
                             "volumeIndex": group.volume_index
                             if group is not None
@@ -665,12 +667,13 @@ def _prepare_flat_audio_bundle(
     """Append one strict Emby flat-layout chapter to its existing media_version."""
 
     media_version_id = str(media_version["id"])
+    version = _ensure_implicit_version(store, work["id"])
     volume = queries.get_first_volume_for_media_version(media_version_id)
     if not volume:
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "mediaVersionId": media_version_id,
+                "versionId": version["id"],
                 "title": "正文",
                 "sortOrder": 0,
                 "format": "AUDIO",
@@ -760,12 +763,13 @@ def _prepare_existing_audio_bundle(
         },
     )
     canonical_id = str(canonical["id"])
+    version = _ensure_implicit_version(store, target_work_id)
     volume = volume_contexts[0] if volume_contexts else None
     if not volume:
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "mediaVersionId": canonical_id,
+                "versionId": version["id"],
                 "title": "正文",
                 "sortOrder": 0,
                 "format": "AUDIO",
@@ -786,7 +790,7 @@ def _prepare_existing_audio_bundle(
         store.update_library_volume(
             str(volume["id"]),
             columns={
-                "mediaVersionId": canonical_id,
+                "versionId": version["id"],
                 "title": base_name,
                 "format": "AUDIO",
                 "resourceKey": f"audio:{bundle_key}",
@@ -799,7 +803,12 @@ def _prepare_existing_audio_bundle(
                 "updatedAt": _now(),
             },
         )
-        volume = {**volume, "mediaVersionId": canonical_id, "hidden": False}
+        volume = {
+            **volume,
+            "versionId": version["id"],
+            "mediaVersionId": canonical_id,
+            "hidden": False,
+        }
 
     for source_volume in volume_contexts:
         source_volume_id = str(source_volume.get("id") or "")

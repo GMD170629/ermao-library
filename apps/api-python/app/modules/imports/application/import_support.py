@@ -35,6 +35,7 @@ from app.modules.imports.application.ports import (
 from app.modules.imports.application.release_titles import parse_release_title
 from app.modules.imports.application.work_resolution import resolve_work_identity
 from app.modules.imports.domain.content_classification import ContentClassification
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 
 SUPPORTED_EXTS = {
     ".epub",
@@ -363,6 +364,21 @@ def _attrs(xml: str, name: str) -> list[dict[str, str]]:
             }
         )
     return output
+
+
+def _ensure_implicit_version(
+    store: LibraryImportStore, work_id: object
+) -> dict[str, object]:
+    return store.ensure_library_version(
+        columns={
+            "id": _id(),
+            "workId": work_id,
+            "sourceKey": IMPLICIT_VERSION_SOURCE_KEY,
+            "sourceName": None,
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        }
+    )
 
 
 def _ensure_work(

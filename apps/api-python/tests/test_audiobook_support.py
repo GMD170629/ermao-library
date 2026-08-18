@@ -60,6 +60,7 @@ from app.modules.imports.infrastructure.uploaded_file_publication import (
 )
 from app.modules.library.infrastructure.implicit_version import (
     IMPLICIT_VERSION_SOURCE_KEY,
+    get_or_create_implicit_version,
 )
 from app.services.audio_metadata import (
     AudioChapterMetadata,
@@ -271,6 +272,7 @@ def _insert_media_volume(
     media_kind: str,
     fmt: str,
 ) -> None:
+    version = get_or_create_implicit_version(db_session, work_id)
     db_session.execute(
         text(
             "INSERT INTO `LibraryMediaVersion` "
@@ -286,14 +288,14 @@ def _insert_media_volume(
     db_session.execute(
         text(
             "INSERT INTO `LibraryVolume` "
-            "(`id`, `mediaVersionId`, `origin`, `title`, `sortOrder`, `format`, `resourceKey`, "
+            "(`id`, `versionId`, `origin`, `title`, `sortOrder`, `format`, `resourceKey`, "
             "`importStatus`, `sizeBytes`, `coverStatus`, `hidden`, `createdAt`, `updatedAt`) "
-            "VALUES (:id, :media_version_id, 'MANUAL', :title, 0, :format, :key, "
+            "VALUES (:id, :version_id, 'MANUAL', :title, 0, :format, :key, "
             "'COMPLETED', 0, 'PENDING', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         ),
         {
             "id": volume_id,
-            "media_version_id": media_version_id,
+            "version_id": version.id,
             "title": media_kind,
             "format": fmt,
             "key": f"test:{volume_id}",
@@ -713,13 +715,25 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     )
 
     assert audio_result.work_id == epub_result.work_id
+    assert (
+        db_session.execute(
+            text("SELECT COUNT(*) FROM LibraryVersion WHERE workId = :id"),
+            {"id": audio_result.work_id},
+        ).scalar()
+        == 1
+    )
     media_volumes = (
         db_session.execute(
             text(
                 "SELECT media.mediaKind, volume.format, volume.title "
                 "FROM LibraryMediaVersion AS media "
-                "JOIN LibraryVolume AS volume ON volume.mediaVersionId = media.id "
-                "WHERE media.workId = :work_id ORDER BY media.mediaKind"
+                "JOIN LibraryVersion AS version ON version.workId = media.workId "
+                "JOIN LibraryVolume AS volume ON volume.versionId = version.id "
+                "WHERE media.workId = :work_id "
+                "AND ("
+                "(media.mediaKind = 'AUDIOBOOK' AND volume.format = 'AUDIO') "
+                "OR (media.mediaKind = 'EBOOK' AND volume.format = 'EPUB')"
+                ") ORDER BY media.mediaKind"
             ),
             {"work_id": audio_result.work_id},
         )
@@ -1076,8 +1090,8 @@ def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
             text(
                 "SELECT volume.id, volume.trackCount, volume.chapterCount "
                 "FROM LibraryVolume AS volume "
-                "JOIN LibraryMediaVersion AS media ON media.id = volume.mediaVersionId "
-                "WHERE media.workId = :work_id AND volume.hidden = 0"
+                "JOIN LibraryVersion AS version ON version.id = volume.versionId "
+                "WHERE version.workId = :work_id AND volume.hidden = 0"
             ),
             {"work_id": first.work_id},
         )
@@ -1346,7 +1360,7 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
     db_session.add(
         LibraryVolume(
             id="mixed-ebook-volume-2",
-            media_version_id="mixed-ebook",
+            version_id=get_or_create_implicit_version(db_session, "mixed-work").id,
             origin="MANUAL",
             title="Second ebook",
             sort_order=1,
@@ -1821,10 +1835,12 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     volumes = (
         db_session.execute(
             text(
-                "SELECT `id`, `title`, `volumeIndex`, `sortOrder` "
-                "FROM `LibraryVolume` WHERE `mediaVersionId` = :media_version_id ORDER BY `sortOrder`"
+                "SELECT volume.`id`, volume.`title`, volume.`volumeIndex`, volume.`sortOrder` "
+                "FROM `LibraryVolume` volume "
+                "JOIN `LibraryVersion` version ON version.`id` = volume.`versionId` "
+                "WHERE version.`workId` = :work_id ORDER BY volume.`sortOrder`"
             ),
-            {"media_version_id": result.media_version_id},
+            {"work_id": result.work_id},
         )
         .mappings()
         .all()
@@ -2017,9 +2033,9 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
         db_session.execute(
             text(
                 "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
-                "FROM `LibraryVolume` volume JOIN `LibraryMediaVersion` media "
-                "ON media.`id` = volume.`mediaVersionId` "
-                "WHERE media.`workId` = :work_id AND volume.`hidden` = 0"
+                "FROM `LibraryVolume` volume JOIN `LibraryVersion` version "
+                "ON version.`id` = volume.`versionId` "
+                "WHERE version.`workId` = :work_id AND volume.`hidden` = 0"
             ),
             {"work_id": results[0].work_id},
         )
@@ -2352,9 +2368,9 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
         db_session.execute(
             text(
                 "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
-                "FROM `LibraryVolume` volume JOIN `LibraryMediaVersion` media "
-                "ON media.`id` = volume.`mediaVersionId` "
-                "WHERE media.`workId` = :work_id AND volume.`hidden` = 0"
+                "FROM `LibraryVolume` volume JOIN `LibraryVersion` version "
+                "ON version.`id` = volume.`versionId` "
+                "WHERE version.`workId` = :work_id AND volume.`hidden` = 0"
             ),
             {"work_id": result.work_id},
         )
@@ -2595,9 +2611,11 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
         db_session.execute(
             text(
                 "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
-                "FROM `LibraryVolume` volume JOIN `LibraryMediaVersion` media "
-                "ON media.`id` = volume.`mediaVersionId` "
-                "WHERE volume.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK'"
+                "FROM `LibraryVolume` volume JOIN `LibraryVersion` version "
+                "ON version.`id` = volume.`versionId` "
+                "JOIN `LibraryMediaVersion` media ON media.`workId` = version.`workId` "
+                "WHERE volume.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK' "
+                "AND volume.`format` = 'AUDIO'"
             ),
         )
         .mappings()

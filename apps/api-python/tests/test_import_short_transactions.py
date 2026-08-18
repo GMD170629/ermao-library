@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import inspect
 import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
+from sqlalchemy import String, create_engine, event, func, insert, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+
 from app.models.import_pipeline import ImportTask
 from app.modules.imports.application.dto import ImportResult
+from app.modules.imports.application.errors import ImportExecutionError
 from app.modules.imports.application.transactions import (
     BoundedLibraryImportStore,
     BufferedImportPersistence,
@@ -23,8 +29,6 @@ from app.modules.imports.infrastructure.library_import_store import (
     SqlAlchemyLibraryImportStore,
 )
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
-from sqlalchemy import String, create_engine, event, func, insert, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
 class ProbeBase(DeclarativeBase):
@@ -67,7 +71,6 @@ class CompletionStore:
         *,
         task_updates: tuple[tuple[str, Mapping[str, object]], ...],
         volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
-        media_versions_to_prune: tuple[str, ...],
     ) -> None:
         self.task_updates.extend(
             (task_id, dict(columns)) for task_id, columns in task_updates
@@ -151,7 +154,7 @@ def test_reading_units_commit_only_at_explicit_completion_boundary() -> None:
     store.insert_library_volume(
         columns={
             "id": "volume-1",
-            "mediaVersionId": "media-1",
+            "versionId": "version-1",
             "importStatus": "COMPLETED",
         }
     )
@@ -265,7 +268,6 @@ def test_import_completion_updates_a_task_batch_with_one_statement(db_session) -
                 (task.id, {"status": "COMPLETED", "progress": 100}) for task in tasks
             ),
             volume_updates=(),
-            media_versions_to_prune=(),
         )
         db_session.commit()
     finally:
@@ -295,9 +297,7 @@ def test_import_checkpoint_buffers_and_merges_task_rows_before_one_insert(
     ) -> None:
         statements.append(statement)
 
-    transactions = ImportTransactionController(
-        SqlAlchemyImportUnitOfWork(db_session)
-    )
+    transactions = ImportTransactionController(SqlAlchemyImportUnitOfWork(db_session))
     store = BoundedLibraryImportStore(
         cast(BufferedImportPersistence, SqlAlchemyLibraryImportStore(db_session)),
         transactions,
@@ -334,11 +334,14 @@ def test_import_checkpoint_buffers_and_merges_task_rows_before_one_insert(
         and '"ImportTask"' in statement
     ]
     assert len(task_inserts) == 1
-    assert db_session.scalar(
-        select(func.count())
-        .select_from(ImportTask)
-        .where(ImportTask.status == "PARSING")
-    ) == 100
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ImportTask)
+            .where(ImportTask.status == "PARSING")
+        )
+        == 100
+    )
 
 
 def test_import_file_overlay_returns_buffered_row_without_writing(db_session) -> None:
@@ -349,9 +352,7 @@ def test_import_file_overlay_returns_buffered_row_without_writing(db_session) ->
     ) -> None:
         statements.append(statement)
 
-    transactions = ImportTransactionController(
-        SqlAlchemyImportUnitOfWork(db_session)
-    )
+    transactions = ImportTransactionController(SqlAlchemyImportUnitOfWork(db_session))
     store = BoundedLibraryImportStore(
         cast(BufferedImportPersistence, SqlAlchemyLibraryImportStore(db_session)),
         transactions,
@@ -478,6 +479,36 @@ def test_blocked_import_preparation_does_not_block_an_independent_writer(
     assert worker_error == []
     assert elapsed < 0.5
     with Session(engine) as session:
-        assert (
-            session.scalar(select(func.count()).select_from(TransactionProbe)) == 2
+        assert session.scalar(select(func.count()).select_from(TransactionProbe)) == 2
+
+
+def test_insert_library_volume_requires_version_id() -> None:
+    unit_of_work = RecordingUnitOfWork()
+    transactions = ImportTransactionController(unit_of_work)
+    store = BoundedLibraryImportStore(
+        cast(BufferedImportPersistence, CompletionStore()),
+        transactions,
+        ImportCompletion(),
+    )
+
+    with pytest.raises(ImportExecutionError) as error:
+        store.insert_library_volume(
+            columns={
+                "id": "volume-missing-version",
+                "importStatus": "PARSING",
+            }
         )
+
+    assert error.value.code == "VERSION_REQUIRED"
+    assert error.value.retryable is False
+
+
+def test_import_completion_does_not_reference_volume_media_version_id() -> None:
+    completion_source = inspect.getsource(
+        SqlAlchemyLibraryImportStore.apply_import_completion
+    )
+    persist_source = inspect.getsource(persist_import_completion)
+    assert "media_version_id" not in completion_source
+    assert "mediaVersionId" not in completion_source
+    assert "media_versions_to_prune" not in completion_source
+    assert "media_versions_to_prune" not in persist_source

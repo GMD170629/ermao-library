@@ -8,8 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.library import LibraryVersion
-
-IMPLICIT_VERSION_SOURCE_KEY = "__implicit__"
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 
 
 def get_or_create_implicit_version(

@@ -44,6 +44,49 @@ from app.modules.library.infrastructure.media_kind_sql import (
 )
 
 
+def _volume_ids_for_media_version(media_version_id: str):
+    return (
+        select(LibraryVolume.id)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .join(
+            LibraryMediaVersion,
+            and_(
+                LibraryMediaVersion.work_id == LibraryVersion.work_id,
+                LibraryMediaVersion.media_kind
+                == volume_effective_media_kind(LibraryVolume),
+            ),
+        )
+        .where(LibraryMediaVersion.id == media_version_id)
+    )
+
+
+def _volumes_matching_media_version(media_version_id: str):
+    return LibraryVolume.id.in_(_volume_ids_for_media_version(media_version_id))
+
+
+def _volume_ids_for_media_versions(media_version_ids: list[str]):
+    return (
+        select(LibraryVolume.id)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .join(
+            LibraryMediaVersion,
+            and_(
+                LibraryMediaVersion.work_id == LibraryVersion.work_id,
+                LibraryMediaVersion.media_kind
+                == volume_effective_media_kind(LibraryVolume),
+            ),
+        )
+        .where(LibraryMediaVersion.id.in_(media_version_ids))
+    )
+
+
+def _media_version_matches_volume() -> Any:
+    return and_(
+        LibraryMediaVersion.work_id == LibraryVersion.work_id,
+        LibraryMediaVersion.media_kind == volume_effective_media_kind(LibraryVolume),
+    )
+
+
 def _records(
     db: Session,
     statement: Any,
@@ -91,7 +134,7 @@ def list_reflowable_chapters_for_media_version(
         db,
         LibraryReadingUnit.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
         func.lower(LibraryReadingUnit.unit_type) == "chapter",
@@ -293,7 +336,7 @@ def get_media_version_format(
 ) -> dict[str, Any] | None:
     volume = db.scalar(
         select(LibraryVolume)
-        .where(LibraryVolume.media_version_id == media_version_id)
+        .where(_volumes_matching_media_version(media_version_id))
         .order_by(LibraryVolume.sort_order, LibraryVolume.id)
         .limit(1)
     )
@@ -308,7 +351,7 @@ def get_media_version_cover_path(
     volume = db.scalar(
         select(LibraryVolume)
         .where(
-            LibraryVolume.media_version_id == media_version_id,
+            _volumes_matching_media_version(media_version_id),
             LibraryVolume.cover_path.is_not(None),
         )
         .order_by(LibraryVolume.sort_order, LibraryVolume.id)
@@ -327,7 +370,7 @@ def get_organize_job_for_work_media_version(
         OrganizeJob.work_id == work_id,
         OrganizeJob.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
     )
@@ -407,7 +450,7 @@ def sum_file_size_bytes_for_media_version(db: Session, media_version_id: str) ->
             select(func.coalesce(func.sum(LibraryFile.size_bytes), 0)).where(
                 LibraryFile.volume_id.in_(
                     select(LibraryVolume.id).where(
-                        LibraryVolume.media_version_id == media_version_id
+                        _volumes_matching_media_version(media_version_id)
                     )
                 )
             ),
@@ -423,7 +466,7 @@ def sum_volume_chapter_count_for_media_version(
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryVolume.chapter_count), 0)).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             ),
             0,
         )
@@ -435,7 +478,7 @@ def sum_volume_page_count_for_media_version(db: Session, media_version_id: str) 
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryVolume.page_count), 0)).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             ),
             0,
         )
@@ -443,7 +486,7 @@ def sum_volume_page_count_for_media_version(db: Session, media_version_id: str) 
 
 
 def count_volumes_for_media_version(db: Session, media_version_id: str) -> int:
-    return _count_volumes(db, LibraryVolume.media_version_id == media_version_id)
+    return _count_volumes(db, _volumes_matching_media_version(media_version_id))
 
 
 def list_volume_ordering_for_media_version(
@@ -457,7 +500,7 @@ def list_volume_ordering_for_media_version(
             LibraryVolume.volume_index.label("volumeIndex"),
             LibraryVolume.sort_order.label("sortOrder"),
         )
-        .where(LibraryVolume.media_version_id == media_version_id)
+        .where(_volumes_matching_media_version(media_version_id))
         .order_by(LibraryVolume.id.asc()),
     )
 
@@ -486,12 +529,9 @@ def count_visible_volumes_for_work(db: Session, work_id: str) -> int:
         db.scalar(
             select(func.count())
             .select_from(LibraryVolume)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
             .where(
-                LibraryMediaVersion.work_id == work_id,
+                LibraryVersion.work_id == work_id,
                 LibraryVolume.hidden.is_(False),
             )
         )
@@ -530,7 +570,7 @@ def sum_audio_file_size_for_media_version(db: Session, media_version_id: str) ->
             select(func.coalesce(func.sum(LibraryFile.size_bytes), 0)).where(
                 LibraryFile.volume_id.in_(
                     select(LibraryVolume.id).where(
-                        LibraryVolume.media_version_id == media_version_id
+                        _volumes_matching_media_version(media_version_id)
                     )
                 ),
                 func.upper(LibraryFile.kind) == "AUDIO",
@@ -547,7 +587,7 @@ def sum_audio_duration_for_media_version(db: Session, media_version_id: str) -> 
             select(func.coalesce(func.sum(LibraryFile.duration_ms), 0)).where(
                 LibraryFile.volume_id.in_(
                     select(LibraryVolume.id).where(
-                        LibraryVolume.media_version_id == media_version_id
+                        _volumes_matching_media_version(media_version_id)
                     )
                 ),
                 func.upper(LibraryFile.kind) == "AUDIO",
@@ -562,7 +602,7 @@ def count_audio_files_for_media_version(db: Session, media_version_id: str) -> i
         db,
         LibraryFile.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
         func.upper(LibraryFile.kind) == "AUDIO",
@@ -574,7 +614,7 @@ def count_audio_chapters_for_media_version(db: Session, media_version_id: str) -
         db,
         LibraryReadingUnit.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
         LibraryReadingUnit.unit_type == "audio_chapter",
@@ -639,7 +679,7 @@ def list_audio_files_for_media_version(
         db,
         LibraryFile.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
         func.upper(LibraryFile.kind) == "AUDIO",
@@ -665,7 +705,7 @@ def list_audio_chapters_for_media_version(
         db,
         LibraryReadingUnit.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
         LibraryReadingUnit.unit_type == "audio_chapter",
@@ -716,7 +756,7 @@ def list_reading_progress_for_media_version(
         db,
         LibraryReadingProgress.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         ),
     )
@@ -732,7 +772,7 @@ def list_reading_progress_for_media_versions(
         db,
         LibraryReadingProgress.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id.in_(media_version_ids)
+                LibraryVolume.id.in_(_volume_ids_for_media_versions(media_version_ids))
             )
         ),
         order_by=(
@@ -781,9 +821,15 @@ def list_visible_media_versions_for_work_and_format(
 ) -> list[dict[str, Any]]:
     rows = db.execute(
         select(LibraryMediaVersion.id, LibraryVolume.resource_key)
+        .select_from(LibraryMediaVersion)
+        .join(LibraryVersion, LibraryVersion.work_id == LibraryMediaVersion.work_id)
         .join(
             LibraryVolume,
-            LibraryVolume.media_version_id == LibraryMediaVersion.id,
+            and_(
+                LibraryVolume.version_id == LibraryVersion.id,
+                volume_effective_media_kind(LibraryVolume)
+                == LibraryMediaVersion.media_kind,
+            ),
         )
         .where(
             LibraryMediaVersion.work_id == work_id,
@@ -802,7 +848,7 @@ def get_first_volume_for_media_version(
 ) -> dict[str, Any] | None:
     return _get_volume(
         db,
-        LibraryVolume.media_version_id == media_version_id,
+        _volumes_matching_media_version(media_version_id),
         order_by=(
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
@@ -816,13 +862,12 @@ def get_volume_context_by_id(db: Session, volume_id: str) -> dict[str, Any] | No
         db.execute(
             select(
                 LibraryVolume.__table__,
+                LibraryMediaVersion.id.label("mediaVersionId"),
                 LibraryMediaVersion.work_id.label("workId"),
                 LibraryMediaVersion.media_kind.label("mediaKind"),
             )
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .join(LibraryMediaVersion, _media_version_matches_volume())
             .where(LibraryVolume.id == volume_id)
         )
         .mappings()
@@ -837,9 +882,15 @@ def find_audio_media_version_by_resource_key(
     row = (
         db.execute(
             select(LibraryMediaVersion.__table__)
+            .select_from(LibraryMediaVersion)
+            .join(LibraryVersion, LibraryVersion.work_id == LibraryMediaVersion.work_id)
             .join(
                 LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                and_(
+                    LibraryVolume.version_id == LibraryVersion.id,
+                    volume_effective_media_kind(LibraryVolume)
+                    == LibraryMediaVersion.media_kind,
+                ),
             )
             .where(
                 LibraryVolume.resource_key == resource_key,
@@ -863,10 +914,8 @@ def find_media_version_resource_key_conflict(
     volume = (
         db.execute(
             select(LibraryVolume.__table__)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .join(LibraryMediaVersion, _media_version_matches_volume())
             .where(
                 LibraryMediaVersion.work_id == work_id,
                 LibraryVolume.resource_key == resource_key,
@@ -885,7 +934,7 @@ def list_volume_cover_paths_for_media_version(
 ) -> list[dict[str, Any]]:
     return _list_volumes(
         db,
-        LibraryVolume.media_version_id == media_version_id,
+        _volumes_matching_media_version(media_version_id),
         LibraryVolume.cover_path.is_not(None),
         LibraryVolume.cover_path != "",
         order_by=(
@@ -900,10 +949,8 @@ def list_volume_cover_paths_for_media_version(
 def find_work_cover_media_version(db: Session, work_id: str) -> dict[str, Any] | None:
     volume = db.scalars(
         select(LibraryVolume)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .join(LibraryMediaVersion, _media_version_matches_volume())
         .where(
             LibraryMediaVersion.work_id == work_id,
             func.coalesce(LibraryVolume.hidden, 0) == 0,
@@ -927,10 +974,8 @@ def find_work_cover_media_version(db: Session, work_id: str) -> dict[str, Any] |
 def has_generated_cover_path(db: Session, work_id: str, cover_path: str) -> bool:
     volume_match = db.scalar(
         select(LibraryVolume.cover_path)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .join(LibraryMediaVersion, _media_version_matches_volume())
         .where(
             LibraryMediaVersion.work_id == work_id,
             LibraryVolume.cover_path == cover_path,
@@ -948,7 +993,7 @@ def get_latest_audio_tags_metadata(
         .where(
             LibraryMetadata.volume_id.in_(
                 select(LibraryVolume.id).where(
-                    LibraryVolume.media_version_id == media_version_id
+                    _volumes_matching_media_version(media_version_id)
                 )
             ),
             LibraryMetadata.source == "audio_tags",
@@ -964,7 +1009,7 @@ def delete_audio_metadata_sources(db: Session, media_version_id: str) -> None:
         delete(LibraryMetadata).where(
             LibraryMetadata.volume_id.in_(
                 select(LibraryVolume.id).where(
-                    LibraryVolume.media_version_id == media_version_id
+                    _volumes_matching_media_version(media_version_id)
                 )
             ),
             LibraryMetadata.source.in_(("audio_tags", "audiobook_manifest")),
@@ -977,7 +1022,7 @@ def detach_audio_chapters_for_media_version(db: Session, media_version_id: str) 
         delete(LibraryReadingUnit).where(
             LibraryReadingUnit.volume_id.in_(
                 select(LibraryVolume.id).where(
-                    LibraryVolume.media_version_id == media_version_id
+                    _volumes_matching_media_version(media_version_id)
                 )
             ),
             LibraryReadingUnit.unit_type == "audio_chapter",
@@ -993,7 +1038,7 @@ def detach_audio_chapters_for_media_version_or_files(
     filters = [
         LibraryReadingUnit.volume_id.in_(
             select(LibraryVolume.id).where(
-                LibraryVolume.media_version_id == media_version_id
+                _volumes_matching_media_version(media_version_id)
             )
         )
     ]
@@ -1042,10 +1087,8 @@ def find_deferred_source_volume(
             LibraryMediaVersion.media_kind,
         )
         .join(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .join(LibraryMediaVersion, _media_version_matches_volume())
         .where(
             LibraryFile.path == source_path,
             LibraryMediaVersion.work_id == work_id,

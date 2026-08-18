@@ -26,6 +26,7 @@ from app.modules.imports.application.import_support import (
     _attrs,
     _classification_columns,
     _classification_result_type,
+    _ensure_implicit_version,
     _ensure_work,
     _extract_isbn,
     _file_resource_key,
@@ -156,6 +157,7 @@ def _import_epub(
     if work_updates:
         store.update_library_work(work["id"], columns=work_updates)
         work = queries.get_work_by_id(str(work["id"])) or {**work, **work_updates}
+    version = _ensure_implicit_version(store, work["id"])
     if volume_info:
         source_key = _source_group_key(options, metadata["title"])
         media_version = _select_volume_media_version(
@@ -187,7 +189,7 @@ def _import_epub(
             volume = store.insert_library_volume(
                 columns={
                     "id": _id(),
-                    "mediaVersionId": media_version["id"],
+                    "versionId": version["id"],
                     "title": volume_info.title,
                     "volumeIndex": volume_info.series_index,
                     "sortOrder": sort_order,
@@ -336,7 +338,7 @@ def _import_epub(
         volume = store.insert_library_volume(
             columns={
                 "id": volume_id,
-                "mediaVersionId": media_version["id"],
+                "versionId": version["id"],
                 "title": resolved_local.metadata.volume_title or identity.title,
                 "sortOrder": 0,
                 "format": "EPUB",

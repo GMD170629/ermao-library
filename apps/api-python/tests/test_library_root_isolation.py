@@ -180,6 +180,16 @@ def test_identical_title_and_merge_key_create_separate_works_per_library(
     assert work_a.library_id == "library-a"
     assert work_b.library_id == "library-b"
     assert db_session.scalar(select(func.count()).select_from(LibraryWork)) == 2
+    versions = db_session.scalars(select(LibraryVersion)).all()
+    assert len(versions) == 2
+    assert {version.work_id for version in versions} == {first.work_id, second.work_id}
+    assert {version.source_key for version in versions} == {IMPLICIT_VERSION_SOURCE_KEY}
+    volume_a = db_session.get(LibraryVolume, first.volume_id)
+    volume_b = db_session.get(LibraryVolume, second.volume_id)
+    assert volume_a is not None and volume_b is not None
+    version_by_work = {version.work_id: version.id for version in versions}
+    assert volume_a.version_id == version_by_work[first.work_id]
+    assert volume_b.version_id == version_by_work[second.work_id]
 
 
 def test_patch_library_organization_mode_persists_enum_value(

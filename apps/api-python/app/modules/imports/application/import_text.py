@@ -20,6 +20,7 @@ from app.modules.imports.application.identity_resolution import (
 from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
+    _ensure_implicit_version,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -74,10 +75,11 @@ def refresh_existing_reflowable_source(
     volume_id = str(file_row.get("volumeId") or existing.volume_id or "")
     volume = queries.get_volume_context_by_id(volume_id) if volume_id else None
     if volume is None:
+        version = _ensure_implicit_version(store, existing.work_id)
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "mediaVersionId": existing.media_version_id,
+                "versionId": version["id"],
                 "title": source_path.stem,
                 "format": source_format,
                 "resourceKey": _hash_text(str(source_path)),
@@ -303,6 +305,7 @@ def _import_reflowable_source(
             "libraryId": options.library_id,
         },
     )
+    version = _ensure_implicit_version(store, work["id"])
     volume_title = resolved_local.metadata.volume_title or identity.title
     volume_index = identity.volume_index
     source_group_key = _source_group_key(options, identity.title)
@@ -322,7 +325,7 @@ def _import_reflowable_source(
     volume = store.insert_library_volume(
         columns={
             "id": _id(),
-            "mediaVersionId": media_version["id"],
+            "versionId": version["id"],
             "title": volume_title,
             "volumeIndex": volume_index,
             "sortOrder": (

@@ -21,6 +21,7 @@ from app.modules.imports.application.identity_resolution import (
 from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
+    _ensure_implicit_version,
     _ensure_work,
     _file_resource_key,
     _finalize_work_cover,
@@ -197,6 +198,7 @@ def _import_pdf(
             "libraryId": options.library_id,
         },
     )
+    version = _ensure_implicit_version(store, work["id"])
     cover_path = None
     try:
         store.update_import_task(task_id, columns={"message": "正在建立 PDF 记录"})
@@ -231,7 +233,7 @@ def _import_pdf(
         volume = store.insert_library_volume(
             columns={
                 "id": volume_id,
-                "mediaVersionId": media_version["id"],
+                "versionId": version["id"],
                 "title": resolved_local.metadata.volume_title or identity.title,
                 "volumeIndex": identity.volume_index,
                 "sortOrder": (

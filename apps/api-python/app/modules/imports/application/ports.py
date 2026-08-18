@@ -162,7 +162,6 @@ class LibraryImportStore(Protocol):
         *,
         task_updates: tuple[tuple[str, Mapping[str, object]], ...],
         volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
-        media_versions_to_prune: tuple[str, ...],
     ) -> None: ...
 
     def insert_import_asset(
@@ -183,6 +182,10 @@ class LibraryImportStore(Protocol):
         self, work_id: str, *, columns: dict[str, object]
     ) -> None: ...
 
+    def ensure_library_version(
+        self, *, columns: dict[str, object]
+    ) -> dict[str, object]: ...
+
     def ensure_library_media_version(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]: ...
@@ -190,8 +193,6 @@ class LibraryImportStore(Protocol):
     def update_library_media_version(
         self, media_version_id: str, *, columns: dict[str, object]
     ) -> None: ...
-
-    def delete_library_media_version_if_empty(self, media_version_id: str) -> None: ...
 
     def insert_library_volume(
         self, *, columns: dict[str, object]

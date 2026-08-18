@@ -23,6 +23,7 @@ class ImportWriteTarget(StrEnum):
     IMPORT_ASSET = "import_asset"
     IMPORT_LOG = "import_log"
     LIBRARY_WORK = "library_work"
+    LIBRARY_VERSION = "library_version"
     LIBRARY_MEDIA_VERSION = "library_media_version"
     LIBRARY_VOLUME = "library_volume"
     LIBRARY_FILE = "library_file"
@@ -80,6 +81,10 @@ class ImportDependencyProjectionReader(Protocol):
         self, work_id: str, media_kind: str
     ) -> dict[str, object] | None: ...
 
+    def find_library_version(
+        self, work_id: str, source_key: str
+    ) -> dict[str, object] | None: ...
+
 
 class BufferedImportPersistence(
     PreparedImportBatchWriter, ImportDependencyProjectionReader, Protocol
@@ -93,7 +98,6 @@ class ImportCompletionWriter(Protocol):
         *,
         task_updates: tuple[tuple[str, Mapping[str, object]], ...],
         volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
-        media_versions_to_prune: tuple[str, ...],
     ) -> None: ...
 
     def get_library_volume_import_status(self, volume_id: str) -> str | None: ...
@@ -172,6 +176,18 @@ class PreparedImportWriteBuffer:
                 candidate_target == ImportWriteTarget.LIBRARY_MEDIA_VERSION
                 and values.get("workId") == work_id
                 and values.get("mediaKind") == media_kind
+            ):
+                return dict(values)
+        return None
+
+    def find_version_insert(
+        self, work_id: object, source_key: object
+    ) -> dict[str, object] | None:
+        for (candidate_target, _target_id), values in self._inserts.items():
+            if (
+                candidate_target == ImportWriteTarget.LIBRARY_VERSION
+                and values.get("workId") == work_id
+                and values.get("sourceKey") == source_key
             ):
                 return dict(values)
         return None
@@ -258,7 +274,6 @@ class PreparedImport:
     result: ImportResult
     task_updates: tuple[tuple[str, Mapping[str, object]], ...]
     volume_updates: tuple[tuple[str, Mapping[str, object]], ...]
-    media_versions_to_prune: tuple[str, ...]
 
 
 @dataclass
@@ -366,7 +381,6 @@ class ImportCompletion:
 
     task_updates: dict[str, dict[str, object]] = field(default_factory=dict)
     volume_updates: dict[str, dict[str, object]] = field(default_factory=dict)
-    media_versions_to_prune: set[str] = field(default_factory=set)
 
     def defer_task(self, task_id: str, columns: dict[str, object]) -> None:
         self.task_updates[task_id] = {
@@ -383,9 +397,6 @@ class ImportCompletion:
     def has_volume(self, volume_id: str) -> bool:
         return volume_id in self.volume_updates
 
-    def defer_media_version_prune(self, media_version_id: str) -> None:
-        self.media_versions_to_prune.add(media_version_id)
-
     def prepare(self, result: ImportResult) -> PreparedImport:
         return PreparedImport(
             result=result,
@@ -397,7 +408,6 @@ class ImportCompletion:
                 (volume_id, MappingProxyType(dict(columns)))
                 for volume_id, columns in self.volume_updates.items()
             ),
-            media_versions_to_prune=tuple(sorted(self.media_versions_to_prune)),
         )
 
 
@@ -408,7 +418,6 @@ def persist_import_completion(
     store.apply_import_completion(
         task_updates=prepared.task_updates,
         volume_updates=prepared.volume_updates,
-        media_versions_to_prune=prepared.media_versions_to_prune,
     )
 
 
@@ -509,6 +518,27 @@ class BoundedLibraryImportStore:
     def update_library_work(self, work_id: str, *, columns: dict[str, object]) -> None:
         self._update(ImportWriteTarget.LIBRARY_WORK, work_id, columns)
 
+    def ensure_library_version(
+        self, *, columns: dict[str, object]
+    ) -> dict[str, object]:
+        resource_key = f"{columns.get('workId')}|{columns.get('sourceKey')}"
+        values = self._scoped_columns("version", resource_key, columns)
+        buffered = self._writes.find_version_insert(
+            values.get("workId"), values.get("sourceKey")
+        )
+        if buffered is not None:
+            return buffered
+        self._transactions.prepare_for_dependency_read()
+        try:
+            existing = self._projection_reader.find_library_version(
+                str(values["workId"]), str(values["sourceKey"])
+            )
+        finally:
+            self._transactions.finish_dependency_read()
+        if existing is not None:
+            return existing
+        return self._insert(ImportWriteTarget.LIBRARY_VERSION, values)
+
     def ensure_library_media_version(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
@@ -535,12 +565,15 @@ class BoundedLibraryImportStore:
     ) -> None:
         self._update(ImportWriteTarget.LIBRARY_MEDIA_VERSION, media_version_id, columns)
 
-    def delete_library_media_version_if_empty(self, media_version_id: str) -> None:
-        self._completion.defer_media_version_prune(media_version_id)
-
     def insert_library_volume(self, *, columns: dict[str, object]) -> dict[str, object]:
         resource_key = columns.get("resourceKey") or columns.get("sourceGroupKey")
         values = self._scoped_columns("volume", resource_key, columns)
+        if not str(values.get("versionId") or "").strip():
+            raise ImportExecutionError(
+                "VERSION_REQUIRED",
+                "导入必须指定所属版本",
+                retryable=False,
+            )
         terminal_status = values.get("importStatus")
         if terminal_status == "COMPLETED":
             values["importStatus"] = "PARSING"

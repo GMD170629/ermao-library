@@ -18,15 +18,16 @@ from app.bootstrap.imports import (
 from app.db.base import Base
 from app.models.import_pipeline import BookConversionTask, ImportTask
 from app.models.library import (
+    Library,
     LibraryFile,
     LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.models.organize import OrganizePolicy
-from app.models.library import Library
 from app.models.settings import SystemEvent
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
@@ -48,6 +49,7 @@ from app.modules.imports.infrastructure.orchestration_services import (
 )
 from app.modules.imports.infrastructure.pdf_inspection import inspect_pdf
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
 from app.services.import_preferences import (
     SUPPORTED_IMPORT_EXTENSIONS,
@@ -82,7 +84,7 @@ def create_worker_tables(db):
 def add_library(db, root_path: Path, *, folder_id: str = "folder-1") -> None:
     db.add(
         Library(
-            organization_mode="FLAT", 
+            organization_mode="FLAT",
             id=folder_id,
             name=root_path.name,
             root_path=str(root_path),
@@ -243,8 +245,7 @@ def write_epub_cover_reference_fixture(
         )
         archive.writestr(
             "OEBPS/one.xhtml",
-            "<html><head><title>正文</title></head>"
-            "<body><h1>正文</h1></body></html>",
+            "<html><head><title>正文</title></head><body><h1>正文</h1></body></html>",
         )
         if cover_entry:
             archive.writestr(cover_entry, b"optional-cover")
@@ -494,15 +495,14 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=epub, origin="MANUAL", original_name="book.epub"
-        ),
+        _options(source_file_path=epub, origin="MANUAL", original_name="book.epub"),
     )
 
     assert result.import_status == "completed"
     assert result.type == "ebook"
     assert result.total_units == 0
     assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryVersion") == 1
     assert _count(db_session, "LibraryMediaVersion") == 1
     assert _count(db_session, "LibraryReadingUnit") == 0
     assert (
@@ -573,6 +573,11 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
         "media-version",
         f"{normalized_source}|{work_id}|EBOOK",
     )
+    version_id = stable_import_resource_id(
+        task_id,
+        "version",
+        f"{normalized_source}|{work_id}|{IMPLICIT_VERSION_SOURCE_KEY}",
+    )
     file_id = stable_import_resource_id(
         task_id,
         "file",
@@ -601,6 +606,13 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
     )
     db_session.flush()
     db_session.add(
+        LibraryVersion(
+            id=version_id,
+            work_id=work_id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        )
+    )
+    db_session.add(
         LibraryMediaVersion(
             id=media_version_id,
             work_id=work_id,
@@ -611,7 +623,7 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
     db_session.add(
         LibraryVolume(
             id=volume_id,
-            media_version_id=media_version_id,
+            version_id=version_id,
             title="Sample",
             format="EPUB",
             resource_key=resource_key,
@@ -661,6 +673,7 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
     assert db_session.scalar(select(func.count()).select_from(LibraryVolume)) == 1
     assert db_session.scalar(select(func.count()).select_from(LibraryWork)) == 1
     assert db_session.scalar(select(func.count()).select_from(LibraryMediaVersion)) == 1
+    assert db_session.scalar(select(func.count()).select_from(LibraryVersion)) == 1
 
 
 def test_import_records_ai_identity_and_result(
@@ -863,6 +876,7 @@ def test_deleted_source_fails_and_finishes_claimed_import_task(
         status="PARSING",
         original_name=source.name,
         source_path=str(source),
+        library_id="test-library",
     )
     db_session.execute(
         text(
@@ -919,6 +933,7 @@ def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(
         origin="WATCH",
         status="PARSING",
         source_path=str(missing_source),
+        library_id="test-library",
     )
     db_session.execute(
         text(
@@ -1436,9 +1451,9 @@ def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
     volumes = (
         db_session.execute(
             text(
-                "SELECT title, volumeIndex, sortOrder, chapterCount FROM LibraryVolume WHERE mediaVersionId = :id ORDER BY sortOrder"
+                "SELECT title, volumeIndex, sortOrder, chapterCount FROM LibraryVolume volume JOIN LibraryVersion version ON version.id = volume.versionId WHERE version.workId = :id ORDER BY volume.sortOrder"
             ),
-            {"id": first_result.media_version_id},
+            {"id": first_result.work_id},
         )
         .mappings()
         .all()
@@ -1536,7 +1551,8 @@ def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
         volumes = list(
             db_session.scalars(
                 select(LibraryVolume)
-                .where(LibraryVolume.media_version_id == first_result.media_version_id)
+                .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+                .where(LibraryVersion.work_id == first_result.work_id)
                 .order_by(LibraryVolume.sort_order)
             )
         )
@@ -1852,16 +1868,12 @@ def test_import_epub_groups_same_work_title_across_directories(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=first, origin="MANUAL", original_name=first.name
-        ),
+        _options(source_file_path=first, origin="MANUAL", original_name=first.name),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=second, origin="MANUAL", original_name=second.name
-        ),
+        _options(source_file_path=second, origin="MANUAL", original_name=second.name),
     )
 
     assert first_result.duplicate is False
@@ -1899,9 +1911,7 @@ def test_embedded_metadata_prevents_directory_from_forcing_cross_format_grouping
     comic_result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
 
     assert len({epub_result.work_id, pdf_result.work_id, comic_result.work_id}) == 3
@@ -2169,7 +2179,7 @@ def test_import_reuses_legacy_work_by_title_and_replaces_old_merge_key(
     test_settings.resolved_storage_root.mkdir(parents=True)
     db_session.add(
         LibraryWork(
-            library_id="test-library", 
+            library_id="test-library",
             id="legacy-work",
             title="同一作品",
             normalized_title="同一作品",
@@ -2590,22 +2600,19 @@ def test_import_comic_persists_page_units_and_detects_duplicate(
     first = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
 
     assert first.type == "comic"
     assert first.total_units == 2
     assert second.duplicate is True
     assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryVersion") == 1
     assert _count(db_session, "LibraryVolume") == 1
     assert _count(db_session, "LibraryReadingUnit") == 2
     page_rows = db_session.execute(
@@ -2621,7 +2628,10 @@ def test_import_comic_persists_page_units_and_detects_duplicate(
     assert first_page_metadata["originalName"] == "001.jpg"
     assert first_page_metadata["pageInVolume"] == 1
     assert first_page_metadata["pageInSection"] == 1
-    assert db_session.execute(text("SELECT pageIndexVersion FROM LibraryFile")).scalar() == 1
+    assert (
+        db_session.execute(text("SELECT pageIndexVersion FROM LibraryFile")).scalar()
+        == 1
+    )
     work = (
         db_session.execute(
             text("SELECT title, author, description, tags FROM LibraryWork")
@@ -2717,9 +2727,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=pdf, origin="MANUAL", original_name="Manual PDF.pdf"
-        ),
+        _options(source_file_path=pdf, origin="MANUAL", original_name="Manual PDF.pdf"),
     )
 
     assert result.import_status == "completed"
@@ -2727,6 +2735,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     assert result.format == "pdf"
     assert result.total_units == 1
     assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryVersion") == 1
     edition = (
         db_session.execute(
             text("SELECT format, coverPath, coverStatus FROM LibraryVolume")
@@ -2864,9 +2873,7 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=pdf, origin="MANUAL", original_name="fallback.pdf"
-        ),
+        _options(source_file_path=pdf, origin="MANUAL", original_name="fallback.pdf"),
     )
 
     assert result.import_status == "completed"
@@ -2976,14 +2983,12 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
     raw_result = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=source, origin="MANUAL", original_name=source.name
-        ),
+        _options(source_file_path=source, origin="MANUAL", original_name=source.name),
     )
     raw_volume = (
         db_session.execute(
             text(
-                "SELECT format, hidden, chapterCount FROM LibraryVolume WHERE id = :id"
+                "SELECT format, hidden, chapterCount, versionId FROM LibraryVolume WHERE id = :id"
             ),
             {"id": raw_result.volume_id},
         )
@@ -3001,6 +3006,7 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
     assert raw_volume["format"] == "TXT"
     assert not raw_volume["hidden"]
     assert raw_volume["chapterCount"] is None
+    assert raw_volume["versionId"]
     assert raw_result.total_units == 0
     assert db_session.scalar(select(func.count()).select_from(LibraryReadingUnit)) == 0
     assert Path(raw_file["path"]) == source.resolve()
@@ -3020,8 +3026,8 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
             text(
                 "SELECT volume.id, volume.format, volume.hidden, volume.derivedFromVolumeId "
                 "FROM LibraryVolume AS volume "
-                "JOIN LibraryMediaVersion AS media ON media.id = volume.mediaVersionId "
-                "WHERE media.workId = :work_id ORDER BY volume.sortOrder, volume.createdAt"
+                "JOIN LibraryVersion AS version ON version.id = volume.versionId "
+                "WHERE version.workId = :work_id ORDER BY volume.sortOrder, volume.createdAt"
             ),
             {"work_id": raw_result.work_id},
         )
@@ -3144,11 +3150,8 @@ def test_native_reflowable_folder_work_keeps_filename_as_volume_title(
     assert work.title == "吉林美术-哆啦A梦珍藏版1-45卷 MOBI格式"
     volumes = db_session.scalars(
         select(LibraryVolume)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .where(LibraryMediaVersion.work_id == first.work_id)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .where(LibraryVersion.work_id == first.work_id)
         .order_by(LibraryVolume.sort_order)
     ).all()
     assert [volume.title for volume in volumes] == [volume_2.stem, volume_43.stem]
@@ -3187,7 +3190,8 @@ def test_native_reflowable_ranges_sort_by_range_start(
     assert len({result.work_id for result in results}) == 1
     volumes = db_session.scalars(
         select(LibraryVolume)
-        .where(LibraryVolume.media_version_id == results[0].media_version_id)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .where(LibraryVersion.work_id == results[0].work_id)
         .order_by(LibraryVolume.sort_order)
     ).all()
     assert [volume.title for volume in volumes] == [
@@ -3237,7 +3241,7 @@ def test_direct_monitor_root_volumes_group_by_resolved_metadata(
     monitor_root.mkdir()
     db_session.add(
         Library(
-            organization_mode="FLAT", 
+            organization_mode="FLAT",
             id="monitor-root",
             name="books",
             root_path=str(monitor_root),
@@ -3298,9 +3302,7 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=source, origin="MANUAL", original_name=source.name
-        ),
+        _options(source_file_path=source, origin="MANUAL", original_name=source.name),
     )
     volume = db_session.get(LibraryVolume, imported.volume_id)
     work = db_session.get(LibraryWork, imported.work_id)
@@ -3330,9 +3332,7 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     refreshed = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=source, origin="MANUAL", original_name=source.name
-        ),
+        _options(source_file_path=source, origin="MANUAL", original_name=source.name),
     )
 
     db_session.refresh(volume)
@@ -3348,12 +3348,9 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     assert (
         db_session.scalar(
             select(LibraryVolume)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
             .where(
-                LibraryMediaVersion.work_id == imported.work_id,
+                LibraryVersion.work_id == imported.work_id,
                 LibraryVolume.format == "EPUB",
             )
         )
@@ -3384,9 +3381,7 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(
     (root / "notes.txt").write_text("ignored", encoding="utf-8")
     (nested / "second.pdf").write_bytes(b"pdf")
     (hidden / "hidden.cbz").write_bytes(b"hidden")
-    folder = LibraryConfig(
-        id="folder-scan", root_path=str(root), min_file_size_bytes=1
-    )
+    folder = LibraryConfig(id="folder-scan", root_path=str(root), min_file_size_bytes=1)
 
     class CollectingQueue:
         def __init__(self):
