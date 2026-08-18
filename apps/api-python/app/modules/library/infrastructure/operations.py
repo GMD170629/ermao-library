@@ -487,14 +487,12 @@ def delete_work(db: Session, work_id: str) -> None:
     db.execute(delete(LibraryWork).where(LibraryWork.id == work_id))
 
 
-def delete_media_version_if_empty(db: Session, media_version_id: str) -> None:
+def delete_version_if_empty(db: Session, version_id: str) -> None:
     has_volume = db.scalar(
-        select(LibraryVolume.id)
-        .where(LibraryVolume.version_id == media_version_id)
-        .limit(1)
+        select(LibraryVolume.id).where(LibraryVolume.version_id == version_id).limit(1)
     )
     if has_volume is None:
-        db.execute(delete(LibraryVersion).where(LibraryVersion.id == media_version_id))
+        db.execute(delete(LibraryVersion).where(LibraryVersion.id == version_id))
 
 
 def delete_work_if_empty(db: Session, work_id: str) -> None:

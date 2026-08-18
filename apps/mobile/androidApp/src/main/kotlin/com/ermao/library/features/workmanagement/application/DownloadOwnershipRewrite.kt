@@ -15,7 +15,7 @@ internal data class DownloadOwnershipRewrite(
 
 /**
  * Split/transfer rewrite the completed download onto the server's target Work and
- * LibraryVersion. [targetVersionId] is the current `targetMediaVersionId` wire field.
+ * LibraryVersion. [targetVersionId] is the structural-move `targetVersionId` wire field.
  */
 internal fun downloadOwnershipRewriteForStructuralMove(
     targetWorkId: String?,

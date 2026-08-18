@@ -1,3 +1,4 @@
+import json
 import zipfile
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -222,7 +223,7 @@ def test_delete_last_volume_cascades_and_undo_restores_volume_resources(
     )
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert payload["deletedMediaVersion"] is True
+    assert payload["deletedVersion"] is True
     assert payload["deletedWork"] is True
     assert payload["operation"]["action"] == "DELETE_VOLUME"
     db_session.expire_all()
@@ -345,7 +346,12 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
         json={"targetMediaKind": "COMIC", "applyTo": "VOLUME"},
     )
     assert response.status_code == 200
-    operation_id = response.json()["data"]["operation"]["id"]
+    payload = response.json()["data"]
+    assert payload["movedVolumeIds"] == [moved.id]
+    assert "targetVersionId" not in payload
+    assert "sourceVersionId" not in payload
+    assert "targetMediaVersionId" not in payload
+    operation_id = payload["operation"]["id"]
     db_session.expire_all()
     moved_after = db_session.get(LibraryVolume, moved.id)
     assert moved_after is not None
@@ -385,12 +391,27 @@ def test_volume_structure_openapi_has_explicit_volume_only_contract(
         {
             path: schema["paths"][path],
             f"{path}/move": schema["paths"][f"{path}/move"],
+            f"{path}/move-to": schema["paths"][f"{path}/move-to"],
             f"{path}/split": schema["paths"][f"{path}/split"],
             f"{path}/reclassify": schema["paths"][f"{path}/reclassify"],
         }
     )
     assert "editionId" not in volume_contract
     assert "SplitEdition" not in volume_contract
+    payloads = schema["components"]["schemas"]
+    structure_payload = str(payloads["WorkStructureMutationPayload"])
+    reclassify_payload = str(payloads["ReclassifyVolumePayload"])
+    reclassify_request = str(payloads["ReclassifyVolumeRequest"])
+    assert "sourceVersionId" in structure_payload
+    assert "targetVersionId" in structure_payload
+    assert "deletedVersion" in structure_payload
+    assert "targetMediaVersionId" not in structure_payload
+    assert "sourceMediaVersionId" not in structure_payload
+    assert "deletedMediaVersion" not in structure_payload
+    assert "movedVolumeIds" in reclassify_payload
+    assert "targetVersionId" not in reclassify_payload
+    assert "SAME_MEDIA_KIND" in reclassify_request
+    assert "MEDIA_VERSION" not in reclassify_request
 
 
 def _batch_volume_aggregate(
@@ -1127,7 +1148,7 @@ def test_delete_volume_rolls_back_when_persistence_fails() -> None:
             return VolumeContext(
                 id="volume",
                 work_id="work",
-                media_version_id="media",
+                version_id="media",
                 media_kind="EBOOK",
                 title="Volume",
                 sort_order=0,
@@ -1185,7 +1206,7 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
             return VolumeContext(
                 id=volume_id,
                 work_id="work",
-                media_version_id="media",
+                version_id="media",
                 media_kind="EBOOK",
                 title=volume_id,
                 sort_order=0 if volume_id == "one" else 1000,
@@ -1212,7 +1233,7 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
             return VolumeDeleteOutcome(
                 work_id="work",
                 volume_id=volume_id,
-                deleted_media_version=False,
+                deleted_version=False,
                 deleted_work=False,
                 operation=OperationSummary(
                     id="operation-one",
@@ -1312,6 +1333,17 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     )
     assert moved.status_code == 200
     moved_data = moved.json()["data"]
+    assert moved_data["sourceVersionId"] == "undo-source-media"
+    assert moved_data["targetVersionId"] == "undo-target-media"
+    assert moved_data["transferMode"] == "APPENDED_VOLUME"
+    move_inverse = json.loads(
+        db_session.get(LibraryOperation, moved_data["operation"]["id"]).inverse_json
+    )
+    assert "sourceVersion" in move_inverse
+    assert "targetVersionId" in move_inverse
+    assert "targetVersionCreated" in move_inverse
+    assert "sourceMediaVersion" not in move_inverse
+    assert "targetMediaVersionId" not in move_inverse
     db_session.expire_all()
     assert db_session.get(LibraryWork, source_work.id) is None
     assert db_session.get(LibraryVolume, source_volume.id).version_id == (
@@ -1334,6 +1366,17 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     assert split.status_code == 200
     split_data = split.json()["data"]
     split_work_id = split_data["targetWorkId"]
+    assert split_data["sourceVersionId"] == "undo-source-media"
+    assert split_data["targetVersionId"]
+    assert split_data["targetVersionId"] != "undo-source-media"
+    assert split_data["transferMode"] == "CREATED_VERSION"
+    split_inverse = json.loads(
+        db_session.get(LibraryOperation, split_data["operation"]["id"]).inverse_json
+    )
+    assert "sourceVersion" in split_inverse
+    assert split_inverse["targetVersionId"] == split_data["targetVersionId"]
+    assert split_inverse["targetVersionCreated"] is True
+    assert "sourceMediaVersion" not in split_inverse
     db_session.expire_all()
     assert db_session.get(LibraryWork, source_work.id) is None
     assert db_session.get(LibraryWork, split_work_id) is not None
@@ -1470,6 +1513,9 @@ def test_set_media_kind_does_not_move_volume_version(
         json={"targetMediaKind": "COMIC", "applyTo": "VOLUME"},
     )
     assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["movedVolumeIds"] == [volume_id]
+    assert "targetVersionId" not in payload
     db_session.expire_all()
     persisted = db_session.get(LibraryVolume, volume_id)
     assert persisted is not None
@@ -1525,12 +1571,18 @@ def test_split_creates_exactly_one_implicit_version_on_new_work(
         work_id="split-implicit-source",
         volume_ids=("split-implicit-one", "split-implicit-keep"),
     )
+    source_version_id = volumes[0].version_id
     response = client.post(
         f"/api/works/{source.id}/volumes/{volumes[0].id}/split",
         json={"title": "Split implicit work"},
     )
     assert response.status_code == 200
-    new_work_id = response.json()["data"]["targetWorkId"]
+    payload = response.json()["data"]
+    new_work_id = payload["targetWorkId"]
+    assert payload["sourceVersionId"] == source_version_id
+    assert payload["targetVersionId"]
+    assert payload["targetWorkId"] == new_work_id
+    assert payload["transferMode"] == "CREATED_VERSION"
     db_session.expire_all()
     new_versions = list(
         db_session.scalars(
@@ -1576,4 +1628,224 @@ def test_production_code_does_not_use_version_source_key_as_media_kind() -> None
             offenders.append(str(path.relative_to(root.parent)))
         if 'LibraryVersion.source_key.label("media_kind")' in text:
             offenders.append(str(path.relative_to(root.parent)))
+    assert offenders == []
+
+
+def test_reclassify_same_media_kind_updates_matching_volumes_without_moving_version(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    _ensure_test_library(db_session)
+    work = LibraryWork(
+        library_id="test-library",
+        id="same-kind-work",
+        origin="MANUAL",
+        title="Same kind",
+        normalized_title="samekind",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    version, ebook, comic = (
+        LibraryVersion(
+            id="same-kind-version",
+            work_id=work.id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        ),
+        LibraryMediaVersion(id="same-kind-ebook", work_id=work.id, media_kind="EBOOK"),
+        LibraryMediaVersion(id="same-kind-comic", work_id=work.id, media_kind="COMIC"),
+    )
+    epub_one = LibraryVolume(
+        id="same-kind-epub-one",
+        version_id=version.id,
+        title="Ebook one",
+        sort_order=0,
+        format="EPUB",
+        resource_key="same-kind:one",
+        import_status="COMPLETED",
+    )
+    epub_two = LibraryVolume(
+        id="same-kind-epub-two",
+        version_id=version.id,
+        title="Ebook two",
+        sort_order=1000,
+        format="EPUB",
+        resource_key="same-kind:two",
+        import_status="COMPLETED",
+    )
+    cbz = LibraryVolume(
+        id="same-kind-cbz",
+        version_id=version.id,
+        title="Comic",
+        sort_order=2000,
+        format="CBZ",
+        resource_key="same-kind:comic",
+        import_status="COMPLETED",
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([version, ebook, comic, epub_one, epub_two, cbz])
+    db_session.commit()
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/{epub_one.id}/reclassify",
+        json={"targetMediaKind": "COMIC", "applyTo": "SAME_MEDIA_KIND"},
+    )
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert sorted(payload["movedVolumeIds"]) == [epub_one.id, epub_two.id]
+    assert "targetVersionId" not in payload
+    db_session.expire_all()
+    first = db_session.get(LibraryVolume, epub_one.id)
+    second = db_session.get(LibraryVolume, epub_two.id)
+    other = db_session.get(LibraryVolume, cbz.id)
+    assert first is not None and second is not None and other is not None
+    assert first.version_id == version.id
+    assert second.version_id == version.id
+    assert other.version_id == version.id
+    assert first.suggested_media_kind == "COMIC"
+    assert second.suggested_media_kind == "COMIC"
+    assert other.suggested_media_kind is None
+
+
+def test_delete_last_volume_of_version_reports_deleted_version_without_deleting_work(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    _ensure_test_library(db_session)
+    work = LibraryWork(
+        library_id="test-library",
+        id="two-version-work",
+        origin="MANUAL",
+        title="Two versions",
+        normalized_title="twoversions",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    keep_version = LibraryVersion(
+        id="two-version-keep",
+        work_id=work.id,
+        source_key="kindle",
+        source_name="Kindle",
+    )
+    gone_version, gone_media = _parent(
+        id="two-version-gone", work_id=work.id, kind="EBOOK"
+    )
+    keep_volume = LibraryVolume(
+        id="two-version-keep-volume",
+        version_id=keep_version.id,
+        title="Keep",
+        sort_order=0,
+        format="EPUB",
+        resource_key="two-version:keep",
+        import_status="COMPLETED",
+    )
+    gone_volume = LibraryVolume(
+        id="two-version-gone-volume",
+        version_id=gone_version.id,
+        title="Gone",
+        sort_order=0,
+        format="EPUB",
+        resource_key="two-version:gone",
+        import_status="COMPLETED",
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all(
+        [keep_version, gone_version, gone_media, keep_volume, gone_volume]
+    )
+    db_session.commit()
+
+    response = client.delete(f"/api/works/{work.id}/volumes/{gone_volume.id}")
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["deletedVersion"] is True
+    assert payload["deletedWork"] is False
+    db_session.expire_all()
+    assert db_session.get(LibraryWork, work.id) is not None
+    assert db_session.get(LibraryVersion, keep_version.id) is not None
+    assert db_session.get(LibraryVersion, gone_version.id) is None
+    assert db_session.get(LibraryVolume, keep_volume.id) is not None
+    assert db_session.get(LibraryVolume, gone_volume.id) is None
+
+
+def test_delete_volume_keeps_version_when_siblings_remain(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    work, volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="sibling-version-work",
+        volume_ids=("sibling-keep", "sibling-delete"),
+    )
+    version_id = volumes[0].version_id
+    response = client.delete(f"/api/works/{work.id}/volumes/{volumes[1].id}")
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["deletedVersion"] is False
+    assert payload["deletedWork"] is False
+    db_session.expire_all()
+    assert db_session.get(LibraryVersion, version_id) is not None
+    assert db_session.get(LibraryVolume, volumes[0].id) is not None
+    assert db_session.get(LibraryVolume, volumes[1].id) is None
+
+
+def test_move_to_reports_source_and_target_version_ids(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    source, source_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="move-report-source",
+        volume_ids=("move-report-volume", "move-report-keep"),
+    )
+    target, target_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="move-report-target",
+        volume_ids=("move-report-existing",),
+    )
+    source_version_id = source_volumes[0].version_id
+    target_version_id = target_volumes[0].version_id
+    response = client.post(
+        f"/api/works/{source.id}/volumes/{source_volumes[0].id}/move-to",
+        json={"targetWorkId": target.id},
+    )
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["sourceVersionId"] == source_version_id
+    assert payload["targetVersionId"] == target_version_id
+    assert payload["targetWorkId"] == target.id
+    assert payload["transferMode"] == "APPENDED_VOLUME"
+    assert "targetMediaVersionId" not in payload
+
+
+def test_structural_operation_modules_do_not_use_media_version_contract_names() -> None:
+    root = Path(__file__).resolve().parents[1] / "app" / "modules" / "library"
+    forbidden = (
+        "sourceMediaVersion",
+        "targetMediaVersion",
+        "source_media_version_id",
+        "target_media_version_id",
+        "CREATED_MEDIA_VERSION",
+        'applyTo = "MEDIA_VERSION"',
+        "deletedMediaVersion",
+    )
+    paths = (
+        root / "application" / "dto.py",
+        root / "application" / "volume_commands.py",
+        root / "infrastructure" / "structural_operations.py",
+        root / "infrastructure" / "volume_commands.py",
+        root / "infrastructure" / "batch_volume_commands.py",
+        root / "presentation" / "schemas.py",
+    )
+    offenders: list[str] = []
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        if any(token in text for token in forbidden):
+            offenders.append(str(path))
     assert offenders == []

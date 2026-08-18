@@ -122,19 +122,19 @@ def _volume_entities(
         )
         .where(LibraryVolume.id.in_(volume_ids))
     ).all()
-    by_id = {volume.id: (volume, media) for volume, media in rows}
+    by_id = {volume.id: (volume, version) for volume, version in rows}
     return tuple(by_id[volume_id] for volume_id in volume_ids if volume_id in by_id)
 
 
-def _remaining_by_media(
+def _remaining_by_version(
     db: Session,
-    media_ids: tuple[str, ...],
+    version_ids: tuple[str, ...],
     selected_ids: set[str],
 ) -> dict[str, list[LibraryVolume]]:
     result: dict[str, list[LibraryVolume]] = defaultdict(list)
     for volume in db.scalars(
         select(LibraryVolume)
-        .where(LibraryVolume.version_id.in_(media_ids))
+        .where(LibraryVolume.version_id.in_(version_ids))
         .order_by(
             LibraryVolume.version_id.asc(),
             LibraryVolume.sort_order.asc(),
@@ -205,14 +205,12 @@ def _prepare_set_media_kind_batch(
             inverse={
                 "sourceWork": None,
                 "sourceWorkDependents": {},
-                "sourceMediaVersion": entity_as_legacy_dict(
-                    selected_by_id[context.id][1]
-                ),
+                "sourceVersion": entity_as_legacy_dict(selected_by_id[context.id][1]),
                 "volume": entity_as_legacy_dict(selected_by_id[context.id][0]),
                 "volumes": [entity_as_legacy_dict(selected_by_id[context.id][0])],
                 "targetWorkId": source_work_id,
-                "targetMediaVersionId": selected_by_id[context.id][1].id,
-                "targetMediaVersionCreated": False,
+                "targetVersionId": selected_by_id[context.id][1].id,
+                "targetVersionCreated": False,
             },
             now=now,
         )
@@ -282,7 +280,7 @@ def _prepare_reparent_batch(
         ).all()
         if volume.id not in selected_ids
     ]
-    remaining = _remaining_by_media(db, source_media_ids, selected_ids)
+    remaining = _remaining_by_version(db, source_media_ids, selected_ids)
     incoming = [
         selected_by_id[context.id][0]
         for context in contexts
@@ -339,13 +337,11 @@ def _prepare_reparent_batch(
                     entity_as_legacy_dict(source_work) if deletes_source_work else None
                 ),
                 "sourceWorkDependents": source_dependents,
-                "sourceMediaVersion": entity_as_legacy_dict(
-                    selected_by_id[context.id][1]
-                ),
+                "sourceVersion": entity_as_legacy_dict(selected_by_id[context.id][1]),
                 "volume": entity_as_legacy_dict(selected_by_id[context.id][0]),
                 "targetWorkId": target_work_id,
-                "targetMediaVersionId": target_id,
-                "targetMediaVersionCreated": created_target_version,
+                "targetVersionId": target_id,
+                "targetVersionCreated": created_target_version,
             },
             now=now,
         )
@@ -409,7 +405,7 @@ def _prepare_split_batch(
     if source_work is None:
         raise ValueError("Source work does not exist")
     source_media_ids = tuple(dict.fromkeys(media.id for _volume, media in selected))
-    remaining = _remaining_by_media(db, source_media_ids, selected_ids)
+    remaining = _remaining_by_version(db, source_media_ids, selected_ids)
     target_work_ids = {context.id: cuid() for context in contexts}
     target_media_ids = {context.id: cuid() for context in contexts}
     work_rows = tuple(
@@ -492,13 +488,11 @@ def _prepare_split_batch(
                     entity_as_legacy_dict(source_work) if deletes_source_work else None
                 ),
                 "sourceWorkDependents": source_dependents,
-                "sourceMediaVersion": entity_as_legacy_dict(
-                    selected_by_id[context.id][1]
-                ),
+                "sourceVersion": entity_as_legacy_dict(selected_by_id[context.id][1]),
                 "volume": entity_as_legacy_dict(selected_by_id[context.id][0]),
                 "targetWorkId": target_work_ids[context.id],
-                "targetMediaVersionId": target_media_ids[context.id],
-                "targetMediaVersionCreated": True,
+                "targetVersionId": target_media_ids[context.id],
+                "targetVersionCreated": True,
                 "newWorkId": target_work_ids[context.id],
             },
             now=now,
@@ -741,7 +735,7 @@ def _prepare_delete_batch(
     selected = _volume_entities(db, volume_ids)
     selected_by_id = {volume.id: (volume, media) for volume, media in selected}
     source_media_ids = tuple(dict.fromkeys(media.id for _volume, media in selected))
-    remaining = _remaining_by_media(db, source_media_ids, selected_ids)
+    remaining = _remaining_by_version(db, source_media_ids, selected_ids)
     empty_media_ids = tuple(
         media_id for media_id in source_media_ids if not remaining.get(media_id)
     )

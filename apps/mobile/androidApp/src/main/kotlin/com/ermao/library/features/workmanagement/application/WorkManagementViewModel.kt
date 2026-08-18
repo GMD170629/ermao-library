@@ -121,7 +121,7 @@ class WorkManagementViewModel(
                 rehomeCompletedDownload(
                     volumeId = volumeId,
                     targetWorkId = outcome.targetWorkId,
-                    targetVersionId = outcome.targetMediaVersionId,
+                    targetVersionId = outcome.targetVersionId,
                     targetWorkTitle = title,
                     targetWorkAuthor = author,
                     targetCoverApiPath = artifact.descriptor.coverApiPath,
@@ -138,7 +138,7 @@ class WorkManagementViewModel(
                 rehomeCompletedDownload(
                     volumeId = volumeId,
                     targetWorkId = it.targetWorkId,
-                    targetVersionId = it.targetMediaVersionId,
+                    targetVersionId = it.targetVersionId,
                     targetWorkTitle = target.title,
                     targetWorkAuthor = target.author,
                     targetCoverApiPath = null,

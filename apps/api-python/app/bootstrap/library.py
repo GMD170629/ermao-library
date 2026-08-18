@@ -228,14 +228,14 @@ def reorder_volume(
     db: Session,
     *,
     volume_id: str,
-    media_version_id: str,
+    version_id: str,
     direction: Literal["up", "down"],
     now: datetime,
 ) -> bool:
     return _reorder_volume(
         db,
         volume_id=volume_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         direction=direction,
         now=now,
     )

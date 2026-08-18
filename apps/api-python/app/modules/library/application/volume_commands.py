@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from app.modules.library.application.dto import MoveVolumeResult
 
@@ -23,7 +23,7 @@ class LibraryActor:
 class VolumeContext:
     id: str
     work_id: str
-    media_version_id: str
+    version_id: str
     media_kind: str
     title: str
     sort_order: int
@@ -67,14 +67,13 @@ class VolumeSplitOutcome:
 class VolumeDeleteOutcome:
     work_id: str
     volume_id: str
-    deleted_media_version: bool
+    deleted_version: bool
     deleted_work: bool
     operation: OperationSummary
 
 
 @dataclass(frozen=True, slots=True)
 class VolumeReclassifyOutcome:
-    target_media_version_id: str
     moved_volume_ids: tuple[str, ...]
     operation: OperationSummary
 
@@ -134,7 +133,7 @@ class VolumeStructurePort(Protocol):
         self,
         *,
         volume_id: str,
-        media_version_id: str,
+        version_id: str,
         direction: Literal["up", "down"],
         now: datetime,
     ) -> bool: ...
@@ -165,7 +164,7 @@ class VolumeStructurePort(Protocol):
         work_id: str,
         volume_id: str,
         target_media_kind: str,
-        apply_to: Literal["VOLUME", "MEDIA_VERSION"],
+        apply_to: Literal["VOLUME", "SAME_MEDIA_KIND"],
         now: datetime,
     ) -> VolumeReclassifyOutcome: ...
 
@@ -232,9 +231,7 @@ def batch_volume_resources(
     )
     if {context.id for context in contexts} != set(command.volume_ids):
         raise VolumeNotFoundError
-    contexts.sort(
-        key=lambda value: (value.media_version_id, value.sort_order, value.id)
-    )
+    contexts.sort(key=lambda value: (value.version_id, value.sort_order, value.id))
 
     target_media_kind = (command.target_media_kind or "").strip().upper()
     target_work_id = (command.target_work_id or "").strip()
@@ -293,15 +290,16 @@ def reclassify_volume_resource(
     _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
     if target_media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
         raise InvalidVolumeChangeError("INVALID_MEDIA_KIND")
-    if apply_to not in {"VOLUME", "MEDIA_VERSION"}:
+    if apply_to not in {"VOLUME", "SAME_MEDIA_KIND"}:
         raise InvalidVolumeChangeError("INVALID_RECLASSIFY_SCOPE")
+    apply_to_scope = cast(Literal["VOLUME", "SAME_MEDIA_KIND"], apply_to)
     try:
         outcome = port.reclassify_volume(
             actor_id=actor.user_id,
             work_id=work_id,
             volume_id=volume_id,
             target_media_kind=target_media_kind,
-            apply_to=apply_to,
+            apply_to=apply_to_scope,
             now=now,
         )
         unit_of_work.commit()
@@ -430,7 +428,7 @@ def reorder_volume_resource(
     try:
         changed = port.reorder_volume(
             volume_id=volume_id,
-            media_version_id=context.media_version_id,
+            version_id=context.version_id,
             direction=direction,
             now=now,
         )

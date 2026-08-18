@@ -349,7 +349,7 @@ export async function reclassifyVolume(
   workId: string,
   volumeId: string,
   targetMediaKind: MediaKind,
-  applyTo: 'VOLUME' | 'MEDIA_VERSION'
+  applyTo: 'VOLUME' | 'SAME_MEDIA_KIND'
 ): Promise<string | null> {
   const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}/reclassify`, {
     method: 'POST',

@@ -87,7 +87,7 @@ data class WorkMutationOutcome(
     val workId: String,
     val deletedWork: Boolean = false,
     val targetWorkId: String? = null,
-    val targetMediaVersionId: String? = null,
+    val targetVersionId: String? = null,
     val operationId: String? = null,
 )
 

@@ -47,7 +47,7 @@ from app.modules.library.infrastructure.structural_operations import (
     prepare_volume_move,
 )
 from app.modules.library.infrastructure.structural_operations import (
-    reorder_volume as reorder_volume_within_media_version,
+    reorder_volume as reorder_volume_within_version,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 from app.services.book_identity import (
@@ -154,7 +154,7 @@ class SqlAlchemyVolumeStructure:
             volume.id: VolumeContext(
                 id=volume.id,
                 work_id=work.id,
-                media_version_id=volume.version_id,
+                version_id=volume.version_id,
                 media_kind=media_kind_of(volume),
                 title=volume.title,
                 sort_order=volume.sort_order,
@@ -164,7 +164,7 @@ class SqlAlchemyVolumeStructure:
                 work_title=work.title,
                 source_path=(Path(path_value).expanduser() if path_value else None),
             )
-            for volume, work, media_version, path_value in rows
+            for volume, work, version, path_value in rows
         }
         return tuple(
             contexts[volume_id] for volume_id in volume_ids if volume_id in contexts
@@ -190,18 +190,18 @@ class SqlAlchemyVolumeStructure:
         volume = self._db.get(LibraryVolume, volume_id)
         if volume is None:
             raise ValueError("Volume does not exist")
-        source_media = self._db.get(LibraryVersion, volume.version_id)
-        if source_media is None or source_media.work_id != source_work_id:
+        source_version = self._db.get(LibraryVersion, volume.version_id)
+        if source_version is None or source_version.work_id != source_work_id:
             raise ValueError("Volume does not belong to work")
         source_volume_count = int(
             self._db.scalar(
                 select(func.count(LibraryVolume.id)).where(
-                    LibraryVolume.version_id == source_media.id
+                    LibraryVolume.version_id == source_version.id
                 )
             )
             or 0
         )
-        source_media_count = int(
+        source_version_count = int(
             self._db.scalar(
                 select(func.count(LibraryVersion.id)).where(
                     LibraryVersion.work_id == source_work_id
@@ -210,7 +210,7 @@ class SqlAlchemyVolumeStructure:
             or 0
         )
         source_work = self._db.get(LibraryWork, source_work_id)
-        deletes_source_work = source_volume_count == 1 and source_media_count == 1
+        deletes_source_work = source_volume_count == 1 and source_version_count == 1
         return {
             "sourceWork": (
                 entity_as_legacy_dict(source_work)
@@ -225,7 +225,7 @@ class SqlAlchemyVolumeStructure:
                 if deletes_source_work
                 else {}
             ),
-            "sourceMediaVersion": entity_as_legacy_dict(source_media),
+            "sourceVersion": entity_as_legacy_dict(source_version),
             "volume": entity_as_legacy_dict(volume),
         }
 
@@ -260,9 +260,9 @@ class SqlAlchemyVolumeStructure:
         inverse.update(
             {
                 "targetWorkId": target_work_id,
-                "targetMediaVersionId": prepared_move.result.target_media_version_id,
-                "targetMediaVersionCreated": (
-                    prepared_move.result.transfer_mode == "CREATED_MEDIA_VERSION"
+                "targetVersionId": prepared_move.result.target_version_id,
+                "targetVersionCreated": (
+                    prepared_move.result.transfer_mode == "CREATED_VERSION"
                 ),
             }
         )
@@ -292,14 +292,14 @@ class SqlAlchemyVolumeStructure:
         self,
         *,
         volume_id: str,
-        media_version_id: str,
+        version_id: str,
         direction: Literal["up", "down"],
         now: datetime,
     ) -> bool:
-        return reorder_volume_within_media_version(
+        return reorder_volume_within_version(
             self._db,
             volume_id=volume_id,
-            media_version_id=media_version_id,
+            version_id=version_id,
             direction=direction,
             now=now,
         )
@@ -311,7 +311,7 @@ class SqlAlchemyVolumeStructure:
         work_id: str,
         volume_id: str,
         target_media_kind: str,
-        apply_to: Literal["VOLUME", "MEDIA_VERSION"],
+        apply_to: Literal["VOLUME", "SAME_MEDIA_KIND"],
         now: datetime,
     ) -> VolumeReclassifyOutcome:
         volume = self._db.get(LibraryVolume, volume_id)
@@ -321,7 +321,7 @@ class SqlAlchemyVolumeStructure:
         if source_version is None or source_version.work_id != work_id:
             raise ValueError("Volume does not belong to work")
         current_kind = media_kind_of(volume)
-        if apply_to == "MEDIA_VERSION":
+        if apply_to == "SAME_MEDIA_KIND":
             work_volumes = list(
                 self._db.scalars(
                     select(LibraryVolume)
@@ -343,10 +343,6 @@ class SqlAlchemyVolumeStructure:
         else:
             selected = [volume]
         inverse = {
-            "sourceMediaVersion": entity_as_legacy_dict(source_version),
-            "targetMediaVersion": None,
-            "targetMediaVersionId": source_version.id,
-            "targetMediaVersionCreated": False,
             "volumes": [entity_as_legacy_dict(row) for row in selected],
         }
         selected_update_rows = [
@@ -375,7 +371,6 @@ class SqlAlchemyVolumeStructure:
             now=now,
         )
         outcome = VolumeReclassifyOutcome(
-            target_media_version_id=source_version.id,
             moved_volume_ids=tuple(row.id for row in selected),
             operation=operation_store.operation_summary(operation.record),
         )
@@ -442,8 +437,8 @@ class SqlAlchemyVolumeStructure:
         inverse.update(
             {
                 "targetWorkId": target_work_id,
-                "targetMediaVersionId": prepared_move.result.target_media_version_id,
-                "targetMediaVersionCreated": True,
+                "targetVersionId": prepared_move.result.target_version_id,
+                "targetVersionCreated": True,
                 "newWorkId": target_work_id,
             }
         )
@@ -486,7 +481,7 @@ class SqlAlchemyVolumeStructure:
         )
         volume = snapshot["LibraryVolume"][0]
         title = str(volume.get("title") or volume_id)
-        deleted_media_version = bool(snapshot.get("LibraryMediaVersion"))
+        deleted_version = bool(snapshot.get("LibraryVersion"))
         deleted_work = bool(snapshot.get("LibraryWork"))
         prepared_deletion = prepare_delete_volume_scope(self._db, volume_id)
         if prepared_deletion is None:
@@ -504,7 +499,7 @@ class SqlAlchemyVolumeStructure:
         outcome = VolumeDeleteOutcome(
             work_id=work_id,
             volume_id=volume_id,
-            deleted_media_version=deleted_media_version,
+            deleted_version=deleted_version,
             deleted_work=deleted_work,
             operation=operation_store.operation_summary(operation.record),
         )

@@ -27,7 +27,7 @@ class PreparedVolumeMove:
 
 
 def _ordered_volume_rows(
-    db: Session, media_version_id: str
+    db: Session, version_id: str
 ) -> list[tuple[str, int, datetime]]:
     return [
         (str(row.id), int(row.sort_order), row.created_at)
@@ -37,7 +37,7 @@ def _ordered_volume_rows(
                 LibraryVolume.sort_order,
                 LibraryVolume.created_at,
             )
-            .where(LibraryVolume.version_id == media_version_id)
+            .where(LibraryVolume.version_id == version_id)
             .order_by(
                 LibraryVolume.sort_order.asc(),
                 LibraryVolume.created_at.asc(),
@@ -175,10 +175,10 @@ def prepare_volume_move(
     return PreparedVolumeMove(
         statements=tuple(write_statements),
         result=MoveVolumeResult(
-            source_media_version_id=source_version_id,
-            target_media_version_id=target_version_id,
+            source_version_id=source_version_id,
+            target_version_id=target_version_id,
             target_work_id=target_work_id,
-            transfer_mode=("CREATED_MEDIA_VERSION" if created else "APPENDED_VOLUME"),
+            transfer_mode=("CREATED_VERSION" if created else "APPENDED_VOLUME"),
         ),
     )
 
@@ -213,13 +213,13 @@ def reorder_volume(
     db: Session,
     *,
     volume_id: str,
-    media_version_id: str,
+    version_id: str,
     direction: Literal["up", "down"],
     now: datetime,
 ) -> bool:
     volumes = db.execute(
         select(LibraryVolume.id, LibraryVolume.sort_order)
-        .where(LibraryVolume.version_id == media_version_id)
+        .where(LibraryVolume.version_id == version_id)
         .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
     ).all()
     index = next(

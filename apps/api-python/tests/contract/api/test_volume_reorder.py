@@ -3,7 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
+)
 
 
 def _login_manager(client, db: Session) -> User:
@@ -26,7 +29,7 @@ def _login_manager(client, db: Session) -> User:
 
 def _add_volume_series(db: Session) -> None:
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="reorder-work",
         origin="MANUAL",
         title="Reorder work",
@@ -35,15 +38,15 @@ def _add_volume_series(db: Session) -> None:
         normalized_author="author",
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id="reorder-media",
+    version = LibraryVersion(
+        id="reorder-version",
         work_id=work.id,
-        media_kind="EBOOK",
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
     )
     volumes = [
         LibraryVolume(
             id=f"reorder-volume-{index}",
-            media_version_id=media_version.id,
+            version_id=version.id,
             title=f"Volume {index}",
             sort_order=index * 1000,
             format="PDF",
@@ -52,7 +55,7 @@ def _add_volume_series(db: Session) -> None:
         )
         for index in range(1, 4)
     ]
-    db.add_all([work, media_version, *volumes])
+    db.add_all([work, version, *volumes])
     db.commit()
 
 
@@ -60,7 +63,7 @@ def _volume_order(db: Session) -> list[str]:
     return list(
         db.scalars(
             select(LibraryVolume.id)
-            .where(LibraryVolume.media_version_id == "reorder-media")
+            .where(LibraryVolume.version_id == "reorder-version")
             .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
         ).all()
     )
@@ -118,7 +121,7 @@ def test_volume_move_rejects_a_volume_outside_the_requested_work(
     _login_manager(client, db_session)
     _add_volume_series(db_session)
     other_work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="other-work",
         origin="MANUAL",
         title="Other work",

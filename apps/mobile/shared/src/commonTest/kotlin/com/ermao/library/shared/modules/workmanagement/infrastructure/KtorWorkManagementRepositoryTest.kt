@@ -72,10 +72,10 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun reclassifyReturnsTargetNeededToRehomeOfflineArtifact() = runBlocking {
+    fun reclassifyDoesNotReturnAVersionId() = runBlocking {
         val repository = repository {
             respond(
-                """{"ok":true,"data":{"workId":"work","targetMediaVersionId":"comic-media"}}""",
+                """{"ok":true,"data":{"movedVolumeIds":["volume"],"operation":{"id":"op"}}}""",
                 HttpStatusCode.OK,
                 jsonHeaders,
             )
@@ -85,7 +85,31 @@ class KtorWorkManagementRepositoryTest {
             repository.reclassifyVolume(context, "work", "volume", ManagedMediaKind.Comic),
         ).value as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
 
-        assertEquals("comic-media", result.targetMediaVersionId)
+        assertEquals(null, result.targetVersionId)
+    }
+
+    @Test
+    fun splitAndTransferReadServerTargetVersionId() = runBlocking {
+        var requestIndex = 0
+        val repository = repository {
+            val body = when (requestIndex++) {
+                0 -> """{"ok":true,"data":{"workId":"work","targetWorkId":"work-split","sourceVersionId":"version-source","targetVersionId":"version-split","transferMode":"CREATED_VERSION"}}"""
+                else -> """{"ok":true,"data":{"workId":"work","targetWorkId":"work-target","sourceVersionId":"version-source","targetVersionId":"version-target","transferMode":"APPENDED_VOLUME"}}"""
+            }
+            respond(body, HttpStatusCode.OK, jsonHeaders)
+        }
+
+        val split = assertIs<WorkManagementResult.Content<*>>(
+            repository.splitVolume(context, "work", "volume", "Split", null),
+        ).value as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
+        assertEquals("work-split", split.targetWorkId)
+        assertEquals("version-split", split.targetVersionId)
+
+        val transfer = assertIs<WorkManagementResult.Content<*>>(
+            repository.transferVolume(context, "work", "volume", "work-target"),
+        ).value as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
+        assertEquals("work-target", transfer.targetWorkId)
+        assertEquals("version-target", transfer.targetVersionId)
     }
 
     @Test

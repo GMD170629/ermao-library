@@ -1004,7 +1004,7 @@ struct WorkDetailView: View {
               let rewrite = DownloadOwnershipRewrite.forMove(
                   move,
                   targetWorkID: outcome.targetWorkId,
-                  targetVersionID: outcome.targetMediaVersionId,
+                  targetVersionID: outcome.targetVersionId,
                   targetWorkTitle: pending.workTitle,
                   targetWorkAuthor: pending.workAuthor
               )

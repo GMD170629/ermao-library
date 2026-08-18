@@ -1162,7 +1162,7 @@ class ReorderVolumeRequest(HttpContractModel):
 
 class ReclassifyVolumeRequest(HttpContractModel):
     target_media_kind: str = Field(alias="targetMediaKind", min_length=1)
-    apply_to: str = Field(alias="applyTo", min_length=1)
+    apply_to: Literal["VOLUME", "SAME_MEDIA_KIND"] = Field(alias="applyTo")
 
 
 class SplitVolumeRequest(HttpContractModel):
@@ -1216,9 +1216,10 @@ class WorkStructureMutationPayload(HttpContractModel):
     work_id: str = Field(alias="workId")
     volume_id: str | None = Field(default=None, alias="volumeId")
     target_work_id: str | None = Field(default=None, alias="targetWorkId")
-    target_media_version_id: str | None = Field(
+    source_version_id: str | None = Field(default=None, alias="sourceVersionId")
+    target_version_id: str | None = Field(
         default=None,
-        alias="targetMediaVersionId",
+        alias="targetVersionId",
     )
     applied_fields: list[str] | None = Field(default=None, alias="appliedFields")
     finished_organize_job_ids: list[str] | None = Field(
@@ -1226,12 +1227,17 @@ class WorkStructureMutationPayload(HttpContractModel):
         alias="finishedOrganizeJobIds",
     )
     transfer_mode: str | None = Field(default=None, alias="transferMode")
-    deleted_media_version: bool | None = Field(
+    deleted_version: bool | None = Field(
         default=None,
-        alias="deletedMediaVersion",
+        alias="deletedVersion",
     )
     deleted_work: bool | None = Field(default=None, alias="deletedWork")
     operation: LibraryOperationSummary | None = None
+
+
+class ReclassifyVolumePayload(HttpContractModel):
+    moved_volume_ids: list[str] = Field(alias="movedVolumeIds")
+    operation: LibraryOperationSummary
 
 
 class MetadataApplyPayload(HttpContractModel):
@@ -1277,6 +1283,7 @@ UndoOperationResponse = SuccessEnvelope[UndoOperationPayload]
 MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]
 MetadataApplyResponse = SuccessEnvelope[MetadataApplyPayload]
 WorkStructureMutationResponse = SuccessEnvelope[WorkStructureMutationPayload]
+ReclassifyVolumeResponse = SuccessEnvelope[ReclassifyVolumePayload]
 BatchVolumeMutationResponse = SuccessEnvelope[BatchVolumeMutationPayload]
 
 

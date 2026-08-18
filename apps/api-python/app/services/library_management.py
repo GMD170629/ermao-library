@@ -788,21 +788,21 @@ def _undo_operation(
             source_dependents = inverse.get("sourceWorkDependents") or {}
             if isinstance(source_dependents, dict):
                 library_operations.restore_rows(db, source_dependents)
-        source_media = inverse.get("sourceMediaVersion") or {}
+        source_version = inverse.get("sourceVersion") or {}
         volume = inverse.get("volume") or {}
-        if not source_media or not volume:
+        if not source_version or not volume:
             raise ValueError("撤销数据不完整")
         library_operations.insert_snapshot(
             db,
             "LibraryVersion",
-            source_media,
+            source_version,
         )
         library_operations.insert_snapshot(db, "LibraryVolume", volume)
-        target_media_version_id = str(inverse.get("targetMediaVersionId") or "")
-        if inverse.get("targetMediaVersionCreated") and target_media_version_id:
-            library_operations.delete_media_version_if_empty(
+        target_version_id = str(inverse.get("targetVersionId") or "")
+        if inverse.get("targetVersionCreated") and target_version_id:
+            library_operations.delete_version_if_empty(
                 db,
-                target_media_version_id,
+                target_version_id,
             )
         new_work_id = str(inverse.get("newWorkId") or "")
         if new_work_id:

@@ -64,7 +64,7 @@ class WorkManagementViewModelTest {
                 splitOutcome = WorkMutationOutcome(
                     workId = SOURCE_WORK_ID,
                     targetWorkId = "work-target",
-                    targetMediaVersionId = "version-target",
+                    targetVersionId = "version-target",
                 ),
             ),
         )
@@ -105,7 +105,7 @@ class WorkManagementViewModelTest {
                 transferOutcome = WorkMutationOutcome(
                     workId = SOURCE_WORK_ID,
                     targetWorkId = "work-target",
-                    targetMediaVersionId = "version-target",
+                    targetVersionId = "version-target",
                 ),
             ),
         )
@@ -142,7 +142,7 @@ class WorkManagementViewModelTest {
                 reclassifyOutcome = WorkMutationOutcome(
                     workId = SOURCE_WORK_ID,
                     targetWorkId = SOURCE_WORK_ID,
-                    targetMediaVersionId = "ignored-version",
+                    targetVersionId = "ignored-version",
                 ),
             ),
         )
@@ -173,7 +173,7 @@ class WorkManagementViewModelTest {
                 splitOutcome = WorkMutationOutcome(
                     workId = SOURCE_WORK_ID,
                     targetWorkId = "work-target",
-                    targetMediaVersionId = null,
+                    targetVersionId = null,
                 ),
             ),
         )
@@ -198,7 +198,7 @@ class WorkManagementViewModelTest {
                 transferOutcome = WorkMutationOutcome(
                     workId = SOURCE_WORK_ID,
                     targetWorkId = null,
-                    targetMediaVersionId = "version-target",
+                    targetVersionId = "version-target",
                 ),
             ),
         )

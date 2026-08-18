@@ -340,7 +340,7 @@ class KtorWorkManagementRepository(
                 workId = data.string("workId") ?: workId,
                 deletedWork = data.boolean("deletedWork") == true,
                 targetWorkId = data.string("targetWorkId"),
-                targetMediaVersionId = data.string("targetMediaVersionId"),
+                targetVersionId = data.string("targetVersionId"),
                 operationId = data.objectValue("operation")?.string("id"),
             ),
         )

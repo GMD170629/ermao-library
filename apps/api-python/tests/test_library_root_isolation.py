@@ -390,7 +390,7 @@ def test_move_volume_resource_rolls_back_cross_library_attempt() -> None:
             return VolumeContext(
                 id="volume",
                 work_id="source-work",
-                media_version_id="media",
+                version_id="media",
                 media_kind="EBOOK",
                 title="Volume",
                 sort_order=0,
@@ -484,7 +484,7 @@ def test_batch_transfer_resource_rolls_back_cross_library_attempt() -> None:
             return VolumeContext(
                 id="volume",
                 work_id="source-work",
-                media_version_id="media",
+                version_id="media",
                 media_kind="EBOOK",
                 title="Volume",
                 sort_order=0,
@@ -556,7 +556,7 @@ def test_batch_transfer_planner_rejects_cross_library(
     context = VolumeContext(
         id=volume_a.id,
         work_id=work_a.id,
-        media_version_id=volume_a.version_id,
+        version_id=volume_a.version_id,
         media_kind="EBOOK",
         title=volume_a.title,
         sort_order=volume_a.sort_order,

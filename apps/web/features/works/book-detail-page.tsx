@@ -572,7 +572,7 @@ function VolumeCard({
       narrator: form.narrator.trim() || null
     }).then(async () => {
       if (targetMediaKind === mediaKind) return;
-      const operationId = await reclassifyVolume(work.id, volume.id, targetMediaKind, applyToVersion ? 'MEDIA_VERSION' : 'VOLUME');
+      const operationId = await reclassifyVolume(work.id, volume.id, targetMediaKind, applyToVersion ? 'SAME_MEDIA_KIND' : 'VOLUME');
       setUndoOperationId(operationId);
     }), '卷册信息已保存');
     if (saved) setEditing(false);

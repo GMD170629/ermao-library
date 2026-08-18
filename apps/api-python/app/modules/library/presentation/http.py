@@ -173,6 +173,7 @@ from app.modules.library.presentation.schemas import (
     MoveVolumeRequest,
     OperationsResponse,
     ReclassifyVolumeRequest,
+    ReclassifyVolumeResponse,
     RenameCategoryRequest,
     RenameCategoryResponse,
     ReorderVolumeRequest,
@@ -3159,7 +3160,7 @@ def reclassify_work_volume(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    WorkStructureMutationResponse,
+    ReclassifyVolumeResponse,
     ErrorResponses(
         LibraryBadRequestError,
         LibraryForbiddenError,
@@ -3205,15 +3206,9 @@ def reclassify_work_volume(
             status_code=400,
             code=code,
         )
-    refreshed_work = _get_work(db, work_id)
-    return WorkStructureMutationResponse(
+    return ReclassifyVolumeResponse(
         data={
-            "book": (
-                _work_view(db, refreshed_work, user.id) if refreshed_work else None
-            ),
-            "workId": work_id,
-            "volumeId": volume_id,
-            "targetMediaVersionId": outcome.target_media_version_id,
+            "movedVolumeIds": list(outcome.moved_volume_ids),
             "operation": _operation_payload(outcome.operation),
         }
     )
@@ -3341,7 +3336,8 @@ def move_work_volume(
             "workId": work_id,
             "targetWorkId": payload.target_work_id,
             "volumeId": volume_id,
-            "targetMediaVersionId": outcome.move.target_media_version_id,
+            "sourceVersionId": outcome.move.source_version_id,
+            "targetVersionId": outcome.move.target_version_id,
             "transferMode": outcome.move.transfer_mode,
             "operation": _operation_payload(outcome.operation),
         }
@@ -3407,7 +3403,8 @@ def split_work_volume(
             "workId": work_id,
             "targetWorkId": outcome.target_work_id,
             "volumeId": volume_id,
-            "targetMediaVersionId": outcome.move.target_media_version_id,
+            "sourceVersionId": outcome.move.source_version_id,
+            "targetVersionId": outcome.move.target_version_id,
             "transferMode": outcome.move.transfer_mode,
             "operation": _operation_payload(outcome.operation),
         }
@@ -3466,7 +3463,7 @@ def delete_work_volume(
             ),
             "workId": work_id,
             "volumeId": volume_id,
-            "deletedMediaVersion": outcome.deleted_media_version,
+            "deletedVersion": outcome.deleted_version,
             "deletedWork": outcome.deleted_work,
             "operation": _operation_payload(outcome.operation),
         }
