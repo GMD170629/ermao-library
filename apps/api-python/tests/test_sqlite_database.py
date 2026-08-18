@@ -9,7 +9,7 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, inspect, select, text, update
+from sqlalchemy import create_engine, insert, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -23,6 +23,7 @@ from app.db.runner import _run_alembic, head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
 from app.models.import_pipeline import ImportTask
+from app.models.library import Library, LibraryVersion, LibraryWork
 from app.models.settings import ReaderBookPreference, SystemSetting
 from app.modules.backup.application.restore import PreparedRestorePlan
 from app.modules.backup.infrastructure.persistence import (
@@ -53,6 +54,7 @@ EXPECTED_TABLES = {
     "UserMediaHistory",
     "MediaVersionMigrationEvent",
     "LibraryReadingUnit",
+    "LibraryVersion",
     "LibraryVolume",
     "LibraryWork",
     "LibraryWorkFacet",
@@ -311,6 +313,19 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             column["name"]: column for column in inspector.get_columns("LibraryWork")
         }
         assert work_columns["libraryId"]["nullable"] is False
+        version_columns = {
+            column["name"]: column
+            for column in inspector.get_columns("LibraryVersion")
+        }
+        assert version_columns["workId"]["nullable"] is False
+        assert version_columns["sourceKey"]["nullable"] is False
+        assert version_columns["sourceName"]["nullable"] is True
+        version_indexes = {
+            index["name"]: tuple(index["column_names"])
+            for index in inspector.get_indexes("LibraryVersion")
+        }
+        assert version_indexes["LibraryVersion_workId_idx"] == ("workId",)
+        assert version_indexes["LibraryVersion_sourceKey_idx"] == ("sourceKey",)
         volume_columns = {
             column["name"] for column in inspector.get_columns("LibraryVolume")
         }
@@ -882,5 +897,125 @@ def test_apply_schema_retries_transient_database_lock(tmp_path, monkeypatch) -> 
         assert attempts == 2
         with engine.connect() as connection:
             assert _alembic_version(connection) == head_revision(engine)
+    finally:
+        engine.dispose()
+
+
+def _seed_library_work(db: Session, *, work_id: str) -> LibraryWork:
+    library = db.get(Library, "version-library")
+    if library is None:
+        library = Library(
+            id="version-library",
+            name="Version Library",
+            root_path="/version-library",
+            organization_mode="FLAT",
+        )
+        db.add(library)
+        db.flush()
+    work = LibraryWork(
+        id=work_id,
+        library_id=library.id,
+        title="星海纪行",
+        normalized_title="星海纪行",
+        tags="[]",
+    )
+    db.add(work)
+    db.flush()
+    return work
+
+
+def test_library_version_can_be_created(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            work = _seed_library_work(db, work_id="work-version-create")
+            version = LibraryVersion(
+                id="version-create",
+                work_id=work.id,
+                source_key="source-epub",
+                source_name="EPUB 源",
+            )
+            db.add(version)
+            db.commit()
+
+            stored = db.get(LibraryVersion, "version-create")
+            assert stored is not None
+            assert stored.work_id == work.id
+            assert stored.source_key == "source-epub"
+            assert stored.source_name == "EPUB 源"
+    finally:
+        engine.dispose()
+
+
+def test_library_work_can_own_multiple_versions(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            work = _seed_library_work(db, work_id="work-version-many")
+            db.add_all(
+                [
+                    LibraryVersion(
+                        id="version-epub",
+                        work_id=work.id,
+                        source_key="source-epub",
+                        source_name="EPUB",
+                    ),
+                    LibraryVersion(
+                        id="version-pdf",
+                        work_id=work.id,
+                        source_key="source-pdf",
+                        source_name=None,
+                    ),
+                ]
+            )
+            db.commit()
+
+            versions = db.scalars(
+                select(LibraryVersion)
+                .where(LibraryVersion.work_id == work.id)
+                .order_by(LibraryVersion.id)
+            ).all()
+            assert [version.id for version in versions] == [
+                "version-epub",
+                "version-pdf",
+            ]
+            assert [version.source_key for version in versions] == [
+                "source-epub",
+                "source-pdf",
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_library_version_cannot_exist_without_work(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(
+                LibraryVersion(
+                    id="version-orphan",
+                    work_id="missing-work",
+                    source_key="source-epub",
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db.commit()
+            db.rollback()
+
+            with pytest.raises(IntegrityError):
+                db.execute(
+                    insert(LibraryVersion).values(
+                        id="version-null-work",
+                        work_id=None,
+                        source_key="source-epub",
+                    )
+                )
+                db.commit()
     finally:
         engine.dispose()

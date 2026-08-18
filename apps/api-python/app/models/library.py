@@ -190,6 +190,40 @@ class LibraryWork(Base):
     )
 
 
+class LibraryVersion(Base):
+    __tablename__ = "LibraryVersion"
+    __table_args__ = (
+        Index("LibraryVersion_workId_idx", "workId"),
+        Index("LibraryVersion_sourceKey_idx", "sourceKey"),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    work_id: Mapped[str] = mapped_column(
+        "workId",
+        String(191),
+        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    source_key: Mapped[str] = mapped_column("sourceKey", String(191), nullable=False)
+    source_name: Mapped[str | None] = mapped_column(
+        "sourceName", Text, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
 class LibraryMediaVersion(Base):
     __tablename__ = "LibraryMediaVersion"
     __table_args__ = (
