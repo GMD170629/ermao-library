@@ -25,8 +25,8 @@ from app.models.library import (
     Library,
     LibraryFacet,
     LibraryFile,
-    LibraryVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
@@ -34,6 +34,9 @@ from app.models.library import (
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 
 WORK_TEXT_FIELDS = {
     "title": LibraryWork.title,
@@ -187,9 +190,7 @@ def resolve_library_roots(
     context: AuthorizationContext,
 ) -> dict[str, str]:
     conditions = tuple(
-        condition
-        for condition in expression.conditions
-        if condition.field == "library"
+        condition for condition in expression.conditions if condition.field == "library"
     )
     if not conditions:
         return {}
@@ -326,7 +327,7 @@ def _condition(
     visible = _visible_volume(context, volume, media_version)
     if field in VOLUME_TEXT_FIELDS or field == "mediaKind":
         expression = (
-            media_version.source_key
+            volume_effective_media_kind(volume)
             if field == "mediaKind"
             else getattr(volume, VOLUME_TEXT_FIELDS[field])
         )

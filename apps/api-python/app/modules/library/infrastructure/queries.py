@@ -22,6 +22,9 @@ from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     resolve_library_roots,
 )
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 
 
 class SqlAlchemyLibraryQueries:
@@ -86,15 +89,12 @@ class SqlAlchemyLibraryQueries:
                 volume_predicates.append(volume_visibility_predicate(context, volume))
             predicates.append(
                 exists(
-                    select(media_version.id).where(
+                    select(volume.id)
+                    .join(media_version, media_version.id == volume.version_id)
+                    .where(
                         media_version.work_id == LibraryWork.id,
-                        media_version.source_key.in_(criteria.media_kinds),
-                        exists(
-                            select(volume.id).where(
-                                volume.version_id == media_version.id,
-                                *volume_predicates,
-                            )
-                        ),
+                        volume_effective_media_kind(volume).in_(criteria.media_kinds),
+                        *volume_predicates,
                     )
                 )
             )

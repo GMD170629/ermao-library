@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -14,11 +14,9 @@ from app.core.authorization import (
     volume_visibility_predicate,
     work_visibility_predicate,
 )
-from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -35,6 +33,7 @@ from app.modules.library.application.volume_commands import (
     VolumeReclassifyOutcome,
     VolumeSplitOutcome,
 )
+from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.infrastructure import operations as operation_store
 from app.modules.library.infrastructure.batch_volume_commands import (
     execute_batch_volume_mutation,
@@ -157,7 +156,7 @@ class SqlAlchemyVolumeStructure:
                 id=volume.id,
                 work_id=work.id,
                 media_version_id=volume.version_id,
-                media_kind=media_version.source_key,
+                media_kind=media_kind_of(volume),
                 title=volume.title,
                 sort_order=volume.sort_order,
                 format=volume.format,
@@ -325,14 +324,19 @@ class SqlAlchemyVolumeStructure:
         volume = self._db.get(LibraryVolume, volume_id)
         if volume is None:
             raise ValueError("Volume does not exist")
-        source_media = self._db.get(LibraryVersion, volume.version_id)
-        if source_media is None or source_media.work_id != work_id:
+        source_version = self._db.get(LibraryVersion, volume.version_id)
+        if source_version is None or source_version.work_id != work_id:
             raise ValueError("Volume does not belong to work")
-        selected = (
-            list(
+        current_kind = media_kind_of(volume)
+        if apply_to == "MEDIA_VERSION":
+            work_volumes = list(
                 self._db.scalars(
                     select(LibraryVolume)
-                    .where(LibraryVolume.version_id == source_media.id)
+                    .join(
+                        LibraryVersion,
+                        LibraryVersion.id == LibraryVolume.version_id,
+                    )
+                    .where(LibraryVersion.work_id == work_id)
                     .order_by(
                         LibraryVolume.sort_order.asc(),
                         LibraryVolume.created_at.asc(),
@@ -340,141 +344,30 @@ class SqlAlchemyVolumeStructure:
                     )
                 ).all()
             )
-            if apply_to == "MEDIA_VERSION"
-            else [volume]
-        )
-        target_media = self._db.scalar(
-            select(LibraryVersion).where(
-                LibraryVersion.work_id == work_id,
-                LibraryVersion.source_key == target_media_kind,
-            )
-        )
-        target_created = target_media is None
-        target_id = cuid() if target_media is None else target_media.id
-        history_media_ids = list(dict.fromkeys([source_media.id, target_id]))
-        histories = list(
-            self._db.scalars(
-                select(UserMediaHistory).where(
-                    UserMediaHistory.media_version_id.in_(history_media_ids)
-                )
-            ).all()
-        )
-        inverse = {
-            "sourceMediaVersion": entity_as_legacy_dict(source_media),
-            "targetMediaVersion": (
-                None if target_created else entity_as_legacy_dict(target_media)
-            ),
-            "targetMediaVersionId": target_id,
-            "targetMediaVersionCreated": target_created,
-            "volumes": [entity_as_legacy_dict(row) for row in selected],
-            "mediaHistories": [entity_as_legacy_dict(row) for row in histories],
-            "historyMediaVersionIds": history_media_ids,
-        }
-        moved_ids = {row.id for row in selected}
-        source_id = source_media.id
-        selected_update_rows: list[dict[str, object]] = []
-        remaining_update_rows: list[dict[str, object]] = []
-        history_update_rows: list[dict[str, object]] = []
-        new_history_rows: list[dict[str, object]] = []
-        history_delete_ids: list[str] = []
-        remaining: list[LibraryVolume] = []
-        if source_id != target_id:
-            target_count = int(
-                self._db.scalar(
-                    select(func.count(LibraryVolume.id)).where(
-                        LibraryVolume.version_id == target_id
-                    )
-                )
-                or 0
-            )
-            for offset, selected_volume in enumerate(selected):
-                selected_update_rows.append(
-                    {
-                        "id": selected_volume.id,
-                        "version_id": target_id,
-                        "sort_order": (target_count + offset) * 1000,
-                        "classification_source": "USER",
-                        "classification_reason": "USER_OVERRIDE",
-                        "suggested_media_kind": None,
-                        "updated_at": now,
-                    }
-                )
-            remaining = list(
-                self._db.scalars(
-                    select(LibraryVolume)
-                    .where(
-                        LibraryVolume.version_id == source_id,
-                        LibraryVolume.id.not_in(moved_ids),
-                    )
-                    .order_by(LibraryVolume.sort_order, LibraryVolume.id)
-                ).all()
-            )
-            for index, remaining_volume in enumerate(remaining):
-                remaining_update_rows.append(
-                    {"id": remaining_volume.id, "sort_order": index * 1000}
-                )
-            source_histories = [
-                row for row in histories if row.media_version_id == source_id
+            selected = [
+                row for row in work_volumes if media_kind_of(row) == current_kind
             ]
-            target_by_user = {
-                row.user_id: row
-                for row in histories
-                if row.media_version_id == target_id
-            }
-            preferred_target_volume_id = selected[-1].id
-            for source_history in source_histories:
-                target_history = target_by_user.get(source_history.user_id)
-                if target_history is None and not remaining:
-                    history_update_rows.append(
-                        {
-                            "id": source_history.id,
-                            "media_version_id": target_id,
-                            "last_volume_id": preferred_target_volume_id,
-                            "updated_at": now,
-                        }
-                    )
-                else:
-                    if target_history is None:
-                        new_history_rows.append(
-                            {
-                                "id": cuid(),
-                                "user_id": source_history.user_id,
-                                "media_version_id": target_id,
-                                "last_volume_id": preferred_target_volume_id,
-                                "created_at": now,
-                                "updated_at": now,
-                            }
-                        )
-                    elif source_history.updated_at > target_history.updated_at:
-                        history_update_rows.append(
-                            {
-                                "id": target_history.id,
-                                "last_volume_id": preferred_target_volume_id,
-                                "updated_at": source_history.updated_at,
-                            }
-                        )
-                    if remaining:
-                        if source_history.last_volume_id in moved_ids:
-                            history_update_rows.append(
-                                {
-                                    "id": source_history.id,
-                                    "last_volume_id": remaining[0].id,
-                                    "updated_at": now,
-                                }
-                            )
-                    else:
-                        history_delete_ids.append(source_history.id)
         else:
-            for selected_volume in selected:
-                selected_update_rows.append(
-                    {
-                        "id": selected_volume.id,
-                        "classification_source": "USER",
-                        "classification_reason": "USER_OVERRIDE",
-                        "suggested_media_kind": None,
-                        "updated_at": now,
-                    }
-                )
+            selected = [volume]
+        inverse = {
+            "sourceMediaVersion": entity_as_legacy_dict(source_version),
+            "targetMediaVersion": None,
+            "targetMediaVersionId": source_version.id,
+            "targetMediaVersionCreated": False,
+            "volumes": [entity_as_legacy_dict(row) for row in selected],
+            "mediaHistories": [],
+            "historyMediaVersionIds": [],
+        }
+        selected_update_rows = [
+            {
+                "id": selected_volume.id,
+                "classification_source": "USER",
+                "classification_reason": "USER_OVERRIDE",
+                "suggested_media_kind": target_media_kind,
+                "updated_at": now,
+            }
+            for selected_volume in selected
+        ]
         operation = operation_store.prepare_operation_write(
             user_id=actor_id,
             action="RECLASSIFY_VOLUME",
@@ -490,61 +383,13 @@ class SqlAlchemyVolumeStructure:
             inverse=inverse,
             now=now,
         )
-        history_delete_statements = tuple(
-            delete(UserMediaHistory).where(UserMediaHistory.id.in_(chunk))
-            for chunk in sqlite_parameter_chunks(
-                tuple(history_delete_ids), parameters_per_row=1
-            )
-        )
         outcome = VolumeReclassifyOutcome(
-            target_media_version_id=target_id,
+            target_media_version_id=source_version.id,
             moved_volume_ids=tuple(row.id for row in selected),
             operation=operation_store.operation_summary(operation.record),
         )
-        if target_created:
-            self._db.execute(
-                insert(LibraryVersion),
-                [
-                    {
-                        "id": target_id,
-                        "work_id": work_id,
-                        "source_key": target_media_kind,
-                        "created_at": now,
-                        "updated_at": now,
-                    }
-                ],
-            )
-            self._db.execute(
-                insert(LibraryMediaVersion),
-                [
-                    {
-                        "id": target_id,
-                        "work_id": work_id,
-                        "media_kind": target_media_kind,
-                        "created_at": now,
-                        "updated_at": now,
-                    }
-                ],
-            )
         if selected_update_rows:
             self._db.execute(update(LibraryVolume), selected_update_rows)
-        if remaining_update_rows:
-            self._db.execute(update(LibraryVolume), remaining_update_rows)
-        if history_update_rows:
-            self._db.execute(update(UserMediaHistory), history_update_rows)
-        if new_history_rows:
-            self._db.execute(insert(UserMediaHistory), new_history_rows)
-        for statement in history_delete_statements:
-            self._db.execute(statement)
-        if source_id != target_id and not remaining:
-            self._db.execute(
-                delete(LibraryVersion).where(LibraryVersion.id == source_id)
-            )
-        self._db.execute(
-            update(LibraryVersion)
-            .where(LibraryVersion.id == target_id)
-            .values(updated_at=now)
-        )
         operation_store.write_prepared_operation(self._db, operation)
         return outcome
 

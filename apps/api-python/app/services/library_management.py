@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from hashlib import sha1
 from typing import Any
 
-from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.bootstrap.library import (
@@ -20,7 +19,6 @@ from app.bootstrap.library import (
 )
 from app.bootstrap.library import smart_shelf_work_ids as _query_smart_shelf_work_ids
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
-from app.models.library import UserMediaHistory
 from app.modules.library.application.management_commands import (
     DeleteLibraryCategory,
     MergeLibraryCategories,
@@ -803,19 +801,6 @@ def _undo_operation(
             "LibraryVersion",
             source_media,
         )
-        media_kind = source_media.get("sourceKey") or source_media.get("mediaKind")
-        if media_kind:
-            library_operations.insert_snapshot(
-                db,
-                "LibraryMediaVersion",
-                {
-                    "id": source_media.get("id"),
-                    "workId": source_media.get("workId"),
-                    "mediaKind": media_kind,
-                    "createdAt": source_media.get("createdAt"),
-                    "updatedAt": source_media.get("updatedAt"),
-                },
-            )
         library_operations.insert_snapshot(db, "LibraryVolume", volume)
         for history in inverse.get("mediaHistories") or []:
             library_operations.insert_snapshot(db, "UserMediaHistory", history)
@@ -829,58 +814,14 @@ def _undo_operation(
         if new_work_id:
             library_operations.delete_work_if_empty(db, new_work_id)
     elif action == "RECLASSIFY_VOLUME":
-        source_media = inverse.get("sourceMediaVersion") or {}
-        target_media = inverse.get("targetMediaVersion") or {}
         volumes = inverse.get("volumes") or []
-        if not source_media or not volumes:
+        volume = inverse.get("volume")
+        if not volumes and isinstance(volume, dict) and volume:
+            volumes = [volume]
+        if not volumes:
             raise ValueError("撤销数据不完整")
-        library_operations.insert_snapshot(db, "LibraryVersion", source_media)
-        source_kind = source_media.get("sourceKey") or source_media.get("mediaKind")
-        if source_kind:
-            library_operations.insert_snapshot(
-                db,
-                "LibraryMediaVersion",
-                {
-                    "id": source_media.get("id"),
-                    "workId": source_media.get("workId"),
-                    "mediaKind": source_kind,
-                    "createdAt": source_media.get("createdAt"),
-                    "updatedAt": source_media.get("updatedAt"),
-                },
-            )
-        if isinstance(target_media, dict) and target_media:
-            library_operations.insert_snapshot(db, "LibraryVersion", target_media)
-            target_kind = target_media.get("sourceKey") or target_media.get("mediaKind")
-            if target_kind:
-                library_operations.insert_snapshot(
-                    db,
-                    "LibraryMediaVersion",
-                    {
-                        "id": target_media.get("id"),
-                        "workId": target_media.get("workId"),
-                        "mediaKind": target_kind,
-                        "createdAt": target_media.get("createdAt"),
-                        "updatedAt": target_media.get("updatedAt"),
-                    },
-                )
-        for volume in volumes:
-            library_operations.insert_snapshot(db, "LibraryVolume", volume)
-        history_media_ids = [
-            str(value) for value in inverse.get("historyMediaVersionIds") or [] if value
-        ]
-        if history_media_ids:
-            db.execute(
-                delete(UserMediaHistory).where(
-                    UserMediaHistory.media_version_id.in_(history_media_ids)
-                )
-            )
-        for history in inverse.get("mediaHistories") or []:
-            library_operations.insert_snapshot(db, "UserMediaHistory", history)
-        target_media_version_id = str(inverse.get("targetMediaVersionId") or "")
-        if inverse.get("targetMediaVersionCreated") and target_media_version_id:
-            library_operations.delete_media_version_if_empty(
-                db, target_media_version_id
-            )
+        for row in volumes:
+            library_operations.insert_snapshot(db, "LibraryVolume", row)
     elif action == "DELETE_VOLUME":
         snapshot = inverse.get("snapshot")
         if not isinstance(snapshot, dict):

@@ -34,6 +34,9 @@ from app.modules.library.application.catalog import (
     CatalogWorkFilter,
     CatalogWorkPage,
 )
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 
 CATALOG_MEDIA_KINDS = ("EBOOK", "COMIC")
 CATALOG_READY_IMPORT_STATUSES = ("COMPLETED", "IMPORTED", "READY")
@@ -49,7 +52,7 @@ def _eligible_volume_exists(context: AuthorizationContext) -> ColumnElement[bool
         .join(file, file.volume_id == volume.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            media_version.source_key.in_(CATALOG_MEDIA_KINDS),
+            volume_effective_media_kind(volume).in_(CATALOG_MEDIA_KINDS),
             volume.hidden.is_(False),
             volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
             volume_visibility_predicate(context, volume),
@@ -115,7 +118,7 @@ def _latest_eligible_volume_at(
         .join(file, file.volume_id == volume.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            media_version.source_key.in_(CATALOG_MEDIA_KINDS),
+            volume_effective_media_kind(volume).in_(CATALOG_MEDIA_KINDS),
             volume.hidden.is_(False),
             volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
             volume_visibility_predicate(context, volume),
@@ -294,7 +297,7 @@ class SqlAlchemyCatalogQueries:
         rows = self._db.execute(
             select(
                 LibraryVersion.work_id,
-                LibraryVersion.source_key.label("media_kind"),
+                volume_effective_media_kind(LibraryVolume).label("media_kind"),
                 LibraryVolume,
                 LibraryFile.id.label("file_id"),
                 LibraryFile.mime_type,
@@ -308,7 +311,7 @@ class SqlAlchemyCatalogQueries:
             .join(LibraryFile, LibraryFile.id == preferred_file_id)
             .where(
                 LibraryVersion.work_id.in_(work_ids),
-                LibraryVersion.source_key.in_(CATALOG_MEDIA_KINDS),
+                volume_effective_media_kind(LibraryVolume).in_(CATALOG_MEDIA_KINDS),
                 LibraryVolume.hidden.is_(False),
                 LibraryVolume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
                 volume_visibility_predicate(context),

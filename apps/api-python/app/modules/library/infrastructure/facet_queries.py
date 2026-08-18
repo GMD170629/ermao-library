@@ -14,11 +14,13 @@ from app.core.authorization import (
 )
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
+)
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
@@ -38,17 +40,19 @@ def list_visible_works(
 def media_kind_counts(
     db: Session, context: AuthorizationContext
 ) -> list[dict[str, Any]]:
+    kind = volume_effective_media_kind(LibraryVolume)
     rows = db.execute(
         select(
-            LibraryMediaVersion.media_kind.label("value"),
-            func.count(func.distinct(LibraryMediaVersion.work_id)).label("count"),
+            kind.label("value"),
+            func.count(func.distinct(LibraryVersion.work_id)).label("count"),
         )
-        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
+        .select_from(LibraryVolume)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
         .where(
             LibraryVolume.hidden.is_(False),
             volume_visibility_predicate(context),
         )
-        .group_by(LibraryMediaVersion.media_kind)
+        .group_by(kind)
     ).all()
     return [{"value": row.value, "count": int(row.count or 0)} for row in rows]
 

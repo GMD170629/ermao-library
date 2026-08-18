@@ -7,7 +7,12 @@ from sqlalchemy import select
 
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import (
+    LibraryMediaVersion,
+    LibraryVersion,
+    LibraryVolume,
+    LibraryWork,
+)
 from app.models.organize import OrganizeJob, OrganizePolicy
 
 if TYPE_CHECKING:
@@ -54,7 +59,7 @@ def _login_member(client: TestClient, db: Session) -> User:
 
 def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
     first = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         title="星海纪行 2",
         normalized_title="星海纪行 2",
         author="林川",
@@ -66,7 +71,7 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
         merge_key="merge-first",
     )
     second = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         title="星海纪行 1",
         normalized_title="星海纪行 1",
         author="林川",
@@ -75,6 +80,12 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
         merge_key="merge-second",
     )
     db.add_all([first, second])
+    db.flush()
+    versions = [
+        LibraryVersion(work_id=first.id, source_key="__implicit__"),
+        LibraryVersion(work_id=second.id, source_key="__implicit__"),
+    ]
+    db.add_all(versions)
     db.flush()
     media = [
         LibraryMediaVersion(work_id=first.id, media_kind="EBOOK"),
@@ -86,7 +97,7 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
     db.flush()
     volumes = [
         LibraryVolume(
-            media_version_id=media[0].id,
+            version_id=versions[0].id,
             title="电子书第二卷",
             volume_index=2,
             sort_order=0,
@@ -97,7 +108,7 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
             cover_status="READY",
         ),
         LibraryVolume(
-            media_version_id=media[1].id,
+            version_id=versions[0].id,
             title="漫画卷",
             sort_order=0,
             format="CBZ",
@@ -105,7 +116,7 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
             import_status="IMPORTED",
         ),
         LibraryVolume(
-            media_version_id=media[2].id,
+            version_id=versions[1].id,
             title="电子书第一卷",
             volume_index=1,
             sort_order=0,
@@ -114,7 +125,7 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
             import_status="IMPORTED",
         ),
         LibraryVolume(
-            media_version_id=media[3].id,
+            version_id=versions[1].id,
             title="有声卷",
             sort_order=0,
             format="M4B",
@@ -175,6 +186,13 @@ def test_preview_merge_creates_a_new_non_reversible_work(
     assert merged is not None
     assert merged.title == "星海纪行"
     assert merged.cover_path == "covers/ebook-2.jpg"
+    merged_versions = list(
+        db_session.scalars(
+            select(LibraryVersion).where(LibraryVersion.work_id == result["workId"])
+        ).all()
+    )
+    assert len(merged_versions) == 1
+    assert merged_versions[0].source_key == "__implicit__"
     merged_media = list(
         db_session.scalars(
             select(LibraryMediaVersion).where(
@@ -187,11 +205,13 @@ def test_preview_merge_creates_a_new_non_reversible_work(
         "COMIC",
         "AUDIOBOOK",
     }
-    ebook_id = next(item.id for item in merged_media if item.media_kind == "EBOOK")
     ebook_volumes = list(
         db_session.scalars(
             select(LibraryVolume)
-            .where(LibraryVolume.media_version_id == ebook_id)
+            .where(
+                LibraryVolume.version_id == merged_versions[0].id,
+                LibraryVolume.format == "EPUB",
+            )
             .order_by(LibraryVolume.sort_order)
         ).all()
     )
@@ -233,11 +253,17 @@ def test_merge_rejects_an_active_background_job(
 ) -> None:
     _login(client, db_session)
     first, second, volumes = _seed(db_session)
+    ebook_media_id = db_session.scalar(
+        select(LibraryMediaVersion.id).where(
+            LibraryMediaVersion.work_id == first.id,
+            LibraryMediaVersion.media_kind == "EBOOK",
+        )
+    )
     db_session.add(
         OrganizeJob(
             work_id=first.id,
             volume_id=volumes[0].id,
-            media_version_id=volumes[0].media_version_id,
+            media_version_id=ebook_media_id,
             trigger="MANUAL",
             status="RUNNING",
             issue_codes="[]",
@@ -265,11 +291,23 @@ def test_merge_does_not_reassign_unresolved_organize_jobs(
 ) -> None:
     _login(client, db_session)
     first, second, volumes = _seed(db_session)
+    first_ebook_id = db_session.scalar(
+        select(LibraryMediaVersion.id).where(
+            LibraryMediaVersion.work_id == first.id,
+            LibraryMediaVersion.media_kind == "EBOOK",
+        )
+    )
+    second_ebook_id = db_session.scalar(
+        select(LibraryMediaVersion.id).where(
+            LibraryMediaVersion.work_id == second.id,
+            LibraryMediaVersion.media_kind == "EBOOK",
+        )
+    )
     jobs = [
         OrganizeJob(
             work_id=first.id,
             volume_id=volumes[0].id,
-            media_version_id=volumes[0].media_version_id,
+            media_version_id=first_ebook_id,
             trigger="MANUAL",
             status="REVIEWING",
             issue_codes="[]",
@@ -277,7 +315,7 @@ def test_merge_does_not_reassign_unresolved_organize_jobs(
         OrganizeJob(
             work_id=second.id,
             volume_id=volumes[2].id,
-            media_version_id=volumes[2].media_version_id,
+            media_version_id=second_ebook_id,
             trigger="MANUAL",
             status="FAILED",
             issue_codes="[]",
@@ -305,9 +343,12 @@ def test_merge_does_not_reassign_unresolved_organize_jobs(
         if (job := db_session.get(OrganizeJob, job_id)) is not None
     ]
     assert all(job.work_id in {first.id, second.id} for job in remaining_jobs)
-    assert db_session.scalar(
-        select(OrganizeJob.id).where(OrganizeJob.work_id == merged_work_id)
-    ) is None
+    assert (
+        db_session.scalar(
+            select(OrganizeJob.id).where(OrganizeJob.work_id == merged_work_id)
+        )
+        is None
+    )
 
 
 def test_merge_preview_requires_system_management_permission(

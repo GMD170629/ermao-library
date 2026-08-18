@@ -12,27 +12,18 @@ from sqlalchemy.sql.base import Executable
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
-from app.models.library import LibraryMediaVersion, LibraryVersion, LibraryVolume, LibraryWork
+from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
 from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
+    get_or_create_implicit_version,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedVolumeMove:
     statements: tuple[Executable, ...]
     result: MoveVolumeResult
-
-
-def _version_for_work(
-    db: Session, *, work_id: str, source_key: str
-) -> LibraryVersion | None:
-    return db.scalar(
-        select(LibraryVersion)
-        .where(
-            LibraryVersion.work_id == work_id,
-            LibraryVersion.source_key == source_key,
-        )
-        .limit(1)
-    )
 
 
 def _ordered_volume_rows(
@@ -123,50 +114,44 @@ def prepare_volume_move(
             raise ValueError("CROSS_LIBRARY_OPERATION")
 
     volume, source_version = source
-    target_version = (
-        None
-        if target_work_prepared
-        else _version_for_work(
-            db, work_id=target_work_id, source_key=source_version.source_key
-        )
-    )
     source_version_id = source_version.id
-    created = target_version is None
-    target_version_id = cuid() if target_version is None else target_version.id
+    write_statements: list[Executable] = []
+    if target_work_prepared:
+        target_version_id = cuid()
+        created = True
+        write_statements.append(
+            insert(LibraryVersion).values(
+                id=target_version_id,
+                work_id=target_work_id,
+                source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                source_name=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        target_rows: list[tuple[str, int, datetime]] = []
+    else:
+        existing_implicit_id = db.scalar(
+            select(LibraryVersion.id).where(
+                LibraryVersion.work_id == target_work_id,
+                LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
+            )
+        )
+        target_version = get_or_create_implicit_version(db, target_work_id, now=now)
+        target_version_id = target_version.id
+        created = existing_implicit_id is None
+        target_rows = _ordered_volume_rows(db, target_version_id)
     source_rows = [
         row
         for row in _ordered_volume_rows(db, source_version_id)
         if row[0] != volume_id
     ]
-    target_rows = (
-        [] if target_work_prepared else _ordered_volume_rows(db, target_version_id)
-    )
     target_rows.append((volume.id, volume.sort_order, volume.created_at))
     source_version_ids = tuple(
         db.scalars(
             select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
         ).all()
     )
-    write_statements: list[Executable] = []
-    if created:
-        write_statements.append(
-            insert(LibraryVersion).values(
-                id=target_version_id,
-                work_id=target_work_id,
-                source_key=source_version.source_key,
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        write_statements.append(
-            insert(LibraryMediaVersion).values(
-                id=target_version_id,
-                work_id=target_work_id,
-                media_kind=source_version.source_key,
-                created_at=now,
-                updated_at=now,
-            )
-        )
     write_statements.append(
         update(LibraryVolume)
         .where(LibraryVolume.id == volume_id)

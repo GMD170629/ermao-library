@@ -29,6 +29,9 @@ from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     resolve_library_roots,
 )
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
@@ -61,16 +64,13 @@ def _media_kind_predicate(
     media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(media_version.id).where(
+        select(volume.id)
+        .join(media_version, media_version.id == volume.version_id)
+        .where(
             media_version.work_id == LibraryWork.id,
-            media_version.source_key.in_(media_kinds),
-            exists(
-                select(volume.id).where(
-                    volume.version_id == media_version.id,
-                    volume.hidden.is_(False),
-                    volume_visibility_predicate(context, volume),
-                )
-            ),
+            volume_effective_media_kind(volume).in_(media_kinds),
+            volume.hidden.is_(False),
+            volume_visibility_predicate(context, volume),
         )
     )
 
@@ -273,8 +273,10 @@ def _order(query: WorkListQuery) -> list[ColumnElement[object]]:
         not query.sort_direction
         and query.sort in {"updated", "recent_read", "recent_import", "progress"}
     )
+
     def direction(column: ColumnElement[object]) -> ColumnElement[object]:
         return column.desc() if descending else column.asc()
+
     if query.sort == "title":
         return [direction(LibraryWork.title), LibraryWork.id.asc()]
     if query.sort == "author":
@@ -318,9 +320,7 @@ def list_works(db: Session, user: User, query: WorkListQuery) -> WorkListResult:
                 LibraryVersion.work_id.label("work_id"),
                 func.max(LibraryReadingProgress.updated_at).label("last_read_at"),
             )
-            .join(
-                LibraryVolume, LibraryVolume.version_id == LibraryVersion.id
-            )
+            .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
             .join(
                 LibraryReadingProgress,
                 LibraryReadingProgress.volume_id == LibraryVolume.id,

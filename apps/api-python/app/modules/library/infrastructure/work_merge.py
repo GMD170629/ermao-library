@@ -47,9 +47,13 @@ from app.modules.library.application.work_merge import (
     WorkMergeInProgressError,
     WorkMergeNotFoundError,
 )
+from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.infrastructure.facet_sync import (
     execute_work_facet_write,
     prepare_work_facet_write,
+)
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
 )
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
@@ -110,9 +114,7 @@ class SqlAlchemyWorkMergeGateway:
             self._db.scalars(
                 select(LibraryVersion)
                 .where(LibraryVersion.work_id.in_(work_ids))
-                .order_by(
-                    LibraryVersion.created_at.asc(), LibraryVersion.id.asc()
-                )
+                .order_by(LibraryVersion.created_at.asc(), LibraryVersion.id.asc())
             ).all()
         )
         media_ids = [media.id for media in media_versions]
@@ -140,10 +142,7 @@ class SqlAlchemyWorkMergeGateway:
         media_by_id = {media.id: media for media in media_versions}
         source_positions = {work_id: index for index, work_id in enumerate(work_ids)}
         return sorted(
-            (
-                (media_by_id[volume.version_id].source_key, volume)
-                for volume in volumes
-            ),
+            ((media_kind_of(volume), volume) for volume in volumes),
             key=lambda item: (
                 MEDIA_KIND_ORDER.get(item[0], 99),
                 0
@@ -371,23 +370,24 @@ class SqlAlchemyWorkMergeGateway:
             "created_at": now,
             "updated_at": now,
         }
+        ordered = self._ordered_volumes(command.work_ids, media_versions, volumes)
         media_kinds = tuple(
             sorted(
-                {media.source_key for media in media_versions},
+                {kind for kind, _volume in ordered},
                 key=lambda value: MEDIA_KIND_ORDER.get(value, 99),
             )
         )
-        new_media_ids = {kind: cuid() for kind in media_kinds}
-        version_rows = tuple(
+        implicit_version_id = cuid()
+        version_rows = (
             {
-                "id": new_media_ids[kind],
+                "id": implicit_version_id,
                 "work_id": new_work_id,
-                "source_key": kind,
+                "source_key": IMPLICIT_VERSION_SOURCE_KEY,
                 "created_at": now,
                 "updated_at": now,
-            }
-            for kind in media_kinds
+            },
         )
+        new_media_ids = {kind: cuid() for kind in media_kinds}
         media_rows = tuple(
             {
                 "id": new_media_ids[kind],
@@ -399,25 +399,31 @@ class SqlAlchemyWorkMergeGateway:
             for kind in media_kinds
         )
 
-        ordered = self._ordered_volumes(command.work_ids, media_versions, volumes)
         kind_positions: dict[str, int] = defaultdict(int)
         volume_update_rows: list[dict[str, object]] = []
         for kind, volume in ordered:
             volume_update_rows.append(
                 {
                     "id": volume.id,
-                    "version_id": new_media_ids[kind],
+                    "version_id": implicit_version_id,
                     "sort_order": kind_positions[kind],
                     "updated_at": now,
                 }
             )
             kind_positions[kind] += 1
 
-        source_media_ids = [media.id for media in media_versions]
+        source_version_ids = [media.id for media in media_versions]
+        old_media_versions = list(
+            self._db.scalars(
+                select(LibraryMediaVersion).where(
+                    LibraryMediaVersion.work_id.in_(command.work_ids)
+                )
+            ).all()
+        )
+        kind_by_media_id = {row.id: row.media_kind for row in old_media_versions}
+        old_media_ids = tuple(kind_by_media_id)
         histories: list[UserMediaHistory] = []
-        for chunk in sqlite_parameter_chunks(
-            tuple(source_media_ids), parameters_per_row=1
-        ):
+        for chunk in sqlite_parameter_chunks(old_media_ids, parameters_per_row=1):
             histories.extend(
                 self._db.scalars(
                     select(UserMediaHistory).where(
@@ -429,9 +435,10 @@ class SqlAlchemyWorkMergeGateway:
             list
         )
         for history in histories:
-            history_groups[
-                (history.user_id, media_by_id[history.media_version_id].source_key)
-            ].append(history)
+            kind = kind_by_media_id.get(history.media_version_id)
+            if kind is None or kind not in new_media_ids:
+                continue
+            history_groups[(history.user_id, kind)].append(history)
         history_loser_ids: list[str] = []
         history_winner_rows: list[dict[str, object]] = []
         for (_user_id, kind), candidates in history_groups.items():
@@ -467,8 +474,9 @@ class SqlAlchemyWorkMergeGateway:
                 "id": row.id,
                 "work_id": new_work_id,
                 "media_version_id": (
-                    new_media_ids[media_by_id[row.media_version_id].source_key]
-                    if row.media_version_id in media_by_id
+                    new_media_ids[kind_by_media_id[row.media_version_id]]
+                    if row.media_version_id in kind_by_media_id
+                    and kind_by_media_id[row.media_version_id] in new_media_ids
                     else row.media_version_id
                 ),
             }
@@ -483,8 +491,9 @@ class SqlAlchemyWorkMergeGateway:
                 "id": row.id,
                 "work_id": new_work_id,
                 "media_version_id": (
-                    new_media_ids[media_by_id[row.media_version_id].source_key]
-                    if row.media_version_id in media_by_id
+                    new_media_ids[kind_by_media_id[row.media_version_id]]
+                    if row.media_version_id in kind_by_media_id
+                    and kind_by_media_id[row.media_version_id] in new_media_ids
                     else row.media_version_id
                 ),
             }
@@ -560,18 +569,13 @@ class SqlAlchemyWorkMergeGateway:
             for chunk in sqlite_parameter_chunks(shelf_rows, parameters_per_row=3)
         )
         source_media_delete_statements = tuple(
-            (
-                delete(LibraryMediaVersion).where(LibraryMediaVersion.id.in_(chunk)),
-                delete(LibraryVersion).where(LibraryVersion.id.in_(chunk)),
-            )
+            delete(LibraryVersion).where(LibraryVersion.id.in_(chunk))
             for chunk in sqlite_parameter_chunks(
-                tuple(source_media_ids), parameters_per_row=1
+                tuple(source_version_ids), parameters_per_row=1
             )
-        )
-        source_media_delete_statements = tuple(
-            statement
-            for pair in source_media_delete_statements
-            for statement in pair
+        ) + tuple(
+            delete(LibraryMediaVersion).where(LibraryMediaVersion.id.in_(chunk))
+            for chunk in sqlite_parameter_chunks(old_media_ids, parameters_per_row=1)
         )
         result = MergeResult(
             work_id=new_work_id,

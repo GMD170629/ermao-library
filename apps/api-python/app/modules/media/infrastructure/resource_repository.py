@@ -12,6 +12,9 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 from app.modules.media.application.resource_query import MediaFileResource
 from app.modules.media.application.volume_archive import (
     VolumeArchiveSelection,
@@ -65,7 +68,7 @@ class SqlAlchemyMediaResourceRepository:
                 volume_visibility_predicate(actor),
             )
             .order_by(
-                LibraryVersion.source_key,
+                volume_effective_media_kind(LibraryVolume),
                 LibraryVolume.sort_order,
                 LibraryVolume.created_at,
                 LibraryVolume.id,
@@ -111,9 +114,9 @@ class SqlAlchemyMediaResourceRepository:
             )
             .order_by(
                 case(
-                    (LibraryVersion.source_key == "EBOOK", 0),
-                    (LibraryVersion.source_key == "COMIC", 1),
-                    (LibraryVersion.source_key == "AUDIOBOOK", 2),
+                    (volume_effective_media_kind(LibraryVolume) == "EBOOK", 0),
+                    (volume_effective_media_kind(LibraryVolume) == "COMIC", 1),
+                    (volume_effective_media_kind(LibraryVolume) == "AUDIOBOOK", 2),
                     else_=3,
                 ),
                 LibraryVolume.sort_order,

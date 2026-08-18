@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFile,
-    LibraryVersion,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
 )
+from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
@@ -31,7 +32,7 @@ def get_volume_context(db: Session, volume_id: str) -> dict[str, Any] | None:
     payload = entity_as_legacy_dict(volume)
     payload.update(
         workId=media_version.work_id,
-        mediaKind=media_version.source_key,
+        mediaKind=media_kind_of(volume),
         versionId=media_version.id,
     )
     return payload
@@ -53,7 +54,7 @@ def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     payload = entity_as_legacy_dict(unit)
     payload.update(
         workId=media_version.work_id,
-        mediaKind=media_version.source_key,
+        mediaKind=media_kind_of(volume),
         versionId=media_version.id,
         format=volume.format,
     )

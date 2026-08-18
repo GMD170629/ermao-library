@@ -37,13 +37,17 @@ from app.models.auth import User
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
-    LibraryVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     UserMediaHistory,
 )
 from app.modules.library.application.bookshelf import BookshelfItemSummary
+from app.modules.library.domain.media_kinds import media_kind_of
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 from app.modules.reader.public import (
     number_or_none as _number_or_none,
 )
@@ -356,7 +360,7 @@ def _available_media_kinds_by_work(
         select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
         .where(LibraryMediaVersion.work_id.in_(work_ids))
         .order_by(
-            LibraryVersion.work_id.asc(),
+            LibraryMediaVersion.work_id.asc(),
             case(
                 (LibraryMediaVersion.media_kind == "EBOOK", 0),
                 (LibraryMediaVersion.media_kind == "COMIC", 1),
@@ -459,7 +463,7 @@ def _management_work_views(
     for work in works:
         work_resources = resources.get(str(work["id"]), [])
         media_kinds = list(
-            dict.fromkeys(media.source_key for media, _volume in work_resources)
+            dict.fromkeys(media_kind_of(volume) for _media, volume in work_resources)
         )
         percents = [
             float(progresses[volume.id].percent) if volume.id in progresses else 0.0
@@ -693,6 +697,42 @@ def _reading_unit_view(unit: LibraryReadingUnit) -> dict[str, Any]:
 
 
 @dataclass(frozen=True, slots=True)
+class _VolumeMediaParent:
+    id: str
+    work_id: str
+    media_kind: str
+
+
+def _media_parents_by_work_kind(
+    db: Session, work_ids: list[str]
+) -> dict[tuple[str, str], _VolumeMediaParent]:
+    if not work_ids:
+        return {}
+    parents: dict[tuple[str, str], _VolumeMediaParent] = {}
+    for media in db.scalars(
+        select(LibraryMediaVersion).where(LibraryMediaVersion.work_id.in_(work_ids))
+    ).all():
+        parents[(media.work_id, media.media_kind)] = _VolumeMediaParent(
+            id=media.id,
+            work_id=media.work_id,
+            media_kind=media.media_kind,
+        )
+    return parents
+
+
+def _parent_for_volume(
+    volume: LibraryVolume,
+    work_id: str,
+    parents: dict[tuple[str, str], _VolumeMediaParent],
+) -> _VolumeMediaParent:
+    kind = media_kind_of(volume)
+    existing = parents.get((work_id, kind))
+    if existing is not None:
+        return existing
+    return _VolumeMediaParent(id=f"{work_id}:{kind}", work_id=work_id, media_kind=kind)
+
+
+@dataclass(frozen=True, slots=True)
 class _WorkViewBatch:
     metadata_lookups: dict[str, dict[str, object]]
     rows_by_work: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]]
@@ -868,9 +908,11 @@ def _work_view(
                 LibraryVolume.id.asc(),
             )
         ).all()
-    grouped: dict[str, tuple[LibraryMediaVersion, list[LibraryVolume]]] = {}
-    for media_version, volume in rows:
-        grouped.setdefault(media_version.id, (media_version, []))[1].append(volume)
+    parents = _media_parents_by_work_kind(db, [work_id])
+    grouped: dict[str, tuple[_VolumeMediaParent, list[LibraryVolume]]] = {}
+    for version, volume in rows:
+        parent = _parent_for_volume(volume, version.work_id, parents)
+        grouped.setdefault(parent.id, (parent, []))[1].append(volume)
     volume_ids = [volume.id for _media, volume in rows]
     progresses = (
         batch.progresses
@@ -908,7 +950,7 @@ def _work_view(
     )
     media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
     ordered = sorted(
-        grouped.values(), key=lambda item: media_order.get(item[0].source_key, 99)
+        grouped.values(), key=lambda item: media_order.get(item[0].media_kind, 99)
     )
     incomplete: dict[str, list[LibraryVolume]] = {}
     all_volumes: list[LibraryVolume] = []
@@ -921,7 +963,7 @@ def _work_view(
             < 100
         ]
     candidates = [item for item in ordered if incomplete[item[0].id]]
-    recent_media: LibraryMediaVersion | None = None
+    recent_media: _VolumeMediaParent | None = None
     continue_volume: LibraryVolume | None = None
     if candidates:
         with_history = [item for item in candidates if item[0].id in histories]
@@ -957,7 +999,7 @@ def _work_view(
         )
         if (
             continue_volume is not None
-            and continue_volume.version_id == media_version.id
+            and media_kind_of(continue_volume) == media_version.media_kind
             and all(volume.id != continue_volume.id for volume in selected)
         ):
             selected.append(continue_volume)
@@ -980,7 +1022,7 @@ def _work_view(
     media_views = [
         {
             "id": media_version.id,
-            "mediaKind": media_version.source_key,
+            "mediaKind": media_version.media_kind,
             "completed": bool(volumes) and not incomplete[media_version.id],
             "volumeCount": len(volumes),
             "sizeBytes": sum(volume.size_bytes for volume in volumes),
@@ -1023,7 +1065,7 @@ def _work_view(
         "metadataLookupError": (metadata_lookup or {}).get("errorSummary"),
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work_id, work, size="medium"),
-        "recentMediaKind": recent_media.source_key if recent_media else None,
+        "recentMediaKind": recent_media.media_kind if recent_media else None,
         "continueVolumeId": continue_volume.id if continue_volume else None,
         "continueVolumeTitle": continue_volume.title if continue_volume else None,
         "continueVolumeProgress": float(progresses[continue_volume.id].percent)
@@ -1231,18 +1273,38 @@ def _work_volume_page_view(
 ) -> dict[str, Any] | None:
     context = authorization_context(db, user)
     media_version = db.scalar(
+        select(LibraryMediaVersion).where(
+            LibraryMediaVersion.id == media_version_id,
+            LibraryMediaVersion.work_id == work_id,
+        )
+    )
+    version = db.scalar(
         select(LibraryVersion).where(
             LibraryVersion.id == media_version_id,
             LibraryVersion.work_id == work_id,
         )
     )
-    if media_version is None:
+    if media_version is None and version is None:
         return None
     filters = [
-        LibraryVolume.version_id == media_version_id,
         LibraryVolume.hidden.is_(False),
         volume_visibility_predicate(context),
     ]
+    if media_version is not None:
+        filters.extend(
+            (
+                LibraryVolume.version_id.in_(
+                    select(LibraryVersion.id).where(LibraryVersion.work_id == work_id)
+                ),
+                volume_effective_media_kind(LibraryVolume) == media_version.media_kind,
+            )
+        )
+        response_media_kind = media_version.media_kind
+        response_version_id = media_version.id
+    else:
+        filters.append(LibraryVolume.version_id == media_version_id)
+        response_media_kind = None
+        response_version_id = media_version_id
     total = int(db.scalar(select(func.count(LibraryVolume.id)).where(*filters)) or 0)
     bounded_page_size = min(100, max(1, page_size))
     total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
@@ -1280,13 +1342,15 @@ def _work_volume_page_view(
             .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
         ).all():
             files[file.volume_id].append(file)
+    if response_media_kind is None and volumes:
+        response_media_kind = media_kind_of(volumes[0])
     return {
-        "versionId": media_version.id,
-        "mediaKind": media_version.source_key,
+        "versionId": response_version_id,
+        "mediaKind": response_media_kind,
         "volumes": [
             _library_volume_page_view(
                 volume,
-                media_version_id=media_version.id,
+                media_version_id=response_version_id,
                 progress=progresses.get(volume.id),
                 files=files.get(volume.id, []),
             )

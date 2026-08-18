@@ -23,11 +23,11 @@ from app.models.import_pipeline import (
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
-    LibraryVersion,
     LibraryMetadata,
     LibraryOperation,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryVolumeFacet,
     LibraryWork,
@@ -43,6 +43,10 @@ from app.modules.library.application.volume_commands import (
     VolumeContext,
 )
 from app.modules.library.infrastructure import operations as operation_store
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
+    get_or_create_implicit_version,
+)
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
@@ -144,99 +148,6 @@ def _remaining_by_media(
     return result
 
 
-def _history_rows(
-    db: Session, media_ids: tuple[str, ...]
-) -> tuple[UserMediaHistory, ...]:
-    if not media_ids:
-        return ()
-    return tuple(
-        db.scalars(
-            select(UserMediaHistory).where(
-                UserMediaHistory.media_version_id.in_(media_ids)
-            )
-        ).all()
-    )
-
-
-def _prepare_history_reparent(
-    *,
-    histories: tuple[UserMediaHistory, ...],
-    source_to_target: Mapping[str, str],
-    remaining_by_media: Mapping[str, list[LibraryVolume]],
-    preferred_volume_by_target: Mapping[str, str],
-    moved_ids: set[str],
-    now: datetime,
-) -> tuple[
-    tuple[Mapping[str, object], ...],
-    tuple[Mapping[str, object], ...],
-    tuple[str, ...],
-]:
-    histories_by_media: dict[str, list[UserMediaHistory]] = defaultdict(list)
-    target_by_key: dict[tuple[str, str], UserMediaHistory | Mapping[str, object]] = {}
-    for history in histories:
-        histories_by_media[history.media_version_id].append(history)
-        target_by_key[(history.media_version_id, history.user_id)] = history
-    updates: dict[str, dict[str, object]] = {}
-    inserts: list[Mapping[str, object]] = []
-    deletes: set[str] = set()
-    for source_id, target_id in source_to_target.items():
-        if source_id == target_id:
-            continue
-        remaining = remaining_by_media.get(source_id, [])
-        preferred_volume_id = preferred_volume_by_target[target_id]
-        for source_history in histories_by_media.get(source_id, []):
-            key = (target_id, source_history.user_id)
-            target_history = target_by_key.get(key)
-            if target_history is None:
-                if not remaining:
-                    row = {
-                        "id": source_history.id,
-                        "media_version_id": target_id,
-                        "last_volume_id": preferred_volume_id,
-                        "updated_at": now,
-                    }
-                    updates[source_history.id] = row
-                    target_by_key[key] = row
-                else:
-                    row = {
-                        "id": cuid(),
-                        "user_id": source_history.user_id,
-                        "media_version_id": target_id,
-                        "last_volume_id": preferred_volume_id,
-                        "created_at": now,
-                        "updated_at": source_history.updated_at,
-                    }
-                    inserts.append(row)
-                    target_by_key[key] = row
-            else:
-                target_updated_at = (
-                    target_history.updated_at
-                    if isinstance(target_history, UserMediaHistory)
-                    else target_history.get("updated_at", now)
-                )
-                if source_history.updated_at > target_updated_at:
-                    target_id_value = (
-                        target_history.id
-                        if isinstance(target_history, UserMediaHistory)
-                        else str(target_history["id"])
-                    )
-                    updates[target_id_value] = {
-                        "id": target_id_value,
-                        "last_volume_id": preferred_volume_id,
-                        "updated_at": source_history.updated_at,
-                    }
-                if not remaining:
-                    deletes.add(source_history.id)
-            if remaining and source_history.last_volume_id in moved_ids:
-                updates[source_history.id] = {
-                    "id": source_history.id,
-                    "last_volume_id": remaining[0].id,
-                    "updated_at": now,
-                }
-    deletes.difference_update(updates)
-    return tuple(updates.values()), tuple(inserts), tuple(sorted(deletes))
-
-
 def _require_same_library(
     db: Session, *, source_work_id: str, target_work_id: str
 ) -> None:
@@ -254,6 +165,82 @@ def _require_same_library(
         raise ValueError("CROSS_LIBRARY_OPERATION")
 
 
+def _prepare_set_media_kind_batch(
+    db: Session,
+    *,
+    actor_id: str,
+    source_work_id: str,
+    contexts: tuple[VolumeContext, ...],
+    target_kind: str,
+    now: datetime,
+) -> PreparedBatchVolumeMutation:
+    volume_ids = tuple(context.id for context in contexts)
+    selected = _volume_entities(db, volume_ids)
+    selected_by_id = {volume.id: (volume, media) for volume, media in selected}
+    source_work = db.get(LibraryWork, source_work_id)
+    if source_work is None:
+        raise ValueError("Source work does not exist")
+    volume_updates = tuple(
+        {
+            "id": volume.id,
+            "classification_source": "USER",
+            "classification_reason": "USER_OVERRIDE",
+            "suggested_media_kind": target_kind,
+            "updated_at": now,
+        }
+        for volume, _media in selected
+    )
+    operations = tuple(
+        operation_store.prepare_operation_write(
+            user_id=actor_id,
+            action="RECLASSIFY_VOLUME",
+            target_type="volume",
+            target_id=context.id,
+            summary=f"Reclassified volume as {target_kind}",
+            payload={
+                "sourceWorkId": source_work_id,
+                "targetWorkId": source_work_id,
+                "volumeId": context.id,
+                "targetMediaKind": target_kind,
+            },
+            inverse={
+                "sourceWork": None,
+                "sourceWorkDependents": {},
+                "sourceMediaVersion": entity_as_legacy_dict(
+                    selected_by_id[context.id][1]
+                ),
+                "volume": entity_as_legacy_dict(selected_by_id[context.id][0]),
+                "volumes": [entity_as_legacy_dict(selected_by_id[context.id][0])],
+                "targetWorkId": source_work_id,
+                "targetMediaVersionId": selected_by_id[context.id][1].id,
+                "targetMediaVersionCreated": False,
+                "mediaHistories": [],
+            },
+            now=now,
+        )
+        for context in contexts
+    )
+    writes: list[PreparedSqlWrite] = [
+        *_parameter_writes(update(LibraryVolume), volume_updates, parameters_per_row=5),
+        PreparedSqlWrite(
+            update(LibraryWork)
+            .where(LibraryWork.id == source_work_id)
+            .values(updated_at=now)
+        ),
+        *_operation_writes(operations),
+    ]
+    return PreparedBatchVolumeMutation(
+        tuple(writes),
+        BatchVolumeOutcome(
+            work_id=source_work_id,
+            affected_volume_ids=volume_ids,
+            target_work_ids=(),
+            operation_ids=tuple(operation.record["id"] for operation in operations),
+            deleted_work=False,
+        ),
+    )
+
+
 def _prepare_reparent_batch(
     db: Session,
     *,
@@ -261,7 +248,6 @@ def _prepare_reparent_batch(
     source_work_id: str,
     target_work_id: str,
     contexts: tuple[VolumeContext, ...],
-    target_kind: str | None,
     now: datetime,
 ) -> PreparedBatchVolumeMutation:
     volume_ids = tuple(context.id for context in contexts)
@@ -277,128 +263,57 @@ def _prepare_reparent_batch(
         _require_same_library(
             db, source_work_id=source_work_id, target_work_id=target_work_id
         )
-    target_kinds = tuple(
-        dict.fromkeys(target_kind or media.source_key for _volume, media in selected)
+    existing_implicit_id = db.scalar(
+        select(LibraryVersion.id).where(
+            LibraryVersion.work_id == target_work_id,
+            LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
+        )
     )
-    target_media_by_kind = {
-        media.source_key: media
-        for media in db.scalars(
-            select(LibraryVersion).where(
-                LibraryVersion.work_id == target_work_id,
-                LibraryVersion.source_key.in_(target_kinds),
+    target_version = get_or_create_implicit_version(db, target_work_id, now=now)
+    target_id = target_version.id
+    created_target_version = existing_implicit_id is None
+    existing_target_volumes = [
+        volume
+        for volume in db.scalars(
+            select(LibraryVolume)
+            .where(LibraryVolume.version_id == target_id)
+            .order_by(
+                LibraryVolume.sort_order.asc(),
+                LibraryVolume.id.asc(),
             )
         ).all()
-    }
-    target_media_ids = {
-        kind: (
-            target_media_by_kind[kind].id if kind in target_media_by_kind else cuid()
-        )
-        for kind in target_kinds
-    }
-    target_version_rows = tuple(
-        {
-            "id": target_media_ids[kind],
-            "work_id": target_work_id,
-            "source_key": kind,
-            "created_at": now,
-            "updated_at": now,
-        }
-        for kind in target_kinds
-        if kind not in target_media_by_kind
-    )
-    target_media_rows = tuple(
-        {
-            "id": target_media_ids[kind],
-            "work_id": target_work_id,
-            "media_kind": kind,
-            "created_at": now,
-            "updated_at": now,
-        }
-        for kind in target_kinds
-        if kind not in target_media_by_kind
-    )
-    existing_target_volumes: dict[str, list[LibraryVolume]] = defaultdict(list)
-    known_target_ids = tuple(target_media_ids.values())
-    for volume in db.scalars(
-        select(LibraryVolume)
-        .where(LibraryVolume.version_id.in_(known_target_ids))
-        .order_by(
-            LibraryVolume.version_id.asc(),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.id.asc(),
-        )
-    ).all():
-        if volume.id not in selected_ids:
-            existing_target_volumes[volume.version_id].append(volume)
+        if volume.id not in selected_ids
+    ]
     remaining = _remaining_by_media(db, source_media_ids, selected_ids)
-    source_to_target = {
-        source_id: target_media_ids[target_kind or source_media[source_id].source_key]
-        for source_id in source_media_ids
-    }
-    incoming_by_target: dict[str, list[LibraryVolume]] = defaultdict(list)
-    for context in contexts:
-        volume, media = selected_by_id[context.id]
-        target_id = target_media_ids[target_kind or media.source_key]
-        if volume.version_id != target_id:
-            incoming_by_target[target_id].append(volume)
+    incoming = [
+        selected_by_id[context.id][0]
+        for context in contexts
+        if selected_by_id[context.id][0].version_id != target_id
+    ]
     volume_updates: list[Mapping[str, object]] = []
-    preferred_by_target: dict[str, str] = {}
-    for target_id, incoming in incoming_by_target.items():
-        start = len(existing_target_volumes.get(target_id, []))
-        for offset, volume in enumerate(incoming, start=1):
-            volume_updates.append(
-                {
-                    "id": volume.id,
-                    "version_id": target_id,
-                    "sort_order": (start + offset) * 1000,
-                    "classification_source": "USER",
-                    "classification_reason": "USER_OVERRIDE",
-                    "suggested_media_kind": None,
-                    "updated_at": now,
-                }
-            )
-        preferred_by_target[target_id] = incoming[-1].id
-    for context in contexts:
-        volume, media = selected_by_id[context.id]
-        target_id = target_media_ids[target_kind or media.source_key]
-        preferred_by_target.setdefault(target_id, volume.id)
-        if volume.version_id == target_id:
-            volume_updates.append(
-                {
-                    "id": volume.id,
-                    "classification_source": "USER",
-                    "classification_reason": "USER_OVERRIDE",
-                    "suggested_media_kind": None,
-                    "updated_at": now,
-                }
-            )
+    start = len(existing_target_volumes)
+    for offset, volume in enumerate(incoming, start=1):
+        volume_updates.append(
+            {
+                "id": volume.id,
+                "version_id": target_id,
+                "sort_order": (start + offset) * 1000,
+                "updated_at": now,
+            }
+        )
     remaining_updates = tuple(
         {"id": volume.id, "sort_order": index * 1000, "updated_at": now}
         for media_id in source_media_ids
         for index, volume in enumerate(remaining.get(media_id, []))
     )
-    all_history_media_ids = tuple(
-        dict.fromkeys((*source_media_ids, *target_media_ids.values()))
-    )
-    histories = _history_rows(db, all_history_media_ids)
-    history_updates, history_inserts, history_deletes = _prepare_history_reparent(
-        histories=histories,
-        source_to_target=source_to_target,
-        remaining_by_media=remaining,
-        preferred_volume_by_target=preferred_by_target,
-        moved_ids=selected_ids,
-        now=now,
-    )
     empty_source_media_ids = tuple(
         media_id
         for media_id in source_media_ids
-        if media_id != source_to_target[media_id] and not remaining.get(media_id)
+        if media_id != target_id and not remaining.get(media_id)
     )
     all_source_media_ids = tuple(
         db.scalars(
-            select(LibraryVersion.id).where(
-                LibraryVersion.work_id == source_work_id
-            )
+            select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
         ).all()
     )
     deletes_source_work = source_work_id != target_work_id and set(
@@ -412,19 +327,14 @@ def _prepare_reparent_batch(
     operations = tuple(
         operation_store.prepare_operation_write(
             user_id=actor_id,
-            action="RECLASSIFY_VOLUME" if target_kind else "MOVE_VOLUME",
+            action="MOVE_VOLUME",
             target_type="volume",
             target_id=context.id,
-            summary=(
-                f"Reclassified volume as {target_kind}"
-                if target_kind
-                else f"Moved volume {context.title}"
-            ),
+            summary=f"Moved volume {context.title}",
             payload={
                 "sourceWorkId": source_work_id,
                 "targetWorkId": target_work_id,
                 "volumeId": context.id,
-                "targetMediaKind": target_kind,
             },
             inverse={
                 "sourceWork": (
@@ -436,24 +346,9 @@ def _prepare_reparent_batch(
                 ),
                 "volume": entity_as_legacy_dict(selected_by_id[context.id][0]),
                 "targetWorkId": target_work_id,
-                "targetMediaVersionId": target_media_ids[
-                    target_kind or selected_by_id[context.id][1].source_key
-                ],
-                "targetMediaVersionCreated": (
-                    target_kind or selected_by_id[context.id][1].source_key
-                )
-                not in target_media_by_kind,
-                "mediaHistories": [
-                    entity_as_legacy_dict(history)
-                    for history in histories
-                    if history.media_version_id
-                    in {
-                        selected_by_id[context.id][1].id,
-                        target_media_ids[
-                            target_kind or selected_by_id[context.id][1].source_key
-                        ],
-                    }
-                ],
+                "targetMediaVersionId": target_id,
+                "targetMediaVersionCreated": created_target_version,
+                "mediaHistories": [],
             },
             now=now,
         )
@@ -462,42 +357,12 @@ def _prepare_reparent_batch(
     writes: list[PreparedSqlWrite] = []
     writes.extend(
         _parameter_writes(
-            insert(LibraryVersion), target_version_rows, parameters_per_row=5
-        )
-    )
-    writes.extend(
-        _parameter_writes(
-            insert(LibraryMediaVersion), target_media_rows, parameters_per_row=5
-        )
-    )
-    writes.extend(
-        _parameter_writes(
-            update(LibraryVolume), tuple(volume_updates), parameters_per_row=7
+            update(LibraryVolume), tuple(volume_updates), parameters_per_row=4
         )
     )
     writes.extend(
         _parameter_writes(
             update(LibraryVolume), remaining_updates, parameters_per_row=3
-        )
-    )
-    writes.extend(
-        _parameter_writes(
-            update(UserMediaHistory), history_updates, parameters_per_row=4
-        )
-    )
-    writes.extend(
-        _parameter_writes(
-            insert(UserMediaHistory), history_inserts, parameters_per_row=6
-        )
-    )
-    writes.extend(
-        _delete_writes(UserMediaHistory, UserMediaHistory.id, history_deletes)
-    )
-    writes.extend(
-        _delete_writes(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id,
-            empty_source_media_ids,
         )
     )
     writes.extend(
@@ -579,17 +444,7 @@ def _prepare_split_batch(
         {
             "id": target_media_ids[context.id],
             "work_id": target_work_ids[context.id],
-            "source_key": selected_by_id[context.id][1].source_key,
-            "created_at": now,
-            "updated_at": now,
-        }
-        for context in contexts
-    )
-    media_rows = tuple(
-        {
-            "id": target_media_ids[context.id],
-            "work_id": target_work_ids[context.id],
-            "media_kind": selected_by_id[context.id][1].source_key,
+            "source_key": IMPLICIT_VERSION_SOURCE_KEY,
             "created_at": now,
             "updated_at": now,
         }
@@ -609,55 +464,12 @@ def _prepare_split_batch(
         for media_id in source_media_ids
         for index, volume in enumerate(remaining.get(media_id, []))
     )
-    histories = _history_rows(db, source_media_ids)
-    target_contexts_by_source: dict[str, list[VolumeContext]] = defaultdict(list)
-    for context in contexts:
-        target_contexts_by_source[selected_by_id[context.id][1].id].append(context)
-    history_updates: list[Mapping[str, object]] = []
-    history_inserts: list[Mapping[str, object]] = []
-    for source_history in histories:
-        targets = target_contexts_by_source.get(source_history.media_version_id, [])
-        if not targets:
-            continue
-        source_remaining = remaining.get(source_history.media_version_id, [])
-        move_target = targets[-1] if not source_remaining else None
-        for context in targets:
-            if move_target is not None and context.id == move_target.id:
-                history_updates.append(
-                    {
-                        "id": source_history.id,
-                        "media_version_id": target_media_ids[context.id],
-                        "last_volume_id": context.id,
-                        "updated_at": now,
-                    }
-                )
-            else:
-                history_inserts.append(
-                    {
-                        "id": cuid(),
-                        "user_id": source_history.user_id,
-                        "media_version_id": target_media_ids[context.id],
-                        "last_volume_id": context.id,
-                        "created_at": now,
-                        "updated_at": source_history.updated_at,
-                    }
-                )
-        if source_remaining and source_history.last_volume_id in selected_ids:
-            history_updates.append(
-                {
-                    "id": source_history.id,
-                    "last_volume_id": source_remaining[0].id,
-                    "updated_at": now,
-                }
-            )
     empty_media_ids = tuple(
         media_id for media_id in source_media_ids if not remaining.get(media_id)
     )
     all_source_media_ids = tuple(
         db.scalars(
-            select(LibraryVersion.id).where(
-                LibraryVersion.work_id == source_work_id
-            )
+            select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
         ).all()
     )
     deletes_source_work = set(all_source_media_ids).issubset(empty_media_ids)
@@ -691,11 +503,7 @@ def _prepare_split_batch(
                 "targetMediaVersionId": target_media_ids[context.id],
                 "targetMediaVersionCreated": True,
                 "newWorkId": target_work_ids[context.id],
-                "mediaHistories": [
-                    entity_as_legacy_dict(history)
-                    for history in histories
-                    if history.media_version_id == selected_by_id[context.id][1].id
-                ],
+                "mediaHistories": [],
             },
             now=now,
         )
@@ -709,9 +517,6 @@ def _prepare_split_batch(
         _parameter_writes(insert(LibraryVersion), version_rows, parameters_per_row=5)
     )
     writes.extend(
-        _parameter_writes(insert(LibraryMediaVersion), media_rows, parameters_per_row=5)
-    )
-    writes.extend(
         _parameter_writes(update(LibraryVolume), volume_updates, parameters_per_row=4)
     )
     writes.extend(
@@ -719,22 +524,7 @@ def _prepare_split_batch(
             update(LibraryVolume), remaining_updates, parameters_per_row=3
         )
     )
-    writes.extend(
-        _parameter_writes(
-            update(UserMediaHistory), tuple(history_updates), parameters_per_row=4
-        )
-    )
-    writes.extend(
-        _parameter_writes(
-            insert(UserMediaHistory), tuple(history_inserts), parameters_per_row=6
-        )
-    )
-    writes.extend(
-        _delete_writes(LibraryMediaVersion, LibraryMediaVersion.id, empty_media_ids)
-    )
-    writes.extend(
-        _delete_writes(LibraryVersion, LibraryVersion.id, empty_media_ids)
-    )
+    writes.extend(_delete_writes(LibraryVersion, LibraryVersion.id, empty_media_ids))
     if deletes_source_work:
         writes.append(
             PreparedSqlWrite(
@@ -771,9 +561,6 @@ def _batch_delete_snapshots(
 ) -> dict[str, dict[str, list[dict[str, object]]]]:
     """Project all delete undo data with a fixed number of set queries."""
     volume_ids = tuple(selected_by_id)
-    media_ids = tuple(
-        dict.fromkeys(media.id for _volume, media in selected_by_id.values())
-    )
     snapshots: dict[str, dict[str, list[dict[str, object]]]] = {
         volume_id: {
             "LibraryVolume": [entity_as_legacy_dict(selected_by_id[volume_id][0])]
@@ -916,30 +703,35 @@ def _batch_delete_snapshots(
                 entity_as_legacy_dict(dependent)
             )
 
-    histories = list(
-        db.scalars(
-            select(UserMediaHistory).where(
-                UserMediaHistory.media_version_id.in_(media_ids)
-            )
-        ).all()
-    )
-    histories_by_media: dict[str, list[dict[str, object]]] = defaultdict(list)
-    for history in histories:
-        histories_by_media[history.media_version_id].append(
-            entity_as_legacy_dict(history)
+    histories = (
+        list(
+            db.scalars(
+                select(UserMediaHistory).where(
+                    UserMediaHistory.media_version_id.in_(
+                        select(LibraryMediaVersion.id).where(
+                            LibraryMediaVersion.work_id == source_work_id
+                        )
+                    )
+                )
+            ).all()
         )
+        if deletes_source_work
+        else []
+    )
+    media_rows = (
+        list(
+            db.scalars(
+                select(LibraryMediaVersion).where(
+                    LibraryMediaVersion.work_id == source_work_id
+                )
+            ).all()
+        )
+        if deletes_source_work
+        else []
+    )
     for volume_id, (_volume, media) in selected_by_id.items():
         if media.id in empty_media_ids:
             snapshots[volume_id]["LibraryVersion"] = [entity_as_legacy_dict(media)]
-            media_row = db.get(LibraryMediaVersion, media.id)
-            if media_row is not None:
-                snapshots[volume_id]["LibraryMediaVersion"] = [
-                    entity_as_legacy_dict(media_row)
-                ]
-            snapshots[volume_id]["UserMediaHistory"] = histories_by_media.get(
-                media.id,
-                [],
-            )
 
     if deletes_source_work:
         work = db.get(LibraryWork, source_work_id)
@@ -947,8 +739,12 @@ def _batch_delete_snapshots(
             raise ValueError("Work does not exist")
         dependents = operation_store.snapshot_work_dependents(db, source_work_id)
         work_row = entity_as_legacy_dict(work)
+        media_legacy = [entity_as_legacy_dict(row) for row in media_rows]
+        history_legacy = [entity_as_legacy_dict(row) for row in histories]
         for snapshot in snapshots.values():
             snapshot["LibraryWork"] = [work_row]
+            snapshot["LibraryMediaVersion"] = media_legacy
+            snapshot["UserMediaHistory"] = history_legacy
             snapshot.update(dependents)
     return snapshots
 
@@ -972,9 +768,7 @@ def _prepare_delete_batch(
     )
     all_source_media_ids = tuple(
         db.scalars(
-            select(LibraryVersion.id).where(
-                LibraryVersion.work_id == source_work_id
-            )
+            select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
         ).all()
     )
     deletes_source_work = set(all_source_media_ids).issubset(empty_media_ids)
@@ -1077,19 +871,7 @@ def _prepare_delete_batch(
                 ),
             )
         )
-    writes.extend(
-        _delete_writes(
-            UserMediaHistory,
-            UserMediaHistory.media_version_id,
-            empty_media_ids,
-        )
-    )
-    writes.extend(
-        _delete_writes(LibraryMediaVersion, LibraryMediaVersion.id, empty_media_ids)
-    )
-    writes.extend(
-        _delete_writes(LibraryVersion, LibraryVersion.id, empty_media_ids)
-    )
+    writes.extend(_delete_writes(LibraryVersion, LibraryVersion.id, empty_media_ids))
     if deletes_source_work:
         writes.extend(
             (
@@ -1152,11 +934,10 @@ def prepare_batch_volume_mutation(
     now: datetime,
 ) -> PreparedBatchVolumeMutation:
     if command.action == "SET_MEDIA_KIND":
-        return _prepare_reparent_batch(
+        return _prepare_set_media_kind_batch(
             db,
             actor_id=actor_id,
             source_work_id=source_work_id,
-            target_work_id=source_work_id,
             contexts=contexts,
             target_kind=str(command.target_media_kind),
             now=now,
@@ -1173,7 +954,6 @@ def prepare_batch_volume_mutation(
             source_work_id=source_work_id,
             target_work_id=str(command.target_work_id),
             contexts=contexts,
-            target_kind=None,
             now=now,
         )
     if command.action == "SPLIT":
