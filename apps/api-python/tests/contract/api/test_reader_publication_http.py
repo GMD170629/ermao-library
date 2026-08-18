@@ -15,9 +15,11 @@ from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 
 
 def _login(client: TestClient, db: Session) -> User:
@@ -101,9 +103,14 @@ def _seed_epub(
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id=f"version-publication{user_suffix}",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id=f"volume-publication{user_suffix}",
-        media_version_id=media.id,
+        version_id=version.id,
         title="跨端出版物",
         sort_order=0,
         format="EPUB",
@@ -120,7 +127,11 @@ def _seed_epub(
         size_bytes=source_path.stat().st_size,
         sort_order=0,
     )
-    db.add_all([work, media, volume, source])
+    db.add(work)
+    db.flush()
+    db.add_all([version, media, volume])
+    db.flush()
+    db.add(source)
     db.commit()
     return volume
 
@@ -148,9 +159,14 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id="version-txt-publication",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id="volume-txt-publication",
-        media_version_id=media.id,
+        version_id=version.id,
         title=work.title,
         sort_order=0,
         format="TXT",
@@ -167,7 +183,11 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
         size_bytes=source_path.stat().st_size,
         sort_order=0,
     )
-    db.add_all([work, media, volume, source])
+    db.add(work)
+    db.flush()
+    db.add_all([version, media, volume])
+    db.flush()
+    db.add(source)
     db.commit()
     return volume
 
@@ -405,9 +425,14 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id="version-mobi-publication",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id="volume-mobi-publication",
-        media_version_id=media.id,
+        version_id=version.id,
         title=work.title,
         sort_order=0,
         format="AZW3",
@@ -424,7 +449,11 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
         size_bytes=target.stat().st_size,
         sort_order=0,
     )
-    db_session.add_all([work, media, volume, source])
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([version, media, volume])
+    db_session.flush()
+    db_session.add(source)
     db_session.commit()
 
     manifest_response = client.get(

@@ -64,8 +64,6 @@ class _ReaderRepository:
                 disc_number=None,
                 track_number=None,
                 sort_order=0,
-                fingerprint=None,
-                full_hash=None,
                 mtime_ms=1,
             )
         ]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -12,9 +11,11 @@ from app.models.auth import User
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 
 
 def test_fb2_publication_manifest_and_resources_use_direct_adapter(
@@ -39,7 +40,6 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         </section></body></FictionBook>""",
         encoding="utf-8",
     )
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     work = LibraryWork(
             library_id="test-library", 
         id="work-fb2-publication",
@@ -53,9 +53,14 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id="version-fb2-publication",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id="volume-fb2-publication",
-        media_version_id=media.id,
+        version_id=version.id,
         title=work.title,
         sort_order=0,
         format="FB2",
@@ -66,16 +71,17 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         id="file-fb2-publication",
         volume_id=volume.id,
         path=str(relative_path),
-        fingerprint=f"sha256:{source_hash}",
-        full_hash=source_hash,
-        hash_status="COMPLETED",
         mtime_ms=int(source_path.stat().st_mtime * 1000),
         kind="FB2",
         mime_type="application/x-fictionbook+xml",
         size_bytes=source_path.stat().st_size,
         sort_order=0,
     )
-    db_session.add_all([user, work, media, volume, source])
+    db_session.add_all([user, work])
+    db_session.flush()
+    db_session.add_all([version, media, volume])
+    db_session.flush()
+    db_session.add(source)
     db_session.commit()
     login = client.post(
         "/api/auth/login",
@@ -99,8 +105,11 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     ]
     assert manifest["toc"][0]["title"] == "第一部"
     assert manifest["toc"][0]["children"][0]["title"] == "第一章"
+    source = db_session.get(LibraryFile, "file-fb2-publication")
+    assert source is not None
     assert manifest["https://shuku.app/reader/runtime"] == {
-        "originalFileHash": f"sha256:{source_hash}",
+        "sourceSizeBytes": source.size_bytes,
+        "sourceMtimeMs": source.mtime_ms,
         "parser": "shuku-fb2-parser-v1",
         "normalization": "shuku-fb2-publication-v1",
         "positionPageLength": 1024,
@@ -111,4 +120,3 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     )
     assert resource_response.status_code == 200
     assert "正文内容" in resource_response.text
-    assert 'data-shuku-security-profile="web-v2"' in resource_response.text

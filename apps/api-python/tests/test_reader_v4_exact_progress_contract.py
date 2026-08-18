@@ -14,10 +14,12 @@ from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     ReaderProgressMutation,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.reader.presentation.v4_schemas import ReaderProgressPut
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -74,32 +76,36 @@ def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
         tags="[]",
     )
     media = LibraryMediaVersion(id="exact-media", work_id=work.id, media_kind="EBOOK")
+    version = LibraryVersion(
+        id="exact-version",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id="exact-volume",
-        media_version_id=media.id,
+        version_id=version.id,
         title="Exact Volume",
         sort_order=0,
         format="EPUB",
         resource_key="exact:volume",
         import_status="COMPLETED",
     )
-    session.add_all(
-        [
-            user,
-            work,
-            media,
-            volume,
-            LibraryFile(
-                id="exact-file",
-                volume_id=volume.id,
-                path=str(source_path),
-                mtime_ms=int(source_path.stat().st_mtime * 1000),
-                kind="EPUB",
-                mime_type="application/epub+zip",
-                size_bytes=source_path.stat().st_size,
-                sort_order=0,
-            ),
-        ]
+    session.add(user)
+    session.add(work)
+    session.flush()
+    session.add_all([version, media, volume])
+    session.flush()
+    session.add(
+        LibraryFile(
+            id="exact-file",
+            volume_id=volume.id,
+            path=str(source_path),
+            mtime_ms=int(source_path.stat().st_mtime * 1000),
+            kind="EPUB",
+            mime_type="application/epub+zip",
+            size_bytes=source_path.stat().st_size,
+            sort_order=0,
+        )
     )
     session.commit()
     login = client.post(

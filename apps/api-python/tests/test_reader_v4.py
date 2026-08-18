@@ -18,9 +18,11 @@ from app.models.library import (
     LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 
 
 def _login(client: TestClient, db_session: Session) -> User:
@@ -59,9 +61,14 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id="version-reader-v3",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id="volume-reader-v3",
-        media_version_id=media_version.id,
+        version_id=version.id,
         title="电子书",
         volume_index=None,
         sort_order=0,
@@ -79,7 +86,11 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
         size_bytes=source_path.stat().st_size,
         sort_order=0,
     )
-    db_session.add_all([work, media_version, volume, file])
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([version, media_version, volume])
+    db_session.flush()
+    db_session.add(file)
     db_session.commit()
     return volume
 
@@ -712,7 +723,7 @@ def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
     first_volume = _ebook_volume(db_session)
     second_volume = LibraryVolume(
         id="volume-reader-v3-2",
-        media_version_id=first_volume.media_version_id,
+        version_id=first_volume.version_id,
         title="电子书 2",
         volume_index=2,
         sort_order=1,
@@ -730,7 +741,9 @@ def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
         size_bytes=10,
         sort_order=0,
     )
-    db_session.add_all([second_volume, second_file])
+    db_session.add(second_volume)
+    db_session.flush()
+    db_session.add(second_file)
     db_session.commit()
 
     finished_response = client.put(
@@ -1091,7 +1104,7 @@ def test_work_cover_fallback_uses_media_priority_then_volume_order(
     )
     comic_volume = LibraryVolume(
         id="volume-reader-v3-comic",
-        media_version_id=comic_media.id,
+        version_id=ebook_volume.version_id,
         title="漫画",
         sort_order=-10,
         format="CBZ",
@@ -1125,7 +1138,7 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
         archive.writestr("META-INF/derived-volume", "derived")
     derived = LibraryVolume(
         id="volume-reader-v3-derived",
-        media_version_id=source.media_version_id,
+        version_id=source.version_id,
         title="EPUB 副本",
         sort_order=1,
         format="EPUB",
@@ -1134,6 +1147,7 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
         import_status="COMPLETED",
     )
     db_session.add(derived)
+    db_session.flush()
     db_session.add(
         LibraryFile(
             id="file-reader-v3-derived",

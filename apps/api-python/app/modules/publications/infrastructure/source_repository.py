@@ -8,7 +8,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -36,13 +36,10 @@ class SqlAlchemyPublicationSourceRepository:
         row = self._session.execute(
             select(LibraryWork, LibraryVolume, LibraryFile)
             .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.work_id == LibraryWork.id,
+                LibraryVersion,
+                LibraryVersion.id == LibraryVolume.version_id,
             )
-            .join(
-                LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
-            )
+            .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
             .join(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
             .where(
                 LibraryVolume.id == volume_id,

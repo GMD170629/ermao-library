@@ -11,9 +11,11 @@ from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.publications.application.ensure_navigation import (
     EnsurePublicationNavigation,
     EnsurePublicationNavigationOutcome,
@@ -62,9 +64,14 @@ def _seed_volume(
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id="navigation-version",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volume = LibraryVolume(
         id="navigation-volume",
-        media_version_id=media.id,
+        version_id=version.id,
         title="卷册",
         sort_order=0,
         format="EPUB",
@@ -76,16 +83,13 @@ def _seed_volume(
         id="navigation-file",
         volume_id=volume.id,
         path=str(source_path),
-        fingerprint="fingerprint",
-        full_hash="a" * 64,
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
         size_bytes=1,
         sort_order=0,
     )
-    db_session.add_all([work, media, volume, source])
+    db_session.add_all([work, version, media, volume, source])
     db_session.commit()
     return volume, source
 
@@ -416,9 +420,6 @@ def test_selected_file_change_regenerates_navigation_for_the_new_file(
         id="replacement-navigation-file",
         volume_id=volume.id,
         path=str(tmp_path / "replacement.epub"),
-        fingerprint="replacement-fingerprint",
-        full_hash=replacement_hash,
-        hash_status="COMPLETED",
         mtime_ms=2,
         kind="EPUB",
         mime_type="application/epub+zip",

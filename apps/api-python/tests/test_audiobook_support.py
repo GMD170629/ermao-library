@@ -891,8 +891,8 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     files = (
         db_session.execute(
             text(
-                "SELECT `path`, `fingerprint`, `fullHash`, `hashStatus` "
-                "FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
+                "SELECT `path` FROM `LibraryFile` "
+                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
             {"volume_id": moved.volume_id},
         )
@@ -901,9 +901,6 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     )
     assert len(files) == 2
     assert all(str(row["path"]).startswith(str(moved_dir)) for row in files)
-    assert all(row["fingerprint"] is None for row in files)
-    assert all(row["fullHash"] is None for row in files)
-    assert {row["hashStatus"] for row in files} == {"PARTIAL_PENDING"}
 
 
 def test_audio_partial_content_overlap_runs_normal_import(
@@ -935,7 +932,7 @@ def test_audio_partial_content_overlap_runs_normal_import(
     files = (
         db_session.execute(
             text(
-                "SELECT `fingerprint`, `fullHash` FROM `LibraryFile` "
+                "SELECT `path`, `sortOrder` FROM `LibraryFile` "
                 "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
             {"volume_id": result.volume_id},
@@ -944,8 +941,7 @@ def test_audio_partial_content_overlap_runs_normal_import(
         .all()
     )
     assert len(files) == 2
-    assert all(row["fingerprint"] is None for row in files)
-    assert all(row["fullHash"] is None for row in files)
+    assert [row["sortOrder"] for row in files] == [0, 1]
 
 
 def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
@@ -977,7 +973,7 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
     files = (
         db_session.execute(
             text(
-                "SELECT `id`, `path`, `fingerprint`, `sortOrder` FROM `LibraryFile` "
+                "SELECT `id`, `path`, `sortOrder` FROM `LibraryFile` "
                 "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
             {"volume_id": result.volume_id},
@@ -999,7 +995,6 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
     assert len(files) == 2
     assert len({row["id"] for row in files}) == 2
     assert len({row["path"] for row in files}) == 2
-    assert all(row["fingerprint"] is None for row in files)
     assert [row["sortOrder"] for row in files] == [0, 1]
     assert [row["fileId"] for row in chapters] == [row["id"] for row in files]
     assert [row["sortOrder"] for row in chapters] == [1, 2]
@@ -1111,20 +1106,6 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     result, _audio_dir = _import_audio_fixture(
         db_session, test_settings, monkeypatch, tmp_path
     )
-    stored_hashes = (
-        db_session.execute(
-            text(
-                "SELECT `fingerprint`, `fullHash` FROM `LibraryFile` "
-                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert stored_hashes
-    assert all(row["fingerprint"] is None for row in stored_hashes)
-    assert all(row["fullHash"] is None for row in stored_hashes)
 
     bootstrap_response = client.get(
         f"/api/reader/v4/volumes/{result.volume_id}/bootstrap"
@@ -1132,13 +1113,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "audio"
-    assert bootstrap["publicationFingerprint"]["originalFileHash"].startswith("sha256:")
-    assert (
-        client.get(f"/api/reader/v4/volumes/{result.volume_id}/bootstrap").json()[
-            "data"
-        ]["publicationFingerprint"]
-        == bootstrap["publicationFingerprint"]
-    )
+    assert "publicationFingerprint" not in bootstrap
     assert [track["trackNumber"] for track in bootstrap["files"]] == [2, 10]
     assert {track["codec"] for track in bootstrap["files"]} == {"mp3"}
     assert bootstrap["volume"]["durationMs"] == 1_200_000
@@ -1187,7 +1162,6 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
         "clientId": "audio-player",
         "locator": {
             "kind": "audio",
-            "publication": bootstrap["publicationFingerprint"],
             "fileId": final_track["id"],
             "positionMillis": 0,
         },
@@ -2483,32 +2457,6 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
         "_resolve_audio_import_source",
         resolve_audio_import_source,
     )
-    historical_hashes: dict[str, tuple[str, str]] = {}
-    for index, result in enumerate(legacy_results, start=1):
-        file_row = (
-            db_session.execute(
-                text("SELECT `id` FROM `LibraryFile` WHERE `volumeId` = :volume_id"),
-                {"volume_id": result.volume_id},
-            )
-            .mappings()
-            .one()
-        )
-        fingerprint = f"legacy-sample-{index}"
-        full_hash = f"{index:064x}"
-        historical_hashes[str(file_row["id"])] = (fingerprint, full_hash)
-        db_session.execute(
-            text(
-                "UPDATE `LibraryFile` SET `fingerprint` = :fingerprint, "
-                "`fullHash` = :full_hash, `hashStatus` = 'COMPLETED' "
-                "WHERE `id` = :file_id"
-            ),
-            {
-                "file_id": file_row["id"],
-                "fingerprint": fingerprint,
-                "full_hash": full_hash,
-            },
-        )
-    db_session.commit()
     failed_bundle_task, failed_bundle_created = _persist_import_enqueue(
         db_session,
         book_dir,
@@ -2570,9 +2518,9 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
         text(
             "INSERT INTO `LibraryReadingProgress` "
             "(`id`, `userId`, `volumeId`, `readerType`, `position`, `percent`, `extra`, "
-            "`contentFingerprint`, `locationType`, `locationJson`, `createdAt`, `updatedAt`) "
+            "`locationType`, `locationJson`, `createdAt`, `updatedAt`) "
             "VALUES ('legacy-progress', :user_id, :volume_id, 'audio', '12345', 42, :extra, "
-            "'sha256:legacy-single-track', 'audio', :location, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            "'audio', :location, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         ),
         {
             "user_id": user.id,
@@ -2627,8 +2575,8 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     tracks = (
         db_session.execute(
             text(
-                "SELECT `id`, `volumeId`, `trackNumber`, `sortOrder`, "
-                "`fingerprint`, `fullHash`, `hashStatus` FROM `LibraryFile` "
+                "SELECT `id`, `volumeId`, `trackNumber`, `sortOrder` "
+                "FROM `LibraryFile` "
                 "WHERE UPPER(`kind`) = 'AUDIO' ORDER BY `sortOrder`"
             ),
         )
@@ -2642,17 +2590,6 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
         (3, 2),
     ]
     assert {
-        str(row["id"]): (
-            row["fingerprint"],
-            row["fullHash"],
-            row["hashStatus"],
-        )
-        for row in tracks
-    } == {
-        file_id: (fingerprint, full_hash, "COMPLETED")
-        for file_id, (fingerprint, full_hash) in historical_hashes.items()
-    }
-    assert {
         row["id"]
         for row in db_session.execute(
             text("SELECT `id` FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id"),
@@ -2662,7 +2599,7 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     progress = (
         db_session.execute(
             text(
-                "SELECT `volumeId`, `percent`, `position`, `contentFingerprint`, `locationJson` "
+                "SELECT `volumeId`, `percent`, `position`, `locationJson` "
                 "FROM `LibraryReadingProgress` WHERE `id` = 'legacy-progress'"
             ),
         )
@@ -2674,8 +2611,6 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     assert progress["percent"] == pytest.approx(
         12_345 / (60_001 + 60_002 + 60_003) * 100
     )
-    assert progress["contentFingerprint"].startswith("sha256:")
-    assert progress["contentFingerprint"] != "sha256:legacy-single-track"
     detail = client.get(f"/api/works/{reconciled.work_id}")
     assert detail.status_code == 200
     book = detail.json()["data"]["book"]
