@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User, UserLibraryAccess
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
+    Library,
     LibraryFile,
     LibraryMediaVersion,
     LibraryOperation,
@@ -17,7 +18,6 @@ from app.models.library import (
     LibraryWork,
     UserMediaHistory,
 )
-from app.models.library import Library
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
     BatchVolumeOutcome,
@@ -54,9 +54,23 @@ def _login_admin(client: TestClient, db: Session) -> User:
     return user
 
 
+def _ensure_test_library(db: Session) -> None:
+    if db.get(Library, "test-library") is None:
+        db.add(
+            Library(
+                id="test-library",
+                name="Test Library",
+                root_path="/test-library",
+                organization_mode="FLAT",
+            )
+        )
+        db.flush()
+
+
 def _volume_aggregate(db: Session, user: User) -> None:
+    _ensure_test_library(db)
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="delete-volume-work",
         origin="MANUAL",
         title="Delete volume",
@@ -83,8 +97,6 @@ def _volume_aggregate(db: Session, user: User) -> None:
         id="delete-volume-file",
         volume_id=volume.id,
         path="library/delete-volume.epub",
-        fingerprint="delete-volume",
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
@@ -104,7 +116,6 @@ def _volume_aggregate(db: Session, user: User) -> None:
         id="delete-volume-bookmark",
         user_id=user.id,
         volume_id=volume.id,
-        content_fingerprint="delete-volume",
         bookmark_id="bookmark-1",
         location_json="{}",
         label="Saved",
@@ -119,7 +130,11 @@ def _volume_aggregate(db: Session, user: User) -> None:
         status="COMPLETED",
         source_path="/imports/delete-volume.epub",
     )
-    db.add_all([work, media_version, volume, file, progress, bookmark, task])
+    db.add(work)
+    db.flush()
+    db.add_all([media_version, volume])
+    db.flush()
+    db.add_all([file, progress, bookmark, task])
     db.commit()
 
 
@@ -171,9 +186,10 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     db_session: Session,
 ) -> None:
     user = _login_admin(client, db_session)
+    _ensure_test_library(db_session)
     now = datetime.now(UTC)
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="reclassify-work",
         origin="MANUAL",
         title="Reclassify",
@@ -231,7 +247,6 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
         id="reclassify-bookmark",
         user_id=user.id,
         volume_id=moved.id,
-        content_fingerprint="reclassify",
         bookmark_id="bookmark-reclassify",
         location_json="{}",
         label="Saved",
@@ -254,14 +269,14 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
         created_at=now - timedelta(days=2),
         updated_at=now - timedelta(days=1),
     )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([ebook, comic])
+    db_session.flush()
+    db_session.add_all([moved, remaining, existing_target])
+    db_session.flush()
     db_session.add_all(
         [
-            work,
-            ebook,
-            comic,
-            moved,
-            remaining,
-            existing_target,
             progress,
             bookmark,
             source_history,
@@ -340,8 +355,9 @@ def _batch_volume_aggregate(
     work_id: str,
     volume_ids: tuple[str, ...],
 ) -> tuple[LibraryWork, list[LibraryVolume]]:
+    _ensure_test_library(db)
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id=work_id,
         origin="MANUAL",
         title="Batch work",
@@ -367,7 +383,9 @@ def _batch_volume_aggregate(
         )
         for index, volume_id in enumerate(volume_ids, start=1)
     ]
-    db.add_all([work, media, *volumes])
+    db.add(work)
+    db.flush()
+    db.add_all([media, *volumes])
     db.commit()
     return work, volumes
 
@@ -603,8 +621,6 @@ def test_batch_volume_download_returns_one_ordered_zip(
                 id=f"batch-download-file-{index}",
                 volume_id=volume.id,
                 path=f"library/{source.name}",
-                fingerprint=f"batch-download-{index}",
-                hash_status="COMPLETED",
                 mtime_ms=index,
                 kind="EPUB",
                 mime_type="application/epub+zip",
@@ -655,9 +671,10 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
     db_session: Session,
 ) -> None:
     user = _login_admin(client, db_session)
+    _ensure_test_library(db_session)
     now = datetime.now(UTC)
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="continue-work",
         origin="MANUAL",
         title="Continue",
@@ -703,14 +720,14 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
         resource_key="continue:comic:second",
         import_status="COMPLETED",
     )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([ebook, comic])
+    db_session.flush()
+    db_session.add_all([ebook_volume, comic_first, comic_second])
+    db_session.flush()
     db_session.add_all(
         [
-            work,
-            ebook,
-            comic,
-            ebook_volume,
-            comic_first,
-            comic_second,
             LibraryReadingProgress(
                 id="continue-comic-progress",
                 user_id=user.id,
@@ -761,8 +778,9 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     db_session: Session,
     test_settings: Settings,
 ) -> None:
+    _ensure_test_library(db_session)
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="import-cleanup-work",
         origin="MANUAL",
         title="Import cleanup",
@@ -794,7 +812,11 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
         resource_key="import-cleanup:second",
         import_status="COMPLETED",
     )
-    db_session.add_all([work, media, first, second])
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(media)
+    db_session.flush()
+    db_session.add_all([first, second])
     db_session.commit()
 
     first_result = _delete_import_linked_library_scope(
@@ -876,10 +898,14 @@ def test_move_volume_hides_an_unauthorized_target_work(
             resource_key=f"{prefix}:volume",
             import_status="COMPLETED",
         )
-        db_session.add_all([work, media, volume])
+        db_session.add(work)
+        db_session.flush()
+        db_session.add_all([media, volume])
         return work, volume
 
-    db_session.add_all([user, source_folder, target_folder, access])
+    db_session.add_all([user, source_folder, target_folder])
+    db_session.flush()
+    db_session.add(access)
     source_work, source_volume = aggregate("source", source_folder.id)
     target_work, _target_volume = aggregate("target", target_folder.id)
     db_session.commit()
@@ -1054,10 +1080,11 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     db_session: Session,
 ) -> None:
     _login_admin(client, db_session)
+    _ensure_test_library(db_session)
 
     def aggregate(prefix: str) -> tuple[LibraryWork, LibraryVolume]:
         work = LibraryWork(
-            library_id="test-library", 
+            library_id="test-library",
             id=f"undo-{prefix}-work",
             origin="MANUAL",
             title=prefix,
@@ -1080,7 +1107,9 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
             resource_key=f"undo:{prefix}",
             import_status="COMPLETED",
         )
-        db_session.add_all([work, media, volume])
+        db_session.add(work)
+        db_session.flush()
+        db_session.add_all([media, volume])
         return work, volume
 
     source_work, source_volume = aggregate("source")
