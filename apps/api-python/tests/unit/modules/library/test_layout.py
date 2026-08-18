@@ -585,3 +585,78 @@ def test_natural_sort_orders_embedded_integers() -> None:
         "第2卷",
         "第10卷",
     ]
+
+
+def test_volumes_work_directory_normalized_collision() -> None:
+    nfc_work = unicodedata.normalize("NFC", "café")
+    nfd_work = unicodedata.normalize("NFD", "café")
+    entries = (
+        _directory(nfc_work),
+        _directory(f"{nfc_work}/中文版"),
+        _file(f"{nfc_work}/中文版/01.epub"),
+        _directory(nfd_work),
+        _directory(f"{nfd_work}/英文版"),
+        _file(f"{nfd_work}/英文版/01.epub"),
+        _directory("活着"),
+        _directory("活着/默认"),
+        _file("活着/默认/活着.epub"),
+    )
+    first = interpret_library_layout(entries, LibraryOrganizationMode.VOLUMES)
+    second = interpret_library_layout(
+        tuple(reversed(entries)),
+        LibraryOrganizationMode.VOLUMES,
+    )
+
+    assert nfc_work != nfd_work
+    assert first == second
+    assert _work_keys(first) == ["work:活着"]
+    assert _asset_paths(first) == ["活着/默认/活着.epub"]
+    assert LayoutViolationCode.NORMALIZED_PATH_COLLISION in _violation_codes(first)
+
+
+def test_volumes_version_directory_normalized_collision() -> None:
+    nfc_version = unicodedata.normalize("NFC", "café")
+    nfd_version = unicodedata.normalize("NFD", "café")
+    entries = (
+        _directory("三体"),
+        _directory(f"三体/{nfc_version}"),
+        _file(f"三体/{nfc_version}/01.epub"),
+        _directory(f"三体/{nfd_version}"),
+        _file(f"三体/{nfd_version}/02.epub"),
+        _directory("三体/中文版"),
+        _file("三体/中文版/地球往事.epub"),
+    )
+    first = interpret_library_layout(entries, LibraryOrganizationMode.VOLUMES)
+    second = interpret_library_layout(
+        tuple(reversed(entries)),
+        LibraryOrganizationMode.VOLUMES,
+    )
+
+    assert first == second
+    assert _work_keys(first) == ["work:三体"]
+    assert [version.source_name for version in first.works[0].versions] == ["中文版"]
+    assert _asset_paths(first) == ["三体/中文版/地球往事.epub"]
+    assert LayoutViolationCode.NORMALIZED_PATH_COLLISION in _violation_codes(first)
+
+
+def test_audiobook_work_directory_normalized_collision() -> None:
+    nfc_work = unicodedata.normalize("NFC", "café")
+    nfd_work = unicodedata.normalize("NFD", "café")
+    entries = (
+        _directory(nfc_work),
+        _audio(f"{nfc_work}/001.mp3"),
+        _directory(nfd_work),
+        _audio(f"{nfd_work}/002.mp3"),
+        _directory("魔戒"),
+        _audio("魔戒/001.mp3"),
+    )
+    first = interpret_library_layout(entries, LibraryOrganizationMode.AUDIOBOOK)
+    second = interpret_library_layout(
+        tuple(reversed(entries)),
+        LibraryOrganizationMode.AUDIOBOOK,
+    )
+
+    assert first == second
+    assert _work_keys(first) == ["work:魔戒"]
+    assert _asset_paths(first) == ["魔戒/001.mp3"]
+    assert LayoutViolationCode.NORMALIZED_PATH_COLLISION in _violation_codes(first)

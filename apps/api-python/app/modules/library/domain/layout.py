@@ -157,6 +157,7 @@ def _normalize_entries(
 ) -> tuple[list[_NormalizedEntry], list[LayoutViolation]]:
     violations: list[LayoutViolation] = []
     grouped: dict[str, list[_NormalizedEntry]] = {}
+    valid: list[_NormalizedEntry] = []
     for entry in entries:
         physical = _logical_relative_path(entry.relative_path)
         if physical is None:
@@ -173,9 +174,9 @@ def _normalize_entries(
             entry_type=entry.entry_type,
             source_type=entry.source_type,
         )
+        valid.append(normalized)
         grouped.setdefault(normalized.canonical_path, []).append(normalized)
 
-    accepted: list[_NormalizedEntry] = []
     for group in grouped.values():
         physicals = {item.physical_path for item in group}
         if len(physicals) > 1:
@@ -186,9 +187,30 @@ def _normalize_entries(
                 )
                 for physical in physicals
             )
-            continue
-        accepted.append(group[0])
-    return accepted, violations
+
+    directory_spellings = _directory_spellings(valid)
+    colliding_directories = {
+        canonical
+        for canonical, physicals in directory_spellings.items()
+        if len(physicals) > 1
+    }
+    for physicals in directory_spellings.values():
+        if len(physicals) > 1:
+            violations.extend(
+                LayoutViolation(
+                    code=LayoutViolationCode.NORMALIZED_PATH_COLLISION,
+                    relative_path=physical,
+                )
+                for physical in physicals
+            )
+
+    kept = [
+        group[0]
+        for group in grouped.values()
+        if len({item.physical_path for item in group}) == 1
+        and not _is_under_directories(group[0].canonical_path, colliding_directories)
+    ]
+    return kept, violations
 
 
 def _build_index(entries: Sequence[_NormalizedEntry]) -> _LayoutIndex:
@@ -493,9 +515,12 @@ def _sort_volumes(volumes: Sequence[LayoutVolume]) -> tuple[LayoutVolume, ...]:
 def _sort_violations(
     violations: Sequence[LayoutViolation],
 ) -> tuple[LayoutViolation, ...]:
+    unique = {
+        (violation.code, violation.relative_path): violation for violation in violations
+    }
     return tuple(
         sorted(
-            violations,
+            unique.values(),
             key=lambda violation: (violation.code.value, violation.relative_path),
         )
     )
@@ -552,8 +577,7 @@ def _register_ancestors(
     current_physical = physical_path
     while current_canonical:
         directories.add(current_canonical)
-        previous_physical = directory_physical.get(current_canonical)
-        if previous_physical is None or current_physical < previous_physical:
+        if current_canonical not in directory_physical:
             directory_physical[current_canonical] = current_physical
         parent_canonical = _parent_path(current_canonical)
         _add_child(children, parent_canonical, current_canonical)
@@ -569,6 +593,40 @@ def _parent_path(path: str) -> str:
     if "/" not in path:
         return _ROOT
     return path.rsplit("/", 1)[0]
+
+
+def _directory_paths(path: str) -> tuple[str, ...]:
+    if not path:
+        return ()
+    parts = path.split("/")
+    return tuple("/".join(parts[:index]) for index in range(1, len(parts) + 1))
+
+
+def _directory_spellings(
+    entries: Sequence[_NormalizedEntry],
+) -> dict[str, set[str]]:
+    spellings: dict[str, set[str]] = {}
+    for entry in entries:
+        if entry.entry_type is LayoutEntryType.DIRECTORY:
+            canonical_dirs = _directory_paths(entry.canonical_path)
+            physical_dirs = _directory_paths(entry.physical_path)
+        else:
+            canonical_dirs = _directory_paths(_parent_path(entry.canonical_path))
+            physical_dirs = _directory_paths(_parent_path(entry.physical_path))
+        for canonical_dir, physical_dir in zip(
+            canonical_dirs, physical_dirs, strict=True
+        ):
+            spellings.setdefault(canonical_dir, set()).add(physical_dir)
+    return spellings
+
+
+def _is_under_directories(canonical_path: str, directories: set[str]) -> bool:
+    current = canonical_path
+    while current:
+        if current in directories:
+            return True
+        current = _parent_path(current)
+    return False
 
 
 def _entry_name(path: str) -> str:
