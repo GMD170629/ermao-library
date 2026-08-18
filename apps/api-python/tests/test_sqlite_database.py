@@ -99,6 +99,7 @@ EXPECTED_BASELINE_DEFAULTS = {
     ("LibraryOperation", "status"): "COMPLETED",
     ("LibraryWorkFacet", "sortOrder"): "0",
     ("LibraryWork", "facetIndexVersion"): "0",
+    ("LibraryFile", "pageIndexVersion"): "0",
     ("ReaderBookmark", "percent"): "0",
     ("ReaderProgressCursor", "highWater"): "-1",
     ("SystemEvent", "actorType"): "system",
@@ -122,6 +123,13 @@ EXPECTED_RESTORED_INDEXES = {
         "SystemEvent_level_createdAt_idx": ("level", "createdAt"),
         "SystemEvent_source_createdAt_idx": ("source", "createdAt"),
         "SystemEvent_targetType_targetId_idx": ("targetType", "targetId"),
+    },
+    "LibraryFile": {
+        "LibraryFile_kind_pageIndexVersion_id_idx": (
+            "kind",
+            "pageIndexVersion",
+            "id",
+        ),
     },
     "UserMonitorFolderAccess": {
         "UserMonitorFolderAccess_folder_idx": ("monitorFolderId",),
@@ -273,6 +281,12 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
                     foreign_key,
                 )
 
+        library_file_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryFile")
+        }
+        assert "volumeId" in library_file_columns
+        assert "editionId" not in library_file_columns
+        assert library_file_columns["pageIndexVersion"]["nullable"] is False
         for table_name in ("DuplicateCandidate", "MetadataSuggestion"):
             columns = {
                 column["name"]: column for column in inspector.get_columns(table_name)
