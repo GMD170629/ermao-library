@@ -110,7 +110,7 @@ def earliest_volume_id(db: Session, work_id: str) -> str | None:
         select(LibraryVolume.id)
         .join(
             LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryMediaVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryMediaVersion.work_id == work_id,
@@ -219,9 +219,7 @@ def prepare_job_update_rows(
     )
 
 
-def write_prepared_job_updates(
-    db: Session, rows: tuple[dict[str, Any], ...]
-) -> None:
+def write_prepared_job_updates(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
     if rows:
         db.execute(update(OrganizeJob), list(rows))
 
@@ -277,9 +275,7 @@ def prepare_work_update_rows(
     )
 
 
-def write_prepared_work_updates(
-    db: Session, rows: tuple[dict[str, Any], ...]
-) -> None:
+def write_prepared_work_updates(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
     if rows:
         db.execute(update(LibraryWork), list(rows))
 
@@ -363,7 +359,7 @@ def list_volumes_for_work(db: Session, work_id: str) -> list[dict[str, Any]]:
         select(LibraryVolume)
         .join(
             LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryMediaVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryMediaVersion.work_id == work_id)
         .order_by(

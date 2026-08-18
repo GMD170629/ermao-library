@@ -5,7 +5,7 @@ import { detailReaderHref, singleVolumeEbook, syntheticPdfPageUnits } from './ch
 
 function volume(overrides: Partial<VolumeResource> = {}): VolumeResource {
   return {
-    id: 'volume-1', mediaVersionId: 'media-1', title: '第一卷', volumeIndex: 1, sortOrder: 0,
+    id: 'volume-1', versionId: 'version-1', title: '第一卷', volumeIndex: 1, sortOrder: 0,
     format: 'EPUB', readerType: 'reflowable', classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null }, derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null,
     isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null,
     coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: 3, durationMs: null, trackCount: null, progress: 0,
@@ -15,11 +15,9 @@ function volume(overrides: Partial<VolumeResource> = {}): VolumeResource {
 
 test('single-volume chapter detail follows the reader type instead of classification', () => {
   const onlyVolume = volume();
-  assert.equal(singleVolumeEbook('EBOOK', [onlyVolume]), onlyVolume);
-  assert.equal(singleVolumeEbook('COMIC', [onlyVolume]), onlyVolume);
-  assert.equal(singleVolumeEbook('AUDIOBOOK', [onlyVolume]), onlyVolume);
-  assert.equal(singleVolumeEbook('EBOOK', [volume({ format: 'MP3', readerType: 'audio' })]), null);
-  assert.equal(singleVolumeEbook('EBOOK', [onlyVolume, volume({ id: 'volume-2' })]), null);
+  assert.equal(singleVolumeEbook([onlyVolume]), onlyVolume);
+  assert.equal(singleVolumeEbook([volume({ format: 'MP3', readerType: 'audio' })]), null);
+  assert.equal(singleVolumeEbook([onlyVolume, volume({ id: 'volume-2' })]), null);
 });
 
 test('chapter targets use exact reflowable hrefs and PDF page numbers', () => {

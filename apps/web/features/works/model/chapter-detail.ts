@@ -1,4 +1,4 @@
-import type { VolumeResource, WorkDetailTabKey } from '../../../types/work';
+import type { VolumeResource } from '../../../types/work';
 import { chapterDeepLinkHref } from '../ebook-chapter-navigation';
 
 export const CHAPTER_DETAIL_PAGE_SIZE = 120;
@@ -30,8 +30,8 @@ export type EbookChapterDetail = Readonly<{
   progress: number;
 }>;
 
-export function singleVolumeEbook(tab: WorkDetailTabKey, volumes: readonly VolumeResource[]): VolumeResource | null {
-  const volume = tab !== 'STRUCTURE' && volumes.length === 1 ? volumes[0] ?? null : null;
+export function singleVolumeEbook(volumes: readonly VolumeResource[]): VolumeResource | null {
+  const volume = volumes.length === 1 ? volumes[0] ?? null : null;
   return volume && (volume.readerType === 'reflowable' || volume.readerType === 'pdf') ? volume : null;
 }
 

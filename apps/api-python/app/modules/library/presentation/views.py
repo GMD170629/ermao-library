@@ -20,9 +20,7 @@ from app.bootstrap.library import (
     library_works,
 )
 from app.bootstrap.organize import organize_jobs
-from app.bootstrap.system import get_setting
 from app.contracts.media_capabilities import (
-    ReaderType,
     kindle_send_available_for_format,
     reader_type_for_format,
 )
@@ -44,23 +42,9 @@ from app.models.library import (
 )
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.library.domain.media_kinds import media_kind_of
-from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
-)
-from app.modules.reader.public import (
-    number_or_none as _number_or_none,
-)
-from app.modules.reader.public import (
-    progress_location as _progress_location,
-)
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.reader.public import (
     progress_navigation as _progress_navigation,
-)
-from app.modules.system.public import (
-    DETAIL_TAB_KEYS,
-)
-from app.modules.system.public import (
-    normalize_detail_tab_order as _normalize_detail_tab_order,
 )
 from app.schemas.responses import fail
 from app.services.book_identity import normalize_identity_part
@@ -211,120 +195,6 @@ def _labels() -> dict[str, dict[str, str]]:
     }
 
 
-DETAIL_TAB_LABELS = {
-    "EBOOK": "电子书",
-    "COMIC": "漫画",
-    "AUDIOBOOK": "有声书",
-    "STRUCTURE": "内容结构",
-}
-
-
-def _detail_tab_order(db: Session) -> list[str]:
-
-    value = get_setting(db, "workDetail.tabOrder")
-    return _normalize_detail_tab_order(value)
-
-
-def _detail_tabs(db: Session, available_media_kinds: set[str]) -> list[dict[str, Any]]:
-    return _detail_tabs_from_order(_detail_tab_order(db), available_media_kinds)
-
-
-def _detail_tabs_from_order(
-    tab_order: list[str] | tuple[str, ...], available_media_kinds: set[str]
-) -> list[dict[str, Any]]:
-    visible = available_media_kinds | {"STRUCTURE"}
-    return [
-        {"key": key, "label": DETAIL_TAB_LABELS[key], "sortOrder": index}
-        for index, key in enumerate(tab_order)
-        if key in visible
-    ]
-
-
-def _saved_detail_tab(db: Session, user_id: str | None, work_id: str) -> str | None:
-    if not user_id or not _has_table(db, "WorkDetailPreference"):
-        return None
-    row = library_projections.get_detail_preference(
-        db,
-        user_id=user_id,
-        work_id=work_id,
-    )
-    selected = str((row or {}).get("selectedTab") or "").strip().upper()
-    return selected if selected in DETAIL_TAB_KEYS else None
-
-
-def _resolve_detail_tab(
-    db: Session,
-    user_id: str | None,
-    work_id: str,
-    detail_tabs: list[dict[str, Any]],
-    requested: str | None = None,
-) -> str:
-    visible = [str(item["key"]) for item in detail_tabs]
-    explicit = str(requested or "").strip().upper()
-    if explicit and explicit in visible:
-        return explicit
-    saved = _saved_detail_tab(db, user_id, work_id)
-    if saved in visible:
-        return str(saved)
-    return next((key for key in visible if key != "STRUCTURE"), "STRUCTURE")
-
-
-def _status_from_progress(
-    progress: dict[str, Any] | None, fallback: str = "UNREAD"
-) -> str:
-    if not progress:
-        return _reading_status(fallback)
-    percent = float(progress.get("percent") or 0)
-    return "FINISHED" if percent >= 100 else "READING" if percent > 0 else "UNREAD"
-
-
-def _format_duration(duration_ms: Any) -> str:
-    total_seconds = max(0, int(float(duration_ms or 0) / 1000))
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return (
-        f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
-    )
-
-
-def _media_position_label(
-    db: Session, reader_type: str, progress: dict[str, Any] | None
-) -> str:
-    if not progress:
-        return "未开始"
-    if reader_type != "audio":
-        location = _progress_location(progress)
-        payload = (
-            location.get("payload")
-            if location.get("engine") == "readium"
-            and isinstance(location.get("payload"), dict)
-            else {}
-        )
-        href = payload.get("href")
-        page = _number_or_none(
-            href.removeprefix("page-")
-            if isinstance(href, str) and href.startswith("page-")
-            else None
-        )
-        if page is not None:
-            return f"第 {page} 页"
-        return "继续上次位置"
-    location = _progress_location(progress)
-    position_ms = _number_or_none(
-        location.get("positionMs") if isinstance(location, dict) else None
-    )
-    if position_ms is None:
-        position_ms = 0
-    chapter_id = location.get("chapterId") if isinstance(location, dict) else None
-    chapter_title = (
-        library_projections.get_reading_unit_title(db, str(chapter_id))
-        if chapter_id and _has_table(db, "LibraryReadingUnit")
-        else None
-    )
-    prefix = f"{chapter_title} · " if chapter_title else ""
-    return f"{prefix}{_format_duration(position_ms)}"
-
-
 def _reading_status(value: Any) -> str:
     normalized = str(value or "UNREAD").strip().upper()
     if normalized == "WANT":
@@ -438,12 +308,12 @@ def _management_work_views(
             LibraryVolume.id,
         )
     ).all()
-    resources: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]] = {
+    resources: dict[str, list[tuple[LibraryVersion, LibraryVolume]]] = {
         work_id: [] for work_id in work_ids
     }
     volume_ids: list[str] = []
-    for media_version, volume in rows:
-        resources.setdefault(media_version.work_id, []).append((media_version, volume))
+    for version, volume in rows:
+        resources.setdefault(version.work_id, []).append((version, volume))
         volume_ids.append(volume.id)
     progresses = (
         {
@@ -462,16 +332,16 @@ def _management_work_views(
     for work in works:
         work_resources = resources.get(str(work["id"]), [])
         media_kinds = list(
-            dict.fromkeys(media_kind_of(volume) for _media, volume in work_resources)
+            dict.fromkeys(media_kind_of(volume) for _version, volume in work_resources)
         )
         percents = [
             float(progresses[volume.id].percent) if volume.id in progresses else 0.0
-            for _media, volume in work_resources
+            for _version, volume in work_resources
         ]
         latest = max(
             (
                 progresses[volume.id].updated_at
-                for _media, volume in work_resources
+                for _version, volume in work_resources
                 if volume.id in progresses
             ),
             default=None,
@@ -524,7 +394,7 @@ def _volume_file_summary_view(file: LibraryFile) -> dict[str, Any]:
 def _library_volume_view(
     volume: LibraryVolume,
     *,
-    media_version_id: str,
+    version_id: str,
     progress: LibraryReadingProgress | None,
     files: list[LibraryFile],
 ) -> dict[str, Any]:
@@ -532,7 +402,7 @@ def _library_volume_view(
     reader_type = reader_type_for_format(volume.format)
     return {
         "id": volume.id,
-        "versionId": media_version_id,
+        "versionId": version_id,
         "title": volume.title,
         "volumeIndex": volume.volume_index,
         "sortOrder": volume.sort_order,
@@ -577,13 +447,13 @@ def _library_volume_view(
 def _library_volume_page_view(
     volume: LibraryVolume,
     *,
-    media_version_id: str,
+    version_id: str,
     progress: LibraryReadingProgress | None,
     files: list[LibraryFile],
 ) -> dict[str, Any]:
     legacy_view = _library_volume_view(
         volume,
-        media_version_id=media_version_id,
+        version_id=version_id,
         progress=progress,
         files=[],
     )
@@ -649,27 +519,23 @@ def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
         "authorFacets": book.get("authorFacets", []),
         "coverStatus": book["coverStatus"],
         "coverUrl": book["coverUrl"],
-        "recentMediaKind": book.get("recentMediaKind"),
         "continueVolumeId": book.get("continueVolumeId"),
         "continueVolumeProgress": book.get("continueVolumeProgress", 0.0),
         "completed": book["completed"],
-        "mediaVersions": [
+        "versions": [
             {
-                "id": media_version["id"],
-                "mediaKind": media_version["mediaKind"],
-                "completed": media_version["completed"],
-                "volumeCount": media_version["volumeCount"],
-                "sizeBytes": media_version["sizeBytes"],
+                "id": version["id"],
+                "sourceKey": version["sourceKey"],
+                "sourceName": version.get("sourceName"),
+                "completed": version["completed"],
+                "volumeCount": version["volumeCount"],
+                "sizeBytes": version["sizeBytes"],
                 "volumes": [
-                    _work_detail_volume_view(volume)
-                    for volume in media_version["volumes"]
+                    _work_detail_volume_view(volume) for volume in version["volumes"]
                 ],
             }
-            for media_version in book["mediaVersions"]
+            for version in book["versions"]
         ],
-        "availableMediaKinds": book["availableMediaKinds"],
-        "detailTabs": book["detailTabs"],
-        "selectedDetailTab": book["selectedDetailTab"],
     }
 
 
@@ -695,28 +561,13 @@ def _reading_unit_view(unit: LibraryReadingUnit) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True, slots=True)
-class _VolumeMediaParent:
-    id: str
-    work_id: str
-    media_kind: str
-
-
-def _media_parents_by_work_kind(
-    db: Session, work_ids: list[str]
-) -> dict[tuple[str, str], _VolumeMediaParent]:
-    if not work_ids:
-        return {}
-    parents: dict[tuple[str, str], _VolumeMediaParent] = {}
-    for media in db.scalars(
-        select(LibraryMediaVersion).where(LibraryMediaVersion.work_id.in_(work_ids))
-    ).all():
-        parents[(media.work_id, media.media_kind)] = _VolumeMediaParent(
-            id=media.id,
-            work_id=media.work_id,
-            media_kind=media.media_kind,
-        )
-    return parents
+def _version_sort_key(version: LibraryVersion) -> tuple[int, str, str, str]:
+    return (
+        0 if version.source_key == IMPLICIT_VERSION_SOURCE_KEY else 1,
+        version.source_name or "",
+        version.source_key,
+        version.id,
+    )
 
 
 def _continue_volume_from_progress(
@@ -740,26 +591,12 @@ def _continue_volume_from_progress(
     )
 
 
-def _parent_for_volume(
-    volume: LibraryVolume,
-    work_id: str,
-    parents: dict[tuple[str, str], _VolumeMediaParent],
-) -> _VolumeMediaParent:
-    kind = media_kind_of(volume)
-    existing = parents.get((work_id, kind))
-    if existing is not None:
-        return existing
-    return _VolumeMediaParent(id=f"{work_id}:{kind}", work_id=work_id, media_kind=kind)
-
-
 @dataclass(frozen=True, slots=True)
 class _WorkViewBatch:
     metadata_lookups: dict[str, dict[str, object]]
-    rows_by_work: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]]
+    rows_by_work: dict[str, list[tuple[LibraryVersion, LibraryVolume]]]
     progresses: dict[str, LibraryReadingProgress]
     files: dict[str, list[LibraryFile]]
-    tab_order: tuple[str, ...]
-    saved_tabs: dict[str, str]
 
 
 def _load_work_view_batch(
@@ -789,14 +626,12 @@ def _load_work_view_batch(
             LibraryVolume.id.asc(),
         )
     ).all()
-    rows_by_work: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]] = {
+    rows_by_work: dict[str, list[tuple[LibraryVersion, LibraryVolume]]] = {
         work_id: [] for work_id in work_ids
     }
     volume_ids: list[str] = []
-    for media_version, volume in rows:
-        rows_by_work.setdefault(media_version.work_id, []).append(
-            (media_version, volume)
-        )
+    for version, volume in rows:
+        rows_by_work.setdefault(version.work_id, []).append((version, volume))
         volume_ids.append(volume.id)
 
     progresses = (
@@ -821,15 +656,6 @@ def _load_work_view_batch(
         ).all():
             files[file.volume_id].append(file)
 
-    preferences = (
-        library_projections.get_detail_preferences(
-            db,
-            user_id=user_id,
-            work_ids=work_ids,
-        )
-        if user_id and _has_table(db, "WorkDetailPreference")
-        else {}
-    )
     return _WorkViewBatch(
         metadata_lookups=library_projections.latest_metadata_lookups_for_works(
             db, work_ids
@@ -837,11 +663,6 @@ def _load_work_view_batch(
         rows_by_work=rows_by_work,
         progresses=progresses,
         files=files,
-        tab_order=tuple(_detail_tab_order(db)),
-        saved_tabs={
-            work_id: str(preference.get("selectedTab") or "").strip().upper()
-            for work_id, preference in preferences.items()
-        },
     )
 
 
@@ -877,7 +698,7 @@ def _work_view(
     work: dict[str, Any],
     user_id: str | None = None,
     *,
-    volume_limit_per_media: int | None = None,
+    volume_limit_per_version: int | None = None,
     include_files: bool = True,
     batch: _WorkViewBatch | None = None,
 ) -> dict[str, Any]:
@@ -911,12 +732,11 @@ def _work_view(
                 LibraryVolume.id.asc(),
             )
         ).all()
-    parents = _media_parents_by_work_kind(db, [work_id])
-    grouped: dict[str, tuple[_VolumeMediaParent, list[LibraryVolume]]] = {}
+    grouped: dict[str, tuple[LibraryVersion, list[LibraryVolume]]] = {}
     for version, volume in rows:
-        parent = _parent_for_volume(volume, version.work_id, parents)
-        grouped.setdefault(parent.id, (parent, []))[1].append(volume)
-    volume_ids = [volume.id for _media, volume in rows]
+        grouped.setdefault(version.id, (version, []))[1].append(volume)
+    ordered = sorted(grouped.values(), key=lambda item: _version_sort_key(item[0]))
+    volume_ids = [volume.id for _version, volume in rows]
     progresses = (
         batch.progresses
         if batch is not None
@@ -934,40 +754,31 @@ def _work_view(
             else {}
         )
     )
-    media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
-    ordered = sorted(
-        grouped.values(), key=lambda item: media_order.get(item[0].media_kind, 99)
-    )
     incomplete: dict[str, list[LibraryVolume]] = {}
     all_volumes: list[LibraryVolume] = []
-    for media_version, volumes in ordered:
+    for version, volumes in ordered:
         all_volumes.extend(volumes)
-        incomplete[media_version.id] = [
+        incomplete[version.id] = [
             volume
             for volume in volumes
             if float(progresses[volume.id].percent if volume.id in progresses else 0)
             < 100
         ]
     continue_volume = _continue_volume_from_progress(all_volumes, progresses)
-    recent_media: _VolumeMediaParent | None = (
-        _parent_for_volume(continue_volume, work_id, parents)
-        if continue_volume is not None
-        else None
-    )
     response_volumes: dict[str, list[LibraryVolume]] = {}
-    for media_version, volumes in ordered:
+    for version, volumes in ordered:
         selected = (
             list(volumes)
-            if volume_limit_per_media is None
-            else list(volumes[:volume_limit_per_media])
+            if volume_limit_per_version is None
+            else list(volumes[:volume_limit_per_version])
         )
         if (
             continue_volume is not None
-            and media_kind_of(continue_volume) == media_version.media_kind
+            and continue_volume.version_id == version.id
             and all(volume.id != continue_volume.id for volume in selected)
         ):
             selected.append(continue_volume)
-        response_volumes[media_version.id] = selected
+        response_volumes[version.id] = selected
     response_volume_ids = [
         volume.id for volumes in response_volumes.values() for volume in volumes
     ]
@@ -983,30 +794,30 @@ def _work_view(
             .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
         ).all():
             files[file.volume_id].append(file)
-    media_views = [
+    version_views = [
         {
-            "id": media_version.id,
-            "mediaKind": media_version.media_kind,
-            "completed": bool(volumes) and not incomplete[media_version.id],
+            "id": version.id,
+            "sourceKey": version.source_key,
+            "sourceName": version.source_name,
+            "completed": bool(volumes) and not incomplete[version.id],
             "volumeCount": len(volumes),
             "sizeBytes": sum(volume.size_bytes for volume in volumes),
             "volumes": [
                 _library_volume_view(
                     volume,
-                    media_version_id=media_version.id,
+                    version_id=version.id,
                     progress=progresses.get(volume.id),
                     files=files.get(volume.id, []),
                 )
-                for volume in response_volumes[media_version.id]
+                for volume in response_volumes[version.id]
             ],
         }
-        for media_version, volumes in ordered
+        for version, volumes in ordered
     ]
-    kinds = [str(item["mediaKind"]) for item in media_views]
-    tabs = (
-        _detail_tabs_from_order(batch.tab_order, set(kinds))
-        if batch is not None
-        else _detail_tabs(db, set(kinds))
+    media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
+    kinds = sorted(
+        dict.fromkeys(media_kind_of(volume) for volume in all_volumes),
+        key=lambda kind: media_order.get(kind, 99),
     )
     last_progress = max(
         progresses.values(), key=lambda progress: progress.updated_at, default=None
@@ -1029,7 +840,6 @@ def _work_view(
         "metadataLookupError": (metadata_lookup or {}).get("errorSummary"),
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work_id, work, size="medium"),
-        "recentMediaKind": recent_media.media_kind if recent_media else None,
         "continueVolumeId": continue_volume.id if continue_volume else None,
         "continueVolumeTitle": continue_volume.title if continue_volume else None,
         "continueVolumeProgress": float(progresses[continue_volume.id].percent)
@@ -1043,187 +853,9 @@ def _work_view(
         ),
         "lastReadAt": _dt(last_progress.updated_at) if last_progress else None,
         "addedAt": _dt(work.get("createdAt")),
-        "mediaVersions": media_views,
+        "versions": version_views,
         "availableMediaKinds": kinds,
-        "detailTabs": tabs,
-        "selectedDetailTab": (
-            batch.saved_tabs.get(work_id)
-            if batch is not None
-            and batch.saved_tabs.get(work_id) in {str(tab["key"]) for tab in tabs}
-            else next(
-                (str(tab["key"]) for tab in tabs if tab["key"] != "STRUCTURE"),
-                "STRUCTURE",
-            )
-            if batch is not None
-            else _resolve_detail_tab(db, user_id, work_id, tabs)
-        ),
     }
-
-
-def _selected_detail_volume_id(
-    book: dict[str, Any],
-    selected_tab: str,
-    requested_volume_id: str | None,
-) -> str | None:
-    if selected_tab == "STRUCTURE":
-        return None
-    media_version = next(
-        (
-            item
-            for item in book.get("mediaVersions", [])
-            if item.get("mediaKind") == selected_tab
-        ),
-        None,
-    )
-    if media_version is None:
-        return None
-    volumes = list(media_version.get("volumes") or [])
-    selected_volume = next(
-        (
-            volume
-            for volume in volumes
-            if requested_volume_id and volume.get("id") == requested_volume_id
-        ),
-        None,
-    )
-    selected_volume = (
-        selected_volume
-        or next(
-            (
-                volume
-                for volume in volumes
-                if volume.get("id") == book.get("continueVolumeId")
-            ),
-            None,
-        )
-        or next(
-            (volume for volume in volumes if not bool(volume.get("completed"))), None
-        )
-        or (volumes[0] if volumes else None)
-    )
-    return str(selected_volume["id"]) if selected_volume is not None else None
-
-
-def _active_media_view(
-    db: Session,
-    book: dict[str, Any],
-    selected_tab: str,
-    user_id: str,
-    requested_volume_id: str | None,
-    unit_page: int,
-    unit_page_size: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    page_size = min(200, max(1, unit_page_size))
-    empty_navigation = {
-        "readingUnits": [],
-        "volumeSections": [],
-        "readingUnitsPage": _empty_reading_units_page(page_size),
-    }
-    volume_id = _selected_detail_volume_id(
-        book,
-        selected_tab,
-        requested_volume_id,
-    )
-    if volume_id is None:
-        return None, empty_navigation
-    media_version = next(
-        (
-            item
-            for item in book.get("mediaVersions", [])
-            if item.get("mediaKind") == selected_tab
-        ),
-        None,
-    )
-    if media_version is None:
-        return None, empty_navigation
-    volumes = list(media_version.get("volumes") or [])
-    selected_volume = next(
-        (volume for volume in volumes if str(volume.get("id")) == volume_id),
-        None,
-    )
-    if selected_volume is None:
-        return None, empty_navigation
-    reader_type = str(selected_volume.get("readerType") or ReaderType.REFLOWABLE)
-    unit_rows = (
-        db.scalars(
-            select(LibraryReadingUnit)
-            .where(LibraryReadingUnit.volume_id == volume_id)
-            .order_by(LibraryReadingUnit.sort_order, LibraryReadingUnit.id)
-        ).all()
-        if reader_type == ReaderType.REFLOWABLE
-        else []
-    )
-    total = len(unit_rows)
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    page = min(max(1, unit_page), total_pages)
-    all_reading_units = [_reading_unit_view(unit) for unit in unit_rows]
-    reading_units = all_reading_units[(page - 1) * page_size : page * page_size]
-    progress = db.scalar(
-        select(LibraryReadingProgress).where(
-            LibraryReadingProgress.user_id == user_id,
-            LibraryReadingProgress.volume_id == volume_id,
-        )
-    )
-    progress_view = (
-        {
-            "volumeId": progress.volume_id,
-            "percent": progress.percent,
-            "locationJson": progress.location_json,
-            "updatedAt": progress.updated_at,
-        }
-        if progress is not None
-        else None
-    )
-    percent = float(selected_volume.get("progress") or 0)
-    files = list(selected_volume.get("files") or [])
-    action_href = (
-        f"/listen/{quote(volume_id, safe='')}"
-        if reader_type == "audio"
-        else f"/reader/{quote(volume_id, safe='')}"
-    )
-    navigation = {
-        "readingUnits": reading_units,
-        "volumeSections": [],
-        "readingUnitsPage": {
-            "page": page,
-            "pageSize": page_size,
-            "total": total,
-            "totalPages": total_pages,
-        },
-    }
-    progress_navigation = _progress_navigation(progress_view, all_reading_units)
-    return {
-        "key": selected_tab,
-        "formatLabel": selected_volume.get("format") or "UNKNOWN",
-        "mediaVersionId": media_version["id"],
-        "selectedVolumeId": volume_id,
-        "selectedVolumeTitle": selected_volume.get("title") or "未命名卷册",
-        "status": "FINISHED"
-        if media_version.get("completed")
-        else "READING"
-        if percent > 0
-        else "UNREAD",
-        "progressStatus": _status_from_progress(progress_view),
-        "progress": percent,
-        "positionLabel": (
-            progress_navigation.get("currentChapterTitle")
-            or _media_position_label(db, reader_type, progress_view)
-        ),
-        "durationMs": selected_volume.get("durationMs"),
-        "narrator": selected_volume.get("narrator") if reader_type == "audio" else None,
-        "primaryAction": {
-            "label": "继续" if percent > 0 else "开始",
-            "href": action_href,
-        },
-        "units": reading_units,
-        "volumes": volumes,
-        "tracks": files if reader_type == "audio" else [],
-        "localProgressScope": {
-            "userId": user_id,
-            "volumeId": volume_id,
-        },
-        **progress_navigation,
-    }, navigation
 
 
 def _work_volume_page_view(
@@ -1231,44 +863,24 @@ def _work_volume_page_view(
     *,
     user: User,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     page: int,
     page_size: int,
 ) -> dict[str, Any] | None:
     context = authorization_context(db, user)
-    media_version = db.scalar(
-        select(LibraryMediaVersion).where(
-            LibraryMediaVersion.id == media_version_id,
-            LibraryMediaVersion.work_id == work_id,
-        )
-    )
     version = db.scalar(
         select(LibraryVersion).where(
-            LibraryVersion.id == media_version_id,
+            LibraryVersion.id == version_id,
             LibraryVersion.work_id == work_id,
         )
     )
-    if media_version is None and version is None:
+    if version is None:
         return None
     filters = [
         LibraryVolume.hidden.is_(False),
         volume_visibility_predicate(context),
+        LibraryVolume.version_id == version.id,
     ]
-    if media_version is not None:
-        filters.extend(
-            (
-                LibraryVolume.version_id.in_(
-                    select(LibraryVersion.id).where(LibraryVersion.work_id == work_id)
-                ),
-                volume_effective_media_kind(LibraryVolume) == media_version.media_kind,
-            )
-        )
-        response_media_kind = media_version.media_kind
-        response_version_id = media_version.id
-    else:
-        filters.append(LibraryVolume.version_id == media_version_id)
-        response_media_kind = None
-        response_version_id = media_version_id
     total = int(db.scalar(select(func.count(LibraryVolume.id)).where(*filters)) or 0)
     bounded_page_size = min(100, max(1, page_size))
     total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
@@ -1306,15 +918,14 @@ def _work_volume_page_view(
             .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
         ).all():
             files[file.volume_id].append(file)
-    if response_media_kind is None and volumes:
-        response_media_kind = media_kind_of(volumes[0])
     return {
-        "versionId": response_version_id,
-        "mediaKind": response_media_kind,
+        "versionId": version.id,
+        "sourceKey": version.source_key,
+        "sourceName": version.source_name,
         "volumes": [
             _library_volume_page_view(
                 volume,
-                media_version_id=response_version_id,
+                version_id=version.id,
                 progress=progresses.get(volume.id),
                 files=files.get(volume.id, []),
             )

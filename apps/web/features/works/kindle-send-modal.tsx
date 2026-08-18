@@ -40,7 +40,7 @@ function supported(path: string, format: string) {
 export function KindleSendModal({ book, open, preferredVolumeId, onClose }: { book: WorkView; open: boolean; preferredVolumeId: string | null; onClose: () => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
-  const options = useMemo<SendOption[]>(() => book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes).flatMap((volume) => volume.files
+  const options = useMemo<SendOption[]>(() => book.versions.flatMap((version) => version.volumes).flatMap((volume) => volume.files
     .filter((file) => supported(file.path, volume.format))
     .map((file) => ({
       fileId: file.id,
@@ -49,7 +49,7 @@ export function KindleSendModal({ book, open, preferredVolumeId, onClose }: { bo
       fileName: fileName(file.path),
       format: volume.format,
       size: file.size
-    }))), [book.mediaVersions]);
+    }))), [book.versions]);
   const defaultOption = options.find((option) => option.volumeId === preferredVolumeId)
     ?? options[0];
   const [selectedFileId, setSelectedFileId] = useState(defaultOption?.fileId ?? '');

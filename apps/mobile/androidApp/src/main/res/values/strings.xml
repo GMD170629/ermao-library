@@ -165,7 +165,7 @@
     <string name="work_unavailable_message">This work doesn’t exist or you no longer have access.</string>
     <string name="work_reader_next_phase_message">Reader and audio playback will be enabled in the next phase.</string>
     <string name="work_no_readable_volumes">No readable volumes are available for this media type.</string>
-    <string name="work_media_versions_title">Media versions</string>
+    <string name="work_media_versions_title">Versions</string>
     <string name="work_detail_title">Book Details</string>
     <string name="work_volume_accessibility_label">Volume %1$s, %2$s</string>
     <string name="work_volume_accessibility_progress">Reading progress %1$d%%</string>

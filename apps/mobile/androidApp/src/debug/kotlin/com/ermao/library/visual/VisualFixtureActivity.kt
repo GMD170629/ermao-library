@@ -34,7 +34,7 @@ import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.HomeContent
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.MediaContent
+import com.ermao.library.features.content.model.VersionContent
 import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.ReadingUnitContent
@@ -386,13 +386,13 @@ private fun FixtureLibrary(showFilter: Boolean) {
 @androidx.compose.runtime.Composable
 private fun FixtureWorkDetail(content: WorkDetailContent) {
     var showShelfPicker by remember { mutableStateOf(false) }
-    val selectedVolume = content.media.firstOrNull()?.volumes?.getOrNull(1)
-        ?: content.media.firstOrNull()?.volumes?.firstOrNull()
+    val selectedVolume = content.versions.firstOrNull()?.volumes?.getOrNull(1)
+        ?: content.versions.firstOrNull()?.volumes?.firstOrNull()
     WorkDetailScreen(
         state = WorkDetailUiState(
             isLoading = false,
             content = content,
-            selectedMediaKind = "EBOOK",
+            selectedVersionId = content.versions.firstOrNull()?.id,
             selectedVolumeId = selectedVolume?.id,
             shelves = fixtureShelves,
             selectedShelfIds = setOf(fixtureShelves.first().id),
@@ -401,7 +401,7 @@ private fun FixtureWorkDetail(content: WorkDetailContent) {
         repository = fixtureRepository,
         context = fixtureRequestContext,
         onBack = {},
-        onSelectMedia = {},
+        onSelectVersion = {},
         onSelectVolume = {},
         onOpenShelfPicker = { showShelfPicker = true },
         onDismissShelfPicker = { showShelfPicker = false },
@@ -480,9 +480,10 @@ private val fixtureDetail = WorkDetailContent(
     authorFacetId = "author-liu-cixin",
     description = "在文明与宇宙的尺度上，人类第一次直面来自群星深处的未知回声。",
     tags = listOf("科幻", "长篇小说"),
-    media = listOf(
-        MediaContent(
-            kind = "EBOOK",
+    versions = listOf(
+        VersionContent(
+            id = "version-ebook",
+            sourceKey = "__implicit__",
             volumes = listOf(
                 fixtureVolume("volume-1", "第一卷 地球往事", 100, true),
                 fixtureVolume("volume-2", "第二卷 黑暗森林", 34, true),
@@ -490,10 +491,20 @@ private val fixtureDetail = WorkDetailContent(
                 fixtureVolume("volume-4", "第四卷 宇宙回声", null, true),
             ),
         ),
-        MediaContent(kind = "COMIC", volumes = listOf(fixtureVolume("comic-1", "漫画版 第一卷", null, true))),
-        MediaContent(kind = "AUDIOBOOK", volumes = listOf(fixtureVolume("audio-1", "有声版", 12, true))),
+        VersionContent(
+            id = "version-comic",
+            sourceKey = "comic-edition",
+            sourceName = "漫画版",
+            volumes = listOf(fixtureVolume("comic-1", "漫画版 第一卷", null, true)),
+        ),
+        VersionContent(
+            id = "version-audio",
+            sourceKey = "audiobook",
+            sourceName = "有声版",
+            volumes = listOf(fixtureVolume("audio-1", "有声版", 12, true)),
+        ),
     ),
-    selectedMediaKind = "EBOOK",
+    selectedVersionId = "version-ebook",
     readingUnits = listOf(
         ReadingUnitContent("chapter-1", "第一章 科学边界", 100, readingState = ChapterReadingState.Read),
         ReadingUnitContent("chapter-2", "第二章 黑暗森林", 34, readingState = ChapterReadingState.Current),
@@ -508,13 +519,14 @@ private val fixtureSingleEbookDetail = WorkDetailContent(
     authorFacetId = "author-frank-herbert",
     description = null,
     tags = listOf("科幻"),
-    media = listOf(
-        MediaContent(
-            kind = "EBOOK",
+    versions = listOf(
+        VersionContent(
+            id = "version-dune",
+            sourceKey = "__implicit__",
             volumes = listOf(fixtureVolume("single-ebook-1", "沙丘", 42, true)),
         ),
     ),
-    selectedMediaKind = "EBOOK",
+    selectedVersionId = "version-dune",
     readingUnits = listOf(
         ReadingUnitContent("dune-chapter-1", "第一章 厄拉科斯", 100, readingState = ChapterReadingState.Read),
         ReadingUnitContent("dune-chapter-2", "第二章 沙漠之路", 42, readingState = ChapterReadingState.Current),
@@ -523,13 +535,14 @@ private val fixtureSingleEbookDetail = WorkDetailContent(
 )
 
 private fun WorkDetailContent.coverPaths(): List<String> =
-    media.flatMap(MediaContent::volumes).map(VolumeContent::coverUrl)
+    versions.flatMap(VersionContent::volumes).map(VolumeContent::coverUrl)
 
 private fun fixtureVolume(id: String, title: String, progress: Int?, readable: Boolean): VolumeContent = VolumeContent(
     id = id,
     title = title,
     format = "EPUB",
     readerType = "reflowable",
+    versionId = "version-$id",
     volumeIndex = id.substringAfterLast('-').toDoubleOrNull(),
     publishedAt = "2010-11-01",
     language = "zh-CN",

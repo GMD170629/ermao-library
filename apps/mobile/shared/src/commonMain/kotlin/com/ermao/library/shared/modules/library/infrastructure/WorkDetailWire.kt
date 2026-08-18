@@ -1,25 +1,18 @@
 package com.ermao.library.shared.modules.library.infrastructure
 
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.library.domain.AppliedFacet
-import com.ermao.library.shared.modules.library.domain.ActiveMedia
 import com.ermao.library.shared.modules.library.domain.FacetKind
-import com.ermao.library.shared.modules.library.domain.MediaVersion
-import com.ermao.library.shared.modules.library.domain.ReadingUnit
+import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.library.domain.Volume
 import com.ermao.library.shared.modules.library.domain.VolumeClassification
 import com.ermao.library.shared.modules.library.domain.VolumeFile
 import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkDetailTab
+import com.ermao.library.shared.modules.library.domain.WorkVersion
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class WorkDetailSummaryPayloadWire(
     val book: WorkWire,
-    val activeMedia: ActiveMediaWire? = null,
-    val readingUnits: List<ReadingUnitWire> = emptyList(),
-    val volumeSections: List<VolumeSectionWire> = emptyList(),
-    val readingUnitsPage: ReadingUnitsPageWire? = null,
 )
 
 @Serializable
@@ -35,14 +28,10 @@ data class WorkWire(
     val seriesIndex: Double? = null,
     val coverStatus: String,
     val coverUrl: String,
-    val recentMediaKind: String? = null,
     val continueVolumeId: String? = null,
     val continueVolumeProgress: Double = 0.0,
     val completed: Boolean,
-    val mediaVersions: List<MediaVersionWire>,
-    val availableMediaKinds: List<String>,
-    val detailTabs: List<WorkDetailTabWire>,
-    val selectedDetailTab: String,
+    val versions: List<WorkVersionWire>,
 )
 
 @Serializable
@@ -59,12 +48,10 @@ internal fun FacetReferenceWire.toDomain(): AppliedFacet = AppliedFacet(
 )
 
 @Serializable
-data class WorkDetailTabWire(val key: String, val label: String, val sortOrder: Int)
-
-@Serializable
-data class MediaVersionWire(
+data class WorkVersionWire(
     val id: String,
-    val mediaKind: String,
+    val sourceKey: String,
+    val sourceName: String? = null,
     val completed: Boolean,
     val volumeCount: Int,
     val sizeBytes: Long,
@@ -74,7 +61,7 @@ data class MediaVersionWire(
 @Serializable
 data class VolumeWire(
     val id: String,
-    val mediaVersionId: String,
+    val versionId: String,
     val title: String,
     val volumeIndex: Double? = null,
     val sortOrder: Int,
@@ -115,20 +102,9 @@ data class VolumeFileSummaryWire(
     val size: String,
 )
 
-fun WorkDetailSummaryPayloadWire.toDomain(): WorkDetailSummary = book.toDomain(
-    activeMedia = activeMedia?.toDomain(),
-    readingUnits = readingUnits.map(ReadingUnitWire::toDomain),
-    readingUnitsPage = readingUnitsPage?.toDomain(),
-)
+fun WorkDetailSummaryPayloadWire.toDomain(): WorkDetailSummary = book.toDomain()
 
-private fun ReadingUnitsPageWire.toDomain(): com.ermao.library.shared.modules.library.domain.ReadingUnitsPage =
-    com.ermao.library.shared.modules.library.domain.ReadingUnitsPage(page, pageSize, total, totalPages)
-
-fun WorkWire.toDomain(
-    activeMedia: ActiveMedia? = null,
-    readingUnits: List<ReadingUnit> = emptyList(),
-    readingUnitsPage: com.ermao.library.shared.modules.library.domain.ReadingUnitsPage? = null,
-): WorkDetailSummary {
+fun WorkWire.toDomain(): WorkDetailSummary {
     require(id.isNotBlank()) { "Work id is blank" }
     require(title.isNotBlank()) { "Work title is blank" }
     return WorkDetailSummary(
@@ -143,27 +119,22 @@ fun WorkWire.toDomain(
         seriesIndex = seriesIndex,
         coverStatus = coverStatus,
         coverUrl = coverUrl,
-        recentMediaKind = recentMediaKind?.let(::MediaKind),
         continueVolumeId = continueVolumeId,
         continueVolumeProgress = continueVolumeProgress.also { require(it in 0.0..100.0) },
         completed = completed,
-        mediaVersions = mediaVersions.map(MediaVersionWire::toDomain),
-        availableMediaKinds = availableMediaKinds.map(::MediaKind),
-        detailTabs = detailTabs.map { WorkDetailTab(it.key, it.label, it.sortOrder) },
-        selectedDetailTab = selectedDetailTab,
-        activeMedia = activeMedia,
-        readingUnits = readingUnits,
-        readingUnitsPage = readingUnitsPage,
+        versions = versions.map(WorkVersionWire::toDomain),
     )
 }
 
-fun MediaVersionWire.toDomain(): MediaVersion {
-    require(id.isNotBlank()) { "Media version id is blank" }
+fun WorkVersionWire.toDomain(): WorkVersion {
+    require(id.isNotBlank()) { "Work version id is blank" }
+    require(sourceKey.isNotBlank()) { "Work version source key is blank" }
     require(volumeCount >= volumes.size) { "Bounded volume page exceeds total count" }
-    require(sizeBytes >= 0) { "Media version size is negative" }
-    return MediaVersion(
+    require(sizeBytes >= 0) { "Work version size is negative" }
+    return WorkVersion(
         id = id,
-        mediaKind = MediaKind(mediaKind),
+        sourceKey = sourceKey,
+        sourceName = sourceName?.takeIf { it.isNotBlank() },
         completed = completed,
         volumeCount = volumeCount,
         sizeBytes = sizeBytes,
@@ -172,12 +143,12 @@ fun MediaVersionWire.toDomain(): MediaVersion {
 }
 
 fun VolumeWire.toDomain(): Volume {
-    require(id.isNotBlank() && mediaVersionId.isNotBlank()) { "Volume identity is blank" }
+    require(id.isNotBlank() && versionId.isNotBlank()) { "Volume identity is blank" }
     require(sizeBytes >= 0) { "Volume size is negative" }
     require(progress in 0.0..100.0) { "Volume progress is outside 0..100" }
     return Volume(
         id = id,
-        mediaVersionId = mediaVersionId,
+        versionId = versionId,
         title = title,
         volumeIndex = volumeIndex,
         sortOrder = sortOrder,

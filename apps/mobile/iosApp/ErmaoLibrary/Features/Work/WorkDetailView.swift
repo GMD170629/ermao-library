@@ -264,12 +264,6 @@ struct WorkDetailView: View {
                 Text("/").foregroundStyle(theme.textTertiary)
                 facetButton(series, kind: .series)
             }
-            if let mediaKind = detail.selectedMediaKind {
-                Text("/").foregroundStyle(theme.textTertiary)
-                Text(mediaKind.title)
-                    .appTextStyle(.body)
-                    .foregroundStyle(theme.textSecondary)
-            }
         }
         .lineLimit(1)
         .minimumScaleFactor(0.8)
@@ -464,25 +458,25 @@ struct WorkDetailView: View {
 
     @ViewBuilder
     private func mediaPicker(_ detail: WorkDetailContent) -> some View {
-        if !detail.availableMediaKinds.isEmpty {
+        if detail.showsVersionPicker {
             HStack(spacing: .space2) {
                 Text("work.media.title").appTextStyle(.sectionTitle)
                 Spacer(minLength: .space1)
                 Picker(
                     "work.media.title",
                     selection: Binding(
-                        get: { detail.selectedMediaKind ?? detail.availableMediaKinds.first ?? .ebook },
-                        set: { store.load(mediaKind: $0) }
+                        get: { detail.selectedVersionId ?? detail.versions.first?.id ?? "" },
+                        set: { store.load(versionId: $0) }
                     )
                 ) {
-                    ForEach(detail.availableMediaKinds, id: \.self) { kind in
-                        Text(kind.title).tag(kind)
+                    ForEach(detail.versions) { version in
+                        Text(version.displayTitle).tag(version.id)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .tint(theme.brandAccent)
-                .frame(width: min(CGFloat(detail.availableMediaKinds.count) * 80, 240))
+                .frame(width: min(CGFloat(detail.versions.count) * 80, 240))
             }
         }
     }
@@ -536,7 +530,7 @@ struct WorkDetailView: View {
         return VStack(alignment: .leading, spacing: .space1) {
             ZStack(alignment: .topLeading) {
                 Button {
-                    store.load(mediaKind: detail.selectedMediaKind, volumeID: volume.id)
+                    store.load(versionId: detail.selectedVersionId, volumeID: volume.id)
                 } label: {
                     BookCoverView(
                         reference: volume.cover,
@@ -1115,7 +1109,7 @@ struct WorkDetailView: View {
     }
 
     private func requestReaderAccess(detail: WorkDetailContent) {
-        guard let volume = selectedVolume(detail), let mediaKind = detail.selectedMediaKind else { return }
+        guard let volume = selectedVolume(detail) else { return }
         if let handoff = ManagedReaderAccessPolicy.verifiedLocalHandoff(
             record: downloads.record(for: volume.id),
             volumeID: volume.id
@@ -1127,7 +1121,7 @@ struct WorkDetailView: View {
             context: context,
             work: detail.work,
             volume: volume,
-            mediaKind: mediaKind
+            mediaKind: volume.libraryMediaKind
         ))
     }
 
@@ -1138,13 +1132,11 @@ struct WorkDetailView: View {
 
     private func enqueueSelectedVolume() {
         guard case .ready(let detail, _) = store.state,
-              let volume = selectedVolume(detail),
-              let mediaKind = detail.selectedMediaKind else { return }
-        downloads.enqueue(work: detail.work, volume: volume, mediaKind: mediaKind)
+              let volume = selectedVolume(detail) else { return }
+        downloads.enqueue(work: detail.work, volume: volume, mediaKind: volume.libraryMediaKind)
     }
 
     private func handleDownload(_ volume: WorkVolume, detail: WorkDetailContent) {
-        guard let mediaKind = detail.selectedMediaKind else { return }
         if let record = downloads.record(for: volume.id) {
             switch record.state {
             case .downloading, .queued: downloads.pause(record)
@@ -1152,7 +1144,7 @@ struct WorkDetailView: View {
             case .completed: break
             }
         } else {
-            downloads.enqueue(work: detail.work, volume: volume, mediaKind: mediaKind)
+            downloads.enqueue(work: detail.work, volume: volume, mediaKind: volume.libraryMediaKind)
         }
     }
 

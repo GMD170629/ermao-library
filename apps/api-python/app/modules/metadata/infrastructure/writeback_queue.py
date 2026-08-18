@@ -175,7 +175,7 @@ def load_metadata_writeback_projection(
     if media_version_id is not None and not media_ids:
         raise ValueError("媒介版本不存在")
     volume_query = select(LibraryVolume).where(
-        LibraryVolume.media_version_id.in_(media_ids),
+        LibraryVolume.version_id.in_(media_ids),
         LibraryVolume.hidden.is_(False),
     )
     if volume_id is not None:
@@ -183,7 +183,7 @@ def load_metadata_writeback_projection(
     volume_rows = tuple(
         db.scalars(
             volume_query.order_by(
-                LibraryVolume.media_version_id.asc(),
+                LibraryVolume.version_id.asc(),
                 LibraryVolume.sort_order.asc(),
                 LibraryVolume.id.asc(),
             )
@@ -254,7 +254,7 @@ def load_metadata_writeback_projection(
         volumes=tuple(
             MetadataWritebackVolumeProjection(
                 id=volume.id,
-                media_version_id=volume.media_version_id,
+                media_version_id=volume.version_id,
                 title=volume.title,
                 description=volume.description,
                 volume_index=volume.volume_index,
@@ -765,23 +765,23 @@ def prepare_preparation_finalization(
     )
     deferred_statements = (
         update(MetadataWritebackPreparation)
-            .where(
-                MetadataWritebackPreparation.id == preparation_id,
-                MetadataWritebackPreparation.status == "RUNNING",
-                MetadataWritebackPreparation.lease_owner_id == owner_id,
-            )
-            .values(
-                status="PENDING",
-                next_attempt_at=now + timedelta(seconds=PREPARATION_DEFER_SECONDS),
-                lease_owner_id=None,
-                lease_expires_at=None,
-                error_code="QUEUE_CAPACITY_DEFERRED",
-                error_summary=None,
-                updated_at=now,
-            ),
+        .where(
+            MetadataWritebackPreparation.id == preparation_id,
+            MetadataWritebackPreparation.status == "RUNNING",
+            MetadataWritebackPreparation.lease_owner_id == owner_id,
+        )
+        .values(
+            status="PENDING",
+            next_attempt_at=now + timedelta(seconds=PREPARATION_DEFER_SECONDS),
+            lease_owner_id=None,
+            lease_expires_at=None,
+            error_code="QUEUE_CAPACITY_DEFERRED",
+            error_summary=None,
+            updated_at=now,
+        ),
         update(MetadataWritebackOperation)
-            .where(MetadataWritebackOperation.id == operation_id)
-            .values(status="PENDING", updated_at=now),
+        .where(MetadataWritebackOperation.id == operation_id)
+        .values(status="PENDING", updated_at=now),
     )
     expanded_statements = tuple(
         insert(MetadataWritebackTarget).values(list(chunk))
@@ -944,9 +944,9 @@ def claim_next_target(
 
 def decode_claimed_target(target: dict[str, Any]) -> dict[str, Any]:
     payload = json.loads(str(target.get("payloadJson") or "{}"))
-    return {
-        key: value for key, value in target.items() if key != "payloadJson"
-    } | {"payload": payload if isinstance(payload, dict) else {}}
+    return {key: value for key, value in target.items() if key != "payloadJson"} | {
+        "payload": payload if isinstance(payload, dict) else {}
+    }
 
 
 def recover_interrupted_targets(db: Session, *, now: datetime) -> int:

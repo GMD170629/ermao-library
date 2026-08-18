@@ -116,7 +116,7 @@ export function AudioMiniPlayer() {
     const pendingCoverUrl = pendingSummary.coverUrl
       ? withBasePath(pendingSummary.coverUrl)
       : withBasePath(`/api/works/${encodeURIComponent(pendingSummary.workId)}/cover?size=small`);
-    const pendingHref = `/works/${encodeURIComponent(pendingSummary.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(pendingSummary.volumeId)}`;
+    const pendingHref = `/works/${encodeURIComponent(pendingSummary.workId)}?volumeId=${encodeURIComponent(pendingSummary.volumeId)}`;
     return (
       <section
         ref={rootRef}
@@ -162,7 +162,7 @@ export function AudioMiniPlayer() {
   const coverUrl = bootstrap.book.coverUrl
     ? withBasePath(bootstrap.book.coverUrl)
     : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
-  const workHref = `/works/${encodeURIComponent(bootstrap.version.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`;
+  const workHref = `/works/${encodeURIComponent(bootstrap.version.workId)}?volumeId=${encodeURIComponent(bootstrap.volume.id)}`;
   const isPlaying = player.lifecycle === 'playing';
   const isLoading = player.lifecycle === 'loading';
   const playbackError = player.loadError ?? player.error;

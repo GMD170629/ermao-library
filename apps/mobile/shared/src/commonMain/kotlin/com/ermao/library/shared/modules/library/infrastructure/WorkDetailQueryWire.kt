@@ -3,7 +3,7 @@ package com.ermao.library.shared.modules.library.infrastructure
 import com.ermao.library.shared.modules.library.domain.ActiveMedia
 import com.ermao.library.shared.modules.library.domain.LocalProgressScope
 import com.ermao.library.shared.modules.library.domain.MediaKind
-import com.ermao.library.shared.modules.library.domain.MediaVersion
+import com.ermao.library.shared.modules.library.domain.WorkVersion
 import com.ermao.library.shared.modules.library.domain.PrimaryAction
 import com.ermao.library.shared.modules.library.domain.ProgressExtra
 import com.ermao.library.shared.modules.library.domain.ReadingUnit
@@ -14,7 +14,6 @@ import com.ermao.library.shared.modules.library.domain.VolumeClassification
 import com.ermao.library.shared.modules.library.domain.VolumeFile
 import com.ermao.library.shared.modules.library.domain.VolumeSection
 import com.ermao.library.shared.modules.library.domain.WorkDetail
-import com.ermao.library.shared.modules.library.domain.WorkDetailTab
 import com.ermao.library.shared.modules.library.domain.WorkSummary
 import kotlinx.serialization.Serializable
 
@@ -31,7 +30,6 @@ data class WorkSummaryWire(
 @Serializable
 data class WorkDetailPayloadWire(
     val book: WorkViewWire,
-    val activeMedia: ActiveMediaWire? = null,
     val readingUnits: List<ReadingUnitWire>,
     val volumeSections: List<VolumeSectionWire>,
     val readingUnitsPage: ReadingUnitsPageWire,
@@ -39,8 +37,9 @@ data class WorkDetailPayloadWire(
 
 @Serializable
 data class WorkVolumePageWire(
-    val mediaVersionId: String,
-    val mediaKind: String,
+    val versionId: String,
+    val sourceKey: String,
+    val sourceName: String? = null,
     val volumes: List<LibraryVolumeWire>,
     val page: Int,
     val pageSize: Int,
@@ -49,10 +48,11 @@ data class WorkVolumePageWire(
 )
 
 fun WorkVolumePageWire.toDomain(): com.ermao.library.shared.modules.library.WorkVolumePage {
-    require(mediaVersionId.isNotBlank() && page > 0 && pageSize in 1..100 && total >= 0 && totalPages > 0)
+    require(versionId.isNotBlank() && sourceKey.isNotBlank() && page > 0 && pageSize in 1..100 && total >= 0 && totalPages > 0)
     return com.ermao.library.shared.modules.library.WorkVolumePage(
-        mediaVersionId = mediaVersionId,
-        mediaKind = MediaKind(mediaKind),
+        versionId = versionId,
+        sourceKey = sourceKey,
+        sourceName = sourceName?.takeIf { it.isNotBlank() },
         volumes = volumes.map(LibraryVolumeWire::toDomain),
         page = page,
         pageSize = pageSize,
@@ -82,23 +82,20 @@ data class WorkViewWire(
     val metadataLookupError: String? = null,
     val coverStatus: String,
     val coverUrl: String,
-    val recentMediaKind: String? = null,
     val continueVolumeId: String? = null,
     val continueVolumeTitle: String? = null,
     val continueVolumeProgress: Double,
     val completed: Boolean,
     val lastReadAt: String? = null,
     val addedAt: String? = null,
-    val mediaVersions: List<LibraryMediaVersionWire>,
-    val availableMediaKinds: List<String>,
-    val detailTabs: List<WorkDetailTabWire>,
-    val selectedDetailTab: String,
+    val versions: List<LibraryVersionWire>,
 )
 
 @Serializable
-data class LibraryMediaVersionWire(
+data class LibraryVersionWire(
     val id: String,
-    val mediaKind: String,
+    val sourceKey: String,
+    val sourceName: String? = null,
     val completed: Boolean,
     val volumeCount: Int,
     val sizeBytes: Long,
@@ -108,7 +105,7 @@ data class LibraryMediaVersionWire(
 @Serializable
 data class LibraryVolumeWire(
     val id: String,
-    val mediaVersionId: String,
+    val versionId: String,
     val title: String,
     val volumeIndex: Double? = null,
     val sortOrder: Int,
@@ -165,7 +162,7 @@ data class LibraryFileWire(
 data class ActiveMediaWire(
     val key: String,
     val formatLabel: String,
-    val mediaVersionId: String,
+    val versionId: String,
     val selectedVolumeId: String,
     val selectedVolumeTitle: String,
     val status: String,
@@ -252,7 +249,7 @@ data class ReadingUnitsPageWire(
 @Serializable
 data class VolumeSectionWire(
     val id: String,
-    val mediaVersionId: String,
+    val versionId: String,
     val title: String,
     val index: Double,
     val fileId: String,
@@ -336,33 +333,36 @@ fun WorkDetailPayloadWire.toDomain(): WorkDetail {
         metadataLookupError = work.metadataLookupError,
         coverStatus = work.coverStatus,
         coverUrl = work.coverUrl,
-        recentMediaKind = work.recentMediaKind?.let(::MediaKind),
         continueVolumeId = work.continueVolumeId,
         continueVolumeTitle = work.continueVolumeTitle,
         continueVolumeProgress = work.continueVolumeProgress,
         completed = work.completed,
         lastReadAt = work.lastReadAt,
         addedAt = work.addedAt,
-        mediaVersions = work.mediaVersions.map(LibraryMediaVersionWire::toDomain),
-        availableMediaKinds = work.availableMediaKinds.map(::MediaKind),
-        detailTabs = work.detailTabs.map { WorkDetailTab(it.key, it.label, it.sortOrder) },
-        selectedDetailTab = work.selectedDetailTab,
-        activeMedia = activeMedia?.toDomain(),
+        versions = work.versions.map(LibraryVersionWire::toDomain),
         readingUnits = readingUnits.map(ReadingUnitWire::toDomain),
         volumeSections = volumeSections.map(VolumeSectionWire::toDomain),
         readingUnitsPage = readingUnitsPage.toDomain(),
     )
 }
 
-private fun LibraryMediaVersionWire.toDomain(): MediaVersion {
-    require(id.isNotBlank() && volumeCount >= volumes.size && sizeBytes >= 0)
-    return MediaVersion(id, MediaKind(mediaKind), completed, volumeCount, sizeBytes, volumes.map(LibraryVolumeWire::toDomain))
+private fun LibraryVersionWire.toDomain(): WorkVersion {
+    require(id.isNotBlank() && sourceKey.isNotBlank() && volumeCount >= volumes.size && sizeBytes >= 0)
+    return WorkVersion(
+        id,
+        sourceKey,
+        sourceName?.takeIf { it.isNotBlank() },
+        completed,
+        volumeCount,
+        sizeBytes,
+        volumes.map(LibraryVolumeWire::toDomain),
+    )
 }
 
 private fun LibraryVolumeWire.toDomain(): Volume {
-    require(id.isNotBlank() && mediaVersionId.isNotBlank() && sizeBytes >= 0 && progress in 0.0..100.0)
+    require(id.isNotBlank() && versionId.isNotBlank() && sizeBytes >= 0 && progress in 0.0..100.0)
     return Volume(
-        id, mediaVersionId, title, volumeIndex, sortOrder, format, readerType,
+        id, versionId, title, volumeIndex, sortOrder, format, readerType,
         VolumeClassification(
             classification.source,
             classification.reason,
@@ -384,9 +384,9 @@ private fun LibraryFileWire.toDomain(): VolumeFile {
 }
 
 internal fun ActiveMediaWire.toDomain(): ActiveMedia {
-    require(mediaVersionId.isNotBlank() && selectedVolumeId.isNotBlank() && progress in 0.0..100.0)
+    require(versionId.isNotBlank() && selectedVolumeId.isNotBlank() && progress in 0.0..100.0)
     return ActiveMedia(
-        MediaKind(key), formatLabel, mediaVersionId, selectedVolumeId, selectedVolumeTitle, status,
+        MediaKind(key), formatLabel, versionId, selectedVolumeId, selectedVolumeTitle, status,
         progressStatus, progress, positionLabel, durationMs, narrator,
         primaryAction?.let { PrimaryAction(it.label, it.href) },
         units.map(ReadingUnitWire::toDomain), volumes.map(LibraryVolumeWire::toDomain),
@@ -432,9 +432,9 @@ private fun ReadingUnitsPageWire.toDomain(): ReadingUnitsPage {
 }
 
 private fun VolumeSectionWire.toDomain(): VolumeSection {
-    require(id.isNotBlank() && mediaVersionId.isNotBlank() && progress in 0.0..100.0)
+    require(id.isNotBlank() && versionId.isNotBlank() && progress in 0.0..100.0)
     return VolumeSection(
-        id, mediaVersionId, title, index, fileId, pageCount, coverUrl, progress, lastReadAt, position,
+        id, versionId, title, index, fileId, pageCount, coverUrl, progress, lastReadAt, position,
         currentPage, currentHref, currentSectionIndex, currentChapterTitle, currentChapterIndex,
         currentChapterSortOrder, progressExtra.toDomain(), progressEstimated,
     )

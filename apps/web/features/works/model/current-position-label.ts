@@ -1,5 +1,5 @@
 import type { VolumeResource } from '../../../types/work';
-import { formatDuration } from '../work-detail-tabs';
+import { formatDuration } from '../work-detail';
 import type { EbookChapterDetail } from './chapter-detail';
 
 type Translate = (

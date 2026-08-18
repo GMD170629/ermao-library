@@ -72,10 +72,10 @@ class WorkDetailLayoutTest {
 
         assertEquals(
             WorkDetailPrimaryActionIntent.Unavailable,
-            workDetailPrimaryActionPresentation("AUDIOBOOK", audiobook, download = null).intent,
+            workDetailPrimaryActionPresentation(audiobook, download = null).intent,
         )
         assertFalse(
-            workDetailPrimaryActionPresentation("AUDIOBOOK", audiobook, download = null).enabled,
+            workDetailPrimaryActionPresentation(audiobook, download = null).enabled,
         )
     }
 
@@ -93,7 +93,6 @@ class WorkDetailLayoutTest {
             download = null,
         )
         val primaryAction = workDetailPrimaryActionPresentation(
-            mediaKind = "EBOOK",
             selectedVolume = currentVolume,
             download = null,
         )
@@ -114,17 +113,16 @@ class WorkDetailLayoutTest {
 
         assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
-            workDetailPrimaryActionPresentation("EBOOK", volume, completedDownload).intent,
+            workDetailPrimaryActionPresentation(volume, completedDownload).intent,
         )
         assertEquals(
             WorkDetailPrimaryActionLabel.ContinueReading,
-            workDetailPrimaryActionPresentation("EBOOK", volume, completedDownload).label,
+            workDetailPrimaryActionPresentation(volume, completedDownload).label,
         )
 
         assertEquals(
             WorkDetailPrimaryActionIntent.DownloadThenRead,
             workDetailPrimaryActionPresentation(
-                "EBOOK",
                 volume.copy(id = "different-volume"),
                 completedDownload,
             ).intent,
@@ -136,7 +134,6 @@ class WorkDetailLayoutTest {
         assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(
-                mediaKind = "COMIC",
                 selectedVolume = testVolume(readerType = "comic", format = "CBZ", progressPercent = null),
                 download = null,
             ).intent,
@@ -144,7 +141,6 @@ class WorkDetailLayoutTest {
         assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(
-                mediaKind = "EBOOK",
                 selectedVolume = testVolume(readerType = "pdf", format = "PDF", progressPercent = null),
                 download = null,
             ).intent,

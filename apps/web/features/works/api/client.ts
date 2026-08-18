@@ -1,4 +1,4 @@
-import type { ClassificationSource, MediaKind, MediaVersionResource, ReaderType, VolumeFormat, VolumeResource, WorkDetailTab, WorkDetailTabKey, WorkView } from '../../../types/work';
+import type { ClassificationSource, MediaKind, ReaderType, VersionResource, VolumeFormat, VolumeResource, WorkView } from '../../../types/work';
 import type { ChapterDetailUnit, EbookChapterDetail } from '../model/chapter-detail';
 
 function record(value: unknown): Record<string, unknown> {
@@ -31,28 +31,6 @@ function mediaKind(value: unknown): MediaKind | null {
   return value === 'EBOOK' || value === 'COMIC' || value === 'AUDIOBOOK' ? value : null;
 }
 
-function detailTabKey(value: unknown): WorkDetailTabKey | null {
-  return mediaKind(value) ?? (value === 'STRUCTURE' ? value : null);
-}
-
-function parseAvailableMediaKinds(value: unknown, mediaVersions: readonly MediaVersionResource[]): MediaKind[] {
-  const parsed = Array.isArray(value) ? value.map(mediaKind).filter((kind): kind is MediaKind => kind !== null) : [];
-  const fallback = mediaVersions.map((mediaVersion) => mediaVersion.mediaKind);
-  return [...new Set(parsed.length ? parsed : fallback)];
-}
-
-function parseDetailTabs(value: unknown): WorkDetailTab[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<WorkDetailTabKey>();
-  return value.flatMap((entry, index) => {
-    const item = record(entry);
-    const key = detailTabKey(item.key);
-    if (!key || seen.has(key)) return [];
-    seen.add(key);
-    return [{ key, label: stringValue(item.label, key), sortOrder: finiteNumber(item.sortOrder, index) }];
-  });
-}
-
 function volumeFormat(value: unknown): VolumeFormat | null {
   return value === 'COMIC' || value === 'CBZ' || value === 'CBR' || value === 'RAR' || value === 'ZIP' || value === 'EPUB' || value === 'PDF' || value === 'AUDIO' || value === 'MP3' || value === 'M4A' || value === 'M4B' || value === 'MOBI' || value === 'AZW' || value === 'AZW3' || value === 'PRC' || value === 'FB2' || value === 'TXT' ? value : null;
 }
@@ -72,9 +50,9 @@ function classificationSource(value: unknown): ClassificationSource {
 function mapVolume(value: unknown): VolumeResource | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
-  const mediaVersionId = stringValue(item.mediaVersionId).trim();
+  const versionId = stringValue(item.versionId).trim();
   const format = volumeFormat(item.format);
-  if (!id || !mediaVersionId || !format) return null;
+  if (!id || !versionId || !format) return null;
   const files = (Array.isArray(item.files) ? item.files : []).flatMap((rawFile) => {
     const file = record(rawFile);
     const fileId = stringValue(file.id).trim();
@@ -101,7 +79,7 @@ function mapVolume(value: unknown): VolumeResource | null {
   const classification = record(item.classification);
   return {
     id,
-    mediaVersionId,
+    versionId,
     title: stringValue(item.title, id),
     volumeIndex: nullableNumber(item.volumeIndex),
     sortOrder: finiteNumber(item.sortOrder),
@@ -137,14 +115,15 @@ function mapVolume(value: unknown): VolumeResource | null {
   };
 }
 
-function mapMediaVersion(value: unknown): MediaVersionResource | null {
+function mapVersion(value: unknown): VersionResource | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
-  const kind = mediaKind(item.mediaKind);
-  if (!id || !kind) return null;
+  const sourceKey = stringValue(item.sourceKey).trim();
+  if (!id || !sourceKey) return null;
   return {
     id,
-    mediaKind: kind,
+    sourceKey,
+    sourceName: nullableString(item.sourceName),
     completed: item.completed === true,
     volumeCount: Math.max(0, finiteNumber(item.volumeCount, Array.isArray(item.volumes) ? item.volumes.length : 0)),
     sizeBytes: Math.max(0, finiteNumber(item.sizeBytes)),
@@ -152,9 +131,10 @@ function mapMediaVersion(value: unknown): MediaVersionResource | null {
   };
 }
 
-export type MediaVersionVolumePage = Readonly<{
-  mediaVersionId: string;
-  mediaKind: MediaKind;
+export type VersionVolumePage = Readonly<{
+  versionId: string;
+  sourceKey: string;
+  sourceName: string | null;
   volumes: VolumeResource[];
   page: number;
   pageSize: number;
@@ -171,9 +151,8 @@ export type WorkTransferTarget = Readonly<{
 export function mapWorkView(value: unknown): WorkView {
   const root = record(value);
   const id = stringValue(root.id).trim();
-  if (!id || !Array.isArray(root.mediaVersions)) throw new Error('作品响应缺少媒介版本结构');
-  const recentMediaKind = mediaKind(root.recentMediaKind);
-  const mediaVersions = root.mediaVersions.map(mapMediaVersion).filter((item): item is MediaVersionResource => item !== null);
+  if (!id || !Array.isArray(root.versions)) throw new Error('作品响应缺少版本结构');
+  const versions = root.versions.map(mapVersion).filter((item): item is VersionResource => item !== null);
   const publicationStatus = root.publicationStatus === 'ONGOING' || root.publicationStatus === 'COMPLETED' || root.publicationStatus === 'HIATUS' || root.publicationStatus === 'CANCELLED' ? root.publicationStatus : 'UNKNOWN';
   const trackingStatus = root.trackingStatus === 'TRACKING' || root.trackingStatus === 'PAUSED' || root.trackingStatus === 'IGNORED' ? root.trackingStatus : 'NOT_TRACKING';
   return {
@@ -194,13 +173,9 @@ export function mapWorkView(value: unknown): WorkView {
     coverUrl: stringValue(root.coverUrl),
     coverStatus: stringValue(root.coverStatus),
     gradient: stringValue(root.gradient),
-    recentMediaKind,
     continueVolumeId: nullableString(root.continueVolumeId),
-    availableMediaKinds: parseAvailableMediaKinds(root.availableMediaKinds, mediaVersions),
-    detailTabs: parseDetailTabs(root.detailTabs),
-    selectedDetailTab: detailTabKey(root.selectedDetailTab),
     completed: root.completed === true,
-    mediaVersions
+    versions
   };
 }
 
@@ -221,22 +196,22 @@ export async function fetchWork(workId: string, signal?: AbortSignal): Promise<W
   return mapWorkView(data.book ?? data.work ?? data);
 }
 
-export async function fetchMediaVersionVolumes(
+export async function fetchVersionVolumes(
   workId: string,
-  mediaVersionId: string,
+  versionId: string,
   page: number,
   pageSize: number,
   signal?: AbortSignal
-): Promise<MediaVersionVolumePage> {
+): Promise<VersionVolumePage> {
   const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/media-versions/${encodeURIComponent(mediaVersionId)}/volumes?${query}`, { signal }));
-  const kind = mediaKind(data.mediaKind);
-  if (stringValue(data.mediaVersionId) !== mediaVersionId || !kind) throw new Error('卷册分页响应与请求不匹配');
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/versions/${encodeURIComponent(versionId)}/volumes?${query}`, { signal }));
+  if (stringValue(data.versionId) !== versionId) throw new Error('卷册分页响应与请求不匹配');
   const resolvedPageSize = positiveInteger(data.pageSize, pageSize);
   const total = Math.max(0, finiteNumber(data.total));
   return {
-    mediaVersionId,
-    mediaKind: kind,
+    versionId,
+    sourceKey: stringValue(data.sourceKey),
+    sourceName: nullableString(data.sourceName),
     volumes: (Array.isArray(data.volumes) ? data.volumes : []).map(mapVolume).filter((volume): volume is VolumeResource => volume !== null),
     page: positiveInteger(data.page, page),
     pageSize: resolvedPageSize,
@@ -245,15 +220,15 @@ export async function fetchMediaVersionVolumes(
   };
 }
 
-export async function fetchAllMediaVersionVolumes(
+export async function fetchAllVersionVolumes(
   workId: string,
-  mediaVersionId: string,
+  versionId: string,
   signal?: AbortSignal
 ): Promise<VolumeResource[]> {
-  const firstPage = await fetchMediaVersionVolumes(workId, mediaVersionId, 1, 100, signal);
+  const firstPage = await fetchVersionVolumes(workId, versionId, 1, 100, signal);
   const volumes = [...firstPage.volumes];
   for (let page = 2; page <= firstPage.totalPages; page += 1) {
-    const nextPage = await fetchMediaVersionVolumes(workId, mediaVersionId, page, 100, signal);
+    const nextPage = await fetchVersionVolumes(workId, versionId, page, 100, signal);
     volumes.push(...nextPage.volumes);
   }
   return volumes;

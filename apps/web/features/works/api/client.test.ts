@@ -12,39 +12,22 @@ test('builds an explicit attachment URL for a single-volume download', () => {
 test('full work responses reject summary projections before reaching detail UI', () => {
   assert.throws(
     () => mapWorkView({ id: 'work-1', title: 'Summary only' }),
-    /媒介版本结构/
+    /版本结构/
   );
-});
-
-test('maps optional detail-tab fields and ignores invalid boundary values', () => {
-  const work = mapWorkView({
-    id: 'work-1', mediaVersions: [], availableMediaKinds: ['EBOOK', 'NOPE'],
-    detailTabs: [{ key: 'AUDIOBOOK', label: 'Listen', sortOrder: 3 }, { key: 'NOPE' }],
-    selectedDetailTab: 'NOPE'
-  });
-  assert.deepEqual(work.availableMediaKinds, ['EBOOK']);
-  assert.deepEqual(work.detailTabs, [{ key: 'AUDIOBOOK', label: 'Listen', sortOrder: 3 }]);
-  assert.equal(work.selectedDetailTab, null);
-});
-
-test('derives available media kinds when optional detail fields are absent', () => {
-  const work = mapWorkView({ id: 'work-1', mediaVersions: [{ id: 'media-1', mediaKind: 'COMIC', volumes: [] }] });
-  assert.deepEqual(work.availableMediaKinds, ['COMIC']);
-  assert.deepEqual(work.detailTabs, []);
-  assert.equal(work.selectedDetailTab, null);
 });
 
 test('keeps server totals when the lean work detail contains only the first volume page', () => {
   const work = mapWorkView({
     id: 'work-1',
-    mediaVersions: [{
-      id: 'media-1',
-      mediaKind: 'COMIC',
+    versions: [{
+      id: 'version-1',
+      sourceKey: '__implicit__',
+      sourceName: null,
       volumeCount: 12,
       sizeBytes: 4096,
       volumes: [{
         id: 'volume-1',
-        mediaVersionId: 'media-1',
+        versionId: 'version-1',
         title: 'Volume 1',
         format: 'COMIC',
         sortOrder: 0,
@@ -54,10 +37,11 @@ test('keeps server totals when the lean work detail contains only the first volu
     }]
   });
 
-  assert.equal(work.mediaVersions[0]?.volumeCount, 12);
-  assert.equal(work.mediaVersions[0]?.sizeBytes, 4096);
-  assert.equal(work.mediaVersions[0]?.volumes.length, 1);
-  assert.equal(work.mediaVersions[0]?.volumes[0]?.readable, true);
+  assert.equal(work.versions[0]?.volumeCount, 12);
+  assert.equal(work.versions[0]?.sizeBytes, 4096);
+  assert.equal(work.versions[0]?.volumes.length, 1);
+  assert.equal(work.versions[0]?.volumes[0]?.readable, true);
+  assert.equal(work.versions[0]?.volumes[0]?.versionId, 'version-1');
 });
 
 test('searches transfer targets and excludes the current work', async () => {

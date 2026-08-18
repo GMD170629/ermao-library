@@ -15,7 +15,6 @@ from app.modules.library.domain.layout import LibraryOrganizationMode
 
 MediaKind = Literal["EBOOK", "COMIC", "AUDIOBOOK"]
 ReadingStatus = Literal["UNREAD", "READING", "FINISHED"]
-DetailTabKey = Literal["EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE"]
 ScalarFilterValue = str | int | float | bool | None
 FilterValue = ScalarFilterValue | list[str] | list[float]
 MetadataCandidateRawValue = TypeAliasType(
@@ -29,10 +28,6 @@ MetadataCandidateRawValue = TypeAliasType(
     | dict[str, "MetadataCandidateRawValue"],
 )
 RequestScalar = str | int | float | bool | None
-
-
-class SaveDetailPreferenceRequest(HttpContractModel):
-    selected_tab: str = Field(alias="selectedTab", min_length=1)
 
 
 class UpdateWorkRequest(HttpContractModel):
@@ -251,21 +246,6 @@ class LibraryVolume(HttpContractModel):
     files: list[LibraryFile]
 
 
-class WorkDetailTab(HttpContractModel):
-    key: DetailTabKey
-    label: str
-    sort_order: int = Field(alias="sortOrder")
-
-
-class LibraryMediaVersion(HttpContractModel):
-    id: str
-    media_kind: MediaKind = Field(alias="mediaKind")
-    completed: bool
-    volume_count: int = Field(alias="volumeCount")
-    size_bytes: int = Field(alias="sizeBytes")
-    volumes: list[LibraryVolume]
-
-
 class WorkDetailVolume(HttpContractModel):
     id: str
     version_id: str = Field(alias="versionId")
@@ -298,13 +278,24 @@ class WorkDetailVolume(HttpContractModel):
     files: list[LibraryFileSummary]
 
 
-class WorkDetailMediaVersion(HttpContractModel):
+class WorkDetailVersion(HttpContractModel):
     id: str
-    media_kind: MediaKind = Field(alias="mediaKind")
+    source_key: str = Field(alias="sourceKey")
+    source_name: str | None = Field(default=None, alias="sourceName")
     completed: bool
     volume_count: int = Field(alias="volumeCount")
     size_bytes: int = Field(alias="sizeBytes")
     volumes: list[WorkDetailVolume]
+
+
+class WorkVersion(HttpContractModel):
+    id: str
+    source_key: str = Field(alias="sourceKey")
+    source_name: str | None = Field(default=None, alias="sourceName")
+    completed: bool
+    volume_count: int = Field(alias="volumeCount")
+    size_bytes: int = Field(alias="sizeBytes")
+    volumes: list[LibraryVolume]
 
 
 class LibraryFacetReferenceView(HttpContractModel):
@@ -329,14 +320,10 @@ class WorkDetailBook(HttpContractModel):
     )
     cover_status: str = Field(alias="coverStatus")
     cover_url: str = Field(alias="coverUrl")
-    recent_media_kind: MediaKind | None = Field(alias="recentMediaKind")
     continue_volume_id: str | None = Field(alias="continueVolumeId")
     continue_volume_progress: float = Field(alias="continueVolumeProgress")
     completed: bool
-    media_versions: list[WorkDetailMediaVersion] = Field(alias="mediaVersions")
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
-    detail_tabs: list[WorkDetailTab] = Field(alias="detailTabs")
-    selected_detail_tab: DetailTabKey = Field(alias="selectedDetailTab")
+    versions: list[WorkDetailVersion]
 
 
 class WorkView(HttpContractModel):
@@ -367,17 +354,14 @@ class WorkView(HttpContractModel):
     metadata_lookup_error: str | None = Field(default=None, alias="metadataLookupError")
     cover_status: str = Field(alias="coverStatus")
     cover_url: str = Field(alias="coverUrl")
-    recent_media_kind: MediaKind | None = Field(alias="recentMediaKind")
     continue_volume_id: str | None = Field(alias="continueVolumeId")
     continue_volume_title: str | None = Field(alias="continueVolumeTitle")
     continue_volume_progress: float = Field(alias="continueVolumeProgress")
     completed: bool
     last_read_at: datetime | None = Field(alias="lastReadAt")
     added_at: datetime | None = Field(alias="addedAt")
-    media_versions: list[LibraryMediaVersion] = Field(alias="mediaVersions")
+    versions: list[WorkVersion]
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
-    detail_tabs: list[WorkDetailTab] = Field(alias="detailTabs")
-    selected_detail_tab: DetailTabKey = Field(alias="selectedDetailTab")
 
 
 class WorkSummary(HttpContractModel):
@@ -682,54 +666,6 @@ class VolumeSection(HttpContractModel):
     progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
-class PrimaryAction(HttpContractModel):
-    label: str
-    href: str
-
-
-class LocalProgressScope(HttpContractModel):
-    user_id: str = Field(alias="userId")
-    volume_id: str = Field(alias="volumeId")
-
-
-class ActiveMedia(HttpContractModel):
-    key: MediaKind
-    format_label: str = Field(alias="formatLabel")
-    media_version_id: str = Field(alias="mediaVersionId")
-    selected_volume_id: str = Field(alias="selectedVolumeId")
-    selected_volume_title: str = Field(alias="selectedVolumeTitle")
-    status: ReadingStatus
-    progress_status: ReadingStatus = Field(alias="progressStatus")
-    progress: float
-    position_label: str = Field(alias="positionLabel")
-    duration_ms: int | None = Field(alias="durationMs")
-    narrator: str | None
-    primary_action: PrimaryAction | None = Field(alias="primaryAction")
-    units: list[ReadingUnit]
-    volumes: list[LibraryVolume]
-    tracks: list[LibraryFile]
-    local_progress_scope: LocalProgressScope = Field(alias="localProgressScope")
-    current_href: str | None = Field(default=None, alias="currentHref")
-    current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
-    current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
-    current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
-    current_page_number: int | None = Field(default=None, alias="currentPageNumber")
-    current_chapter_sort_order: int | None = Field(
-        default=None,
-        alias="currentChapterSortOrder",
-    )
-    progress_extra: ProgressExtra = Field(alias="progressExtra")
-    progress_estimated: bool = Field(default=False, alias="progressEstimated")
-
-
-class WorkDetailPayload(HttpContractModel):
-    book: WorkView
-    active_media: ActiveMedia | None = Field(alias="activeMedia")
-    reading_units: list[ReadingUnit] = Field(alias="readingUnits")
-    volume_sections: list[VolumeSection] = Field(alias="volumeSections")
-    reading_units_page: ReadingUnitsPage = Field(alias="readingUnitsPage")
-
-
 class WorkPayload(HttpContractModel):
     book: WorkView | None
 
@@ -740,7 +676,8 @@ class WorkDetailSummaryPayload(HttpContractModel):
 
 class WorkVolumePagePayload(HttpContractModel):
     version_id: str = Field(alias="versionId")
-    media_kind: MediaKind = Field(alias="mediaKind")
+    source_key: str = Field(alias="sourceKey")
+    source_name: str | None = Field(default=None, alias="sourceName")
     volumes: list[WorkDetailVolume]
     page: int
     page_size: int = Field(alias="pageSize")
@@ -764,11 +701,6 @@ class WorkReadingUnitsPayload(HttpContractModel):
     current_page_number: int | float | None = Field(
         default=None, alias="currentPageNumber"
     )
-
-
-class DetailPreferencePayload(HttpContractModel):
-    selected_detail_tab: DetailTabKey = Field(alias="selectedDetailTab")
-    detail_tabs: list[WorkDetailTab] = Field(alias="detailTabs")
 
 
 class DeletedPathFailure(HttpContractModel):
@@ -1259,10 +1191,8 @@ LibraryGroupingsResponse = SuccessEnvelope[LibraryGroupingsPayload]
 WorksResponse = SuccessEnvelope[WorksPayload]
 WorkResponse = SuccessEnvelope[WorkPayload]
 WorkDetailSummaryResponse = SuccessEnvelope[WorkDetailSummaryPayload]
-WorkDetailResponse = SuccessEnvelope[WorkDetailPayload]
 WorkVolumePageResponse = SuccessEnvelope[WorkVolumePagePayload]
 WorkReadingUnitsResponse = SuccessEnvelope[WorkReadingUnitsPayload]
-DetailPreferenceResponse = SuccessEnvelope[DetailPreferencePayload]
 DeletedWorkResponse = SuccessEnvelope[DeletedWorkPayload]
 BulkMutationResponse = SuccessEnvelope[BulkMutationPayload]
 FindReplacePreviewResponse = SuccessEnvelope[FindReplacePreviewPayload]

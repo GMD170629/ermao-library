@@ -1,8 +1,11 @@
 package com.ermao.library.shared.modules.library.domain
 
-data class MediaVersion(
+const val IMPLICIT_WORK_VERSION_SOURCE_KEY = "__implicit__"
+
+data class WorkVersion(
     val id: String,
-    val mediaKind: MediaKind,
+    val sourceKey: String,
+    val sourceName: String?,
     val completed: Boolean,
     val volumeCount: Int,
     val sizeBytes: Long,

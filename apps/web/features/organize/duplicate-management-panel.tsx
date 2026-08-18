@@ -130,7 +130,7 @@ export function DuplicateManagementPanel() {
                 <input type="radio" name={group.id} value={work.id} checked={targets[group.id] === work.id} onChange={() => setTargets((current) => ({ ...current, [group.id]: work.id }))} className="mt-1 accent-[#EF4D2F]" />
                 <span className="min-w-0">
                   <span className="block font-medium text-[#302D2A]">{work.title}</span>
-                  <span className="mt-1 block text-sm text-[#746E68]">{work.author} · {work.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes).length} <I18nText>个卷册</I18nText></span>
+                  <span className="mt-1 block text-sm text-[#746E68]">{work.author} · {work.versions.flatMap((version) => version.volumes).length} <I18nText>个卷册</I18nText></span>
                   <span className="mt-2 flex flex-wrap gap-1.5">{work.tags.slice(0, 4).map((tag) => <Badge key={tag}>{tag}</Badge>)}</span>
                   {targets[group.id] === work.id ? <span className="mt-3 block text-xs font-medium text-[#D34B32]"><I18nText>保留此记录的标题、封面与基础信息</I18nText></span> : null}
                 </span>

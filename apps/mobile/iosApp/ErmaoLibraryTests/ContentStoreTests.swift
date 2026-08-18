@@ -9,7 +9,7 @@ final class ContentStoreTests: XCTestCase {
     func testVolumeIndexUsesServerValueAndFallsBackToOneBasedPosition() {
         let base = WorkVolume(
             id: "volume-1",
-            mediaVersionID: "media-1",
+            versionID: "media-1",
             title: "Volume",
             formatLabel: "EPUB",
             sizeLabel: nil,
@@ -22,7 +22,7 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(
             WorkVolume(
                 id: "volume-3",
-                mediaVersionID: "media-1",
+                versionID: "media-1",
                 title: "Volume 3",
                 formatLabel: "EPUB",
                 volumeIndex: 3,
@@ -36,7 +36,7 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(
             WorkVolume(
                 id: "volume-1-5",
-                mediaVersionID: "media-1",
+                versionID: "media-1",
                 title: "Volume 1.5",
                 formatLabel: "EPUB",
                 volumeIndex: 1.5,
@@ -280,8 +280,8 @@ final class ContentStoreTests: XCTestCase {
             tags: [],
             seriesFacet: nil,
             authorFacets: [],
-            availableMediaKinds: [.ebook],
-            selectedMediaKind: .ebook,
+            versions: [],
+            selectedVersionId: "version-1",
             selectedVolumeID: nil,
             readingStatus: .unread,
             volumes: [],
@@ -324,14 +324,14 @@ final class ContentStoreTests: XCTestCase {
             tags: [],
             seriesFacet: nil,
             authorFacets: [],
-            availableMediaKinds: [.ebook],
-            selectedMediaKind: .ebook,
+            versions: [],
+            selectedVersionId: "version-1",
             selectedVolumeID: "volume-1",
             readingStatus: .unread,
             volumes: [
                 WorkVolume(
                     id: "volume-1",
-                    mediaVersionID: "media-1",
+                    versionID: "media-1",
                     title: "Volume 1",
                     formatLabel: "EPUB",
                     sizeLabel: nil,
@@ -341,7 +341,7 @@ final class ContentStoreTests: XCTestCase {
                 ),
                 WorkVolume(
                     id: "volume-2",
-                    mediaVersionID: "media-1",
+                    versionID: "media-1",
                     title: "Volume 2",
                     formatLabel: "EPUB",
                     sizeLabel: nil,
@@ -436,14 +436,14 @@ final class ContentStoreTests: XCTestCase {
             tags: [],
             seriesFacet: nil,
             authorFacets: [],
-            availableMediaKinds: [.ebook],
-            selectedMediaKind: .ebook,
+            versions: [],
+            selectedVersionId: "version-1",
             selectedVolumeID: "volume-position",
             readingStatus: .unread,
             volumes: [
                 WorkVolume(
                     id: "volume-position",
-                    mediaVersionID: "media-position",
+                    versionID: "media-position",
                     title: "Volume",
                     formatLabel: "EPUB",
                     sizeLabel: nil,

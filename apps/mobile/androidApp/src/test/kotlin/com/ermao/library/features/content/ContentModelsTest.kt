@@ -1,7 +1,7 @@
 package com.ermao.library.features.content
 
 import com.ermao.library.features.content.model.MediaFilter
-import com.ermao.library.features.content.model.MediaContent
+import com.ermao.library.features.content.model.VersionContent
 import com.ermao.library.features.content.model.ReadingUnitContent
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.VolumeContent
@@ -48,6 +48,7 @@ class ContentModelsTest {
             title = "EPUB",
             format = "EPUB",
             readerType = "reflowable",
+            versionId = "version-1",
             progressPercent = null,
             readable = true,
             selected = true,
@@ -59,14 +60,14 @@ class ContentModelsTest {
             authorFacetId = null,
             description = null,
             tags = emptyList(),
-            media = listOf(MediaContent("EBOOK", listOf(reflowable))),
-            selectedMediaKind = "EBOOK",
+            versions = listOf(VersionContent("version-1", "__implicit__", volumes = listOf(reflowable))),
+            selectedVersionId = "version-1",
             readingUnits = chapter,
         )
 
         assertTrue(detail.supportsChapterDirectory(reflowable.id))
-        assertFalse(detail.copy(media = listOf(MediaContent("EBOOK", listOf(reflowable.copy(format = "PDF", readerType = "pdf", id = "pdf"))))).supportsChapterDirectory("pdf"))
-        assertFalse(detail.copy(media = listOf(MediaContent("COMIC", listOf(reflowable.copy(format = "CBZ", readerType = "comic", id = "comic"))))).supportsChapterDirectory("comic"))
+        assertFalse(detail.copy(versions = listOf(VersionContent("version-pdf", "__implicit__", volumes = listOf(reflowable.copy(format = "PDF", readerType = "pdf", id = "pdf"))))).supportsChapterDirectory("pdf"))
+        assertFalse(detail.copy(versions = listOf(VersionContent("version-comic", "comic", volumes = listOf(reflowable.copy(format = "CBZ", readerType = "comic", id = "comic"))))).supportsChapterDirectory("comic"))
     }
 
     @Test
@@ -78,13 +79,17 @@ class ContentModelsTest {
             authorFacetId = null,
             description = "  ",
             tags = emptyList(),
-            media = listOf(MediaContent("EBOOK", emptyList())),
-            selectedMediaKind = "EBOOK",
+            versions = listOf(VersionContent("version-1", "__implicit__", volumes = emptyList())),
+            selectedVersionId = "version-1",
         )
 
         assertFalse(content.hasDescription)
-        assertFalse(content.showsMediaPicker)
+        assertFalse(content.showsVersionPicker)
         assertTrue(content.copy(description = "Description").hasDescription)
-        assertTrue(content.copy(media = content.media + MediaContent("COMIC", emptyList())).showsMediaPicker)
+        assertTrue(
+            content.copy(
+                versions = content.versions + VersionContent("version-2", "kindle", sourceName = "Kindle", volumes = emptyList()),
+            ).showsVersionPicker,
+        )
     }
 }

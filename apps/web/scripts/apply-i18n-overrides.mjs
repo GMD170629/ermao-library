@@ -269,7 +269,13 @@ const exactOverrides = {
   '卷册已转移': 'Volume transferred',
   '卷册转移失败': 'Failed to transfer volume',
   '上移 {value0}': 'Move {value0} up',
-  '下移 {value0}': 'Move {value0} down'
+  '下移 {value0}': 'Move {value0} down',
+  '版本不存在': 'Version not found',
+  '不能跨书库合并作品': 'Cannot merge works across libraries',
+  '不能跨书库移动卷册': 'Cannot move volumes across libraries',
+  '导入必须指定所属版本': 'Import must specify a version',
+  '已看完': 'Finished viewing',
+  '作品响应缺少版本结构': 'Work response is missing version structure'
 };
 
 for (const source of Object.keys(catalog)) {

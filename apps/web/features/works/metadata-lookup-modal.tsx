@@ -8,11 +8,12 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
 import { withBasePath } from '../../lib/base-path';
-import type { VolumeResource, WorkView } from '../../types/work';
+import type { MediaKind, VolumeResource, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-import { fetchAllMediaVersionVolumes } from './api/client';
+import { fetchAllVersionVolumes } from './api/client';
 import { completeMetadataApply } from './application/metadata-apply-completion';
+import { mediaKindOfVolume } from './work-detail';
 
 type MetadataSource = string;
 type MetadataField = 'coverUrl' | 'title' | 'author' | 'description' | 'tags' | 'seriesName' | 'publisher' | 'publishedAt' | 'language' | 'isbn';
@@ -33,7 +34,7 @@ type MetadataCandidate = {
 
 type MetadataLookupModalProps = {
   book: WorkView;
-  currentMediaVersionId?: string | null;
+  currentVersionId?: string | null;
   open: boolean;
   onClose: () => void;
   onApplied: () => void | Promise<void>;
@@ -107,44 +108,45 @@ function defaultFields(book: WorkView, candidate: MetadataCandidate | null, targ
   });
 }
 
-function initialSource(book: WorkView): MetadataSource {
-  return book.availableMediaKinds[0] === 'COMIC' ? 'bangumi' : 'douban';
+function initialSource(volume: VolumeResource | undefined): MetadataSource {
+  return volume && mediaKindOfVolume(volume) === 'COMIC' ? 'bangumi' : 'douban';
 }
 
 type MetadataProviderOption = { id: string; name: string; enabled: boolean; mediaKinds: string[]; mode: string };
 type MetadataProviderPipeline = { mediaKind: string; providers: Array<{ providerId: string; enabled: boolean }> };
-function selectedMediaKind(book: WorkView) {
-  return book.availableMediaKinds[0] ?? 'EBOOK';
+function selectedMediaKind(volume: VolumeResource | undefined): MediaKind {
+  return volume ? mediaKindOfVolume(volume) : 'EBOOK';
 }
 
-export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose, onApplied }: MetadataLookupModalProps) {
+export function MetadataLookupModal({ book, currentVersionId, open, onClose, onApplied }: MetadataLookupModalProps) {
   const { t: i18nAttribute, formatDate } = useAttributeI18n();
-  const [source, setSource] = useState<MetadataSource>(() => initialSource(book));
+  const targetVersion = useMemo(() => {
+    const continuationVolume = book.versions
+      .flatMap((version) => version.volumes)
+      .find((volume) => volume.id === book.continueVolumeId);
+    const fallbackVersionId = continuationVolume?.versionId ?? book.versions[0]?.id;
+    return book.versions.find((version) => version.id === (currentVersionId ?? fallbackVersionId)) ?? book.versions[0] ?? null;
+  }, [book.continueVolumeId, book.versions, currentVersionId]);
+  const [source, setSource] = useState<MetadataSource>(() => initialSource(targetVersion?.volumes[0]));
   const [query, setQuery] = useState(book.title);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<MetadataField[]>([]);
-  const targetMediaVersion = useMemo(() => {
-    const continuationVolume = book.mediaVersions
-      .flatMap((mediaVersion) => mediaVersion.volumes)
-      .find((volume) => volume.id === book.continueVolumeId);
-    const fallbackMediaVersionId = continuationVolume?.mediaVersionId ?? book.mediaVersions[0]?.id;
-    return book.mediaVersions.find((mediaVersion) => mediaVersion.id === (currentMediaVersionId ?? fallbackMediaVersionId)) ?? book.mediaVersions[0] ?? null;
-  }, [book.continueVolumeId, book.mediaVersions, currentMediaVersionId]);
   const [targetVolumes, setTargetVolumes] = useState<VolumeResource[]>([]);
   const [volumeTarget, setVolumeTarget] = useState(ALL_VOLUMES);
   const selectedTargetVolume = volumeTarget === ALL_VOLUMES
     ? targetVolumes[0]
     : targetVolumes.find((volume) => volume.id === volumeTarget);
+  const kindVolume = selectedTargetVolume ?? targetVersion?.volumes[0];
   const targetVolumeId = selectedTargetVolume?.id ?? null;
   const volumeTargetOptions = useMemo(() => [
     {
       value: ALL_VOLUMES,
-      label: i18nAttribute('当前媒体版本的全部 {value0} 个卷册', { value0: targetMediaVersion?.volumeCount ?? targetVolumes.length }),
+      label: i18nAttribute('当前版本的全部 {value0} 个卷册', { value0: targetVersion?.volumeCount ?? targetVolumes.length }),
       translate: false
     },
     ...targetVolumes.map((volume) => ({ value: volume.id, label: volume.title, translate: false }))
-  ], [i18nAttribute, targetMediaVersion?.volumeCount, targetVolumes]);
+  ], [i18nAttribute, targetVersion?.volumeCount, targetVolumes]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -156,13 +158,13 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
     value: provider.id,
     label: provider.name,
     translate: false,
-    disabled: !enabledProviderIds.includes(provider.id) || !provider.mediaKinds.includes(selectedMediaKind(book))
-  })), [book, enabledProviderIds, providers]);
+    disabled: !enabledProviderIds.includes(provider.id) || !provider.mediaKinds.includes(selectedMediaKind(kindVolume))
+  })), [enabledProviderIds, kindVolume, providers]);
   const sourceReady = options.some((option) => option.value === source && !option.disabled);
 
   useEffect(() => {
     if (!open) return;
-    const fallbackSource = initialSource(book);
+    const fallbackSource = initialSource(kindVolume);
     setSource(fallbackSource);
     setQuery(book.title);
     setCandidates([]);
@@ -175,30 +177,31 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
       .then((payload) => {
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取元数据插件失败');
         const nextProviders = payload.data?.providers ?? [];
-        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.mediaKind === selectedMediaKind(book));
+        const mediaKind = selectedMediaKind(kindVolume);
+        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.mediaKind === mediaKind);
         const nextEnabledProviderIds = (pipeline?.providers ?? []).filter((item) => item.enabled).map((item) => item.providerId);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
-        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.mediaKinds.includes(selectedMediaKind(book)));
+        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.mediaKinds.includes(mediaKind));
         if (applicable) setSource(applicable.id);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : '读取元数据插件失败'));
-  }, [book, open]);
+  }, [book, kindVolume, open]);
 
   useEffect(() => {
-    if (!open || !targetMediaVersion) return;
+    if (!open || !targetVersion) return;
     const controller = new AbortController();
     setVolumeTarget(ALL_VOLUMES);
-    setTargetVolumes(targetMediaVersion.volumes);
-    void fetchAllMediaVersionVolumes(book.id, targetMediaVersion.id, controller.signal)
+    setTargetVolumes(targetVersion.volumes);
+    void fetchAllVersionVolumes(book.id, targetVersion.id, controller.signal)
       .then(setTargetVolumes)
       .catch((reason) => {
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
-          setError(i18nAttribute('无法读取当前媒体版本的卷册'));
+          setError(i18nAttribute('无法读取当前版本的卷册'));
         }
       });
     return () => controller.abort();
-  }, [book.id, i18nAttribute, open, targetMediaVersion]);
+  }, [book.id, i18nAttribute, open, targetVersion]);
 
   useEffect(() => {
     setSelectedFields(defaultFields(book, selected, targetVolumes[0]));

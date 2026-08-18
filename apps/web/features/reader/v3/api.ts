@@ -106,10 +106,6 @@ function visualReaderType(value: unknown): VisualReaderType | null {
   return value === 'reflowable' || value === 'comic' || value === 'pdf' ? value : null;
 }
 
-export function workDetailTabForReaderType(readerType: VisualReaderType): 'EBOOK' | 'COMIC' {
-  return readerType === 'comic' ? 'COMIC' : 'EBOOK';
-}
-
 function mapVolume(value: unknown): ReaderVolume | null {
   const item = record(value);
   const id = stringValue(item.id).trim();

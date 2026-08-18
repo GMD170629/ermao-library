@@ -11,12 +11,12 @@ import { ContextActionMenu, type ContextMenuPosition } from '../../components/ui
 import { useToast } from '../../components/ui/feedback';
 import { useAppSession } from '../../components/layout/app-session-context';
 import { Select } from '../../components/ui/select';
-import type { MediaKind, MediaVersionResource, ReaderType, VolumeResource, WorkDetailTabKey, WorkView } from '../../types/work';
+import type { MediaKind, ReaderType, VersionResource, VolumeResource, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n } from '@/i18n/provider';
-import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllMediaVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl, type WorkTransferTarget } from './api/client';
+import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl, type WorkTransferTarget } from './api/client';
 import { useVolumeWallSelection } from './application/use-volume-wall-selection';
-import { detailTabsForBook, displayVolumeNumber, formatDuration, isWorkDetailTabKey, resolvedDetailTab, selectedVolumeForDetailTab, volumesForDetailTab, workDetailReturnHref, workDetailTabHref } from './work-detail-tabs';
+import { displayVolumeNumber, formatDuration, mediaKindOfVolume, selectedVolumeForWork, shouldShowVersionHeadings, versionDisplayTitle, workDetailHref, workDetailReturnHref } from './work-detail';
 import { smallVolumeCoverUrl } from './volume-cover-url';
 import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
@@ -24,7 +24,7 @@ import { bookActionIds, type BookActionId } from './model/book-action-menu';
 import { CHAPTER_DETAIL_PAGE_SIZE, singleVolumeEbook, type EbookChapterDetail } from './model/chapter-detail';
 import { currentPositionLabel } from './model/current-position-label';
 import { structureFileLabel } from './model/structure-file-label';
-import { structureVolumeList, structureVolumeShowsFileDetails } from './model/structure-volume-list';
+import { structureVolumeList } from './model/structure-volume-list';
 import { volumeActionAvailability, type VolumeActionId } from './model/volume-action-menu';
 import { SingleVolumeChapterList } from './ui/single-volume-chapter-list';
 import { WorkMetadataEditor } from './ui/work-metadata-editor';
@@ -283,16 +283,10 @@ function VolumeContextTransferDialog({ work, volumes, onClose, onTransferred }: 
   </div>;
 }
 
-function visibleVersionVolumes(mediaVersion: MediaVersionResource): VolumeResource[] {
-  return mediaVersion.volumes
+function visibleVersionVolumes(version: VersionResource): VolumeResource[] {
+  return version.volumes
     .filter((volume) => !volume.hidden)
     .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
-}
-
-function mediaKindLabel(mediaKind: MediaKind): string {
-  if (mediaKind === 'COMIC') return '漫画';
-  if (mediaKind === 'AUDIOBOOK') return '有声书';
-  return '电子书';
 }
 
 function classificationLabel(volume: VolumeResource): string {
@@ -313,7 +307,8 @@ function volumeUnitLabel(volume: VolumeResource, translate: (source: string, val
 
 function StructureVersionCard({
   work,
-  mediaVersion,
+  version,
+  showHeading,
   managementMode,
   canManage,
   returnHref,
@@ -321,7 +316,8 @@ function StructureVersionCard({
   onRefresh
 }: {
   work: WorkView;
-  mediaVersion: MediaVersionResource;
+  version: VersionResource;
+  showHeading: boolean;
   managementMode: boolean;
   canManage: boolean;
   returnHref: string;
@@ -343,11 +339,11 @@ function StructureVersionCard({
   const [expanded, setExpanded] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
   const volumeListId = useId();
-  const volumes = visibleVersionVolumes(mediaVersion);
-  const { visibleVolumes, canToggle } = structureVolumeList(volumes, expanded, mediaVersion.volumeCount);
+  const volumes = visibleVersionVolumes(version);
+  const { visibleVolumes, canToggle } = structureVolumeList(volumes, expanded, version.volumeCount);
   const firstReadableVolume = volumes.find((volume) => volume.readable) ?? null;
   const movingVolume = volumes.find((volume) => volume.id === movingVolumeId) ?? null;
-  const totalSizeBytes = mediaVersion.sizeBytes;
+  const totalSizeBytes = version.sizeBytes;
   const sizeLabel = totalSizeBytes > 0
     ? totalSizeBytes >= 1024 ** 3
       ? `${formatNumber(totalSizeBytes / 1024 ** 3, { maximumFractionDigits: 1 })} GB`
@@ -361,7 +357,7 @@ function StructureVersionCard({
     }
     setLoadingAll(true);
     try {
-      if (volumes.length < mediaVersion.volumeCount) await onLoadAll();
+      if (volumes.length < version.volumeCount) await onLoadAll();
       setExpanded(true);
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('卷册加载失败'));
@@ -419,7 +415,7 @@ function StructureVersionCard({
       await runVolumeAction(work.id, movingVolume.id, 'move-to', { targetWorkId: selectedTargetWorkId });
       setMovingVolumeId(null);
       feedback.success(t('卷册已转移'));
-      const totalVolumes = work.mediaVersions.reduce((total, version) => total + version.volumeCount, 0);
+      const totalVolumes = work.versions.reduce((total, version) => total + version.volumeCount, 0);
       if (totalVolumes <= 1) router.push(returnHref);
       else await onRefresh();
     } catch (reason) {
@@ -432,10 +428,10 @@ function StructureVersionCard({
   return (
     <article className="rounded-2xl border border-stone-200 bg-white">
       <div className="flex flex-wrap items-center gap-4 p-4 sm:p-5">
-        <span className="inline-flex min-w-16 justify-center rounded-lg border border-orange-100 bg-orange-50 px-3 py-2 text-xs font-semibold text-amber-700">{t(mediaKindLabel(mediaVersion.mediaKind))}</span>
+        {showHeading ? <span className="inline-flex min-w-16 justify-center rounded-lg border border-orange-100 bg-orange-50 px-3 py-2 text-xs font-semibold text-amber-700">{t(versionDisplayTitle(version) ?? '默认版本')}</span> : null}
         <div className="min-w-[220px] flex-1">
           <div className="text-xs text-stone-500">
-            {[sizeLabel, t('{value0} 个卷册', { value0: mediaVersion.volumeCount })].filter(Boolean).join(' · ')}
+            {[sizeLabel, t('{value0} 个卷册', { value0: version.volumeCount })].filter(Boolean).join(' · ')}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -452,7 +448,7 @@ function StructureVersionCard({
               <span className="w-8 text-xs tabular-nums text-stone-400">{String(displayVolumeNumber(volume, index)).padStart(2, '0')}</span>
               <div className="min-w-0 flex-1">
                 <span data-i18n-skip className="block truncate text-sm text-stone-800" title={volume.title}>{volume.title}</span>
-                {structureVolumeShowsFileDetails(mediaVersion.mediaKind) ? volume.files.map((file) => {
+                {volume.readerType !== 'audio' ? volume.files.map((file) => {
                   const label = structureFileLabel(volume.readerType, file.path);
                   return <span key={file.id} data-i18n-skip className="mt-0.5 block truncate text-xs text-stone-400" title={label}>{label}</span>;
                 }) : null}
@@ -460,13 +456,13 @@ function StructureVersionCard({
               <span className="text-xs text-stone-400">{volumeUnitLabel(volume, t)}</span>
               {managementMode ? <div className="flex items-center gap-1">
                 <button type="button" disabled={busyMoveId !== null || index === 0} onClick={() => void moveVolume(volume, 'up')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('上移 {value0}', { value0: volume.title })}><ChevronUp size={16} /></button>
-                <button type="button" disabled={busyMoveId !== null || index === mediaVersion.volumeCount - 1} onClick={() => void moveVolume(volume, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('下移 {value0}', { value0: volume.title })}><ChevronDown size={16} /></button>
+                <button type="button" disabled={busyMoveId !== null || index === version.volumeCount - 1} onClick={() => void moveVolume(volume, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('下移 {value0}', { value0: volume.title })}><ChevronDown size={16} /></button>
                 <button type="button" aria-expanded={managedVolumeId === volume.id} onClick={() => setManagedVolumeId((current) => current === volume.id ? null : volume.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('编辑 {value0}', { value0: volume.title })}><Edit3 size={15} /></button>
                 <button type="button" onClick={() => openTransfer(volume)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('转移 {value0}', { value0: volume.title })}><MoveRight size={16} /></button>
               </div> : <button type="button" disabled={!volume.readable} onClick={() => router.push(readerHref(volume))} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('打开 {value0}', { value0: volume.title })}><ChevronRight size={16} /></button>}
             </div>
             {managementMode && managedVolumeId === volume.id ? <div className="pb-4 pt-2">
-              <VolumeCard work={work} mediaKind={mediaVersion.mediaKind} volume={volume} canManage={canManage} onRefresh={onRefresh} />
+              <VolumeCard work={work} mediaKind={mediaKindOfVolume(volume)} volume={volume} canManage={canManage} onRefresh={onRefresh} />
             </div> : null}
           </div>
         ))}
@@ -479,9 +475,9 @@ function StructureVersionCard({
           className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg text-sm font-medium text-stone-600 transition hover:bg-stone-50 hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200"
         >
           {loadingAll ? <LoaderCircle className="animate-spin" size={16} /> : expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          {loadingAll ? t('正在加载全部卷册…') : expanded ? t('收起卷册') : t('展开全部（共 {value0} 卷）', { value0: mediaVersion.volumeCount })}
+          {loadingAll ? t('正在加载全部卷册…') : expanded ? t('收起卷册') : t('展开全部（共 {value0} 卷）', { value0: version.volumeCount })}
         </button> : null}
-      </div> : <div className="border-t border-stone-100 px-5 py-3 text-sm text-stone-400"><I18nText>该媒介还没有可见卷册</I18nText></div>}
+      </div> : <div className="border-t border-stone-100 px-5 py-3 text-sm text-stone-400"><I18nText>该版本还没有可见卷册</I18nText></div>}
 
       {movingVolume ? <div className="fixed inset-0 z-[110] flex items-end justify-center bg-stone-950/40 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('转移卷册')}>
         <div className="w-full max-w-xl rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
@@ -626,7 +622,7 @@ function VolumeCard({
             <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑卷册</I18nText></h2><button type="button" onClick={() => setEditing(false)} aria-label={t('关闭')}><X size={20} /></button></div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>当前内容分类</I18nText><Select value={targetMediaKind} onChange={setTargetMediaKind} ariaLabel="当前内容分类" className="mt-1.5 w-full" options={[{ value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} /><span className="mt-1.5 block text-xs text-stone-500">{t(classificationLabel(volume))}</span>{volume.classification.suggestedMediaKind === 'COMIC' ? <button type="button" className="mt-2 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs font-medium text-orange-700" onClick={() => setTargetMediaKind('COMIC')}>{t('可能是漫画 · 改为漫画')}</button> : null}</label>
-              <label className="flex items-center gap-2 text-sm text-stone-600 sm:col-span-2"><input type="checkbox" checked={applyToVersion} onChange={(event) => setApplyToVersion(event.target.checked)} />{t('同时应用到此版本全部 {value0} 个卷册', { value0: work.mediaVersions.find((version) => version.id === volume.mediaVersionId)?.volumeCount ?? 1 })}</label>
+              <label className="flex items-center gap-2 text-sm text-stone-600 sm:col-span-2"><input type="checkbox" checked={applyToVersion} onChange={(event) => setApplyToVersion(event.target.checked)} />{t('同时应用到此版本全部 {value0} 个卷册', { value0: work.versions.find((version) => version.id === volume.versionId)?.volumeCount ?? 1 })}</label>
               <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>卷册名称</I18nText><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>卷号（可选且可重复）</I18nText><input inputMode="decimal" value={form.volumeIndex} onChange={(event) => setForm({ ...form, volumeIndex: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>排序</I18nText><input inputMode="numeric" value={form.sortOrder} onChange={(event) => setForm({ ...form, sortOrder: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -704,76 +700,70 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     return () => { disposed = true; controller.abort(); };
   }, [bookId, t]);
 
-  const requestedTab = isWorkDetailTabKey(searchParams.get('detailTab')) ? searchParams.get('detailTab') as WorkDetailTabKey : null;
   const requestedVolumeId = searchParams.get('volumeId')?.trim() || null;
   const returnHref = workDetailReturnHref(searchParams.get('returnTo'));
-  const tab = work ? resolvedDetailTab(work, requestedTab) : 'STRUCTURE';
-  const selectedVolume = work ? selectedVolumeForDetailTab(work, tab, requestedVolumeId) : null;
-  const tabs = useMemo(() => work ? detailTabsForBook(work) : [], [work]);
-  const volumes = useMemo(() => work ? volumesForDetailTab(work, tab) : [], [tab, work]);
-  const singleEbookVolume = singleVolumeEbook(tab, volumes);
-  const wallVolumeIds = useMemo(() => volumes.map((volume) => volume.id), [volumes]);
+  const selectedVolume = work ? selectedVolumeForWork(work, requestedVolumeId) : null;
+  const selectedVersion = work && selectedVolume
+    ? work.versions.find((version) => version.id === selectedVolume.versionId) ?? work.versions[0] ?? null
+    : work?.versions[0] ?? null;
+  const showVersionHeadings = work ? shouldShowVersionHeadings(work) : false;
+  const allVolumes = useMemo(() => work ? work.versions.flatMap((version) => visibleVersionVolumes(version)) : [], [work]);
+  const singleEbookVolume = singleVolumeEbook(allVolumes);
+  const wallVolumeIds = useMemo(() => allVolumes.map((volume) => volume.id), [allVolumes]);
   const wallSelection = useVolumeWallSelection({
-    enabled: canManage && tab !== 'STRUCTURE' && !singleEbookVolume,
-    scopeKey: tab,
+    enabled: canManage && !singleEbookVolume,
+    scopeKey: work?.id ?? '',
     volumeIds: wallVolumeIds
   });
   const chapterPage = singleEbookVolume && chapterPagination.volumeId === singleEbookVolume.id ? chapterPagination.page : 1;
   const chapterDetail = singleEbookVolume && chapterDetailState?.volumeId === singleEbookVolume.id ? chapterDetailState.detail : null;
-  const structureMediaVersions = useMemo(() => work
-    ? work.availableMediaKinds.flatMap((mediaKind) => work.mediaVersions.filter((mediaVersion) => mediaVersion.mediaKind === mediaKind))
-    : [], [work]);
-  const activeMediaKind = tab === 'STRUCTURE' ? null : tab;
   const activeProgress = selectedVolume?.progress ?? 0;
   const activeCopy = selectedVolume ? consumptionCopy(selectedVolume.readerType) : null;
   const activeReaderHref = selectedVolume?.readable ? readerHref(selectedVolume) : null;
   const readingStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
   const workActions = bookActionIds({
     canManage,
-    hasDownload: Boolean(selectedVolume?.readable),
+    hasDownload: Boolean(selectedVersion),
     kindleSendAvailable: selectedVolume?.kindleSendAvailable === true
   });
   const currentWorkId = work?.id;
 
-  const loadAllVolumes = useCallback(async (mediaVersionId: string, signal?: AbortSignal) => {
+  const loadAllVolumes = useCallback(async (versionId: string, signal?: AbortSignal) => {
     if (!currentWorkId) return [];
-    const nextVolumes = await fetchAllMediaVersionVolumes(currentWorkId, mediaVersionId, signal);
+    const nextVolumes = await fetchAllVersionVolumes(currentWorkId, versionId, signal);
     setWork((current) => current ? {
       ...current,
-      mediaVersions: current.mediaVersions.map((mediaVersion) => mediaVersion.id === mediaVersionId
-        ? { ...mediaVersion, volumes: nextVolumes, volumeCount: nextVolumes.length }
-        : mediaVersion)
+      versions: current.versions.map((version) => version.id === versionId
+        ? { ...version, volumes: nextVolumes, volumeCount: nextVolumes.length }
+        : version)
     } : current);
     return nextVolumes;
   }, [currentWorkId]);
 
-  const selectedMediaVersion = activeMediaKind && work
-    ? work.mediaVersions.find((mediaVersion) => mediaVersion.mediaKind === activeMediaKind) ?? null
-    : null;
-  const selectedWallVolumes = useMemo(() => volumes.filter((volume) => wallSelection.selectedIds.has(volume.id)), [volumes, wallSelection.selectedIds]);
+  const selectedWallVolumes = useMemo(() => allVolumes.filter((volume) => wallSelection.selectedIds.has(volume.id)), [allVolumes, wallSelection.selectedIds]);
   const selectedWallVolume = selectedWallVolumes.length === 1 ? selectedWallVolumes[0] ?? null : null;
   const wallVolumeActions = volumeActionAvailability({
     canManage,
     readable: selectedWallVolumes.length > 0 && selectedWallVolumes.every((volume) => volume.readable),
-    mediaKind: activeMediaKind ?? 'EBOOK',
+    mediaKind: selectedWallVolume ? mediaKindOfVolume(selectedWallVolume) : 'EBOOK',
     selectionCount: selectedWallVolumes.length
   });
 
   useEffect(() => {
     setVolumeMenuPosition(null);
     setVolumeMenuAnchor(null);
-  }, [tab]);
+  }, [selectedVersion?.id]);
 
   useEffect(() => {
-    if (!selectedMediaVersion || selectedMediaVersion.volumes.length >= selectedMediaVersion.volumeCount) return;
+    if (!selectedVersion || selectedVersion.volumes.length >= selectedVersion.volumeCount) return;
     const controller = new AbortController();
-    void loadAllVolumes(selectedMediaVersion.id, controller.signal).catch((reason) => {
+    void loadAllVolumes(selectedVersion.id, controller.signal).catch((reason) => {
       if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
         setError(reason instanceof Error ? reason.message : t('卷册加载失败'));
       }
     });
     return () => controller.abort();
-  }, [loadAllVolumes, selectedMediaVersion, t]);
+  }, [loadAllVolumes, selectedVersion, t]);
 
   useEffect(() => {
     if (!work || !singleEbookVolume) return;
@@ -801,8 +791,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       await updateVolumeReadingStatus(selectedVolume.id, status);
       const nextWork = await fetchWork(bookId);
       setWork(nextWork);
-      const nextVolume = selectedVolumeForDetailTab(nextWork, tab, nextWork.continueVolumeId);
-      router.replace(workDetailTabHref(nextWork.id, tab, nextVolume?.id, returnHref));
+      const nextVolume = selectedVolumeForWork(nextWork, nextWork.continueVolumeId);
+      router.replace(workDetailHref(nextWork.id, nextVolume?.id, returnHref));
       feedback.success(t(status === 'FINISHED' ? '已标记为已读' : '已标记为未读'));
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('阅读状态更新失败'));
@@ -876,7 +866,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     } else if (action === 'metadata') setMetadataLookupOpen(true);
     else if (action === 'upload-cover') coverInputRef.current?.click();
     else if (action === 'regenerate-cover') void regenerateCover();
-    else if (action === 'download' && selectedVolume) window.location.href = volumeFileDownloadUrl(selectedVolume.id);
+    else if (action === 'download') void downloadCurrentVersion();
     else if (action === 'kindle') void openKindleSend();
     else if (action === 'delete') void removeWork();
   };
@@ -885,13 +875,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     if (!work) return;
     setWorkActionBusy('kindle');
     try {
-      const loadedVersions = await Promise.all(work.mediaVersions.map(async (mediaVersion) => ({
-        ...mediaVersion,
-        volumes: mediaVersion.volumes.length >= mediaVersion.volumeCount
-          ? mediaVersion.volumes
-          : await fetchAllMediaVersionVolumes(work.id, mediaVersion.id)
+      const loadedVersions = await Promise.all(work.versions.map(async (version) => ({
+        ...version,
+        volumes: version.volumes.length >= version.volumeCount
+          ? version.volumes
+          : await fetchAllVersionVolumes(work.id, version.id)
       })));
-      setWork({ ...work, mediaVersions: loadedVersions });
+      setWork({ ...work, versions: loadedVersions });
       setKindleSendOpen(true);
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('卷册加载失败'));
@@ -900,10 +890,31 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }
   };
 
-  const selectTab = (next: WorkDetailTabKey) => {
-    if (!work) return;
-    const nextVolume = selectedVolumeForDetailTab(work, next, work.continueVolumeId);
-    router.replace(workDetailTabHref(work.id, next, nextVolume?.id, returnHref));
+  const downloadCurrentVersion = async () => {
+    if (!work || !selectedVersion) return;
+    setWorkActionBusy('download');
+    try {
+      const nextVolumes = selectedVersion.volumes.length >= selectedVersion.volumeCount
+        ? selectedVersion.volumes
+        : await fetchAllVersionVolumes(work.id, selectedVersion.id);
+      const volumeIds = nextVolumes.filter((volume) => volume.readable).map((volume) => volume.id);
+      if (volumeIds.length === 1 && volumeIds[0]) {
+        window.location.href = volumeFileDownloadUrl(volumeIds[0]);
+        return;
+      }
+      if (volumeIds.length === 0) return;
+      const archive = await downloadVolumeArchive(work.id, volumeIds);
+      const href = URL.createObjectURL(archive.blob);
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = archive.filename;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 0);
+    } catch (reason) {
+      feedback.error(reason instanceof Error ? reason.message : t('下载失败'));
+    } finally {
+      setWorkActionBusy(null);
+    }
   };
 
   const refreshWallVolumes = async () => {
@@ -990,7 +1001,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
             <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-stone-950 sm:text-[34px]" title={work.title}>{work.title}</h1>
             <p data-i18n-skip className="mt-3 text-base text-stone-600">{work.author}</p>
             {work.description ? <p data-i18n-skip className="mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600" title={work.description}>{work.description}</p> : <p className="mt-5 text-sm text-stone-400"><I18nText>暂无简介</I18nText></p>}
-            {activeMediaKind && selectedVolume && activeCopy ? <div className="mt-7 max-w-3xl lg:mt-auto">
+            {selectedVolume && activeCopy ? <div className="mt-7 max-w-3xl lg:mt-auto">
               <div className="flex items-center gap-4">
                 <span className="shrink-0 text-sm font-medium text-stone-700">{t(activeCopy.progress)}</span>
                 <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200">
@@ -1007,21 +1018,21 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           </div>
 
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end lg:col-start-2 xl:col-start-3 xl:flex-col xl:justify-end">
-            {activeMediaKind && activeCopy ? <Button
+            {selectedVolume && activeCopy ? <Button
               disabled={!activeReaderHref}
-              icon={activeMediaKind === 'AUDIOBOOK' ? Headphones : activeMediaKind === 'COMIC' ? Images : BookOpen}
+              icon={selectedVolume.readerType === 'audio' ? Headphones : selectedVolume.readerType === 'comic' ? Images : BookOpen}
               onClick={() => activeReaderHref && router.push(activeReaderHref)}
               className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420] sm:flex-1 xl:!flex-none xl:w-full"
             >
               {t(activeProgress > 0 ? activeCopy.resume : activeCopy.start)}
             </Button> : null}
             <div className="flex w-full gap-2 xl:justify-end">
-              {activeMediaKind && activeCopy ? <Select
+              {selectedVolume && activeCopy ? <Select
                 value={readingStatus}
                 options={[
-                  { value: 'READING', label: activeMediaKind === 'AUDIOBOOK' ? '在听' : '在看', disabled: readingStatus !== 'READING' },
-                  { value: 'UNREAD', label: activeMediaKind === 'AUDIOBOOK' ? '未听' : '未读' },
-                  { value: 'FINISHED', label: activeMediaKind === 'AUDIOBOOK' ? '已听完' : '已读' }
+                  { value: 'READING', label: selectedVolume.readerType === 'audio' ? '在听' : selectedVolume.readerType === 'comic' ? '在看' : '在读', disabled: readingStatus !== 'READING' },
+                  { value: 'UNREAD', label: selectedVolume.readerType === 'audio' ? '未听' : selectedVolume.readerType === 'comic' ? '未看' : '未读' },
+                  { value: 'FINISHED', label: selectedVolume.readerType === 'audio' ? '已听完' : selectedVolume.readerType === 'comic' ? '已看完' : '已读' }
                 ]}
                 onChange={(status) => void updateReadingStatus(status)}
                 ariaLabel={t(activeCopy.status)}
@@ -1057,31 +1068,28 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
       <WorkMetadataEditor work={work} open={editingMetadata} onClose={() => setEditingMetadata(false)} onSaved={(nextWork) => { setWork(nextWork); setEditingMetadata(false); }} />
 
-      <nav className="mt-10 flex gap-2 overflow-x-auto border-b border-stone-200" aria-label={t('作品媒介')}>
-        {tabs.map((item) => <button key={item.key} type="button" onClick={() => selectTab(item.key)} className={cn('min-h-11 shrink-0 border-b-2 px-4 text-sm font-medium', tab === item.key ? 'border-[#ff4f2a] text-[#d94322]' : 'border-transparent text-stone-500 hover:text-stone-900')}>{t(item.label)}</button>)}
-      </nav>
-
-      {tab === 'STRUCTURE' ? (
-        <section className="mt-6 border-t border-stone-200 pt-8">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold text-stone-950"><I18nText>版本与内容</I18nText></h2>
-              <p className="mt-1 text-sm text-stone-500">{t('{value0} 个版本 · 覆盖 {value1} 种媒介。管理模式下可调整卷册信息和位置。', { value0: structureMediaVersions.length, value1: work.availableMediaKinds.length })}</p>
-            </div>
-            {canManage ? <Button variant={managementMode ? 'secondary' : 'primary'} icon={Settings2} onClick={() => setManagementMode((current) => !current)} className={cn('!rounded-xl', !managementMode && '!bg-[#ff4f26] !text-white hover:!bg-[#e84420]')}>
-              {managementMode ? t('完成管理') : t('管理内容结构')}
-            </Button> : null}
+      <section className="mt-6 border-t border-stone-200 pt-8">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-stone-950"><I18nText>版本与内容</I18nText></h2>
+            <p className="mt-1 text-sm text-stone-500">{t('{value0} 个版本。管理模式下可调整卷册信息和位置。', { value0: work.versions.length })}</p>
           </div>
+          {canManage ? <Button variant={managementMode ? 'secondary' : 'primary'} icon={Settings2} onClick={() => setManagementMode((current) => !current)} className={cn('!rounded-xl', !managementMode && '!bg-[#ff4f26] !text-white hover:!bg-[#e84420]')}>
+            {managementMode ? t('完成管理') : t('管理内容结构')}
+          </Button> : null}
+        </div>
+        {showVersionHeadings ? (
           <div className="mt-6 space-y-5">
-            {structureMediaVersions.length ? structureMediaVersions.map((mediaVersion) => (
+            {work.versions.length ? work.versions.map((version) => (
               <StructureVersionCard
-                key={mediaVersion.id}
+                key={version.id}
                 work={work}
-                mediaVersion={mediaVersion}
+                version={version}
+                showHeading
                 managementMode={managementMode}
                 canManage={canManage}
                 returnHref={returnHref}
-                onLoadAll={async () => { await loadAllVolumes(mediaVersion.id); }}
+                onLoadAll={async () => { await loadAllVolumes(version.id); }}
                 onRefresh={async () => {
                   try {
                     setWork(await fetchWork(bookId));
@@ -1090,18 +1098,21 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                   }
                 }}
               />
-            )) : <div className="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>该媒介还没有可见卷册</I18nText></div>}
+            )) : <div className="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>还没有可见卷册</I18nText></div>}
           </div>
-        </section>
-      ) : (
-        singleEbookVolume ? <SingleVolumeChapterList
-          volume={singleEbookVolume}
-          detail={chapterDetail}
-          loading={chapterLoading}
-          error={chapterError}
-          requestedPage={chapterPage}
-          onPageChange={(page) => setChapterPagination({ volumeId: singleEbookVolume.id, page })}
-        /> : <section
+        ) : singleEbookVolume ? (
+          <div className="mt-6">
+            <SingleVolumeChapterList
+              volume={singleEbookVolume}
+              detail={chapterDetail}
+              loading={chapterLoading}
+              error={chapterError}
+              requestedPage={chapterPage}
+              onPageChange={(page) => setChapterPagination({ volumeId: singleEbookVolume.id, page })}
+            />
+          </div>
+        ) : (
+        <section
           className="mt-6"
           data-volume-wall-selection-surface="true"
           onMouseDown={(event) => {
@@ -1111,12 +1122,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
             wallSelection.clear();
           }}
         >
-          {volumes.length ? <>
+          {allVolumes.length ? <>
             <div>
               <h2 className="text-lg font-semibold text-stone-950"><I18nText>卷册</I18nText></h2>
-              <p className="mt-1 text-sm text-stone-500">{t('{value0} 个卷册', { value0: volumes.length })}</p>
+              <p className="mt-1 text-sm text-stone-500">{t('{value0} 个卷册', { value0: allVolumes.length })}</p>
             </div>
-            <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(130px,160px))] gap-5">{volumes.map((volume, index) => <VolumeWallCard
+            <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(130px,160px))] gap-5">{allVolumes.map((volume, index) => <VolumeWallCard
               key={volume.id}
               work={work}
               volume={volume}
@@ -1134,9 +1145,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 setVolumeMenuPosition(position);
               }}
             />)}</div>
-          </> : <div className="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>该媒介还没有可见卷册</I18nText></div>}
+          </> : <div className="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>还没有可见卷册</I18nText></div>}
         </section>
-      )}
+        )}
+      </section>
 
       {selectedWallVolumes.length > 0 && canManage ? <ContextActionMenu
         position={volumeMenuPosition}
@@ -1173,7 +1185,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
       <VolumeContextEditDialog
         work={work}
-        volume={volumes.find((volume) => volume.id === editingWallVolumeId) ?? null}
+        volume={allVolumes.find((volume) => volume.id === editingWallVolumeId) ?? null}
         onClose={() => setEditingWallVolumeId(null)}
         onSaved={refreshWallVolumes}
       />
@@ -1188,7 +1200,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         }}
       />
 
-      <MetadataLookupModal book={work} currentMediaVersionId={selectedVolume?.mediaVersionId ?? null} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={refreshAfterMetadataApply} />
+      <MetadataLookupModal book={work} currentVersionId={selectedVolume?.versionId ?? null} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={refreshAfterMetadataApply} />
       <KindleSendModal book={work} open={kindleSendOpen} preferredVolumeId={selectedVolume?.id ?? null} onClose={() => setKindleSendOpen(false)} />
     </div>
   );

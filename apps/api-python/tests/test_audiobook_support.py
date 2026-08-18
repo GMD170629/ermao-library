@@ -1271,30 +1271,15 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
             "mixed-work"
         ]
 
-    db_session.execute(
-        text(
-            "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
-            "VALUES ('workDetail.tabOrder', :value, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
-            "ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, `updatedAt` = CURRENT_TIMESTAMP"
-        ),
-        {"value": '["AUDIOBOOK","COMIC","EBOOK","STRUCTURE"]'},
-    )
-    db_session.commit()
     detail = client.get("/api/works/mixed-work").json()["data"]["book"]
-    assert [tab["key"] for tab in detail["detailTabs"]] == [
-        "AUDIOBOOK",
-        "COMIC",
-        "EBOOK",
-        "STRUCTURE",
+    assert [version["sourceKey"] for version in detail["versions"]] == [
+        IMPLICIT_VERSION_SOURCE_KEY
     ]
-    saved = client.put(
-        "/api/works/mixed-work/detail-preference", json={"selectedTab": "COMIC"}
-    )
-    assert saved.status_code == 200
-    assert (
-        client.get("/api/works/mixed-work").json()["data"]["book"]["selectedDetailTab"]
-        == "COMIC"
-    )
+    assert {volume["id"] for volume in detail["versions"][0]["volumes"]} == {
+        "mixed-ebook-volume",
+        "mixed-comic-volume",
+        "mixed-audio-volume",
+    }
 
     for index, volume_id in enumerate(
         ("mixed-ebook-volume", "mixed-comic-volume", "mixed-audio-volume"),
@@ -1322,15 +1307,15 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
     db_session.commit()
     completed_for_a = client.get("/api/works/mixed-work").json()["data"]["book"]
     assert completed_for_a["completed"] is True
-    assert all(item["completed"] for item in completed_for_a["mediaVersions"])
+    assert all(item["completed"] for item in completed_for_a["versions"])
 
     _login(client, db_session, email="listener-b@example.com")
     detail_for_b = client.get("/api/works/mixed-work").json()["data"]["book"]
     assert detail_for_b["completed"] is False
     assert all(
         volume["progress"] == 0
-        for media_version in detail_for_b["mediaVersions"]
-        for volume in media_version["volumes"]
+        for version in detail_for_b["versions"]
+        for volume in version["volumes"]
     )
 
     _login(client, db_session, email="listener-a@example.com")
@@ -1406,30 +1391,18 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     db_session.commit()
 
     detail = client.get("/api/works/switch-work").json()["data"]
-    assert len(detail["book"]["mediaVersions"]) == 1
-    assert [
-        volume["id"] for volume in detail["book"]["mediaVersions"][0]["volumes"]
-    ] == ["audio-a-volume", "audio-b-volume"]
+    assert len(detail["book"]["versions"]) == 1
+    assert [volume["id"] for volume in detail["book"]["versions"][0]["volumes"]] == [
+        "audio-a-volume",
+        "audio-b-volume",
+    ]
     assert detail["book"]["continueVolumeId"] == "audio-b-volume"
-
-    selected_a = client.get(
-        "/api/works/switch-work",
-        params={"detailTab": "AUDIOBOOK", "volumeId": "audio-a-volume"},
-    ).json()["data"]["activeMedia"]
-    assert selected_a["mediaVersionId"] == "switch-audio"
-    assert selected_a["selectedVolumeId"] == "audio-a-volume"
-    assert selected_a["progress"] == 0
-    assert selected_a["status"] == "UNREAD"
-    assert selected_a["primaryAction"]["href"] == "/listen/audio-a-volume"
-
-    selected_b = client.get(
-        "/api/works/switch-work",
-        params={"detailTab": "AUDIOBOOK", "volumeId": "audio-b-volume"},
-    ).json()["data"]["activeMedia"]
-    assert selected_b["selectedVolumeId"] == "audio-b-volume"
-    assert selected_b["progress"] == 80
-    assert selected_b["progressStatus"] == "READING"
-    assert selected_b["primaryAction"]["href"] == "/listen/audio-b-volume"
+    volumes_by_id = {
+        volume["id"]: volume for volume in detail["book"]["versions"][0]["volumes"]
+    }
+    assert volumes_by_id["audio-a-volume"]["progress"] == 0
+    assert volumes_by_id["audio-b-volume"]["progress"] == 80
+    assert volumes_by_id["audio-a-volume"]["versionId"] == "switch-version"
 
     now = datetime.now(UTC)
     db_session.add(
@@ -1454,7 +1427,7 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     db_session.commit()
     completed = client.get("/api/works/switch-work").json()["data"]["book"]
     assert completed["completed"] is True
-    assert completed["mediaVersions"][0]["completed"] is True
+    assert completed["versions"][0]["completed"] is True
     assert completed["continueVolumeId"] == "audio-b-volume"
 
 
@@ -1868,22 +1841,20 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
             },
         )
     db_session.commit()
-    detail = client.get(
-        f"/api/works/{result.work_id}",
-        params={"detailTab": "AUDIOBOOK", "volumeId": volumes[0]["id"]},
-    ).json()["data"]
-    selected_media_version = next(
+    detail = client.get(f"/api/works/{result.work_id}").json()["data"]
+    selected_version = next(
         item
-        for item in detail["book"]["mediaVersions"]
-        if item["id"] == result.media_version_id
+        for item in detail["book"]["versions"]
+        if {volume["id"] for volume in item["volumes"]}
+        >= {volumes[0]["id"], volumes[1]["id"]}
+        or item["volumeCount"] >= 2
     )
-    assert selected_media_version["completed"] is False
-    assert [volume["progress"] for volume in selected_media_version["volumes"]] == [
+    assert selected_version["completed"] is False
+    assert [volume["progress"] for volume in selected_version["volumes"]] == [
         100,
         0,
     ]
     assert detail["book"]["continueVolumeId"] == volumes[1]["id"]
-    assert detail["activeMedia"]["progress"] == 100
 
 
 def test_audio_directory_structure_rejects_mixed_tracks_and_keeps_unmatched_children_independent(
@@ -2617,8 +2588,8 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     detail = client.get(f"/api/works/{reconciled.work_id}")
     assert detail.status_code == 200
     book = detail.json()["data"]["book"]
-    assert len(book["mediaVersions"]) == 1
-    assert [volume["id"] for volume in book["mediaVersions"][0]["volumes"]] == [
+    assert len(book["versions"]) == 1
+    assert [volume["id"] for volume in book["versions"][0]["volumes"]] == [
         reconciled.volume_id
     ]
     bootstrap = client.get(f"/api/reader/v4/volumes/{reconciled.volume_id}/bootstrap")

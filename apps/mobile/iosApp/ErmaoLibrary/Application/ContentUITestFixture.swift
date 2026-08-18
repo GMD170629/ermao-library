@@ -173,13 +173,12 @@ private struct FixtureContentClient: ContentClient {
 
     func fetchWorkDetail(context: ContentRequestContext, query: WorkDetailQuery) async throws -> WorkDetailContent {
         let work = works.first(where: { $0.id == query.workID }) ?? works[0]
-        let selectedKind = query.mediaKind ?? work.availableMediaKinds.first
         let selectedVolumeID = query.volumeID ?? "volume-1"
-        let volumes: [WorkVolume] = if work.id == "the-left-hand-of-darkness", selectedKind == .ebook {
+        let volumes: [WorkVolume] = if work.id == "the-left-hand-of-darkness" {
             [
                 WorkVolume(
                     id: "volume-1",
-                    mediaVersionID: "media-version-1",
+                    versionID: "version-1",
                     title: "The Left Hand of Darkness I",
                     formatLabel: "EPUB",
                     volumeIndex: 1,
@@ -190,7 +189,7 @@ private struct FixtureContentClient: ContentClient {
                 ),
                 WorkVolume(
                     id: "volume-2",
-                    mediaVersionID: "media-version-1",
+                    versionID: "version-1",
                     title: "The Left Hand of Darkness II",
                     formatLabel: "EPUB",
                     volumeIndex: 2,
@@ -201,7 +200,7 @@ private struct FixtureContentClient: ContentClient {
                 ),
                 WorkVolume(
                     id: "volume-3",
-                    mediaVersionID: "media-version-1",
+                    versionID: "version-1",
                     title: "The Left Hand of Darkness III",
                     formatLabel: "EPUB",
                     volumeIndex: 3,
@@ -215,7 +214,7 @@ private struct FixtureContentClient: ContentClient {
             [
                 WorkVolume(
                     id: "volume-1",
-                    mediaVersionID: "media-version-1",
+                    versionID: "version-1",
                     title: "Volume 1",
                     formatLabel: "EPUB",
                     sizeLabel: "2.6 MB",
@@ -225,6 +224,13 @@ private struct FixtureContentClient: ContentClient {
                 )
             ]
         }
+        let version = WorkVersionContent(
+            id: "version-1",
+            sourceKey: "__implicit__",
+            sourceName: nil,
+            volumes: volumes,
+            volumeCount: volumes.count
+        )
         return WorkDetailContent(
             work: work,
             description: work.id == "a-wizard-of-earthsea"
@@ -233,8 +239,8 @@ private struct FixtureContentClient: ContentClient {
             tags: ["Classic", "Romance"],
             seriesFacet: FacetIdentity(id: "earthsea", kind: .series, name: "Earthsea"),
             authorFacets: [FacetIdentity(id: "ursula-le-guin", kind: .author, name: work.author)],
-            availableMediaKinds: work.availableMediaKinds,
-            selectedMediaKind: selectedKind,
+            versions: [version],
+            selectedVersionId: version.id,
             selectedVolumeID: selectedVolumeID,
             readingStatus: work.progress == nil ? .unread : .reading,
             volumes: volumes,

@@ -175,7 +175,7 @@ def first_media_selection_for_work(
         .select_from(LibraryMediaVersion)
         .outerjoin(
             LibraryVolume,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryMediaVersion.id == LibraryVolume.version_id,
         )
         .where(
             *filters,
@@ -197,4 +197,8 @@ def first_media_selection_for_work(
     ).first()
     if row is None:
         return None
-    return str(row.id), str(row.media_kind), str(row.volume_id) if row.volume_id else None
+    return (
+        str(row.id),
+        str(row.media_kind),
+        str(row.volume_id) if row.volume_id else None,
+    )

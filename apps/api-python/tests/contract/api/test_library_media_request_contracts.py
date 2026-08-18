@@ -8,7 +8,6 @@ from app.models.auth import User
 
 BODY_OPERATIONS = (
     ("PATCH", "/api/works/work-id"),
-    ("PUT", "/api/works/work-id/detail-preference"),
     ("POST", "/api/works/bulk"),
     ("POST", "/api/works/bulk/find-replace/preview"),
     ("POST", "/api/works/bulk/cover"),
@@ -25,7 +24,6 @@ def test_library_and_shelf_write_bodies_are_documented() -> None:
     schema = create_app().openapi()
     templated_operations = (
         ("patch", "/api/works/{work_id}"),
-        ("put", "/api/works/{work_id}/detail-preference"),
         ("post", "/api/works/bulk"),
         ("post", "/api/works/bulk/find-replace/preview"),
         ("post", "/api/works/bulk/cover"),

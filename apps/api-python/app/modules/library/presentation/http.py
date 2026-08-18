@@ -88,10 +88,8 @@ from app.modules.library.application.request_mutations import (
     CoverMutation,
     CoverPublicationFailure,
     CoverRecordMutation,
-    DetailPreferenceMutation,
     LibraryRequestMutationGateway,
     MetadataApplyMutation,
-    SaveDetailPreference,
     UpdateBulkReadingStatus,
     UpdateBulkShelfMembership,
     UpdateBulkWorks,
@@ -146,7 +144,6 @@ from app.modules.library.presentation.schemas import (
     DashboardSummaryResponse,
     DeleteCategoryResponse,
     DeletedWorkResponse,
-    DetailPreferenceResponse,
     DuplicatesResponse,
     FacetsResponse,
     FilterOptionsResponse,
@@ -177,13 +174,11 @@ from app.modules.library.presentation.schemas import (
     RenameCategoryRequest,
     RenameCategoryResponse,
     ReorderVolumeRequest,
-    SaveDetailPreferenceRequest,
     SeriesResponse,
     SplitVolumeRequest,
     UndoOperationResponse,
     UpdateVolumeRequest,
     UpdateWorkRequest,
-    WorkDetailResponse,
     WorkDetailSummaryResponse,
     WorkMergePreviewResponse,
     WorkMergeResponse,
@@ -196,7 +191,6 @@ from app.modules.library.presentation.schemas import (
     WorkVolumePageResponse,
 )
 from app.modules.library.presentation.views import (
-    _active_media_view,
     _coerce_int,
     _cover_url,
     _get_work,
@@ -205,8 +199,6 @@ from app.modules.library.presentation.views import (
     _metadata_field_patch,
     _preferred_work_cover_path,
     _require_work_manager,
-    _resolve_detail_tab,
-    _selected_detail_volume_id,
     _visible_work_or_none,
     _work_detail_summary_view,
     _work_reading_units_view,
@@ -247,7 +239,6 @@ from app.modules.publications.domain.model import (
 from app.modules.system.presentation.mappers import (
     serialize_system_event as _serialize_system_event,
 )
-from app.modules.system.public import DETAIL_TAB_KEYS
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
     identity_merge_key,
@@ -394,19 +385,6 @@ def _ensure_detail_navigation(
     if result.outcome == EnsurePublicationNavigationOutcome.UNSUPPORTED:
         return False, None
     return True, result.chapter_count
-
-
-def _set_book_chapter_count(
-    book: dict[str, Any],
-    *,
-    volume_id: str,
-    chapter_count: int | None,
-) -> None:
-    for media_version in book.get("mediaVersions", []):
-        for volume in media_version.get("volumes", []):
-            if str(volume.get("id")) == volume_id:
-                volume["chapterCount"] = chapter_count
-                return
 
 
 def _system_auth(db: Session, request: Request, settings: Settings):
@@ -789,16 +767,17 @@ def management_folders(
         }
         for row in db.execute(
             select(
-                LibraryMediaVersion.work_id.label("workId"),
+                LibraryVersion.work_id.label("workId"),
                 func.coalesce(func.sum(LibraryVolume.size_bytes), 0).label("sizeBytes"),
                 func.count().label("volumeCount"),
             )
+            .select_from(LibraryVolume)
             .join(
-                LibraryMediaVersion,
+                LibraryVersion,
                 LibraryVersion.id == LibraryVolume.version_id,
             )
             .where(LibraryVolume.hidden.is_(False))
-            .group_by(LibraryMediaVersion.work_id)
+            .group_by(LibraryVersion.work_id)
         ).all()
     ]
     size_by_work = {row.get("workId"): row for row in volumes}
@@ -1196,15 +1175,10 @@ def list_works(
 def get_work(
     work_id: str,
     request: Request,
-    detailTab: str | None = None,
-    volumeId: str | None = None,
-    unitPage: int | None = None,
-    chapterPage: int = 1,
-    chapterPageSize: int = 120,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    WorkDetailSummaryResponse | WorkDetailResponse,
+    WorkDetailSummaryResponse,
     ErrorResponses(LibraryNotFoundError),
 ]:
     user, auth_error = _auth(db, request, settings)
@@ -1214,12 +1188,11 @@ def get_work(
     if not work:
         _raise_library_error("作品不存在", status_code=404)
     facet_references = library_facet_references(db).for_visible_work(work_id)
-    navigation_requested = bool(request.query_params)
     book = _work_view(
         db,
         work,
         user.id,
-        volume_limit_per_media=None if navigation_requested else 10,
+        volume_limit_per_version=10,
         include_files=True,
     )
     book["seriesFacet"] = (
@@ -1235,67 +1208,13 @@ def get_work(
         {"id": facet.id, "kind": facet.kind, "name": facet.name}
         for facet in facet_references.authors
     ]
-    selected_tab = (
-        _resolve_detail_tab(
-            db,
-            user.id,
-            work_id,
-            book.get("detailTabs", []),
-            detailTab,
-        )
-        if navigation_requested
-        else str(book.get("selectedDetailTab") or "STRUCTURE")
-    )
-    navigation_tab = selected_tab
-    if navigation_tab == "STRUCTURE":
-        navigation_tab = next(
-            (
-                str(tab.get("key"))
-                for tab in book.get("detailTabs", [])
-                if str(tab.get("key")) != "STRUCTURE"
-            ),
-            "STRUCTURE",
-        )
-    selected_volume_id = _selected_detail_volume_id(
-        book,
-        navigation_tab,
-        volumeId,
-    )
-    if selected_volume_id is not None:
-        navigation_attempted, chapter_count = _ensure_detail_navigation(
-            db=db,
-            request=request,
-            settings=settings,
-            user=user,
-            volume_id=selected_volume_id,
-        )
-        if navigation_attempted:
-            _set_book_chapter_count(
-                book,
-                volume_id=selected_volume_id,
-                chapter_count=chapter_count,
-            )
-    if not navigation_requested:
-        return WorkDetailSummaryResponse(data={"book": _work_detail_summary_view(book)})
-    book["selectedDetailTab"] = selected_tab
-    active_media, navigation = _active_media_view(
-        db,
-        book,
-        selected_tab,
-        user.id,
-        volumeId,
-        unitPage if unitPage is not None else chapterPage,
-        chapterPageSize,
-    )
-    return WorkDetailResponse(
-        data={"book": book, "activeMedia": active_media, **navigation}
-    )
+    return WorkDetailSummaryResponse(data={"book": _work_detail_summary_view(book)})
 
 
-@router.get("/works/{work_id}/media-versions/{media_version_id}/volumes")
-def get_work_media_version_volumes(
+@router.get("/works/{work_id}/versions/{version_id}/volumes")
+def get_work_version_volumes(
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     request: Request,
     page: Annotated[int, Query(ge=1)] = 1,
     pageSize: Annotated[int, Query(ge=1, le=100)] = 100,
@@ -1311,12 +1230,12 @@ def get_work_media_version_volumes(
         db,
         user=user,
         work_id=work_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         page=page,
         page_size=pageSize,
     )
     if result is None:
-        _raise_library_error("媒介版本不存在", status_code=404)
+        _raise_library_error("版本不存在", status_code=404)
     return WorkVolumePageResponse(data=result)
 
 
@@ -1343,7 +1262,7 @@ def get_work_volume_reading_units(
         )
         .where(
             LibraryVolume.id == volume_id,
-            LibraryMediaVersion.work_id == work_id,
+            LibraryVersion.work_id == work_id,
             LibraryVolume.hidden.is_(False),
         )
     )
@@ -1367,52 +1286,6 @@ def get_work_volume_reading_units(
     if result is None:
         _raise_library_error("卷册不存在", status_code=404)
     return WorkReadingUnitsResponse(data=result)
-
-
-@router.put("/works/{work_id}/detail-preference")
-async def save_work_detail_preference(
-    work_id: str,
-    payload: SaveDetailPreferenceRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    DetailPreferenceResponse,
-    ErrorResponses(
-        LibraryBadRequestError,
-        LibraryNotFoundError,
-        LibraryConflictError,
-        LibraryUnavailableError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    work = _visible_work_or_none(db, user, work_id)
-    if not work:
-        _raise_library_error("作品不存在", status_code=404)
-    requested = payload.selected_tab.strip().upper()
-    book = _work_view(db, work, user.id)
-    tabs = book.get("detailTabs", [])
-    visible = {str(item.get("key")) for item in tabs}
-    if requested not in DETAIL_TAB_KEYS:
-        _raise_library_error("详情选项卡无效", status_code=400)
-    if requested not in visible:
-        _raise_library_error("该作品没有对应的媒介版本", status_code=409)
-    now = _now()
-    if not _has_table(db, "WorkDetailPreference"):
-        _raise_library_error("详情偏好表尚未初始化", status_code=503)
-    SaveDetailPreference(_request_mutations(db), db).execute(
-        DetailPreferenceMutation(
-            user_id=user.id,
-            work_id=work_id,
-            selected_tab=requested,
-            now=now,
-        )
-    )
-    return DetailPreferenceResponse(
-        data={"selectedDetailTab": requested, "detailTabs": tabs}
-    )
 
 
 @router.patch("/works/{work_id}")
@@ -1700,7 +1573,7 @@ def _first_volume(db: Session, work_id: str) -> dict[str, Any] | None:
             LibraryVersion,
             LibraryVersion.id == LibraryVolume.version_id,
         )
-        .where(LibraryMediaVersion.work_id == work_id, LibraryVolume.hidden.is_(False))
+        .where(LibraryVersion.work_id == work_id, LibraryVolume.hidden.is_(False))
         .order_by(
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),

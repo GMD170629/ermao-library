@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.LibraryScope
+import com.ermao.library.features.content.model.VolumeContent
 import com.ermao.library.features.content.model.WorkCard
 import com.ermao.library.features.content.model.WorkDetailContent
 import com.ermao.library.features.content.model.ChapterReadingState
@@ -23,7 +24,6 @@ import com.ermao.library.shared.modules.library.FacetSort
 import com.ermao.library.shared.modules.library.WorkDetailQuery
 import com.ermao.library.shared.modules.library.WorkVolumePageQuery
 import com.ermao.library.shared.modules.library.WorkVolumePageRepository
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
@@ -139,7 +139,7 @@ class FacetViewModel(
 data class WorkDetailUiState(
     val isLoading: Boolean = true,
     val content: WorkDetailContent? = null,
-    val selectedMediaKind: String? = null,
+    val selectedVersionId: String? = null,
     val selectedVolumeId: String? = null,
     val errorCode: String? = null,
     val shelves: List<ShelfSummary> = emptyList(),
@@ -182,56 +182,52 @@ class WorkDetailViewModel(
         load()
     }
 
-    fun retry() = load(
-        mediaKind = mutableUiState.value.selectedMediaKind,
-        volumeId = mutableUiState.value.selectedVolumeId,
-    )
+    fun retry() = load(volumeId = mutableUiState.value.selectedVolumeId)
 
     fun refresh() = load(
-        mediaKind = mutableUiState.value.selectedMediaKind,
         volumeId = mutableUiState.value.selectedVolumeId,
         showBlockingLoading = false,
     )
 
-    fun selectMedia(kind: String) {
-        val firstVolume = mutableUiState.value.content?.media
-            ?.firstOrNull { it.kind == kind }?.volumes?.firstOrNull()
-        mutableUiState.update { it.copy(selectedMediaKind = kind, selectedVolumeId = firstVolume?.id) }
-        load(kind, firstVolume?.id, showBlockingLoading = false)
+    fun selectVersion(versionId: String) {
+        val firstVolume = mutableUiState.value.content?.versions
+            ?.firstOrNull { it.id == versionId }?.volumes?.firstOrNull()
+        mutableUiState.update { it.copy(selectedVersionId = versionId, selectedVolumeId = firstVolume?.id) }
+        load(volumeId = firstVolume?.id, showBlockingLoading = false)
     }
 
     fun selectVolume(volumeId: String) {
-        mutableUiState.update { it.copy(selectedVolumeId = volumeId) }
-        load(mutableUiState.value.selectedMediaKind, volumeId, showBlockingLoading = false)
+        val versionId = mutableUiState.value.content?.versions
+            ?.firstOrNull { version -> version.volumes.any { it.id == volumeId } }?.id
+        mutableUiState.update { it.copy(selectedVersionId = versionId ?: it.selectedVersionId, selectedVolumeId = volumeId) }
+        load(volumeId = volumeId, showBlockingLoading = false)
     }
 
     fun loadMoreVolumes() {
         val state = mutableUiState.value
         if (state.isLoadingMoreVolumes) return
         val loader = repository as? WorkVolumePageRepository ?: return
-        val media = state.content?.media?.firstOrNull { it.kind == state.selectedMediaKind } ?: return
-        if (media.volumes.size >= media.volumeCount) return
-        val mediaVersionId = media.volumes.firstOrNull()?.mediaVersionId ?: return
-        val requestedMediaKind = media.kind
+        val version = state.content?.versions?.firstOrNull { it.id == state.selectedVersionId } ?: return
+        if (version.volumes.size >= version.volumeCount) return
+        val versionId = version.id
         val pageSize = 24
-        val nextPage = (media.volumes.size / pageSize) + 1
+        val nextPage = (version.volumes.size / pageSize) + 1
         mutableUiState.update { it.copy(isLoadingMoreVolumes = true, volumePaginationErrorCode = null) }
         viewModelScope.launch {
             when (val result = loader.loadWorkVolumes(
                 context,
-                WorkVolumePageQuery(workId, mediaVersionId, nextPage, pageSize),
+                WorkVolumePageQuery(workId, versionId, nextPage, pageSize),
             )) {
                 is ContentResult.Content -> mutableUiState.update { current ->
                     val currentContent = current.content ?: return@update current.copy(isLoadingMoreVolumes = false)
-                    val currentMedia = currentContent.media.firstOrNull { it.kind == requestedMediaKind }
-                    if (current.selectedMediaKind != requestedMediaKind ||
-                        currentMedia?.volumes?.firstOrNull()?.mediaVersionId != mediaVersionId
-                    ) return@update current.copy(isLoadingMoreVolumes = false)
+                    if (current.selectedVersionId != versionId) {
+                        return@update current.copy(isLoadingMoreVolumes = false)
+                    }
                     current.copy(
                         isLoadingMoreVolumes = false,
                         content = currentContent.copy(
-                            media = currentContent.media.map { candidate ->
-                                if (candidate.kind != requestedMediaKind) candidate else candidate.copy(
+                            versions = currentContent.versions.map { candidate ->
+                                if (candidate.id != versionId) candidate else candidate.copy(
                                     volumeCount = result.value.total,
                                     volumes = (candidate.volumes + result.value.volumes.map { it.toUiContent() })
                                         .distinctBy { it.id }
@@ -242,13 +238,10 @@ class WorkDetailViewModel(
                     )
                 }
                 is ContentResult.Failure -> mutableUiState.update { current ->
-                    val currentMediaVersionId = current.content?.media
-                        ?.firstOrNull { it.kind == requestedMediaKind }
-                        ?.volumes?.firstOrNull()?.mediaVersionId
                     current.copy(
                         isLoadingMoreVolumes = false,
                         volumePaginationErrorCode = result.error.code.takeIf {
-                            current.selectedMediaKind == requestedMediaKind && currentMediaVersionId == mediaVersionId
+                            current.selectedVersionId == versionId
                         },
                     )
                 }
@@ -340,7 +333,6 @@ class WorkDetailViewModel(
     }
 
     private fun load(
-        mediaKind: String? = null,
         volumeId: String? = null,
         showBlockingLoading: Boolean = true,
     ) {
@@ -348,17 +340,18 @@ class WorkDetailViewModel(
         mutableUiState.update { it.copy(isLoading = showBlockingLoading, errorCode = null) }
         viewModelScope.launch {
             try {
-                val requestedKind = mediaKind?.let(::MediaKind)
-                when (val result = repository.loadWorkDetail(context, WorkDetailQuery(workId, requestedKind, volumeId))) {
+                when (val result = repository.loadWorkDetail(context, WorkDetailQuery(workId, volumeId))) {
                     is ContentResult.Content -> {
                         if (generation != loadGeneration) return@launch
                         val baseContent = result.value.toUiContent()
-                        val selectedKind = mediaKind ?: baseContent.selectedMediaKind ?: baseContent.media.firstOrNull()?.kind
-                        val selectedVolume = baseContent.media.firstOrNull { it.kind == selectedKind }
-                            ?.volumes?.firstOrNull { it.id == volumeId }
-                            ?: baseContent.media.firstOrNull { it.kind == selectedKind }?.volumes?.firstOrNull { it.selected }
-                            ?: baseContent.media.firstOrNull { it.kind == selectedKind }
-                            ?.volumes?.firstOrNull()
+                        val selectedVolume = pickSelectedVolume(
+                            versions = baseContent.versions,
+                            requestedVolumeId = volumeId,
+                            continueVolumeId = result.value.continueVolumeId,
+                        )
+                        val selectedVersionId = baseContent.versions.firstOrNull { version ->
+                            version.volumes.any { it.id == selectedVolume?.id }
+                        }?.id ?: baseContent.versions.firstOrNull()?.id
                         val selectedVolumeId = selectedVolume?.id
                         val uiContent = selectedVolumeId
                             ?.let(latestProgressUpdatesByVolumeId::get)
@@ -368,7 +361,7 @@ class WorkDetailViewModel(
                         mutableUiState.value = WorkDetailUiState(
                             isLoading = false,
                             content = uiContent,
-                            selectedMediaKind = selectedKind,
+                            selectedVersionId = selectedVersionId,
                             selectedVolumeId = selectedVolume?.id,
                             shelves = shelfState.shelves,
                             selectedShelfIds = shelfState.selectedShelfIds,
@@ -436,9 +429,9 @@ internal fun WorkDetailContent.applying(
     return copy(
         work = work.copy(progressPercent = update.percent.toInt().coerceIn(0, 100)),
         completed = update.percent >= 100.0,
-        media = media.map { mediaVersion ->
-            mediaVersion.copy(
-                volumes = mediaVersion.volumes.map { volume ->
+        versions = versions.map { version ->
+            version.copy(
+                volumes = version.volumes.map { volume ->
                     if (volume.id == update.volumeId) {
                         volume.copy(progressPercent = update.percent.toInt().coerceIn(0, 100))
                     } else {
@@ -458,6 +451,18 @@ internal fun WorkDetailContent.applying(
             )
         },
     )
+}
+
+private fun pickSelectedVolume(
+    versions: List<com.ermao.library.features.content.model.VersionContent>,
+    requestedVolumeId: String?,
+    continueVolumeId: String?,
+): VolumeContent? {
+    val volumes = versions.flatMap { it.volumes }
+    return requestedVolumeId?.let { id -> volumes.firstOrNull { it.id == id } }
+        ?: continueVolumeId?.let { id -> volumes.firstOrNull { it.id == id } }
+        ?: volumes.firstOrNull { (it.progressPercent ?: 0) < 100 }
+        ?: volumes.firstOrNull()
 }
 
 private fun mergeWorks(existing: List<WorkCard>, incoming: List<WorkCard>): List<WorkCard> =

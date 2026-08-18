@@ -3,15 +3,10 @@ export type ReadingFormat = VolumeFormat;
 export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 export type ReaderType = 'reflowable' | 'comic' | 'pdf' | 'audio';
 export type ClassificationSource = 'AUTO' | 'MONITOR_FOLDER' | 'USER' | 'INHERITED' | 'LEGACY';
-export type WorkDetailTabKey = MediaKind | 'STRUCTURE';
 export type PublicationStatus = 'UNKNOWN' | 'ONGOING' | 'COMPLETED' | 'HIATUS' | 'CANCELLED';
 export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
 
-export type WorkDetailTab = Readonly<{
-  key: WorkDetailTabKey;
-  label: string;
-  sortOrder: number;
-}>;
+export const IMPLICIT_VERSION_SOURCE_KEY = '__implicit__';
 
 export type LibraryFileResource = Readonly<{
   id: string;
@@ -34,7 +29,7 @@ export type LibraryFileResource = Readonly<{
 
 export type VolumeResource = Readonly<{
   id: string;
-  mediaVersionId: string;
+  versionId: string;
   title: string;
   volumeIndex: number | null;
   sortOrder: number;
@@ -69,9 +64,10 @@ export type VolumeResource = Readonly<{
   files: LibraryFileResource[];
 }>;
 
-export type MediaVersionResource = Readonly<{
+export type VersionResource = Readonly<{
   id: string;
-  mediaKind: MediaKind;
+  sourceKey: string;
+  sourceName: string | null;
   completed: boolean;
   volumeCount: number;
   sizeBytes: number;
@@ -96,13 +92,9 @@ export type WorkView = Readonly<{
   coverUrl: string;
   coverStatus: string;
   gradient: string;
-  recentMediaKind: MediaKind | null;
   continueVolumeId: string | null;
-  availableMediaKinds: MediaKind[];
-  detailTabs: WorkDetailTab[];
-  selectedDetailTab: WorkDetailTabKey | null;
   completed: boolean;
-  mediaVersions: MediaVersionResource[];
+  versions: VersionResource[];
 }>;
 
 export type SeriesSummary = Readonly<{
@@ -112,14 +104,15 @@ export type SeriesSummary = Readonly<{
 }>;
 
 export function allWorkVolumes(work: WorkView): VolumeResource[] {
-  return work.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
-}
-
-export function mediaVersionForKind(work: WorkView, mediaKind: MediaKind): MediaVersionResource | null {
-  return work.mediaVersions.find((mediaVersion) => mediaVersion.mediaKind === mediaKind) ?? null;
+  return work.versions.flatMap((version) => version.volumes);
 }
 
 export function volumeById(work: WorkView, volumeId: string | null | undefined): VolumeResource | null {
   if (!volumeId) return null;
   return allWorkVolumes(work).find((volume) => volume.id === volumeId) ?? null;
+}
+
+export function versionById(work: WorkView, versionId: string | null | undefined): VersionResource | null {
+  if (!versionId) return null;
+  return work.versions.find((version) => version.id === versionId) ?? null;
 }

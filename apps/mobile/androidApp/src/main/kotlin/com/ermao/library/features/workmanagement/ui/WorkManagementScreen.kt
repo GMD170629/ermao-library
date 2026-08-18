@@ -398,8 +398,8 @@ private fun ReadingStatusForm(
     content: WorkDetailContent,
     viewModel: WorkManagementViewModel,
 ) {
-    val volume = content.media.flatMap { it.volumes }.firstOrNull { it.selected }
-        ?: content.media.flatMap { it.volumes }.firstOrNull()
+    val volume = content.allVolumes.firstOrNull { it.selected }
+        ?: content.allVolumes.firstOrNull()
     var selected by remember(content.work.id) {
         mutableStateOf(if (content.completed) ManagedReadingStatus.Finished else ManagedReadingStatus.Unread)
     }
@@ -488,7 +488,8 @@ private fun MetadataForm(
     state: WorkManagementUiState,
     viewModel: WorkManagementViewModel,
 ) {
-    val kind = content.selectedMediaKind.toManagedMediaKind()
+    val kind = (content.allVolumes.firstOrNull { it.selected } ?: content.allVolumes.firstOrNull())
+        ?.toManagedMediaKind() ?: ManagedMediaKind.Ebook
     var query by remember { mutableStateOf(content.work.title) }
     var providerId by remember { mutableStateOf("") }
     var candidate by remember { mutableStateOf<MetadataCandidate?>(null) }
@@ -544,8 +545,8 @@ private fun MetadataForm(
                     providerId,
                     selected,
                     selectedFields,
-                    content.media.flatMap { it.volumes }.firstOrNull { it.selected }?.id
-                        ?: content.media.flatMap { it.volumes }.firstOrNull()?.id,
+                    content.allVolumes.firstOrNull { it.selected }?.id
+                        ?: content.allVolumes.firstOrNull()?.id,
                     applyToAllVolumes = applyToAllVolumes,
                 )
             },
@@ -562,7 +563,7 @@ private fun MediaKindForm(
     blocked: Boolean,
     viewModel: WorkManagementViewModel,
 ) {
-    val current = content.selectedMediaKind.toManagedMediaKind()
+    val current = volume.toManagedMediaKind()
     var selected by remember(volume.id) { mutableStateOf(current) }
     val theme = WarmPageThemeValues
     ManagedMediaKind.entries.forEach { kind ->
@@ -673,7 +674,7 @@ private fun KindleForm(
 ) {
     LaunchedEffect(Unit) { viewModel.loadKindleSettings() }
     val settings = state.kindleSettings
-    val targetVolumes = selectedVolume?.let(::listOf) ?: content.media.flatMap { it.volumes }
+    val targetVolumes = selectedVolume?.let(::listOf) ?: content.allVolumes
     val files = targetVolumes.flatMap { volume ->
         volume.files.filter { it.path.endsWith(".epub", true) || it.path.endsWith(".pdf", true) }
             .map { volume to it }
@@ -760,7 +761,7 @@ private fun DeleteWorkForm(
         text = { Text(stringResource(R.string.management_confirm_delete_work)) },
         confirmButton = {
             TextButton(
-                onClick = { viewModel.deleteWork(content.media.flatMap { it.volumes }.map { it.id }) },
+                onClick = { viewModel.deleteWork(content.allVolumes.map { it.id }) },
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = androidx.compose.material3.MaterialTheme.colorScheme.error,
                 ),
@@ -808,11 +809,19 @@ private fun Field(value: String, onValueChange: (String) -> Unit, label: Int) {
     )
 }
 
-private fun String?.toManagedMediaKind(): ManagedMediaKind = when (this?.uppercase()) {
-    "COMIC" -> ManagedMediaKind.Comic
-    "AUDIOBOOK" -> ManagedMediaKind.Audiobook
-    else -> ManagedMediaKind.Ebook
-}
+private fun VolumeContent.toManagedMediaKind(): ManagedMediaKind =
+    when (suggestedMediaKind?.uppercase()) {
+        "COMIC" -> ManagedMediaKind.Comic
+        "AUDIOBOOK" -> ManagedMediaKind.Audiobook
+        "EBOOK" -> ManagedMediaKind.Ebook
+        else -> when {
+            readerType.equals("audio", ignoreCase = true) -> ManagedMediaKind.Audiobook
+            readerType.equals("comic", ignoreCase = true) -> ManagedMediaKind.Comic
+            format.uppercase() in setOf("CBZ", "CBR", "ZIP") -> ManagedMediaKind.Comic
+            format.uppercase() in setOf("M4B", "MP3", "M4A", "AUDIO") -> ManagedMediaKind.Audiobook
+            else -> ManagedMediaKind.Ebook
+        }
+    }
 
 private fun MetadataCandidate.availableFields(): Set<MetadataField> = buildSet {
     if (coverUrl != null) add(MetadataField.Cover)

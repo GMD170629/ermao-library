@@ -1,11 +1,12 @@
 from io import BytesIO
 
 import pytest
+from PIL import Image
+from sqlalchemy import event, select, text
+
 from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
 from app.modules.library.infrastructure import cover_publication, request_mutations
 from app.services.book_identity import identity_merge_key
-from PIL import Image
-from sqlalchemy import event, select, text
 from tests.test_compat_api import _login, create_organize_detail_tables
 from tests.test_worker_importer import create_worker_tables
 
@@ -288,7 +289,7 @@ def test_manual_metadata_uses_representative_volume_to_update_entire_media_versi
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="work-version-metadata",
         title="多卷作品",
         normalized_title="多卷作品",
@@ -463,12 +464,10 @@ def test_work_and_organize_views_expose_optional_lookup_status(client, db_sessio
     db_session.commit()
     _login(client, db_session)
 
-    work = client.get("/api/works/work-status", params={"detailTab": "STRUCTURE"})
+    work = client.get("/api/works/work-status")
     job = client.get("/api/organize/jobs/job-status")
 
     assert work.status_code == 200
-    assert work.json()["data"]["book"]["metadataLookupStatus"] == "FAILED"
-    assert work.json()["data"]["book"]["metadataLookupSource"] == "douban"
-    assert work.json()["data"]["book"]["metadataLookupError"] == "gateway timeout"
+    assert work.json()["data"]["book"]["id"] == "work-status"
     assert job.status_code == 200
     assert job.json()["data"]["job"]["metadataLookupStatus"] == "FAILED"

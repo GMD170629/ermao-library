@@ -6,10 +6,6 @@ import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
 import com.ermao.library.shared.modules.library.domain.WorkSummary
 import com.ermao.library.shared.modules.library.domain.Volume
-import com.ermao.library.shared.modules.reader.ReaderChapterListMetadata
-import com.ermao.library.shared.modules.reader.ReaderChapterState
-import com.ermao.library.shared.modules.reader.ReaderChapterUnit
-import com.ermao.library.shared.modules.reader.resolveReaderChapterStates
 import java.time.Instant
 
 fun ContentResult.Content<*>.freshness(): ContentFreshness = ContentFreshness.Fresh
@@ -67,34 +63,28 @@ fun HomeSnapshot.hasSectionFailure(): Boolean =
     continueReading is HomeSection.Failure || recentReading is HomeSection.Failure || recentAdded is HomeSection.Failure
 
 fun WorkDetailSummary.toUiContent(): WorkDetailContent {
-    val units = (readingUnits.ifEmpty { activeMedia?.units.orEmpty() })
-        .distinctBy { unit -> unit.id }
-        .sortedBy { unit -> unit.sortOrder }
-    val page = readingUnitsPage
-    val chapterStates = resolveReaderChapterStates(
-        units = units.map {
-            ReaderChapterUnit(
-                href = it.href,
-                sortOrder = it.sortOrder,
-                readingOrderPosition = it.metadata.readingOrderPosition,
-            )
-        },
-        currentHref = activeMedia?.currentHref,
-        currentSortOrder = activeMedia?.currentChapterSortOrder,
-        progressPercent = activeMedia?.progress?.coerceIn(0.0, 100.0) ?: if (completed) 100.0 else 0.0,
-        metadata = ReaderChapterListMetadata(
-            page = page?.page ?: 1,
-            pageSize = page?.pageSize ?: maxOf(1, units.size),
-            currentIndex = activeMedia?.currentChapterIndex,
-        ),
-    )
+    val continueVolumeId = continueVolumeId
+    val versions = versions.map { version ->
+        VersionContent(
+            id = version.id,
+            sourceKey = version.sourceKey,
+            sourceName = version.sourceName,
+            volumeCount = version.volumeCount,
+            volumes = version.volumes.map { volume -> volume.toUiContent(volume.id == continueVolumeId) },
+        )
+    }
+    val selectedVersionId = versions.firstOrNull { version ->
+        version.volumes.any { it.id == continueVolumeId }
+    }?.id ?: versions.firstOrNull()?.id
     return WorkDetailContent(
     work = WorkCard(
         id = id,
         title = title,
         author = author,
         coverUrl = coverUrl,
-        mediaKinds = availableMediaKinds.map { it.wireValue },
+        mediaKinds = versions.flatMap { version ->
+            version.volumes.mapNotNull { volume -> volume.suggestedMediaKind }
+        }.distinct(),
         progressPercent = continueVolumeProgress.toInt().takeIf { it > 0 },
     ),
     seriesId = seriesFacet?.id,
@@ -103,31 +93,10 @@ fun WorkDetailSummary.toUiContent(): WorkDetailContent {
     authorFacetId = authorFacets.firstOrNull()?.id,
     description = description,
     tags = tags,
-    media = mediaVersions.map { media ->
-        MediaContent(
-            kind = media.mediaKind.wireValue,
-            volumeCount = media.volumeCount,
-            volumes = media.volumes.map { volume -> volume.toUiContent(volume.id == continueVolumeId) },
-        )
-    },
-    selectedMediaKind = recentMediaKind?.wireValue,
+    versions = versions,
+    selectedVersionId = selectedVersionId,
     completed = completed,
-    readingUnits = units.mapIndexed { index, unit ->
-            ReadingUnitContent(
-                id = unit.id,
-                title = unit.title?.takeIf(String::isNotBlank) ?: unit.id,
-                progressPercent = activeMedia?.progress?.toInt()
-                    ?.takeIf { chapterStates[index] == ReaderChapterState.Current },
-                href = unit.href,
-                sortOrder = unit.sortOrder,
-                readingOrderPosition = unit.metadata.readingOrderPosition,
-                readingState = when (chapterStates[index]) {
-                    ReaderChapterState.Current -> ChapterReadingState.Current
-                    ReaderChapterState.Read -> ChapterReadingState.Read
-                    ReaderChapterState.Unread -> ChapterReadingState.Unread
-                },
-            )
-        },
+    readingUnits = emptyList(),
     )
 }
 
@@ -136,7 +105,7 @@ fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent
     title = title,
     format = format,
     readerType = readerType,
-    mediaVersionId = mediaVersionId,
+    versionId = versionId,
     volumeIndex = volumeIndex,
     sortOrder = sortOrder,
     publisher = publisher,
@@ -147,6 +116,7 @@ fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent
     narrator = narrator,
     pageCount = pageCount,
     metadataSource = origin,
+    suggestedMediaKind = classification.suggestedMediaKind?.wireValue,
     kindleSendAvailable = kindleSendAvailable,
     files = files.map { file -> VolumeFileContent(file.id, file.path, file.sizeBytes, file.displaySize) },
     coverUrl = coverUrl,

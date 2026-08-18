@@ -2,7 +2,7 @@ package com.ermao.library.shared.modules.library.domain
 
 data class Volume(
     val id: String,
-    val mediaVersionId: String,
+    val versionId: String,
     val title: String,
     val volumeIndex: Double?,
     val sortOrder: Int,

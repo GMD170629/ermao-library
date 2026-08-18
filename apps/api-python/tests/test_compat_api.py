@@ -36,6 +36,7 @@ from app.models.import_pipeline import BookConversionTask, ImportTask, ImportWor
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -245,9 +246,17 @@ def _add_comic_volume(db_session, volume_id: str) -> None:
     db_session.add(media)
     db_session.flush()
     db_session.add(
+        LibraryVersion(
+            id=media_version_id,
+            work_id=work_id,
+            source_key="__implicit__",
+        )
+    )
+    db_session.flush()
+    db_session.add(
         LibraryVolume(
             id=volume_id,
-            media_version_id=media_version_id,
+            version_id=media_version_id,
             title="Comic volume",
             sort_order=0,
             format="COMIC",
@@ -1223,8 +1232,20 @@ def test_works_library_filters_cover_type_status_tags_and_import_state(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES
+                ('comic-ready-media', 'comic-ready', '__implicit__', 'now', 'now'),
+                ('comic-new-media', 'comic-new', '__implicit__', 'now', 'now'),
+                ('epub-ready-media', 'epub-ready', '__implicit__', 'now', 'now'),
+                ('pdf-ready-media', 'pdf-ready', '__implicit__', 'now', 'now')
+            """
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES
                 ('comic-ready-edition', 'comic-ready-media', 'MANUAL', 'Comic', 0, 'CBZ', 'test:comic-ready', 'COMPLETED', 10, 'PENDING', 0, 'now', 'now'),
@@ -1265,7 +1286,7 @@ def test_works_library_filters_cover_type_status_tags_and_import_state(
 
     unread = client.get("/api/works/comic-new").json()["data"]["book"]
     assert unread["completed"] is False
-    assert unread["mediaVersions"][0]["volumes"][0]["progress"] == 0
+    assert unread["versions"][0]["volumes"][0]["progress"] == 0
 
 
 def test_work_detail_epub_reading_units_are_paginated_and_clamped(client, db_session):
@@ -1290,8 +1311,14 @@ def test_work_detail_epub_reading_units_are_paginated_and_clamped(client, db_ses
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (id, workId, sourceKey, createdAt, updatedAt)
+            VALUES ('paged-epub-media', 'paged-epub', '__implicit__', 'now', 'now')"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, volumeIndex, sortOrder, format,
+                id, versionId, origin, title, volumeIndex, sortOrder, format,
                 resourceKey, importStatus, sizeBytes, chapterCount, coverStatus,
                 hidden, createdAt, updatedAt
             ) VALUES (
@@ -1322,34 +1349,34 @@ def test_work_detail_epub_reading_units_are_paginated_and_clamped(client, db_ses
     db_session.commit()
 
     page_two = client.get(
-        "/api/works/paged-epub",
-        params={"chapterPage": 2, "chapterPageSize": 50},
+        "/api/works/paged-epub/volumes/paged-epub-volume/reading-units",
+        params={"page": 2, "pageSize": 50},
     )
     assert page_two.status_code == 200
     page_two_data = page_two.json()["data"]
-    assert page_two_data["readingUnitsPage"] == {
+    assert page_two_data["page"] == {
         "page": 2,
         "pageSize": 50,
         "total": 125,
         "totalPages": 3,
     }
-    assert [unit["title"] for unit in page_two_data["readingUnits"][:2]] == [
+    assert [unit["title"] for unit in page_two_data["units"][:2]] == [
         "第 51 章",
         "第 52 章",
     ]
-    assert page_two_data["readingUnits"][-1]["title"] == "第 100 章"
+    assert page_two_data["units"][-1]["title"] == "第 100 章"
 
     clamped = client.get(
-        "/api/works/paged-epub",
-        params={"chapterPage": 999, "chapterPageSize": 50},
+        "/api/works/paged-epub/volumes/paged-epub-volume/reading-units",
+        params={"page": 999, "pageSize": 50},
     ).json()["data"]
-    assert clamped["readingUnitsPage"] == {
+    assert clamped["page"] == {
         "page": 3,
         "pageSize": 50,
         "total": 125,
         "totalPages": 3,
     }
-    assert [unit["title"] for unit in clamped["readingUnits"]] == [
+    assert [unit["title"] for unit in clamped["units"]] == [
         f"第 {index} 章" for index in range(101, 126)
     ]
 
@@ -1411,8 +1438,16 @@ def test_work_detail_loads_directory_only_for_reflowable_volumes(
         )
         db_session.execute(
             text(
+                """INSERT INTO LibraryVersion (
+                    id, workId, sourceKey, createdAt, updatedAt
+                ) VALUES (:media_id, :work_id, '__implicit__', 'now', 'now')"""
+            ),
+            {"media_id": media_id, "work_id": work_id, "media_kind": media_kind},
+        )
+        db_session.execute(
+            text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, volumeIndex, sortOrder,
+                    id, versionId, origin, title, volumeIndex, sortOrder,
                     format, resourceKey, importStatus, sizeBytes, pageCount,
                     chapterCount, coverStatus, hidden, createdAt, updatedAt
                 ) VALUES (
@@ -1432,12 +1467,20 @@ def test_work_detail_loads_directory_only_for_reflowable_volumes(
         )
     db_session.commit()
 
-    for work_id in ("empty-epub", "comic-detail", "pdf-detail"):
-        detail = client.get(
-            f"/api/works/{work_id}", params={"chapterPageSize": 50}
+    for work_id, volume_id in (
+        ("empty-epub", "empty-epub-volume"),
+        ("comic-detail", "comic-detail-volume"),
+        ("pdf-detail", "pdf-detail-volume"),
+    ):
+        detail = client.get(f"/api/works/{work_id}").json()["data"]
+        assert set(detail) == {"book"}
+        assert detail["book"]["versions"][0]["volumes"][0]["id"] == volume_id
+        units = client.get(
+            f"/api/works/{work_id}/volumes/{volume_id}/reading-units",
+            params={"pageSize": 50},
         ).json()["data"]
-        assert detail["readingUnits"] == []
-        assert detail["readingUnitsPage"] == {
+        assert units["units"] == []
+        assert units["page"] == {
             "page": 1,
             "pageSize": 50,
             "total": 0,
@@ -1451,16 +1494,10 @@ def test_work_detail_loads_directory_only_for_reflowable_volumes(
         "app.modules.library.presentation.http.ensure_publication_navigation",
         fail_if_publication_navigation_is_requested,
     )
-    comic = client.get("/api/works/comic-detail", params={"detailTab": "COMIC"}).json()[
-        "data"
-    ]
-    assert comic["activeMedia"]["selectedVolumeId"] == "comic-detail-volume"
-    assert comic["readingUnits"] == []
-    pdf = client.get("/api/works/pdf-detail", params={"detailTab": "EBOOK"}).json()[
-        "data"
-    ]
-    assert pdf["activeMedia"]["selectedVolumeId"] == "pdf-detail-volume"
-    assert pdf["readingUnits"] == []
+    comic = client.get("/api/works/comic-detail").json()["data"]
+    assert comic["book"]["versions"][0]["volumes"][0]["id"] == "comic-detail-volume"
+    pdf = client.get("/api/works/pdf-detail").json()["data"]
+    assert pdf["book"]["versions"][0]["volumes"][0]["id"] == "pdf-detail-volume"
 
 
 def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(
@@ -1503,8 +1540,16 @@ def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(
         )
         db_session.execute(
             text(
+                """INSERT INTO LibraryVersion (
+                    id, workId, sourceKey, createdAt, updatedAt
+                ) VALUES (:id, :work_id, '__implicit__', 'now', 'now')"""
+            ),
+            {"id": f"{work_id}-media", "work_id": work_id},
+        )
+        db_session.execute(
+            text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                    id, versionId, origin, title, sortOrder, format, resourceKey,
                     importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
                 ) VALUES (
                     :id, :media_id, 'MANUAL', :title, 0, 'EPUB', :resource_key,
@@ -1521,7 +1566,7 @@ def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(
     db_session.execute(
         text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, volumeIndex, sortOrder, format,
+                id, versionId, origin, title, volumeIndex, sortOrder, format,
                 resourceKey, importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'work-new-volume-2', 'work-new-media', 'MANUAL', '第二卷', 2, 1,
@@ -1575,10 +1620,7 @@ def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(
     assert continue_item["progress"] == 50
 
     db_session.execute(
-        text(
-            "UPDATE LibraryVolume SET hidden = 1 "
-            "WHERE mediaVersionId = 'work-new-media'"
-        )
+        text("UPDATE LibraryVolume SET hidden = 1 WHERE versionId = 'work-new-media'")
     )
     db_session.commit()
     fallback = client.get("/api/dashboard/continue-reading").json()["data"]["item"]
@@ -1653,8 +1695,18 @@ def test_works_sortable_metadata_fields_support_both_directions(client, db_sessi
         )
         db_session.execute(
             text(
+                """INSERT INTO LibraryVersion (
+                    id, workId, sourceKey, createdAt, updatedAt
+                ) VALUES (
+                    :id, :work_id, '__implicit__', 'now', 'now'
+                )"""
+            ),
+            {"id": f"{work_id}-media", "work_id": work_id},
+        )
+        db_session.execute(
+            text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                    id, versionId, origin, title, sortOrder, format, resourceKey,
                     publisher, importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
                 ) VALUES (
                     :id, :media_id, 'MANUAL', :title, 0, 'EPUB', :resource_key,
@@ -1784,8 +1836,18 @@ def test_bulk_works_delete_records_removes_selected_books(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'bulk-delete-media', 'bulk-delete-1', '__implicit__',
+                '2026-06-11T00:00:00', '2026-06-11T00:00:00'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, chapterCount, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'bulk-delete-edition', 'bulk-delete-media', 'MANUAL', 'Default', 0,
@@ -1913,8 +1975,18 @@ def _create_bulk_management_fixture(db_session):
         )
         db_session.execute(
             text(
+                """INSERT INTO LibraryVersion (
+                    id, workId, sourceKey, createdAt, updatedAt
+                ) VALUES (
+                    :id, :work_id, '__implicit__', '2026-07-20T00:00:00', '2026-07-20T00:00:00'
+                )"""
+            ),
+            {"id": f"{work_id}-media", "work_id": work_id},
+        )
+        db_session.execute(
+            text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                    id, versionId, origin, title, sortOrder, format, resourceKey,
                     language, publisher, importStatus, sizeBytes, coverStatus, hidden,
                     createdAt, updatedAt
                 ) VALUES (
@@ -2067,7 +2139,7 @@ def test_bulk_cover_crop_compress_replace_and_regenerate(
         db_session.execute(
             text(
                 "UPDATE LibraryVolume SET coverPath = :path, coverStatus = 'READY' "
-                "WHERE mediaVersionId = :media_id"
+                "WHERE versionId = :media_id"
             ),
             {
                 "path": str(source.relative_to(test_settings.resolved_storage_root)),
@@ -2171,8 +2243,18 @@ def test_delete_work_removes_storage_managed_files_only(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'delete-media', 'delete-with-files', '__implicit__',
+                '2026-06-11T00:00:00', '2026-06-11T00:00:00'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, volumeIndex, sortOrder, format,
+                id, versionId, origin, title, volumeIndex, sortOrder, format,
                 resourceKey, importStatus, sizeBytes, chapterCount, coverPath,
                 coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
@@ -2323,8 +2405,18 @@ def test_delete_work_preserves_linked_source_inside_storage_by_default(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'preserve-source-media', 'preserve-source-work', '__implicit__',
+                '2026-07-19T00:00:00', '2026-07-19T00:00:00'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'preserve-source-edition', 'preserve-source-media', 'MANUAL', 'Default',
@@ -2405,6 +2497,16 @@ def test_delete_import_task_supports_record_and_source_scopes_only(
             )"""
         )
     )
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'conversion-cleanup-media', 'conversion-cleanup-work', '__implicit__',
+                '2026-07-19T00:00:00', '2026-07-19T00:00:00'
+            )"""
+        )
+    )
 
     paths: dict[str, tuple[Path, Path]] = {}
     for suffix in ["record", "source", "converted"]:
@@ -2428,7 +2530,7 @@ def test_delete_import_task_supports_record_and_source_scopes_only(
         db_session.execute(
             text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, sortOrder, format,
+                    id, versionId, origin, title, sortOrder, format,
                     resourceKey, importStatus, sizeBytes, coverStatus, hidden,
                     createdAt, updatedAt
                 ) VALUES (
@@ -2558,13 +2660,23 @@ def test_delete_import_task_only_deletes_its_linked_volume(
             )"""
         )
     )
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'linked-delete-media', 'linked-delete-work', '__implicit__',
+                '2026-07-19T00:00:00', '2026-07-19T00:00:00'
+            )"""
+        )
+    )
     for index in [1, 2]:
         managed_file = managed_root / f"volume-{index}.epub"
         managed_file.write_bytes(f"managed-{index}".encode())
         db_session.execute(
             text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                    id, versionId, origin, title, sortOrder, format, resourceKey,
                     importStatus, sizeBytes, chapterCount, coverStatus, hidden,
                     createdAt, updatedAt
                 ) VALUES (
@@ -2601,7 +2713,7 @@ def test_delete_import_task_only_deletes_its_linked_volume(
     db_session.execute(
         text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, chapterCount, coverStatus, hidden,
                 createdAt, updatedAt
             ) VALUES (
@@ -2784,7 +2896,7 @@ def test_delete_import_task_matches_volume_by_file_path_without_work_link(
     library_path.write_bytes(b"path-linked")
 
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="path-linked-work",
         origin="MANUAL",
         title="Path linked work",
@@ -2798,9 +2910,14 @@ def test_delete_import_task_matches_volume_by_file_path_without_work_link(
         work_id=work.id,
         media_kind="EBOOK",
     )
+    version = LibraryVersion(
+        id="path-linked-media",
+        work_id=work.id,
+        source_key="__implicit__",
+    )
     volume = LibraryVolume(
         id="path-linked-volume",
-        media_version_id=media.id,
+        version_id=media.id,
         title="Path linked volume",
         sort_order=0,
         format="EPUB",
@@ -2830,6 +2947,8 @@ def test_delete_import_task_matches_volume_by_file_path_without_work_link(
     db_session.add(work)
     db_session.flush()
     db_session.add(media)
+    db_session.flush()
+    db_session.add(version)
     db_session.flush()
     db_session.add(volume)
     db_session.flush()
@@ -2924,8 +3043,17 @@ def test_regenerate_cover_uses_first_sorted_volume(client, db_session, test_sett
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'comic-media', 'work-cover', '__implicit__', 'now', 'now'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, volumeIndex, sortOrder, format,
+                id, versionId, origin, title, volumeIndex, sortOrder, format,
                 resourceKey, importStatus, sizeBytes, pageCount, coverPath,
                 coverStatus, hidden, createdAt, updatedAt
             ) VALUES
@@ -2998,8 +3126,17 @@ def test_cover_endpoints_serve_default_without_mutating_existing_entries(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'media-default', 'work-default', '__implicit__', 'now', 'now'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'volume-default', 'media-default', 'MANUAL', '正文', 0, 'EPUB',
@@ -3084,8 +3221,17 @@ def test_small_cover_endpoints_compress_cache_and_preserve_other_variants(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'media-small-cover', 'work-small-cover', '__implicit__', 'now', 'now'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'volume-small-cover', 'media-small-cover', 'MANUAL', '正文', 0,
@@ -3229,6 +3375,16 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
                 id, workId, mediaKind, createdAt, updatedAt
             ) VALUES (
                 'media-contract', 'work-contract', 'EBOOK', '2026-06-11T00:00:00',
+                '2026-06-11T00:00:00'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'media-contract', 'work-contract', '__implicit__', '2026-06-11T00:00:00',
                 '2026-06-11T00:00:00'
             )"""
         )
@@ -3477,8 +3633,18 @@ def test_import_tasks_return_logs_summary_and_rescan_contract(client, db_session
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'media-import', 'work-import', '__implicit__',
+                '2026-06-11T00:00:00', '2026-06-11T00:00:00'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'volume-import', 'media-import', 'WATCH', 'Imported source', 0,
@@ -3747,17 +3913,13 @@ def test_library_and_system_settings_mutations(
     assert child_tree.status_code == 200
     assert child_tree.json()["data"]["node"]["children"][0]["name"] == "nested"
 
-    alias_tree = client.get(
-        "/api/libraries/tree", params={"path": str(monitor_alias)}
-    )
+    alias_tree = client.get("/api/libraries/tree", params={"path": str(monitor_alias)})
     assert alias_tree.status_code == 200
     assert alias_tree.json()["data"]["node"]["path"] == str(
         test_settings.resolved_monitor_root.resolve()
     )
 
-    outside_tree = client.get(
-        "/api/libraries/tree", params={"path": str(second_root)}
-    )
+    outside_tree = client.get("/api/libraries/tree", params={"path": str(second_root)})
     assert outside_tree.status_code == 200
     assert outside_tree.json()["data"]["node"]["path"] == str(second_root.resolve())
 
@@ -3779,7 +3941,8 @@ def test_library_and_system_settings_mutations(
         "/api/libraries",
         json={
             "name": "Inbox",
-            "rootPath": str(test_settings.resolved_monitor_root), "organizationMode": "FLAT",
+            "rootPath": str(test_settings.resolved_monitor_root),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -3820,12 +3983,18 @@ def test_library_and_system_settings_mutations(
 
     symlink_duplicate = client.post(
         "/api/libraries",
-        json={"name": "Alias", "rootPath": str(monitor_alias), "organizationMode": "FLAT", "enabled": True},
+        json={
+            "name": "Alias",
+            "rootPath": str(monitor_alias),
+            "organizationMode": "FLAT",
+            "enabled": True,
+        },
     )
     assert symlink_duplicate.status_code == 409
 
     empty_path = client.post(
-        "/api/libraries", json={"name": "No Path", "rootPath": " ", "organizationMode": "FLAT"}
+        "/api/libraries",
+        json={"name": "No Path", "rootPath": " ", "organizationMode": "FLAT"},
     )
     assert empty_path.status_code == 400
     assert empty_path.json()["ok"] is False
@@ -3839,7 +4008,11 @@ def test_library_and_system_settings_mutations(
 
     unavailable_path = client.post(
         "/api/libraries",
-        json={"name": "Missing", "rootPath": str(second_root / "missing"), "organizationMode": "FLAT"},
+        json={
+            "name": "Missing",
+            "rootPath": str(second_root / "missing"),
+            "organizationMode": "FLAT",
+        },
     )
     assert unavailable_path.status_code == 404
 
@@ -3850,21 +4023,33 @@ def test_library_and_system_settings_mutations(
         )
         unreadable_path = client.post(
             "/api/libraries",
-            json={"name": "Unreadable", "rootPath": str(second_root), "organizationMode": "FLAT"},
+            json={
+                "name": "Unreadable",
+                "rootPath": str(second_root),
+                "organizationMode": "FLAT",
+            },
         )
     assert unreadable_path.status_code == 400
     assert unreadable_path.json()["error"]["code"] == "INVALID_LIBRARY_PATH"
 
     second = client.post(
         "/api/libraries",
-        json={"name": "Second Inbox", "rootPath": str(second_root), "organizationMode": "FLAT", "enabled": True},
+        json={
+            "name": "Second Inbox",
+            "rootPath": str(second_root),
+            "organizationMode": "FLAT",
+            "enabled": True,
+        },
     )
     assert second.status_code == 201
     second_folder_id = second.json()["data"]["library"]["id"]
 
     collision = client.put(
         f"/api/libraries/{second_folder_id}",
-        json={"rootPath": str(test_settings.resolved_monitor_root), "organizationMode": "FLAT"},
+        json={
+            "rootPath": str(test_settings.resolved_monitor_root),
+            "organizationMode": "FLAT",
+        },
     )
     assert collision.status_code == 409
     assert collision.json()["ok"] is False
@@ -3899,7 +4084,8 @@ def test_library_delete_rolls_back_when_audit_event_fails(
         "/api/libraries",
         json={
             "name": "Rollback Inbox",
-            "rootPath": str(test_settings.resolved_monitor_root), "organizationMode": "FLAT",
+            "rootPath": str(test_settings.resolved_monitor_root),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -4038,21 +4224,15 @@ def test_raw_text_detail_preserves_source_format_without_conversion_action(
     imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=source, origin="MANUAL", original_name=source.name
-        ),
+        _options(source_file_path=source, origin="MANUAL", original_name=source.name),
     )
 
-    detail = client.get(
-        f"/api/works/{imported.work_id}",
-        params={"detailTab": "EBOOK", "volumeId": imported.volume_id},
-    )
+    detail = client.get(f"/api/works/{imported.work_id}")
     assert detail.status_code == 200
-    raw_media = detail.json()["data"]["book"]["mediaVersions"][0]
+    raw_media = detail.json()["data"]["book"]["versions"][0]
     raw_volume = raw_media["volumes"][0]
     assert raw_volume["format"] == "TXT"
     assert "conversionAvailable" not in raw_volume
-    assert detail.json()["data"]["activeMedia"]["primaryAction"] is not None
     ebook_list = client.get("/api/works?type=ebook")
     assert [book["id"] for book in ebook_list.json()["data"]["books"]] == [
         imported.work_id
@@ -4066,7 +4246,7 @@ def test_raw_text_detail_preserves_source_format_without_conversion_action(
         "book"
     ]
     assert [
-        volume["format"] for volume in unchanged_detail["mediaVersions"][0]["volumes"]
+        volume["format"] for volume in unchanged_detail["versions"][0]["volumes"]
     ] == ["TXT"]
 
 
@@ -4095,7 +4275,8 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
         "/api/libraries",
         json={
             "name": "Scan scope",
-            "rootPath": str(scan_root), "organizationMode": "FLAT",
+            "rootPath": str(scan_root),
+            "organizationMode": "FLAT",
             "enabled": True,
             "ignoreHidden": True,
             "minFileSizeBytes": 6,
@@ -4183,7 +4364,8 @@ def test_scan_job_list_cancel_and_resubmit_contract(client, db_session, test_set
         "/api/libraries",
         json={
             "name": "Cancelable scan",
-            "rootPath": str(scan_root), "organizationMode": "FLAT",
+            "rootPath": str(scan_root),
+            "organizationMode": "FLAT",
             "enabled": True,
             "minFileSizeBytes": 0,
         },
@@ -4239,7 +4421,8 @@ def test_scan_selected_audiobook_directory_queues_one_directory_bundle(
         "/api/libraries",
         json={
             "name": "Audiobooks",
-            "rootPath": str(scan_root), "organizationMode": "FLAT",
+            "rootPath": str(scan_root),
+            "organizationMode": "FLAT",
             "enabled": True,
             "minFileSizeBytes": 0,
         },
@@ -4373,7 +4556,8 @@ def test_management_overview_events_and_folders(client, db_session, test_setting
         "/api/libraries",
         json={
             "name": "Inbox",
-            "rootPath": str(test_settings.resolved_monitor_root), "organizationMode": "FLAT",
+            "rootPath": str(test_settings.resolved_monitor_root),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -5597,8 +5781,15 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
         )
         db_session.execute(
             text(
+                """INSERT INTO LibraryVersion (
+                    id, workId, sourceKey, createdAt, updatedAt
+                ) VALUES ('media-ebook-bangumi', 'work-ebook-bangumi', '__implicit__', 'now', 'now')"""
+            )
+        )
+        db_session.execute(
+            text(
                 """INSERT INTO LibraryVolume (
-                    id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                    id, versionId, origin, title, sortOrder, format, resourceKey,
                     importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
                 ) VALUES (
                     'volume-ebook-bangumi', 'media-ebook-bangumi', 'MANUAL', '正文', 0,
@@ -5755,8 +5946,17 @@ def test_backup_create_download_and_restore_database_export(
     )
     db_session.execute(
         text(
+            """INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'backup-media-version', 'backup-work', '__implicit__', 'now', 'now'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
             """INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, chapterCount, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'backup-volume', 'backup-media-version', 'MANUAL', '正文', 0, 'EPUB',
@@ -5955,7 +6155,12 @@ def test_upload_saves_to_monitored_directory_without_creating_import_task(
     upload_dir = _managed_fixture_dir(test_settings, "uploads")
     monitored = client.post(
         "/api/libraries",
-        json={"name": "Upload monitor", "rootPath": str(upload_dir), "organizationMode": "FLAT", "enabled": True},
+        json={
+            "name": "Upload monitor",
+            "rootPath": str(upload_dir),
+            "organizationMode": "FLAT",
+            "enabled": True,
+        },
     )
     assert monitored.status_code == 201
 
@@ -5994,7 +6199,8 @@ def test_upload_saves_to_nested_directory_inside_enabled_library(
         "/api/libraries",
         json={
             "name": "Nested upload monitor",
-            "rootPath": str(monitor_root), "organizationMode": "FLAT",
+            "rootPath": str(monitor_root),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -6004,14 +6210,13 @@ def test_upload_saves_to_nested_directory_inside_enabled_library(
         "/api/libraries",
         json={
             "name": "Disabled upload monitor",
-            "rootPath": str(disabled_root), "organizationMode": "FLAT",
+            "rootPath": str(disabled_root),
+            "organizationMode": "FLAT",
             "enabled": False,
         },
     )
     assert disabled.status_code == 201
-    selectable_folders = client.get(
-        "/api/libraries", params={"purpose": "upload"}
-    )
+    selectable_folders = client.get("/api/libraries", params={"purpose": "upload"})
     assert selectable_folders.status_code == 200
     selectable_ids = [
         folder["id"] for folder in selectable_folders.json()["data"]["libraries"]
@@ -6107,7 +6312,8 @@ def test_upload_rejects_symlink_escape_from_enabled_library(
         "/api/libraries",
         json={
             "name": "Symlink uploads",
-            "rootPath": str(monitor_root), "organizationMode": "FLAT",
+            "rootPath": str(monitor_root),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -6139,7 +6345,8 @@ def test_upload_requires_access_to_the_covering_library(
         "/api/libraries",
         json={
             "name": "Restricted uploads",
-            "rootPath": str(upload_dir), "organizationMode": "FLAT",
+            "rootPath": str(upload_dir),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -6191,7 +6398,8 @@ def test_upload_uses_a_numbered_name_when_the_target_already_exists(
         "/api/libraries",
         json={
             "name": "Duplicate uploads",
-            "rootPath": str(upload_dir), "organizationMode": "FLAT",
+            "rootPath": str(upload_dir),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )
@@ -6238,7 +6446,12 @@ def test_upload_rolls_back_files_when_atomic_publication_fails(
     upload_dir = _managed_fixture_dir(test_settings, "atomic-uploads")
     monitored = client.post(
         "/api/libraries",
-        json={"name": "Atomic uploads", "rootPath": str(upload_dir), "organizationMode": "FLAT", "enabled": True},
+        json={
+            "name": "Atomic uploads",
+            "rootPath": str(upload_dir),
+            "organizationMode": "FLAT",
+            "enabled": True,
+        },
     )
     assert monitored.status_code == 201
     original_copy = AtomicUploadedFilePublisher._copy_stream
@@ -6375,9 +6588,7 @@ def test_reader_v4_bootstrap_is_volume_scoped_and_reader_v2_is_removed(
     comic_imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     epub_payload = {
         "volumeId": epub_imported.volume_id,
@@ -6391,7 +6602,7 @@ def test_reader_v4_bootstrap_is_volume_scoped_and_reader_v2_is_removed(
     assert epub_data["readerType"] == "reflowable"
     assert epub_data["sourceFormat"] == "epub"
     assert epub_data["volume"]["id"] == epub_payload["volumeId"]
-    assert epub_data["mediaVersion"]["workId"] == epub_payload["workId"]
+    assert epub_data["version"]["workId"] == epub_payload["workId"]
     assert "edition" not in epub_data
     assert len(epub_data["units"]) == 2
     assert [unit["title"] for unit in epub_data["units"]] == ["第一节", "第二节"]
@@ -6552,9 +6763,7 @@ def legacy_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next
     imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     payload = {
         "volumeId": imported.volume_id,
@@ -6872,9 +7081,7 @@ def legacy_volume_move_reorders_epub_and_comic_volumes_and_rejects_cross_work(
     comic_imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     comic_payload = {
         "volumeId": comic_imported.volume_id,
@@ -7024,7 +7231,8 @@ def test_imported_pdf_supports_stream_bootstrap_and_v4_progress(
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
     assert data["readerType"] == "pdf"
-    assert data["mediaVersion"]["mediaKind"] == "EBOOK"
+    assert data["version"]["workId"] == imported.work_id
+    assert "mediaKind" not in data["version"]
     assert data["volume"]["format"] == "PDF"
     assert data["volume"]["pageCount"] >= 1
     assert len(data["units"]) == 1
@@ -7105,9 +7313,7 @@ def test_imported_comic_serves_archive_page(
     imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     volume_id = imported.volume_id
     assert (
@@ -7259,9 +7465,7 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
     assert original.headers["content-type"].startswith("image/jpeg")
     assert original.headers["x-comic-image-variant"] == "original"
 
-    data_saver = client.get(
-        page_url, params={"imageVariant": "data-saver"}
-    )
+    data_saver = client.get(page_url, params={"imageVariant": "data-saver"})
     assert data_saver.status_code == 200
     assert data_saver.content[:4] == b"RIFF"
     assert data_saver.content[8:12] == b"WEBP"
@@ -7359,9 +7563,7 @@ def test_volume_pages_require_persisted_comic_page_index(
     imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     volume_id = imported.volume_id
     preserved_updated_at = "2026-08-11T08:00:00.000Z"
@@ -7471,9 +7673,7 @@ def test_archive_page_streams_are_limited_and_logged(
     imported = import_managed_book(
         db_session,
         test_settings,
-        _options(
-            source_file_path=comic, origin="MANUAL", original_name=comic.name
-        ),
+        _options(source_file_path=comic, origin="MANUAL", original_name=comic.name),
     )
     volume_id = imported.volume_id
     bootstrap = client.get(f"/api/reader/v4/volumes/{volume_id}/bootstrap")

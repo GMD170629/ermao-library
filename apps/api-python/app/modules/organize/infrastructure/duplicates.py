@@ -34,7 +34,9 @@ def prepare_duplicate_actions_write(
 ) -> PreparedDuplicateWrite:
     """Load merge projections and build every mutation before the write UoW."""
 
-    merge_actions = tuple(action for action in actions if action.action == "MERGE_WORKS")
+    merge_actions = tuple(
+        action for action in actions if action.action == "MERGE_WORKS"
+    )
     source_ids = tuple(dict.fromkeys(action.source_work_id for action in merge_actions))
     target_ids = tuple(dict.fromkeys(action.target_work_id for action in merge_actions))
     all_work_ids = source_ids + tuple(
@@ -65,11 +67,11 @@ def prepare_duplicate_actions_write(
             db.execute(
                 select(
                     LibraryVolume.id,
-                    LibraryVolume.media_version_id,
+                    LibraryVolume.version_id,
                     LibraryVolume.sort_order,
                     LibraryVolume.created_at,
                 )
-                .where(LibraryVolume.media_version_id.in_(version_ids))
+                .where(LibraryVolume.version_id.in_(version_ids))
                 .order_by(
                     LibraryVolume.sort_order.asc(),
                     LibraryVolume.created_at.asc(),
@@ -88,7 +90,7 @@ def prepare_duplicate_actions_write(
     volumes_by_version: dict[str, list[object]] = {}
     next_order_by_version: dict[str, int] = {}
     for row in volume_rows:
-        version_id = str(row.media_version_id)
+        version_id = str(row.version_id)
         volumes_by_version.setdefault(version_id, []).append(row)
         next_order_by_version[version_id] = max(
             next_order_by_version.get(version_id, 0), int(row.sort_order or 0) + 1
@@ -167,9 +169,7 @@ def prepare_duplicate_actions_write(
                     MetadataLookupTask.volume_id.is_not(None),
                 )
                 .values(
-                    work_id=case(
-                        merge_work_targets, value=MetadataLookupTask.work_id
-                    ),
+                    work_id=case(merge_work_targets, value=MetadataLookupTask.work_id),
                     updated_at=merge_actions[0].timestamp,
                 )
             )
@@ -250,7 +250,7 @@ def duplicate_entity_as_legacy_dict(entity: DuplicateCandidate) -> dict[str, Any
 def volume_entity_as_dict(entity: LibraryVolume) -> dict[str, Any]:
     return {
         "id": entity.id,
-        "mediaVersionId": entity.media_version_id,
+        "mediaVersionId": entity.version_id,
         "title": entity.title,
         "volumeIndex": entity.volume_index,
         "sortOrder": entity.sort_order,
@@ -304,9 +304,7 @@ def dismiss_pending_duplicates(db: Session, job_id: str) -> None:
     )
 
 
-def dismiss_pending_duplicates_for_jobs(
-    db: Session, job_ids: tuple[str, ...]
-) -> None:
+def dismiss_pending_duplicates_for_jobs(db: Session, job_ids: tuple[str, ...]) -> None:
     if not job_ids or not _has_table(db, "DuplicateCandidate"):
         return
     db.execute(
@@ -345,9 +343,7 @@ def insert_duplicate_candidate(
     )
 
 
-def insert_duplicate_candidates(
-    db: Session, rows: tuple[dict[str, Any], ...]
-) -> None:
+def insert_duplicate_candidates(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
     """Insert a prepared duplicate-candidate batch in one typed statement."""
     if not rows:
         return
@@ -372,7 +368,7 @@ def first_visible_volume(db: Session, work_id: str) -> dict[str, Any] | None:
         select(LibraryVolume)
         .join(
             LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryMediaVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryMediaVersion.work_id == work_id,

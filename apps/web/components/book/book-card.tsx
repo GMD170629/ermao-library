@@ -46,7 +46,7 @@ export function BookCard({
   const { t: i18nAttribute } = useAttributeI18n();
   const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
   const continueVolume = volumeById(book, book.continueVolumeId);
-  const mediaKinds = book.mediaVersions.map((mediaVersion) => mediaVersion.mediaKind) as CardMediaKind[];
+  const mediaKinds = (book.availableMediaKinds ?? []) as CardMediaKind[];
   const hasProgress = Boolean(continueVolume && continueVolume.progress > 0 && continueVolume.progress < 100);
   const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allWorkVolumes(book).some((volume) => volume.progress > 0) ? 'READING' : 'UNREAD', mediaKinds);
 

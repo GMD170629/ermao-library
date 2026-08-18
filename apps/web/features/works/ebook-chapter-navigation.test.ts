@@ -18,16 +18,13 @@ test('isReflowableEbookFormat rejects comic, pdf, audio, and unknown values', ()
   }
 });
 
-test('hasEbookChapterNavigation follows format across classified media tabs', () => {
-  assert.equal(hasEbookChapterNavigation('EBOOK', 'MOBI'), true);
-  assert.equal(hasEbookChapterNavigation('EBOOK', 'EPUB'), true);
-  assert.equal(hasEbookChapterNavigation('EBOOK', 'TXT'), true);
-  assert.equal(hasEbookChapterNavigation('EBOOK', 'FB2'), true);
-  assert.equal(hasEbookChapterNavigation('STRUCTURE', 'MOBI'), false);
-  assert.equal(hasEbookChapterNavigation('COMIC', 'EPUB'), true);
-  assert.equal(hasEbookChapterNavigation('AUDIOBOOK', 'EPUB'), true);
-  assert.equal(hasEbookChapterNavigation('EBOOK', 'PDF'), false);
-  assert.equal(hasEbookChapterNavigation('EBOOK', null), false);
+test('hasEbookChapterNavigation follows format', () => {
+  assert.equal(hasEbookChapterNavigation('MOBI'), true);
+  assert.equal(hasEbookChapterNavigation('EPUB'), true);
+  assert.equal(hasEbookChapterNavigation('TXT'), true);
+  assert.equal(hasEbookChapterNavigation('FB2'), true);
+  assert.equal(hasEbookChapterNavigation('PDF'), false);
+  assert.equal(hasEbookChapterNavigation(null), false);
 });
 
 test('chapterDeepLinkHref keeps EPUB hrefs including fragments', () => {

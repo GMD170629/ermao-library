@@ -128,56 +128,58 @@ actor SharedContentClient: ContentClient {
             context: sharedContext(context),
             query: ErmaoShared.WorkDetailQuery(
                 workId: query.workID,
-                mediaKind: query.mediaKind?.rawValue,
                 volumeId: query.volumeID
             )
         )
         let value: ErmaoShared.WorkDetailSummary = try contentValue(result)
-        let mediaKinds = value.availableMediaKinds.compactMap(mapMediaKind)
-        let selectedKind = mapMediaKind(value.selectedDetailTab)
-        let selectedVersions = value.mediaVersions.filter {
-            mapMediaKind($0.mediaKind) == selectedKind
+        let versions = value.versions.map { version in
+            WorkVersionContent(
+                id: version.id,
+                sourceKey: version.sourceKey,
+                sourceName: version.sourceName,
+                volumes: version.volumes.map { volume in
+                    mapVolume(volume, selectedVolumeID: nil)
+                },
+                volumeCount: Int(version.volumeCount)
+            )
         }
-        let selectedVolumeCount = selectedVersions.reduce(0) { $0 + Int($1.volumeCount) }
+        let allVolumes = versions.flatMap(\.volumes)
         let selectedVolumeID = query.volumeID
-            ?? value.activeMedia?.selectedVolumeId
             ?? value.continueVolumeId
-            ?? selectedVersions.flatMap(\.volumes).first?.id
-        let volumes = selectedVersions.flatMap(\.volumes).map { volume in
+            ?? allVolumes.first(where: { ($0.progress ?? 0) < 100 })?.id
+            ?? allVolumes.first?.id
+        let selectedVersionId = query.versionId
+            ?? versions.first(where: { version in version.volumes.contains(where: { $0.id == selectedVolumeID }) })?.id
+            ?? versions.first?.id
+        let selectedVersion = versions.first(where: { $0.id == selectedVersionId }) ?? versions.first
+        let volumes = (selectedVersion?.volumes ?? []).map { volume in
             WorkVolume(
                 id: volume.id,
-                mediaVersionID: volume.mediaVersionId,
+                versionID: volume.versionID,
                 title: volume.title,
-                formatLabel: volume.format,
-                volumeIndex: volume.volumeIndex?.doubleValue,
-                cover: cover(volume.coverUrl),
-                sizeLabel: ByteCountFormatter.string(
-                    fromByteCount: volume.sizeBytes,
-                    countStyle: .file
-                ),
-                progress: volume.progress > 0 ? volume.progress : nil,
-                isReadable: volume.readable,
+                formatLabel: volume.formatLabel,
+                readerType: volume.readerType,
+                suggestedMediaKind: volume.suggestedMediaKind,
+                volumeIndex: volume.volumeIndex,
+                cover: volume.cover,
+                sizeLabel: volume.sizeLabel,
+                progress: volume.progress,
+                isReadable: volume.isReadable,
                 isSelected: volume.id == selectedVolumeID,
-                sortOrder: Int(volume.sortOrder),
+                sortOrder: volume.sortOrder,
                 publisher: volume.publisher,
                 publishedAt: volume.publishedAt,
                 language: volume.language,
                 isbn: volume.isbn,
                 identifier: volume.identifier,
                 narrator: volume.narrator,
-                pageCount: volume.pageCount?.intValue,
-                metadataSource: volume.origin,
+                pageCount: volume.pageCount,
+                metadataSource: volume.metadataSource,
                 kindleSendAvailable: volume.kindleSendAvailable,
-                files: volume.files.map {
-                    WorkVolumeFile(
-                        id: $0.id,
-                        path: $0.path,
-                        sizeBytes: $0.sizeBytes,
-                        displaySize: $0.displaySize
-                    )
-                }
+                files: volume.files
             )
         }
+        let selectedVolumeCount = selectedVersion?.volumeCount ?? volumes.count
         let selectedProgress = value.continueVolumeProgress > 0 ? value.continueVolumeProgress : nil
         let readingStatus: LibraryReadingStatus = if value.completed {
             .finished
@@ -186,49 +188,6 @@ actor SharedContentClient: ContentClient {
         } else {
             .unread
         }
-        let currentChapterProgress = value.activeMedia?.progress ?? 0
-        let readingUnits = value.readingUnits.isEmpty
-            ? value.activeMedia?.units ?? []
-            : value.readingUnits
-        let chapterUnits = readingUnits.filter { $0.volumeId == selectedVolumeID }
-        let readerChapterUnits: [ErmaoShared.ReaderChapterUnit] = chapterUnits.map {
-            ErmaoShared.ReaderChapterUnit(
-                href: $0.href,
-                sortOrder: Int32($0.sortOrder),
-                readingOrderPosition: $0.metadata.readingOrderPosition
-            )
-        }
-        let chapterStates = ErmaoShared.PublicKt.resolveReaderChapterStates(
-            units: readerChapterUnits,
-            currentHref: value.activeMedia?.currentHref,
-            currentSortOrder: value.activeMedia?.currentChapterSortOrder,
-            progressPercent: currentChapterProgress,
-            metadata: ErmaoShared.ReaderChapterListMetadata(
-                page: 1,
-                pageSize: Int32(max(1, chapterUnits.count)),
-                currentIndex: value.activeMedia?.currentChapterIndex
-            )
-        )
-        let chapters = chapterUnits.enumerated().compactMap { index, unit -> WorkChapter? in
-            guard unit.volumeId == selectedVolumeID,
-                  let title = unit.title,
-                  !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            let state: WorkChapterReadingState = switch chapterStates[index] {
-            case .current: .current
-            case .read: .read
-            default: .unread
-            }
-            return WorkChapter(
-                id: unit.id,
-                title: title,
-                progress: state == .current && currentChapterProgress > 0 ? currentChapterProgress : nil,
-                isCurrent: state == .current,
-                href: unit.href,
-                sortOrder: Int(unit.sortOrder),
-                readingOrderPosition: unit.metadata.readingOrderPosition.map { Int($0.intValue) },
-                state: state
-            )
-        }
         return WorkDetailContent(
             work: WorkCard(
                 id: value.id,
@@ -236,27 +195,27 @@ actor SharedContentClient: ContentClient {
                 author: value.author,
                 cover: cover(value.coverUrl),
                 progress: selectedProgress,
-                availableMediaKinds: mediaKinds
+                availableMediaKinds: []
             ),
             description: value.description_,
             tags: value.tags,
             seriesFacet: value.seriesFacet.map(mapFacet),
             seriesIndex: value.seriesIndex?.doubleValue,
             authorFacets: value.authorFacets.map(mapFacet),
-            availableMediaKinds: mediaKinds,
-            selectedMediaKind: selectedKind,
+            versions: versions,
+            selectedVersionId: selectedVersionId,
             selectedVolumeID: selectedVolumeID,
             readingStatus: readingStatus,
             volumes: volumes,
             volumeCount: selectedVolumeCount,
-            chapters: chapters
+            chapters: []
         )
     }
 
     func fetchWorkVolumes(
         context: ContentRequestContext,
         workID: String,
-        mediaVersionID: String,
+        versionId: String,
         page: Int,
         pageSize: Int
     ) async throws -> WorkVolumePage {
@@ -264,38 +223,14 @@ actor SharedContentClient: ContentClient {
             context: sharedContext(context),
             query: ErmaoShared.WorkVolumePageQuery(
                 workId: workID,
-                mediaVersionId: mediaVersionID,
+                versionId: versionId,
                 page: Int32(page),
                 pageSize: Int32(pageSize)
             )
         )
         let value: ErmaoShared.WorkVolumePage = try contentValue(result)
         let volumes = value.volumes.map { volume in
-            WorkVolume(
-                id: volume.id,
-                mediaVersionID: volume.mediaVersionId,
-                title: volume.title,
-                formatLabel: volume.format,
-                volumeIndex: volume.volumeIndex?.doubleValue,
-                cover: cover(volume.coverUrl),
-                sizeLabel: ByteCountFormatter.string(fromByteCount: volume.sizeBytes, countStyle: .file),
-                progress: volume.progress > 0 ? volume.progress : nil,
-                isReadable: volume.readable,
-                isSelected: false,
-                sortOrder: Int(volume.sortOrder),
-                publisher: volume.publisher,
-                publishedAt: volume.publishedAt,
-                language: volume.language,
-                isbn: volume.isbn,
-                identifier: volume.identifier,
-                narrator: volume.narrator,
-                pageCount: volume.pageCount?.intValue,
-                metadataSource: volume.origin,
-                kindleSendAvailable: volume.kindleSendAvailable,
-                files: volume.files.map {
-                    WorkVolumeFile(id: $0.id, path: $0.path, sizeBytes: $0.sizeBytes, displaySize: $0.displaySize)
-                }
-            )
+            mapVolume(volume, selectedVolumeID: nil)
         }
         return WorkVolumePage(
             volumes: volumes,
@@ -397,6 +332,47 @@ actor SharedContentClient: ContentClient {
             cover: cover(value.coverUrl),
             progress: value.progress > 0 ? value.progress : nil,
             availableMediaKinds: value.availableMediaKinds.compactMap(mapMediaKind)
+        )
+    }
+
+    private func mapVolume(_ volume: ErmaoShared.Volume, selectedVolumeID: String?) -> WorkVolume {
+        WorkVolume(
+            id: volume.id,
+            versionID: volume.versionId,
+            title: volume.title,
+            formatLabel: volume.format,
+            readerType: volume.readerType,
+            suggestedMediaKind: {
+                guard let raw = volume.classification.suggestedMediaKind else { return nil }
+                return mapMediaKind(raw)
+            }(),
+            volumeIndex: volume.volumeIndex?.doubleValue,
+            cover: cover(volume.coverUrl),
+            sizeLabel: ByteCountFormatter.string(
+                fromByteCount: volume.sizeBytes,
+                countStyle: .file
+            ),
+            progress: volume.progress > 0 ? volume.progress : nil,
+            isReadable: volume.readable,
+            isSelected: volume.id == selectedVolumeID,
+            sortOrder: Int(volume.sortOrder),
+            publisher: volume.publisher,
+            publishedAt: volume.publishedAt,
+            language: volume.language,
+            isbn: volume.isbn,
+            identifier: volume.identifier,
+            narrator: volume.narrator,
+            pageCount: volume.pageCount?.intValue,
+            metadataSource: volume.origin,
+            kindleSendAvailable: volume.kindleSendAvailable,
+            files: volume.files.map {
+                WorkVolumeFile(
+                    id: $0.id,
+                    path: $0.path,
+                    sizeBytes: $0.sizeBytes,
+                    displaySize: $0.displaySize
+                )
+            }
         )
     }
 

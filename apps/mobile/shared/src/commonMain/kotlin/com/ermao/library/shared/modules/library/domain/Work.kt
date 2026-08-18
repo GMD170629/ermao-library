@@ -23,17 +23,10 @@ data class WorkDetailSummary(
     val seriesIndex: Double?,
     val coverStatus: String,
     val coverUrl: String,
-    val recentMediaKind: MediaKind?,
     val continueVolumeId: String?,
     val continueVolumeProgress: Double,
     val completed: Boolean,
-    val mediaVersions: List<MediaVersion>,
-    val availableMediaKinds: List<MediaKind>,
-    val detailTabs: List<WorkDetailTab>,
-    val selectedDetailTab: String,
-    val activeMedia: ActiveMedia? = null,
-    val readingUnits: List<ReadingUnit> = emptyList(),
-    val readingUnitsPage: ReadingUnitsPage? = null,
+    val versions: List<WorkVersion>,
 )
 
 data class AppliedFacet(
@@ -52,9 +45,3 @@ value class MediaKind(val wireValue: String) {
         val Audiobook = MediaKind("AUDIOBOOK")
     }
 }
-
-data class WorkDetailTab(
-    val key: String,
-    val label: String,
-    val sortOrder: Int,
-)

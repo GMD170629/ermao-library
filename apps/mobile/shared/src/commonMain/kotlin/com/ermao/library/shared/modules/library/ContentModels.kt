@@ -92,7 +92,6 @@ data class FacetQuery(
 
 data class WorkDetailQuery(
     val workId: String,
-    val mediaKind: MediaKind? = null,
     val volumeId: String? = null,
 ) {
     init { require(workId.isNotBlank()) }
@@ -100,16 +99,17 @@ data class WorkDetailQuery(
 
 data class WorkVolumePageQuery(
     val workId: String,
-    val mediaVersionId: String,
+    val versionId: String,
     val page: Int,
     val pageSize: Int = 24,
 ) {
-    init { require(workId.isNotBlank() && mediaVersionId.isNotBlank() && page > 0 && pageSize in 1..100) }
+    init { require(workId.isNotBlank() && versionId.isNotBlank() && page > 0 && pageSize in 1..100) }
 }
 
 data class WorkVolumePage(
-    val mediaVersionId: String,
-    val mediaKind: MediaKind,
+    val versionId: String,
+    val sourceKey: String,
+    val sourceName: String?,
     val volumes: List<com.ermao.library.shared.modules.library.domain.Volume>,
     val page: Int,
     val pageSize: Int,

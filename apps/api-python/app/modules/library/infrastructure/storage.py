@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import case, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.library import (
@@ -70,12 +70,6 @@ def update_cover_record(
 
 
 def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
-    media_priority = case(
-        (LibraryMediaVersion.media_kind == "EBOOK", 0),
-        (LibraryMediaVersion.media_kind == "COMIC", 1),
-        (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
-        else_=3,
-    )
     cover = db.scalar(
         select(LibraryVolume.cover_path)
         .join(
@@ -83,13 +77,12 @@ def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
             LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(
-            LibraryMediaVersion.work_id == work_id,
+            LibraryVersion.work_id == work_id,
             LibraryVolume.hidden.is_(False),
             LibraryVolume.cover_path.is_not(None),
             LibraryVolume.cover_path != "",
         )
         .order_by(
-            media_priority,
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
             LibraryVolume.id.asc(),
@@ -154,9 +147,7 @@ def collect_storage_values(
     media_version_ids = [media_version.id for media_version in media_versions]
     volumes = (
         db.scalars(
-            select(LibraryVolume).where(
-                LibraryVolume.version_id.in_(media_version_ids)
-            )
+            select(LibraryVolume).where(LibraryVolume.version_id.in_(media_version_ids))
         ).all()
         if media_version_ids
         else []

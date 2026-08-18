@@ -32,7 +32,7 @@ import {
 import { withBasePath } from '../../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../lib/pwa/update-coordination';
 import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '../reader-theme';
-import { fetchReaderBootstrap, ReaderBootstrapError, workDetailTabForReaderType, type ReaderBootstrap } from './api';
+import { fetchReaderBootstrap, ReaderBootstrapError, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
 import { resolveRequestedPublicationHref } from './publication-direct-target';
 import { decidePendingVsServer, resolveStartupResume } from './local-resume';
@@ -499,7 +499,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const cancelStartupConflict = useCallback(() => {
     const conflict = startupConflict;
     if (!conflict) return;
-    router.push(`/works/${conflict.bootstrap.version.workId}?detailTab=${workDetailTabForReaderType(conflict.bootstrap.readerType)}&volumeId=${encodeURIComponent(conflict.bootstrap.volume.id)}`);
+    router.push(`/works/${conflict.bootstrap.version.workId}?volumeId=${encodeURIComponent(conflict.bootstrap.volume.id)}`);
   }, [router, startupConflict]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
@@ -737,7 +737,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
           onPreferencesChange={savePreferences}
           onResetPreferences={resetPreferences}
           onLocationChange={saveLocation}
-          onBack={() => router.push(`/works/${bootstrap.version.workId}?detailTab=${workDetailTabForReaderType(bootstrap.readerType)}&volumeId=${encodeURIComponent(bootstrap.volume.id)}`)}
+          onBack={() => router.push(`/works/${bootstrap.version.workId}?volumeId=${encodeURIComponent(bootstrap.volume.id)}`)}
           onRetry={() => setRetry((value) => value + 1)}
           onSelectVolume={(nextVolumeId, pageIndex) => router.push(readerHref(nextVolumeId, pageIndex))}
           onIndexProgress={setIndexProgress}

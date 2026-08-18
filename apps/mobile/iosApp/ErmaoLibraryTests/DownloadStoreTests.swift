@@ -21,7 +21,7 @@ final class DownloadStoreTests: XCTestCase {
         let transfer = SharedManagedDownloadTransfer(cookieStore: cookieStore)
         let volume = WorkVolume(
             id: "imp_2dfdb3d04f8b7238152bec2373f57213b5681dc2",
-            mediaVersionID: "imp_0e42263b2877d99f6ae9387edf572c2d8f777d7e",
+            versionID: "imp_0e42263b2877d99f6ae9387edf572c2d8f777d7e",
             title: "Styles",
             formatLabel: "EPUB",
             sizeLabel: nil,
@@ -180,7 +180,7 @@ final class DownloadStoreTests: XCTestCase {
         let original = try await makeRecord(store: store)
         let volume = WorkVolume(
             id: original.volumeID,
-            mediaVersionID: "media-version-ebook",
+            versionID: "media-version-ebook",
             title: "Volume",
             formatLabel: "EPUB",
             sizeLabel: "4 bytes",
@@ -218,7 +218,7 @@ final class DownloadStoreTests: XCTestCase {
         let original = try await makeRecord(store: store)
         let volume = WorkVolume(
             id: original.volumeID,
-            mediaVersionID: "media-version-new",
+            versionID: "media-version-new",
             title: "Volume",
             formatLabel: "EPUB",
             sizeLabel: "4 bytes",
@@ -238,7 +238,7 @@ final class DownloadStoreTests: XCTestCase {
                 availableMediaKinds: [.ebook]
             ),
             volume: volume,
-            versionID: volume.mediaVersionID,
+            versionID: volume.versionID,
             versionSourceKey: "__implicit__",
             versionSourceName: nil,
             versionCompleted: false,
@@ -509,7 +509,7 @@ final class DownloadStoreTests: XCTestCase {
             ),
             volume: WorkVolume(
                 id: volumeID,
-                mediaVersionID: "media-version-ebook",
+                versionID: "media-version-ebook",
                 title: "Volume",
                 formatLabel: "EPUB",
                 sizeLabel: "4 bytes",

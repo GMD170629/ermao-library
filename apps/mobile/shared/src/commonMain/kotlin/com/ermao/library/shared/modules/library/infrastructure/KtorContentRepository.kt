@@ -22,7 +22,6 @@ import com.ermao.library.shared.modules.library.WorkVolumePageQuery
 import com.ermao.library.shared.modules.library.WorkVolumePageRepository
 import com.ermao.library.shared.modules.library.WorksQuery
 import com.ermao.library.shared.modules.library.domain.FacetKind
-import com.ermao.library.shared.modules.library.domain.WorkDetail
 import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
 import com.ermao.library.shared.modules.library.domain.WorkSummary
 import kotlinx.coroutines.async
@@ -152,19 +151,14 @@ class KtorContentRepository(
             ApiRequest(
                 ApiMethod.Get,
                 "/api/works/${query.workId}",
-                WorkDetailPayloadWire.serializer(),
+                WorkDetailSummaryPayloadWire.serializer(),
                 queryParameters = buildMap {
-                    // Without any query parameter the compatibility API intentionally returns
-                    // a summary without readingUnits. Request the first bounded navigation page
-                    // so a single-volume EPUB exposes its real directory on the initial load.
-                    put("chapterPageSize", listOf(DEFAULT_READING_UNITS_PAGE_SIZE.toString()))
-                    query.mediaKind?.let { put("detailTab", listOf(it.wireValue)) }
                     query.volumeId?.let { put("volumeId", listOf(it)) }
                 },
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toDomain().toSummary(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
@@ -176,7 +170,7 @@ class KtorContentRepository(
             client.execute(
                 ApiRequest(
                     ApiMethod.Get,
-                    "/api/works/${query.workId}/media-versions/${query.mediaVersionId}/volumes",
+                    "/api/works/${query.workId}/versions/${query.versionId}/volumes",
                     WorkVolumePageWire.serializer(),
                     queryParameters = mapOf(
                         "page" to listOf(query.page.toString()),
@@ -270,31 +264,6 @@ class KtorContentRepository(
         }
     }
 
-    private fun WorkDetail.toSummary(): WorkDetailSummary = WorkDetailSummary(
-        id = id,
-        title = title,
-        author = author,
-        description = description,
-        tags = tags,
-        seriesName = seriesName,
-        seriesFacet = seriesFacet,
-        authorFacets = authorFacets,
-        seriesIndex = seriesIndex,
-        coverStatus = coverStatus,
-        coverUrl = coverUrl,
-        recentMediaKind = recentMediaKind,
-        continueVolumeId = continueVolumeId,
-        continueVolumeProgress = continueVolumeProgress,
-        completed = completed,
-        mediaVersions = mediaVersions,
-        availableMediaKinds = availableMediaKinds,
-        detailTabs = detailTabs,
-        selectedDetailTab = selectedDetailTab,
-        activeMedia = activeMedia,
-        readingUnits = readingUnits,
-        readingUnitsPage = readingUnitsPage,
-    )
-
     private suspend fun <T> withClient(context: ContentRequestContext, block: suspend (ApiClient) -> ApiResult<T>): ApiResult<T> {
         val client = clients.create(context.profile)
         return try { block(client) } finally { client.close() }
@@ -306,7 +275,4 @@ class KtorContentRepository(
         snapshot.recentAdded,
     ).filterIsInstance<HomeSection.Failure>().first().error
 
-    private companion object {
-        const val DEFAULT_READING_UNITS_PAGE_SIZE = 120
-    }
 }

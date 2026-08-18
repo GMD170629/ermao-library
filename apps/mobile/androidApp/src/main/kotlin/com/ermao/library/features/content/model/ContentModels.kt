@@ -76,7 +76,7 @@ data class VolumeContent(
     val title: String,
     val format: String,
     val readerType: String = "reflowable",
-    val mediaVersionId: String = "",
+    val versionId: String = "",
     val volumeIndex: Double? = null,
     val sortOrder: Int = 0,
     val publisher: String? = null,
@@ -87,6 +87,7 @@ data class VolumeContent(
     val narrator: String? = null,
     val pageCount: Int? = null,
     val metadataSource: String? = null,
+    val suggestedMediaKind: String? = null,
     val kindleSendAvailable: Boolean = false,
     val files: List<VolumeFileContent> = emptyList(),
     val coverUrl: String = "",
@@ -133,8 +134,10 @@ enum class ChapterReadingState { Current, Read, Unread }
 
 @Immutable
 @Serializable
-data class MediaContent(
-    val kind: String,
+data class VersionContent(
+    val id: String,
+    val sourceKey: String,
+    val sourceName: String? = null,
     val volumes: List<VolumeContent>,
     val volumeCount: Int = volumes.size,
 )
@@ -149,19 +152,20 @@ data class WorkDetailContent(
     val authorFacetId: String?,
     val description: String?,
     val tags: List<String>,
-    val media: List<MediaContent>,
-    val selectedMediaKind: String?,
+    val versions: List<VersionContent>,
+    val selectedVersionId: String?,
     val completed: Boolean = false,
     val readingUnits: List<ReadingUnitContent> = emptyList(),
 ) {
     val hasDescription: Boolean get() = !description.isNullOrBlank()
 
-    val showsMediaPicker: Boolean get() = media.map { it.kind.uppercase() }.distinct().size > 1
+    val showsVersionPicker: Boolean get() = versions.size > 1
+
+    val allVolumes: List<VolumeContent> get() = versions.flatMap { it.volumes }
 
     fun supportsChapterDirectory(volumeId: String?): Boolean =
         volumeId != null &&
-            media.asSequence().flatMap { it.volumes.asSequence() }
-                .firstOrNull { it.id == volumeId }
+            allVolumes.firstOrNull { it.id == volumeId }
                 ?.readerType.equals("reflowable", ignoreCase = true) &&
             readingUnits.isNotEmpty()
 }

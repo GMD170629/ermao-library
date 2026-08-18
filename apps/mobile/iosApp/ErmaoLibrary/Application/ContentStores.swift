@@ -725,7 +725,7 @@ final class WorkDetailStore: ObservableObject {
     var workIDValue: String { workID }
     private let onUnauthorized: @MainActor () -> Void
     private var requestGeneration = UUID()
-    private var activeMediaKind: LibraryMediaKind?
+    private var activeVersionId: String?
     private var activeVolumeID: String?
     private var latestProgressUpdatesByVolumeID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
     private var cancellables: Set<AnyCancellable> = []
@@ -743,11 +743,11 @@ final class WorkDetailStore: ObservableObject {
     }
 
     func load(
-        mediaKind: LibraryMediaKind? = nil,
+        versionId: String? = nil,
         volumeID: String? = nil,
         showBlockingLoading: Bool = true
     ) {
-        activeMediaKind = mediaKind
+        activeVersionId = versionId
         activeVolumeID = volumeID
         if showBlockingLoading || currentContent == nil { state = .loading }
         let generation = UUID()
@@ -757,7 +757,7 @@ final class WorkDetailStore: ObservableObject {
             do {
                 let value = try await client.fetchWorkDetail(
                     context: context,
-                    query: WorkDetailQuery(workID: workID, mediaKind: mediaKind, volumeID: volumeID)
+                    query: WorkDetailQuery(workID: workID, versionId: versionId, volumeID: volumeID)
                 )
                 guard requestGeneration == generation else { return }
                 let latestProgressUpdate = value.selectedVolumeID
@@ -780,18 +780,18 @@ final class WorkDetailStore: ObservableObject {
 
     func refreshIfLoaded() {
         guard currentContent != nil else { return }
-        load(mediaKind: activeMediaKind, volumeID: activeVolumeID, showBlockingLoading: false)
+        load(versionId: activeVersionId, volumeID: activeVolumeID, showBlockingLoading: false)
     }
 
     func loadMoreVolumes() {
         guard !isLoadingMoreVolumes,
               let content = currentContent,
               content.volumes.count < content.volumeCount,
-              let mediaVersionID = content.volumes.first?.mediaVersionID
+              let versionId = content.selectedVersionId ?? content.volumes.first?.versionID
         else { return }
         let pageSize = 24
         let nextPage = content.volumes.count / pageSize + 1
-        let requestedMediaKind = content.selectedMediaKind
+        let requestedVersionId = versionId
         isLoadingMoreVolumes = true
         hasVolumePaginationError = false
         Task { [weak self] in
@@ -800,7 +800,7 @@ final class WorkDetailStore: ObservableObject {
                 let page = try await client.fetchWorkVolumes(
                     context: context,
                     workID: workID,
-                    mediaVersionID: mediaVersionID,
+                    versionId: versionId,
                     page: nextPage,
                     pageSize: pageSize
                 )
@@ -808,8 +808,8 @@ final class WorkDetailStore: ObservableObject {
                     isLoadingMoreVolumes = false
                     return
                 }
-                guard current.selectedMediaKind == requestedMediaKind,
-                      current.volumes.first?.mediaVersionID == mediaVersionID else {
+                guard current.selectedVersionId == requestedVersionId,
+                      current.volumes.first?.versionID == versionId else {
                     isLoadingMoreVolumes = false
                     return
                 }
@@ -817,8 +817,8 @@ final class WorkDetailStore: ObservableObject {
                 isLoadingMoreVolumes = false
             } catch {
                 isLoadingMoreVolumes = false
-                if currentContent?.selectedMediaKind == requestedMediaKind,
-                   currentContent?.volumes.first?.mediaVersionID == mediaVersionID {
+                if currentContent?.selectedVersionId == requestedVersionId,
+                   currentContent?.volumes.first?.versionID == versionId {
                     hasVolumePaginationError = true
                 }
             }
@@ -855,8 +855,17 @@ private extension WorkDetailContent {
             seriesFacet: seriesFacet,
             seriesIndex: seriesIndex,
             authorFacets: authorFacets,
-            availableMediaKinds: availableMediaKinds,
-            selectedMediaKind: selectedMediaKind,
+            versions: versions.map { version in
+                guard version.id == selectedVersionId else { return version }
+                return WorkVersionContent(
+                    id: version.id,
+                    sourceKey: version.sourceKey,
+                    sourceName: version.sourceName,
+                    volumes: merged,
+                    volumeCount: page.total
+                )
+            },
+            selectedVersionId: selectedVersionId,
             selectedVolumeID: selectedVolumeID,
             readingStatus: readingStatus,
             volumes: merged,
@@ -882,9 +891,11 @@ private extension WorkDetailContent {
             guard volume.id == update.volumeId else { return volume }
             return WorkVolume(
                 id: volume.id,
-                mediaVersionID: volume.mediaVersionID,
+                versionID: volume.versionID,
                 title: volume.title,
                 formatLabel: volume.formatLabel,
+                readerType: volume.readerType,
+                suggestedMediaKind: volume.suggestedMediaKind,
                 volumeIndex: volume.volumeIndex,
                 cover: volume.cover,
                 sizeLabel: volume.sizeLabel,
@@ -942,8 +953,16 @@ private extension WorkDetailContent {
             seriesFacet: seriesFacet,
             seriesIndex: seriesIndex,
             authorFacets: authorFacets,
-            availableMediaKinds: availableMediaKinds,
-            selectedMediaKind: selectedMediaKind,
+            versions: versions.map { version in
+                WorkVersionContent(
+                    id: version.id,
+                    sourceKey: version.sourceKey,
+                    sourceName: version.sourceName,
+                    volumes: version.id == selectedVersionId ? updatedVolumes : version.volumes,
+                    volumeCount: version.volumeCount
+                )
+            },
+            selectedVersionId: selectedVersionId,
             selectedVolumeID: selectedVolumeID,
             readingStatus: update.percent >= 100 ? .finished : .reading,
             volumes: updatedVolumes,

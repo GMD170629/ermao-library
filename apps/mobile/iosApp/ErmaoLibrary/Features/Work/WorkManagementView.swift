@@ -336,7 +336,7 @@ struct WorkManagementView: View {
                         localKind: localKind(selectedKind)
                     )
                 }
-                .disabled(hasActiveDownload || selectedKind == sharedKind(detail.selectedMediaKind ?? .ebook))
+                .disabled(hasActiveDownload || selectedKind == sharedKind(activeVolume?.libraryMediaKind ?? .ebook))
                 if hasActiveDownload { Text("management.activeDownloadBlocked") }
             }
         }
@@ -348,7 +348,7 @@ struct WorkManagementView: View {
                 TextField("management.title", text: $title)
                 TextField("management.author", text: $author)
                 Button("management.split") {
-                    store.split(volume, title: title, author: author.nilIfBlank, mediaKind: detail.selectedMediaKind ?? .ebook)
+                    store.split(volume, title: title, author: author.nilIfBlank, mediaKind: volume.libraryMediaKind)
                 }
                 .disabled(title.isEmpty)
             }
@@ -373,7 +373,7 @@ struct WorkManagementView: View {
                 }
                 Button("management.moveToSelectedWork") {
                     guard let target = store.transferTargets.first(where: { $0.id == selectedTransferTargetID }) else { return }
-                    store.transfer(volume, target: target, mediaKind: detail.selectedMediaKind ?? .ebook)
+                    store.transfer(volume, target: target, mediaKind: volume.libraryMediaKind)
                 }
                 .disabled(hasActiveDownload || selectedTransferTargetID == nil)
             }
@@ -469,7 +469,7 @@ struct WorkManagementView: View {
         case .ebook: .ebook
         case .comic: .comic
         case .audiobook: .audiobook
-        default: detail.selectedMediaKind ?? .ebook
+        default: activeVolume?.libraryMediaKind ?? .ebook
         }
     }
 

@@ -127,7 +127,7 @@ struct FacetQuery: Equatable, Hashable, Sendable {
 
 struct WorkDetailQuery: Equatable, Hashable, Sendable {
     let workID: String
-    let mediaKind: LibraryMediaKind?
+    let versionId: String?
     let volumeID: String?
 }
 
@@ -191,9 +191,11 @@ struct FacetPage: Codable, Equatable, Sendable {
 
 struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
     let id: String
-    let mediaVersionID: String
+    let versionID: String
     let title: String
     let formatLabel: String
+    let readerType: String
+    let suggestedMediaKind: LibraryMediaKind?
     let volumeIndex: Double?
     let cover: CoverReference?
     let sizeLabel: String?
@@ -214,9 +216,11 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
 
     init(
         id: String,
-        mediaVersionID: String,
+        versionID: String,
         title: String,
         formatLabel: String,
+        readerType: String = "reflowable",
+        suggestedMediaKind: LibraryMediaKind? = nil,
         volumeIndex: Double? = nil,
         cover: CoverReference? = nil,
         sizeLabel: String?,
@@ -236,9 +240,11 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
         files: [WorkVolumeFile] = []
     ) {
         self.id = id
-        self.mediaVersionID = mediaVersionID
+        self.versionID = versionID
         self.title = title
         self.formatLabel = formatLabel
+        self.readerType = readerType
+        self.suggestedMediaKind = suggestedMediaKind
         self.volumeIndex = volumeIndex
         self.cover = cover
         self.sizeLabel = sizeLabel
@@ -272,6 +278,20 @@ struct WorkVolume: Identifiable, Codable, Equatable, Sendable {
             value = String(position + 1)
         }
         return value.count >= 2 ? value : "0\(value)"
+    }
+
+    var libraryMediaKind: LibraryMediaKind {
+        if let suggestedMediaKind { return suggestedMediaKind }
+        switch readerType.lowercased() {
+        case "audio": return .audiobook
+        case "comic": return .comic
+        default:
+            switch formatLabel.uppercased() {
+            case "CBZ", "CBR", "ZIP": return .comic
+            case "M4B", "MP3", "M4A", "AUDIO": return .audiobook
+            default: return .ebook
+            }
+        }
     }
 }
 
@@ -326,6 +346,24 @@ struct WorkChapter: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+struct WorkVersionContent: Identifiable, Codable, Equatable, Sendable {
+    let id: String
+    let sourceKey: String
+    let sourceName: String?
+    let volumes: [WorkVolume]
+    let volumeCount: Int
+
+    var displayTitle: String {
+        if sourceKey == "__implicit__" {
+            String(localized: "downloads.version.implicit")
+        } else if let sourceName, !sourceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sourceName
+        } else {
+            sourceKey
+        }
+    }
+}
+
 struct WorkDetailContent: Codable, Equatable, Sendable {
     let work: WorkCard
     let description: String?
@@ -333,13 +371,15 @@ struct WorkDetailContent: Codable, Equatable, Sendable {
     let seriesFacet: FacetIdentity?
     let seriesIndex: Double?
     let authorFacets: [FacetIdentity]
-    let availableMediaKinds: [LibraryMediaKind]
-    let selectedMediaKind: LibraryMediaKind?
+    let versions: [WorkVersionContent]
+    let selectedVersionId: String?
     let selectedVolumeID: String?
     let readingStatus: LibraryReadingStatus?
     let volumes: [WorkVolume]
     let volumeCount: Int
     let chapters: [WorkChapter]
+
+    var showsVersionPicker: Bool { versions.count > 1 }
 
     init(
         work: WorkCard,
@@ -348,8 +388,8 @@ struct WorkDetailContent: Codable, Equatable, Sendable {
         seriesFacet: FacetIdentity?,
         seriesIndex: Double? = nil,
         authorFacets: [FacetIdentity],
-        availableMediaKinds: [LibraryMediaKind],
-        selectedMediaKind: LibraryMediaKind?,
+        versions: [WorkVersionContent] = [],
+        selectedVersionId: String?,
         selectedVolumeID: String?,
         readingStatus: LibraryReadingStatus?,
         volumes: [WorkVolume],
@@ -362,8 +402,8 @@ struct WorkDetailContent: Codable, Equatable, Sendable {
         self.seriesFacet = seriesFacet
         self.seriesIndex = seriesIndex
         self.authorFacets = authorFacets
-        self.availableMediaKinds = availableMediaKinds
-        self.selectedMediaKind = selectedMediaKind
+        self.versions = versions
+        self.selectedVersionId = selectedVersionId
         self.selectedVolumeID = selectedVolumeID
         self.readingStatus = readingStatus
         self.volumes = volumes
@@ -386,7 +426,7 @@ protocol ContentClient: Sendable {
     func fetchWorkVolumes(
         context: ContentRequestContext,
         workID: String,
-        mediaVersionID: String,
+        versionId: String,
         page: Int,
         pageSize: Int
     ) async throws -> WorkVolumePage
@@ -397,7 +437,7 @@ extension ContentClient {
     func fetchWorkVolumes(
         context: ContentRequestContext,
         workID: String,
-        mediaVersionID: String,
+        versionId: String,
         page: Int,
         pageSize: Int
     ) async throws -> WorkVolumePage {

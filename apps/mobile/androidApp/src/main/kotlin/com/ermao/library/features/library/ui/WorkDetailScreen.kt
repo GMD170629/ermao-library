@@ -184,7 +184,7 @@ fun WorkDetailScreen(
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onSelectMedia: (String) -> Unit,
+    onSelectVersion: (String) -> Unit,
     onSelectVolume: (String) -> Unit,
     onLoadMoreVolumes: () -> Unit = {},
     onOpenShelfPicker: () -> Unit,
@@ -282,7 +282,7 @@ fun WorkDetailScreen(
                 state = state,
                 repository = repository,
                 context = context,
-                onSelectMedia = onSelectMedia,
+                onSelectVersion = onSelectVersion,
                 onSelectVolume = onSelectVolume,
                 onLoadMoreVolumes = onLoadMoreVolumes,
                 onOpenShelfPicker = onOpenShelfPicker,
@@ -471,7 +471,7 @@ private fun WorkDetailBody(
     state: WorkDetailUiState,
     repository: ContentRepository,
     context: ContentRequestContext,
-    onSelectMedia: (String) -> Unit,
+    onSelectVersion: (String) -> Unit,
     onSelectVolume: (String) -> Unit,
     onLoadMoreVolumes: () -> Unit,
     onOpenShelfPicker: () -> Unit,
@@ -490,8 +490,8 @@ private fun WorkDetailBody(
 ) {
     val theme = WarmPageThemeValues
     val content = requireNotNull(state.content)
-    val selectedMedia = content.media.firstOrNull { it.kind == state.selectedMediaKind }
-        ?: content.media.firstOrNull()
+    val selectedVersion = content.versions.firstOrNull { it.id == state.selectedVersionId }
+        ?: content.versions.firstOrNull()
     val selectedVolume = state.resolveSelectedVolume()
     LazyColumn(
         modifier = modifier
@@ -512,7 +512,6 @@ private fun WorkDetailBody(
         }
         item {
             WorkDetailActionRow(
-                mediaKind = state.selectedMediaKind,
                 selectedVolume = selectedVolume,
                 selectedDownload = selectedVolume?.let { volume -> downloadRecordsByVolume[volume.id] },
                 onOpenShelfPicker = onOpenShelfPicker,
@@ -526,16 +525,18 @@ private fun WorkDetailBody(
             )
         }
         if (content.hasDescription) item { WorkAboutSection(content) }
-        if (content.media.isNotEmpty()) {
+        if (content.showsVersionPicker) {
             item {
                 WorkMediaPicker(
-                    options = content.media.map { media -> WarmPageChoice(media.kind, mediaLabel(media.kind)) },
-                    selected = state.selectedMediaKind ?: content.media.first().kind,
-                    onSelect = onSelectMedia,
+                    options = content.versions.map { version ->
+                        WarmPageChoice(version.id, versionLabel(version))
+                    },
+                    selected = state.selectedVersionId ?: content.versions.first().id,
+                    onSelect = onSelectVersion,
                 )
             }
         }
-        if (selectedMedia == null || selectedMedia.volumes.isEmpty()) {
+        if (selectedVersion == null || selectedVersion.volumes.isEmpty()) {
             item {
                 WarmPageEmptyState(
                     title = stringResource(R.string.work_no_readable_volumes),
@@ -545,9 +546,9 @@ private fun WorkDetailBody(
         } else {
             item {
                 WorkVolumeRail(
-                    volumes = selectedMedia.volumes,
+                    volumes = selectedVersion.volumes,
                     selectedVolumeId = selectedVolume?.id,
-                    totalVolumes = selectedMedia.volumeCount,
+                    totalVolumes = selectedVersion.volumeCount,
                     isLoadingMore = state.isLoadingMoreVolumes,
                     paginationErrorCode = state.volumePaginationErrorCode,
                     repository = repository,
@@ -567,7 +568,6 @@ private fun WorkDetailBody(
 
 @Composable
 private fun WorkDetailActionRow(
-    mediaKind: String?,
     selectedVolume: VolumeContent?,
     selectedDownload: AndroidDownloadRecord?,
     onOpenShelfPicker: () -> Unit,
@@ -581,7 +581,6 @@ private fun WorkDetailActionRow(
 ) {
     val theme = WarmPageThemeValues
     val primaryAction = workDetailPrimaryActionPresentation(
-        mediaKind = mediaKind,
         selectedVolume = selectedVolume,
         download = selectedDownload,
     )
@@ -683,7 +682,7 @@ private fun WorkDetailActionRow(
             )
         }
         val captionResource = when {
-            mediaKind.equals("AUDIOBOOK", ignoreCase = true) -> R.string.work_audiobook_player_unavailable
+            selectedVolume?.readerType.equals("audio", ignoreCase = true) -> R.string.work_audiobook_player_unavailable
             selectedVolume == null -> R.string.work_reader_next_phase_message
             !isSupportedNativeReaderEntry(selectedVolume.readerType, selectedVolume.format) ->
                 R.string.work_reader_renderer_pending
@@ -863,16 +862,6 @@ private fun WorkCreatorAndSeriesLine(
             ) {
                 content.seriesId?.let { onOpenFacet(LibraryScope.Series, it) }
             }
-        }
-        content.selectedMediaKind?.let { kind ->
-            Text(" / ", style = theme.typography.body, color = theme.colors.textTertiary)
-            Text(
-                mediaLabel(kind),
-                style = theme.typography.body,
-                color = theme.colors.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -1426,7 +1415,6 @@ internal fun workReadingStatusChoices(): List<WorkReadingStatus> = listOf(
 )
 
 internal fun workDetailPrimaryActionPresentation(
-    mediaKind: String?,
     selectedVolume: VolumeContent?,
     download: AndroidDownloadRecord?,
 ): WorkDetailPrimaryActionPresentation {
@@ -1441,9 +1429,7 @@ internal fun workDetailPrimaryActionPresentation(
     } else {
         WorkDetailPrimaryActionLabel.StartListening
     }
-    if (mediaKind.equals("AUDIOBOOK", ignoreCase = true) ||
-        selectedVolume?.readerType.equals("audio", ignoreCase = true)
-    ) {
+    if (selectedVolume?.readerType.equals("audio", ignoreCase = true)) {
         return WorkDetailPrimaryActionPresentation(
             intent = WorkDetailPrimaryActionIntent.Unavailable,
             label = listeningLabel,
@@ -2206,19 +2192,21 @@ private fun WorkActionRow(
 
 private fun WorkDetailUiState.resolveSelectedVolume(): VolumeContent? {
     val content = content ?: return null
-    val media = content.media.firstOrNull { it.kind == selectedMediaKind }
-        ?: content.media.firstOrNull()
-    return media?.volumes?.firstOrNull { it.id == selectedVolumeId }
-        ?: media?.volumes?.firstOrNull { it.selected }
-        ?: media?.volumes?.firstOrNull()
+    val version = content.versions.firstOrNull { it.id == selectedVersionId }
+        ?: content.versions.firstOrNull()
+    return version?.volumes?.firstOrNull { it.id == selectedVolumeId }
+        ?: version?.volumes?.firstOrNull { it.selected }
+        ?: version?.volumes?.firstOrNull()
 }
 
 @Composable
-private fun mediaLabel(kind: String): String = when (kind.uppercase()) {
-    "EBOOK" -> stringResource(R.string.media_ebook)
-    "COMIC" -> stringResource(R.string.media_comic)
-    "AUDIOBOOK" -> stringResource(R.string.media_audiobook)
-    else -> kind
+private fun versionLabel(version: com.ermao.library.features.content.model.VersionContent): String {
+    val implicitTitle = stringResource(R.string.downloads_version_implicit)
+    return if (version.sourceKey == com.ermao.library.shared.modules.library.domain.IMPLICIT_WORK_VERSION_SOURCE_KEY) {
+        implicitTitle
+    } else {
+        version.sourceName?.takeIf { it.isNotBlank() } ?: version.sourceKey
+    }
 }
 
 @Composable

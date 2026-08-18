@@ -79,8 +79,8 @@ class DetailViewModelsTest {
         authorFacetId = null,
         description = null,
         tags = emptyList(),
-        media = emptyList(),
-        selectedMediaKind = "EBOOK",
+        versions = emptyList(),
+        selectedVersionId = "version-1",
         readingUnits = chapters.toList(),
     )
 }

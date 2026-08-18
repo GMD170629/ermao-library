@@ -128,7 +128,7 @@ test('PWA launch parameters keep the responsive web shell on mobile widths', asy
 test('work detail volume covers support selection, keyboard-accessible context management, and double-click open', async ({ page }) => {
   const volume = (id: string, title: string, sortOrder: number) => ({
     id,
-    mediaVersionId: 'context-media',
+    versionId: 'context-version',
     title,
     volumeIndex: sortOrder + 1,
     sortOrder,
@@ -177,17 +177,14 @@ test('work detail volume covers support selection, keyboard-accessible context m
     updatedAt: '2026-08-03T08:00:00.000Z',
     recentMediaKind: 'COMIC',
     continueVolumeId: volumes[0].id,
-    availableMediaKinds: ['COMIC'],
-    detailTabs: ['STRUCTURE', 'COMIC'],
-    selectedDetailTab: 'COMIC',
     completed: false,
-    mediaVersions: [{ id: 'context-media', mediaKind: 'COMIC', completed: false, volumeCount: 2, sizeBytes: 1024, volumes }]
+    versions: [{ id: 'context-version', sourceKey: '__implicit__', sourceName: null, completed: false, volumeCount: 2, sizeBytes: 1024, volumes }]
   };
   await page.route('**/api/works/context-work', async (route) => {
     await route.fulfill({ json: { ok: true, data: work } });
   });
 
-  await page.goto('/works/context-work?detailTab=COMIC&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
+  await page.goto('/works/context-work?volumeId=context-volume-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   const first = page.getByRole('button', { name: '第 1 卷' });
   const second = page.getByRole('button', { name: '第 2 卷' });
   const volumeProgress = page.locator('[data-volume-progress]');
@@ -889,11 +886,12 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     statusValue: 'UNREAD',
     lastReadAt: '2026-07-17T08:30:00.000Z',
     importedAt: '2026-07-17T08:30:00.000Z',
-    mediaVersions: [{
-      id: 'mobile-media',
-      mediaKind: 'EBOOK',
+    versions: [{
+      id: 'mobile-version',
+      sourceKey: '__implicit__',
+      sourceName: null,
       completed: false,
-      volumes: [{ id: 'mobile-volume', mediaVersionId: 'mobile-media', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, files: [] }]
+      volumes: [{ id: 'mobile-volume', versionId: 'mobile-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, files: [] }]
     }]
   };
 
