@@ -270,6 +270,180 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(groups.single?.versions.single?.records.count, 2)
     }
 
+    func testSplitAndTransferRewriteUseServerTargetVersion() {
+        let rewrite = DownloadOwnershipRewrite.forMove(
+            .split,
+            targetWorkID: "work-target",
+            targetVersionID: "version-target",
+            targetWorkTitle: "Split Work",
+            targetWorkAuthor: "Author"
+        )
+        XCTAssertEqual(rewrite?.targetWorkID, "work-target")
+        XCTAssertEqual(rewrite?.targetVersionID, "version-target")
+        XCTAssertEqual(rewrite?.targetVersionSourceKey, ManagedDownloadGrouping.implicitSourceKey)
+        XCTAssertNil(rewrite?.targetVersionSourceName)
+        XCTAssertNil(rewrite?.targetVersionCompleted)
+
+        let transferred = DownloadOwnershipRewrite.forMove(
+            .transfer,
+            targetWorkID: "work-target",
+            targetVersionID: "version-target",
+            targetWorkTitle: "Target Work",
+            targetWorkAuthor: "Author"
+        )
+        XCTAssertEqual(transferred?.targetVersionID, "version-target")
+        XCTAssertEqual(transferred?.targetVersionSourceKey, "__implicit__")
+    }
+
+    func testReclassifyDoesNotRewriteDownloadVersion() {
+        XCTAssertNil(
+            DownloadOwnershipRewrite.forMove(
+                .reclassify,
+                targetWorkID: "work",
+                targetVersionID: "version-target",
+                targetWorkTitle: "Work",
+                targetWorkAuthor: "Author"
+            )
+        )
+    }
+
+    func testMissingTargetVersionLeavesLocalOwnershipUnchanged() {
+        XCTAssertNil(
+            DownloadOwnershipRewrite.forMove(
+                .split,
+                targetWorkID: "work-target",
+                targetVersionID: nil,
+                targetWorkTitle: "Split Work",
+                targetWorkAuthor: "Author"
+            )
+        )
+        XCTAssertNil(
+            DownloadOwnershipRewrite.forMove(
+                .transfer,
+                targetWorkID: nil,
+                targetVersionID: "version-target",
+                targetWorkTitle: "Target Work",
+                targetWorkAuthor: "Author"
+            )
+        )
+    }
+
+    func testStructuralMoveRehomesCatalogWithoutChangingLocalFileOrBytes() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let completed = try await complete(try await makeRecord(store: store), in: store)
+        let originalURL = await store.fileURL(for: completed)
+        let originalBytes = try Data(contentsOf: XCTUnwrap(originalURL))
+        let rewrite = try XCTUnwrap(
+            DownloadOwnershipRewrite.forMove(
+                .split,
+                targetWorkID: "work-target",
+                targetVersionID: "version-target",
+                targetWorkTitle: "Split Work",
+                targetWorkAuthor: "Author"
+            )
+        )
+
+        var moved = completed
+        moved.workID = rewrite.targetWorkID
+        moved.workTitle = rewrite.targetWorkTitle
+        moved.workAuthor = rewrite.targetWorkAuthor
+        moved.versionID = rewrite.targetVersionID
+        moved.versionSourceKey = rewrite.targetVersionSourceKey
+        moved.versionSourceName = rewrite.targetVersionSourceName
+        moved.versionCompleted = rewrite.targetVersionCompleted
+        try await store.update(moved)
+
+        let persisted = try XCTUnwrap(try await store.records(namespace: namespace).single)
+        XCTAssertEqual(persisted.workID, "work-target")
+        XCTAssertEqual(persisted.versionID, "version-target")
+        XCTAssertEqual(persisted.versionSourceKey, "__implicit__")
+        XCTAssertNil(persisted.versionSourceName)
+        XCTAssertNil(persisted.versionCompleted)
+        XCTAssertEqual(persisted.localRelativePath, completed.localRelativePath)
+        XCTAssertEqual(persisted.receivedBytes, completed.receivedBytes)
+        let movedURL = await store.fileURL(for: persisted)
+        XCTAssertEqual(
+            movedURL?.resolvingSymlinksInPath(),
+            originalURL?.resolvingSymlinksInPath()
+        )
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(movedURL)), originalBytes)
+
+        let groups = ManagedDownloadGrouping.completed(records: [persisted], query: "")
+        XCTAssertEqual(groups.single?.workID, "work-target")
+        XCTAssertEqual(groups.single?.versions.single?.versionID, "version-target")
+    }
+
+    func testCenterRehomeMovesCompletedGroupToTargetVersionWithoutTouchingBytes() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let completed = try await complete(try await makeRecord(store: store), in: store)
+        let originalURL = await store.fileURL(for: completed)
+        let originalBytes = try Data(contentsOf: XCTUnwrap(originalURL))
+        let center = DownloadCenterStore(repository: store, transfer: UnavailableManagedDownloadTransfer())
+        center.activate(
+            context: ContentRequestContext(
+                profileID: "profile",
+                profileDisplayName: "Server",
+                serverIdentity: "server",
+                userID: "user",
+                authorizationVersion: 1,
+                baseURL: "https://library.example",
+                acceptsInsecureTLS: false
+            )
+        )
+        try await waitUntil { !center.records.isEmpty }
+
+        let rewrite = try XCTUnwrap(
+            DownloadOwnershipRewrite.forMove(
+                .transfer,
+                targetWorkID: "work-target",
+                targetVersionID: "version-target",
+                targetWorkTitle: "Target Work",
+                targetWorkAuthor: "Author"
+            )
+        )
+        center.rehomeCompleted(
+            volumeID: completed.volumeID,
+            targetWorkID: rewrite.targetWorkID,
+            targetWorkTitle: rewrite.targetWorkTitle,
+            targetWorkAuthor: rewrite.targetWorkAuthor,
+            targetVersionID: rewrite.targetVersionID,
+            targetVersionSourceKey: rewrite.targetVersionSourceKey,
+            targetVersionSourceName: rewrite.targetVersionSourceName,
+            targetVersionCompleted: rewrite.targetVersionCompleted
+        )
+
+        let moved = try XCTUnwrap(center.record(for: completed.volumeID))
+        XCTAssertEqual(moved.workID, "work-target")
+        XCTAssertEqual(moved.versionID, "version-target")
+        XCTAssertEqual(moved.localRelativePath, completed.localRelativePath)
+        XCTAssertEqual(moved.receivedBytes, completed.receivedBytes)
+        XCTAssertEqual(center.completedGroups.single?.workID, "work-target")
+        XCTAssertEqual(center.completedGroups.single?.versions.single?.versionID, "version-target")
+        let movedURL = await store.fileURL(for: moved)
+        XCTAssertEqual(
+            movedURL?.resolvingSymlinksInPath(),
+            originalURL?.resolvingSymlinksInPath()
+        )
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(movedURL)), originalBytes)
+    }
+
+    func testDownloadLocalizationKeepsStorageAndImplicitVersionKeys() throws {
+        let catalog = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("ErmaoLibrary/Resources/Localizable.xcstrings")
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: catalog)) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(json["strings"] as? [String: Any])
+        XCTAssertNotNil(strings["downloads.storage.used"])
+        XCTAssertNotNil(strings["downloads.version.implicit"])
+    }
+
     func testCatalogWithoutVersionFieldsIsDiscarded() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -302,6 +476,18 @@ final class DownloadStoreTests: XCTestCase {
             records: [completed],
             recordID: completed.id
         )?.id, completed.id)
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 1,
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("timed out waiting for download catalog to load")
     }
 
     private var namespace: String { "server|user|1" }

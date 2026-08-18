@@ -43,7 +43,11 @@ class DownloadsRuntimeTest {
         assertEquals("Kindle", moved?.descriptor?.versionSourceName)
         assertEquals(true, moved?.descriptor?.versionCompleted)
         assertEquals(artifact.localReference, moved?.localReference)
+        assertEquals(artifact.verifiedBytes, moved?.verifiedBytes)
         assertEquals(listOf(moved), catalog.listArtifacts(artifact.identity.namespace))
+        val grouped = runtime.downloadedWorks(artifact.identity.namespace).single()
+        assertEquals("work-b", grouped.workId)
+        assertEquals(listOf("version-b"), grouped.versions.map { it.versionId })
     }
 
     @Test

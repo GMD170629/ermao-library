@@ -977,22 +977,12 @@ struct WorkDetailView: View {
             onWorkDeleted()
         case .volumeDeleted:
             if let managedVolumeID { downloads.remove(volumeID: managedVolumeID) }
-        case .volumeReclassified, .volumeSplit, .volumeTransferred:
-            if let pending = managementStore.pendingOwnership,
-               let outcome = managementStore.lastOutcome,
-               let record = downloads.record(for: pending.volumeID),
-               record.isVerifiedOfflineCopy {
-                downloads.rehomeCompleted(
-                    volumeID: pending.volumeID,
-                    targetWorkID: outcome.targetWorkId ?? pending.workID ?? detail?.work.id ?? "",
-                    targetWorkTitle: pending.workTitle,
-                    targetWorkAuthor: pending.workAuthor,
-                    targetVersionID: record.versionID,
-                    targetVersionSourceKey: record.versionSourceKey,
-                    targetVersionSourceName: record.versionSourceName,
-                    targetVersionCompleted: record.versionCompleted
-                )
-            }
+        case .volumeSplit:
+            rewriteCompletedDownload(move: .split, store: managementStore)
+        case .volumeTransferred:
+            rewriteCompletedDownload(move: .transfer, store: managementStore)
+        case .volumeReclassified:
+            break
         default: break
         }
         managementTask = nil
@@ -1001,6 +991,34 @@ struct WorkDetailView: View {
         }
         managementStore.consumeCompletion()
         if action != .workDeleted { store.load() }
+    }
+
+    private func rewriteCompletedDownload(
+        move: DownloadStructuralMove,
+        store: WorkManagementStore
+    ) {
+        guard let pending = store.pendingOwnership,
+              let outcome = store.lastOutcome,
+              let record = downloads.record(for: pending.volumeID),
+              record.isVerifiedOfflineCopy,
+              let rewrite = DownloadOwnershipRewrite.forMove(
+                  move,
+                  targetWorkID: outcome.targetWorkId,
+                  targetVersionID: outcome.targetMediaVersionId,
+                  targetWorkTitle: pending.workTitle,
+                  targetWorkAuthor: pending.workAuthor
+              )
+        else { return }
+        downloads.rehomeCompleted(
+            volumeID: pending.volumeID,
+            targetWorkID: rewrite.targetWorkID,
+            targetWorkTitle: rewrite.targetWorkTitle,
+            targetWorkAuthor: rewrite.targetWorkAuthor,
+            targetVersionID: rewrite.targetVersionID,
+            targetVersionSourceKey: rewrite.targetVersionSourceKey,
+            targetVersionSourceName: rewrite.targetVersionSourceName,
+            targetVersionCompleted: rewrite.targetVersionCompleted
+        )
     }
 
     private func openShelfPicker() {

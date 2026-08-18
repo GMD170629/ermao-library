@@ -54,6 +54,23 @@ class AndroidDownloadModelsTest {
     }
 
     @Test
+    fun rehomedVolumeGroupsUnderTargetWorkAndVersion() {
+        val moved = record("task-1", "work-source", "Source", "Author", "Volume", "one.bin", completed = true).copy(
+            workId = "work-target",
+            workTitle = "Target",
+            versionId = "version-target",
+            versionSourceKey = "__implicit__",
+            versionSourceName = null,
+        )
+
+        val work = groupReadableDownloads(listOf(moved), "") { true }.single()
+
+        assertEquals("work-target", work.workId)
+        assertEquals(listOf("version-target"), work.versions.map { it.versionId })
+        assertEquals("__implicit__", work.versions.single().sourceKey)
+    }
+
+    @Test
     fun catalogRecordCannotClaimCompletedWithoutVerifiedLocalReference() {
         assertFailsWith<IllegalArgumentException> {
             record("task", "work", "Title", "Author", "Volume", null, completed = true)

@@ -27,6 +27,7 @@
     "downloads.search.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No downloaded books found" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未找到已下载图书" } } } },
     "downloads.search.prompt" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Search downloaded books" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索已下载图书" } } } },
     "downloads.storage.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Device Storage" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设备存储" } } } },
+    "downloads.storage.used" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded content" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载内容" } } } },
     "downloads.version.implicit" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Default version" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "默认版本" } } } },
     "downloads.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloads" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载中心" } } } },
     "downloads.view.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "View Downloads" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看下载" } } } },

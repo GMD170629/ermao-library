@@ -106,32 +106,10 @@ class WorkManagementViewModel(
         repository.updateVolume(context, workId, volumeId, draft)
     }
 
-    fun reclassifyVolume(
-        volumeId: String,
-        mediaKind: ManagedMediaKind,
-        workTitle: String,
-        workAuthor: String?,
-        coverApiPath: String?,
-    ) {
-        mutate(
-            completion = WorkManagementCompletion.VolumeReclassified,
-            block = { repository.reclassifyVolume(context, workId, volumeId, mediaKind) },
-            onSuccess = success@{ _ ->
-                val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
-                downloadsRuntime.rehomeCompletedArtifact(
-                    namespace = downloadNamespace,
-                    volumeId = volumeId,
-                    targetWorkId = workId,
-                    targetVersionId = artifact.descriptor.versionId,
-                    targetVersionSourceKey = artifact.descriptor.versionSourceKey,
-                    targetVersionSourceName = artifact.descriptor.versionSourceName,
-                    targetWorkTitle = workTitle,
-                    targetWorkAuthor = workAuthor,
-                    targetCoverApiPath = coverApiPath,
-                    targetVersionCompleted = artifact.descriptor.versionCompleted,
-                )
-            },
-        )
+    fun reclassifyVolume(volumeId: String, mediaKind: ManagedMediaKind) {
+        mutate(WorkManagementCompletion.VolumeReclassified) {
+            repository.reclassifyVolume(context, workId, volumeId, mediaKind)
+        }
     }
 
     fun splitVolume(volumeId: String, title: String, author: String?) {
@@ -139,19 +117,14 @@ class WorkManagementViewModel(
             completion = WorkManagementCompletion.VolumeSplit,
             block = { repository.splitVolume(context, workId, volumeId, title, author) },
             onSuccess = success@{ outcome ->
-                val targetWorkId = outcome.targetWorkId ?: return@success
                 val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
-                downloadsRuntime.rehomeCompletedArtifact(
-                    namespace = downloadNamespace,
+                rehomeCompletedDownload(
                     volumeId = volumeId,
-                    targetWorkId = targetWorkId,
-                    targetVersionId = artifact.descriptor.versionId,
-                    targetVersionSourceKey = artifact.descriptor.versionSourceKey,
-                    targetVersionSourceName = artifact.descriptor.versionSourceName,
+                    targetWorkId = outcome.targetWorkId,
+                    targetVersionId = outcome.targetMediaVersionId,
                     targetWorkTitle = title,
                     targetWorkAuthor = author,
                     targetCoverApiPath = artifact.descriptor.coverApiPath,
-                    targetVersionCompleted = artifact.descriptor.versionCompleted,
                 )
             },
         )
@@ -161,20 +134,14 @@ class WorkManagementViewModel(
         mutate(
             completion = WorkManagementCompletion.VolumeTransferred,
             block = { repository.transferVolume(context, workId, volumeId, target.id) },
-            onSuccess = success@{ outcome ->
-                val targetWorkId = outcome.targetWorkId ?: target.id
-                val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
-                downloadsRuntime.rehomeCompletedArtifact(
-                    namespace = downloadNamespace,
+            onSuccess = {
+                rehomeCompletedDownload(
                     volumeId = volumeId,
-                    targetWorkId = targetWorkId,
-                    targetVersionId = artifact.descriptor.versionId,
-                    targetVersionSourceKey = artifact.descriptor.versionSourceKey,
-                    targetVersionSourceName = artifact.descriptor.versionSourceName,
+                    targetWorkId = it.targetWorkId,
+                    targetVersionId = it.targetMediaVersionId,
                     targetWorkTitle = target.title,
                     targetWorkAuthor = target.author,
                     targetCoverApiPath = null,
-                    targetVersionCompleted = artifact.descriptor.versionCompleted,
                 )
             },
         )
@@ -236,6 +203,35 @@ class WorkManagementViewModel(
         mutate(WorkManagementCompletion.ReadingStatusUpdated) {
             repository.setReadingStatus(context, volumeId, status)
         }
+
+    private suspend fun rehomeCompletedDownload(
+        volumeId: String,
+        targetWorkId: String?,
+        targetVersionId: String?,
+        targetWorkTitle: String,
+        targetWorkAuthor: String?,
+        targetCoverApiPath: String?,
+    ) {
+        val rewrite = downloadOwnershipRewriteForStructuralMove(
+            targetWorkId = targetWorkId,
+            targetVersionId = targetVersionId,
+            targetWorkTitle = targetWorkTitle,
+            targetWorkAuthor = targetWorkAuthor,
+            targetCoverApiPath = targetCoverApiPath,
+        ) ?: return
+        downloadsRuntime.rehomeCompletedArtifact(
+            namespace = downloadNamespace,
+            volumeId = volumeId,
+            targetWorkId = rewrite.targetWorkId,
+            targetVersionId = rewrite.targetVersionId,
+            targetVersionSourceKey = rewrite.targetVersionSourceKey,
+            targetVersionSourceName = rewrite.targetVersionSourceName,
+            targetWorkTitle = rewrite.targetWorkTitle,
+            targetWorkAuthor = rewrite.targetWorkAuthor,
+            targetCoverApiPath = rewrite.targetCoverApiPath,
+            targetVersionCompleted = rewrite.targetVersionCompleted,
+        )
+    }
 
     private fun checkCapability() {
         viewModelScope.launch {

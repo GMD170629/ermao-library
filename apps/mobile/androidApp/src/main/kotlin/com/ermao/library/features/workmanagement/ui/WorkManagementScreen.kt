@@ -599,9 +599,7 @@ private fun MediaKindForm(
         enabled = !blocked && selected != current,
         modifier = Modifier.fillMaxWidth(),
         onClick = {
-            viewModel.reclassifyVolume(
-                volume.id, selected, content.work.title, content.work.author, content.work.coverUrl,
-            )
+            viewModel.reclassifyVolume(volume.id, selected)
         },
     )
 }
