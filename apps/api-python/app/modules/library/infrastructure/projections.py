@@ -15,7 +15,6 @@ from app.models.library import (
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import MetadataLookupTask
@@ -80,67 +79,6 @@ def save_detail_preference(
         preference.updated_at = now
     db.flush()
     return entity_as_legacy_dict(preference)
-
-
-def get_media_history(
-    db: Session, *, user_id: str, media_version_id: str
-) -> dict[str, object] | None:
-    history = db.scalar(
-        select(UserMediaHistory).where(
-            UserMediaHistory.user_id == user_id,
-            UserMediaHistory.media_version_id == media_version_id,
-        )
-    )
-    return entity_as_legacy_dict(history) if history is not None else None
-
-
-def save_media_history(
-    db: Session,
-    *,
-    user_id: str,
-    media_version_id: str,
-    last_volume_id: str | None,
-    now: datetime,
-) -> dict[str, object]:
-    history = db.scalar(
-        select(UserMediaHistory).where(
-            UserMediaHistory.user_id == user_id,
-            UserMediaHistory.media_version_id == media_version_id,
-        )
-    )
-    if history is None:
-        history = UserMediaHistory(
-            id=f"py_{uuid4().hex}",
-            user_id=user_id,
-            media_version_id=media_version_id,
-            last_volume_id=last_volume_id,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(history)
-    else:
-        history.last_volume_id = last_volume_id
-        history.updated_at = now
-    db.flush()
-    return entity_as_legacy_dict(history)
-
-
-def list_media_histories_for_work(
-    db: Session, *, user_id: str, work_id: str
-) -> list[dict[str, object]]:
-    histories = db.scalars(
-        select(UserMediaHistory)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == UserMediaHistory.media_version_id,
-        )
-        .where(
-            UserMediaHistory.user_id == user_id,
-            LibraryMediaVersion.work_id == work_id,
-        )
-        .order_by(UserMediaHistory.updated_at.desc(), UserMediaHistory.id.desc())
-    ).all()
-    return [entity_as_legacy_dict(history) for history in histories]
 
 
 def get_media_version(db: Session, media_version_id: str) -> dict[str, object] | None:
@@ -272,13 +210,17 @@ def latest_metadata_lookups_for_works(
 ) -> dict[str, dict[str, object]]:
     if not work_ids:
         return {}
-    rank = func.row_number().over(
-        partition_by=MetadataLookupTask.work_id,
-        order_by=(
-            MetadataLookupTask.created_at.desc(),
-            MetadataLookupTask.id.desc(),
-        ),
-    ).label("lookup_rank")
+    rank = (
+        func.row_number()
+        .over(
+            partition_by=MetadataLookupTask.work_id,
+            order_by=(
+                MetadataLookupTask.created_at.desc(),
+                MetadataLookupTask.id.desc(),
+            ),
+        )
+        .label("lookup_rank")
+    )
     ranked = (
         select(MetadataLookupTask.__table__, rank)
         .where(MetadataLookupTask.work_id.in_(work_ids))

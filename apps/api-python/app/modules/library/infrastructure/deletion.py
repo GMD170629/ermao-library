@@ -23,15 +23,14 @@ from app.models.import_pipeline import (
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
-    LibraryVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
@@ -62,14 +61,18 @@ def load_prepared_import_volume_deletion(
 ) -> PreparedLibraryVolumeDeletion | None:
     """Load the complete SQL decision projection without filesystem work."""
 
-    target_statement = select(
-        LibraryVolume.id.label("volume_id"),
-        LibraryVolume.version_id.label("media_version_id"),
-        LibraryVolume.cover_path.label("cover_path"),
-        LibraryVersion.work_id.label("work_id"),
-    ).select_from(LibraryVolume).join(
-        LibraryVersion,
-        LibraryVersion.id == LibraryVolume.version_id,
+    target_statement = (
+        select(
+            LibraryVolume.id.label("volume_id"),
+            LibraryVolume.version_id.label("media_version_id"),
+            LibraryVolume.cover_path.label("cover_path"),
+            LibraryVersion.work_id.label("work_id"),
+        )
+        .select_from(LibraryVolume)
+        .join(
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
+        )
     )
     target_row = None
     if file_paths:
@@ -280,9 +283,6 @@ def delete_work_records_bulk(db: Session, work_ids: tuple[str, ...]) -> int:
         delete(LibraryMetadata).where(LibraryMetadata.volume_id.in_(volume_ids)),
         delete(LibraryVolumeFacet).where(LibraryVolumeFacet.volume_id.in_(volume_ids)),
         delete(LibraryFile).where(LibraryFile.volume_id.in_(volume_ids)),
-        delete(UserMediaHistory).where(
-            UserMediaHistory.media_version_id.in_(media_version_ids)
-        ),
         delete(LibraryVolume).where(LibraryVolume.id.in_(volume_ids)),
         delete(LibraryMediaVersion).where(
             LibraryMediaVersion.id.in_(media_version_ids)
@@ -403,15 +403,10 @@ def prepare_delete_volume_scope(
     if delete_media_version:
         statements.extend(
             (
-                delete(UserMediaHistory).where(
-                    UserMediaHistory.media_version_id == media_version_id
-                ),
                 delete(LibraryMediaVersion).where(
                     LibraryMediaVersion.id == media_version_id
                 ),
-                delete(LibraryVersion).where(
-                    LibraryVersion.id == media_version_id
-                ),
+                delete(LibraryVersion).where(LibraryVersion.id == media_version_id),
             )
         )
     if delete_work:
@@ -505,18 +500,13 @@ def _prepare_import_volume_deletion_statements(
             delete(LibraryVolumeFacet).where(
                 LibraryVolumeFacet.volume_id == prepared.volume_id
             ),
-            delete(LibraryFile).where(
-                LibraryFile.volume_id == prepared.volume_id
-            ),
+            delete(LibraryFile).where(LibraryFile.volume_id == prepared.volume_id),
         )
     )
     after: list[Executable] = []
     if prepared.delete_media_version:
         after.extend(
             (
-                delete(UserMediaHistory).where(
-                    UserMediaHistory.media_version_id == prepared.media_version_id
-                ),
                 delete(LibraryMediaVersion).where(
                     LibraryMediaVersion.id == prepared.media_version_id
                 ),

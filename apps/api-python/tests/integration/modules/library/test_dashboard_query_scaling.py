@@ -12,10 +12,11 @@ from app.models.auth import User
 from app.models.library import (
     LibraryFacet,
     LibraryMediaVersion,
+    LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
-    UserMediaHistory,
 )
 from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.application.work_list import WorkListQuery
@@ -42,6 +43,7 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
             [
                 {
                     "id": f"scale-work-{index:06d}",
+                    "library_id": "test-library",
                     "origin": "MANUAL",
                     "title": f"Scale book {index}",
                     "normalized_title": f"scalebook{index}",
@@ -49,6 +51,19 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
                     "normalized_author": "scaleauthor",
                     "tags": "[]",
                     "hidden": False,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db.execute(
+            insert(LibraryVersion),
+            [
+                {
+                    "id": f"scale-version-{index:06d}",
+                    "work_id": f"scale-work-{index:06d}",
+                    "source_key": "__implicit__",
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -73,8 +88,7 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
             [
                 {
                     "id": f"scale-volume-{index:06d}",
-                    "media_version_id": f"scale-media-{index:06d}",
-                    "library_id": None,
+                    "version_id": f"scale-version-{index:06d}",
                     "origin": "MANUAL",
                     "title": "Volume 1",
                     "sort_order": 0,
@@ -267,11 +281,14 @@ def test_continue_reading_does_not_scan_every_visible_volume(
     _seed_manual_library(db_session, work_count=2_000)
     now = datetime.now(UTC)
     db_session.add(
-        UserMediaHistory(
-            id="scale-reader-history",
+        LibraryReadingProgress(
+            id="scale-reader-progress",
             user_id=user.id,
-            media_version_id="scale-media-001999",
-            last_volume_id="scale-volume-001999",
+            volume_id="scale-volume-001999",
+            reader_type="epub",
+            position="1",
+            percent=40,
+            extra="{}",
             created_at=now,
             updated_at=now,
         )

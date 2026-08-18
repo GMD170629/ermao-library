@@ -20,7 +20,6 @@ from app.models.library import (
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
@@ -210,11 +209,6 @@ class SqlAlchemyVolumeStructure:
             )
             or 0
         )
-        histories = self._db.scalars(
-            select(UserMediaHistory).where(
-                UserMediaHistory.media_version_id == source_media.id
-            )
-        ).all()
         source_work = self._db.get(LibraryWork, source_work_id)
         deletes_source_work = source_volume_count == 1 and source_media_count == 1
         return {
@@ -233,7 +227,6 @@ class SqlAlchemyVolumeStructure:
             ),
             "sourceMediaVersion": entity_as_legacy_dict(source_media),
             "volume": entity_as_legacy_dict(volume),
-            "mediaHistories": [entity_as_legacy_dict(row) for row in histories],
         }
 
     def move_volume(
@@ -355,8 +348,6 @@ class SqlAlchemyVolumeStructure:
             "targetMediaVersionId": source_version.id,
             "targetMediaVersionCreated": False,
             "volumes": [entity_as_legacy_dict(row) for row in selected],
-            "mediaHistories": [],
-            "historyMediaVersionIds": [],
         }
         selected_update_rows = [
             {

@@ -9,11 +9,15 @@ from app.models.auth import User
 from app.models.library import (
     LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
+)
 
 
 def test_bookshelf_projection_uses_current_users_continue_volume_progress(
@@ -35,7 +39,7 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
         role="member",
     )
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="bookshelf-work",
         origin="MANUAL",
         title="Bookshelf work",
@@ -44,6 +48,13 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
         normalized_author="author",
         tags="[]",
         hidden=False,
+        created_at=now,
+        updated_at=now,
+    )
+    version = LibraryVersion(
+        id="bookshelf-version",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
         created_at=now,
         updated_at=now,
     )
@@ -56,7 +67,7 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
     )
     first_volume = LibraryVolume(
         id="bookshelf-volume-1",
-        media_version_id=media_version.id,
+        version_id=version.id,
         origin="MANUAL",
         title="Volume 1",
         sort_order=0,
@@ -68,7 +79,7 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
     )
     second_volume = LibraryVolume(
         id="bookshelf-volume-2",
-        media_version_id=media_version.id,
+        version_id=version.id,
         origin="MANUAL",
         title="Volume 2",
         sort_order=1,
@@ -78,9 +89,11 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
         created_at=now,
         updated_at=now,
     )
-    db_session.add_all(
-        [current_user, other_user, work, media_version, first_volume, second_volume]
-    )
+    db_session.add_all([current_user, other_user, work])
+    db_session.flush()
+    db_session.add_all([version, media_version])
+    db_session.flush()
+    db_session.add_all([first_volume, second_volume])
     db_session.flush()
     db_session.add_all(
         [

@@ -14,14 +14,17 @@ from app.core.authorization import (
 )
 from app.models.library import (
     LibraryMediaVersion,
-    LibraryVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.modules.library.application.bookshelf import (
     BookshelfItemQueryPort,
     BookshelfItemSummary,
+)
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
 )
 from app.modules.reader.public import (
     MediaKind,
@@ -54,19 +57,18 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
         if not visible_work_ids:
             return ()
 
+        media_kind = volume_effective_media_kind(LibraryVolume)
         rows = self._db.execute(
             select(
-                LibraryMediaVersion.work_id,
-                LibraryMediaVersion.media_kind,
+                LibraryVersion.work_id,
+                media_kind.label("media_kind"),
                 LibraryVolume.id.label("volume_id"),
                 LibraryVolume.sort_order,
                 LibraryReadingProgress.percent,
                 LibraryReadingProgress.updated_at.label("progress_updated_at"),
             )
-            .join(
-                LibraryVolume,
-                LibraryVolume.version_id == LibraryVersion.id,
-            )
+            .select_from(LibraryVolume)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
             .outerjoin(
                 LibraryReadingProgress,
                 and_(
@@ -75,26 +77,35 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 ),
             )
             .where(
-                LibraryMediaVersion.work_id.in_(visible_work_ids),
+                LibraryVersion.work_id.in_(visible_work_ids),
                 LibraryVolume.hidden.is_(False),
                 volume_visibility_predicate(context),
             )
             .order_by(
-                LibraryMediaVersion.work_id.asc(),
-                LibraryMediaVersion.id.asc(),
+                LibraryVersion.work_id.asc(),
                 LibraryVolume.sort_order.asc(),
                 LibraryVolume.id.asc(),
             )
         ).all()
-
+        media_kind_rows = self._db.execute(
+            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
+            .where(LibraryMediaVersion.work_id.in_(visible_work_ids))
+            .order_by(
+                LibraryMediaVersion.work_id.asc(),
+                LibraryMediaVersion.id.asc(),
+            )
+        ).all()
         media_kinds_by_work: dict[str, list[str]] = defaultdict(list)
+        for work_id, kind in media_kind_rows:
+            kind_value = str(kind)
+            if kind_value not in media_kinds_by_work[str(work_id)]:
+                media_kinds_by_work[str(work_id)].append(kind_value)
+
         states_by_work: dict[str, list[VolumeReadingState]] = defaultdict(list)
         percent_by_volume: dict[str, float] = {}
         for row in rows:
             work_id = str(row.work_id)
             media_kind = MediaKind(str(row.media_kind))
-            if media_kind.value not in media_kinds_by_work[work_id]:
-                media_kinds_by_work[work_id].append(media_kind.value)
             percent = min(100.0, max(0.0, float(row.percent or 0)))
             volume_id = str(row.volume_id)
             percent_by_volume[volume_id] = percent

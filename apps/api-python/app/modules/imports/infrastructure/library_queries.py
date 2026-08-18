@@ -5,7 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Integer, case, cast, delete, func, literal, or_, select, update
+from sqlalchemy import (
+    Integer,
+    and_,
+    case,
+    cast,
+    delete,
+    func,
+    literal,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -22,12 +33,15 @@ from app.models.library import (
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.models.shelf import Shelf, ShelfWork
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 
 
 def _records(
@@ -103,20 +117,6 @@ def _list_reading_progress(
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     statement = select(LibraryReadingProgress.__table__).where(*filters)
-    if order_by:
-        statement = statement.order_by(*order_by)
-    if limit is not None:
-        statement = statement.limit(limit)
-    return _records(db, statement)
-
-
-def _list_consumption_states(
-    db: Session,
-    *filters: Any,
-    order_by: tuple[Any, ...] | None = None,
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
-    statement = select(UserMediaHistory.__table__).where(*filters)
     if order_by:
         statement = statement.order_by(*order_by)
     if limit is not None:
@@ -749,18 +749,20 @@ def list_audiobook_consumption_for_works(
 ) -> list[dict[str, Any]]:
     if not work_ids:
         return []
-    return _records(
+    return _list_reading_progress(
         db,
-        select(UserMediaHistory.__table__)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == UserMediaHistory.media_version_id,
-        )
-        .where(
-            LibraryMediaVersion.work_id.in_(work_ids),
-            LibraryMediaVersion.media_kind == "AUDIOBOOK",
-        )
-        .order_by(UserMediaHistory.updated_at.asc(), UserMediaHistory.id.asc()),
+        LibraryReadingProgress.volume_id.in_(
+            select(LibraryVolume.id)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .where(
+                LibraryVersion.work_id.in_(work_ids),
+                volume_effective_media_kind(LibraryVolume) == "AUDIOBOOK",
+            )
+        ),
+        order_by=(
+            LibraryReadingProgress.updated_at.asc(),
+            LibraryReadingProgress.id.asc(),
+        ),
     )
 
 
@@ -1072,11 +1074,16 @@ def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | N
                 LibraryWork.title,
             )
             .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
             .join(
                 LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+                and_(
+                    LibraryMediaVersion.work_id == LibraryWork.id,
+                    LibraryMediaVersion.media_kind
+                    == volume_effective_media_kind(LibraryVolume),
+                ),
             )
-            .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
             .where(
                 LibraryFile.path == str(path.resolve()),
                 LibraryVolume.import_status.in_(("COMPLETED", "IMPORTED", "READY")),

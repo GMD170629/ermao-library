@@ -41,7 +41,6 @@ from app.models.library import (
     LibraryReadingUnit,
     LibraryVersion,
     LibraryVolume,
-    UserMediaHistory,
 )
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.library.domain.media_kinds import media_kind_of
@@ -720,6 +719,27 @@ def _media_parents_by_work_kind(
     return parents
 
 
+def _continue_volume_from_progress(
+    volumes: list[LibraryVolume],
+    progresses: dict[str, LibraryReadingProgress],
+) -> LibraryVolume | None:
+    if not volumes:
+        return None
+    unfinished = [
+        volume
+        for volume in volumes
+        if float(progresses[volume.id].percent if volume.id in progresses else 0) < 100
+    ]
+    pool = unfinished or volumes
+    with_progress = [volume for volume in pool if volume.id in progresses]
+    if not with_progress:
+        return pool[0]
+    return max(
+        with_progress,
+        key=lambda volume: (progresses[volume.id].updated_at, volume.id),
+    )
+
+
 def _parent_for_volume(
     volume: LibraryVolume,
     work_id: str,
@@ -737,7 +757,6 @@ class _WorkViewBatch:
     metadata_lookups: dict[str, dict[str, object]]
     rows_by_work: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]]
     progresses: dict[str, LibraryReadingProgress]
-    histories: dict[str, UserMediaHistory]
     files: dict[str, list[LibraryFile]]
     tab_order: tuple[str, ...]
     saved_tabs: dict[str, str]
@@ -774,13 +793,11 @@ def _load_work_view_batch(
         work_id: [] for work_id in work_ids
     }
     volume_ids: list[str] = []
-    media_version_ids: list[str] = []
     for media_version, volume in rows:
         rows_by_work.setdefault(media_version.work_id, []).append(
             (media_version, volume)
         )
         volume_ids.append(volume.id)
-        media_version_ids.append(media_version.id)
 
     progresses = (
         {
@@ -793,19 +810,6 @@ def _load_work_view_batch(
             ).all()
         }
         if user_id and volume_ids
-        else {}
-    )
-    histories = (
-        {
-            history.media_version_id: history
-            for history in db.scalars(
-                select(UserMediaHistory).where(
-                    UserMediaHistory.user_id == user_id,
-                    UserMediaHistory.media_version_id.in_(media_version_ids),
-                )
-            ).all()
-        }
-        if user_id and media_version_ids
         else {}
     )
     files: dict[str, list[LibraryFile]] = {volume_id: [] for volume_id in volume_ids}
@@ -832,7 +836,6 @@ def _load_work_view_batch(
         ),
         rows_by_work=rows_by_work,
         progresses=progresses,
-        histories=histories,
         files=files,
         tab_order=tuple(_detail_tab_order(db)),
         saved_tabs={
@@ -931,23 +934,6 @@ def _work_view(
             else {}
         )
     )
-    histories = (
-        batch.histories
-        if batch is not None
-        else (
-            {
-                history.media_version_id: history
-                for history in db.scalars(
-                    select(UserMediaHistory).where(
-                        UserMediaHistory.user_id == user_id,
-                        UserMediaHistory.media_version_id.in_(grouped),
-                    )
-                ).all()
-            }
-            if user_id and grouped
-            else {}
-        )
-    )
     media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
     ordered = sorted(
         grouped.values(), key=lambda item: media_order.get(item[0].media_kind, 99)
@@ -962,34 +948,12 @@ def _work_view(
             if float(progresses[volume.id].percent if volume.id in progresses else 0)
             < 100
         ]
-    candidates = [item for item in ordered if incomplete[item[0].id]]
-    recent_media: _VolumeMediaParent | None = None
-    continue_volume: LibraryVolume | None = None
-    if candidates:
-        with_history = [item for item in candidates if item[0].id in histories]
-        if with_history:
-            recent_media, _ = max(
-                with_history, key=lambda item: histories[item[0].id].updated_at
-            )
-        else:
-            recent_media = candidates[0][0]
-        continue_volume = incomplete[recent_media.id][0]
-    elif ordered:
-        with_history = [item for item in ordered if item[0].id in histories]
-        recent_media, recent_volumes = (
-            max(with_history, key=lambda item: histories[item[0].id].updated_at)
-            if with_history
-            else ordered[0]
-        )
-        history = histories.get(recent_media.id)
-        continue_volume = next(
-            (
-                volume
-                for volume in recent_volumes
-                if history and volume.id == history.last_volume_id
-            ),
-            recent_volumes[0],
-        )
+    continue_volume = _continue_volume_from_progress(all_volumes, progresses)
+    recent_media: _VolumeMediaParent | None = (
+        _parent_for_volume(continue_volume, work_id, parents)
+        if continue_volume is not None
+        else None
+    )
     response_volumes: dict[str, list[LibraryVolume]] = {}
     for media_version, volumes in ordered:
         selected = (

@@ -32,7 +32,6 @@ from app.models.library import (
     LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
@@ -214,7 +213,6 @@ def _prepare_set_media_kind_batch(
                 "targetWorkId": source_work_id,
                 "targetMediaVersionId": selected_by_id[context.id][1].id,
                 "targetMediaVersionCreated": False,
-                "mediaHistories": [],
             },
             now=now,
         )
@@ -348,7 +346,6 @@ def _prepare_reparent_batch(
                 "targetWorkId": target_work_id,
                 "targetMediaVersionId": target_id,
                 "targetMediaVersionCreated": created_target_version,
-                "mediaHistories": [],
             },
             now=now,
         )
@@ -503,7 +500,6 @@ def _prepare_split_batch(
                 "targetMediaVersionId": target_media_ids[context.id],
                 "targetMediaVersionCreated": True,
                 "newWorkId": target_work_ids[context.id],
-                "mediaHistories": [],
             },
             now=now,
         )
@@ -703,21 +699,6 @@ def _batch_delete_snapshots(
                 entity_as_legacy_dict(dependent)
             )
 
-    histories = (
-        list(
-            db.scalars(
-                select(UserMediaHistory).where(
-                    UserMediaHistory.media_version_id.in_(
-                        select(LibraryMediaVersion.id).where(
-                            LibraryMediaVersion.work_id == source_work_id
-                        )
-                    )
-                )
-            ).all()
-        )
-        if deletes_source_work
-        else []
-    )
     media_rows = (
         list(
             db.scalars(
@@ -740,11 +721,9 @@ def _batch_delete_snapshots(
         dependents = operation_store.snapshot_work_dependents(db, source_work_id)
         work_row = entity_as_legacy_dict(work)
         media_legacy = [entity_as_legacy_dict(row) for row in media_rows]
-        history_legacy = [entity_as_legacy_dict(row) for row in histories]
         for snapshot in snapshots.values():
             snapshot["LibraryWork"] = [work_row]
             snapshot["LibraryMediaVersion"] = media_legacy
-            snapshot["UserMediaHistory"] = history_legacy
             snapshot.update(dependents)
     return snapshots
 

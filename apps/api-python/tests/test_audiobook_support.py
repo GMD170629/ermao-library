@@ -5,7 +5,7 @@ import json
 import sys
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -29,14 +29,13 @@ from app.bootstrap.imports import (
     scan_directory_for_imports,
 )
 from app.core.auth import hash_password
-from tests.conftest import recreate_application_schema
 from app.models.auth import User
 from app.models.library import (
     LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.modules.imports.application.audio_types import (
     LEGACY_AUDIO_EXTS,
@@ -59,6 +58,9 @@ from app.modules.imports.infrastructure.orchestration_services import (
 from app.modules.imports.infrastructure.uploaded_file_publication import (
     AtomicUploadedFilePublisher,
 )
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
+)
 from app.services.audio_metadata import (
     AudioChapterMetadata,
     AudioFileMetadata,
@@ -69,6 +71,7 @@ from app.worker.watcher import (
     WatchState,
     WorkerManager,
 )
+from tests.conftest import recreate_application_schema
 from tests.test_worker_importer import write_epub_metadata_fixture
 
 
@@ -1373,10 +1376,15 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     media_version = LibraryMediaVersion(
         id="switch-audio", work_id=work.id, media_kind="AUDIOBOOK"
     )
+    version = LibraryVersion(
+        id="switch-version",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     volumes = [
         LibraryVolume(
             id=f"audio-{suffix}-volume",
-            media_version_id=media_version.id,
+            version_id=version.id,
             origin="MANUAL",
             title=f"Volume {suffix.upper()}",
             sort_order=index,
@@ -1386,29 +1394,23 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
         )
         for index, suffix in enumerate(("a", "b"))
     ]
-    db_session.add_all([work, media_version, *volumes])
+    db_session.add(work)
     db_session.flush()
-    db_session.add_all(
-        [
-            LibraryReadingProgress(
-                id="progress-b",
-                user_id=user.id,
-                volume_id=volumes[1].id,
-                reader_type="audio",
-                position="50000",
-                percent=80,
-                extra='{"positionMs":50000}',
-                schema_version=3,
-                location_type="audio",
-                location_json=json.dumps({"type": "audio", "positionMs": 50_000}),
-            ),
-            UserMediaHistory(
-                id="switch-history",
-                user_id=user.id,
-                media_version_id=media_version.id,
-                last_volume_id=volumes[1].id,
-            ),
-        ]
+    db_session.add_all([version, media_version, *volumes])
+    db_session.flush()
+    db_session.add(
+        LibraryReadingProgress(
+            id="progress-b",
+            user_id=user.id,
+            volume_id=volumes[1].id,
+            reader_type="audio",
+            position="50000",
+            percent=80,
+            extra='{"positionMs":50000}',
+            schema_version=3,
+            location_type="audio",
+            location_json=json.dumps({"type": "audio", "positionMs": 50_000}),
+        )
     )
     db_session.commit()
 
@@ -1417,7 +1419,7 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     assert [
         volume["id"] for volume in detail["book"]["mediaVersions"][0]["volumes"]
     ] == ["audio-a-volume", "audio-b-volume"]
-    assert detail["book"]["continueVolumeId"] == "audio-a-volume"
+    assert detail["book"]["continueVolumeId"] == "audio-b-volume"
 
     selected_a = client.get(
         "/api/works/switch-work",
@@ -1438,6 +1440,7 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     assert selected_b["progressStatus"] == "READING"
     assert selected_b["primaryAction"]["href"] == "/listen/audio-b-volume"
 
+    now = datetime.now(UTC)
     db_session.add(
         LibraryReadingProgress(
             id="progress-a",
@@ -1450,11 +1453,13 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
             schema_version=3,
             location_type="audio",
             location_json=json.dumps({"type": "audio", "positionMs": 100_000}),
+            created_at=now - timedelta(hours=1),
+            updated_at=now - timedelta(hours=1),
         )
     )
     db_session.query(LibraryReadingProgress).filter(
         LibraryReadingProgress.id == "progress-b"
-    ).update({"percent": 100})
+    ).update({"percent": 100, "updated_at": now})
     db_session.commit()
     completed = client.get("/api/works/switch-work").json()["data"]["book"]
     assert completed["completed"] is True

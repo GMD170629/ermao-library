@@ -27,7 +27,6 @@ from app.models.library import (
     LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.modules.imports.application.transactions import (
@@ -65,7 +64,6 @@ class SqlAlchemyLibraryImportStore:
             ImportWriteTarget.LIBRARY_READING_PROGRESS: (
                 LibraryReadingProgress.__table__
             ),
-            ImportWriteTarget.USER_MEDIA_HISTORY: UserMediaHistory.__table__,
             ImportWriteTarget.ORGANIZE_JOB: OrganizeJob.__table__,
             ImportWriteTarget.METADATA_LOOKUP_TASK: MetadataLookupTask.__table__,
         }
@@ -163,9 +161,7 @@ class SqlAlchemyLibraryImportStore:
         ):
             executions.append(
                 _PreparedSqlExecution(
-                    delete(LibraryReadingUnit).where(
-                        LibraryReadingUnit.id.in_(chunk)
-                    )
+                    delete(LibraryReadingUnit).where(LibraryReadingUnit.id.in_(chunk))
                 )
             )
         for chunk in sqlite_parameter_chunks(
@@ -183,9 +179,7 @@ class SqlAlchemyLibraryImportStore:
         ):
             executions.append(
                 _PreparedSqlExecution(
-                    delete(LibraryMetadata).where(
-                        LibraryMetadata.volume_id.in_(chunk)
-                    )
+                    delete(LibraryMetadata).where(LibraryMetadata.volume_id.in_(chunk))
                 )
             )
 
@@ -225,7 +219,6 @@ class SqlAlchemyLibraryImportStore:
             ImportWriteTarget.IMPORT_ASSET,
             ImportWriteTarget.IMPORT_LOG,
             ImportWriteTarget.LIBRARY_READING_PROGRESS,
-            ImportWriteTarget.USER_MEDIA_HISTORY,
             ImportWriteTarget.ORGANIZE_JOB,
             ImportWriteTarget.METADATA_LOOKUP_TASK,
         )
@@ -274,9 +267,7 @@ class SqlAlchemyLibraryImportStore:
     ) -> None:
         executions = [
             *self._prepare_bulk_update_by_id(ImportTask.__table__, task_updates),
-            *self._prepare_bulk_update_by_id(
-                LibraryVolume.__table__, volume_updates
-            ),
+            *self._prepare_bulk_update_by_id(LibraryVolume.__table__, volume_updates),
         ]
         for chunk in sqlite_parameter_chunks(
             media_versions_to_prune, parameters_per_row=1
@@ -287,8 +278,7 @@ class SqlAlchemyLibraryImportStore:
                         LibraryMediaVersion.id.in_(chunk),
                         ~exists(
                             select(LibraryVolume.id).where(
-                                LibraryVolume.media_version_id
-                                == LibraryMediaVersion.id
+                                LibraryVolume.media_version_id == LibraryMediaVersion.id
                             )
                         ),
                     )
@@ -317,9 +307,7 @@ class SqlAlchemyLibraryImportStore:
         )
         return str(status) if status is not None else None
 
-    def find_library_file_import_target(
-        self, path: str
-    ) -> dict[str, object] | None:
+    def find_library_file_import_target(self, path: str) -> dict[str, object] | None:
         existing = (
             self._db.execute(
                 select(

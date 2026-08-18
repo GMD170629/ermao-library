@@ -16,6 +16,7 @@ from app.models.library import (
     Library,
     LibraryMediaVersion,
     LibraryOperation,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -31,6 +32,9 @@ from app.modules.library.application.volume_commands import (
 from app.modules.library.infrastructure.batch_volume_commands import (
     _prepare_reparent_batch,
     prepare_batch_volume_mutation,
+)
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
 )
 from app.services.download_executor import DownloadExecutionResult
 from app.services.download_queue import process_next_download_task
@@ -73,6 +77,11 @@ def _work(
         tags="[]",
         merge_key=f"{title.casefold()}:刘慈欣",
     )
+    version = LibraryVersion(
+        id=f"version-{work_id}",
+        work_id=work.id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
     media = LibraryMediaVersion(
         id=f"media-{work_id}",
         work_id=work.id,
@@ -80,13 +89,14 @@ def _work(
     )
     volume = LibraryVolume(
         id=f"volume-{work_id}",
-        media_version_id=media.id,
+        version_id=version.id,
         title=title,
         sort_order=0,
         format="EPUB",
         resource_key=f"{work_id}:volume",
         import_status="COMPLETED",
     )
+    volume.version = version
     return work, media, volume
 
 
@@ -117,7 +127,9 @@ def _seed_cross_library_volume_pair(
     db_session.flush()
     db_session.add_all([work_a, work_b])
     db_session.flush()
-    db_session.add_all([media_a, volume_a, media_b, volume_b])
+    db_session.add_all(
+        [volume_a.version, media_a, volume_a, volume_b.version, media_b, volume_b]
+    )
     db_session.commit()
     return work_a, media_a, volume_a, work_b
 
@@ -290,7 +302,9 @@ def test_merge_works_rejects_cross_library_without_mutation(
     db_session.flush()
     db_session.add_all([work_a, work_b])
     db_session.flush()
-    db_session.add_all([media_a, volume_a, media_b, volume_b])
+    db_session.add_all(
+        [volume_a.version, media_a, volume_a, volume_b.version, media_b, volume_b]
+    )
     db_session.commit()
 
     with pytest.raises(ValueError, match="跨书库"):
@@ -300,7 +314,7 @@ def test_merge_works_rejects_cross_library_without_mutation(
     assert db_session.get(LibraryWork, work_a.id) is not None
     assert db_session.get(LibraryWork, work_b.id) is not None
     assert db_session.get(LibraryMediaVersion, media_b.id) is not None
-    assert db_session.get(LibraryVolume, volume_b.id).media_version_id == media_b.id
+    assert db_session.get(LibraryVolume, volume_b.id).version_id == volume_b.version_id
     assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0
 
 
@@ -331,7 +345,9 @@ def test_move_volume_rejects_cross_library_without_mutation(
     db_session.flush()
     db_session.add_all([work_a, work_b])
     db_session.flush()
-    db_session.add_all([media_a, volume_a, media_b, volume_b])
+    db_session.add_all(
+        [volume_a.version, media_a, volume_a, volume_b.version, media_b, volume_b]
+    )
     db_session.commit()
 
     moved = client.post(
@@ -344,7 +360,7 @@ def test_move_volume_rejects_cross_library_without_mutation(
     db_session.expire_all()
     persisted = db_session.get(LibraryVolume, volume_a.id)
     assert persisted is not None
-    assert persisted.media_version_id == media_a.id
+    assert persisted.version_id == volume_a.version_id
     assert db_session.get(LibraryWork, work_a.id) is not None
     assert db_session.get(LibraryWork, work_b.id) is not None
     assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0
@@ -420,7 +436,7 @@ def test_batch_transfer_rejects_cross_library_without_mutation(
     db_session: Session,
 ) -> None:
     _login_admin(client, db_session)
-    work_a, media_a, volume_a, work_b = _seed_cross_library_volume_pair(
+    work_a, _media_a, volume_a, work_b = _seed_cross_library_volume_pair(
         db_session, prefix="batch-transfer"
     )
 
@@ -438,7 +454,7 @@ def test_batch_transfer_rejects_cross_library_without_mutation(
     db_session.expire_all()
     persisted = db_session.get(LibraryVolume, volume_a.id)
     assert persisted is not None
-    assert persisted.media_version_id == media_a.id
+    assert persisted.version_id == volume_a.version_id
     assert db_session.get(LibraryWork, work_a.id) is not None
     assert db_session.get(LibraryWork, work_b.id) is not None
     assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0
@@ -523,14 +539,14 @@ def test_batch_transfer_resource_rolls_back_cross_library_attempt() -> None:
 def test_batch_transfer_planner_rejects_cross_library(
     db_session: Session,
 ) -> None:
-    work_a, media_a, volume_a, work_b = _seed_cross_library_volume_pair(
+    work_a, _media_a, volume_a, work_b = _seed_cross_library_volume_pair(
         db_session, prefix="batch-planner"
     )
     now = datetime.now(UTC)
     context = VolumeContext(
         id=volume_a.id,
         work_id=work_a.id,
-        media_version_id=media_a.id,
+        media_version_id=volume_a.version_id,
         media_kind="EBOOK",
         title=volume_a.title,
         sort_order=volume_a.sort_order,
@@ -562,14 +578,13 @@ def test_batch_transfer_planner_rejects_cross_library(
             source_work_id=work_a.id,
             target_work_id=work_b.id,
             contexts=(context,),
-            target_kind=None,
             now=now,
         )
 
     db_session.expire_all()
     persisted = db_session.get(LibraryVolume, volume_a.id)
     assert persisted is not None
-    assert persisted.media_version_id == media_a.id
+    assert persisted.version_id == volume_a.version_id
     assert db_session.get(LibraryWork, work_a.id) is not None
     assert db_session.get(LibraryWork, work_b.id) is not None
     assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0

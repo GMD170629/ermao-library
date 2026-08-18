@@ -273,7 +273,6 @@ def _merge_works(
 
     all_work_ids = [target_work_id, *sources]
     media_versions = library_works.list_media_versions_for_works(db, all_work_ids)
-    media_histories = library_works.list_media_histories_for_works(db, all_work_ids)
     inverse = {
         "targetWork": target,
         "sourceWorks": source_rows,
@@ -282,7 +281,6 @@ def _merge_works(
             db,
             [str(item["id"]) for item in media_versions],
         ),
-        "mediaHistories": media_histories,
         "shelfWorks": _shelf_snapshot(db, all_work_ids),
     }
 
@@ -781,8 +779,6 @@ def _undo_operation(
             )
         for volume in inverse.get("volumes") or []:
             library_operations.insert_snapshot(db, "LibraryVolume", volume)
-        for history in inverse.get("mediaHistories") or []:
-            library_operations.insert_snapshot(db, "UserMediaHistory", history)
         for shelf in inverse.get("shelfWorks") or []:
             library_operations.insert_snapshot(db, "ShelfWork", shelf)
     elif action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
@@ -802,8 +798,6 @@ def _undo_operation(
             source_media,
         )
         library_operations.insert_snapshot(db, "LibraryVolume", volume)
-        for history in inverse.get("mediaHistories") or []:
-            library_operations.insert_snapshot(db, "UserMediaHistory", history)
         target_media_version_id = str(inverse.get("targetMediaVersionId") or "")
         if inverse.get("targetMediaVersionCreated") and target_media_version_id:
             library_operations.delete_media_version_if_empty(

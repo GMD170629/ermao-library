@@ -29,7 +29,6 @@ class ImportWriteTarget(StrEnum):
     LIBRARY_READING_UNIT = "library_reading_unit"
     LIBRARY_METADATA = "library_metadata"
     LIBRARY_READING_PROGRESS = "library_reading_progress"
-    USER_MEDIA_HISTORY = "user_media_history"
     ORGANIZE_JOB = "organize_job"
     METADATA_LOOKUP_TASK = "metadata_lookup_task"
 
@@ -105,9 +104,7 @@ class ImportCompletionWriter(Protocol):
 
     def get_library_file(self, file_id: str) -> dict[str, object] | None: ...
 
-    def get_library_reading_unit(
-        self, unit_id: str
-    ) -> dict[str, object] | None: ...
+    def get_library_reading_unit(self, unit_id: str) -> dict[str, object] | None: ...
 
 
 @dataclass
@@ -209,14 +206,10 @@ class PreparedImportWriteBuffer:
                 for target_id, columns in self._reading_unit_pre_updates.items()
             ),
             updates=tuple(
-                PreparedImportUpdate(
-                    target, target_id, MappingProxyType(dict(columns))
-                )
+                PreparedImportUpdate(target, target_id, MappingProxyType(dict(columns)))
                 for (target, target_id), columns in self._updates.items()
             ),
-            reading_unit_ids_to_delete=tuple(
-                sorted(self._reading_unit_ids_to_delete)
-            ),
+            reading_unit_ids_to_delete=tuple(sorted(self._reading_unit_ids_to_delete)),
             reading_unit_file_ids_to_reset=tuple(
                 sorted(self._reading_unit_file_ids_to_reset)
             ),
@@ -540,9 +533,7 @@ class BoundedLibraryImportStore:
     def update_library_media_version(
         self, media_version_id: str, *, columns: dict[str, object]
     ) -> None:
-        self._update(
-            ImportWriteTarget.LIBRARY_MEDIA_VERSION, media_version_id, columns
-        )
+        self._update(ImportWriteTarget.LIBRARY_MEDIA_VERSION, media_version_id, columns)
 
     def delete_library_media_version_if_empty(self, media_version_id: str) -> None:
         self._completion.defer_media_version_prune(media_version_id)
@@ -556,8 +547,8 @@ class BoundedLibraryImportStore:
         volume_id = str(values["id"])
         self._transactions.prepare_for_dependency_read()
         try:
-            existing_status = (
-                self._projection_reader.get_library_volume_import_status(volume_id)
+            existing_status = self._projection_reader.get_library_volume_import_status(
+                volume_id
             )
         finally:
             self._transactions.finish_dependency_read()
@@ -590,9 +581,7 @@ class BoundedLibraryImportStore:
         if isinstance(path, str):
             self._transactions.prepare_for_dependency_read()
             try:
-                existing = self._projection_reader.find_library_file_import_target(
-                    path
-                )
+                existing = self._projection_reader.find_library_file_import_target(path)
             finally:
                 self._transactions.finish_dependency_read()
             if existing is not None and str(existing["importStatus"]) not in {
@@ -607,9 +596,7 @@ class BoundedLibraryImportStore:
                     if key not in {"id", "createdAt"}
                 }
                 self._writes.reset_reading_units_for_file(existing_id)
-                self._update(
-                    ImportWriteTarget.LIBRARY_FILE, existing_id, replacement
-                )
+                self._update(ImportWriteTarget.LIBRARY_FILE, existing_id, replacement)
                 return {**values, "id": existing_id}
         return self._insert(ImportWriteTarget.LIBRARY_FILE, values)
 
@@ -670,17 +657,7 @@ class BoundedLibraryImportStore:
         *,
         columns: dict[str, object],
     ) -> None:
-        self._update(
-            ImportWriteTarget.LIBRARY_READING_PROGRESS, progress_id, columns
-        )
-
-    def update_user_media_history(
-        self,
-        history_id: str,
-        *,
-        columns: dict[str, object],
-    ) -> None:
-        self._update(ImportWriteTarget.USER_MEDIA_HISTORY, history_id, columns)
+        self._update(ImportWriteTarget.LIBRARY_READING_PROGRESS, progress_id, columns)
 
     def insert_organize_job(self, *, columns: dict[str, object]) -> dict[str, object]:
         return self._insert(ImportWriteTarget.ORGANIZE_JOB, columns)

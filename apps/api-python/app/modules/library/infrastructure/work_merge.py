@@ -22,7 +22,6 @@ from app.models.library import (
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import (
@@ -422,34 +421,6 @@ class SqlAlchemyWorkMergeGateway:
         )
         kind_by_media_id = {row.id: row.media_kind for row in old_media_versions}
         old_media_ids = tuple(kind_by_media_id)
-        histories: list[UserMediaHistory] = []
-        for chunk in sqlite_parameter_chunks(old_media_ids, parameters_per_row=1):
-            histories.extend(
-                self._db.scalars(
-                    select(UserMediaHistory).where(
-                        UserMediaHistory.media_version_id.in_(chunk)
-                    )
-                ).all()
-            )
-        history_groups: dict[tuple[str, str], list[UserMediaHistory]] = defaultdict(
-            list
-        )
-        for history in histories:
-            kind = kind_by_media_id.get(history.media_version_id)
-            if kind is None or kind not in new_media_ids:
-                continue
-            history_groups[(history.user_id, kind)].append(history)
-        history_loser_ids: list[str] = []
-        history_winner_rows: list[dict[str, object]] = []
-        for (_user_id, kind), candidates in history_groups.items():
-            winner = max(candidates, key=lambda row: (row.updated_at, row.id))
-            history_loser_ids.extend(
-                history.id for history in candidates if history is not winner
-            )
-            history_winner_rows.append(
-                {"id": winner.id, "media_version_id": new_media_ids[kind]}
-            )
-
         shelf_ids = tuple(
             set(
                 self._db.scalars(
@@ -554,12 +525,6 @@ class SqlAlchemyWorkMergeGateway:
         # synchronous writeback operation rows.
         self._writeback.enabled()
 
-        history_delete_statements = tuple(
-            delete(UserMediaHistory).where(UserMediaHistory.id.in_(chunk))
-            for chunk in sqlite_parameter_chunks(
-                tuple(history_loser_ids), parameters_per_row=1
-            )
-        )
         shelf_rows = tuple(
             {"shelf_id": shelf_id, "work_id": new_work_id, "created_at": now}
             for shelf_id in shelf_ids
@@ -596,10 +561,6 @@ class SqlAlchemyWorkMergeGateway:
         self._db.execute(insert(LibraryVersion), list(version_rows))
         self._db.execute(insert(LibraryMediaVersion), list(media_rows))
         self._db.execute(update(LibraryVolume), volume_update_rows)
-        for statement in history_delete_statements:
-            self._db.execute(statement)
-        if history_winner_rows:
-            self._db.execute(update(UserMediaHistory), history_winner_rows)
 
         self._db.execute(
             delete(ShelfWork).where(ShelfWork.work_id.in_(command.work_ids))

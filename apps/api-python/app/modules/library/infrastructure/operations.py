@@ -33,7 +33,6 @@ from app.models.library import (
     LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
@@ -57,7 +56,6 @@ _SNAPSHOT_MODELS: dict[str, type] = {
         LibraryWorkFacet,
         LibraryVolumeFacet,
         ShelfWork,
-        UserMediaHistory,
         WorkDetailPreference,
         ImportTask,
         ImportAsset,
@@ -82,7 +80,6 @@ _RESTORE_ORDER = (
     "LibraryWorkFacet",
     "LibraryVolumeFacet",
     "ShelfWork",
-    "UserMediaHistory",
     "WorkDetailPreference",
     "ImportTask",
     "ImportAsset",
@@ -439,16 +436,6 @@ def capture_volume_delete_snapshot(
         snapshot["LibraryMediaVersion"] = [
             entity_as_legacy_dict(row) for row in media_rows
         ]
-        media_ids = tuple(row.id for row in media_rows)
-        snapshot["UserMediaHistory"] = (
-            _rows(
-                db,
-                UserMediaHistory,
-                UserMediaHistory.media_version_id.in_(media_ids),
-            )
-            if media_ids
-            else []
-        )
         snapshot["LibraryWorkFacet"] = _rows(
             db, LibraryWorkFacet, LibraryWorkFacet.work_id == work_id
         )

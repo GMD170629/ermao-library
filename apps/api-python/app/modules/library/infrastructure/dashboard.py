@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, case, exists, func, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.contracts.media_capabilities import reader_type_for_format
 from app.core.authorization import (
@@ -25,253 +23,13 @@ from app.models.library import (
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.models.settings import SystemEvent
 from app.modules.library.infrastructure.media_kind_sql import (
     volume_effective_media_kind,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
-from app.modules.reader.public import (
-    MediaKind,
-    VolumeReadingState,
-    choose_continue_volume_id,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class _MediaActivityCandidate:
-    media_version_id: str
-    recent_at: datetime
-    media_kind: MediaKind
-    work_id: str
-
-
-def _media_priority(column: ColumnElement[str]) -> ColumnElement[int]:
-    return case(
-        (column == MediaKind.EBOOK.value, 0),
-        (column == MediaKind.COMIC.value, 1),
-        (column == MediaKind.AUDIOBOOK.value, 2),
-        else_=3,
-    )
-
-
-def _visible_media_volume_exists(
-    context: AuthorizationContext,
-    user_id: str,
-    *,
-    work_id: ColumnElement[str],
-    media_kind: ColumnElement[str],
-    unfinished_only: bool,
-) -> ColumnElement[bool]:
-    version = aliased(LibraryVersion)
-    volume = aliased(LibraryVolume)
-    progress = aliased(LibraryReadingProgress)
-    statement = (
-        select(volume.id)
-        .join(version, version.id == volume.version_id)
-        .outerjoin(
-            progress,
-            (progress.volume_id == volume.id) & (progress.user_id == user_id),
-        )
-        .where(
-            version.work_id == work_id,
-            volume_effective_media_kind(volume) == media_kind,
-            volume.hidden.is_(False),
-            volume_visibility_predicate(context, volume),
-        )
-    )
-    if unfinished_only:
-        statement = statement.where(func.coalesce(progress.percent, 0) < 100)
-    return exists(statement)
-
-
-def _history_activity_candidate(
-    db: Session,
-    context: AuthorizationContext,
-    user_id: str,
-    *,
-    unfinished_only: bool,
-) -> _MediaActivityCandidate | None:
-    row = db.execute(
-        select(
-            UserMediaHistory.media_version_id,
-            UserMediaHistory.updated_at.label("recent_at"),
-            LibraryMediaVersion.media_kind,
-            LibraryWork.id.label("work_id"),
-        )
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == UserMediaHistory.media_version_id,
-        )
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
-        .where(
-            UserMediaHistory.user_id == user_id,
-            LibraryWork.hidden.is_(False),
-            _visible_media_volume_exists(
-                context,
-                user_id,
-                work_id=LibraryWork.id,
-                media_kind=LibraryMediaVersion.media_kind,
-                unfinished_only=unfinished_only,
-            ),
-        )
-        .order_by(
-            UserMediaHistory.updated_at.desc(),
-            _media_priority(LibraryMediaVersion.media_kind),
-            LibraryWork.id.asc(),
-            LibraryMediaVersion.id.asc(),
-        )
-        .limit(1)
-    ).first()
-    if row is None:
-        return None
-    return _MediaActivityCandidate(
-        media_version_id=str(row.media_version_id),
-        recent_at=row.recent_at,
-        media_kind=MediaKind(str(row.media_kind)),
-        work_id=str(row.work_id),
-    )
-
-
-def _progress_activity_candidate(
-    db: Session,
-    context: AuthorizationContext,
-    user_id: str,
-    *,
-    unfinished_only: bool,
-) -> _MediaActivityCandidate | None:
-    history = aliased(UserMediaHistory)
-    volume_kind = volume_effective_media_kind(LibraryVolume)
-    row = db.execute(
-        select(
-            LibraryMediaVersion.id.label("media_version_id"),
-            LibraryReadingProgress.updated_at.label("recent_at"),
-            LibraryMediaVersion.media_kind,
-            LibraryWork.id.label("work_id"),
-        )
-        .join(
-            LibraryVolume,
-            LibraryVolume.id == LibraryReadingProgress.volume_id,
-        )
-        .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
-        )
-        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
-        .join(
-            LibraryMediaVersion,
-            (LibraryMediaVersion.work_id == LibraryWork.id)
-            & (LibraryMediaVersion.media_kind == volume_kind),
-        )
-        .where(
-            LibraryReadingProgress.user_id == user_id,
-            LibraryWork.hidden.is_(False),
-            LibraryVolume.hidden.is_(False),
-            volume_visibility_predicate(context),
-            ~exists(
-                select(history.id).where(
-                    history.user_id == user_id,
-                    history.media_version_id == LibraryMediaVersion.id,
-                )
-            ),
-            _visible_media_volume_exists(
-                context,
-                user_id,
-                work_id=LibraryWork.id,
-                media_kind=LibraryMediaVersion.media_kind,
-                unfinished_only=unfinished_only,
-            ),
-        )
-        .order_by(
-            LibraryReadingProgress.updated_at.desc(),
-            _media_priority(LibraryMediaVersion.media_kind),
-            LibraryWork.id.asc(),
-            LibraryMediaVersion.id.asc(),
-        )
-        .limit(1)
-    ).first()
-    if row is None:
-        return None
-    return _MediaActivityCandidate(
-        media_version_id=str(row.media_version_id),
-        recent_at=row.recent_at,
-        media_kind=MediaKind(str(row.media_kind)),
-        work_id=str(row.work_id),
-    )
-
-
-def _candidate_rank(candidate: _MediaActivityCandidate) -> tuple[float, int, str, str]:
-    media_priority = {
-        MediaKind.EBOOK: 0,
-        MediaKind.COMIC: 1,
-        MediaKind.AUDIOBOOK: 2,
-    }
-    return (
-        -candidate.recent_at.timestamp(),
-        media_priority[candidate.media_kind],
-        candidate.work_id,
-        candidate.media_version_id,
-    )
-
-
-def _recent_activity_media_id(
-    db: Session,
-    context: AuthorizationContext,
-    user_id: str,
-    *,
-    unfinished_only: bool,
-) -> str | None:
-    candidates = [
-        candidate
-        for candidate in (
-            _history_activity_candidate(
-                db,
-                context,
-                user_id,
-                unfinished_only=unfinished_only,
-            ),
-            _progress_activity_candidate(
-                db,
-                context,
-                user_id,
-                unfinished_only=unfinished_only,
-            ),
-        )
-        if candidate is not None
-    ]
-    if not candidates:
-        return None
-    return min(candidates, key=_candidate_rank).media_version_id
-
-
-def _first_visible_media_id(
-    db: Session,
-    context: AuthorizationContext,
-    user_id: str,
-    *,
-    unfinished_only: bool,
-) -> str | None:
-    return db.scalar(
-        select(LibraryMediaVersion.id)
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
-        .where(
-            LibraryWork.hidden.is_(False),
-            _visible_media_volume_exists(
-                context,
-                user_id,
-                work_id=LibraryWork.id,
-                media_kind=LibraryMediaVersion.media_kind,
-                unfinished_only=unfinished_only,
-            ),
-        )
-        .order_by(
-            _media_priority(LibraryMediaVersion.media_kind),
-            LibraryWork.id.asc(),
-            LibraryMediaVersion.id.asc(),
-        )
-        .limit(1)
-    )
+from app.modules.reader.public import MediaKind
 
 
 def dashboard_summary(
@@ -445,106 +203,56 @@ def recent_reading(
 def continue_reading_progress(
     db: Session, context: AuthorizationContext, user_id: str
 ) -> dict[str, Any] | None:
-    selected_media_id = _recent_activity_media_id(
-        db,
-        context,
-        user_id,
-        unfinished_only=True,
-    ) or _first_visible_media_id(
-        db,
-        context,
-        user_id,
-        unfinished_only=True,
-    )
-    if selected_media_id is None:
-        selected_media_id = _recent_activity_media_id(
-            db,
-            context,
-            user_id,
-            unfinished_only=False,
-        ) or _first_visible_media_id(
-            db,
-            context,
-            user_id,
-            unfinished_only=False,
-        )
-    if selected_media_id is None:
-        return None
+    volume_kind = volume_effective_media_kind(LibraryVolume)
 
-    rows = db.execute(
-        select(
-            LibraryVolume.id.label("volume_id"),
-            LibraryVolume.version_id,
-            LibraryVolume.title.label("volume_title"),
-            LibraryVolume.sort_order,
-            LibraryVolume.narrator,
-            LibraryVolume.format.label("volume_format"),
-            LibraryMediaVersion.media_kind,
-            LibraryWork.id.label("work_id"),
-            LibraryWork.title.label("work_title"),
-            LibraryWork.author,
-            LibraryWork.cover_path,
-            LibraryWork.cover_status,
-            LibraryWork.updated_at.label("work_updated_at"),
-            LibraryReadingProgress.percent,
-            LibraryReadingProgress.updated_at.label("progress_updated_at"),
-            UserMediaHistory.last_volume_id,
-            UserMediaHistory.updated_at.label("history_updated_at"),
+    def latest_progress(*, unfinished_only: bool):
+        statement = (
+            select(
+                LibraryVolume.id.label("volume_id"),
+                LibraryVolume.title.label("volume_title"),
+                LibraryVolume.narrator,
+                LibraryVolume.format.label("volume_format"),
+                volume_kind.label("media_kind"),
+                LibraryWork.id.label("work_id"),
+                LibraryWork.title.label("work_title"),
+                LibraryWork.author,
+                LibraryWork.cover_path,
+                LibraryWork.cover_status,
+                LibraryWork.updated_at.label("work_updated_at"),
+                LibraryReadingProgress.percent,
+                LibraryReadingProgress.updated_at.label("progress_updated_at"),
+            )
+            .select_from(LibraryReadingProgress)
+            .join(
+                LibraryVolume,
+                LibraryVolume.id == LibraryReadingProgress.volume_id,
+            )
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
+            .where(
+                LibraryReadingProgress.user_id == user_id,
+                LibraryWork.hidden.is_(False),
+                LibraryVolume.hidden.is_(False),
+                work_visibility_predicate(context),
+                volume_visibility_predicate(context),
+            )
+            .order_by(
+                LibraryReadingProgress.updated_at.desc(),
+                LibraryReadingProgress.id.desc(),
+            )
+            .limit(1)
         )
-        .select_from(LibraryMediaVersion)
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
-        .join(
-            LibraryVersion,
-            LibraryVersion.work_id == LibraryWork.id,
-        )
-        .join(
-            LibraryVolume,
-            LibraryVolume.version_id == LibraryVersion.id,
-        )
-        .outerjoin(
-            LibraryReadingProgress,
-            (LibraryReadingProgress.volume_id == LibraryVolume.id)
-            & (LibraryReadingProgress.user_id == user_id),
-        )
-        .outerjoin(
-            UserMediaHistory,
-            (UserMediaHistory.media_version_id == LibraryMediaVersion.id)
-            & (UserMediaHistory.user_id == user_id),
-        )
-        .where(
-            LibraryMediaVersion.id == selected_media_id,
-            volume_effective_media_kind(LibraryVolume)
-            == LibraryMediaVersion.media_kind,
-            LibraryWork.hidden.is_(False),
-            LibraryVolume.hidden.is_(False),
-            volume_visibility_predicate(context),
-        )
-        .order_by(
-            LibraryMediaVersion.id.asc(),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.id.asc(),
-        )
-    ).all()
-    if not rows:
+        if unfinished_only:
+            statement = statement.where(
+                func.coalesce(LibraryReadingProgress.percent, 0) < 100
+            )
+        return db.execute(statement).first()
+
+    selected = latest_progress(unfinished_only=True) or latest_progress(
+        unfinished_only=False
+    )
+    if selected is None:
         return None
-    states = [
-        VolumeReadingState(
-            volume_id=str(row.volume_id),
-            media_kind=MediaKind(str(row.media_kind)),
-            sort_order=int(row.sort_order),
-            percent=int(float(row.percent or 0)),
-            last_read_at=(
-                row.history_updated_at
-                if row.last_volume_id == row.volume_id
-                else row.progress_updated_at
-            ),
-        )
-        for row in rows
-    ]
-    selected_volume_id = choose_continue_volume_id(states)
-    if selected_volume_id is None:
-        return None
-    selected = next(row for row in rows if row.volume_id == selected_volume_id)
     reader_type = reader_type_for_format(str(selected.volume_format))
     return {
         "workId": selected.work_id,

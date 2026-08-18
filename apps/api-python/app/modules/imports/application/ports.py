@@ -234,13 +234,6 @@ class LibraryImportStore(Protocol):
         columns: dict[str, object],
     ) -> None: ...
 
-    def update_user_media_history(
-        self,
-        history_id: str,
-        *,
-        columns: dict[str, object],
-    ) -> None: ...
-
     def insert_organize_job(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]: ...

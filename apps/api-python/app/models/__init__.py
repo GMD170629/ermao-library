@@ -39,7 +39,6 @@ from app.models.library import (
     LibraryWorkFacet,
     MediaVersionMigrationEvent,
     ReaderProgressMutation,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import (
@@ -129,7 +128,6 @@ __all__ = [
     "SystemHealthRun",
     "SystemSetting",
     "User",
-    "UserMediaHistory",
     "UserLibraryAccess",
     "UserPreference",
     "WorkDetailPreference",

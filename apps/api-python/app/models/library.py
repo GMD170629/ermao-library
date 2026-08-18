@@ -210,9 +210,7 @@ class LibraryVersion(Base):
         nullable=False,
     )
     source_key: Mapped[str] = mapped_column("sourceKey", String(191), nullable=False)
-    source_name: Mapped[str | None] = mapped_column(
-        "sourceName", Text, nullable=True
-    )
+    source_name: Mapped[str | None] = mapped_column("sourceName", Text, nullable=True)
     work: Mapped[LibraryWork] = relationship()
     volumes: Mapped[list[LibraryVolume]] = relationship(back_populates="version")
     created_at: Mapped[datetime] = mapped_column(
@@ -863,58 +861,6 @@ class ReaderProgressMutation(Base):
     )
     received_at: Mapped[datetime] = mapped_column(
         "receivedAt", TimestampMilliseconds(), nullable=False
-    )
-
-
-class UserMediaHistory(Base):
-    __tablename__ = "UserMediaHistory"
-    __table_args__ = (
-        UniqueConstraint(
-            "userId",
-            "mediaVersionId",
-            name="UserMediaHistory_user_mediaVersion_key",
-        ),
-        Index("UserMediaHistory_updatedAt_idx", "updatedAt"),
-        Index(
-            "UserMediaHistory_userId_updatedAt_mediaVersionId_idx",
-            "userId",
-            "updatedAt",
-            "mediaVersionId",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    user_id: Mapped[str] = mapped_column(
-        "userId",
-        String(191),
-        ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    media_version_id: Mapped[str] = mapped_column(
-        "mediaVersionId",
-        String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    last_volume_id: Mapped[str | None] = mapped_column(
-        "lastVolumeId",
-        String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
     )
 
 

@@ -22,7 +22,6 @@ from app.models.library import (
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
@@ -262,7 +261,6 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
 ) -> None:
     user = _login_admin(client, db_session)
     _ensure_test_library(db_session)
-    now = datetime.now(UTC)
     work = LibraryWork(
         library_id="test-library",
         id="reclassify-work",
@@ -333,36 +331,13 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
         percent=42,
         bookmark_created_at="2026-08-03T00:00:00Z",
     )
-    source_history = UserMediaHistory(
-        id="reclassify-source-history",
-        user_id=user.id,
-        media_version_id=ebook.id,
-        last_volume_id=moved.id,
-        created_at=now - timedelta(days=2),
-        updated_at=now,
-    )
-    target_history = UserMediaHistory(
-        id="reclassify-target-history",
-        user_id=user.id,
-        media_version_id=comic.id,
-        last_volume_id=existing_target.id,
-        created_at=now - timedelta(days=2),
-        updated_at=now - timedelta(days=1),
-    )
     db_session.add(work)
     db_session.flush()
     db_session.add_all([version, ebook, comic])
     db_session.flush()
     db_session.add_all([moved, remaining, existing_target])
     db_session.flush()
-    db_session.add_all(
-        [
-            progress,
-            bookmark,
-            source_history,
-            target_history,
-        ]
-    )
+    db_session.add_all([progress, bookmark])
     db_session.commit()
 
     response = client.post(
@@ -380,14 +355,6 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     assert moved_after.suggested_media_kind == "COMIC"
     assert db_session.get(LibraryReadingProgress, progress.id) is not None
     assert db_session.get(ReaderBookmark, bookmark.id) is not None
-    source_history_after = db_session.get(UserMediaHistory, source_history.id)
-    target_history_after = db_session.get(UserMediaHistory, target_history.id)
-    assert source_history_after is not None
-    assert source_history_after.last_volume_id == moved.id
-    assert source_history_after.media_version_id == ebook.id
-    assert target_history_after is not None
-    assert target_history_after.last_volume_id == existing_target.id
-    assert target_history_after.media_version_id == comic.id
 
     undo = client.post(f"/api/library/operations/{operation_id}/undo")
     assert undo.status_code == 200
@@ -397,13 +364,8 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     assert restored.version_id == version.id
     assert restored.classification_source == "AUTO"
     assert restored.suggested_media_kind == "COMIC"
-    assert (
-        db_session.get(UserMediaHistory, source_history.id).last_volume_id == moved.id
-    )
-    assert (
-        db_session.get(UserMediaHistory, target_history.id).last_volume_id
-        == existing_target.id
-    )
+    assert db_session.get(LibraryReadingProgress, progress.id) is not None
+    assert db_session.get(ReaderBookmark, bookmark.id) is not None
 
 
 def test_volume_structure_openapi_has_explicit_volume_only_contract(
@@ -470,6 +432,37 @@ def _batch_volume_aggregate(
     db.add_all([version, media, *volumes])
     db.commit()
     return work, volumes
+
+
+def _attach_progress_and_bookmark(
+    db: Session,
+    *,
+    user_id: str,
+    volume_id: str,
+    suffix: str,
+) -> tuple[LibraryReadingProgress, ReaderBookmark]:
+    progress = LibraryReadingProgress(
+        id=f"{suffix}-progress",
+        user_id=user_id,
+        volume_id=volume_id,
+        reader_type="epub",
+        position="epubcfi(/6/2)",
+        percent=33,
+        extra="{}",
+    )
+    bookmark = ReaderBookmark(
+        id=f"{suffix}-bookmark",
+        user_id=user_id,
+        volume_id=volume_id,
+        bookmark_id=f"bookmark-{suffix}",
+        location_json="{}",
+        label="Saved",
+        percent=33,
+        bookmark_created_at="2026-08-03T00:00:00Z",
+    )
+    db.add_all([progress, bookmark])
+    db.commit()
+    return progress, bookmark
 
 
 def test_batch_reclassify_updates_every_selected_volume_in_one_contract(
@@ -756,112 +749,214 @@ def test_batch_volume_download_rejects_a_missing_source_without_partial_archive(
     assert response.json()["error"]["code"] == "VOLUME_SOURCE_MISSING"
 
 
-def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent(
+def test_continue_reading_uses_latest_unfinished_progress(
     client: TestClient,
     db_session: Session,
 ) -> None:
     user = _login_admin(client, db_session)
     _ensure_test_library(db_session)
     now = datetime.now(UTC)
-    work = LibraryWork(
-        library_id="test-library",
-        id="continue-work",
-        origin="MANUAL",
-        title="Continue",
-        normalized_title="continue",
-        author="Author",
-        normalized_author="author",
-        tags="[]",
+
+    def seed_work(
+        *,
+        work_id: str,
+        title: str,
+        media_kind: str,
+        volume_format: str,
+        reader_type: str,
+        percent: float,
+        updated_at: datetime,
+    ) -> LibraryVolume:
+        work = LibraryWork(
+            library_id="test-library",
+            id=work_id,
+            origin="MANUAL",
+            title=title,
+            normalized_title=work_id,
+            author="Author",
+            normalized_author="author",
+            tags="[]",
+        )
+        version = LibraryVersion(
+            id=f"{work_id}-version",
+            work_id=work.id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        )
+        media = LibraryMediaVersion(
+            id=f"{work_id}-media",
+            work_id=work.id,
+            media_kind=media_kind,
+        )
+        volume = LibraryVolume(
+            id=f"{work_id}-volume",
+            version_id=version.id,
+            title=title,
+            sort_order=0,
+            format=volume_format,
+            resource_key=f"continue:{work_id}",
+            import_status="COMPLETED",
+        )
+        progress = LibraryReadingProgress(
+            id=f"{work_id}-progress",
+            user_id=user.id,
+            volume_id=volume.id,
+            reader_type=reader_type,
+            position="1",
+            percent=percent,
+            extra="{}",
+            created_at=updated_at,
+            updated_at=updated_at,
+        )
+        db_session.add(work)
+        db_session.flush()
+        db_session.add_all([version, media])
+        db_session.flush()
+        db_session.add(volume)
+        db_session.flush()
+        db_session.add(progress)
+        return volume
+
+    finished = seed_work(
+        work_id="continue-finished",
+        title="Finished",
+        media_kind="EBOOK",
+        volume_format="EPUB",
+        reader_type="epub",
+        percent=100,
+        updated_at=now,
     )
-    version = LibraryVersion(
-        id="continue-version",
-        work_id=work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    zero = seed_work(
+        work_id="continue-zero",
+        title="Zero",
+        media_kind="COMIC",
+        volume_format="CBZ",
+        reader_type="comic",
+        percent=0,
+        updated_at=now - timedelta(hours=1),
     )
-    ebook = LibraryMediaVersion(
-        id="continue-ebook", work_id=work.id, media_kind="EBOOK"
+    recent = seed_work(
+        work_id="continue-recent",
+        title="Recent",
+        media_kind="EBOOK",
+        volume_format="EPUB",
+        reader_type="epub",
+        percent=40,
+        updated_at=now - timedelta(hours=2),
     )
-    comic = LibraryMediaVersion(
-        id="continue-comic", work_id=work.id, media_kind="COMIC"
-    )
-    ebook_volume = LibraryVolume(
-        id="continue-ebook-volume",
-        version_id=version.id,
-        title="Ebook",
-        sort_order=0,
-        format="EPUB",
-        resource_key="continue:ebook",
-        import_status="COMPLETED",
-    )
-    comic_first = LibraryVolume(
-        id="continue-comic-first",
-        version_id=version.id,
-        title="Comic first",
-        sort_order=0,
-        format="CBZ",
-        resource_key="continue:comic:first",
-        import_status="COMPLETED",
-    )
-    comic_second = LibraryVolume(
-        id="continue-comic-second",
-        version_id=version.id,
-        title="Comic second",
-        sort_order=1000,
-        format="CBZ",
-        resource_key="continue:comic:second",
-        import_status="COMPLETED",
-    )
-    db_session.add(work)
-    db_session.flush()
-    db_session.add_all([version, ebook, comic])
-    db_session.flush()
-    db_session.add_all([ebook_volume, comic_first, comic_second])
-    db_session.flush()
-    db_session.add_all(
-        [
-            LibraryReadingProgress(
-                id="continue-comic-progress",
-                user_id=user.id,
-                volume_id=comic_second.id,
-                reader_type="comic",
-                position="5",
-                percent=50,
-                extra="{}",
-                updated_at=now,
-            ),
-            UserMediaHistory(
-                id="continue-ebook-history",
-                user_id=user.id,
-                media_version_id=ebook.id,
-                last_volume_id=ebook_volume.id,
-                created_at=now - timedelta(hours=1),
-                updated_at=now - timedelta(hours=1),
-            ),
-            UserMediaHistory(
-                id="continue-comic-history",
-                user_id=user.id,
-                media_version_id=comic.id,
-                last_volume_id=comic_second.id,
-                created_at=now,
-                updated_at=now,
-            ),
-        ]
+    seed_work(
+        work_id="continue-older",
+        title="Older",
+        media_kind="EBOOK",
+        volume_format="EPUB",
+        reader_type="epub",
+        percent=10,
+        updated_at=now - timedelta(hours=3),
     )
     db_session.commit()
-    history_count = int(
-        db_session.scalar(select(func.count()).select_from(UserMediaHistory)) or 0
-    )
 
     response = client.get("/api/dashboard/continue-reading")
 
     assert response.status_code == 200
     item = response.json()["data"]["item"]
-    assert item["mediaKind"] == "COMIC"
-    assert item["resumeVolumeId"] == comic_first.id
+    assert item["workId"] == "continue-zero"
+    assert item["resumeVolumeId"] == zero.id
     assert item["progress"] == 0
-    assert (
-        int(db_session.scalar(select(func.count()).select_from(UserMediaHistory)) or 0)
-        == history_count
+    assert item["mediaKind"] == "COMIC"
+    assert item["resumeVolumeId"] != finished.id
+    assert item["resumeVolumeId"] != recent.id
+
+
+def test_move_transfer_and_split_keep_volume_progress_and_bookmarks(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+
+    def single_volume(prefix: str) -> tuple[LibraryWork, LibraryVolume]:
+        work, volumes = _batch_volume_aggregate(
+            db_session,
+            work_id=f"{prefix}-work",
+            volume_ids=(f"{prefix}-volume",),
+        )
+        return work, volumes[0]
+
+    source, moved_volume = single_volume("keep-move-source")
+    target, _existing = single_volume("keep-move-target")
+    progress, bookmark = _attach_progress_and_bookmark(
+        db_session,
+        user_id=user.id,
+        volume_id=moved_volume.id,
+        suffix="keep-move",
+    )
+    move = client.post(
+        f"/api/works/{source.id}/volumes/{moved_volume.id}/move-to",
+        json={"targetWorkId": target.id},
+    )
+    assert move.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(LibraryReadingProgress, progress.id) is not None
+    assert db_session.get(ReaderBookmark, bookmark.id) is not None
+    assert db_session.get(LibraryReadingProgress, progress.id).volume_id == (
+        moved_volume.id
+    )
+    assert db_session.get(ReaderBookmark, bookmark.id).volume_id == moved_volume.id
+
+    transfer_source, transfer_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="keep-transfer-source",
+        volume_ids=("keep-transfer-one", "keep-transfer-two"),
+    )
+    transfer_target, _ = _batch_volume_aggregate(
+        db_session,
+        work_id="keep-transfer-target",
+        volume_ids=("keep-transfer-existing",),
+    )
+    transfer_progress, transfer_bookmark = _attach_progress_and_bookmark(
+        db_session,
+        user_id=user.id,
+        volume_id=transfer_volumes[0].id,
+        suffix="keep-transfer",
+    )
+    transfer = client.post(
+        f"/api/works/{transfer_source.id}/volumes/batch",
+        json={
+            "action": "TRANSFER",
+            "volumeIds": [volume.id for volume in transfer_volumes],
+            "targetWorkId": transfer_target.id,
+        },
+    )
+    assert transfer.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(LibraryReadingProgress, transfer_progress.id) is not None
+    assert db_session.get(ReaderBookmark, transfer_bookmark.id) is not None
+    assert db_session.get(LibraryReadingProgress, transfer_progress.id).volume_id == (
+        transfer_volumes[0].id
+    )
+
+    split_source, split_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="keep-split-source",
+        volume_ids=("keep-split-one", "keep-split-two"),
+    )
+    split_progress, split_bookmark = _attach_progress_and_bookmark(
+        db_session,
+        user_id=user.id,
+        volume_id=split_volumes[0].id,
+        suffix="keep-split",
+    )
+    split = client.post(
+        f"/api/works/{split_source.id}/volumes/batch",
+        json={
+            "action": "SPLIT",
+            "volumeIds": [volume.id for volume in split_volumes],
+        },
+    )
+    assert split.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(LibraryReadingProgress, split_progress.id) is not None
+    assert db_session.get(ReaderBookmark, split_bookmark.id) is not None
+    assert db_session.get(LibraryReadingProgress, split_progress.id).volume_id == (
+        split_volumes[0].id
     )
 
 

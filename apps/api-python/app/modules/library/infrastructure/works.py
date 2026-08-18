@@ -12,11 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryMediaVersion,
-    LibraryVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
-    UserMediaHistory,
 )
 from app.models.shelf import ShelfWork
 
@@ -124,22 +123,6 @@ def list_progress_for_works(db: Session, work_ids: list[str]) -> list[dict[str, 
     return [{"id": row.id, "workId": row.work_id} for row in rows]
 
 
-def list_media_histories_for_works(
-    db: Session, work_ids: list[str]
-) -> list[dict[str, Any]]:
-    if not work_ids:
-        return []
-    histories = db.scalars(
-        select(UserMediaHistory)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == UserMediaHistory.media_version_id,
-        )
-        .where(LibraryMediaVersion.work_id.in_(work_ids))
-    ).all()
-    return [entity_as_legacy_dict(history) for history in histories]
-
-
 def list_shelf_links_for_works(
     db: Session, work_ids: list[str]
 ) -> list[dict[str, Any]]:
@@ -199,23 +182,6 @@ def move_media_version_to_work(
         .where(LibraryVolume.version_id == source.id)
         .values(media_version_id=target.id, updated_at=now)
     )
-    for history in db.scalars(
-        select(UserMediaHistory).where(UserMediaHistory.media_version_id == source.id)
-    ).all():
-        existing = db.scalar(
-            select(UserMediaHistory).where(
-                UserMediaHistory.user_id == history.user_id,
-                UserMediaHistory.media_version_id == target.id,
-            )
-        )
-        if existing is None:
-            history.media_version_id = target.id
-        elif history.updated_at > existing.updated_at:
-            existing.last_volume_id = history.last_volume_id
-            existing.updated_at = history.updated_at
-            db.delete(history)
-        else:
-            db.delete(history)
     db.delete(source)
     return target.id
 

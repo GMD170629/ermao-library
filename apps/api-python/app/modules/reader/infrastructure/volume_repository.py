@@ -20,7 +20,6 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
     ReaderProgressMutation,
-    UserMediaHistory,
 )
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
@@ -402,26 +401,6 @@ class SqlAlchemyReaderVolumeRepository:
             )
         )
 
-        history_insert = sqlite_insert(UserMediaHistory).values(
-            id=cuid(),
-            userId=user_id,
-            mediaVersionId=context.media_version.id,
-            lastVolumeId=context.volume.id,
-            createdAt=now,
-            updatedAt=now,
-        )
-        self._session.execute(
-            history_insert.on_conflict_do_update(
-                index_elements=[
-                    UserMediaHistory.user_id,
-                    UserMediaHistory.media_version_id,
-                ],
-                set_={
-                    "lastVolumeId": history_insert.excluded["lastVolumeId"],
-                    "updatedAt": history_insert.excluded["updatedAt"],
-                },
-            )
-        )
         return _progress_dto(progress)
 
     def set_reading_status(
@@ -487,26 +466,6 @@ class SqlAlchemyReaderVolumeRepository:
         )
         if progress is None:
             raise RuntimeError("reading status upsert returned no row")
-        history_insert = sqlite_insert(UserMediaHistory).values(
-            id=cuid(),
-            userId=user_id,
-            mediaVersionId=context.media_version.id,
-            lastVolumeId=context.volume.id,
-            createdAt=now,
-            updatedAt=now,
-        )
-        self._session.execute(
-            history_insert.on_conflict_do_update(
-                index_elements=[
-                    UserMediaHistory.user_id,
-                    UserMediaHistory.media_version_id,
-                ],
-                set_={
-                    "lastVolumeId": context.volume.id,
-                    "updatedAt": now,
-                },
-            )
-        )
         return _progress_dto(progress)
 
     def save_external_progress(
@@ -570,31 +529,9 @@ class SqlAlchemyReaderVolumeRepository:
         )
         if progress is None:
             raise RuntimeError("external progress upsert returned no row")
-        history_insert = sqlite_insert(UserMediaHistory).values(
-            id=cuid(),
-            userId=user_id,
-            mediaVersionId=context.media_version.id,
-            lastVolumeId=context.volume.id,
-            createdAt=now,
-            updatedAt=now,
-        )
-        self._session.execute(
-            history_insert.on_conflict_do_update(
-                index_elements=[
-                    UserMediaHistory.user_id,
-                    UserMediaHistory.media_version_id,
-                ],
-                set_={
-                    "lastVolumeId": context.volume.id,
-                    "updatedAt": now,
-                },
-            )
-        )
         return _progress_dto(progress)
 
-    def list_bookmarks(
-        self, user_id: str, volume_id: str
-    ) -> list[ReaderBookmarkDto]:
+    def list_bookmarks(self, user_id: str, volume_id: str) -> list[ReaderBookmarkDto]:
         bookmarks = self._session.scalars(
             select(ReaderBookmark)
             .where(

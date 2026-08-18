@@ -55,7 +55,6 @@ EXPECTED_TABLES = {
     "LibraryReadingProgress",
     "LibraryMediaVersion",
     "LibraryVolumeFacet",
-    "UserMediaHistory",
     "MediaVersionMigrationEvent",
     "LibraryReadingUnit",
     "LibraryVersion",
@@ -312,14 +311,15 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             str(constraint["sqltext"])
             for constraint in inspector.get_check_constraints("Library")
         )
-        assert "FLAT" in check_sql and "VOLUMES" in check_sql and "AUDIOBOOK" in check_sql
+        assert (
+            "FLAT" in check_sql and "VOLUMES" in check_sql and "AUDIOBOOK" in check_sql
+        )
         work_columns = {
             column["name"]: column for column in inspector.get_columns("LibraryWork")
         }
         assert work_columns["libraryId"]["nullable"] is False
         version_columns = {
-            column["name"]: column
-            for column in inspector.get_columns("LibraryVersion")
+            column["name"]: column for column in inspector.get_columns("LibraryVersion")
         }
         assert version_columns["workId"]["nullable"] is False
         assert version_columns["sourceKey"]["nullable"] is False
@@ -354,6 +354,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
         assert "monitorFolderId" not in scan_job_columns
         assert "MonitorFolder" not in inspector.get_table_names()
         assert "UserMonitorFolderAccess" not in inspector.get_table_names()
+        assert "UserMediaHistory" not in inspector.get_table_names()
         for table_name in ("DuplicateCandidate", "MetadataSuggestion"):
             columns = {
                 column["name"]: column for column in inspector.get_columns(table_name)

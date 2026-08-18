@@ -6,6 +6,12 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
+from sqlalchemy import delete, insert, select, update
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Delete, Update
+
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.auth import (
     PasswordResetToken,
@@ -21,7 +27,6 @@ from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
     LibraryOperation,
     LibraryReadingProgress,
-    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.settings import (
@@ -31,11 +36,6 @@ from app.models.settings import (
     SystemEvent,
 )
 from app.models.shelf import Shelf, ShelfWork
-from sqlalchemy import delete, insert, select, update
-from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
-from sqlalchemy.sql.dml import Delete, Update
 
 
 @dataclass(frozen=True)
@@ -107,9 +107,7 @@ def write_prepared_library_access(
     prepared: PreparedLibraryAccessWrite,
 ) -> None:
     db.execute(
-        delete(UserLibraryAccess).where(
-            UserLibraryAccess.user_id == prepared.user_id
-        )
+        delete(UserLibraryAccess).where(UserLibraryAccess.user_id == prepared.user_id)
     )
     if prepared.rows:
         for chunk in sqlite_parameter_chunks(
@@ -233,7 +231,6 @@ def prepare_personal_user_deletion(
     for model in (
         ReaderBookmark,
         WorkDetailPreference,
-        UserMediaHistory,
         LibraryReadingProgress,
         ReaderProgressCursor,
         ReaderBookPreference,
