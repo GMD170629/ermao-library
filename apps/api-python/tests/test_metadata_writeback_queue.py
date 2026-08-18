@@ -38,6 +38,7 @@ def _library_source(
     db_session.add_all(
         [
             LibraryWork(
+            library_id="test-library", 
                 id="work-1",
                 title="快照标题",
                 normalized_title="快照标题",

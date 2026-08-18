@@ -140,27 +140,27 @@ internal class KtorAdministrativeSettingsRepository(
         )
     }
 
-    override suspend fun loadMonitorFolders(context: AdministrativeSettingsContext) =
-        call(context, ApiMethod.Get, "/api/monitor-folders", transform = JsonElement::toMonitorFolders)
+    override suspend fun loadLibraries(context: AdministrativeSettingsContext) =
+        call(context, ApiMethod.Get, "/api/libraries", transform = JsonElement::toLibraries)
 
-    override suspend fun createMonitorFolder(context: AdministrativeSettingsContext, folder: MonitorFolderDraft): AdministrativeSettingsResult<MonitorFolder> {
+    override suspend fun createLibrary(context: AdministrativeSettingsContext, folder: LibraryDraft): AdministrativeSettingsResult<Library> {
         validateFolder(folder)?.let { return it }
-        return call(context, ApiMethod.Post, "/api/monitor-folders", body = folder.toRequest(), transform = JsonElement::toMonitorFolderPayload)
+        return call(context, ApiMethod.Post, "/api/libraries", body = folder.toRequest(), transform = JsonElement::toLibraryPayload)
     }
 
-    override suspend fun updateMonitorFolder(context: AdministrativeSettingsContext, folderId: String, folder: MonitorFolderDraft): AdministrativeSettingsResult<MonitorFolder> {
+    override suspend fun updateLibrary(context: AdministrativeSettingsContext, folderId: String, folder: LibraryDraft): AdministrativeSettingsResult<Library> {
         validateFolder(folder)?.let { return it }
-        return idCall(context, ApiMethod.Put, "/api/monitor-folders", folderId, body = folder.toRequest(), transform = JsonElement::toMonitorFolderPayload)
+        return idCall(context, ApiMethod.Put, "/api/libraries", folderId, body = folder.toRequest(), transform = JsonElement::toLibraryPayload)
     }
 
-    override suspend fun deleteMonitorFolder(context: AdministrativeSettingsContext, folderId: String) =
-        idCall(context, ApiMethod.Delete, "/api/monitor-folders", folderId, transform = { it.toDeletedFlag(folderId) })
+    override suspend fun deleteLibrary(context: AdministrativeSettingsContext, folderId: String) =
+        idCall(context, ApiMethod.Delete, "/api/libraries", folderId, transform = { it.toDeletedFlag(folderId) })
 
     override suspend fun loadDirectory(context: AdministrativeSettingsContext, path: String?) =
         call(
             context,
             ApiMethod.Get,
-            "/api/monitor-folders/tree",
+            "/api/libraries/tree",
             query = queryOf("path" to path?.trim()?.takeIf(String::isNotEmpty)),
             transform = JsonElement::toDirectoryNode,
         )
@@ -785,7 +785,7 @@ internal class KtorAdministrativeSettingsRepository(
         else -> null
     }
 
-    private fun validateFolder(folder: MonitorFolderDraft): AdministrativeSettingsResult.Failure? = when {
+    private fun validateFolder(folder: LibraryDraft): AdministrativeSettingsResult.Failure? = when {
         folder.rootPath.isBlank() -> invalid("INVALID_ROOT_PATH", "rootPath")
         folder.minimumFileSizeBytes < 0 -> invalid("INVALID_MIN_FILE_SIZE", "minimumFileSizeBytes")
         else -> null

@@ -64,7 +64,7 @@ EXPECTED_TABLES = {
     "MetadataOpfQueueState",
     "MetadataProviderExecution",
     "MetadataProviderPipeline",
-    "MonitorFolder",
+    "Library",
     "OrganizeJob",
     "OrganizePolicy",
     "OrganizeRun",
@@ -87,7 +87,7 @@ EXPECTED_TABLES = {
     "QueueControlOperation",
     "SystemSetting",
     "User",
-    "UserMonitorFolderAccess",
+    "UserLibraryAccess",
     "UserPreference",
     "WorkDetailPreference",
 }
@@ -131,8 +131,8 @@ EXPECTED_RESTORED_INDEXES = {
             "id",
         ),
     },
-    "UserMonitorFolderAccess": {
-        "UserMonitorFolderAccess_folder_idx": ("monitorFolderId",),
+    "UserLibraryAccess": {
+        "UserLibraryAccess_library_idx": ("libraryId",),
     },
     "UserPreference": {
         "UserPreference_userId_idx": ("userId",),
@@ -287,6 +287,47 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
         assert "volumeId" in library_file_columns
         assert "editionId" not in library_file_columns
         assert library_file_columns["pageIndexVersion"]["nullable"] is False
+        library_columns = {
+            column["name"]: column for column in inspector.get_columns("Library")
+        }
+        assert library_columns["rootPath"]["nullable"] is False
+        assert library_columns["organizationMode"]["nullable"] is False
+        unique_constraints = inspector.get_unique_constraints("Library")
+        unique_column_sets = {
+            tuple(constraint["column_names"]) for constraint in unique_constraints
+        }
+        unique_indexes = {
+            tuple(index["column_names"])
+            for index in inspector.get_indexes("Library")
+            if index.get("unique")
+        }
+        assert ("rootPath",) in unique_column_sets | unique_indexes
+        check_sql = " ".join(
+            str(constraint["sqltext"])
+            for constraint in inspector.get_check_constraints("Library")
+        )
+        assert "FLAT" in check_sql and "VOLUMES" in check_sql and "AUDIOBOOK" in check_sql
+        work_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryWork")
+        }
+        assert work_columns["libraryId"]["nullable"] is False
+        volume_columns = {
+            column["name"] for column in inspector.get_columns("LibraryVolume")
+        }
+        assert "monitorFolderId" not in volume_columns
+        assert "libraryId" not in volume_columns
+        import_task_columns = {
+            column["name"] for column in inspector.get_columns("ImportTask")
+        }
+        assert "libraryId" in import_task_columns
+        assert "monitorFolderId" not in import_task_columns
+        scan_job_columns = {
+            column["name"] for column in inspector.get_columns("ImportScanJob")
+        }
+        assert "libraryId" in scan_job_columns
+        assert "monitorFolderId" not in scan_job_columns
+        assert "MonitorFolder" not in inspector.get_table_names()
+        assert "UserMonitorFolderAccess" not in inspector.get_table_names()
         for table_name in ("DuplicateCandidate", "MetadataSuggestion"):
             columns = {
                 column["name"]: column for column in inspector.get_columns(table_name)

@@ -42,7 +42,7 @@ def test_list_bookshelf_items_normalizes_ids_without_reordering() -> None:
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
 

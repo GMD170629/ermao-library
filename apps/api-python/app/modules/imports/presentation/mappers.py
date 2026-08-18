@@ -18,10 +18,10 @@ from app.core.time import timestamp_ms_to_iso
 from app.models.library import LibraryWork
 from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.imports.application.monitor_paths import (
-    MonitorPathError,
+    LibraryPathError,
     is_inside_path,
-    monitor_directory_tree_node,
-    resolve_monitor_folder_path,
+    library_directory_tree_node,
+    resolve_library_root_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,8 +100,8 @@ def friendly_import_error(
 ) -> str | None:
     text_value = message or ""
     code = (error_code or "").upper()
-    if code == "MONITOR_FOLDER_NOT_FOUND":
-        return "监控文件夹已被删除，本次导入任务已结束。"
+    if code == "LIBRARY_NOT_FOUND":
+        return "书库已被删除，本次导入任务已结束。"
     if code == "SOURCE_NOT_FOUND":
         return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
     if code == "IMPORT_WORKER_FAILED":
@@ -152,14 +152,14 @@ def import_task_view(
     db: Session, task: dict[str, Any], log_limit: int = 20
 ) -> dict[str, Any]:
     page_hydrated = "_pageLogs" in task
-    monitor_folder = task.get("_pageMonitorFolder") if page_hydrated else None
+    library = task.get("_pageLibrary") if page_hydrated else None
     if (
         not page_hydrated
-        and task.get("monitorFolderId")
-        and _has_table(db, "MonitorFolder")
+        and task.get("libraryId")
+        and _has_table(db, "Library")
     ):
-        monitor_folder = import_http_store.get_monitor_folder(
-            db, str(task.get("monitorFolderId"))
+        library = import_http_store.get_library(
+            db, str(task.get("libraryId"))
         )
     book = None
     if page_hydrated:
@@ -206,7 +206,7 @@ def import_task_view(
             "retryable": bool(task.get("retryable")),
             "createdAt": _dt(task.get("createdAt")),
             "finishedAt": _dt(task.get("finishedAt")),
-            "monitorFolder": monitor_folder,
+            "library": library,
             "book": book,
             "logs": [serialize_import_log(log) for log in logs],
             "recognizedMetadata": _recognized_metadata_view(
@@ -216,7 +216,7 @@ def import_task_view(
     )
     view.pop("duplicate", None)
     view.pop("sourceKey", None)
-    view.pop("_pageMonitorFolder", None)
+    view.pop("_pageLibrary", None)
     view.pop("_pageWork", None)
     view.pop("_pageLogs", None)
     view.pop("_pageConversion", None)
@@ -224,13 +224,13 @@ def import_task_view(
 
 
 __all__ = [
-    "MonitorPathError",
+    "LibraryPathError",
     "display_path_name",
     "friendly_import_error",
     "import_task_view",
     "is_inside_path",
-    "monitor_directory_tree_node",
-    "resolve_monitor_folder_path",
+    "library_directory_tree_node",
+    "resolve_library_root_path",
     "serialize_import_log",
 ]
 

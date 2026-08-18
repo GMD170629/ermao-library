@@ -7,17 +7,15 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
+from app.modules.library.domain.layout import LibraryOrganizationMode
 
 
-class MonitorFolder(HttpContractModel):
+class Library(HttpContractModel):
     id: str
     name: str
     root_path: str = Field(alias="rootPath")
-    shelf_id: str | None = Field(default=None, alias="shelfId")
+    organization_mode: LibraryOrganizationMode = Field(alias="organizationMode")
     enabled: bool
-    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
-        alias="mediaKindPolicy"
-    )
     ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
     ignore_hidden: bool = Field(alias="ignoreHidden")
     min_file_size_bytes: int = Field(alias="minFileSizeBytes")
@@ -26,32 +24,30 @@ class MonitorFolder(HttpContractModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
-class CreateMonitorFolderRequest(HttpContractModel):
+class CreateLibraryRequest(HttpContractModel):
     root_path: str = Field(alias="rootPath", min_length=1)
     name: str | None = None
-    shelf_id: str | None = Field(default=None, alias="shelfId")
+    organization_mode: LibraryOrganizationMode = Field(alias="organizationMode")
     enabled: bool = True
-    media_kind_policy: str = Field(default="MIXED", alias="mediaKindPolicy")
     ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
     ignore_hidden: bool = Field(default=True, alias="ignoreHidden")
     min_file_size_bytes: int = Field(default=10240, ge=0, alias="minFileSizeBytes")
     description: str | None = None
-    import_mode: str | None = Field(default=None, alias="importMode")
 
 
-class UpdateMonitorFolderRequest(HttpContractModel):
+class UpdateLibraryRequest(HttpContractModel):
     root_path: str | None = Field(default=None, alias="rootPath")
     name: str | None = None
-    shelf_id: str | None = Field(default=None, alias="shelfId")
+    organization_mode: LibraryOrganizationMode | None = Field(
+        default=None, alias="organizationMode"
+    )
     enabled: bool | None = None
-    media_kind_policy: str | None = Field(default=None, alias="mediaKindPolicy")
     ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
     ignore_hidden: bool | None = Field(default=None, alias="ignoreHidden")
     min_file_size_bytes: int | None = Field(
         default=None, ge=0, alias="minFileSizeBytes"
     )
     description: str | None = None
-    import_mode: str | None = Field(default=None, alias="importMode")
 
 
 class ParseReleaseTitleRequest(HttpContractModel):
@@ -69,34 +65,32 @@ class DeleteImportTaskRequest(HttpContractModel):
     delete_library_record: bool = Field(default=False, alias="deleteLibraryRecord")
 
 
-class MonitorFoldersPayload(HttpContractModel):
-    folders: list[MonitorFolder]
-    monitor_root: str | None = Field(alias="monitorRoot")
+class LibrariesPayload(HttpContractModel):
+    libraries: list[Library]
     last_upload_target_path: str | None = Field(alias="lastUploadTargetPath")
     last_download_target_path: str | None = Field(alias="lastDownloadTargetPath")
 
 
-class MonitorFolderPayload(HttpContractModel):
-    folder: MonitorFolder
+class LibraryPayload(HttpContractModel):
+    library: Library
 
 
-class MonitorDirectoryChild(HttpContractModel):
+class LibraryDirectoryChild(HttpContractModel):
     name: str
     path: str
     readable: bool
 
 
-class MonitorDirectoryNode(MonitorDirectoryChild):
+class LibraryDirectoryNode(LibraryDirectoryChild):
     error: str | None
-    children: list[MonitorDirectoryChild]
+    children: list[LibraryDirectoryChild]
 
 
-class MonitorDirectoryPayload(HttpContractModel):
-    node: MonitorDirectoryNode
-    monitor_root: str | None = Field(alias="monitorRoot")
+class LibraryDirectoryPayload(HttpContractModel):
+    node: LibraryDirectoryNode
 
 
-class DeletedMonitorFolderPayload(HttpContractModel):
+class DeletedLibraryPayload(HttpContractModel):
     deleted: bool
     id: str
 
@@ -111,10 +105,10 @@ class ParsedReleaseTitlePayload(HttpContractModel):
     parsed: ParsedReleaseTitle
 
 
-MonitorFoldersResponse = SuccessEnvelope[MonitorFoldersPayload]
-MonitorFolderResponse = SuccessEnvelope[MonitorFolderPayload]
-MonitorDirectoryResponse = SuccessEnvelope[MonitorDirectoryPayload]
-DeletedMonitorFolderResponse = SuccessEnvelope[DeletedMonitorFolderPayload]
+LibrariesResponse = SuccessEnvelope[LibrariesPayload]
+LibraryResponse = SuccessEnvelope[LibraryPayload]
+LibraryDirectoryResponse = SuccessEnvelope[LibraryDirectoryPayload]
+DeletedLibraryResponse = SuccessEnvelope[DeletedLibraryPayload]
 ParsedReleaseTitleResponse = SuccessEnvelope[ParsedReleaseTitlePayload]
 
 
@@ -147,7 +141,7 @@ class RecognizedImportMetadata(HttpContractModel):
 
 class ImportTask(HttpContractModel):
     id: str
-    monitor_folder_id: str | None = Field(alias="monitorFolderId")
+    library_id: str | None = Field(alias="libraryId")
     work_id: str | None = Field(alias="workId")
     volume_id: str | None = Field(alias="volumeId")
     origin: str
@@ -181,7 +175,7 @@ class ImportTask(HttpContractModel):
     updated_at: datetime = Field(alias="updatedAt")
     source_file_exists: bool = Field(alias="sourceFileExists")
     friendly_error: str | None = Field(alias="friendlyError")
-    monitor_folder: MonitorFolder | None = Field(alias="monitorFolder")
+    library: Library | None = Field(alias="library")
     book: ImportedBook | None
     logs: list[ImportLog]
 
@@ -222,7 +216,7 @@ class ScanError(HttpContractModel):
 
 class ImportScanJob(HttpContractModel):
     id: str
-    monitor_folder_id: str | None = Field(alias="monitorFolderId")
+    library_id: str | None = Field(alias="libraryId")
     root_path: str = Field(alias="rootPath")
     trigger: str
     status: Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]

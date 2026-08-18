@@ -25,7 +25,7 @@ UNRESOLVED_JOB_STATUSES = (
 def work_entity_as_legacy_dict(entity: LibraryWork) -> dict[str, Any]:
     return {
         "id": entity.id,
-        "monitorFolderId": entity.monitor_folder_id,
+        "libraryId": entity.library_id,
         "origin": entity.origin,
         "title": entity.title,
         "normalizedTitle": entity.normalized_title,

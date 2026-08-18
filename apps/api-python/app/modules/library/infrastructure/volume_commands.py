@@ -69,7 +69,7 @@ class SqlAlchemyVolumeStructure:
             is_admin=actor.is_admin,
             can_manage_system=actor.can_manage_system,
             can_view_manual_imports=actor.can_view_manual_imports,
-            monitor_folder_ids=actor.monitor_folder_ids,
+            library_ids=actor.library_ids,
             authz_version=1,
         )
 
@@ -154,7 +154,7 @@ class SqlAlchemyVolumeStructure:
                 title=volume.title,
                 sort_order=volume.sort_order,
                 format=volume.format,
-                monitor_folder_id=volume.monitor_folder_id,
+                library_id=work.library_id,
                 author=work.author,
                 work_title=work.title,
                 source_path=(Path(path_value).expanduser() if path_value else None),
@@ -544,7 +544,7 @@ class SqlAlchemyVolumeStructure:
         work_id = cuid()
         return work_id, {
             "id": work_id,
-            "monitor_folder_id": source.monitor_folder_id,
+            "library_id": source.library_id,
             "origin": source.origin,
             "title": new_work.title,
             "normalized_title": normalize_identity_part(new_work.title),

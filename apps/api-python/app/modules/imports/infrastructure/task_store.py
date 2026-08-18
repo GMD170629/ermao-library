@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.imports.application.dto import ImportTaskDTO, StageImportCommand
 from app.modules.imports.infrastructure import tasks as task_rows
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
@@ -22,13 +22,7 @@ class SqlAlchemyImportTaskStore:
         self._db = db
 
     def stage(self, command: StageImportCommand) -> tuple[ImportTaskDTO, bool]:
-        media_kind_policy = command.media_kind_policy
-        if media_kind_policy is None and command.monitor_folder_id is not None:
-            media_kind_policy = self._db.scalar(
-                select(MonitorFolder.media_kind_policy).where(
-                    MonitorFolder.id == command.monitor_folder_id
-                )
-            )
+        media_kind_policy = command.media_kind_policy or "MIXED"
         row, created = task_rows.stage_import_task(
             self._db,
             command.source_path,
@@ -36,7 +30,7 @@ class SqlAlchemyImportTaskStore:
             original_name=command.original_name,
             requested_title=command.requested_title,
             requested_author=command.requested_author,
-            monitor_folder_id=command.monitor_folder_id,
+            library_id=command.library_id,
             media_kind_policy=str(media_kind_policy or "MIXED"),
             message=command.message,
             allow_terminal_requeue=command.allow_terminal_requeue,
@@ -102,35 +96,21 @@ class SqlAlchemyImportTaskStore:
                 "sourcePath": task.source_path,
                 "originalName": task.original_name,
                 "origin": task.origin,
-                "monitorFolderId": task.monitor_folder_id,
+                "libraryId": task.library_id,
                 "error": error_summary,
                 "finishedAt": now,
             },
         )
         write_prepared_system_events(self._db, [prepared_event])
 
-    def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
+    def library_exists(self, library_id: str) -> bool:
         return (
             self._db.scalar(
-                select(MonitorFolder.id)
-                .where(MonitorFolder.id == monitor_folder_id)
+                select(Library.id)
+                .where(Library.id == library_id)
                 .limit(1)
             )
             is not None
-        )
-
-    def link_work_to_monitor_shelf(
-        self,
-        monitor_folder_id: str | None,
-        work_id: str,
-        *,
-        created_at: int,
-    ) -> None:
-        task_rows.link_imported_work_to_monitor_shelf(
-            self._db,
-            monitor_folder_id,
-            work_id,
-            created_at=created_at,
         )
 
     def mark_download_completed(

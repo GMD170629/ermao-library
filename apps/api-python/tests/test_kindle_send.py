@@ -7,8 +7,7 @@ from pathlib import Path
 from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
-from app.db.base import Base
-from app.db.bootstrap import apply_schema
+from tests.conftest import recreate_application_schema
 from app.models.auth import User
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
@@ -28,9 +27,7 @@ from tests.support.sqlalchemy import StatementRecorder
 
 def _apply_full_schema(db_session) -> None:
     db_session.rollback()
-    engine = db_session.get_bind()
-    Base.metadata.drop_all(engine)
-    apply_schema(engine)
+    recreate_application_schema(db_session.get_bind())
 
 
 def _login(client, db_session) -> None:
@@ -82,6 +79,7 @@ def _prepare(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"epub fixture")
     work = LibraryWork(
+            library_id="test-library", 
         id="work-kindle",
         title="Kindle Test Book",
         normalized_title="kindle test book",

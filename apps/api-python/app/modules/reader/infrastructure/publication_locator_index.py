@@ -103,7 +103,7 @@ class NormalizedPublicationLocatorIndex:
                 access_scope=PublicationAccessScope(
                     is_admin=access_scope.is_admin,
                     can_view_manual_imports=access_scope.can_view_manual_imports,
-                    monitor_folder_ids=access_scope.monitor_folder_ids,
+                    library_ids=access_scope.library_ids,
                 ),
             )
         except (

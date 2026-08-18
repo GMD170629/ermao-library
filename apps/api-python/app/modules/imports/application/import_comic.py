@@ -187,7 +187,7 @@ def _import_comic(
             "tags": ["comic", parsed["format"]],
             "mergeKey": merge_key,
             "origin": options.origin,
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
         },
     )
     media_version = (
@@ -209,7 +209,7 @@ def _import_comic(
             columns={
                 "id": _id(),
                 "workId": work["id"],
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "mediaKind": classification.media_kind,
                 "format": archive_format,
@@ -235,7 +235,7 @@ def _import_comic(
                 "resourceKey": _file_resource_key(
                     "comic", options.source_file_path.resolve()
                 ),
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "sourceGroupKey": source_key,
                 "description": parsed.get("description"),

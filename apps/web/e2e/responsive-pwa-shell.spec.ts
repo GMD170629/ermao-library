@@ -13,7 +13,7 @@ async function mockWebAppApi(page: Page) {
               isAdmin: true,
               canManageSystem: true,
               allLibraryScopes: true,
-              monitorFolderIds: [],
+              libraryIds: [],
               canViewManualImports: true,
               authzVersion: 1
             }

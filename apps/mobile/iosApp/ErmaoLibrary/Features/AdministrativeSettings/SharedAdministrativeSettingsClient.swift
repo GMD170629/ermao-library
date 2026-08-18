@@ -51,7 +51,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
                 logBytes: 0, logLimitBytes: 0
             )
         }
-        async let folders: ErmaoShared.MonitorFolders = value(try await repository.loadMonitorFolders(context: context))
+        async let folders: ErmaoShared.Libraries = value(try await repository.loadLibraries(context: context))
         async let imports: ErmaoShared.ImportTaskPage = value(try await repository.listImportTasks(context: context, filter: ErmaoShared.ImportTaskFilter(status: nil, keyword: nil, page: 1, pageSize: 1)))
         async let preferences: ErmaoShared.ImportPreferences = value(try await repository.loadImportPreferences(context: context))
         async let organize: ErmaoShared.OrganizeJobPage = value(try await repository.listOrganizeJobs(context: context, filter: ErmaoShared.OrganizeJobFilter(search: nil, status: nil, page: 1, pageSize: 1)))
@@ -141,7 +141,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     }
     func loadUser(id: String) async throws -> AdministrativeUser { let wire: ErmaoShared.ManagedUser = try value(try await repository.loadUser(context: context, userId: id)); let mapped = map(wire); cachedUsers[id] = mapped; return mapped }
     func createUser(_ draft: UserDraft) async throws -> AdministrativeUser {
-        let wire: ErmaoShared.ManagedUser = try value(try await repository.createUser(context: context, user: ErmaoShared.CreateManagedUser(name: draft.displayName, email: draft.email, password: draft.initialPassword, role: map(draft.role), canManageSystem: draft.canManageSystem, canViewManualImports: false, monitorFolderIds: [], locale: map(draft.locale))))
+        let wire: ErmaoShared.ManagedUser = try value(try await repository.createUser(context: context, user: ErmaoShared.CreateManagedUser(name: draft.displayName, email: draft.email, password: draft.initialPassword, role: map(draft.role), canManageSystem: draft.canManageSystem, canViewManualImports: false, libraryIds: [], locale: map(draft.locale))))
         let mapped = map(wire); cachedUsers[mapped.id] = mapped; return mapped
     }
     func updateUser(id: String, draft: UserDraft) async throws -> AdministrativeUser {
@@ -159,24 +159,24 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func deleteUser(id: String) async throws { let wire: ErmaoShared.DeletedManagedUser = try value(try await repository.deleteUser(context: context, userId: id, confirmation: "DELETE")); guard wire.deleted else { throw protocolFailure() }; cachedUsers[id] = nil }
     func resetUserPassword(id: String, newPassword: String) async throws { let wire: ErmaoShared.ManagedPasswordChange = try value(try await repository.resetUserPassword(context: context, userId: id, password: newPassword)); guard wire.passwordChanged else { throw protocolFailure() } }
     func loadUserAccess(id: String) async throws -> UserAccessSnapshot { let user = try await loadUser(id: id); let folders = try await loadLibrarySources().sources.map { AdministrativeLibraryScope(id: $0.id, name: $0.displayName, serverPath: $0.serverPath, workCount: 0) }; return UserAccessSnapshot(user: user, scopes: folders) }
-    func saveUserAccess(id: String, monitorFolderIDs: Set<String>, canViewManualImports: Bool) async throws -> AdministrativeUser {
+    func saveUserAccess(id: String, libraryIDs: Set<String>, canViewManualImports: Bool) async throws -> AdministrativeUser {
         let existing: AdministrativeUser
         if let cached = cachedUsers[id] { existing = cached } else { existing = try await loadUser(id: id) }
-        let update = ErmaoShared.UpdateManagedUser(name: existing.displayName, email: existing.email, role: map(existing.role), status: existing.enabled ? .active : .disabled, canManageSystem: existing.canManageSystem, canViewManualImports: canViewManualImports, monitorFolderIds: Array(monitorFolderIDs), locale: map(existing.locale))
+        let update = ErmaoShared.UpdateManagedUser(name: existing.displayName, email: existing.email, role: map(existing.role), status: existing.enabled ? .active : .disabled, canManageSystem: existing.canManageSystem, canViewManualImports: canViewManualImports, libraryIds: Array(libraryIDs), locale: map(existing.locale))
         let wire: ErmaoShared.ManagedUser = try value(try await repository.updateUser(context: context, userId: id, user: update)); let mapped = map(wire); cachedUsers[id] = mapped; return mapped
     }
 
     func loadLibrarySources() async throws -> LibrarySourcesSnapshot {
-        let wire: ErmaoShared.MonitorFolders = try value(try await repository.loadMonitorFolders(context: context))
+        let wire: ErmaoShared.Libraries = try value(try await repository.loadLibraries(context: context))
         let mapped = wire.folders.map(map); cachedSources = Dictionary(uniqueKeysWithValues: mapped.map { ($0.id, $0) })
         var scan: DirectoryScanProgress?
         if let lastScanJobID, let job: ErmaoShared.ImportScanJob = try? value(try await repository.loadImportScanJob(context: context, jobId: lastScanJobID)) { scan = map(job) }
         return LibrarySourcesSnapshot(storage: wire.monitorRoot.map { StorageSummary(label: $0, path: $0, freeBytes: nil, totalBytes: nil) }, sources: mapped, activeScan: scan)
     }
     func loadLibrarySource(id: String) async throws -> LibrarySource { if let cached = cachedSources[id] { return cached }; _ = try await loadLibrarySources(); guard let result = cachedSources[id] else { throw AdministrativeFailure(kind: .notFound, code: "SOURCE_NOT_FOUND") }; return result }
-    func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.MonitorFolder = try value(try await repository.createMonitorFolder(context: context, folder: sourceDraft(source))); return map(wire) }
-    func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.MonitorFolder = try value(try await repository.updateMonitorFolder(context: context, folderId: source.id, folder: sourceDraft(source))); return map(wire) }
-    func deleteLibrarySource(id: String) async throws { let deleted: KotlinBoolean = try value(try await repository.deleteMonitorFolder(context: context, folderId: id)); guard deleted.boolValue else { throw protocolFailure() } }
+    func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.Library = try value(try await repository.createLibrary(context: context, folder: sourceDraft(source))); return map(wire) }
+    func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.Library = try value(try await repository.updateLibrary(context: context, folderId: source.id, folder: sourceDraft(source))); return map(wire) }
+    func deleteLibrarySource(id: String) async throws { let deleted: KotlinBoolean = try value(try await repository.deleteLibrary(context: context, folderId: id)); guard deleted.boolValue else { throw protocolFailure() } }
     func rescanLibrarySource(id: String) async throws { let source = try await loadLibrarySource(id: id); try await scanDirectory(path: source.serverPath) }
     func loadServerDirectories(path: String?) async throws -> ServerDirectoryPage { let wire: ErmaoShared.DirectoryNode = try value(try await repository.loadDirectory(context: context, path: path)); return map(wire) }
     func scanDirectory(path: String) async throws { let job: ErmaoShared.ImportScanJob = try value(try await repository.scanDirectory(context: context, path: path)); lastScanJobID = job.id }

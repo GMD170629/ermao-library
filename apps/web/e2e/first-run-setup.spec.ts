@@ -23,23 +23,24 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
       }
     });
   });
-  await page.route('**/api/monitor-folders', async (route) => {
+  await page.route('**/api/libraries', async (route) => {
     if (route.request().method() === 'GET') {
-      await route.fulfill({ json: { ok: true, data: { folders: [], monitorRoot: '/monitor' } } });
+      await route.fulfill({ json: { ok: true, data: { libraries: [] } } });
       return;
     }
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toEqual({
       name: '我的书库',
       rootPath: '/monitor',
+      organizationMode: 'FLAT',
       enabled: true,
       ignorePatterns: '',
       ignoreHidden: true,
       minFileSizeBytes: 0
     });
-    await route.fulfill({ status: 201, json: { ok: true, data: { folder: { id: 'folder-1', name: '我的书库', rootPath: '/monitor', enabled: true } } } });
+    await route.fulfill({ status: 201, json: { ok: true, data: { library: { id: 'folder-1', name: '我的书库', rootPath: '/monitor', organizationMode: 'FLAT', enabled: true } } } });
   });
-  await page.route('**/api/monitor-folders/tree**', async (route) => {
+  await page.route('**/api/libraries/tree**', async (route) => {
     const requestedPath = new URL(route.request().url()).searchParams.get('path');
     await route.fulfill({
       json: {
@@ -70,8 +71,8 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByLabel('确认密码').fill('initial-password-123');
   await page.getByRole('button', { name: '创建账户' }).click();
 
-  await expect(page.getByRole('heading', { name: '添加监控文件夹' })).toBeVisible();
-  const folderPath = page.getByRole('combobox', { name: '监控文件夹路径' });
+  await expect(page.getByRole('heading', { name: '新增书库' })).toBeVisible();
+  const folderPath = page.getByRole('combobox', { name: '书库路径' });
   await folderPath.fill('/monitor');
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   const directoryTree = page.getByRole('tree');
@@ -81,7 +82,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByRole('button', { name: '添加并继续' }).click();
 
   await expect(page.getByRole('heading', { name: '你的私人书库已准备好' })).toBeVisible();
-  await expect(page.getByText(/监控文件夹已启用/)).toBeVisible();
+  await expect(page.getByText(/书库已启用/)).toBeVisible();
   await expect(page.getByText(/owner@example.com/)).toBeVisible();
   await expect(page.getByRole('button', { name: '进入书库' })).toBeVisible();
 });
@@ -118,8 +119,8 @@ test('an authenticated owner can resume unfinished library onboarding after refr
 
   await page.goto('/setup');
 
-  await expect(page.getByRole('heading', { name: '添加监控文件夹' })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: '监控文件夹路径' })).toHaveValue('/monitor');
+  await expect(page.getByRole('heading', { name: '新增书库' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: '书库路径' })).toHaveValue('/monitor');
 });
 
 test('login shows password errors in the system feedback style and in Chinese', async ({ page }) => {

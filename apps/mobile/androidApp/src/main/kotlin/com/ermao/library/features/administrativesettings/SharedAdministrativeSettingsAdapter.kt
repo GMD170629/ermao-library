@@ -32,7 +32,7 @@ import com.ermao.library.shared.modules.administrativesettings.MediaKindPolicy a
 import com.ermao.library.shared.modules.administrativesettings.MetadataPipelineEntry as SharedPipelineEntry
 import com.ermao.library.shared.modules.administrativesettings.MetadataProvider as SharedProvider
 import com.ermao.library.shared.modules.administrativesettings.MetadataProviderUpdate as SharedProviderUpdate
-import com.ermao.library.shared.modules.administrativesettings.MonitorFolderDraft as SharedFolderDraft
+import com.ermao.library.shared.modules.administrativesettings.LibraryDraft as SharedFolderDraft
 import com.ermao.library.shared.modules.administrativesettings.OrganizeJobFilter as SharedOrganizeFilter
 import com.ermao.library.shared.modules.administrativesettings.OrganizePolicy as SharedOrganizePolicy
 import com.ermao.library.shared.modules.administrativesettings.OrganizeRules as SharedOrganizeRules
@@ -69,7 +69,7 @@ class SharedAdministrativeSettingsAdapter(
         }
         is AdministrativeSettingsRoute.UserEdit -> loadUserEditor(route)
         is AdministrativeSettingsRoute.UserAccess -> loadUserAccess(route.userId)
-        AdministrativeSettingsRoute.LibrarySources -> sharedRepository.loadMonitorFolders(sharedContext).map { result ->
+        AdministrativeSettingsRoute.LibrarySources -> sharedRepository.loadLibraries(sharedContext).map { result ->
             LibrarySourcesSnapshot(result.monitorRoot, result.folders.map { it.toLocal() })
         }
         is AdministrativeSettingsRoute.LibrarySourceEdit -> loadLibrarySourceEditor(route.sourceId)
@@ -147,7 +147,7 @@ class SharedAdministrativeSettingsAdapter(
                 BackupRecord(
                     archive.id, archive.fileName ?: archive.name, archive.kind.equals("automatic", true), bytesLabel(archive.sizeBytes),
                     archive.createdAt, archive.counts["works"] ?: 0, archive.counts["progress"] ?: 0,
-                    archive.counts["monitor_folders"] ?: archive.counts["sources"] ?: 0,
+                    archive.counts["libraries"] ?: archive.counts["sources"] ?: 0,
                 )
             })
         }
@@ -174,7 +174,7 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.SetUserEnabled -> updateUserEnabled(command)
         is AdministrativeCommand.DeleteUser -> deleteUser(command)
         is AdministrativeCommand.SaveLibrarySource -> saveLibrarySource(command)
-        is AdministrativeCommand.DeleteLibrarySource -> sharedRepository.deleteMonitorFolder(sharedContext, command.sourceId).receipt(command)
+        is AdministrativeCommand.DeleteLibrarySource -> sharedRepository.deleteLibrary(sharedContext, command.sourceId).receipt(command)
         is AdministrativeCommand.RescanLibrarySource -> rescanLibrarySource(command)
         is AdministrativeCommand.ScanDirectory -> sharedRepository.scanDirectory(sharedContext, command.directory.uri).receipt(command)
         is AdministrativeCommand.RetryImportTask -> sharedRepository.retryImportTask(sharedContext, command.taskId).receipt(command)
@@ -253,7 +253,7 @@ class SharedAdministrativeSettingsAdapter(
     private suspend fun loadUserEditor(route: AdministrativeSettingsRoute.UserEdit): AdministrativeResult<AdministrativePageSnapshot> {
         if (route.userId == null) return AdministrativeResult.Content(UserEditorSnapshot(null, false, false, emptySet()))
         return sharedRepository.loadUser(sharedContext, route.userId).map { user ->
-            UserEditorSnapshot(user.toLocal(), user.canManageSystem, user.canViewManualImports, user.monitorFolderIds.toSet())
+            UserEditorSnapshot(user.toLocal(), user.canManageSystem, user.canViewManualImports, user.libraryIds.toSet())
         }
     }
 
@@ -262,16 +262,16 @@ class SharedAdministrativeSettingsAdapter(
             is SharedContent -> result.value
             is SharedFailure -> return result.toLocalFailure()
         }
-        return sharedRepository.loadMonitorFolders(sharedContext).map { folders ->
+        return sharedRepository.loadLibraries(sharedContext).map { folders ->
             UserAccessSnapshot(
                 user.toLocal(), user.role == SharedUserRole.Admin, user.canViewManualImports,
-                folders.folders.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.monitorFolderIds) },
+                folders.folders.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.libraryIds) },
             )
         }
     }
 
     private suspend fun loadLibrarySourceEditor(sourceId: String?): AdministrativeResult<AdministrativePageSnapshot> =
-        sharedRepository.loadMonitorFolders(sharedContext).map { result ->
+        sharedRepository.loadLibraries(sharedContext).map { result ->
             val source = sourceId?.let { id -> result.folders.firstOrNull { it.id == id } }
             LibrarySourceEditorSnapshot(source?.toLocal(), source?.ignorePatterns.orEmpty(), source?.ignoreHidden ?: true, source?.minimumFileSizeBytes ?: 0L)
         }
@@ -372,7 +372,7 @@ class SharedAdministrativeSettingsAdapter(
             is SharedFailure -> return result.toLocalFailure()
         }
         val folderIds = if (command.allLibraries && user.role != SharedUserRole.Admin) return validationFailure("MEMBER_REQUIRES_EXPLICIT_SCOPE") else command.sourceIds.toList()
-        return sharedRepository.updateUser(sharedContext, user.id, user.toUpdate(monitorFolderIds = folderIds)).receipt(command)
+        return sharedRepository.updateUser(sharedContext, user.id, user.toUpdate(libraryIds = folderIds)).receipt(command)
     }
 
     private suspend fun updateUserEnabled(command: AdministrativeCommand.SetUserEnabled): AdministrativeResult<AdministrativeCommandReceipt> {
@@ -393,16 +393,16 @@ class SharedAdministrativeSettingsAdapter(
 
     private suspend fun saveLibrarySource(command: AdministrativeCommand.SaveLibrarySource): AdministrativeResult<AdministrativeCommandReceipt> {
         val draft = command.draft.toShared()
-        return if (command.draft.id == null) sharedRepository.createMonitorFolder(sharedContext, draft).receipt(command)
-        else sharedRepository.updateMonitorFolder(sharedContext, command.draft.id, draft).receipt(command)
+        return if (command.draft.id == null) sharedRepository.createLibrary(sharedContext, draft).receipt(command)
+        else sharedRepository.updateLibrary(sharedContext, command.draft.id, draft).receipt(command)
     }
 
     private suspend fun rescanLibrarySource(command: AdministrativeCommand.RescanLibrarySource): AdministrativeResult<AdministrativeCommandReceipt> {
-        val folders = when (val result = sharedRepository.loadMonitorFolders(sharedContext)) {
+        val folders = when (val result = sharedRepository.loadLibraries(sharedContext)) {
             is SharedContent -> result.value
             is SharedFailure -> return result.toLocalFailure()
         }
-        val path = folders.folders.firstOrNull { it.id == command.sourceId }?.rootPath ?: return notFound("MONITOR_FOLDER_NOT_FOUND")
+        val path = folders.folders.firstOrNull { it.id == command.sourceId }?.rootPath ?: return notFound("LIBRARY_NOT_FOUND")
         return sharedRepository.scanDirectory(sharedContext, path).receipt(command)
     }
 
@@ -574,15 +574,15 @@ private fun AdministrativeLocale.toShared() = if (this == AdministrativeLocale.Z
 
 private fun SharedUser.toUpdate(
     status: SharedUserStatus = this.status,
-    monitorFolderIds: List<String> = this.monitorFolderIds,
-) = SharedUpdateUser(name, email, role, status, canManageSystem, canViewManualImports, monitorFolderIds, locale)
+    libraryIds: List<String> = this.libraryIds,
+) = SharedUpdateUser(name, email, role, status, canManageSystem, canViewManualImports, libraryIds, locale)
 
 private fun UserDraft.toSharedUpdate() = SharedUpdateUser(
     displayName, email, role.toShared(), if (enabled) SharedUserStatus.Active else SharedUserStatus.Disabled,
     canManageSystem, canViewManualImports, sourceIds.toList(), locale.toShared(),
 )
 
-private fun com.ermao.library.shared.modules.administrativesettings.MonitorFolder.toLocal() = LibrarySource(
+private fun com.ermao.library.shared.modules.administrativesettings.Library.toLocal() = LibrarySource(
     id, name, rootPath, enabled, mediaKindPolicy.toLocal(), description,
 )
 

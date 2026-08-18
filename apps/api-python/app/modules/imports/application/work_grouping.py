@@ -43,7 +43,7 @@ def resolve_non_audio_work_identity(
         services.parse_filename_identity(filename),
         volume_title,
     )
-    monitor_root = services.monitor_root_path(options.monitor_folder_id)
+    monitor_root = services.monitor_root_path(options.library_id)
     is_monitor_root_file = _is_direct_monitor_root_file(
         source_path,
         monitor_root,

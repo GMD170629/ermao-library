@@ -288,21 +288,21 @@ class KindleSendTask(Base):
 class ImportTask(Base):
     __tablename__ = "ImportTask"
     __table_args__ = (
-        Index("ImportTask_monitorFolderId_status_idx", "monitorFolderId", "status"),
+        Index("ImportTask_libraryId_status_idx", "libraryId", "status"),
         Index("ImportTask_status_createdAt_idx", "status", "createdAt"),
         Index("ImportTask_workId_idx", "workId"),
         Index("ImportTask_volumeId_idx", "volumeId"),
         Index("ImportTask_status_leaseExpiresAt_idx", "status", "leaseExpiresAt"),
         Index("ImportTask_createdAt_id_idx", "createdAt", "id"),
         Index(
-            "ImportTask_monitorFolderId_createdAt_id_idx",
-            "monitorFolderId",
+            "ImportTask_libraryId_createdAt_id_idx",
+            "libraryId",
             "createdAt",
             "id",
         ),
         Index(
-            "ImportTask_monitorFolderId_status_createdAt_id_idx",
-            "monitorFolderId",
+            "ImportTask_libraryId_status_createdAt_id_idx",
+            "libraryId",
             "status",
             "createdAt",
             "id",
@@ -316,10 +316,10 @@ class ImportTask(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    monitor_folder_id: Mapped[str | None] = mapped_column(
-        "monitorFolderId",
+    library_id: Mapped[str | None] = mapped_column(
+        "libraryId",
         String(191),
-        ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("Library.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     media_kind_policy: Mapped[str] = mapped_column(
@@ -427,8 +427,8 @@ class ImportScanJob(Base):
     __tablename__ = "ImportScanJob"
     __table_args__ = (
         Index(
-            "ImportScanJob_monitorFolderId_status_createdAt_idx",
-            "monitorFolderId",
+            "ImportScanJob_libraryId_status_createdAt_idx",
+            "libraryId",
             "status",
             "createdAt",
         ),
@@ -436,10 +436,10 @@ class ImportScanJob(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    monitor_folder_id: Mapped[str | None] = mapped_column(
-        "monitorFolderId",
+    library_id: Mapped[str | None] = mapped_column(
+        "libraryId",
         String(191),
-        ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("Library.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     actor_user_id: Mapped[str | None] = mapped_column(

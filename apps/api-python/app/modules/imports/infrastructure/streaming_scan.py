@@ -17,7 +17,7 @@ from app.modules.imports.application.audio_types import (
 from app.modules.imports.application.work_queue_dto import ScanErrorDTO
 from app.modules.imports.infrastructure.directory_scan import (
     ImportIgnoreReason,
-    MonitorFolderConfig,
+    LibraryConfig,
     audio_track_name_proves_membership,
     import_source_ignore_reason,
     is_supported_import_filename,
@@ -89,7 +89,7 @@ class ScanSlice:
 class StreamingDirectoryScanner:
     """Keep only iterator stack and one bounded candidate batch in memory."""
 
-    def __init__(self, root_path: Path, folder: MonitorFolderConfig) -> None:
+    def __init__(self, root_path: Path, folder: LibraryConfig) -> None:
         self._root_path = root_path.expanduser().resolve()
         self._folder = folder
         self._stack: list[_Frame] = []

@@ -217,7 +217,7 @@ final class PreviewMobileRuntime: MobileRuntimeClient {
                 isAdmin: false,
                 canManageSystem: false,
                 allLibraryScopes: true,
-                monitorFolderIDs: [],
+                libraryIDs: [],
                 canViewManualImports: false,
                 authorizationVersion: 1
             ),

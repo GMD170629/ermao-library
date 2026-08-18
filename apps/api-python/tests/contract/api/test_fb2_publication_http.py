@@ -41,6 +41,7 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     )
     source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     work = LibraryWork(
+            library_id="test-library", 
         id="work-fb2-publication",
         origin="MANUAL",
         title="直接读取 FB2",

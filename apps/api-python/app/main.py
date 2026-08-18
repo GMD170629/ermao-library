@@ -44,7 +44,7 @@ LOGGER = logging.getLogger(__name__)
 
 SYSTEM_MANAGER_PREFIXES = (
     "/api/management",
-    "/api/monitor-folders",
+    "/api/libraries",
     "/api/system-settings",
     "/api/metadata/providers",
     "/api/sources",

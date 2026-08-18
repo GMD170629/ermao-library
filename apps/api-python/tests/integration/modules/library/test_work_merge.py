@@ -54,6 +54,7 @@ def _login_member(client: TestClient, db: Session) -> User:
 
 def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
     first = LibraryWork(
+            library_id="test-library", 
         title="星海纪行 2",
         normalized_title="星海纪行 2",
         author="林川",
@@ -65,6 +66,7 @@ def _seed(db: Session) -> tuple[LibraryWork, LibraryWork, list[LibraryVolume]]:
         merge_key="merge-first",
     )
     second = LibraryWork(
+            library_id="test-library", 
         title="星海纪行 1",
         normalized_title="星海纪行 1",
         author="林川",

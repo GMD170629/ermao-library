@@ -34,6 +34,7 @@ def _work(
     hidden: bool = False,
 ) -> LibraryWork:
     return LibraryWork(
+            library_id="test-library", 
         id=work_id,
         title=title,
         normalized_title=title.casefold(),

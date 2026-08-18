@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.import_pipeline import ImportAsset, ImportTask, ImportWorkItem
 from app.models.library import LibraryFile
-from app.models.settings import MonitorFolder
 from app.modules.imports.application.work_queue_dto import (
     PreparedScanCandidateBatch,
     PreparedScanSources,
@@ -43,7 +42,7 @@ def load_scan_candidate_projection(
     db: Session,
     sources: PreparedScanSources,
     *,
-    monitor_folder_id: str,
+    library_id: str,
 ) -> ScanCandidateProjection:
     """Load only the SQL projection needed to prepare a scanner page."""
 
@@ -83,15 +82,10 @@ def load_scan_candidate_projection(
                 )
             ).all()
         )
-    media_kind_policy = db.scalar(
-        select(MonitorFolder.media_kind_policy).where(
-            MonitorFolder.id == monitor_folder_id
-        )
-    )
     return ScanCandidateProjection(
         task_sources=tuple(task_rows),
         library_sources=tuple(library_rows),
-        media_kind_policy=str(media_kind_policy or "MIXED"),
+        media_kind_policy="MIXED",
     )
 
 
@@ -99,7 +93,7 @@ def prepare_scan_candidate_batch(
     sources: PreparedScanSources,
     projection: ScanCandidateProjection,
     *,
-    monitor_folder_id: str,
+    library_id: str,
     now_ms: int,
     now: object,
 ) -> PreparedScanCandidateBatch:
@@ -142,7 +136,7 @@ def prepare_scan_candidate_batch(
             original_name=path.name,
             requested_title=None,
             requested_author=None,
-            monitor_folder_id=monitor_folder_id,
+            library_id=library_id,
             media_kind_policy=projection.media_kind_policy,
             message="扫描文件已进入导入队列",
             now=now_ms,

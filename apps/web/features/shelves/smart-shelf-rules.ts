@@ -29,7 +29,7 @@ const fieldLabels: Record<string, string> = {
   volumeCount: '卷册数量', sourcePath: '原始文件路径', readingStatus: '阅读状态',
   progress: '阅读进度', lastReadAt: '最近阅读时间', publicationStatus: '连载状态',
   trackingStatus: '追踪状态', organizeStatus: '整理状态', organized: '已完成整理',
-  hasCover: '有封面', shelf: '所在普通书架', monitorFolder: '监控文件夹', origin: '加入来源',
+  hasCover: '有封面', shelf: '所在普通书架', library: '书库', origin: '加入来源',
   importStatus: '导入状态', createdAt: '加入时间', updatedAt: '最后更新时间'
 };
 

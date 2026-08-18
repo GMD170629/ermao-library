@@ -208,7 +208,7 @@ internal fun JsonElement.toSmtpTestResult(): SmtpTestResult =
 internal fun JsonElement.toManagedUser(): ManagedUser {
     val user = objectValue("INVALID_ADMIN_USER").expectKeys(
         "id", "email", "name", "role", "status", "canManageSystem", "canViewManualImports", "authzVersion",
-        "avatarUrl", "locale", "monitorFolderIds", "authorization", "createdAt", "updatedAt",
+        "avatarUrl", "locale", "libraryIds", "authorization", "createdAt", "updatedAt",
     )
     return ManagedUser(
         id = user.requiredString("id"),
@@ -218,7 +218,7 @@ internal fun JsonElement.toManagedUser(): ManagedUser {
         status = enumValue(user.requiredString("status"), ManagedUserStatus.entries, ManagedUserStatus::wireValue, "UNSUPPORTED_USER_STATUS"),
         canManageSystem = user.requiredBoolean("canManageSystem"),
         canViewManualImports = user.requiredBoolean("canViewManualImports"),
-        monitorFolderIds = user.requiredStringList("monitorFolderIds"),
+        libraryIds = user.requiredStringList("libraryIds"),
         locale = enumValue(user.requiredString("locale"), ManagedLocale.entries, ManagedLocale::wireValue, "UNSUPPORTED_LOCALE"),
         authorizationVersion = user.requiredLong("authzVersion"),
         avatarUrl = user.requiredNullableString("avatarUrl"),
@@ -252,12 +252,12 @@ internal fun JsonElement.toDeletedFlag(expectedId: String): Boolean {
     return root.requiredBoolean("deleted")
 }
 
-internal fun JsonElement.toMonitorFolder(): MonitorFolder {
+internal fun JsonElement.toLibrary(): Library {
     val folder = objectValue("INVALID_MONITOR_FOLDER").expectKeys(
         "id", "name", "rootPath", "shelfId", "enabled", "mediaKindPolicy", "ignorePatterns", "ignoreHidden",
         "minFileSizeBytes", "description", "createdAt", "updatedAt",
     )
-    return MonitorFolder(
+    return Library(
         id = folder.requiredString("id"),
         name = folder.requiredString("name"),
         rootPath = folder.requiredString("rootPath"),
@@ -273,15 +273,15 @@ internal fun JsonElement.toMonitorFolder(): MonitorFolder {
     )
 }
 
-internal fun JsonElement.toMonitorFolderPayload(): MonitorFolder =
-    objectValue("INVALID_MONITOR_FOLDER_PAYLOAD").expectKeys("folder").requiredObject("folder").toMonitorFolder()
+internal fun JsonElement.toLibraryPayload(): Library =
+    objectValue("INVALID_LIBRARY_PAYLOAD").expectKeys("folder").requiredObject("folder").toLibrary()
 
-internal fun JsonElement.toMonitorFolders(): MonitorFolders {
+internal fun JsonElement.toLibraries(): Libraries {
     val root = objectValue("INVALID_MONITOR_FOLDERS").expectKeys(
         "folders", "monitorRoot", "lastUploadTargetPath", "lastDownloadTargetPath",
     )
-    return MonitorFolders(
-        folders = root.requiredArray("folders").map(JsonElement::toMonitorFolder),
+    return Libraries(
+        folders = root.requiredArray("folders").map(JsonElement::toLibrary),
         monitorRoot = root.requiredNullableString("monitorRoot"),
         lastUploadTargetPath = root.requiredNullableString("lastUploadTargetPath"),
         lastDownloadTargetPath = root.requiredNullableString("lastDownloadTargetPath"),
@@ -309,11 +309,11 @@ internal fun JsonElement.toDirectoryNode(): DirectoryNode {
 
 internal fun JsonElement.toImportTask(): ImportTask {
     val task = objectValue("INVALID_IMPORT_TASK").expectKeys(
-        "id", "monitorFolderId", "workId", "volumeId", "origin", "mediaKindPolicy", "status", "originalName",
+        "id", "libraryId", "workId", "volumeId", "origin", "mediaKindPolicy", "status", "originalName",
         "requestedTitle", "requestedAuthor", "recognizedMetadata", "sourcePath", "taskKind", "bundleKey",
         "assetCount", "processedAssetCount", "progress", "duration", "errorSummary", "errorCode", "retryable",
         "attempts", "leaseOwner", "leaseExpiresAt", "message", "startedAt", "finishedAt", "createdAt", "updatedAt",
-        "sourceFileExists", "friendlyError", "monitorFolder", "book", "logs",
+        "sourceFileExists", "friendlyError", "library", "book", "logs",
     )
     task.requiredNullableObject("recognizedMetadata")
     task.requiredNullableString("bundleKey")
@@ -321,12 +321,12 @@ internal fun JsonElement.toImportTask(): ImportTask {
     task.requiredNullableString("leaseExpiresAt")
     task.requiredNullableString("message")
     task.requiredNullableString("friendlyError")
-    task.requiredNullableObject("monitorFolder")
+    task.requiredNullableObject("library")
     task.requiredNullableObject("book")
     task.validateRequiredArray("logs")
     return ImportTask(
         id = task.requiredString("id"),
-        monitorFolderId = task.requiredNullableString("monitorFolderId"),
+        libraryId = task.requiredNullableString("libraryId"),
         workId = task.requiredNullableString("workId"),
         volumeId = task.requiredNullableString("volumeId"),
         origin = task.requiredString("origin"),
@@ -404,7 +404,7 @@ internal fun JsonElement.toDeletedCount(): Int =
 
 internal fun JsonElement.toImportScanJob(): ImportScanJob {
     val job = objectValue("INVALID_SCAN_JOB").expectKeys(
-        "id", "monitorFolderId", "rootPath", "trigger", "status", "directoriesScanned", "filesScanned",
+        "id", "libraryId", "rootPath", "trigger", "status", "directoriesScanned", "filesScanned",
         "candidatesFound", "queuedCount", "skippedCount", "errorCount", "ignoredReasonCounts", "errorSamples",
         "restartCount", "startedAt", "heartbeatAt", "finishedAt", "createdAt", "updatedAt",
     )
@@ -412,7 +412,7 @@ internal fun JsonElement.toImportScanJob(): ImportScanJob {
     job.validateRequiredArray("errorSamples")
     return ImportScanJob(
         id = job.requiredString("id"),
-        monitorFolderId = job.requiredNullableString("monitorFolderId"),
+        libraryId = job.requiredNullableString("libraryId"),
         rootPath = job.requiredString("rootPath"),
         trigger = job.requiredString("trigger"),
         status = enumValue(job.requiredString("status"), ImportScanStatus.entries, ImportScanStatus::wireValue, "UNSUPPORTED_SCAN_STATUS"),

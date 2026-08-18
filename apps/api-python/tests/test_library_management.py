@@ -29,8 +29,15 @@ def _insert_work(
 ) -> None:
     db.execute(
         text(
-            "INSERT INTO `LibraryWork` (`id`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `tags`, `mergeKey`, `updatedAt`) "
-            "VALUES (:id, :title, :normalized_title, :author, :normalized_author, :tags, :merge_key, '2026-07-22T00:00:00')"
+            "INSERT INTO `Library` (`id`, `name`, `rootPath`, `organizationMode`, `updatedAt`) "
+            "SELECT 'test-library', 'Test Library', '/library/test', 'FLAT', 0 "
+            "WHERE NOT EXISTS (SELECT 1 FROM `Library` WHERE `id` = 'test-library')"
+        )
+    )
+    db.execute(
+        text(
+            "INSERT INTO `LibraryWork` (`id`, `libraryId`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `tags`, `mergeKey`, `updatedAt`) "
+            "VALUES (:id, 'test-library', :title, :normalized_title, :author, :normalized_author, :tags, :merge_key, '2026-07-22T00:00:00')"
         ),
         {
             "id": work_id,
@@ -443,15 +450,15 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
         with Session(engine) as db:
             db.execute(
                 text(
-                    "INSERT INTO `MonitorFolder` (`id`, `name`, `rootPath`, `updatedAt`) "
-                    "VALUES ('folder-a', '科幻原始目录', '/books/scifi', '2026-07-22T00:00:00')"
+                    "INSERT INTO `Library` (`id`, `name`, `rootPath`, `organizationMode`, `updatedAt`) "
+                    "VALUES ('folder-a', '科幻原始目录', '/books/scifi', 'FLAT', '2026-07-22T00:00:00')"
                 )
             )
             _insert_work(db, "work-a", "星海列车", "林川", ["科幻", "收藏"])
             _insert_work(db, "work-b", "远航日志", "周禾", ["旅行"])
             db.execute(
                 text(
-                    "UPDATE `LibraryWork` SET `monitorFolderId` = 'folder-a', `origin` = 'WATCH', "
+                    "UPDATE `LibraryWork` SET `libraryId` = 'folder-a', `origin` = 'WATCH', "
                     "`metadataQuality` = 92, `createdAt` = '2026-07-01T10:00:00' WHERE `id` = 'work-a'"
                 )
             )
@@ -462,7 +469,7 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
             )
             db.execute(
                 text(
-                    "UPDATE `LibraryVolume` SET `monitorFolderId` = 'folder-a', `origin` = 'WATCH' WHERE `id` = 'volume-work-a'"
+                    "UPDATE `LibraryVolume` SET `origin` = 'WATCH' WHERE `id` = 'volume-work-a'"
                 )
             )
             db.execute(
@@ -499,7 +506,7 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
                     {"field": "mediaKind", "operator": "equals", "value": "EBOOK"},
                     {"field": "shelf", "operator": "equals", "value": "shelf-a"},
                     {
-                        "field": "monitorFolder",
+                        "field": "library",
                         "operator": "equals",
                         "value": "folder-a",
                     },

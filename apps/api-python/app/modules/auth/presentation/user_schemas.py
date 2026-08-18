@@ -17,7 +17,7 @@ from pydantic import Field
 
 class AdminUser(AuthUser):
     locale: Literal["zh-CN", "en-US"]
-    monitor_folder_ids: list[str] = Field(alias="monitorFolderIds")
+    library_ids: list[str] = Field(alias="libraryIds")
     authorization: AuthorizationView
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")

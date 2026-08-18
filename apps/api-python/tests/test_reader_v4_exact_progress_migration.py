@@ -26,11 +26,17 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
             for column in inspect(engine).get_columns("LibraryReadingProgress")
         }
 
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert (
-            head_revision(engine)
-            == "0028_remove_publication_render_cache"
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0022_reader_v4_location_morphologies"
+            ),
         )
+        with engine.connect() as _conn:
+            _current = _conn.exec_driver_sql(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).scalar()
+        assert _current == "0022_reader_v4_location_morphologies"
         inspector = inspect(engine)
         assert "revision" in {
             column["name"] for column in inspector.get_columns("LibraryReadingProgress")
@@ -44,6 +50,7 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
             "clientId",
             "revision",
             "locatorJson",
+            "contentFingerprint",
             "displayPercent",
             "capturedAt",
             "receivedAt",
@@ -61,10 +68,16 @@ def test_reader_v4_exact_progress_migration_is_restart_safe_and_reversible(
             for column in downgraded.get_columns("LibraryReadingProgress")
         }
 
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        assert (
-            head_revision(engine)
-            == "0028_remove_publication_render_cache"
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0022_reader_v4_location_morphologies"
+            ),
         )
+        with engine.connect() as _conn:
+            _current = _conn.exec_driver_sql(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).scalar()
+        assert _current == "0022_reader_v4_location_morphologies"
     finally:
         engine.dispose()

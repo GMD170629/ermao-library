@@ -35,6 +35,7 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
         role="member",
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="bookshelf-work",
         origin="MANUAL",
         title="Bookshelf work",
@@ -127,7 +128,7 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
 

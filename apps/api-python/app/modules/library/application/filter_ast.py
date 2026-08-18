@@ -69,7 +69,7 @@ FIELD_OPERATORS = {
             "trackingStatus",
             "organizeStatus",
             "shelf",
-            "monitorFolder",
+            "library",
             "origin",
             "importStatus",
         )

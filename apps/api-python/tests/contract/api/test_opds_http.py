@@ -37,6 +37,7 @@ def _seed_opds_publication(db: Session) -> User:
         role="admin",
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="opds-work",
         title="Escaped & Visible",
         normalized_title="escaped & visible",

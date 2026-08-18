@@ -50,7 +50,7 @@ struct RuntimeAuthorization: Equatable, Sendable {
     let isAdmin: Bool
     let canManageSystem: Bool
     let allLibraryScopes: Bool
-    let monitorFolderIDs: [String]
+    let libraryIDs: [String]
     let canViewManualImports: Bool
     let authorizationVersion: Int64
 }

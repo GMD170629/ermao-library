@@ -29,8 +29,7 @@ from app.bootstrap.imports import (
     scan_directory_for_imports,
 )
 from app.core.auth import hash_password
-from app.db.base import Base
-from app.db.bootstrap import apply_schema
+from tests.conftest import recreate_application_schema
 from app.models.auth import User
 from app.models.library import (
     LibraryMediaVersion,
@@ -66,7 +65,7 @@ from app.services.audio_metadata import (
     parse_audio_metadata,
 )
 from app.worker.watcher import (
-    MonitorFolderConfig,
+    LibraryConfig,
     WatchState,
     WorkerManager,
 )
@@ -111,9 +110,7 @@ class _FakeAudioDirectoryEntry:
 
 def _initialize_schema(db_session) -> None:
     db_session.rollback()
-    engine = db_session.get_bind()
-    Base.metadata.drop_all(engine)
-    apply_schema(engine)
+    recreate_application_schema(db_session.get_bind())
     db_session.expire_all()
 
 
@@ -143,8 +140,8 @@ def _login(
 
 def _enable_upload_monitor(client, target: Path, name: str) -> None:
     response = client.post(
-        "/api/monitor-folders",
-        json={"name": name, "rootPath": str(target), "enabled": True},
+        "/api/libraries",
+        json={"name": name, "rootPath": str(target), "organizationMode": "FLAT", "enabled": True},
     )
     assert response.status_code == 201
 
@@ -1238,6 +1235,7 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
     user_a = _login(client, db_session, email="listener-a@example.com")
     db_session.add(
         LibraryWork(
+            library_id="test-library", 
             id="mixed-work",
             origin="MANUAL",
             title="Mixed media work",
@@ -1355,6 +1353,7 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     _initialize_schema(db_session)
     user = _login(client, db_session, email="volume-switch@example.com")
     work = LibraryWork(
+            library_id="test-library", 
         id="switch-work",
         origin="MANUAL",
         title="Two audio volumes",
@@ -1689,7 +1688,7 @@ def test_nested_author_directory_is_not_used_as_audiobook_author(
     queue = _RecordingQueue()
     summary = scan_directory_for_imports(
         test_settings.resolved_monitor_root,
-        MonitorFolderConfig(
+        LibraryConfig(
             id="emby",
             root_path=str(test_settings.resolved_monitor_root),
             min_file_size_bytes=0,
@@ -1773,7 +1772,7 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     queue = _RecordingQueue()
     scan_directory_for_imports(
         test_settings.resolved_monitor_root,
-        MonitorFolderConfig(
+        LibraryConfig(
             id="multi-volume",
             root_path=str(test_settings.resolved_monitor_root),
             min_file_size_bytes=0,
@@ -2049,7 +2048,7 @@ class _RecordingQueue:
     def __init__(self) -> None:
         self.paths: list[Path] = []
 
-    def enqueue(self, path: Path, _folder: MonitorFolderConfig) -> None:
+    def enqueue(self, path: Path, _folder: LibraryConfig) -> None:
         self.paths.append(path.resolve())
 
 
@@ -2062,7 +2061,7 @@ def test_mixed_monitor_root_does_not_swallow_standalone_audio_files(tmp_path) ->
     sibling_epub = root / "Sibling Book.epub"
     for path in (flat_first, flat_second, standalone, sibling_epub):
         path.write_bytes(b"fixture")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="watch",
         root_path=str(root),
         min_file_size_bytes=0,
@@ -2117,7 +2116,7 @@ def test_watcher_live_and_rescan_only_bundle_proven_book_directories(
     titled_appendix = titled_split_book / "附录.pdf"
     for path in (titled_first, titled_second, titled_appendix):
         path.write_bytes(b"fixture")
-    folder = MonitorFolderConfig(id="watch", root_path=str(root), min_file_size_bytes=0)
+    folder = LibraryConfig(id="watch", root_path=str(root), min_file_size_bytes=0)
 
     queue = _RecordingQueue()
     summary = scan_directory_for_imports(root, folder, queue)
@@ -2177,7 +2176,7 @@ def test_audio_bundle_detection_applies_ignore_rules_before_mixed_content_check(
         path.write_bytes(b"fixture")
     (book_dir / "desc.txt").write_text("description")
     (book_dir / "reader.txt").write_text("reader")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="watch",
         root_path=str(root),
         ignore_patterns="*.txt",
@@ -2224,7 +2223,7 @@ def test_audio_bundle_detection_applies_minimum_size_before_mixed_content_check(
     first_track.write_bytes(b"a" * 16)
     second_track.write_bytes(b"b" * 16)
     (book_dir / "desc.txt").write_bytes(b"x")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="watch",
         root_path=str(root),
         min_file_size_bytes=10,
@@ -2247,7 +2246,7 @@ def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(
     second_track = root / "鬼出棺第002章谢半鬼.m4a"
     for path in (first_track, second_track):
         path.write_bytes(b"fixture")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="watch",
         root_path=str(root),
         min_file_size_bytes=0,
@@ -2498,7 +2497,7 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     rescan_queue = _RecordingQueue()
     scan_directory_for_imports(
         test_settings.resolved_monitor_root,
-        MonitorFolderConfig(
+        LibraryConfig(
             id="watch",
             root_path=str(test_settings.resolved_monitor_root),
             min_file_size_bytes=0,

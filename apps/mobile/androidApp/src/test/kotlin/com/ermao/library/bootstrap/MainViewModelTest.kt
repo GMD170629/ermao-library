@@ -567,7 +567,7 @@ private fun authenticated(profile: ServerProfile) = AppSession.Authenticated(
         isAdmin = false,
         canManageSystem = false,
         allLibraryScopes = true,
-        monitorFolderIds = emptySet(),
+        libraryIds = emptySet(),
         canViewManualImports = false,
         authorizationVersion = 1,
     ),

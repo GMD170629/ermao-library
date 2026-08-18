@@ -4,12 +4,12 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, exists, false, or_, select
+from sqlalchemy import ColumnElement, exists, false, select, true
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql.dml import Insert
 
-from app.models.auth import User, UserMonitorFolderAccess, UserPreference
+from app.models.auth import User, UserLibraryAccess, UserPreference
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
@@ -28,7 +28,7 @@ class AuthorizationContext:
     is_admin: bool
     can_manage_system: bool
     can_view_manual_imports: bool
-    monitor_folder_ids: tuple[str, ...]
+    library_ids: tuple[str, ...]
     authz_version: int
 
     def to_view(self) -> dict[str, Any]:
@@ -36,7 +36,7 @@ class AuthorizationContext:
             "isAdmin": self.is_admin,
             "canManageSystem": self.can_manage_system,
             "allLibraryScopes": self.is_admin,
-            "monitorFolderIds": list(self.monitor_folder_ids),
+            "libraryIds": list(self.library_ids),
             "canViewManualImports": self.is_admin or self.can_view_manual_imports,
             "authzVersion": self.authz_version,
         }
@@ -51,38 +51,44 @@ def can_manage_system(user: User) -> bool:
 
 
 def authorization_context(db: Session, user: User) -> AuthorizationContext:
-    folder_ids: tuple[str, ...] = ()
+    library_ids: tuple[str, ...] = ()
     if not is_admin(user):
         rows = db.scalars(
-            select(UserMonitorFolderAccess.monitor_folder_id)
-            .where(UserMonitorFolderAccess.user_id == user.id)
-            .order_by(UserMonitorFolderAccess.monitor_folder_id)
+            select(UserLibraryAccess.library_id)
+            .where(UserLibraryAccess.user_id == user.id)
+            .order_by(UserLibraryAccess.library_id)
         )
-        folder_ids = tuple(str(item) for item in rows)
+        library_ids = tuple(str(item) for item in rows)
     return AuthorizationContext(
         user_id=user.id,
         is_admin=is_admin(user),
         can_manage_system=can_manage_system(user),
         can_view_manual_imports=bool(user.can_view_manual_imports),
-        monitor_folder_ids=folder_ids,
+        library_ids=library_ids,
         authz_version=int(user.authz_version or 1),
     )
 
 
-def monitor_folder_visibility_predicate(
+def library_visibility_predicate(
     context: AuthorizationContext,
-    monitor_folder_column: ColumnElement[str | None],
+    library_column: ColumnElement[str],
 ) -> ColumnElement[bool]:
-    """Build a typed authorization predicate for a monitor-folder column."""
+    """Build a typed authorization predicate for a library-id column."""
 
     if context.is_admin:
-        return monitor_folder_column.is_(monitor_folder_column)
-    clauses: list[ColumnElement[bool]] = []
-    if context.monitor_folder_ids:
-        clauses.append(monitor_folder_column.in_(context.monitor_folder_ids))
-    if context.can_view_manual_imports:
-        clauses.append(monitor_folder_column.is_(None))
-    return or_(*clauses) if clauses else false()
+        return true()
+    if not context.library_ids:
+        return false()
+    return library_column.in_(context.library_ids)
+
+
+def work_visibility_predicate(
+    context: AuthorizationContext,
+    work: type[LibraryWork] = LibraryWork,
+) -> ColumnElement[bool]:
+    if context.is_admin:
+        return work.id.is_not(None)
+    return library_visibility_predicate(context, work.library_id)
 
 
 def volume_visibility_predicate(
@@ -91,48 +97,27 @@ def volume_visibility_predicate(
 ) -> ColumnElement[bool]:
     if context.is_admin:
         return volume.id.is_not(None)
-    return monitor_folder_visibility_predicate(context, volume.monitor_folder_id)
-
-
-def work_visibility_predicate(
-    context: AuthorizationContext,
-    work: type[LibraryWork] = LibraryWork,
-) -> ColumnElement[bool]:
-    """Scope works through visible, authorized volume resources."""
-
-    if context.is_admin:
-        return work.id.is_not(None)
-    accessible_volume = aliased(LibraryVolume)
+    accessible_work = aliased(LibraryWork)
     accessible_media_version = aliased(LibraryMediaVersion)
-    has_accessible_volume = exists(
-        select(accessible_volume.id).where(
-            accessible_volume.media_version_id == accessible_media_version.id,
-            accessible_volume.hidden.is_(False),
-            volume_visibility_predicate(context, accessible_volume),
+    return exists(
+        select(accessible_work.id).where(
+            accessible_media_version.id == volume.media_version_id,
+            accessible_work.id == accessible_media_version.work_id,
+            work_visibility_predicate(context, accessible_work),
         )
     )
-    has_accessible_media_version = exists(
-        select(accessible_media_version.id)
-        .where(
-            accessible_media_version.work_id == work.id,
-            has_accessible_volume,
-        )
-    )
-    return has_accessible_media_version
 
 
-def can_access_monitor_folder(
-    db: Session, user: User, monitor_folder_id: str | None
-) -> bool:
+def can_access_library(db: Session, user: User, library_id: str | None) -> bool:
     if is_admin(user):
         return True
-    if monitor_folder_id is None:
-        return bool(user.can_view_manual_imports)
+    if not library_id:
+        return False
     return (
         db.scalar(
-            select(UserMonitorFolderAccess.user_id).where(
-                UserMonitorFolderAccess.user_id == user.id,
-                UserMonitorFolderAccess.monitor_folder_id == monitor_folder_id,
+            select(UserLibraryAccess.user_id).where(
+                UserLibraryAccess.user_id == user.id,
+                UserLibraryAccess.library_id == library_id,
             )
         )
         is not None
@@ -158,13 +143,12 @@ def can_access_media_version(db: Session, user: User, media_version_id: str) -> 
         db.scalar(
             select(LibraryMediaVersion.id)
             .join(
-                LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                LibraryWork,
+                LibraryWork.id == LibraryMediaVersion.work_id,
             )
             .where(
                 LibraryMediaVersion.id == media_version_id,
-                LibraryVolume.hidden.is_(False),
-                volume_visibility_predicate(context),
+                work_visibility_predicate(context),
             )
         )
         is not None

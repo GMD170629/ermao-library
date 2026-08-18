@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.models.auth import User
-from app.models.settings import MonitorFolder, SystemHealthRun
+from app.models.library import Library
+from app.models.settings import SystemHealthRun
 
 
 def _setup_admin(client) -> None:
@@ -40,7 +41,7 @@ def test_health_response_shape(client, test_settings):
     assert all(check["name"] != "ebookConversion" for check in payload["data"]["checks"])
 
 
-def test_health_aggregates_enabled_monitor_folder_readability(
+def test_health_aggregates_enabled_library_readability(
     client, db_session, tmp_path
 ):
     _setup_admin(client)
@@ -50,8 +51,10 @@ def test_health_aggregates_enabled_monitor_folder_readability(
     second.mkdir()
     db_session.add_all(
         [
-            MonitorFolder(name="First", root_path=str(first), enabled=True),
-            MonitorFolder(name="Second", root_path=str(second), enabled=True),
+            Library(
+            organization_mode="FLAT", name="First", root_path=str(first), enabled=True),
+            Library(
+            organization_mode="FLAT", name="Second", root_path=str(second), enabled=True),
         ]
     )
     db_session.commit()
@@ -64,16 +67,17 @@ def test_health_aggregates_enabled_monitor_folder_readability(
         if check["name"] == "monitorRootReadable"
     )
     assert monitor_check["status"] == "ok"
-    assert monitor_check["message"] == "2 个监控文件夹可读"
+    assert monitor_check["message"] == "2 个书库可读"
 
 
-def test_missing_enabled_monitor_folder_does_not_block_service_readiness(
+def test_missing_enabled_library_does_not_block_service_readiness(
     client, db_session, tmp_path
 ):
     _setup_admin(client)
     missing = tmp_path / "detached-library"
     db_session.add(
-        MonitorFolder(name="Detached", root_path=str(missing), enabled=True)
+        Library(
+            organization_mode="FLAT", name="Detached", root_path=str(missing), enabled=True)
     )
     db_session.commit()
 
@@ -93,13 +97,14 @@ def test_missing_enabled_monitor_folder_does_not_block_service_readiness(
     assert str(missing) in monitor_check["message"]
 
 
-def test_health_reports_an_unreadable_enabled_monitor_folder(
+def test_health_reports_an_unreadable_enabled_library(
     client, db_session, tmp_path, monkeypatch
 ):
     _setup_admin(client)
     blocked = tmp_path / "blocked-library"
     blocked.mkdir()
-    db_session.add(MonitorFolder(name="Blocked", root_path=str(blocked), enabled=True))
+    db_session.add(Library(
+            organization_mode="FLAT", name="Blocked", root_path=str(blocked), enabled=True))
     db_session.commit()
     original_iterdir = Path.iterdir
 
@@ -118,10 +123,10 @@ def test_health_reports_an_unreadable_enabled_monitor_folder(
         if check["name"] == "monitorRootReadable"
     )
     assert monitor_check["status"] == "warning"
-    assert "监控文件夹不可读" in monitor_check["message"]
+    assert "书库不可读" in monitor_check["message"]
 
 
-def test_health_allows_no_configured_monitor_folders(client):
+def test_health_allows_no_configured_libraries(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200

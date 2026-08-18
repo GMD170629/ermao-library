@@ -288,7 +288,7 @@ def _library_actor(db: Session, user: User) -> LibraryActor:
         can_manage_system=context.can_manage_system,
         is_admin=context.is_admin,
         can_view_manual_imports=context.can_view_manual_imports,
-        monitor_folder_ids=context.monitor_folder_ids,
+        library_ids=context.library_ids,
     )
 
 
@@ -344,7 +344,7 @@ def _publication_access_scope(db: Session, user: User) -> PublicationAccessScope
     return PublicationAccessScope(
         is_admin=context.is_admin,
         can_view_manual_imports=context.can_view_manual_imports,
-        monitor_folder_ids=tuple(context.monitor_folder_ids),
+        library_ids=tuple(context.library_ids),
     )
 
 
@@ -625,7 +625,7 @@ def dashboard_summary(
             "comicBooks": summary["comicBooks"],
             "audiobookBooks": summary["audiobookBooks"],
             "storageUsedBytes": int(summary["storageUsedBytes"] or 0),
-            "monitorFolderCount": summary["monitorFolderCount"],
+            "libraryCount": summary["libraryCount"],
             "lastImportAt": _dt(summary.get("lastImportAt")),
             "latestSyncAt": _dt(summary.get("latestSyncAt")),
         }
@@ -770,10 +770,10 @@ def management_folders(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    monitor_folders = import_http_store.list_monitor_folders(db)
+    libraries = import_http_store.list_libraries(db)
     source_nodes = [
         {**folder, **_source_folder_preview(str(folder.get("rootPath") or ""))}
-        for folder in monitor_folders
+        for folder in libraries
     ]
     works = library_dashboard.list_management_works(db, limit=300)
     from sqlalchemy import func
@@ -860,10 +860,10 @@ def management_folders(
             for name, items in sorted(buckets.items(), key=lambda item: item[0])
         ]
 
-    source_names = {folder.get("id"): folder.get("name") for folder in monitor_folders}
+    source_names = {folder.get("id"): folder.get("name") for folder in libraries}
     by_source: dict[str, list[dict[str, Any]]] = {}
     for work in work_items:
-        name = source_names.get(work.get("monitorFolderId")) or "手动导入"
+        name = source_names.get(work.get("libraryId")) or "手动导入"
         by_source.setdefault(str(name), []).append(work)
     file_rows = library_dashboard.list_management_file_rows(db, limit=2000)
     managed_paths = []

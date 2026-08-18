@@ -1,4 +1,4 @@
-"""Filesystem adapter for monitor-folder import discovery."""
+"""Filesystem adapter for library-root import discovery."""
 
 from __future__ import annotations
 
@@ -26,10 +26,9 @@ from app.services.import_preferences import (
 
 
 @dataclass(frozen=True)
-class MonitorFolderConfig:
+class LibraryConfig:
     id: str
     root_path: str
-    shelf_id: str | None = None
     ignore_hidden: bool = True
     ignore_patterns: str | None = None
     min_file_size_bytes: int = 10240
@@ -40,14 +39,14 @@ class MonitorFolderConfig:
 
 
 class ImportQueueProtocol(Protocol):
-    def enqueue(self, path: Path, folder: MonitorFolderConfig) -> None: ...
+    def enqueue(self, path: Path, folder: LibraryConfig) -> None: ...
 
 
 ImportIgnoreReason = Literal[
     "temporary_upload",
     "hidden_path",
     "global_ignore_pattern",
-    "monitor_folder_ignore_pattern",
+    "library_ignore_pattern",
     "unsupported_file_type",
     "extension_not_allowed",
     "below_minimum_size",
@@ -73,17 +72,16 @@ class ScanSummary:
     errors: list[dict[str, object]] = field(default_factory=list)
 
 
-def monitor_folder_config(
+def library_config(
     row: Any,
     *,
     preferences: ImportPreferences | None = None,
-) -> MonitorFolderConfig:
+) -> LibraryConfig:
     preferences = preferences or ImportPreferences()
     raw_min_file_size = row.get("minFileSizeBytes")
-    return MonitorFolderConfig(
+    return LibraryConfig(
         id=str(row["id"]),
         root_path=str(row["rootPath"]),
-        shelf_id=str(row.get("shelfId")) if row.get("shelfId") else None,
         ignore_hidden=bool(row.get("ignoreHidden", True)),
         ignore_patterns=row.get("ignorePatterns"),
         min_file_size_bytes=int(
@@ -98,7 +96,7 @@ def monitor_folder_config(
 
 def path_ignore_reason(
     path: Path,
-    folder: MonitorFolderConfig,
+    folder: LibraryConfig,
 ) -> ImportIgnoreReason | None:
     if any(
         part.endswith(".part") or part.startswith(".upload-") for part in path.parts
@@ -111,17 +109,17 @@ def path_ignore_reason(
     if matches_ignore_patterns(path, folder.global_ignore_patterns):
         return "global_ignore_pattern"
     if matches_ignore_patterns(path, folder.ignore_patterns):
-        return "monitor_folder_ignore_pattern"
+        return "library_ignore_pattern"
     return None
 
 
-def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
+def should_ignore_path(path: Path, folder: LibraryConfig) -> bool:
     return path_ignore_reason(path, folder) is not None
 
 
 def import_file_ignore_reason(
     path: Path,
-    folder: MonitorFolderConfig,
+    folder: LibraryConfig,
 ) -> ImportIgnoreReason | None:
     reason = path_ignore_reason(path, folder)
     if reason is not None:
@@ -136,7 +134,7 @@ def import_file_ignore_reason(
     return None
 
 
-def should_ignore_file(path: Path, folder: MonitorFolderConfig) -> bool:
+def should_ignore_file(path: Path, folder: LibraryConfig) -> bool:
     return import_file_ignore_reason(path, folder) is not None
 
 
@@ -152,13 +150,13 @@ def import_source_meets_minimum_size(path: Path, min_file_size_bytes: int) -> bo
         return False
 
 
-def should_ignore_import_source(path: Path, folder: MonitorFolderConfig) -> bool:
+def should_ignore_import_source(path: Path, folder: LibraryConfig) -> bool:
     return import_source_ignore_reason(path, folder) is not None
 
 
 def import_source_ignore_reason(
     path: Path,
-    folder: MonitorFolderConfig,
+    folder: LibraryConfig,
 ) -> ImportIgnoreReason | None:
     reason = import_file_ignore_reason(path, folder)
     if reason is not None:
@@ -182,7 +180,7 @@ def is_proven_audio_bundle_directory(
     path: Path,
     files: list[Path] | None = None,
     *,
-    folder: MonitorFolderConfig | None = None,
+    folder: LibraryConfig | None = None,
 ) -> bool:
     try:
         candidates = files if files is not None else collect_audio_bundle_files(path)
@@ -216,7 +214,7 @@ def audio_track_name_proves_membership(path: Path) -> bool:
 
 def scan_directory_for_imports(
     root_path: Path,
-    folder: MonitorFolderConfig,
+    folder: LibraryConfig,
     import_queue: ImportQueueProtocol,
     *,
     summary: ScanSummary | None = None,

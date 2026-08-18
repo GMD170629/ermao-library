@@ -410,7 +410,7 @@ class KtorPersonalSettingsRepositoryTest {
         const val USER_WITHOUT_AVATAR =
             """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":null}}}"""
         const val SESSION =
-            """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"en-US"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"monitorFolderIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"en-US"}}}"""
+            """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"en-US"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"libraryIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"en-US"}}}"""
         const val PASSWORD_CHANGED =
             """{"ok":true,"data":{"passwordChanged":true,"requiresLogin":true}}"""
         const val PREFERENCES_ZH =

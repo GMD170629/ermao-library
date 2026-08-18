@@ -47,7 +47,7 @@ class ImportWorkItemDTO:
 @dataclass(frozen=True)
 class ImportScanJobDTO:
     id: str
-    monitor_folder_id: str | None
+    library_id: str | None
     actor_user_id: str | None
     root_path: str
     trigger: str

@@ -41,8 +41,8 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("users", "User"),
     ("userPreferences", "UserPreference"),
     ("shelves", "Shelf"),
-    ("monitorFolders", "MonitorFolder"),
-    ("userMonitorFolderAccess", "UserMonitorFolderAccess"),
+    ("libraries", "Library"),
+    ("userLibraryAccess", "UserLibraryAccess"),
     ("works", "LibraryWork"),
     ("mediaVersions", "LibraryMediaVersion"),
     ("volumes", "LibraryVolume"),
@@ -81,7 +81,7 @@ RESTORE_ORDER = [
     "Source",
     "ReaderBookmark",
     "MediaVersionMigrationEvent",
-    "UserMonitorFolderAccess",
+    "UserLibraryAccess",
     "UserPreference",
     "BookIdentityCache",
     "ExternalMetadataCache",
@@ -111,7 +111,7 @@ RESTORE_ORDER = [
     "LibraryVolume",
     "LibraryMediaVersion",
     "LibraryWork",
-    "MonitorFolder",
+    "Library",
 ]
 
 
@@ -167,9 +167,9 @@ def counts_for_export(
     return {
         "users": len(database_export.get("users", [])),
         "userPreferences": len(database_export.get("userPreferences", [])),
-        "monitorFolders": len(database_export.get("monitorFolders", [])),
-        "userMonitorFolderAccess": len(
-            database_export.get("userMonitorFolderAccess", [])
+        "libraries": len(database_export.get("libraries", [])),
+        "userLibraryAccess": len(
+            database_export.get("userLibraryAccess", [])
         ),
         "works": len(database_export.get("works", [])),
         "mediaVersions": len(database_export.get("mediaVersions", [])),
@@ -265,7 +265,7 @@ def create_backup(
             "reading-metadata",
             "tags",
             "volume-progress",
-            "monitor-folder-settings",
+            "library-settings",
             "multi-user-authorization",
             "user-preferences",
             "reader-bookmarks",
@@ -280,7 +280,7 @@ def create_backup(
         "counts": counts,
     }
     settings_export = {
-        "monitorFolders": database_export.get("monitorFolders", []),
+        "libraries": database_export.get("libraries", []),
         "systemSettings": database_export.get("systemSettings", []),
         "storageRoot": str(settings.resolved_storage_root),
         "backupRoot": str(backup_dir(settings)),

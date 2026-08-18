@@ -4,8 +4,8 @@ import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../../../components/ui/cn';
 import { I18nText, useI18n } from '@/i18n/provider';
-import { loadMonitorDirectory } from '../api/monitor-folders-client';
-import type { DirectoryNode } from '../api/monitor-folders-client';
+import { loadLibraryDirectory } from '../api/libraries-client';
+import type { DirectoryNode } from '../api/libraries-client';
 import { directoryPathChain } from '../model/directory-path';
 
 type DirectoryPathPickerVariant = 'default' | 'setup';
@@ -41,7 +41,7 @@ export function DirectoryPathPicker({
     setLoadingPath(path || '__root__');
     setTreeError('');
     try {
-      const node = await loadMonitorDirectory(path, signal);
+      const node = await loadLibraryDirectory(path, signal);
       if (!path) setRootPath(node.path);
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
@@ -156,7 +156,7 @@ export function DirectoryPathPicker({
             }
           }}
           placeholder={t('请输入或选择文件夹')}
-          aria-label={t('监控文件夹路径')}
+          aria-label={t('书库路径')}
           aria-controls={treeId}
           aria-expanded={open}
           aria-autocomplete="list"

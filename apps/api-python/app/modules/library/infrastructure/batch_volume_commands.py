@@ -508,7 +508,7 @@ def _prepare_split_batch(
     work_rows = tuple(
         {
             "id": target_work_ids[context.id],
-            "monitor_folder_id": source_work.monitor_folder_id,
+            "library_id": source_work.library_id,
             "origin": source_work.origin,
             "title": f"{context.work_title}（{context.title}）",
             "normalized_title": normalize_identity_part(

@@ -18,15 +18,15 @@ class PathSecurityValidation:
 
 
 class PathSecurityService:
-    def validate_monitor_folder(self, input_path: str) -> PathSecurityValidation:
+    def validate_library_root(self, input_path: str) -> PathSecurityValidation:
         validation = self._validate_absolute_path(input_path)
         if not validation.real_path.is_dir():
             raise PathSecurityError(
-                f"监控文件夹不是目录：{input_path}", "NOT_DIRECTORY"
+                f"书库不是目录：{input_path}", "NOT_DIRECTORY"
             )
         if not os.access(validation.real_path, os.R_OK):
             raise PathSecurityError(
-                f"监控文件夹不可读：{input_path}", "PATH_UNAVAILABLE"
+                f"书库不可读：{input_path}", "PATH_UNAVAILABLE"
             )
         return validation
 
@@ -45,7 +45,7 @@ class PathSecurityService:
         target = Path(trimmed)
         if not target.is_absolute():
             raise PathSecurityError(
-                f"监控文件夹路径必须是绝对路径：{trimmed}", "NOT_ABSOLUTE"
+                f"书库路径必须是绝对路径：{trimmed}", "NOT_ABSOLUTE"
             )
         if not target.exists():
             raise PathSecurityError(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import case, delete, false, or_, select, update
+from sqlalchemy import case, delete, false, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
@@ -173,19 +173,20 @@ class SqlAlchemyReaderVolumeRepository:
     ) -> list[ReaderVolumeDto]:
         visibility: ColumnElement[bool] = LibraryVolume.id.is_not(None)
         if not access_scope.is_admin:
-            clauses = []
-            if access_scope.monitor_folder_ids:
-                clauses.append(
-                    LibraryVolume.monitor_folder_id.in_(access_scope.monitor_folder_ids)
-                )
-            if access_scope.can_view_manual_imports:
-                clauses.append(LibraryVolume.monitor_folder_id.is_(None))
-            visibility = or_(*clauses) if clauses else false()
+            visibility = (
+                LibraryWork.library_id.in_(access_scope.library_ids)
+                if access_scope.library_ids
+                else false()
+            )
         volumes = self._session.scalars(
             select(LibraryVolume)
             .join(
                 LibraryMediaVersion,
                 LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .join(
+                LibraryWork,
+                LibraryWork.id == LibraryMediaVersion.work_id,
             )
             .where(
                 LibraryMediaVersion.work_id == work_id,

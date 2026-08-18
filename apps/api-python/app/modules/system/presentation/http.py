@@ -288,14 +288,14 @@ def dashboard_system_status(
     if auth_error:
         return auth_error
     health = run_system_health_checks(db, settings)
-    enabled = import_http_store.list_enabled_monitor_folder_rows(db)
+    enabled = import_http_store.list_enabled_library_rows(db)
     current_task, latest_task, failed_count = import_http_store.import_status_snapshot(
         db
     )
     return DashboardSystemStatusResponse(
         data=dashboard_system_status_payload(
             health=health,
-            enabled_monitor_folders=enabled,
+            enabled_libraries=enabled,
             current_import_task=current_task,
             latest_import_task=latest_task,
             failed_count=failed_count,

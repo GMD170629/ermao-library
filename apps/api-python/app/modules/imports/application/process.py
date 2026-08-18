@@ -11,7 +11,7 @@ from app.modules.imports.application.dto import (
     ImportTaskDTO,
 )
 from app.modules.imports.application.errors import (
-    MonitorFolderDeletedDuringImportError,
+    LibraryDeletedDuringImportError,
 )
 from app.modules.imports.application.ports import (
     ImportMetadataObserver,
@@ -21,14 +21,14 @@ from app.modules.imports.application.ports import (
 )
 
 
-def _ensure_monitor_folder_exists(
+def _ensure_library_exists(
     store: ImportTaskStore,
-    monitor_folder_id: str | None,
+    library_id: str | None,
 ) -> None:
-    if monitor_folder_id is not None and not store.monitor_folder_exists(
-        monitor_folder_id
+    if library_id is not None and not store.library_exists(
+        library_id
     ):
-        raise MonitorFolderDeletedDuringImportError
+        raise LibraryDeletedDuringImportError
 
 
 def process_import_task(
@@ -42,7 +42,7 @@ def process_import_task(
     now: int,
 ) -> ImportResult:
     try:
-        _ensure_monitor_folder_exists(store, task.monitor_folder_id)
+        _ensure_library_exists(store, task.library_id)
         unit_of_work.release()
         result = pipeline.import_managed_book(
             settings,
@@ -52,18 +52,13 @@ def process_import_task(
                 requested_title=task.requested_title,
                 requested_author=task.requested_author,
                 origin=task.origin or "MANUAL",
-                monitor_folder_id=task.monitor_folder_id,
+                library_id=task.library_id,
                 media_kind_policy=task.media_kind_policy,
                 import_task_id=task.id,
                 expected_lease_owner=task.lease_owner,
             ),
         )
-        _ensure_monitor_folder_exists(store, task.monitor_folder_id)
-        store.link_work_to_monitor_shelf(
-            task.monitor_folder_id,
-            result.work_id,
-            created_at=now,
-        )
+        _ensure_library_exists(store, task.library_id)
         store.mark_download_completed(
             source_path=task.source_path,
             book_id=result.work_id,

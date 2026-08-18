@@ -7,47 +7,47 @@ from pathlib import Path
 from typing import Any
 
 
-class MonitorPathError(ValueError):
+class LibraryPathError(ValueError):
     def __init__(self, message: str, *, status_code: int, code: str) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
 
 
-def resolve_monitor_folder_path(value: object) -> Path:
+def resolve_library_root_path(value: object) -> Path:
     raw_path = str(value or "").strip()
     if not raw_path:
-        raise MonitorPathError(
-            "请选择监控文件夹路径",
+        raise LibraryPathError(
+            "请选择书库路径",
             status_code=400,
-            code="MONITOR_FOLDER_PATH_REQUIRED",
+            code="INVALID_LIBRARY_PATH",
         )
     target = Path(raw_path).expanduser()
     if not target.is_absolute():
-        raise MonitorPathError(
-            "监控文件夹路径必须是绝对路径",
+        raise LibraryPathError(
+            "书库路径必须是绝对路径",
             status_code=400,
-            code="MONITOR_FOLDER_PATH_NOT_ABSOLUTE",
+            code="INVALID_LIBRARY_PATH",
         )
     try:
         real_target = target.resolve(strict=True)
     except (OSError, RuntimeError):
-        raise MonitorPathError(
-            "监控文件夹路径不存在或不可读",
+        raise LibraryPathError(
+            "书库路径不存在或不可读",
             status_code=404,
-            code="MONITOR_FOLDER_PATH_UNAVAILABLE",
+            code="INVALID_LIBRARY_PATH",
         ) from None
     if not real_target.is_dir():
-        raise MonitorPathError(
-            "监控文件夹路径必须是目录",
+        raise LibraryPathError(
+            "书库路径必须是目录",
             status_code=400,
-            code="MONITOR_FOLDER_PATH_NOT_DIRECTORY",
+            code="INVALID_LIBRARY_PATH",
         )
     if not os.access(real_target, os.R_OK):
-        raise MonitorPathError(
-            "监控文件夹路径不可读",
+        raise LibraryPathError(
+            "书库路径不可读",
             status_code=400,
-            code="MONITOR_FOLDER_PATH_UNREADABLE",
+            code="INVALID_LIBRARY_PATH",
         )
     return real_target
 
@@ -60,7 +60,7 @@ def is_inside_path(root: Path, target: Path) -> bool:
         return False
 
 
-def monitor_directory_tree_node(
+def library_directory_tree_node(
     requested_path: str | None,
 ) -> tuple[dict[str, Any] | None, str | None, int]:
     raw_path = str(requested_path or "").strip()
@@ -80,7 +80,7 @@ def monitor_directory_tree_node(
         return None, "路径不存在或不可读", 404
 
     if not real_target.is_dir():
-        return None, "监控文件夹路径必须是目录", 400
+        return None, "书库路径必须是目录", 400
 
     children: list[dict[str, Any]] = []
     readable = os.access(real_target, os.R_OK)

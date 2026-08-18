@@ -29,12 +29,12 @@ function parseDirectoryNode(value: unknown): DirectoryNode | null {
   };
 }
 
-export async function loadMonitorDirectory(
+export async function loadLibraryDirectory(
   path?: string,
   signal?: AbortSignal
 ): Promise<DirectoryNode> {
   const query = path ? `?path=${encodeURIComponent(path)}` : '';
-  const response = await fetch(`/api/monitor-folders/tree${query}`, {
+  const response = await fetch(`/api/libraries/tree${query}`, {
     cache: 'no-store', credentials: 'same-origin', signal
   });
   const payload: unknown = await response.json();

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 def _work_with_file(db: Session, path: Path, suffix: str) -> LibraryWork:
     work = LibraryWork(
+            library_id="test-library", 
         id=f"delete-work-{suffix}",
         origin="MANUAL",
         title="Delete me",

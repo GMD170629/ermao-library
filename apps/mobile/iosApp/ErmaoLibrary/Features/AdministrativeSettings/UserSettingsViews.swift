@@ -216,11 +216,11 @@ struct UserAccessView: View {
     private func load() async {
         state = .loading
         state = await store.load(scope: "user-access-\(userID)") { try await store.client.loadUserAccess(id: userID) }
-        if case let .loaded(snapshot) = state { manualImports = snapshot.user.canViewManualImports; selected = snapshot.user.monitorFolderIDs }
+        if case let .loaded(snapshot) = state { manualImports = snapshot.user.canViewManualImports; selected = snapshot.user.libraryIDs }
     }
     private func save() {
         Task {
-            let result = await store.performValue(id: "save-access") { try await store.client.saveUserAccess(id: userID, monitorFolderIDs: selected, canViewManualImports: manualImports) }
+            let result = await store.performValue(id: "save-access") { try await store.client.saveUserAccess(id: userID, libraryIDs: selected, canViewManualImports: manualImports) }
             if case .success = result { dismiss() }
         }
     }

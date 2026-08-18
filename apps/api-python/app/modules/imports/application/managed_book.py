@@ -203,7 +203,7 @@ def import_managed_book(
                     "sourcePath": str(original_source),
                     "originalName": options.original_name or source.name,
                     "origin": options.origin,
-                    "monitorFolderId": options.monitor_folder_id,
+                    "libraryId": options.library_id,
                     "format": source_ext.removeprefix("."),
                 },
             )

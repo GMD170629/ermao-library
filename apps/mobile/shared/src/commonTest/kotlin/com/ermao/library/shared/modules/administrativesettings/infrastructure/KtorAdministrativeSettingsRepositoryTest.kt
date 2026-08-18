@@ -68,7 +68,7 @@ class KtorAdministrativeSettingsRepositoryTest {
                     ManagedUserRole.Member,
                     canManageSystem = true,
                     canViewManualImports = true,
-                    monitorFolderIds = listOf("folder-1"),
+                    libraryIds = listOf("folder-1"),
                     locale = ManagedLocale.EnUs,
                 ),
             ),
@@ -91,7 +91,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         )
         assertEquals("""{"email":"reader@kindle.com"}""", harness.requests[1].body)
         assertTrue(harness.requests[3].body.contains("\"clearSmtpPassword\":false"))
-        assertTrue(harness.requests[5].body.contains("\"monitorFolderIds\":[\"folder-1\"]"))
+        assertTrue(harness.requests[5].body.contains("\"libraryIds\":[\"folder-1\"]"))
         assertEquals("""{"password":"next-password"}""", harness.requests[6].body)
         assertEquals("""{"confirmation":"reader@example.com"}""", harness.requests[7].body)
     }
@@ -111,7 +111,7 @@ class KtorAdministrativeSettingsRepositoryTest {
             Response(200, LOG_SETTINGS),
         )
 
-        assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadMonitorFolders(context()))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadLibraries(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadDirectory(context(), "/books"))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.listImportTasks(context(), ImportTaskFilter()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadOrganizePolicy(context()))
@@ -125,8 +125,8 @@ class KtorAdministrativeSettingsRepositoryTest {
         val paths = harness.requests.map(CapturedRequest::path)
         assertEquals(
             listOf(
-                "/base/api/monitor-folders",
-                "/base/api/monitor-folders/tree",
+                "/base/api/libraries",
+                "/base/api/libraries/tree",
                 "/base/api/import-tasks",
                 "/base/api/organize/policy",
                 "/base/api/system-settings/opds",
@@ -181,10 +181,10 @@ class KtorAdministrativeSettingsRepositoryTest {
         )
 
         assertIs<AdministrativeSettingsContent<*>>(
-            harness.repository.updateMonitorFolder(
+            harness.repository.updateLibrary(
                 context(),
                 "folder-1",
-                MonitorFolderDraft(
+                LibraryDraft(
                     rootPath = "/books",
                     name = "Books",
                     shelfId = null,
@@ -203,7 +203,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.deleteBackup(context(), "backup-1"))
 
         assertEquals(HttpMethod.Put, harness.requests[0].method)
-        assertEquals("/base/api/monitor-folders/folder-1", harness.requests[0].path)
+        assertEquals("/base/api/libraries/folder-1", harness.requests[0].path)
         assertEquals(
             """{"deleteMode":"source","deleteLibraryRecord":true}""",
             harness.requests[1].body,
@@ -468,7 +468,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val KINDLE_SETTINGS_UPDATED = KINDLE_SETTINGS
         const val EMAIL_SETTINGS = """{"ok":true,"data":{"smtp":{"host":"smtp.example.com","port":587,"security":"starttls","username":"reader","fromEmail":"sender@example.com","fromName":"Library","maxAttachmentMb":25,"passwordConfigured":true},"kindle":{"email":"reader@kindle.com"}}}"""
         const val SMTP_TEST = """{"ok":true,"data":{"connected":true,"message":"ok"}}"""
-        const val USER = """{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":7,"avatarUrl":null,"locale":"en-US","monitorFolderIds":["folder-1"],"authorization":{"isAdmin":false,"canManageSystem":true,"allLibraryScopes":false,"monitorFolderIds":["folder-1"],"canViewManualImports":true,"authzVersion":7},"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}"""
+        const val USER = """{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":7,"avatarUrl":null,"locale":"en-US","libraryIds":["folder-1"],"authorization":{"isAdmin":false,"canManageSystem":true,"allLibraryScopes":false,"libraryIds":["folder-1"],"canViewManualImports":true,"authzVersion":7},"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}"""
         const val USERS = """{"ok":true,"data":{"users":[$USER]}}"""
         const val USER_PAYLOAD = """{"ok":true,"data":{"user":$USER}}"""
         const val PASSWORD_CHANGED = """{"ok":true,"data":{"passwordChanged":true,"sessionsRevoked":true}}"""

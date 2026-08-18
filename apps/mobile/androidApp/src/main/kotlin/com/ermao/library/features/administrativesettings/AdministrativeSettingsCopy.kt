@@ -108,7 +108,7 @@ enum class AdministrativeCopy(
     UserAccessHint("用户只能浏览和阅读所选范围内的内容。", "The user can browse and read only content in the selected scope."),
     StorageLocation("存储位置", "Storage location"),
     AvailableSpace("可用空间", "Available space"),
-    MonitoringFolders("监控文件夹", "Watched folders"),
+    MonitoringFolders("书库", "Watched folders"),
     AddSource("新增", "Add"),
     BrowseDirectory("选择本机目录", "Choose device directory"),
     ScanDirectory("扫描此目录", "Scan this directory"),

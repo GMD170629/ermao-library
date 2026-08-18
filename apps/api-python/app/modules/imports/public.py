@@ -23,10 +23,10 @@ from app.modules.imports.application.enqueue import (
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.modules.imports.application.import_support import parse_series_volume_info
 from app.modules.imports.application.monitor_paths import (
-    MonitorPathError,
+    LibraryPathError,
     is_inside_path,
-    monitor_directory_tree_node,
-    resolve_monitor_folder_path,
+    library_directory_tree_node,
+    resolve_library_root_path,
     target_directory_from_path,
 )
 from app.modules.imports.application.ports import ImportUnitOfWork
@@ -52,7 +52,7 @@ __all__ = [
     "ImportResult",
     "ImportTaskDTO",
     "ImportUnitOfWork",
-    "MonitorPathError",
+    "LibraryPathError",
     "ParsedReleaseTitle",
     "PreparedImportDeletion",
     "PreparedImportEnqueue",
@@ -67,11 +67,11 @@ __all__ = [
     "commit_import_checkpoint",
     "is_inside_path",
     "is_supported_import_filename",
-    "monitor_directory_tree_node",
+    "library_directory_tree_node",
     "parse_release_title",
     "parse_series_volume_info",
     "reset_failed_import_checkpoint",
-    "resolve_monitor_folder_path",
+    "resolve_library_root_path",
     "safe_upload_filename",
     "target_directory_from_path",
 ]

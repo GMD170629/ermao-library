@@ -15,7 +15,7 @@ from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHand
 from watchdog.observers import Observer
 
 from app.bootstrap.imports import (
-    MonitorFolderConfig,
+    LibraryConfig,
     ScanSummary,
     StreamingDirectoryScanner,
     import_file_ignore_reason,
@@ -24,13 +24,12 @@ from app.bootstrap.imports import (
     import_source_meets_minimum_size,
     library_repository,
     load_import_enqueue_command_projection,
-    monitor_folder_config,
+    library_config,
     monitor_repository,
     persist_import_enqueue_write,
     persist_import_events,
     persist_import_rescan_completion,
     persist_import_scan_requests,
-    persist_watched_import_shelf_link,
     prepare_import_enqueue_command,
     prepare_import_enqueue_write,
     should_ignore_file,
@@ -39,7 +38,6 @@ from app.core.config import Settings
 from app.models.common import db_timestamp
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
-from app.modules.imports.application.shelf_link import PreparedImportShelfLink
 from app.modules.system.public import PreparedSystemEvent, is_database_busy_error
 from app.services.audio_metadata import (
     audio_bundle_root,
@@ -69,13 +67,13 @@ from app.worker.path_security import PathSecurityError, PathSecurityService
 class ImportQueueProtocol(Protocol):
     """Queue contract owned by the watcher process boundary."""
 
-    def enqueue(self, path: Path, folder: MonitorFolderConfig) -> None: ...
+    def enqueue(self, path: Path, folder: LibraryConfig) -> None: ...
 
 
 audio_bundle_fully_imported = library_repository.audio_bundle_fully_imported
 get_completed_import_task_work_id = monitor_repository.get_completed_import_task_work_id
 get_system_settings = monitor_repository.get_system_settings
-list_enabled_monitor_folders = monitor_repository.list_enabled_monitor_folders
+list_enabled_libraries = monitor_repository.list_enabled_libraries
 
 RESCAN_REQUESTED_AT_KEY = "monitor.rescanRequestedAt"
 RESCAN_HANDLED_AT_KEY = "monitor.rescanHandledAt"
@@ -127,14 +125,14 @@ class WatchState:
 
 @dataclass(frozen=True, slots=True)
 class WorkerRefreshProjection:
-    folders: tuple[MonitorFolderConfig, ...]
+    folders: tuple[LibraryConfig, ...]
     rescan_requested_at: str | None
     rescan_handled_at: str | None
 
 
 class WorkerFileHandler(FileSystemEventHandler):
     def __init__(
-        self, manager: WorkerManager, folder: MonitorFolderConfig, state: WatchState
+        self, manager: WorkerManager, folder: LibraryConfig, state: WatchState
     ) -> None:
         self.manager = manager
         self.folder = folder
@@ -178,9 +176,9 @@ class WorkerManager:
     def refresh_worker_state(self) -> None:
         try:
             with self.db_factory() as db:
-                folder_rows = tuple(list_enabled_monitor_folders(db))
+                folder_rows = tuple(list_enabled_libraries(db))
                 setting_values = get_system_settings(db, WORKER_REFRESH_SETTING_KEYS)
-            folders = enabled_monitor_folders(folder_rows, setting_values)
+            folders = enabled_libraries(folder_rows, setting_values)
             projection = WorkerRefreshProjection(
                 folders=folders,
                 rescan_requested_at=setting_values.get(RESCAN_REQUESTED_AT_KEY),
@@ -211,7 +209,7 @@ class WorkerManager:
     def _schedule_scan_request(
         self,
         *,
-        monitor_folder_id: str,
+        library_id: str,
         root_path: Path,
         trigger: str,
         available_at: datetime | None = None,
@@ -220,7 +218,7 @@ class WorkerManager:
         prepared_job = prepare_import_scan_job(
             job_id=f"scan_{uuid4().hex}",
             work_item_id=f"work_{uuid4().hex}",
-            monitor_folder_id=monitor_folder_id,
+            library_id=library_id,
             actor_user_id=None,
             canonical_root_path=str(root_path.expanduser().resolve()),
             trigger=trigger,
@@ -230,7 +228,7 @@ class WorkerManager:
         with self.db_factory() as db:
             persist_import_scan_requests(db, (prepared_job,), ())
 
-    def refresh_watchers(self, folders: tuple[MonitorFolderConfig, ...]) -> None:
+    def refresh_watchers(self, folders: tuple[LibraryConfig, ...]) -> None:
         active_ids = {folder.id for folder in folders}
         for folder_id, state in list(self.watchers.items()):
             folder = next((item for item in folders if item.id == folder_id), None)
@@ -243,21 +241,21 @@ class WorkerManager:
             if folder.id in self.watchers:
                 continue
             try:
-                real_path = self.security.validate_monitor_folder(
+                real_path = self.security.validate_library_root(
                     folder.root_path
                 ).real_path
             except PathSecurityError as exc:
                 print(
-                    f"[import-worker] monitor folder unavailable {folder.root_path}: {exc}",
+                    f"[import-worker] library unavailable {folder.root_path}: {exc}",
                     flush=True,
                 )
                 prepared_event = prepare_system_event(
                     source="import",
                     action="scan.failed",
                     level="error",
-                    target_type="monitorFolder",
+                    target_type="library",
                     target_id=folder.id,
-                    message=f"监控文件夹扫描失败：{folder.root_path}",
+                    message=f"书库扫描失败：{folder.root_path}",
                     metadata={
                         "rootPath": folder.root_path,
                         "trigger": "watcher_started",
@@ -280,7 +278,7 @@ class WorkerManager:
             print(f"[import-worker] monitoring {real_path}", flush=True)
             try:
                 self._schedule_scan_request(
-                    monitor_folder_id=folder.id,
+                    library_id=folder.id,
                     root_path=real_path,
                     trigger="watcher_started",
                 )
@@ -311,7 +309,7 @@ class WorkerManager:
             request_payload = None
         if isinstance(request_payload, dict):
             request_timestamp = str(request_payload.get("requestedAt") or requested_at)
-            raw_folder_ids = request_payload.get("monitorFolderIds")
+            raw_folder_ids = request_payload.get("libraryIds")
             if isinstance(raw_folder_ids, list):
                 requested_folder_ids = {
                     str(folder_id)
@@ -329,21 +327,21 @@ class WorkerManager:
         prepared_events: list[PreparedSystemEvent] = []
         for folder in folders:
             try:
-                real_path = self.security.validate_monitor_folder(
+                real_path = self.security.validate_library_root(
                     folder.root_path
                 ).real_path
             except PathSecurityError as exc:
                 print(
-                    f"[import-worker] rescan monitor folder unavailable {folder.root_path}: {exc}",
+                    f"[import-worker] rescan library unavailable {folder.root_path}: {exc}",
                     flush=True,
                 )
                 failure_event = prepare_system_event(
                     source="import",
                     action="scan.failed",
                     level="error",
-                    target_type="monitorFolder",
+                    target_type="library",
                     target_id=folder.id,
-                    message=f"监控文件夹重新扫描失败：{folder.root_path}",
+                    message=f"书库重新扫描失败：{folder.root_path}",
                     metadata={
                         "rootPath": folder.root_path,
                         "trigger": "manual_rescan",
@@ -357,7 +355,7 @@ class WorkerManager:
                 prepare_import_scan_job(
                     job_id=f"scan_{uuid4().hex}",
                     work_item_id=f"work_{uuid4().hex}",
-                    monitor_folder_id=folder.id,
+                    library_id=folder.id,
                     actor_user_id=None,
                     canonical_root_path=str(real_path),
                     trigger="manual_rescan",
@@ -369,8 +367,8 @@ class WorkerManager:
             source="import",
             action="rescan.completed",
             level="info",
-            target_type="monitorFolder",
-            message=f"已提交重新扫描：{len(folders)} 个监控文件夹",
+            target_type="library",
+            message=f"已提交重新扫描：{len(folders)} 个书库",
             metadata={
                 "requestedAt": request_timestamp,
                 "folderCount": len(folders),
@@ -404,7 +402,7 @@ class WorkerManager:
         )
 
     def schedule_import(
-        self, path: Path, folder: MonitorFolderConfig, state: WatchState
+        self, path: Path, folder: LibraryConfig, state: WatchState
     ) -> None:
         if getattr(self, "_imports_paused", False):
             return
@@ -442,7 +440,7 @@ class WorkerManager:
     def _schedule_import_once(
         self,
         candidate: Path,
-        folder: MonitorFolderConfig,
+        folder: LibraryConfig,
         state: WatchState,
         *,
         audio_scan_root: Path | None,
@@ -459,14 +457,14 @@ class WorkerManager:
             at_high_watermark = import_queue_at_high_watermark(db)
         if at_high_watermark:
             self._schedule_scan_request(
-                monitor_folder_id=folder.id,
+                library_id=folder.id,
                 root_path=state.root_path,
                 trigger="WATCHER_BACKPRESSURE",
             )
             return
         if audio_scan_root is not None:
             self._schedule_scan_request(
-                monitor_folder_id=folder.id,
+                library_id=folder.id,
                 root_path=audio_scan_root,
                 trigger="WATCHER_AUDIO_EVENT",
                 available_at=available_at,
@@ -476,7 +474,7 @@ class WorkerManager:
             candidate,
             origin="WATCH",
             original_name=candidate_name,
-            monitor_folder_id=folder.id,
+            library_id=folder.id,
             message="监控文件已进入导入队列",
             allow_terminal_requeue=candidate_is_directory,
         )
@@ -506,7 +504,7 @@ class WorkerManager:
                 continue
             try:
                 self._schedule_scan_request(
-                    monitor_folder_id=folder_id,
+                    library_id=folder_id,
                     root_path=state.root_path,
                     trigger="WATCHER_RECOVERY",
                 )
@@ -538,10 +536,10 @@ class WorkerManager:
         print(f"[import-worker] stopped monitor {state.root_path}", flush=True)
 
 
-def enabled_monitor_folders(
+def enabled_libraries(
     rows: tuple[Mapping[str, object], ...],
     setting_values: Mapping[str, str],
-) -> tuple[MonitorFolderConfig, ...]:
+) -> tuple[LibraryConfig, ...]:
     """Map detached SQL projections into watcher configuration."""
 
     stability_enabled = normalize_import_setting_value(
@@ -566,14 +564,13 @@ def enabled_monitor_folders(
             setting_values.get(IMPORT_IGNORE_PATTERNS_KEY)
         ),
     )
-    return tuple(monitor_folder_config(row, preferences=preferences) for row in rows)
+    return tuple(library_config(row, preferences=preferences) for row in rows)
 
 
-def config_signature(folder: MonitorFolderConfig) -> str:
+def config_signature(folder: LibraryConfig) -> str:
     return "|".join(
         [
             folder.root_path,
-            folder.shelf_id or "",
             str(folder.ignore_hidden),
             folder.ignore_patterns or "",
             str(folder.min_file_size_bytes),
@@ -648,22 +645,11 @@ def wait_for_stable_import_source(
         return False
 
 
-def _add_work_to_target_shelf(
-    db: Session, folder: MonitorFolderConfig, work_id: str | None
-) -> None:
-    if not folder.shelf_id or not work_id:
-        return
-    persist_watched_import_shelf_link(
-        db,
-        PreparedImportShelfLink(folder.shelf_id, work_id, db_timestamp()),
-    )
-
-
 def import_watched_file(
     db: Session,
     settings: Settings,
     path: Path,
-    folder: MonitorFolderConfig,
+    folder: LibraryConfig,
     *,
     has_changed: Callable[[], bool] | None = None,
     mark_deferred: Callable[[], None] | None = None,
@@ -688,12 +674,12 @@ def import_watched_file(
             source="import",
             action="scan.file.deferred",
             level="warning",
-            target_type="monitorFolder",
+            target_type="library",
             target_id=folder.id,
             message=f"扫描到的文件尚未稳定，暂缓导入：{path.name}",
             metadata={
                 "sourcePath": str(path),
-                "monitorFolderId": folder.id,
+                "libraryId": folder.id,
                 "minFileSizeBytes": folder.min_file_size_bytes,
                 "stabilityCheckEnabled": folder.stability_check_enabled,
                 "stabilityCheckSeconds": delay,
@@ -705,7 +691,6 @@ def import_watched_file(
     existing = get_completed_import_task_work_id(db, str(path))
     db.close()
     if existing and (path.is_file() or _audio_bundle_is_fully_imported(db, path)):
-        _add_work_to_target_shelf(db, folder, existing.get("workId"))
         print(f"[import-worker] skipped already imported file {path}", flush=True)
         _record_worker_event(
             db,
@@ -716,7 +701,7 @@ def import_watched_file(
             message=f"扫描文件已导入，跳过处理：{path.name}",
             metadata={
                 "sourcePath": str(path),
-                "monitorFolderId": folder.id,
+                "libraryId": folder.id,
                 "reason": "completed_import_task_exists",
             },
         )
@@ -725,7 +710,7 @@ def import_watched_file(
         path,
         origin="WATCH",
         original_name=path.name,
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         message="监控文件已进入导入队列",
         allow_terminal_requeue=path.is_dir(),
     )
@@ -743,7 +728,7 @@ def import_watched_file(
 def scan_directory_with_logging(
     db: Session,
     root_path: Path,
-    folder: MonitorFolderConfig,
+    folder: LibraryConfig,
     import_queue: ImportQueueProtocol,
     *,
     trigger: str,
@@ -751,7 +736,7 @@ def scan_directory_with_logging(
 ) -> ScanSummary:
     base_metadata = {
         "rootPath": str(root_path),
-        "monitorFolderId": folder.id,
+        "libraryId": folder.id,
         "trigger": trigger,
         "requestedAt": requested_at,
     }
@@ -759,9 +744,9 @@ def scan_directory_with_logging(
         db,
         source="import",
         action="scan.started",
-        target_type="monitorFolder",
+        target_type="library",
         target_id=folder.id,
-        message=f"开始扫描监控文件夹：{root_path.name or root_path}",
+        message=f"开始扫描书库：{root_path.name or root_path}",
         metadata=base_metadata,
     )
 
@@ -798,7 +783,7 @@ def scan_directory_with_logging(
         source="import",
         action=action,
         level="warning" if error_count else "info",
-        target_type="monitorFolder",
+        target_type="library",
         target_id=folder.id,
         message=(
             f"扫描完成：检查 {summary.files_scanned} 个文件，发现 {summary.candidates_found} 个新增待识别文件"

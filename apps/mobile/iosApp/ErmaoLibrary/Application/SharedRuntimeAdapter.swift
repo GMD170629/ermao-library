@@ -203,7 +203,7 @@ private enum SharedSessionMapper {
                 isAdmin: snapshot.isAdmin,
                 canManageSystem: snapshot.canManageSystem,
                 allLibraryScopes: snapshot.allLibraryScopes,
-                monitorFolderIDs: snapshot.monitorFolderIds,
+                libraryIDs: snapshot.libraryIds,
                 canViewManualImports: snapshot.canViewManualImports,
                 authorizationVersion: $0
             )

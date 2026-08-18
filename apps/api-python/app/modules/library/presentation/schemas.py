@@ -11,6 +11,7 @@ from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 from app.contracts.system_events import SystemEvent
+from app.modules.library.domain.layout import LibraryOrganizationMode
 
 MediaKind = Literal["EBOOK", "COMIC", "AUDIOBOOK"]
 ReadingStatus = Literal["UNREAD", "READING", "FINISHED"]
@@ -396,7 +397,7 @@ class ManagementWorkSummary(HttpContractModel):
     id: str
     title: str
     author: str
-    monitor_folder_id: str | None = Field(alias="monitorFolderId")
+    library_id: str | None = Field(alias="libraryId")
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     series_name: str | None = Field(alias="seriesName")
     organize_status: str | None = Field(alias="organizeStatus")
@@ -430,7 +431,7 @@ class DashboardSummaryPayload(HttpContractModel):
     comic_books: int = Field(alias="comicBooks")
     audiobook_books: int = Field(alias="audiobookBooks")
     storage_used_bytes: int = Field(alias="storageUsedBytes")
-    monitor_folder_count: int = Field(alias="monitorFolderCount")
+    library_count: int = Field(alias="libraryCount")
     last_import_at: datetime | None = Field(alias="lastImportAt")
     latest_sync_at: datetime | None = Field(alias="latestSyncAt")
 
@@ -502,11 +503,8 @@ class SourceFolderNode(HttpContractModel):
     id: str
     name: str
     root_path: str = Field(alias="rootPath")
-    shelf_id: str | None = Field(alias="shelfId")
+    organization_mode: LibraryOrganizationMode = Field(alias="organizationMode")
     enabled: bool
-    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
-        alias="mediaKindPolicy"
-    )
     ignore_patterns: str | None = Field(alias="ignorePatterns")
     ignore_hidden: bool = Field(alias="ignoreHidden")
     min_file_size_bytes: int = Field(alias="minFileSizeBytes")

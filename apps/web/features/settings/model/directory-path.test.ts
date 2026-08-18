@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { directoryPathChain } from './directory-path';
 
-test('keeps the filesystem root while locating a nested monitor folder', () => {
+test('keeps the filesystem root while locating a nested library path', () => {
   assert.deepEqual(directoryPathChain('/home/liumianti/books'), [
     '/',
     '/home',

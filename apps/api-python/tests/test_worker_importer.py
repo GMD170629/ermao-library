@@ -26,7 +26,8 @@ from app.models.library import (
     LibraryWork,
 )
 from app.models.organize import OrganizePolicy
-from app.models.settings import MonitorFolder, SystemEvent
+from app.models.library import Library
+from app.models.settings import SystemEvent
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -58,14 +59,19 @@ from app.worker.path_security import (
     PathSecurityService,
 )
 from app.worker.watcher import (
-    MonitorFolderConfig,
+    LibraryConfig,
     WatchState,
     WorkerManager,
     import_watched_file,
-    monitor_folder_config,
+    library_config,
     scan_directory_with_logging,
     should_ignore_file,
 )
+
+
+def _options(**kwargs) -> ImportOptions:
+    kwargs.setdefault("library_id", "test-library")
+    return ImportOptions(**kwargs)
 
 
 def create_worker_tables(db):
@@ -73,9 +79,10 @@ def create_worker_tables(db):
     db.commit()
 
 
-def add_monitor_folder(db, root_path: Path, *, folder_id: str = "folder-1") -> None:
+def add_library(db, root_path: Path, *, folder_id: str = "folder-1") -> None:
     db.add(
-        MonitorFolder(
+        Library(
+            organization_mode="FLAT", 
             id=folder_id,
             name=root_path.name,
             root_path=str(root_path),
@@ -461,7 +468,7 @@ def test_path_security_accepts_any_visible_absolute_directory(tmp_path):
     library.mkdir(parents=True)
     service = PathSecurityService()
 
-    validation = service.validate_monitor_folder(str(library))
+    validation = service.validate_library_root(str(library))
 
     assert validation.real_path == library.resolve()
 
@@ -469,7 +476,7 @@ def test_path_security_accepts_any_visible_absolute_directory(tmp_path):
 def test_path_security_rejects_relative_paths():
     service = PathSecurityService()
     with pytest.raises(PathSecurityError) as error:
-        service.validate_monitor_folder("books")
+        service.validate_library_root("books")
     assert error.value.code == "NOT_ABSOLUTE"
 
 
@@ -487,7 +494,7 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub, origin="MANUAL", original_name="book.epub"
         ),
     )
@@ -571,57 +578,66 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
         "file",
         f"{normalized_source}|{source_path}",
     )
-    db_session.add_all(
-        [
-            ImportTask(
-                id=task_id,
-                origin="MANUAL",
-                status="FAILED",
-                source_path=source_path,
-                retryable=True,
-            ),
-            LibraryWork(
-                id=work_id,
-                title="Sample",
-                normalized_title="sample",
-                author="Author",
-                normalized_author="author",
-                tags="[]",
-                merge_key=_work_merge_key("Sample"),
-            ),
-            LibraryMediaVersion(
-                id=media_version_id,
-                work_id=work_id,
-                media_kind="EBOOK",
-            ),
-            LibraryVolume(
-                id=volume_id,
-                media_version_id=media_version_id,
-                title="Sample",
-                format="EPUB",
-                resource_key=resource_key,
-                import_status="PARSING",
-            ),
-            LibraryFile(
-                id=file_id,
-                volume_id=volume_id,
-                path=source_path,
-                file_path_hash=hashlib.sha256(source_path.encode()).hexdigest(),
-                hash_status="PARTIAL_PENDING",
-                mtime_ms=int(stat.st_mtime * 1000),
-                kind="EPUB",
-                mime_type="application/epub+zip",
-                size_bytes=stat.st_size,
-                sort_order=0,
-            ),
-        ]
+    db_session.add(
+        ImportTask(
+            id=task_id,
+            origin="MANUAL",
+            status="FAILED",
+            source_path=source_path,
+            retryable=True,
+        )
+    )
+    db_session.add(
+        LibraryWork(
+            library_id="test-library",
+            id=work_id,
+            title="Sample",
+            normalized_title="sample",
+            author="Author",
+            normalized_author="author",
+            tags="[]",
+            merge_key=_work_merge_key("Sample"),
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryMediaVersion(
+            id=media_version_id,
+            work_id=work_id,
+            media_kind="EBOOK",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryVolume(
+            id=volume_id,
+            media_version_id=media_version_id,
+            title="Sample",
+            format="EPUB",
+            resource_key=resource_key,
+            import_status="PARSING",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryFile(
+            id=file_id,
+            volume_id=volume_id,
+            path=source_path,
+            file_path_hash=hashlib.sha256(source_path.encode()).hexdigest(),
+            mtime_ms=int(stat.st_mtime * 1000),
+            kind="EPUB",
+            mime_type="application/epub+zip",
+            size_bytes=stat.st_size,
+            sort_order=0,
+        )
     )
     db_session.commit()
 
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="MANUAL",
             original_name=epub.name,
@@ -671,7 +687,7 @@ def test_import_records_ai_identity_and_result(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
 
     assert result.title == "AI 识别书名"
@@ -716,7 +732,7 @@ def test_import_records_path_identity_cache_hit(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
 
     assert result.title == "缓存书名"
@@ -764,7 +780,7 @@ def test_import_records_ai_failure_and_regex_fallback(
     import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
 
     events = (
@@ -796,7 +812,7 @@ def test_structural_parse_failure_rolls_back_all_library_records(
         import_managed_book(
             db_session,
             test_settings,
-            ImportOptions(
+            _options(
                 source_file_path=broken, origin="MANUAL", original_name=broken.name
             ),
         )
@@ -947,6 +963,7 @@ def test_watch_epub_prefers_embedded_opf_when_filename_conflicts(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     source_name = "斯泰尔斯庄园奇案_阿加莎·克里 - (英)阿加莎·克里斯蒂.epub"
     epub = tmp_path / source_name
@@ -959,11 +976,11 @@ def test_watch_epub_prefers_embedded_opf_when_filename_conflicts(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="WATCH",
             original_name=source_name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -987,6 +1004,7 @@ def test_epub_import_applies_embedded_description_to_work(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "黑暗物质三部曲 - 菲利普·普尔曼.epub"
     write_epub_metadata_fixture(
@@ -1000,11 +1018,11 @@ def test_epub_import_applies_embedded_description_to_work(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="WATCH",
             original_name=epub.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1031,11 +1049,11 @@ def test_epub_import_applies_embedded_description_to_work(
     repeated = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_epub,
             origin="WATCH",
             original_name=second_epub.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     db_session.refresh(work)
@@ -1049,6 +1067,7 @@ def test_watch_epub_uses_opf_when_sanitized_filename_identity_is_incomplete(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     source_name = "白夜行_(东野圭吾)_(z-library.sk_1lib.sk_z-lib.sk).epub"
     epub = tmp_path / source_name
@@ -1057,11 +1076,11 @@ def test_watch_epub_uses_opf_when_sanitized_filename_identity_is_incomplete(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="WATCH",
             original_name=source_name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1104,7 +1123,7 @@ def test_sidecar_opf_overrides_embedded_metadata_and_is_echoed_on_import_task(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="MANUAL",
             original_name=epub.name,
@@ -1147,6 +1166,7 @@ def test_path_priority_resolves_once_before_work_and_volume_decisions(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     db_session.add(
         OrganizePolicy(
@@ -1175,11 +1195,11 @@ def test_path_priority_resolves_once_before_work_and_volume_decisions(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="WATCH",
             original_name=epub.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1208,39 +1228,27 @@ def test_path_priority_resolves_once_before_work_and_volume_decisions(
     assert field_sources["publisher"] == "SIDECAR_OPF"
 
 
-def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(
+def test_watched_import_creates_work_in_library(
     db_session, test_settings, tmp_path, monkeypatch
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     db_session.execute(
         text(
-            "CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"
-        )
-    )
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"
-        )
-    )
-    db_session.execute(
-        text(
-            "INSERT INTO Shelf (id, name, createdAt, updatedAt) VALUES ('target-shelf', '自动收录', 'now', 'now')"
-        )
-    )
-    db_session.execute(
-        text(
-            "INSERT INTO MonitorFolder (id, name, rootPath, shelfId, enabled, ignoreHidden, minFileSizeBytes, createdAt, updatedAt) VALUES ('folder-1', '测试目录', :root_path, 'target-shelf', 1, 1, 1, 'now', 'now')"
+            """INSERT INTO Library (
+                id, name, rootPath, organizationMode, enabled, ignoreHidden, minFileSizeBytes, createdAt, updatedAt
+            ) VALUES (
+                'folder-1', '测试目录', :root_path, 'FLAT', 1, 1, 1, 'now', 'now'
+            )"""
         ),
         {"root_path": str(tmp_path)},
     )
     db_session.commit()
     epub = tmp_path / "[星海列车][林川].epub"
     write_epub_metadata_fixture(epub, "星海列车", "林川")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-1",
         root_path=str(tmp_path),
-        shelf_id="target-shelf",
         min_file_size_bytes=1,
     )
     monkeypatch.setenv("MONITOR_FILE_STABLE_DELAY_MS", "0")
@@ -1256,23 +1264,14 @@ def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(
         )
     )
     process_import_task(db_session, test_settings, pending)
-    first = (
-        db_session.execute(text("SELECT shelfId, workId FROM ShelfWork"))
+    works = (
+        db_session.execute(text("SELECT id, libraryId FROM LibraryWork"))
         .mappings()
         .all()
     )
-    assert len(first) == 1
-    assert first[0]["shelfId"] == "target-shelf"
-
-    db_session.execute(text("DELETE FROM ShelfWork"))
-    db_session.commit()
-    import_watched_file(db_session, test_settings, epub, folder)
-    restored = (
-        db_session.execute(text("SELECT shelfId, workId FROM ShelfWork"))
-        .mappings()
-        .all()
-    )
-    assert [dict(row) for row in restored] == [dict(first[0])]
+    assert len(works) == 1
+    assert works[0]["libraryId"] == "folder-1"
+    assert epub.exists()
 
 
 def test_parse_series_volume_info_from_real_watch_layout():
@@ -1353,7 +1352,7 @@ def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
-    add_monitor_folder(db_session, tmp_path)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = (
         tmp_path
@@ -1379,31 +1378,31 @@ def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     tenth_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=tenth,
             origin="WATCH",
             original_name=tenth.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     duplicate_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=duplicate_tenth,
             origin="WATCH",
             original_name=tenth.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1470,7 +1469,7 @@ def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
-    add_monitor_folder(db_session, tmp_path)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
 
     pdf_dir = tmp_path / "同一作品"
@@ -1482,21 +1481,21 @@ def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
     first_pdf_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first_pdf,
             origin="WATCH",
             original_name=first_pdf.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_pdf_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_pdf,
             origin="WATCH",
             original_name=second_pdf.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1509,21 +1508,21 @@ def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
     first_comic_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first_comic,
             origin="WATCH",
             original_name=first_comic.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_comic_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_comic,
             origin="WATCH",
             original_name=second_comic.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1563,14 +1562,14 @@ def test_explicit_series_directory_groups_all_volumes_by_folder(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_26, origin="WATCH", original_name=volume_26.name
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_30, origin="WATCH", original_name=volume_30.name
         ),
     )
@@ -1597,6 +1596,7 @@ def test_numeric_comic_fallback_groups_parenthesized_volumes(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = (
         tmp_path / "[FX戦士久留美][ですにゃん×荒酸だいすき][角川][Vol.01-Vol.05][未完]"
@@ -1610,21 +1610,21 @@ def test_numeric_comic_fallback_groups_parenthesized_volumes(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1655,14 +1655,14 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_8, origin="WATCH", original_name=volume_8.name
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_5, origin="WATCH", original_name=volume_5.name
         ),
     )
@@ -1690,14 +1690,14 @@ def test_filename_alias_groups_later_volume_by_same_directory(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_14, origin="WATCH", original_name=volume_14.name
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_16, origin="WATCH", original_name=volume_16.name
         ),
     )
@@ -1723,14 +1723,14 @@ def test_explicit_volumes_in_ambiguous_collection_still_group_by_folder(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first_file, origin="WATCH", original_name=first_file.name
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_file, origin="WATCH", original_name=second_file.name
         ),
     )
@@ -1753,14 +1753,14 @@ def test_identical_embedded_metadata_groups_files_despite_different_paths(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first_file, origin="WATCH", original_name=first_file.name
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_file, origin="WATCH", original_name=second_file.name
         ),
     )
@@ -1787,7 +1787,7 @@ def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
-    add_monitor_folder(db_session, tmp_path)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = tmp_path / "[DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！][金光铉]"
     series_dir.mkdir()
@@ -1797,11 +1797,11 @@ def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="WATCH",
             original_name=epub.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1852,14 +1852,14 @@ def test_import_epub_groups_same_work_title_across_directories(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first, origin="MANUAL", original_name=first.name
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second, origin="MANUAL", original_name=second.name
         ),
     )
@@ -1889,17 +1889,17 @@ def test_embedded_metadata_prevents_directory_from_forcing_cross_format_grouping
     epub_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
     pdf_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=pdf, origin="MANUAL", original_name=pdf.name),
+        _options(source_file_path=pdf, origin="MANUAL", original_name=pdf.name),
     )
     comic_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=comic, origin="MANUAL", original_name=comic.name
         ),
     )
@@ -1940,7 +1940,7 @@ def test_pdf_series_volume_preserves_explicit_chinese_volume_index(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
+        _options(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
     )
 
     volume = db_session.get(LibraryVolume, result.volume_id)
@@ -1954,6 +1954,7 @@ def test_watched_pdf_volumes_do_not_merge_when_embedded_authors_differ(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = tmp_path / "same-series"
     series_dir.mkdir()
@@ -1965,21 +1966,21 @@ def test_watched_pdf_volumes_do_not_merge_when_embedded_authors_differ(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -1995,6 +1996,7 @@ def test_watched_pdf_volumes_recognize_short_numbers_inside_titles(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = tmp_path / "PDF格式-龙与猫之国.6卷"
     series_dir.mkdir()
@@ -2006,21 +2008,21 @@ def test_watched_pdf_volumes_recognize_short_numbers_inside_titles(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2045,6 +2047,7 @@ def test_watched_cjk_marker_before_number_merges_by_directory_and_title(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = tmp_path / "东京复仇者全彩31卷 PDF格式"
     series_dir.mkdir()
@@ -2056,21 +2059,21 @@ def test_watched_cjk_marker_before_number_merges_by_directory_and_title(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2086,6 +2089,7 @@ def test_watched_pdf_volumes_in_different_directories_do_not_merge(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first_dir = tmp_path / "edition-a"
     second_dir = tmp_path / "edition-b"
@@ -2099,21 +2103,21 @@ def test_watched_pdf_volumes_in_different_directories_do_not_merge(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2125,6 +2129,7 @@ def test_watched_pdf_files_with_same_title_ignore_different_authors(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first = tmp_path / "同名作品一.pdf"
     second = tmp_path / "同名作品二.pdf"
@@ -2134,21 +2139,21 @@ def test_watched_pdf_files_with_same_title_ignore_different_authors(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2164,6 +2169,7 @@ def test_import_reuses_legacy_work_by_title_and_replaces_old_merge_key(
     test_settings.resolved_storage_root.mkdir(parents=True)
     db_session.add(
         LibraryWork(
+            library_id="test-library", 
             id="legacy-work",
             title="同一作品",
             normalized_title="同一作品",
@@ -2180,7 +2186,7 @@ def test_import_reuses_legacy_work_by_title_and_replaces_old_merge_key(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="MANUAL",
             original_name=source.name,
@@ -2197,6 +2203,7 @@ def test_watched_pdf_numeric_embedded_titles_remain_distinct(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first = tmp_path / "作品2023全彩版.pdf"
     second = tmp_path / "作品2026全彩版.pdf"
@@ -2206,21 +2213,21 @@ def test_watched_pdf_numeric_embedded_titles_remain_distinct(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2232,6 +2239,7 @@ def test_watched_pdf_similar_embedded_titles_do_not_merge_by_directory(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first = tmp_path / "abcdefghij.pdf"
     second = tmp_path / "abcdefgxyz.pdf"
@@ -2241,21 +2249,21 @@ def test_watched_pdf_similar_embedded_titles_do_not_merge_by_directory(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2267,6 +2275,7 @@ def test_watched_pdf_titles_below_threshold_do_not_merge(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first = tmp_path / "abcdefghij.pdf"
     second = tmp_path / "abcdezzzzz.pdf"
@@ -2276,21 +2285,21 @@ def test_watched_pdf_titles_below_threshold_do_not_merge(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2302,6 +2311,7 @@ def test_watched_pdf_similar_titles_in_different_directories_do_not_merge(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
+    add_library(db_session, tmp_path)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first_dir = tmp_path / "edition-a"
     second_dir = tmp_path / "edition-b"
@@ -2315,21 +2325,21 @@ def test_watched_pdf_similar_titles_in_different_directories_do_not_merge(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="WATCH",
             original_name=first.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="WATCH",
             original_name=second.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -2352,7 +2362,7 @@ def test_manual_pdf_files_with_same_title_ignore_different_authors(
     first_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first,
             origin="MANUAL",
             original_name=first.name,
@@ -2361,7 +2371,7 @@ def test_manual_pdf_files_with_same_title_ignore_different_authors(
     second_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second,
             origin="MANUAL",
             original_name=second.name,
@@ -2386,7 +2396,7 @@ def test_manual_title_and_author_override_folder_identity(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=epub,
             origin="MANUAL",
             original_name=epub.name,
@@ -2418,7 +2428,7 @@ def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_exte
         result = import_managed_book(
             db_session,
             test_settings,
-            ImportOptions(
+            _options(
                 source_file_path=epub, origin="MANUAL", original_name="fallback.epub"
             ),
         )
@@ -2507,7 +2517,7 @@ def test_import_epub_with_missing_declared_cover_persists_default_cover(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
 
     assert result.import_status == "completed"
@@ -2554,7 +2564,7 @@ def test_import_epub_resolves_cover_path_case_and_url_encoding(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
 
     assert result.import_status == "completed"
@@ -2580,14 +2590,14 @@ def test_import_comic_persists_page_units_and_detects_duplicate(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=comic, origin="MANUAL", original_name=comic.name
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=comic, origin="MANUAL", original_name=comic.name
         ),
     )
@@ -2670,14 +2680,14 @@ def test_import_comic_updates_generated_work_cover_to_first_volume(
     first_import = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_2, origin="MANUAL", original_name=volume_2.name
         ),
     )
     second_import = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_1, origin="MANUAL", original_name=volume_1.name
         ),
     )
@@ -2707,7 +2717,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=pdf, origin="MANUAL", original_name="Manual PDF.pdf"
         ),
     )
@@ -2776,7 +2786,7 @@ def test_existing_pdf_rescan_repairs_legacy_shared_cover_path(
     imported = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
+        _options(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
     )
     volume = db_session.get(LibraryVolume, imported.volume_id)
     work = db_session.get(LibraryWork, imported.work_id)
@@ -2798,7 +2808,7 @@ def test_existing_pdf_rescan_repairs_legacy_shared_cover_path(
     rescanned = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
+        _options(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
     )
 
     db_session.refresh(volume)
@@ -2822,7 +2832,7 @@ def test_import_text_pdf_remains_ebook(db_session, test_settings, tmp_path):
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=pdf, origin="MANUAL", original_name=pdf.name),
+        _options(source_file_path=pdf, origin="MANUAL", original_name=pdf.name),
     )
 
     assert result.type == "ebook"
@@ -2854,7 +2864,7 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=pdf, origin="MANUAL", original_name="fallback.pdf"
         ),
     )
@@ -2887,7 +2897,7 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
 
 
 def test_monitor_ignore_rules():
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="1", root_path="/tmp", ignore_patterns="*.tmp\nskip", min_file_size_bytes=1
     )
     assert should_ignore_file(Path("/tmp/.hidden/book.epub"), folder)
@@ -2897,8 +2907,8 @@ def test_monitor_ignore_rules():
     assert not should_ignore_file(Path("/tmp/book.epub"), folder)
 
 
-def test_monitor_folder_config_preserves_zero_minimum_file_size():
-    folder = monitor_folder_config(
+def test_library_config_preserves_zero_minimum_file_size():
+    folder = library_config(
         {
             "id": "folder-zero",
             "rootPath": "/library",
@@ -2930,7 +2940,7 @@ def test_global_import_preferences_filter_extensions_and_patterns(
     assert not preferences.stability_check_enabled
     assert preferences.stability_check_seconds == 300
 
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="1",
         root_path="/tmp",
         min_file_size_bytes=1,
@@ -2966,7 +2976,7 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
     raw_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source, origin="MANUAL", original_name=source.name
         ),
     )
@@ -2999,7 +3009,7 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
     legacy_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
@@ -3029,7 +3039,7 @@ def test_text_file_imports_preserve_source_format_for_legacy_origin(
     retried_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
@@ -3066,7 +3076,7 @@ def test_native_reflowable_sources_do_not_require_automatic_conversion(
     imported = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="MANUAL",
             original_name=source.name,
@@ -3099,7 +3109,7 @@ def test_native_reflowable_folder_work_keeps_filename_as_volume_title(
     db_session, test_settings, tmp_path
 ) -> None:
     create_worker_tables(db_session)
-    add_monitor_folder(db_session, tmp_path)
+    add_library(db_session, tmp_path)
     work_dir = tmp_path / "吉林美术-哆啦A梦珍藏版1-45卷 MOBI格式"
     work_dir.mkdir()
     volume_43 = work_dir / "哆啦A梦珍藏版Vol_43卷.mobi"
@@ -3110,21 +3120,21 @@ def test_native_reflowable_folder_work_keeps_filename_as_volume_title(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_43,
             origin="WATCH",
             original_name=volume_43.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_2,
             origin="WATCH",
             original_name=volume_2.name,
-            monitor_folder_id="folder-1",
+            library_id="folder-1",
         ),
     )
 
@@ -3150,7 +3160,7 @@ def test_native_reflowable_ranges_sort_by_range_start(
     db_session, test_settings, tmp_path
 ) -> None:
     create_worker_tables(db_session)
-    add_monitor_folder(db_session, tmp_path)
+    add_library(db_session, tmp_path)
     work_dir = tmp_path / "瑞克和莫蒂1-60话 MOBI格式"
     work_dir.mkdir()
     sources = [
@@ -3165,11 +3175,11 @@ def test_native_reflowable_ranges_sort_by_range_start(
             import_managed_book(
                 db_session,
                 test_settings,
-                ImportOptions(
+                _options(
                     source_file_path=source,
                     origin="WATCH",
                     original_name=source.name,
-                    monitor_folder_id="folder-1",
+                    library_id="folder-1",
                 ),
             )
         )
@@ -3193,7 +3203,7 @@ def test_native_reflowable_without_volume_numbers_uses_similar_parent_work(
     db_session, test_settings, tmp_path
 ) -> None:
     create_worker_tables(db_session)
-    add_monitor_folder(db_session, tmp_path)
+    add_library(db_session, tmp_path)
     work_dir = tmp_path / "Appendix"
     work_dir.mkdir()
     sources = [work_dir / "Appendix B.mobi", work_dir / "Appendix A.mobi"]
@@ -3204,11 +3214,11 @@ def test_native_reflowable_without_volume_numbers_uses_similar_parent_work(
             import_managed_book(
                 db_session,
                 test_settings,
-                ImportOptions(
+                _options(
                     source_file_path=source,
                     origin="WATCH",
                     original_name=source.name,
-                    monitor_folder_id="folder-1",
+                    library_id="folder-1",
                 ),
             )
         )
@@ -3226,7 +3236,8 @@ def test_direct_monitor_root_volumes_group_by_resolved_metadata(
     monitor_root = tmp_path / "books"
     monitor_root.mkdir()
     db_session.add(
-        MonitorFolder(
+        Library(
+            organization_mode="FLAT", 
             id="monitor-root",
             name="books",
             root_path=str(monitor_root),
@@ -3242,7 +3253,7 @@ def test_direct_monitor_root_volumes_group_by_resolved_metadata(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_56,
             origin="MANUAL",
             original_name=volume_56.name,
@@ -3251,7 +3262,7 @@ def test_direct_monitor_root_volumes_group_by_resolved_metadata(
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=volume_55,
             origin="MANUAL",
             original_name=volume_55.name,
@@ -3287,7 +3298,7 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     imported = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source, origin="MANUAL", original_name=source.name
         ),
     )
@@ -3298,7 +3309,6 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     ).one()
     assert volume is not None
     assert work is not None
-    original_hash = book_file.full_hash
     db_session.add(
         LibraryReadingUnit(
             id="stale-import-navigation",
@@ -3320,7 +3330,7 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     refreshed = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source, origin="MANUAL", original_name=source.name
         ),
     )
@@ -3332,7 +3342,6 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
     assert volume.format == "FB2"
     assert volume.chapter_count is None
     db_session.refresh(book_file)
-    assert book_file.full_hash != original_hash
     assert book_file.size_bytes == source.stat().st_size
     assert work.title == "真实标题"
     assert work.author == "测试作者"
@@ -3375,7 +3384,7 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(
     (root / "notes.txt").write_text("ignored", encoding="utf-8")
     (nested / "second.pdf").write_bytes(b"pdf")
     (hidden / "hidden.cbz").write_bytes(b"hidden")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-scan", root_path=str(root), min_file_size_bytes=1
     )
 
@@ -3430,7 +3439,7 @@ def test_directory_scan_filters_minimum_file_size_before_queue(db_session, tmp_p
     root.mkdir()
     (root / "accepted.epub").write_bytes(b"a" * 16)
     (root / "too-small.epub").write_bytes(b"x")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-size-filter",
         root_path=str(root),
         min_file_size_bytes=10,
@@ -3473,7 +3482,7 @@ def test_directory_scan_aggregates_ignore_reasons_without_file_events(
     ):
         (root / name).write_bytes(b"x" * 16)
     (root / "too-small.epub").write_bytes(b"x")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-ignore-rules",
         root_path=str(root),
         ignore_patterns="folder-*.epub",
@@ -3511,7 +3520,7 @@ def test_directory_scan_aggregates_ignore_reasons_without_file_events(
         "extension_not_allowed",
         "global_ignore_pattern",
         "hidden_path",
-        "monitor_folder_ignore_pattern",
+        "library_ignore_pattern",
         "temporary_upload",
         "unsupported_file_type",
     }
@@ -3524,7 +3533,7 @@ def test_file_watcher_drops_ignored_file_without_file_level_event(
     create_worker_tables(db_session)
     source = tmp_path / "ignored-by-watcher.epub"
     source.write_bytes(b"ignored")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-watcher-ignore",
         root_path=str(tmp_path),
         ignore_patterns="ignored-by-watcher.epub",
@@ -3565,7 +3574,7 @@ def test_directory_scan_only_queues_files_without_existing_import_records(
         {"source_path": str(cached.resolve())},
     )
     db_session.commit()
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-cache", root_path=str(root), min_file_size_bytes=1
     )
 

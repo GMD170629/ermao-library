@@ -120,6 +120,7 @@ def insert_import_task(
         volume_id = f"volume-{source_key}"
         db.add(
             LibraryWork(
+            library_id="test-library", 
                 id=work_id,
                 title=source.stem,
                 normalized_title=source.stem.casefold(),
@@ -862,10 +863,10 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
     upload_dir = test_settings.resolved_monitor_root / "uploads"
     upload_dir.mkdir()
     monitored = client.post(
-        "/api/monitor-folders",
+        "/api/libraries",
         json={
             "name": "Conversion uploads",
-            "rootPath": str(upload_dir),
+            "rootPath": str(upload_dir), "organizationMode": "FLAT",
             "enabled": True,
         },
     )

@@ -87,6 +87,7 @@ def _seed_epub(
     source_path = settings.resolved_storage_root / relative_path
     _write_epub(source_path)
     work = LibraryWork(
+            library_id="test-library", 
         id=f"work-publication{user_suffix}",
         origin="MANUAL",
         title="跨端出版物",
@@ -133,6 +134,7 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
         + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="work-txt-publication",
         origin="MANUAL",
         title="确定性文本出版物",
@@ -389,6 +391,7 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     shutil.copyfile(fixture, target)
     source_hash_before = hashlib.sha256(target.read_bytes()).hexdigest()
     work = LibraryWork(
+            library_id="test-library", 
         id="work-mobi-publication",
         origin="MANUAL",
         title="中文字符完整性验证",

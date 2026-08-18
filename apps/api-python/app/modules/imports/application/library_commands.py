@@ -1,4 +1,4 @@
-"""Prepared commands for monitor-folder state transitions."""
+"""Prepared commands for library catalog-root state transitions."""
 
 from __future__ import annotations
 
@@ -11,42 +11,42 @@ from app.modules.system.public import PreparedSystemEvent
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedMonitorFolderCreate:
+class PreparedLibraryCreate:
     values: dict[str, object]
     event: PreparedSystemEvent
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedMonitorFolderUpdate:
-    folder_id: str
+class PreparedLibraryUpdate:
+    library_id: str
     values: dict[str, object]
     event: PreparedSystemEvent
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedMonitorFolderDelete:
-    folder_id: str
+class PreparedLibraryDelete:
+    library_id: str
     affected_user_ids: tuple[str, ...]
     updated_at: datetime
     event: PreparedSystemEvent
 
 
-class MonitorFolderWriteStore(Protocol):
-    def create(self, prepared: PreparedMonitorFolderCreate) -> None: ...
+class LibraryWriteStore(Protocol):
+    def create(self, prepared: PreparedLibraryCreate) -> None: ...
 
-    def update(self, prepared: PreparedMonitorFolderUpdate) -> None: ...
+    def update(self, prepared: PreparedLibraryUpdate) -> None: ...
 
-    def delete(self, prepared: PreparedMonitorFolderDelete) -> bool: ...
+    def delete(self, prepared: PreparedLibraryDelete) -> bool: ...
 
 
-def prepare_monitor_folder_update_values(
+def prepare_library_update_values(
     values: dict[str, object],
 ) -> dict[str, object]:
     mapping = {
         "name": "name",
         "rootPath": "root_path",
+        "organizationMode": "organization_mode",
         "enabled": "enabled",
-        "mediaKindPolicy": "media_kind_policy",
         "ignorePatterns": "ignore_patterns",
         "ignoreHidden": "ignore_hidden",
         "minFileSizeBytes": "min_file_size_bytes",
@@ -60,10 +60,10 @@ def prepare_monitor_folder_update_values(
     }
 
 
-def persist_monitor_folder_create(
-    store: MonitorFolderWriteStore,
+def persist_library_create(
+    store: LibraryWriteStore,
     unit_of_work: ImportUnitOfWork,
-    prepared: PreparedMonitorFolderCreate,
+    prepared: PreparedLibraryCreate,
 ) -> None:
     try:
         store.create(prepared)
@@ -73,10 +73,10 @@ def persist_monitor_folder_create(
         raise
 
 
-def persist_monitor_folder_update(
-    store: MonitorFolderWriteStore,
+def persist_library_update(
+    store: LibraryWriteStore,
     unit_of_work: ImportUnitOfWork,
-    prepared: PreparedMonitorFolderUpdate,
+    prepared: PreparedLibraryUpdate,
 ) -> None:
     try:
         store.update(prepared)
@@ -86,10 +86,10 @@ def persist_monitor_folder_update(
         raise
 
 
-def persist_monitor_folder_delete(
-    store: MonitorFolderWriteStore,
+def persist_library_delete(
+    store: LibraryWriteStore,
     unit_of_work: ImportUnitOfWork,
-    prepared: PreparedMonitorFolderDelete,
+    prepared: PreparedLibraryDelete,
 ) -> bool:
     try:
         deleted = store.delete(prepared)

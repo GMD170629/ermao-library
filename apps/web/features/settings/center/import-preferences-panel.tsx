@@ -191,7 +191,7 @@ export function ImportPreferencesPanel() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h3 id="extensions-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>允许导入的文件后缀</I18nText></h3>
-            <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>默认全部开启。关闭后缀会同时影响手动上传、监控文件夹和后台导入。</I18nText></p>
+            <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>默认全部开启。关闭后缀会同时影响手动上传、书库和后台导入。</I18nText></p>
           </div>
           <button
             type="button"
@@ -234,7 +234,7 @@ export function ImportPreferencesPanel() {
 
       <section aria-labelledby="ignore-title">
         <h3 id="ignore-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>全局导入忽略规则</I18nText></h3>
-        <p className="mt-1 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>每行一条规则，支持通配符。规则会与每个监控文件夹自己的忽略规则叠加。</I18nText></p>
+        <p className="mt-1 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>每行一条规则，支持通配符。规则会与每个书库自己的忽略规则叠加。</I18nText></p>
         <textarea
           value={preferences.ignorePatterns}
           disabled={loading}

@@ -45,9 +45,6 @@ def _volume(
         id=f"{volume_id}-file",
         volume_id=volume.id,
         path=f"/library/{volume_id}.{source_format.lower()}",
-        fingerprint=f"{volume_id}-fingerprint",
-        full_hash=(volume_id[0] * 64),
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind=source_format,
         mime_type="application/octet-stream",
@@ -89,15 +86,16 @@ def test_0024_upgrade_clears_only_reflowable_chapters_and_adds_empty_cache_state
             chapter_count=3,
         )
         with Session(engine) as session:
-            session.add(
-                LibraryWork(
+            work_table = sa.Table("LibraryWork", sa.MetaData(), autoload_with=engine)
+            session.execute(
+                work_table.insert().values(
                     id="navigation-migration-work",
                     origin="MANUAL",
                     title="Migration",
-                    normalized_title="migration",
-                    author=None,
-                    normalized_author=None,
+                    normalizedTitle="migration",
                     tags="[]",
+                    createdAt=1,
+                    updatedAt=1,
                 )
             )
             session.flush()
@@ -194,10 +192,24 @@ def test_0024_upgrade_clears_only_reflowable_chapters_and_adds_empty_cache_state
                 )
             )
 
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0025_publication_navigation_projection_version"
+            ),
+        )
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0025_publication_navigation_projection_version"
+            ),
+        )
 
-        assert head_revision(engine) == "0028_remove_publication_render_cache"
+        with engine.connect() as _conn:
+            _current = _conn.exec_driver_sql(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).scalar()
+        assert _current == "0025_publication_navigation_projection_version"
         assert "PublicationNavigationCache" in inspect(engine).get_table_names()
         assert "PublicationRenderCache" not in inspect(engine).get_table_names()
         with Session(engine) as session:

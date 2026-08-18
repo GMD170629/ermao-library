@@ -56,7 +56,7 @@ class AuthorizationView(HttpContractModel):
     is_admin: bool = Field(alias="isAdmin")
     can_manage_system: bool = Field(alias="canManageSystem")
     all_library_scopes: bool = Field(alias="allLibraryScopes")
-    monitor_folder_ids: list[str] = Field(alias="monitorFolderIds")
+    library_ids: list[str] = Field(alias="libraryIds")
     can_view_manual_imports: bool = Field(alias="canViewManualImports")
     authz_version: int = Field(alias="authzVersion")
 

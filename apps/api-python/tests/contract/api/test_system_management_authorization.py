@@ -5,9 +5,8 @@ from typing import TYPE_CHECKING
 import pytest
 from app import main as app_main
 from app.core.auth import hash_password
-from app.db.base import Base
-from app.db.runner import apply_schema
 from app.models.auth import User
+from tests.conftest import recreate_application_schema
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -137,9 +136,7 @@ def test_delegated_system_manager_keeps_system_management_success_contracts(
     db_session: Session,
 ) -> None:
     db_session.rollback()
-    engine = db_session.get_bind()
-    Base.metadata.drop_all(engine)
-    apply_schema(engine)
+    recreate_application_schema(db_session.get_bind())
     manager = _create_user(
         db_session,
         email="delegated-manager@example.com",

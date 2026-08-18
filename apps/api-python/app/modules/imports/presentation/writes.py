@@ -44,7 +44,7 @@ from app.bootstrap.system import (
 )
 from app.contracts.http_errors import ErrorResponses
 from app.contracts.import_deletion import PreparedLibraryVolumeDeletion
-from app.core.authorization import authorization_context, can_access_monitor_folder
+from app.core.authorization import authorization_context, can_access_library
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
@@ -63,10 +63,10 @@ from app.modules.imports.presentation.mappers import (
     is_inside_path as _is_inside_path,
 )
 from app.modules.imports.presentation.mappers import (
-    monitor_directory_tree_node as _monitor_directory_tree_node,
+    library_directory_tree_node as _library_directory_tree_node,
 )
 from app.modules.imports.presentation.path_helpers import (
-    enabled_monitor_folder_for_path as _enabled_monitor_folder_for_path,
+    enabled_library_for_path as _enabled_library_for_path,
 )
 from app.modules.imports.presentation.schemas import (
     DeletedImportTasksResponse,
@@ -147,8 +147,8 @@ def _visible_import_task_or_none(
     db: Session, user: User, task_id: str
 ) -> dict[str, Any] | None:
     task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_monitor_folder(
-        db, user, task.get("monitorFolderId")
+    if task is None or not can_access_library(
+        db, user, task.get("libraryId")
     ):
         return None
     return task
@@ -288,19 +288,19 @@ def import_work(
             status_code=400,
             details=ImportFileListDetails(files=ignored_files),
         )
-    monitor_folder = _enabled_monitor_folder_for_path(db, upload_dir)
-    if monitor_folder is None:
+    library = _enabled_library_for_path(db, upload_dir)
+    if library is None:
         _raise_import_error(
-            "上传目录必须位于已启用的监控文件夹中",
+            "上传目录必须位于已启用的书库中",
             status_code=400,
             code="UPLOAD_TARGET_NOT_MONITORED",
         )
-    monitor_folder_id = str((monitor_folder or {}).get("id") or "") or None
-    if not can_access_monitor_folder(db, user, monitor_folder_id):
+    library_id = str((library or {}).get("id") or "") or None
+    if not can_access_library(db, user, library_id):
         _raise_import_error(
             "目标文件夹不存在或无权访问",
             status_code=404,
-            code="MONITOR_FOLDER_NOT_FOUND",
+            code="LIBRARY_NOT_FOUND",
         )
     db.close()
     sources = tuple(
@@ -337,7 +337,7 @@ def import_work(
         )
         _raise_import_error("保存上传文件失败", status_code=500)
 
-    auto_import = monitor_folder is not None
+    auto_import = library is not None
     monitoring_status = "WATCHING" if auto_import else "NOT_MONITORED"
     logger.info(
         "upload.files_saved",
@@ -380,11 +380,11 @@ def scan_import_directory(
         return auth_error
     db.close()
     requested_path = str(payload.path if payload is not None else "").strip()
-    node, error, status_code = _monitor_directory_tree_node(requested_path)
+    node, error, status_code = _library_directory_tree_node(requested_path)
     if error or not node:
         _raise_import_error(error or "目录不可用", status_code=status_code)
     target_path = Path(str(node["path"])).resolve()
-    folder_rows = import_http_store.list_enabled_monitor_folder_rows(db)
+    folder_rows = import_http_store.list_enabled_library_rows(db)
     db.close()
     matching_folders = []
     for folder in folder_rows:
@@ -396,20 +396,20 @@ def scan_import_directory(
             matching_folders.append((folder_path, folder))
     if not matching_folders:
         _raise_import_error(
-            "所选目录不在已启用的监控文件夹内，请先添加或启用对应监控文件夹",
+            "所选目录不在已启用的书库内，请先添加或启用对应书库",
             status_code=400,
         )
     _folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
-    if not can_access_monitor_folder(db, user, str(folder.get("id"))):
+    if not can_access_library(db, user, str(folder.get("id"))):
         _raise_import_error(
-            "目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND"
+            "目录不可用", status_code=404, code="LIBRARY_NOT_FOUND"
         )
     db.close()
     checkpoint_at = _now()
     prepared_job = prepare_import_scan_job(
         job_id=f"scan_{uuid4().hex}",
         work_item_id=f"work_{uuid4().hex}",
-        monitor_folder_id=str(folder["id"]),
+        library_id=str(folder["id"]),
         actor_user_id=user.id,
         canonical_root_path=str(target_path),
         trigger="MANUAL_DIRECTORY",
@@ -422,7 +422,7 @@ def scan_import_directory(
         actor_type="admin",
         actor_id=user.id,
         action="scan.directory.requested",
-        target_type="monitorFolder",
+        target_type="library",
         target_id=str(folder["id"]),
         message=f"从文件管理识别目录：{target_path}",
         metadata={"scanJobId": prepared_job.job_id, "path": str(target_path)},
@@ -549,7 +549,7 @@ def delete_import_task(
     work_id = str(task.get("workId") or "").strip()
 
     conversion = import_http_store.get_conversion_for_import(db, task_id)
-    monitor_root_values = import_http_store.list_monitor_root_paths(db)
+    monitor_root_values = import_http_store.list_library_root_paths(db)
     db.close()
     selected_paths: list[Path] = []
     if delete_mode == "source":
@@ -658,12 +658,12 @@ def rescan_import_tasks(
     if auth_error:
         return auth_error
     context = authorization_context(db, user)
-    if not context.is_admin and not context.monitor_folder_ids:
+    if not context.is_admin and not context.library_ids:
         _raise_import_error(
             "没有可重新识别的授权文件夹", status_code=403, code="NO_IMPORT_SCOPE"
         )
-    allowed_ids = None if context.is_admin else set(context.monitor_folder_ids)
-    folder_rows = tuple(import_http_store.list_enabled_monitor_folder_rows(db))
+    allowed_ids = None if context.is_admin else set(context.library_ids)
+    folder_rows = tuple(import_http_store.list_enabled_library_rows(db))
     db.close()
     requested_at = _now()
     prepared_jobs = []
@@ -679,7 +679,7 @@ def rescan_import_tasks(
             prepare_import_scan_job(
                 job_id=f"scan_{uuid4().hex}",
                 work_item_id=f"work_{uuid4().hex}",
-                monitor_folder_id=folder_id,
+                library_id=folder_id,
                 actor_user_id=user.id,
                 canonical_root_path=str(canonical_root),
                 trigger="RESCAN",
@@ -694,8 +694,8 @@ def rescan_import_tasks(
         actor_type="admin",
         actor_id=user.id,
         action="rescan.requested",
-        target_type="monitorFolder",
-        message="请求重新识别监控文件夹",
+        target_type="library",
+        message="请求重新识别书库",
         metadata={
             "requestedAt": requested_at.isoformat(),
             "scanJobIds": [job.job_id for job in prepared_jobs_tuple],
@@ -716,7 +716,7 @@ def _visible_scan_job_or_none(
     db: Session, user: User, job_id: str
 ) -> ImportScanJobDTO | None:
     job = get_import_scan_job_query(db, job_id)
-    if job is None or not can_access_monitor_folder(db, user, job.monitor_folder_id):
+    if job is None or not can_access_library(db, user, job.library_id):
         return None
     return job
 
@@ -747,9 +747,9 @@ def list_import_scan_jobs(
     context = authorization_context(db, user)
     jobs = list_import_scan_jobs_query(
         db,
-        monitor_folder_ids=None
+        library_ids=None
         if context.is_admin
-        else tuple(context.monitor_folder_ids),
+        else tuple(context.library_ids),
         status=status,
     )
     return ImportScanJobsResponse(

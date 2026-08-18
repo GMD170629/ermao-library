@@ -2,9 +2,9 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.core.authorization import authorization_context
-from app.models.auth import User, UserMonitorFolderAccess
+from app.models.auth import User, UserLibraryAccess
 from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.library.application.groupings import ListLibraryGroupings
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
@@ -21,6 +21,7 @@ def _work(
     hidden: bool = False,
 ) -> LibraryWork:
     return LibraryWork(
+            library_id="test-library", 
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
@@ -175,11 +176,13 @@ def test_grouping_representative_works_are_limited_to_authorized_scope(
     db_session.add_all(
         [
             user,
-            MonitorFolder(id="allowed-folder", name="可见", root_path="/allowed"),
-            MonitorFolder(id="denied-folder", name="不可见", root_path="/denied"),
-            UserMonitorFolderAccess(
+            Library(
+            organization_mode="FLAT", id="allowed-folder", name="可见", root_path="/allowed"),
+            Library(
+            organization_mode="FLAT", id="denied-folder", name="不可见", root_path="/denied"),
+            UserLibraryAccess(
                 user_id=user.id,
-                monitor_folder_id="allowed-folder",
+                library_id="allowed-folder",
             ),
         ]
     )
@@ -196,7 +199,6 @@ def test_grouping_representative_works_are_limited_to_authorized_scope(
         volume = LibraryVolume(
             id=f"volume-{work_id}",
             media_version_id=media.id,
-            monitor_folder_id=folder_id,
             title=work_id,
             format="EPUB",
             resource_key=f"resource-{work_id}",

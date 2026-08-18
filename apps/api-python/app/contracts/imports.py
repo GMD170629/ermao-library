@@ -40,7 +40,7 @@ class ImportTaskContract(BaseModel):
     recognized_metadata: RecognizedImportMetadataContract | None = Field(
         default=None, alias="recognizedMetadata"
     )
-    monitor_folder_id: str | None = Field(default=None, alias="monitorFolderId")
+    library_id: str | None = Field(default=None, alias="libraryId")
     work_id: str | None = Field(default=None, alias="workId")
     volume_id: str | None = Field(default=None, alias="volumeId")
     task_kind: str = Field(alias="taskKind")

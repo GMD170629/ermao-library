@@ -16,7 +16,7 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.models.shelf import Shelf
 from app.modules.library.application.filter_options import (
     LibraryFilterOption,
@@ -39,7 +39,7 @@ class SqlAlchemyLibraryFilterQueries:
             formats=self._volume_options(context, LibraryVolume.format),
             import_statuses=self._volume_options(context, LibraryVolume.import_status),
             origins=self._origin_options(context),
-            monitor_folders=self._monitor_folder_options(context),
+            libraries=self._library_options(context),
             shelves=self._shelf_options(context),
         )
 
@@ -137,21 +137,21 @@ class SqlAlchemyLibraryFilterQueries:
             for row in rows
         )
 
-    def _monitor_folder_options(
+    def _library_options(
         self, context: AuthorizationContext
     ) -> tuple[LibraryFilterOption, ...]:
         statement = select(
-            MonitorFolder.id, MonitorFolder.name, MonitorFolder.root_path
+            Library.id, Library.name, Library.root_path
         )
         if not context.is_admin:
-            if not context.monitor_folder_ids:
+            if not context.library_ids:
                 return ()
             statement = statement.where(
-                MonitorFolder.id.in_(context.monitor_folder_ids)
+                Library.id.in_(context.library_ids)
             )
         rows = self._db.execute(
             statement.order_by(
-                func.lower(MonitorFolder.name).asc(), MonitorFolder.id.asc()
+                func.lower(Library.name).asc(), Library.id.asc()
             )
         ).all()
         return tuple(

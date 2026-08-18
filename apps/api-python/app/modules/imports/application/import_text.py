@@ -295,7 +295,7 @@ def _import_reflowable_source(
             "tags": ["ebook", source_format.lower(), *metadata.subjects],
             "mergeKey": merge_key,
             "origin": options.origin,
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
         },
     )
     volume_title = resolved_local.metadata.volume_title or identity.title
@@ -329,7 +329,7 @@ def _import_reflowable_source(
             "format": source_format,
             "resourceKey": _hash_text(str(source_path)),
             "sourceGroupKey": source_group_key,
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
             "origin": options.origin,
             "description": metadata.description,
             "language": metadata.language,

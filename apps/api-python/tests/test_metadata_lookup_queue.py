@@ -59,11 +59,11 @@ def _insert_lookup_fixture(
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor,
+                id, libraryId, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverPath,
                 coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-lookup', 'MANUAL', :title, :title, :author, :author,
+                'work-lookup', 'test-library', 'MANUAL', :title, :title, :author, :author,
                 'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
                 :cover_path, :cover_status, 0, 0, :merge_key, 'now', 'now'
             )

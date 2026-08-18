@@ -40,6 +40,7 @@ def _seed_read_surfaces(engine: Engine) -> None:
             )
         )
         work = LibraryWork(
+            library_id="test-library", 
             id="writer-lock-work",
             origin="MANUAL",
             title="Writer lock reader",

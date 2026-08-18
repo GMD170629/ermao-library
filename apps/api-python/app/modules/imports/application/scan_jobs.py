@@ -11,7 +11,7 @@ from hashlib import sha256
 class PreparedImportScanJob:
     job_id: str
     work_item_id: str
-    monitor_folder_id: str
+    library_id: str
     actor_user_id: str | None
     root_path: str
     trigger: str
@@ -24,7 +24,7 @@ def prepare_import_scan_job(
     *,
     job_id: str,
     work_item_id: str,
-    monitor_folder_id: str,
+    library_id: str,
     actor_user_id: str | None,
     canonical_root_path: str,
     trigger: str,
@@ -37,11 +37,11 @@ def prepare_import_scan_job(
     return PreparedImportScanJob(
         job_id=job_id,
         work_item_id=work_item_id,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
         actor_user_id=actor_user_id,
         root_path=canonical_root_path,
         trigger=trigger,
-        dedupe_key=f"scan:{monitor_folder_id}:{path_key}",
+        dedupe_key=f"scan:{library_id}:{path_key}",
         available_at=available_at or created_at,
         created_at=created_at,
     )

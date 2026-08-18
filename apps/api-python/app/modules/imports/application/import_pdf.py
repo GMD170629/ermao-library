@@ -194,7 +194,7 @@ def _import_pdf(
             "tags": tags,
             "mergeKey": merge_key,
             "origin": options.origin,
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
         },
     )
     cover_path = None
@@ -204,7 +204,7 @@ def _import_pdf(
             columns={
                 "id": _id(),
                 "workId": work["id"],
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "mediaKind": media_kind,
                 "format": "PDF",
@@ -242,7 +242,7 @@ def _import_pdf(
                 "format": "PDF",
                 "resourceKey": _file_resource_key("pdf", source_path),
                 "sourceGroupKey": source_group_key,
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "description": inspection.description,
                 "sizeBytes": file_size,

@@ -17,11 +17,11 @@ from app.bootstrap.imports import (
 from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.imports.application.maintenance_commands import prepare_import_retry
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.imports.infrastructure import streaming_scan
-from app.modules.imports.infrastructure.directory_scan import MonitorFolderConfig
+from app.modules.imports.infrastructure.directory_scan import LibraryConfig
 from app.modules.imports.infrastructure.scan_batch_store import (
     load_scan_candidate_projection,
     prepare_scan_candidate_batch,
@@ -42,17 +42,17 @@ from app.services.system_events import prepare_system_event
 from sqlalchemy import delete, func, select
 
 
-def _stage_scan_candidate_batch(db_session, candidates, *, monitor_folder_id: str):
+def _stage_scan_candidate_batch(db_session, candidates, *, library_id: str):
     sources = prepare_scan_sources(candidates)
     projection = load_scan_candidate_projection(
         db_session,
         sources,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
     )
     prepared = prepare_scan_candidate_batch(
         sources,
         projection,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
         now_ms=now_timestamp_ms(),
         now=db_timestamp(),
     )
@@ -63,7 +63,8 @@ def test_import_enqueue_is_prepared_after_its_projection_session_closes(
     db_session,
     tmp_path: Path,
 ) -> None:
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-two-phase-enqueue",
         name="Two phase enqueue",
         root_path=str(tmp_path),
@@ -77,7 +78,7 @@ def test_import_enqueue_is_prepared_after_its_projection_session_closes(
     command = prepare_import_enqueue_command(
         source,
         origin="WATCH",
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
     )
     projection = load_import_enqueue_command_projection(db_session, command)
     db_session.close()
@@ -201,7 +202,7 @@ def test_streaming_scan_keeps_million_scale_candidate_buffer_bounded(
         lambda _path: (_FakeFileEntry(index) for index in range(total_entries)),
     )
 
-    def ignore_reason(path: Path, _folder: MonitorFolderConfig):
+    def ignore_reason(path: Path, _folder: LibraryConfig):
         if model == "ignored":
             return "unsupported_file_type"
         if model == "mixed" and int(path.stem) % 2:
@@ -211,7 +212,7 @@ def test_streaming_scan_keeps_million_scale_candidate_buffer_bounded(
     monkeypatch.setattr(streaming_scan, "import_source_ignore_reason", ignore_reason)
     scanner = StreamingDirectoryScanner(
         Path("/virtual/library"),
-        MonitorFolderConfig(
+        LibraryConfig(
             id="folder-million",
             root_path="/virtual/library",
             min_file_size_bytes=0,
@@ -253,7 +254,7 @@ def test_streaming_scan_blocks_overflowing_audio_bundle_without_hiding_non_audio
     )
     scanner = StreamingDirectoryScanner(
         Path("/virtual/library"),
-        MonitorFolderConfig(
+        LibraryConfig(
             id="folder-audio-overflow",
             root_path="/virtual/library",
             min_file_size_bytes=0,
@@ -301,7 +302,8 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
 ) -> None:
     root = tmp_path / "overflow"
     root.mkdir()
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-audio-overflow-persistence",
         name="Audio overflow persistence",
         root_path=str(root),
@@ -312,7 +314,7 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
     db_session.flush()
     _job, created = create_or_reuse_scan_job(
         db_session,
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         actor_user_id=None,
         root_path=root,
         trigger="TEST",
@@ -396,7 +398,7 @@ def test_multivolume_audio_limit_is_aggregated_across_the_whole_book(
     )
     scanner = StreamingDirectoryScanner(
         root,
-        MonitorFolderConfig(
+        LibraryConfig(
             id="folder-multivolume-overflow",
             root_path=str(root),
             min_file_size_bytes=0,
@@ -428,7 +430,8 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
     db_session,
     tmp_path: Path,
 ) -> None:
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-priority",
         name="Priority",
         root_path=str(tmp_path),
@@ -436,7 +439,7 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
     )
     task = ImportTask(
         id="task-priority",
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         origin="WATCH",
         status="PENDING",
         source_path=str(tmp_path / "book.epub"),
@@ -447,7 +450,7 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
     work = ensure_import_work_item(db_session, task, available_at=first_available_at)
     create_or_reuse_scan_job(
         db_session,
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         actor_user_id=None,
         root_path=tmp_path,
         trigger="TEST",
@@ -476,7 +479,8 @@ def test_pending_audio_scan_job_refreshes_stability_debounce(
     db_session,
     tmp_path: Path,
 ) -> None:
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-audio-scan-debounce",
         name="Audio scan debounce",
         root_path=str(tmp_path),
@@ -487,7 +491,7 @@ def test_pending_audio_scan_job_refreshes_stability_debounce(
     first_available_at = db_timestamp() + timedelta(seconds=2)
     job, created = create_or_reuse_scan_job(
         db_session,
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         actor_user_id=None,
         root_path=tmp_path / "audiobook",
         trigger="WATCHER_AUDIO_EVENT",
@@ -496,7 +500,7 @@ def test_pending_audio_scan_job_refreshes_stability_debounce(
     later_available_at = db_timestamp() + timedelta(seconds=5)
     reused, created_again = create_or_reuse_scan_job(
         db_session,
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         actor_user_id=None,
         root_path=tmp_path / "audiobook",
         trigger="WATCHER_AUDIO_EVENT",
@@ -519,7 +523,8 @@ def test_prepared_monitor_rescan_jobs_insert_as_one_set_and_reuse_existing(
     tmp_path: Path,
 ) -> None:
     folders = tuple(
-        MonitorFolder(
+        Library(
+            organization_mode="FLAT", 
             id=f"folder-rescan-{index}",
             name=f"Rescan {index}",
             root_path=str(tmp_path / str(index)),
@@ -534,7 +539,7 @@ def test_prepared_monitor_rescan_jobs_insert_as_one_set_and_reuse_existing(
         prepare_import_scan_job(
             job_id=f"scan-rescan-{index}",
             work_item_id=f"work-rescan-{index}",
-            monitor_folder_id=folder.id,
+            library_id=folder.id,
             actor_user_id=None,
             canonical_root_path=folder.root_path,
             trigger="manual_rescan",
@@ -559,7 +564,8 @@ def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
     db_session,
     tmp_path: Path,
 ) -> None:
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-batch",
         name="Batch",
         root_path=str(tmp_path),
@@ -572,10 +578,10 @@ def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
     db_session.flush()
 
     first = _stage_scan_candidate_batch(
-        db_session, candidates, monitor_folder_id=folder.id
+        db_session, candidates, library_id=folder.id
     )
     second = _stage_scan_candidate_batch(
-        db_session, candidates, monitor_folder_id=folder.id
+        db_session, candidates, library_id=folder.id
     )
     db_session.commit()
 
@@ -591,7 +597,8 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session,
     tmp_path: Path,
 ) -> None:
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-audio-repeat",
         name="Audio repeat",
         root_path=str(tmp_path),
@@ -605,7 +612,7 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session.flush()
 
     first = _stage_scan_candidate_batch(
-        db_session, (bundle,), monitor_folder_id=folder.id
+        db_session, (bundle,), library_id=folder.id
     )
     task = db_session.scalar(select(ImportTask))
     assert task is not None
@@ -614,7 +621,7 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session.flush()
 
     second = _stage_scan_candidate_batch(
-        db_session, (bundle,), monitor_folder_id=folder.id
+        db_session, (bundle,), library_id=folder.id
     )
     db_session.commit()
 
@@ -629,7 +636,8 @@ def test_scan_recovery_restarts_from_root_and_resets_attempt_counts(
     db_session,
     tmp_path: Path,
 ) -> None:
-    folder = MonitorFolder(
+    folder = Library(
+            organization_mode="FLAT", 
         id="folder-recovery",
         name="Recovery",
         root_path=str(tmp_path),
@@ -639,7 +647,7 @@ def test_scan_recovery_restarts_from_root_and_resets_attempt_counts(
     db_session.flush()
     job, _created = create_or_reuse_scan_job(
         db_session,
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         actor_user_id=None,
         root_path=tmp_path,
         trigger="TEST",

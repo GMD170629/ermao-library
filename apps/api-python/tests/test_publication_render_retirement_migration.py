@@ -19,10 +19,19 @@ def test_0028_removes_only_reader_render_cache_table(tmp_path) -> None:
         assert "PublicationRenderCache" in before
         assert "BookConversionTask" in before
 
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0028_remove_publication_render_cache"
+            ),
+        )
 
         after = set(inspect(engine).get_table_names())
-        assert head_revision(engine) == "0028_remove_publication_render_cache"
+        with engine.connect() as connection:
+            current = connection.exec_driver_sql(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).scalar()
+        assert current == "0028_remove_publication_render_cache"
         assert "PublicationRenderCache" not in after
         assert "BookConversionTask" in after
         assert before - after == {"PublicationRenderCache"}

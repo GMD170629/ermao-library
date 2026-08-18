@@ -47,6 +47,7 @@ def _login_admin(client: TestClient, db_session: Session) -> User:
 
 def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
     target_work = LibraryWork(
+            library_id="test-library", 
         title="OpenAPI 回归作品",
         normalized_title="openapi 回归作品",
         author="测试作者",
@@ -55,6 +56,7 @@ def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
         merge_key="openapi-regression-target",
     )
     source_work = LibraryWork(
+            library_id="test-library", 
         title="OpenAPI 回归作品",
         normalized_title="openapi 回归作品",
         author="测试作者",

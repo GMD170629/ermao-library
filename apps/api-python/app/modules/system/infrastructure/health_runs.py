@@ -23,7 +23,8 @@ from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
 from app.models.auth import UserPreference
 from app.models.import_pipeline import DownloadTask, ImportTask, KindleSendTask
 from app.models.organize import MetadataLookupTask
-from app.models.settings import MonitorFolder, SystemHealthRun
+from app.models.library import Library
+from app.models.settings import SystemHealthRun
 from app.modules.system.application.commands import (
     SystemWriteTransaction,
     reset_failed_system_transaction,
@@ -161,14 +162,14 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
         _item("database", "storage", "health.item.database", "database"),
     ]
     folders = db.scalars(
-        select(MonitorFolder)
-        .where(MonitorFolder.enabled.is_(True))
-        .order_by(MonitorFolder.created_at, MonitorFolder.id)
+        select(Library)
+        .where(Library.enabled.is_(True))
+        .order_by(Library.created_at, Library.id)
     ).all()
     for folder in folders:
         items.append(
             _item(
-                f"monitor-folder:{folder.id}",
+                f"library:{folder.id}",
                 "storage",
                 "health.item.importFolder",
                 "directory",

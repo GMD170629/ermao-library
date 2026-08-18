@@ -140,7 +140,7 @@ def _reader_scope(context: AuthorizationContext) -> ReaderAccessScope:
     return ReaderAccessScope(
         is_admin=context.is_admin,
         can_view_manual_imports=context.can_view_manual_imports,
-        monitor_folder_ids=context.monitor_folder_ids,
+        library_ids=context.library_ids,
     )
 
 

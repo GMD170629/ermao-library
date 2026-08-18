@@ -140,7 +140,7 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     func setUserEnabled(id: String, enabled: Bool) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func deleteUser(id: String) async throws { try fail() }; func resetUserPassword(id: String, newPassword: String) async throws { try fail() }
     func loadUserAccess(id: String) async throws -> UserAccessSnapshot { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
-    func saveUserAccess(id: String, monitorFolderIDs: Set<String>, canViewManualImports: Bool) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
+    func saveUserAccess(id: String, libraryIDs: Set<String>, canViewManualImports: Bool) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func loadLibrarySources() async throws -> LibrarySourcesSnapshot { try fail(); return .init(storage: nil, sources: [], activeScan: nil) }
     func loadLibrarySource(id: String) async throws -> LibrarySource { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { try fail(); return source }; func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { try fail(); return source }

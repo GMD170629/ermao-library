@@ -149,7 +149,7 @@ def _import_epub(
             ),
             "mergeKey": merge_key,
             "origin": options.origin,
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
         },
     )
     work_updates = _missing_epub_work_metadata(work, metadata)
@@ -193,7 +193,7 @@ def _import_epub(
                     "sortOrder": sort_order,
                     "format": "EPUB",
                     "resourceKey": _file_resource_key("epub", source_path),
-                    "monitorFolderId": options.monitor_folder_id,
+                    "libraryId": options.library_id,
                     "origin": options.origin,
                     "sourceGroupKey": source_key,
                     "description": metadata.get("description"),
@@ -313,7 +313,7 @@ def _import_epub(
             columns={
                 "id": _id(),
                 "workId": work["id"],
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "mediaKind": classification.media_kind,
                 "format": "EPUB",
@@ -341,7 +341,7 @@ def _import_epub(
                 "sortOrder": 0,
                 "format": "EPUB",
                 "resourceKey": _file_resource_key("epub", source_path),
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "description": metadata.get("description"),
                 "language": metadata.get("language"),

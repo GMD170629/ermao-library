@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.core.authorization import authorization_context
-from app.models.auth import User, UserMonitorFolderAccess
+from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
     LibraryFacet,
     LibraryFile,
@@ -10,7 +10,7 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.library.application.catalog import (
     CatalogWorkFilter,
     GetCatalogWork,
@@ -22,6 +22,7 @@ from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 
 def _work(work_id: str, title: str, *, hidden: bool = False) -> LibraryWork:
     return LibraryWork(
+            library_id="test-library", 
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
@@ -39,7 +40,7 @@ def _add_volume(
     volume_id: str,
     media_kind: str = "EBOOK",
     import_status: str = "COMPLETED",
-    monitor_folder_id: str | None = None,
+    library_id: str | None = None,
     with_file: bool = True,
     hidden: bool = False,
 ) -> None:
@@ -51,7 +52,6 @@ def _add_volume(
     volume = LibraryVolume(
         id=volume_id,
         media_version_id=media.id,
-        monitor_folder_id=monitor_folder_id,
         title=f"Volume {volume_id}",
         format="CBZ" if media_kind == "COMIC" else "EPUB",
         resource_key=f"catalog:{volume_id}",
@@ -166,10 +166,12 @@ def test_catalog_applies_member_volume_scope_inside_queries(
         role="member",
         can_view_manual_imports=False,
     )
-    allowed_folder = MonitorFolder(
+    allowed_folder = Library(
+            organization_mode="FLAT", 
         id="folder-allowed", name="Allowed", root_path="/allowed"
     )
-    denied_folder = MonitorFolder(
+    denied_folder = Library(
+            organization_mode="FLAT", 
         id="folder-denied", name="Denied", root_path="/denied"
     )
     db_session.add_all(
@@ -184,19 +186,19 @@ def test_catalog_applies_member_volume_scope_inside_queries(
     )
     db_session.flush()
     db_session.add(
-        UserMonitorFolderAccess(user_id=member.id, monitor_folder_id=allowed_folder.id)
+        UserLibraryAccess(user_id=member.id, library_id=allowed_folder.id)
     )
     _add_volume(
         db_session,
         work_id="allowed",
         volume_id="allowed",
-        monitor_folder_id=allowed_folder.id,
+        library_id=allowed_folder.id,
     )
     _add_volume(
         db_session,
         work_id="denied",
         volume_id="denied",
-        monitor_folder_id=denied_folder.id,
+        library_id=denied_folder.id,
     )
     _add_volume(db_session, work_id="manual", volume_id="manual")
     db_session.commit()

@@ -348,7 +348,7 @@ class SqlAlchemyWorkMergeGateway:
         tags_source = json.dumps(command.metadata.tags, ensure_ascii=False)
         work_row = {
             "id": new_work_id,
-            "monitor_folder_id": None,
+            "library_id": first.library_id,
             "origin": "MANUAL",
             "title": command.metadata.title,
             "normalized_title": normalize_identity_part(command.metadata.title),

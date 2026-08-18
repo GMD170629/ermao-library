@@ -11,6 +11,7 @@ from types import MappingProxyType, TracebackType
 from typing import Protocol, TypeVar
 
 from app.modules.imports.application.dto import ImportResult
+from app.modules.imports.application.errors import ImportExecutionError
 from app.modules.imports.application.ports import ImportUnitOfWork
 from app.modules.system.public import PreparedSystemEvent
 
@@ -503,6 +504,12 @@ class BoundedLibraryImportStore:
         return self._insert(ImportWriteTarget.IMPORT_LOG, columns)
 
     def insert_library_work(self, *, columns: dict[str, object]) -> dict[str, object]:
+        if not columns.get("libraryId"):
+            raise ImportExecutionError(
+                "LIBRARY_REQUIRED",
+                "导入必须指定所属书库",
+                retryable=False,
+            )
         values = self._scoped_columns("work", "primary", columns)
         return self._insert(ImportWriteTarget.LIBRARY_WORK, values)
 

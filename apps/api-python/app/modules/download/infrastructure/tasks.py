@@ -11,7 +11,8 @@ from sqlalchemy.sql.dml import Update
 
 from app.models.common import db_timestamp
 from app.models.import_pipeline import DownloadTask
-from app.models.settings import MonitorFolder, SystemSetting
+from app.models.library import Library
+from app.models.settings import SystemSetting
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
@@ -155,10 +156,10 @@ def system_setting_value(db: Session, key: str) -> str | None:
     return row.value if row is not None else None
 
 
-def list_enabled_monitor_folders(db: Session) -> list[dict[str, Any]]:
-    if not has_table(db, "MonitorFolder"):
+def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
+    if not has_table(db, "Library"):
         return []
     rows = db.execute(
-        select(MonitorFolder).where(MonitorFolder.enabled.is_(True))
+        select(Library).where(Library.enabled.is_(True))
     ).scalars().all()
     return [entity_as_legacy_dict(row) for row in rows]

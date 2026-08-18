@@ -19,40 +19,6 @@ def db_timestamp() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class MonitorFolder(Base):
-    __tablename__ = "MonitorFolder"
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    name: Mapped[str] = mapped_column(String(191), nullable=False)
-    root_path: Mapped[str] = mapped_column("rootPath", String(191), unique=True, nullable=False)
-    shelf_id: Mapped[str | None] = mapped_column(
-        "shelfId",
-        String(191),
-        ForeignKey("Shelf.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
-    media_kind_policy: Mapped[str] = mapped_column(
-        "mediaKindPolicy",
-        String(32),
-        nullable=False,
-        default="MIXED",
-        server_default="MIXED",
-    )
-    ignore_patterns: Mapped[str | None] = mapped_column("ignorePatterns", Text, nullable=True)
-    ignore_hidden: Mapped[bool] = mapped_column("ignoreHidden", Boolean, nullable=False, default=True, server_default="1")
-    min_file_size_bytes: Mapped[int] = mapped_column("minFileSizeBytes", Integer, nullable=False, default=10240, server_default="10240")
-    description: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
-
-
 class SystemSetting(Base):
     __tablename__ = "SystemSetting"
 

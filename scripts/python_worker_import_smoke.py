@@ -29,7 +29,7 @@ def setup_database(storage_root: Path, monitor_root: Path) -> str:
     with engine.begin() as db:
         db.execute(
             text(
-                """INSERT INTO MonitorFolder (
+                """INSERT INTO Library (
                     id, name, rootPath, enabled, ignoreHidden, minFileSizeBytes,
                     createdAt, updatedAt
                 ) VALUES (

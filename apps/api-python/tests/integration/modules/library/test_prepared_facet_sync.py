@@ -22,6 +22,7 @@ def test_prepared_facet_sync_uses_existing_real_ids_and_preserves_updated_at(
     original_updated_at = datetime(2026, 8, 11, 8, 0, tzinfo=UTC)
     db_session.add(
         LibraryWork(
+            library_id="test-library", 
             id="prepared-facet-work",
             title="Prepared facets",
             normalized_title="preparedfacets",

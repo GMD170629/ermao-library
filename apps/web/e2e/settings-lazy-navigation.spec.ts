@@ -144,13 +144,13 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { tasks: [], summary: { completed: 0, failed: 0 }, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
       return;
     }
-    if (pathname.endsWith('/api/monitor-folders/tree')) {
+    if (pathname.endsWith('/api/libraries/tree')) {
       const requestedPath = url.searchParams.get('path');
       await route.fulfill({ json: { ok: true, data: { node: requestedPath === '/monitor' ? { name: 'monitor', path: '/monitor', readable: true, children: [] } : { name: '/', path: '/', readable: true, children: [{ name: 'monitor', path: '/monitor', readable: true }] }, monitorRoot: null } } });
       return;
     }
-    if (pathname.endsWith('/api/monitor-folders')) {
-      await route.fulfill({ json: { ok: true, data: { folders: [] } } });
+    if (pathname.endsWith('/api/libraries')) {
+      await route.fulfill({ json: { ok: true, data: { libraries: [] } } });
       return;
     }
     if (pathname.endsWith('/api/system-settings')) {
@@ -263,27 +263,27 @@ test('library import sections fetch only when their tab mounts and refresh after
   await page.goto('/settings/library');
   await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(0);
   const initialImportTaskRequests = requestCount(counts, '/api/import-tasks');
-  expect(requestCount(counts, '/api/monitor-folders/tree')).toBe(0);
-  expect(requestCount(counts, '/api/monitor-folders')).toBe(0);
+  expect(requestCount(counts, '/api/libraries/tree')).toBe(0);
+  expect(requestCount(counts, '/api/libraries')).toBe(0);
   expect(requestCount(counts, '/api/system-settings')).toBe(0);
 
   await page.getByRole('tab', { name: '文件管理' }).click();
-  await expect.poll(() => requestCount(counts, '/api/monitor-folders/tree')).toBeGreaterThan(0);
-  await page.getByRole('tab', { name: '监控文件夹' }).click();
-  await expect.poll(() => requestCount(counts, '/api/monitor-folders')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/libraries/tree')).toBeGreaterThan(0);
+  await page.getByRole('tab', { name: '书库' }).click();
+  await expect.poll(() => requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '偏好设置' }).click();
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '导入记录' }).click();
   await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
 });
 
-test('new monitor folder shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
+test('new library shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
   await page.goto('/settings/library');
   await page.getByRole('tab', { name: '文件管理' }).click();
-  await page.getByRole('tab', { name: '监控文件夹' }).click();
-  await page.getByRole('button', { name: '添加文件夹' }).click();
+  await page.getByRole('tab', { name: '书库' }).click();
+  await page.getByRole('button', { name: '新增书库' }).click();
 
-  const folderPath = page.getByRole('combobox', { name: '监控文件夹路径' });
+  const folderPath = page.getByRole('combobox', { name: '书库路径' });
   await folderPath.fill('/monitor');
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   const directoryTree = page.getByRole('tree');

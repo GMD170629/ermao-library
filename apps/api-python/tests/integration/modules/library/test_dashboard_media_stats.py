@@ -8,6 +8,7 @@ from app.modules.library.infrastructure.dashboard import dashboard_summary
 
 def _work(work_id: str, *, hidden: bool = False) -> LibraryWork:
     return LibraryWork(
+            library_id="test-library", 
         id=work_id,
         title=work_id,
         normalized_title=work_id,

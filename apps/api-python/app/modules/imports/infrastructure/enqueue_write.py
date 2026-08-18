@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms
 from app.models.import_pipeline import ImportAsset, ImportTask, ImportWorkItem
-from app.models.settings import MonitorFolder
 from app.modules.imports.application.dto import StageImportCommand
 from app.modules.imports.application.enqueue import (
     ImportEnqueueProjection,
@@ -28,7 +27,7 @@ def load_import_enqueue_projection(
     db: Session,
     *,
     canonical_source_path: str,
-    monitor_folder_id: str | None,
+    library_id: str | None,
     allow_terminal_requeue: bool,
 ) -> ImportEnqueueProjection:
     statuses = (
@@ -65,17 +64,10 @@ def load_import_enqueue_projection(
             .mappings()
             .first()
         )
-    policy = None
-    if monitor_folder_id is not None:
-        policy = db.scalar(
-            select(MonitorFolder.media_kind_policy).where(
-                MonitorFolder.id == monitor_folder_id
-            )
-        )
     return ImportEnqueueProjection(
         existing_task=dict(task_row) if task_row is not None else None,
         existing_work=dict(work_row) if work_row is not None else None,
-        media_kind_policy=str(policy or "MIXED"),
+        media_kind_policy="MIXED",
     )
 
 
@@ -132,7 +124,7 @@ def prepare_import_enqueue(
         original_name=command.original_name,
         requested_title=command.requested_title,
         requested_author=command.requested_author,
-        monitor_folder_id=command.monitor_folder_id,
+        library_id=command.library_id,
         media_kind_policy=command.media_kind_policy
         or projection.media_kind_policy,
         message=command.message,

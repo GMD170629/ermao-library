@@ -109,7 +109,7 @@ def _monitor_source_roots(db: Session, settings: Settings) -> list[Path]:
     roots: list[Path] = []
     roots.extend(
         Path(root_path).expanduser()
-        for root_path in import_http_store.list_monitor_root_paths(db)
+        for root_path in import_http_store.list_library_root_paths(db)
         if root_path.strip()
     )
     resolved: list[Path] = []
@@ -170,7 +170,7 @@ def _collect_work_source_paths(
         if database_path.is_absolute():
             paths.append(database_path)
     # Older records may not retain an ImportTask link. In that case a library
-    # file living in a monitor folder is the best available source-file signal.
+    # file living in a library is the best available source-file signal.
     if not paths and _has_table(db, "LibraryFile"):
         monitor_roots = _monitor_source_roots(db, settings)
         for path_value in library_join_queries.list_file_paths_for_work(db, work_id):

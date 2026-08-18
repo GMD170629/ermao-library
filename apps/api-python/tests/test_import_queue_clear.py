@@ -28,6 +28,7 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
     source_file.parent.mkdir(parents=True)
     source_file.write_bytes(b"source")
     work = LibraryWork(
+            library_id="test-library", 
         id="preserved-work",
         title="Preserved",
         normalized_title="preserved",

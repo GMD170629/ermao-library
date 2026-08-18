@@ -77,7 +77,7 @@ internal data class SettingsAuthorizationWire(
     val isAdmin: Boolean,
     val canManageSystem: Boolean,
     val allLibraryScopes: Boolean,
-    val monitorFolderIds: List<String>,
+    val libraryIds: List<String>,
     val canViewManualImports: Boolean,
     val authzVersion: Long,
 )

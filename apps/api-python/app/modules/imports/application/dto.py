@@ -163,7 +163,7 @@ class ImportTaskDTO:
     requested_title: str | None = None
     requested_author: str | None = None
     recognized_metadata: Mapping[str, object] | None = None
-    monitor_folder_id: str | None = None
+    library_id: str | None = None
     media_kind_policy: str = "MIXED"
     work_id: str | None = None
     volume_id: str | None = None
@@ -189,7 +189,7 @@ class StageImportCommand:
     original_name: str | None = None
     requested_title: str | None = None
     requested_author: str | None = None
-    monitor_folder_id: str | None = None
+    library_id: str | None = None
     media_kind_policy: str | None = None
     message: str = "等待后台处理"
     allow_terminal_requeue: bool = False
@@ -202,7 +202,7 @@ class ImportOptions:
     original_name: str | None = None
     requested_title: str | None = None
     requested_author: str | None = None
-    monitor_folder_id: str | None = None
+    library_id: str | None = None
     media_kind_policy: str = "MIXED"
     import_task_id: str | None = None
     original_source_file_path: Path | None = None

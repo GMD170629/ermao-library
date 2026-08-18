@@ -52,7 +52,7 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
     select_count = 0

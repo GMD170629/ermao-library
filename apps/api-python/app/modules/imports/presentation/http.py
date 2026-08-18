@@ -1,4 +1,4 @@
-"""Imports HTTP surface: monitor folders and import-task reads."""
+"""Imports HTTP surface: libraries and import-task reads."""
 
 from __future__ import annotations
 
@@ -18,42 +18,42 @@ from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
     import_http_store,
-    persist_import_monitor_folder_create,
-    persist_import_monitor_folder_delete,
-    persist_import_monitor_folder_update,
+    persist_import_library_create,
+    persist_import_library_delete,
+    persist_import_library_update,
 )
 from app.bootstrap.system import get_setting
-from app.core.authorization import authorization_context, can_access_monitor_folder
+from app.core.authorization import authorization_context, can_access_library
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.imports.application.monitor_folder_commands import (
-    PreparedMonitorFolderCreate,
-    PreparedMonitorFolderDelete,
-    PreparedMonitorFolderUpdate,
-    prepare_monitor_folder_update_values,
+from app.modules.imports.application.library_commands import (
+    PreparedLibraryCreate,
+    PreparedLibraryDelete,
+    PreparedLibraryUpdate,
+    prepare_library_update_values,
 )
 from app.modules.imports.presentation.mappers import (
-    MonitorPathError,
+    LibraryPathError,
     import_task_view,
-    monitor_directory_tree_node,
-    resolve_monitor_folder_path,
+    library_directory_tree_node,
+    resolve_library_root_path,
 )
 from app.modules.imports.presentation.path_helpers import (
-    enabled_monitor_folder_for_path,
+    enabled_library_for_path,
 )
 from app.modules.imports.presentation.schemas import (
-    CreateMonitorFolderRequest,
-    DeletedMonitorFolderResponse,
+    CreateLibraryRequest,
+    DeletedLibraryResponse,
     ImportLogsResponse,
     ImportTaskResponse,
     ImportTasksResponse,
-    MonitorDirectoryResponse,
-    MonitorFolderResponse,
-    MonitorFoldersResponse,
+    LibraryDirectoryResponse,
+    LibraryResponse,
+    LibrariesResponse,
     ParsedReleaseTitleResponse,
     ParseReleaseTitleRequest,
-    UpdateMonitorFolderRequest,
+    UpdateLibraryRequest,
 )
 from app.modules.imports.presentation.writes import router as writes_router
 from app.modules.imports.public import parse_release_title
@@ -86,37 +86,36 @@ def _visible_import_task_or_none(
     db: Session, user: User, task_id: str
 ) -> dict[str, Any] | None:
     task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_monitor_folder(
-        db, user, task.get("monitorFolderId")
+    if task is None or not can_access_library(
+        db, user, task.get("libraryId")
     ):
         return None
     return task
 
 
-@router.get("/monitor-folders")
-def list_monitor_folders(
+@router.get("/libraries")
+def list_libraries(
     request: Request,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorFoldersResponse:
+) -> LibrariesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    folders = import_http_store.list_monitor_folders(db)
+    folders = import_http_store.list_libraries(db)
     if purpose == "upload" and user is not None:
         context = authorization_context(db, user)
-        allowed_folder_ids = set(context.monitor_folder_ids)
+        allowed_library_ids = set(context.library_ids)
         folders = [
             folder
             for folder in folders
             if bool(folder.get("enabled"))
-            and (context.is_admin or str(folder.get("id") or "") in allowed_folder_ids)
+            and (context.is_admin or str(folder.get("id") or "") in allowed_library_ids)
         ]
     return ok(
         {
-            "folders": folders,
-            "monitorRoot": None,
+            "libraries": folders,
             "lastUploadTargetPath": _system_setting_value(
                 db, "library.lastUploadTargetPath"
             ),
@@ -127,83 +126,72 @@ def list_monitor_folders(
     )
 
 
-@router.get("/monitor-folders/tree")
-def monitor_folder_tree(
+@router.get("/libraries/tree")
+def library_tree(
     request: Request,
     path: str | None = None,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorDirectoryResponse:
+) -> LibraryDirectoryResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     if purpose == "upload":
-        monitor_folder = (
-            enabled_monitor_folder_for_path(db, Path(path)) if path else None
+        library = (
+            enabled_library_for_path(db, Path(path)) if path else None
         )
-        monitor_folder_id = str((monitor_folder or {}).get("id") or "") or None
+        library_id = str((library or {}).get("id") or "") or None
         if (
-            monitor_folder is None
+            library is None
             or user is None
-            or not can_access_monitor_folder(db, user, monitor_folder_id)
+            or not can_access_library(db, user, library_id)
         ):
             return fail(
                 "目标文件夹不存在或无权访问",
                 status_code=404,
-                code="MONITOR_FOLDER_NOT_FOUND",
+                code="LIBRARY_NOT_FOUND",
             )
     db.close()
-    node, error, status_code = monitor_directory_tree_node(path)
+    node, error, status_code = library_directory_tree_node(path)
     if error:
         return fail(error, status_code=status_code)
     return ok(
         {
             "node": node,
-            "monitorRoot": None,
         }
     )
 
 
-@router.post("/monitor-folders")
-async def create_monitor_folder(
-    payload: CreateMonitorFolderRequest,
+@router.post("/libraries")
+async def create_library(
+    payload: CreateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorFolderResponse:
+) -> LibraryResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     db.close()
     try:
-        root_path = str(resolve_monitor_folder_path(payload.root_path))
-    except MonitorPathError as exc:
+        root_path = str(resolve_library_root_path(payload.root_path))
+    except LibraryPathError as exc:
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
-    if payload.shelf_id:
-        return fail(
-            "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
-            status_code=400,
-            code="MONITOR_FOLDER_SHELF_RETIRED",
-        )
-    media_kind_policy = payload.media_kind_policy.strip().upper()
-    if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
-        return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
-    existing_folder = import_http_store.get_monitor_folder_by_root_path(db, root_path)
+    existing_library = import_http_store.get_library_by_root_path(db, root_path)
     db.close()
-    if existing_folder:
+    if existing_library:
         return fail(
-            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+            "书库路径已存在", status_code=409, details={"rootPath": root_path}
         )
-    folder_id = f"py_{time_ns()}"
+    library_id = f"py_{time_ns()}"
     checkpoint_at = _now()
-    folder: dict[str, object] = {
-        "id": folder_id,
-        "name": payload.name or Path(root_path).name or "监控文件夹",
+    library: dict[str, object] = {
+        "id": library_id,
+        "name": payload.name or Path(root_path).name or "书库",
         "rootPath": root_path,
-        "shelfId": None,
+        "organizationMode": payload.organization_mode.value,
         "enabled": payload.enabled,
-        "mediaKindPolicy": media_kind_policy,
         "ignorePatterns": payload.ignore_patterns,
         "ignoreHidden": payload.ignore_hidden,
         "minFileSizeBytes": payload.min_file_size_bytes,
@@ -213,68 +201,55 @@ async def create_monitor_folder(
     }
     prepared_event = prepare_system_event(
         level="info",
-        source="folder",
+        source="library",
         actor_type="admin",
         actor_id=user.id,
         action="created",
-        target_type="monitorFolder",
-        target_id=folder_id,
-        message=f"新增来源目录：{folder['name']}",
+        target_type="library",
+        target_id=library_id,
+        message=f"新增书库：{library['name']}",
         metadata={"rootPath": root_path},
     )
     try:
-        persist_import_monitor_folder_create(
+        persist_import_library_create(
             db,
-            PreparedMonitorFolderCreate(folder, prepared_event),
+            PreparedLibraryCreate(library, prepared_event),
         )
     except IntegrityError:
         return fail(
-            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+            "书库路径已存在", status_code=409, details={"rootPath": root_path}
         )
-    return ok({"folder": folder}, status_code=201)
+    return ok({"library": library}, status_code=201)
 
 
-@router.put("/monitor-folders/{folder_id}")
-@router.patch("/monitor-folders/{folder_id}")
-async def update_monitor_folder(
-    folder_id: str,
-    payload: UpdateMonitorFolderRequest,
+@router.put("/libraries/{library_id}")
+@router.patch("/libraries/{library_id}")
+async def update_library(
+    library_id: str,
+    payload: UpdateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorFolderResponse:
+) -> LibraryResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    if payload.shelf_id:
-        return fail(
-            "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
-            status_code=400,
-            code="MONITOR_FOLDER_SHELF_RETIRED",
-        )
-    values = payload.model_dump(
-        by_alias=True,
-        exclude_unset=True,
-        exclude={"shelf_id", "import_mode"},
-    )
-    if "mediaKindPolicy" in values and values["mediaKindPolicy"] is not None:
-        media_kind_policy = str(values["mediaKindPolicy"]).strip().upper()
-        if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
-            return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
-        values["mediaKindPolicy"] = media_kind_policy
-    existing = import_http_store.get_monitor_folder(db, folder_id)
+    values = payload.model_dump(by_alias=True, exclude_unset=True)
+    if "organizationMode" in values and values["organizationMode"] is not None:
+        values["organizationMode"] = str(values["organizationMode"])
+    existing = import_http_store.get_library(db, library_id)
     if not existing:
-        return fail("监控文件夹不存在", status_code=404)
+        return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
     if "rootPath" in values:
         try:
-            root_path = str(resolve_monitor_folder_path(values["rootPath"]))
-        except MonitorPathError as exc:
+            root_path = str(resolve_library_root_path(values["rootPath"]))
+        except LibraryPathError as exc:
             return fail(str(exc), status_code=exc.status_code, code=exc.code)
-        if import_http_store.get_monitor_folder_by_root_path(
-            db, root_path, exclude_id=folder_id
+        if import_http_store.get_library_by_root_path(
+            db, root_path, exclude_id=library_id
         ):
             return fail(
-                "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+                "书库路径已存在", status_code=409, details={"rootPath": root_path}
             )
         values["rootPath"] = root_path
     db.close()
@@ -282,81 +257,81 @@ async def update_monitor_folder(
         values["updatedAt"] = _now()
         prepared_event = prepare_system_event(
             level="info",
-            source="folder",
+            source="library",
             actor_type="admin",
             actor_id=user.id,
             action="updated",
-            target_type="monitorFolder",
-            target_id=folder_id,
-            message=f"更新来源目录：{values.get('name') or existing.get('name')}",
+            target_type="library",
+            target_id=library_id,
+            message=f"更新书库：{values.get('name') or existing.get('name')}",
             metadata={
                 "changes": values,
                 "rootPath": values.get("rootPath") or existing.get("rootPath"),
             },
         )
-        prepared_values = prepare_monitor_folder_update_values(values)
+        prepared_values = prepare_library_update_values(values)
         try:
-            persist_import_monitor_folder_update(
+            persist_import_library_update(
                 db,
-                PreparedMonitorFolderUpdate(
-                    folder_id,
+                PreparedLibraryUpdate(
+                    library_id,
                     prepared_values,
                     prepared_event,
                 ),
             )
         except IntegrityError:
             return fail(
-                "监控文件夹路径已存在",
+                "书库路径已存在",
                 status_code=409,
                 details={"rootPath": values.get("rootPath")},
             )
-        folder = import_http_store.get_monitor_folder(db, folder_id)
+        library = import_http_store.get_library(db, library_id)
     else:
-        folder = existing
-    return ok({"folder": folder})
+        library = existing
+    return ok({"library": library})
 
 
-@router.delete("/monitor-folders/{folder_id}")
-def delete_monitor_folder(
-    folder_id: str,
+@router.delete("/libraries/{library_id}")
+def delete_library(
+    library_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedMonitorFolderResponse:
+) -> DeletedLibraryResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    existing = import_http_store.get_monitor_folder(db, folder_id)
-    affected_user_ids = import_http_store.list_monitor_folder_access_user_ids(
+    existing = import_http_store.get_library(db, library_id)
+    affected_user_ids = import_http_store.list_library_access_user_ids(
         db,
-        folder_id,
+        library_id,
     )
     db.close()
     checkpoint_at = _now()
     prepared_event = prepare_system_event(
         level="warning",
-        source="folder",
+        source="library",
         actor_type="admin",
         actor_id=user.id,
         action="deleted",
-        target_type="monitorFolder",
-        target_id=folder_id,
-        message=f"删除来源目录：{(existing or {}).get('name') or folder_id}",
+        target_type="library",
+        target_id=library_id,
+        message=f"删除书库：{(existing or {}).get('name') or library_id}",
         metadata={
             "rootPath": (existing or {}).get("rootPath"),
             "authorizationInvalidatedFor": len(affected_user_ids),
         },
     )
-    deleted = persist_import_monitor_folder_delete(
+    deleted = persist_import_library_delete(
         db,
-        PreparedMonitorFolderDelete(
-            folder_id,
+        PreparedLibraryDelete(
+            library_id,
             affected_user_ids,
             checkpoint_at,
             prepared_event,
         ),
     )
-    return ok({"deleted": deleted, "id": folder_id})
+    return ok({"deleted": deleted, "id": library_id})
 
 
 @router.get("/import-tasks")

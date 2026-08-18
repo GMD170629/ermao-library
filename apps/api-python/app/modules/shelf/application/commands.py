@@ -55,7 +55,7 @@ class ShelfWriteStore(Protocol):
 
     def collection_has_members(self, db: object, collection_id: str) -> bool: ...
 
-    def clear_monitor_folder_shelf_links(
+    def clear_library_shelf_links(
         self, db: object, shelf_id: str, *, now: datetime
     ) -> None: ...
 
@@ -263,7 +263,7 @@ class DeleteShelf:
                 command.shelf_id,
             ):
                 raise ValueError("SHELF_COLLECTION_NOT_EMPTY")
-            self._store.clear_monitor_folder_shelf_links(
+            self._store.clear_library_shelf_links(
                 self._unit_of_work,
                 command.shelf_id,
                 now=command.now,

@@ -31,6 +31,7 @@ def _login(client, db_session) -> User:
 
 def _add_work_with_volumes(db_session, *, volume_count: int = 12) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="detail-work",
         title="Detail work",
         normalized_title="detail work",

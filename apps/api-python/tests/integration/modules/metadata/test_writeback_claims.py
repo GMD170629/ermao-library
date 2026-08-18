@@ -26,6 +26,7 @@ def _seed_claim_rows(engine, source: Path) -> None:
     with Session(engine) as db, db.begin():
         db.add(
             LibraryWork(
+            library_id="test-library", 
                 id="claim-work",
                 title="Claim",
                 normalized_title="claim",

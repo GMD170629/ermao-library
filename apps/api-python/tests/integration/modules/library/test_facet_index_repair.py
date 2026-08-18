@@ -36,6 +36,7 @@ def _add_pending_works(db: Session, count: int) -> None:
     db.add_all(
         [
             LibraryWork(
+            library_id="test-library", 
                 id=f"facet-work-{index}",
                 title=f"Facet work {index}",
                 normalized_title=f"facet work {index}",
@@ -145,6 +146,7 @@ def test_facet_index_repair_uses_bounded_set_based_statements(
     db_session.add_all(
         [
             LibraryWork(
+            library_id="test-library", 
                 id=f"statement-work-{index}",
                 title=f"Statement work {index}",
                 normalized_title=f"statement work {index}",
@@ -196,6 +198,7 @@ def test_facet_index_repair_uses_bounded_set_based_statements(
 def test_facet_index_repair_preserves_work_updated_at(db_session: Session) -> None:
     original_updated_at = datetime(2020, 1, 2, 3, 4, 5, tzinfo=UTC)
     work = LibraryWork(
+            library_id="test-library", 
         id="preserved-updated-at-work",
         title="Preserved timestamp",
         normalized_title="preserved timestamp",
@@ -228,6 +231,7 @@ def test_facet_index_repair_preserves_existing_facet_identity(
         aliases='["Tag 0"]',
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="existing-facet-work",
         title="Existing facet",
         normalized_title="existing facet",
@@ -265,6 +269,7 @@ def test_facet_index_repair_replaces_stale_links_for_empty_facets(
         aliases="[]",
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="empty-facet-work",
         title="Empty facets",
         normalized_title="empty facets",
@@ -301,6 +306,7 @@ def test_facet_index_repair_deduplicates_normalized_values(
     db_session: Session,
 ) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="duplicate-facet-work",
         title="Duplicate facets",
         normalized_title="duplicate facets",
@@ -335,6 +341,7 @@ def test_facet_index_repair_skips_source_changed_after_preparation(
     db_session: Session,
 ) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="concurrently-changed-work",
         title="Changed source",
         normalized_title="changed source",
@@ -400,6 +407,7 @@ def test_facet_index_repair_processes_stable_subset_when_one_source_changed(
     db_session: Session,
 ) -> None:
     stable = LibraryWork(
+            library_id="test-library", 
         id="stable-subset-work",
         title="Stable subset",
         normalized_title="stable subset",
@@ -409,6 +417,7 @@ def test_facet_index_repair_processes_stable_subset_when_one_source_changed(
         series_name=None,
     )
     changed = LibraryWork(
+            library_id="test-library", 
         id="changed-subset-work",
         title="Changed subset",
         normalized_title="changed subset",
@@ -468,6 +477,7 @@ def test_facet_index_repair_compares_the_exact_tag_source(
     db_session: Session,
 ) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="exact-tag-source-work",
         title="Exact tag source",
         normalized_title="exact tag source",
@@ -524,6 +534,7 @@ def test_facet_index_repair_short_timeout_defers_to_existing_writer(
     with regular_factory() as seed:
         seed.add(
             LibraryWork(
+            library_id="test-library", 
                 id="busy-work",
                 title="Busy work",
                 normalized_title="busy work",
@@ -589,6 +600,7 @@ def test_facet_index_repair_does_not_lock_writers_during_python_preparation(
         seed.add_all(
             [
                 LibraryWork(
+            library_id="test-library", 
                     id="prepared-work",
                     title="Prepared work",
                     normalized_title="prepared work",
@@ -597,6 +609,7 @@ def test_facet_index_repair_does_not_lock_writers_during_python_preparation(
                     tags='["Prepared tag"]',
                 ),
                 LibraryWork(
+            library_id="test-library", 
                     id="normal-write",
                     title="Normal write",
                     normalized_title="normal write",
@@ -677,6 +690,7 @@ def test_budgeted_maintenance_transaction_is_interrupted_and_releases_writer(
         seed.add_all(
             [
                 LibraryWork(
+            library_id="test-library", 
                     id=f"budget-work-{index}",
                     title=f"Budget work {index}",
                     normalized_title=f"budget work {index}",

@@ -16,7 +16,6 @@ from app.core.authorization import (
 )
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.library import LibraryWork
-from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
@@ -441,14 +440,10 @@ def delete_shelf(db: Session, shelf_id: str) -> bool:
     return bool(result.rowcount)
 
 
-def clear_monitor_folder_shelf_links(
+def clear_library_shelf_links(
     db: Session,
     shelf_id: str,
     *,
     now: datetime,
 ) -> None:
-    db.execute(
-        update(MonitorFolder)
-        .where(MonitorFolder.shelf_id == shelf_id)
-        .values(shelf_id=None, updated_at=now)
-    )
+    del db, shelf_id, now

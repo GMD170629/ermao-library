@@ -9,7 +9,7 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { useI18n as useExpressionI18n } from '@/i18n/provider';
 
-type MonitorFolder = {
+type Library = {
   id: string;
   name: string;
   rootPath: string;
@@ -55,7 +55,7 @@ function isInside(rootPath: string, targetPath: string) {
 
 export function ImportFileManager() {
   const { t: i18nAttribute } = useAttributeI18n();
-  const [folders, setFolders] = useState<MonitorFolder[]>([]);
+  const [folders, setFolders] = useState<Library[]>([]);
   const [rootPath, setRootPath] = useState('');
   const [nodes, setNodes] = useState<Record<string, DirectoryNode>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -74,11 +74,11 @@ export function ImportFileManager() {
     setLoadingPath(key);
     setError('');
     try {
-      const response = await fetch(`/api/monitor-folders/tree${path ? `?path=${encodeURIComponent(path)}` : ''}`);
-      const payload = await response.json() as { ok: boolean; data?: { node: DirectoryNode; monitorRoot?: string | null }; error?: { message: string } };
+      const response = await fetch(`/api/libraries/tree${path ? `?path=${encodeURIComponent(path)}` : ''}`);
+      const payload = await response.json() as { ok: boolean; data?: { node: DirectoryNode }; error?: { message: string } };
       if (!response.ok || !payload.ok || !payload.data?.node) throw new Error(payload.error?.message ?? '读取目录失败');
       const node = payload.data.node;
-      setRootPath(payload.data.monitorRoot || node.path);
+      setRootPath(node.path);
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
     } catch (reason) {
@@ -93,11 +93,11 @@ export function ImportFileManager() {
     let active = true;
     async function load() {
       try {
-        const response = await fetch('/api/monitor-folders');
-        const payload = await response.json() as { ok: boolean; data?: { folders: MonitorFolder[] }; error?: { message: string } };
+        const response = await fetch('/api/libraries');
+        const payload = await response.json() as { ok: boolean; data?: { libraries: Library[] }; error?: { message: string } };
         if (!active) return;
-        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '读取监控文件夹失败');
-        setFolders(payload.data?.folders ?? []);
+        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '读取书库失败');
+        setFolders(payload.data?.libraries ?? []);
         const root = await loadNode();
         if (active && root) {
           setSelectedPath(root.path);
@@ -147,7 +147,7 @@ export function ImportFileManager() {
     }
   }, [i18nAttribute, result, toast]);
 
-  const selectedMonitorFolder = useMemo(() => folders
+  const selectedLibrary = useMemo(() => folders
     .filter((folder) => folder.enabled && selectedPath && isInside(folder.rootPath, selectedPath))
     .sort((left, right) => right.rootPath.length - left.rootPath.length)[0] ?? null, [folders, selectedPath]);
 
@@ -164,7 +164,7 @@ export function ImportFileManager() {
   }
 
   async function scanSelectedDirectory() {
-    if (!selectedPath || !selectedMonitorFolder) return;
+    if (!selectedPath || !selectedLibrary) return;
     let submitted = false;
     setScanning(true);
     setError('');
@@ -216,7 +216,7 @@ export function ImportFileManager() {
       <div className="flex flex-col gap-4 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-4 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="font-semibold text-[#2A2825]"><I18nText>从目录识别图书</I18nText></div>
-          <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>选择已启用监控文件夹内的目录。识别仍会应用格式、隐藏文件、大小、忽略规则和已导入检查。</I18nText></p>
+          <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>选择已启用书库内的目录。识别仍会应用格式、隐藏文件、大小、忽略规则和已导入检查。</I18nText></p>
         </div>
         <Button variant="secondary" icon={RefreshCw} loading={loadingPath === (selectedPath || '__root__')} loadingText={i18nAttribute("刷新中")} onClick={() => void loadNode(selectedPath || undefined)}><I18nText>刷新目录</I18nText></Button>
       </div>
@@ -235,8 +235,8 @@ export function ImportFileManager() {
         <aside className="flex flex-col p-5">
           <div className="text-xs font-medium text-[#8A847D]"><I18nText>当前选择</I18nText></div>
           <div className="mt-2 break-all text-sm font-semibold leading-6 text-[#2A2825]">{selectedPath || i18nAttribute("尚未选择目录")}</div>
-          <div className={cn('mt-4 rounded-xl px-3 py-2 text-xs leading-5', selectedMonitorFolder ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800')}>
-            {selectedMonitorFolder ? i18nAttribute("使用“{value0}”的识别规则", { value0: selectedMonitorFolder.name }) : i18nAttribute("此目录不在已启用的监控文件夹内，不能识别。")}
+          <div className={cn('mt-4 rounded-xl px-3 py-2 text-xs leading-5', selectedLibrary ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800')}>
+            {selectedLibrary ? i18nAttribute("使用“{value0}”的识别规则", { value0: selectedLibrary.name }) : i18nAttribute("此目录不在已启用的书库内，不能识别。")}
           </div>
           {result ? (
             <div className="mt-4 space-y-2 border-t border-[#E9E5DF] pt-4 text-sm text-[#5F5953]">
@@ -265,7 +265,7 @@ export function ImportFileManager() {
           {error ? <div className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">{error}</div> : null}
           <div className="mt-auto space-y-2">
             {result && ['PENDING', 'RUNNING'].includes(result.status) ? <Button className="w-full" variant="secondary" icon={Square} onClick={() => void cancelScan()} aria-label={i18nAttribute("取消扫描任务")}><I18nText>取消扫描</I18nText></Button> : null}
-            <Button className="w-full" icon={Search} disabled={!selectedMonitorFolder || !selectedPath} loading={scanning} loadingText={i18nAttribute("识别中")} onClick={() => void scanSelectedDirectory()}><I18nText>识别此目录</I18nText></Button>
+            <Button className="w-full" icon={Search} disabled={!selectedLibrary || !selectedPath} loading={scanning} loadingText={i18nAttribute("识别中")} onClick={() => void scanSelectedDirectory()}><I18nText>识别此目录</I18nText></Button>
           </div>
         </aside>
       </div>

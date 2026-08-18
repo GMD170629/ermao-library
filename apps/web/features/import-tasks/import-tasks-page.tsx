@@ -39,7 +39,7 @@ type ImportTask = {
     fields: string[];
     source: 'REQUESTED' | 'SIDECAR_OPF' | 'EMBEDDED' | 'PATH';
   } | null;
-  monitorFolder?: { name: string; rootPath: string } | null;
+  library?: { name: string; rootPath: string } | null;
   book?: { id: string; title: string } | null;
   logs: Array<{ id: string; level: string; message: string; createdAt: string }>;
 };
@@ -210,9 +210,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       const payload = text ? JSON.parse(text) as { ok: boolean; data?: { requestedAt: string; jobs: ImportScanJob[] }; error?: { message: string } } : null;
       if (!response.ok) throw new Error(payload?.error?.message ?? `请求重新识别失败：HTTP ${response.status}`);
       if (!payload?.ok) throw new Error(payload?.error?.message ?? '请求重新识别失败');
-      setMessage('已请求重新识别监控文件夹');
+      setMessage('已请求重新识别书库');
       setScanJobs(payload.data?.jobs ?? []);
-      toast.success('已请求重新识别监控文件夹');
+      toast.success('已请求重新识别书库');
       setError('');
       setPage(1);
       await loadTasks(1);
@@ -382,7 +382,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
       {!embedded ? <PageTitle
         title={i18nAttribute("导入任务")}
-        desc={i18nAttribute("查看手动上传和监控文件夹自动导入状态。")}
+        desc={i18nAttribute("查看手动上传和书库自动导入状态。")}
         action={(
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
@@ -503,7 +503,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                     {task.recognizedMetadata.author ? <span> · {task.recognizedMetadata.author}</span> : null}
                   </div>
                 ) : null}
-                <div className="mt-2 break-words text-sm text-slate-500">{task.monitorFolder?.name ? `${task.monitorFolder.name} · ` : ''}{task.sourcePath}</div>
+                <div className="mt-2 break-words text-sm text-slate-500">{task.library?.name ? `${task.library.name} · ` : ''}{task.sourcePath}</div>
                 {task.errorSummary ? (
                   <div className="mt-3 space-y-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
                     <div className="flex gap-2"><AlertTriangle size={16} />{task.errorSummary}</div>

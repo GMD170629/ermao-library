@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 
 
 def _login_system_manager(client: TestClient, db: Session) -> User:
@@ -40,11 +40,11 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
     _login_system_manager(client, db_session)
     monitored_directory = tmp_path / "comic-library"
     monitored_directory.mkdir()
-    folder = MonitorFolder(
+    folder = Library(
         name="漫画目录",
         root_path=str(monitored_directory),
+        organization_mode="VOLUMES",
         enabled=True,
-        media_kind_policy="COMIC",
         ignore_patterns=None,
         ignore_hidden=True,
         min_file_size_bytes=10240,
@@ -54,7 +54,7 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
     db_session.flush()
     task = ImportTask(
         id="dashboard-contract-task",
-        monitor_folder_id=folder.id,
+        library_id=folder.id,
         media_kind_policy="COMIC",
         origin="WATCHER",
         status="COMPLETED",
@@ -67,7 +67,6 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
         },
         source_path=str(monitored_directory / "第一卷.cbz"),
         source_key="dashboard-contract-source-key",
-        content_hash="dashboard-contract-content-hash",
         task_kind="FILE",
         progress=100,
         processed_asset_count=1,
@@ -79,7 +78,7 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
 
     assert response.status_code == 200, response.text
     payload = response.json()["data"]
-    assert payload["enabledMonitorFolders"][0]["mediaKindPolicy"] == "COMIC"
+    assert payload["enabledLibraries"][0]["organizationMode"] == "VOLUMES"
     latest = payload["latestImportTask"]
     assert latest["id"] == task.id
     assert latest["mediaKindPolicy"] == "COMIC"

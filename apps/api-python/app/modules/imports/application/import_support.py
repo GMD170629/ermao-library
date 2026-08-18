@@ -393,7 +393,7 @@ def _ensure_work(
     row = store.insert_library_work(
         columns={
             "id": _id(),
-            "monitorFolderId": data.get("monitorFolderId"),
+            "libraryId": data.get("libraryId"),
             "origin": data["origin"],
             "title": data["title"],
             "normalizedTitle": _normalize_key(data["title"]),
@@ -554,7 +554,7 @@ def _ensure_import_task(
     row = store.insert_import_task(
         columns={
             "id": _id(),
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
             "origin": options.origin,
             "status": "PENDING",
             "originalName": options.original_name or options.source_file_path.name,

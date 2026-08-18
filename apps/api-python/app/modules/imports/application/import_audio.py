@@ -188,7 +188,7 @@ def _import_audio(
                 columns={
                     "id": _id(),
                     "workId": work["id"],
-                    "monitorFolderId": options.monitor_folder_id,
+                    "libraryId": options.library_id,
                     "origin": options.origin,
                     "mediaKind": classification.media_kind,
                     "format": "AUDIO",
@@ -224,7 +224,7 @@ def _import_audio(
                                 if flat_bundle_key and group is None
                                 else f"{resource_key}:{volume_index}"
                             ),
-                            "monitorFolderId": options.monitor_folder_id,
+                            "libraryId": options.library_id,
                             "origin": options.origin,
                             "sourceGroupKey": f"{options.origin.lower()}:{bundle_key}",
                             "sizeBytes": sum(
@@ -624,7 +624,7 @@ def _ensure_audio_work(
             "tags": ["audiobook", "audio"],
             "mergeKey": merge_key,
             "origin": options.origin,
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
         },
     )
 
@@ -675,7 +675,7 @@ def _prepare_flat_audio_bundle(
                 "sortOrder": 0,
                 "format": "AUDIO",
                 "resourceKey": resource_key,
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "sourceGroupKey": f"{options.origin.lower()}:{bundle_key}",
                 "chapterCount": 0,
@@ -694,7 +694,7 @@ def _prepare_flat_audio_bundle(
     store.update_library_volume(
         str(volume["id"]),
         columns={
-            "monitorFolderId": options.monitor_folder_id,
+            "libraryId": options.library_id,
             "origin": options.origin,
             "resourceKey": resource_key,
             "sourceGroupKey": f"{options.origin.lower()}:{bundle_key}",
@@ -770,7 +770,7 @@ def _prepare_existing_audio_bundle(
                 "sortOrder": 0,
                 "format": "AUDIO",
                 "resourceKey": f"audio:{bundle_key}",
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "sourceGroupKey": f"{options.origin.lower()}:{bundle_key}",
                 "chapterCount": 0,
@@ -791,7 +791,7 @@ def _prepare_existing_audio_bundle(
                 "format": "AUDIO",
                 "resourceKey": f"audio:{bundle_key}",
                 "sourceGroupKey": f"{options.origin.lower()}:{bundle_key}",
-                "monitorFolderId": options.monitor_folder_id,
+                "libraryId": options.library_id,
                 "origin": options.origin,
                 "narrator": narrator,
                 "hidden": False,

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { CompactLanguageSwitcher } from '../../components/layout/compact-language-switcher';
+import { Select } from '../../components/ui/select';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
 import { I18nText } from '@/i18n/provider';
@@ -55,6 +56,7 @@ export function SetupPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [folderName, setFolderName] = useState('我的书库');
   const [folderPath, setFolderPath] = useState('');
+  const [organizationMode, setOrganizationMode] = useState<'FLAT' | 'VOLUMES' | 'AUDIOBOOK'>('FLAT');
   const [folderAdded, setFolderAdded] = useState(false);
   const [error, setError] = useState('');
 
@@ -173,19 +175,20 @@ export function SetupPage() {
   async function saveFolder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!folderPath.trim()) {
-      setError('请输入监控文件夹路径');
+      setError('请输入书库路径');
       return;
     }
     setStage('saving-folder');
     setError('');
     try {
-      const response = await fetch('/api/monitor-folders', {
+      const response = await fetch('/api/libraries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
           name: folderName.trim() || '我的书库',
           rootPath: folderPath.trim(),
+          organizationMode,
           enabled: true,
           ignorePatterns: '',
           ignoreHidden: true,
@@ -193,12 +196,12 @@ export function SetupPage() {
         })
       });
       const payload = await readSetupPayload(response);
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '监控文件夹添加失败');
+      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '书库添加失败');
       setFolderAdded(true);
       setStage('complete');
       saveProgress({ stage: 'complete', email, folderAdded: true, folderPath: folderPath.trim() });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '监控文件夹添加失败');
+      setError(reason instanceof Error ? reason.message : '书库添加失败');
       setStage('folder');
     }
   }
@@ -245,7 +248,7 @@ export function SetupPage() {
             <div className="flex min-h-[430px] flex-col items-start justify-center" aria-live="polite">
               <span className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#8B9D83] text-[#E8DCC7]"><Check size={28} strokeWidth={2.4} /></span>
               <h1 className="mt-7 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl"><I18nText>你的私人书库已准备好</I18nText></h1>
-              <p className="mt-4 text-sm leading-7 text-[#606C38]/80">{i18nAttribute('管理账户 {value0} 已创建并登录。', { value0: email })}{folderAdded ? i18nAttribute("监控文件夹已启用，系统会自动识别目录中已有和以后新增的读物。") : i18nAttribute("你可以稍后在设置中添加监控文件夹。")}</p>
+              <p className="mt-4 text-sm leading-7 text-[#606C38]/80">{i18nAttribute('管理账户 {value0} 已创建并登录。', { value0: email })}{folderAdded ? i18nAttribute("书库已启用，系统会自动识别目录中已有和以后新增的读物。") : i18nAttribute("你可以稍后在设置中新增书库。")}</p>
               <button type="button" onClick={() => { window.localStorage.removeItem(setupProgressKey); router.replace('/library'); router.refresh(); }} className="mt-8 inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7] transition hover:bg-[#B08B6E] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#8B9D83]/40">
                 <I18nText>进入书库 </I18nText><ArrowRight size={17} />
               </button>
@@ -254,19 +257,46 @@ export function SetupPage() {
             <>
               <div className="mt-10 max-w-xl">
                 <div className="text-sm font-semibold text-[#C66B3D]"><I18nText>第 2 步，共 2 步</I18nText></div>
-                <h1 className="mt-2 text-3xl font-semibold tracking-[-0.045em] sm:text-4xl"><I18nText>添加监控文件夹</I18nText></h1>
-                <p className="mt-3 text-sm leading-7 text-[#606C38]/80"><I18nText>把服务器或 NAS 上的读物目录加入监控。目录内已有和以后新增的支持格式都会由后台自动识别。</I18nText></p>
+                <h1 className="mt-2 text-3xl font-semibold tracking-[-0.045em] sm:text-4xl"><I18nText>新增书库</I18nText></h1>
+                <p className="mt-3 text-sm leading-7 text-[#606C38]/80"><I18nText>把服务器或 NAS 上的读物目录加入书库。目录内已有和以后新增的支持格式都会由后台自动识别。</I18nText></p>
               </div>
               <form onSubmit={saveFolder} className="mt-8 space-y-4">
                 <label className="block">
-                  <span className="text-sm font-semibold"><I18nText>文件夹名称</I18nText></span>
+                  <span className="text-sm font-semibold"><I18nText>书库名称</I18nText></span>
                   <input value={folderName} onChange={(event) => { setFolderName(event.target.value); setError(''); }} maxLength={100} className="mt-2 h-12 w-full rounded-2xl border border-[#B08B6E]/55 bg-[#E8DCC7] px-4 text-sm outline-none transition focus:border-[#C66B3D] focus:ring-4 focus:ring-[#C66B3D]/15" />
                 </label>
                 <div className="block">
-                  <span className="text-sm font-semibold"><I18nText>监控文件夹路径</I18nText></span>
+                  <span className="text-sm font-semibold"><I18nText>书库路径</I18nText></span>
                   <DirectoryPathPicker value={folderPath} onChange={(value) => { setFolderPath(value); setError(''); }} disabled={stage === 'saving-folder'} variant="setup" />
                   <span className="mt-2 block text-xs leading-5 text-[#606C38]/65"><I18nText>路径必须是应用当前可访问且可读取的绝对目录。</I18nText></span>
                 </div>
+                <label className="block">
+                  <span className="text-sm font-semibold"><I18nText>组织方式</I18nText></span>
+                  <Select
+                    value={organizationMode}
+                    onChange={(value) => {
+                      setOrganizationMode(value as 'FLAT' | 'VOLUMES' | 'AUDIOBOOK');
+                      setError('');
+                    }}
+                    disabled={stage === 'saving-folder'}
+                    ariaLabel="组织方式"
+                    className="mt-2 w-full"
+                    triggerClassName="h-12 w-full rounded-2xl px-4 text-sm"
+                    tone="setup"
+                    options={[
+                      { value: 'FLAT', label: '平铺' },
+                      { value: 'VOLUMES', label: '卷册' },
+                      { value: 'AUDIOBOOK', label: '有声书' }
+                    ]}
+                  />
+                  <span className="mt-2 block text-xs leading-5 text-[#606C38]/65">
+                    {organizationMode === 'FLAT'
+                      ? i18nAttribute('平铺：根目录文件各自作为独立作品')
+                      : organizationMode === 'VOLUMES'
+                        ? i18nAttribute('卷册：Work / Version / 文件')
+                        : i18nAttribute('有声书：按有声书目录组织')}
+                  </span>
+                </label>
                 {error ? <SetupError message={error} /> : null}
                 <button type="submit" disabled={stage === 'saving-folder'} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7] transition hover:bg-[#B08B6E] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#8B9D83]/40 disabled:cursor-not-allowed disabled:opacity-70">
                   {stage === 'saving-folder' ? <><Loader2 size={17} className="animate-spin" /> <I18nText>正在添加</I18nText></> : <><I18nText>添加并继续 </I18nText><ArrowRight size={17} /></>}
@@ -316,7 +346,7 @@ export function SetupPage() {
             <ol className="mt-8 space-y-6">
               <SetupStep icon={Database} title={i18nAttribute("检查系统状态")} description={i18nAttribute("确认数据库和存储目录可用")} complete={statusChecked} active={stage === 'checking' || stage === 'unavailable'} />
               <SetupStep icon={UserRoundPlus} title={i18nAttribute("创建管理账户")} description={i18nAttribute("设置用户名、邮箱和登录密码")} complete={accountCreated} active={stage === 'account' || stage === 'creating-account'} />
-              <SetupStep icon={FolderPlus} title={i18nAttribute("添加监控文件夹")} description={i18nAttribute("持续识别目录中的读物")} complete={stage === 'complete'} active={folderActive} />
+              <SetupStep icon={FolderPlus} title={i18nAttribute("新增书库")} description={i18nAttribute("持续识别目录中的读物")} complete={stage === 'complete'} active={folderActive} />
             </ol>
             <p className="mt-auto pt-10 text-xs leading-6 text-[#E8DCC7]/70"><I18nText>账号信息仅保存在你的服务器中。以后可以在设置页面修改用户名、邮箱、密码和头像。</I18nText></p>
           </div>

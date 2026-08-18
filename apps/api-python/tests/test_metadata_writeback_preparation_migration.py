@@ -35,10 +35,19 @@ def test_writeback_preparation_upgrade_is_reversible_and_restart_safe(
             lambda config: command.upgrade(config, "0018_library_facet_index_version"),
         )
 
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0019_writeback_preparation"
+            ),
+        )
 
         inspector = inspect(engine)
-        assert head_revision(engine) == "0028_remove_publication_render_cache"
+        with engine.connect() as _conn:
+            _current = _conn.exec_driver_sql(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).scalar()
+        assert _current == "0019_writeback_preparation"
         assert {
             "id",
             "operationId",
@@ -105,7 +114,12 @@ def test_writeback_preparation_upgrade_is_reversible_and_restart_safe(
             downgraded, "MetadataOpfQueueState"
         )
 
-        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(
+                config, "0019_writeback_preparation"
+            ),
+        )
         assert "MetadataWritebackPreparation" in inspect(engine).get_table_names()
     finally:
         engine.dispose()

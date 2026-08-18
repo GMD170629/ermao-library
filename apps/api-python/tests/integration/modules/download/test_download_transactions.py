@@ -3,8 +3,7 @@ from __future__ import annotations
 import app.bootstrap.download as download_bootstrap
 import pytest
 from app.bootstrap.system import prepare_system_event
-from app.db.base import Base
-from app.db.bootstrap import apply_schema
+from tests.conftest import recreate_application_schema
 from app.models.import_pipeline import DownloadTask
 from app.models.settings import SystemEvent, SystemSetting
 from app.modules.download.application.dto import CreateDownloadTask
@@ -14,9 +13,7 @@ from tests.support.sqlalchemy import StatementRecorder
 
 def _prepare_schema(db_session) -> None:
     db_session.rollback()
-    engine = db_session.get_bind()
-    Base.metadata.drop_all(engine)
-    apply_schema(engine)
+    recreate_application_schema(db_session.get_bind())
 
 
 def _command(task_id: str) -> CreateDownloadTask:

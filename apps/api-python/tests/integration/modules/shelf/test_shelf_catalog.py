@@ -32,6 +32,7 @@ def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) ->
         role="admin",
     )
     visible = LibraryWork(
+            library_id="test-library", 
         id="visible-work",
         title="Visible",
         normalized_title="visible",
@@ -40,6 +41,7 @@ def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) ->
         tags="[]",
     )
     hidden = LibraryWork(
+            library_id="test-library", 
         id="hidden-work",
         title="Hidden",
         normalized_title="hidden",

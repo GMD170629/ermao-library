@@ -184,13 +184,13 @@ def enqueue_download_import_command(
     task_id: str,
     source_path: str,
     original_name: str,
-    monitor_folder_id: str | None,
+    library_id: str | None,
 ) -> ImportTaskDTO:
     enqueue_command = prepare_import_enqueue_command(
         source_path,
         origin="DOWNLOAD",
         original_name=original_name,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
         message="下载完成，等待后台导入",
     )
     projection = load_import_enqueue_command_projection(db, enqueue_command)

@@ -171,9 +171,9 @@ class PasswordResetToken(Base):
     user: Mapped[User] = relationship("User", back_populates="password_reset_tokens")
 
 
-class UserMonitorFolderAccess(Base):
-    __tablename__ = "UserMonitorFolderAccess"
-    __table_args__ = (Index("UserMonitorFolderAccess_folder_idx", "monitorFolderId"),)
+class UserLibraryAccess(Base):
+    __tablename__ = "UserLibraryAccess"
+    __table_args__ = (Index("UserLibraryAccess_library_idx", "libraryId"),)
 
     user_id: Mapped[str] = mapped_column(
         "userId",
@@ -181,10 +181,10 @@ class UserMonitorFolderAccess(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    monitor_folder_id: Mapped[str] = mapped_column(
-        "monitorFolderId",
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
         String(191),
-        ForeignKey("MonitorFolder.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(

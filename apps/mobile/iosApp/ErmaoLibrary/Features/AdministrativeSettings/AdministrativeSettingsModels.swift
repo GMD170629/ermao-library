@@ -178,7 +178,7 @@ struct AdministrativeUser: Identifiable, Equatable, Sendable {
     var role: UserRole
     var enabled: Bool
     var canManageSystem: Bool
-    var monitorFolderIDs: Set<String>
+    var libraryIDs: Set<String>
     var canViewManualImports: Bool
     var locale: AdministrativeSettingsLocale
 }

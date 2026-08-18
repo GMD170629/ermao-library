@@ -11,7 +11,7 @@ from app.models.auth import (
     PasswordResetToken,
     ReaderBookmark,
     User,
-    UserMonitorFolderAccess,
+    UserLibraryAccess,
     UserPreference,
 )
 from app.models.auth import (
@@ -50,7 +50,7 @@ class PreparedUserInsert:
 
 
 @dataclass(frozen=True)
-class PreparedMonitorFolderAccessWrite:
+class PreparedLibraryAccessWrite:
     user_id: str
     rows: tuple[dict[str, object], ...]
 
@@ -60,55 +60,55 @@ class PreparedPersonalUserDeletion:
     statements: tuple[Delete | Update, ...]
 
 
-def list_monitor_folder_ids(db: Session, user_id: str) -> list[str]:
+def list_library_ids(db: Session, user_id: str) -> list[str]:
     rows = db.execute(
-        select(UserMonitorFolderAccess.monitor_folder_id)
-        .where(UserMonitorFolderAccess.user_id == user_id)
-        .order_by(UserMonitorFolderAccess.monitor_folder_id)
+        select(UserLibraryAccess.library_id)
+        .where(UserLibraryAccess.user_id == user_id)
+        .order_by(UserLibraryAccess.library_id)
     ).scalars()
     return [str(item) for item in rows]
 
 
-def validate_monitor_folder_ids(db: Session, folder_ids: list[str]) -> list[str]:
+def validate_library_ids(db: Session, folder_ids: list[str]) -> list[str]:
     if not folder_ids:
         return []
-    from app.models.settings import MonitorFolder
+    from app.models.library import Library
 
     existing = {
         str(item)
         for item in db.execute(
-            select(MonitorFolder.id).where(MonitorFolder.id.in_(folder_ids))
+            select(Library.id).where(Library.id.in_(folder_ids))
         ).scalars()
     }
     missing = [folder_id for folder_id in folder_ids if folder_id not in existing]
     if missing:
-        raise ValueError("包含不存在的监控文件夹")
+        raise ValueError("包含不存在的书库")
     return folder_ids
 
 
-def prepare_monitor_folder_access(
+def prepare_library_access(
     user_id: str,
     folder_ids: list[str],
     now: datetime,
-) -> PreparedMonitorFolderAccessWrite:
+) -> PreparedLibraryAccessWrite:
     rows = tuple(
         {
             "user_id": user_id,
-            "monitor_folder_id": folder_id,
+            "library_id": folder_id,
             "created_at": now,
         }
         for folder_id in folder_ids
     )
-    return PreparedMonitorFolderAccessWrite(user_id=user_id, rows=rows)
+    return PreparedLibraryAccessWrite(user_id=user_id, rows=rows)
 
 
-def write_prepared_monitor_folder_access(
+def write_prepared_library_access(
     db: Session,
-    prepared: PreparedMonitorFolderAccessWrite,
+    prepared: PreparedLibraryAccessWrite,
 ) -> None:
     db.execute(
-        delete(UserMonitorFolderAccess).where(
-            UserMonitorFolderAccess.user_id == prepared.user_id
+        delete(UserLibraryAccess).where(
+            UserLibraryAccess.user_id == prepared.user_id
         )
     )
     if prepared.rows:
@@ -116,7 +116,7 @@ def write_prepared_monitor_folder_access(
             prepared.rows,
             parameters_per_row=3,
         ):
-            db.execute(insert(UserMonitorFolderAccess), list(chunk))
+            db.execute(insert(UserLibraryAccess), list(chunk))
 
 
 def _prepare_user_preference_rows(
@@ -239,7 +239,7 @@ def prepare_personal_user_deletion(
         ReaderBookPreference,
         ReaderPreference,
         UserPreference,
-        UserMonitorFolderAccess,
+        UserLibraryAccess,
         PasswordResetToken,
         UserSession,
     ):

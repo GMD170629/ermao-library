@@ -216,7 +216,7 @@ export function SmartFilterBuilder({ fields, rules, loading = false, onChange }:
           <button type="button" onClick={addCondition} className="flex min-h-28 w-full flex-col items-center justify-center rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-6 text-center transition hover:border-[#E4A692] hover:bg-[#FFF8F5]">
             <Database size={20} className="text-[#B0A69E]" />
             <span className="mt-2 text-sm font-medium text-[#5E5752]"><I18nText>添加第一个筛选条件</I18nText></span>
-            <span className="mt-1 text-xs text-[#928A83]"><I18nText>可按元数据、格式、阅读、书架、加入时间或监控文件夹筛选</I18nText></span>
+            <span className="mt-1 text-xs text-[#928A83]"><I18nText>可按元数据、格式、阅读、书架、加入时间或书库筛选</I18nText></span>
           </button>
         ) : null}
         {!loading && rules.conditions.map((condition, index) => {

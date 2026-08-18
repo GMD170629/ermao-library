@@ -23,7 +23,7 @@ protocol AdministrativeSettingsClient: Sendable {
     func loadUserAccess(id: String) async throws -> UserAccessSnapshot
     func saveUserAccess(
         id: String,
-        monitorFolderIDs: Set<String>,
+        libraryIDs: Set<String>,
         canViewManualImports: Bool
     ) async throws -> AdministrativeUser
 

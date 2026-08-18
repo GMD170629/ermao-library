@@ -13,11 +13,9 @@ from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms
 from app.models.import_pipeline import ImportAsset, ImportTask
 from app.modules.imports.infrastructure.library_queries import (
-    add_work_to_shelf,
     complete_download_task_for_source,
     fail_import_assets_for_task,
     get_import_task_by_id,
-    get_monitor_folder_shelf_id,
 )
 from app.modules.imports.infrastructure.source_keys import source_key
 from app.services.audio_metadata import collect_audio_bundle_files
@@ -90,7 +88,7 @@ def stage_import_task(
     original_name: str | None = None,
     requested_title: str | None = None,
     requested_author: str | None = None,
-    monitor_folder_id: str | None = None,
+    library_id: str | None = None,
     media_kind_policy: str = "MIXED",
     message: str = "等待后台处理",
     allow_terminal_requeue: bool = False,
@@ -106,7 +104,7 @@ def stage_import_task(
         original_name=original_name,
         requested_title=requested_title,
         requested_author=requested_author,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
         media_kind_policy=media_kind_policy,
         message=message,
         now=now,
@@ -222,21 +220,6 @@ def fail_claimed_import_task_row(
     return bool(result.rowcount)
 
 
-def link_imported_work_to_monitor_shelf(
-    db: Session,
-    monitor_folder_id: str | None,
-    work_id: str,
-    *,
-    created_at: Any,
-) -> None:
-    if not monitor_folder_id:
-        return
-    shelf_id = get_monitor_folder_shelf_id(db, monitor_folder_id)
-    if not shelf_id:
-        return
-    add_work_to_shelf(db, shelf_id, work_id, created_at=created_at)
-
-
 def mark_download_task_completed_for_import(
     db: Session,
     *,
@@ -260,7 +243,7 @@ def build_import_task_values(
     original_name: str | None,
     requested_title: str | None,
     requested_author: str | None,
-    monitor_folder_id: str | None,
+    library_id: str | None,
     media_kind_policy: str,
     message: str,
     now: Any,
@@ -269,7 +252,7 @@ def build_import_task_values(
     is_audio_bundle = source.is_dir() and bool(bundle_files)
     values: dict[str, Any] = {
         "id": task_id,
-        "monitorFolderId": monitor_folder_id,
+        "libraryId": library_id,
         "mediaKindPolicy": media_kind_policy,
         "workId": None,
         "origin": origin,

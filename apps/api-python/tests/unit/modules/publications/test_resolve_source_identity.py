@@ -49,7 +49,7 @@ def test_resolves_actual_source_hash_when_legacy_database_hash_is_missing() -> N
         access_scope=PublicationAccessScope(
             is_admin=True,
             can_view_manual_imports=True,
-            monitor_folder_ids=(),
+            library_ids=(),
         ),
     )
 

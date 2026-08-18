@@ -136,6 +136,7 @@ def test_collection_rejects_books_nesting_and_nonempty_deletion(
 
     db_session.add(
         LibraryWork(
+            library_id="test-library", 
             id="collection-guard-work",
             title="不能加入合集",
             normalized_title="不能加入合集",

@@ -1,4 +1,4 @@
-"""SQL-only monitor-folder command adapter."""
+"""SQL-only library command adapter."""
 
 from __future__ import annotations
 
@@ -6,34 +6,34 @@ from sqlalchemy import delete, func, insert, update
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
-from app.models.settings import MonitorFolder
-from app.modules.imports.application.monitor_folder_commands import (
-    PreparedMonitorFolderCreate,
-    PreparedMonitorFolderDelete,
-    PreparedMonitorFolderUpdate,
+from app.models.library import Library
+from app.modules.imports.application.library_commands import (
+    PreparedLibraryCreate,
+    PreparedLibraryDelete,
+    PreparedLibraryUpdate,
 )
 from app.services.system_events import write_prepared_system_events
 
 
-class SqlAlchemyMonitorFolderWriteStore:
+class SqlAlchemyLibraryWriteStore:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def create(self, prepared: PreparedMonitorFolderCreate) -> None:
-        self._db.execute(insert(MonitorFolder.__table__).values(prepared.values))
+    def create(self, prepared: PreparedLibraryCreate) -> None:
+        self._db.execute(insert(Library.__table__).values(prepared.values))
         write_prepared_system_events(self._db, (prepared.event,))
 
-    def update(self, prepared: PreparedMonitorFolderUpdate) -> None:
+    def update(self, prepared: PreparedLibraryUpdate) -> None:
         self._db.execute(
-            update(MonitorFolder)
-            .where(MonitorFolder.id == prepared.folder_id)
+            update(Library)
+            .where(Library.id == prepared.library_id)
             .values(**prepared.values)
         )
         write_prepared_system_events(self._db, (prepared.event,))
 
-    def delete(self, prepared: PreparedMonitorFolderDelete) -> bool:
+    def delete(self, prepared: PreparedLibraryDelete) -> bool:
         result = self._db.execute(
-            delete(MonitorFolder).where(MonitorFolder.id == prepared.folder_id)
+            delete(Library).where(Library.id == prepared.library_id)
         )
         deleted = bool(result.rowcount)
         if prepared.affected_user_ids:

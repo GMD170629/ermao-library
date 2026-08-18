@@ -1,4 +1,4 @@
-"""ORM persistence for monitor folders and import path caches."""
+"""ORM persistence for libraries and import path caches."""
 
 from __future__ import annotations
 
@@ -10,25 +10,22 @@ from sqlalchemy.orm import Session
 
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportTask
-from app.models.library import LibraryFile
-from app.models.settings import MonitorFolder, SystemSetting
+from app.models.library import Library, LibraryFile
+from app.models.settings import SystemSetting
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.infrastructure.library_queries import (
-    add_work_to_shelf,
     audio_bundle_fully_imported,
     get_completed_import_task_for_source,
-    shelf_exists,
-    touch_shelf_updated_at,
 )
 from app.services.audio_metadata import collect_audio_bundle_files
 
 
-def list_enabled_monitor_folders(db: Session) -> list[dict[str, Any]]:
+def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
     rows = (
         db.execute(
-            select(MonitorFolder.__table__)
-            .where(MonitorFolder.enabled.is_(True))
-            .order_by(MonitorFolder.created_at.desc())
+            select(Library.__table__)
+            .where(Library.enabled.is_(True))
+            .order_by(Library.created_at.desc())
         )
         .mappings()
         .all()
@@ -52,19 +49,6 @@ def upsert_system_setting(db: Session, key: str, value: str) -> None:
         )
         return
     db.add(SystemSetting(key=key, value=value, created_at=now, updated_at=now))
-
-
-def add_work_to_target_shelf(
-    db: Session,
-    *,
-    shelf_id: str,
-    work_id: str,
-) -> None:
-    if not shelf_exists(db, shelf_id):
-        return
-    now = db_timestamp()
-    add_work_to_shelf(db, shelf_id, work_id, created_at=now)
-    touch_shelf_updated_at(db, shelf_id, updated_at=now)
 
 
 def get_completed_import_task_work_id(

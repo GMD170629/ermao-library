@@ -72,7 +72,7 @@ class LibraryFilterSchemaOptions:
     formats: tuple[LibraryFilterOption, ...]
     import_statuses: tuple[LibraryFilterOption, ...]
     origins: tuple[LibraryFilterOption, ...]
-    monitor_folders: tuple[LibraryFilterOption, ...]
+    libraries: tuple[LibraryFilterOption, ...]
     shelves: tuple[LibraryFilterOption, ...]
 
 
@@ -243,12 +243,12 @@ FILTER_FIELD_DEFINITIONS = (
         "shelf", "所在普通书架", "来源与归档", "select", SELECT_OPERATORS, "shelves"
     ),
     LibraryFilterFieldDefinition(
-        "monitorFolder",
-        "监控文件夹",
+        "library",
+        "书库",
         "来源与归档",
         "select",
         SELECT_OPERATORS,
-        "monitorFolders",
+        "libraries",
     ),
     LibraryFilterFieldDefinition(
         "sourcePath", "原始文件路径", "来源与归档", "text", TEXT_OPERATORS
@@ -326,7 +326,7 @@ class GetLibraryFilterSchema:
             "formats": dynamic.formats,
             "importStatuses": dynamic.import_statuses,
             "origins": dynamic.origins,
-            "monitorFolders": dynamic.monitor_folders,
+            "libraries": dynamic.libraries,
             "shelves": dynamic.shelves,
         }
         return LibraryFilterSchema(

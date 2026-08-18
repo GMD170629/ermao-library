@@ -57,6 +57,7 @@ def _seed_pending_comics(
             _write_comic_archive(archive_path, page_count)
             updated_at = datetime(2026, 8, 11, 8, index % 60, tzinfo=UTC)
             work = LibraryWork(
+            library_id="test-library", 
                 id=f"comic-work-{index:03}",
                 origin="MANUAL",
                 title=f"Comic {index}",

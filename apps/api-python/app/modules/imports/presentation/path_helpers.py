@@ -21,14 +21,14 @@ def has_table(db: Session, table: str) -> bool:
         return False
 
 
-def enabled_monitor_folder_for_path(db: Session, target: Path) -> dict[str, Any] | None:
-    if not has_table(db, "MonitorFolder"):
+def enabled_library_for_path(db: Session, target: Path) -> dict[str, Any] | None:
+    if not has_table(db, "Library"):
         return None
     try:
         real_target = target.expanduser().resolve()
     except OSError:
         return None
-    for folder in import_http_store.list_enabled_monitor_folder_rows(db):
+    for folder in import_http_store.list_enabled_library_rows(db):
         try:
             root = Path(str(folder.get("rootPath") or "")).expanduser().resolve()
         except OSError:

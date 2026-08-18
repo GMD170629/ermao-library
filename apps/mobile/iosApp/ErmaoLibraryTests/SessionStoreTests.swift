@@ -378,7 +378,7 @@ final class SessionStoreTests: XCTestCase {
                     isAdmin: false,
                     canManageSystem: false,
                     allLibraryScopes: true,
-                    monitorFolderIDs: [],
+                    libraryIDs: [],
                     canViewManualImports: false,
                     authorizationVersion: 7
                 ),

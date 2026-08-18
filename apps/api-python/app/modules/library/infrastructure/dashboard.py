@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, aliased
 from app.contracts.media_capabilities import reader_type_for_format
 from app.core.authorization import (
     AuthorizationContext,
-    monitor_folder_visibility_predicate,
+    library_visibility_predicate,
     volume_visibility_predicate,
     work_visibility_predicate,
 )
@@ -25,7 +25,8 @@ from app.models.library import (
     LibraryWork,
     UserMediaHistory,
 )
-from app.models.settings import MonitorFolder, SystemEvent
+from app.models.library import Library
+from app.models.settings import SystemEvent
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 from app.modules.reader.public import (
     MediaKind,
@@ -306,7 +307,7 @@ def dashboard_summary(
         select(ImportTask.finished_at, ImportTask.updated_at)
         .where(
             ImportTask.status == "COMPLETED",
-            monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id),
+            library_visibility_predicate(context, ImportTask.library_id),
         )
         .order_by(ImportTask.finished_at.desc(), ImportTask.id.desc())
         .limit(1)
@@ -321,17 +322,17 @@ def dashboard_summary(
         .limit(1)
     )
 
-    monitor_folder_count = (
+    library_count = (
         int(
             db.scalar(
                 select(func.count())
-                .select_from(MonitorFolder)
-                .where(MonitorFolder.enabled.is_(True))
+                .select_from(Library)
+                .where(Library.enabled.is_(True))
             )
             or 0
         )
         if context.is_admin
-        else len(context.monitor_folder_ids)
+        else len(context.library_ids)
     )
 
     return {
@@ -340,7 +341,7 @@ def dashboard_summary(
         "comicBooks": comic_books,
         "audiobookBooks": audiobook_books,
         "storageUsedBytes": storage,
-        "monitorFolderCount": monitor_folder_count,
+        "libraryCount": library_count,
         "lastImportAt": (last_import or {}).get("finishedAt")
         or (last_import or {}).get("updatedAt"),
         "latestSyncAt": latest_progress_at,
@@ -596,7 +597,7 @@ def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, An
             LibraryWork.title,
             LibraryWork.author,
             LibraryWork.series_name,
-            LibraryWork.monitor_folder_id,
+            LibraryWork.library_id,
             LibraryWork.organize_status,
             LibraryWork.hidden,
             LibraryWork.updated_at,
@@ -628,7 +629,7 @@ def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, An
             "author": row.author,
             "seriesName": row.series_name,
             "availableMediaKinds": kinds_by_work[str(row.id)],
-            "monitorFolderId": row.monitor_folder_id,
+            "libraryId": row.library_id,
             "organizeStatus": row.organize_status,
             "hidden": row.hidden,
             "updatedAt": row.updated_at,

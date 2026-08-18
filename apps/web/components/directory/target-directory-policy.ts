@@ -1,4 +1,4 @@
-export type MonitorFolderPath = {
+export type LibraryPath = {
   rootPath: string;
   enabled: boolean;
 };
@@ -13,7 +13,7 @@ export function isDirectoryInside(rootPath: string, targetPath: string): boolean
   return target === root || target.startsWith(`${root}/`);
 }
 
-export function enabledMonitorRootPaths(folders: MonitorFolderPath[]): string[] {
+export function enabledLibraryRootPaths(folders: LibraryPath[]): string[] {
   return folders
     .filter((folder) => folder.enabled)
     .map((folder) => normalizeDirectoryPath(folder.rootPath));

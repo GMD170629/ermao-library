@@ -8,7 +8,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
-from app.models.auth import User, UserMonitorFolderAccess
+from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
     LibraryFacet,
     LibraryFile,
@@ -18,7 +18,7 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.models.shelf import Shelf, ShelfWork
 
 
@@ -52,6 +52,7 @@ def _add_work(
     author: str | None = None,
 ) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
@@ -98,7 +99,7 @@ def _filtered_titles(client: TestClient, rules: dict[str, object]) -> list[str]:
 def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     alpha_work = LibraryWork(
         id="alpha",
-        monitor_folder_id="folder-alpha",
+        library_id="folder-alpha",
         origin="WATCH",
         title="星海列车",
         normalized_title="星海列车",
@@ -120,7 +121,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     )
     beta_work = LibraryWork(
         id="beta",
-        monitor_folder_id="folder-beta",
+        library_id="folder-beta",
         origin="MANUAL",
         title="平凡日记",
         normalized_title="平凡日记",
@@ -141,6 +142,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         updated_at=datetime(2025, 1, 2, 8, tzinfo=UTC),
     )
     empty_work = LibraryWork(
+            library_id="test-library", 
         id="empty",
         origin="MANUAL",
         title="空白样本",
@@ -172,7 +174,6 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryVolume(
             id="volume-alpha-1",
             media_version_id=alpha_media.id,
-            monitor_folder_id="folder-alpha",
             origin="WATCH",
             title="星海列车 旗舰卷",
             volume_index=1,
@@ -193,7 +194,6 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryVolume(
             id="volume-alpha-2",
             media_version_id=alpha_media.id,
-            monitor_folder_id="folder-alpha",
             origin="WATCH",
             title="星海列车 第二卷",
             volume_index=2,
@@ -211,7 +211,6 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     beta_volume = LibraryVolume(
         id="volume-beta",
         media_version_id=beta_media.id,
-        monitor_folder_id="folder-beta",
         origin="MANUAL",
         title="平凡日记 第一卷",
         format="PDF",
@@ -281,12 +280,14 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     )
     db.add_all(
         [
-            MonitorFolder(
+            Library(
+            organization_mode="FLAT", 
                 id="folder-alpha",
                 name="星海目录",
                 root_path="/books/alpha",
             ),
-            MonitorFolder(
+            Library(
+            organization_mode="FLAT", 
                 id="folder-beta",
                 name="普通目录",
                 root_path="/books/beta",
@@ -470,7 +471,7 @@ def test_work_list_applies_every_smart_filter_field(
         "organized": {"operator": "is_true"},
         "hasCover": {"operator": "is_true"},
         "shelf": {"operator": "equals", "value": "shelf-alpha"},
-        "monitorFolder": {"operator": "equals", "value": "folder-alpha"},
+        "library": {"operator": "equals", "value": "folder-alpha"},
         "origin": {"operator": "equals", "value": "WATCH"},
         "importStatus": {"operator": "equals", "value": "COMPLETED"},
         "createdAt": {"operator": "equals", "value": "2026-07-10"},
@@ -482,10 +483,10 @@ def test_work_list_applies_every_smart_filter_field(
     schema_fields = {field["key"] for field in returned_fields}
     assert set(conditions_by_field) == schema_fields
     field_keys = [field["key"] for field in returned_fields]
-    monitor_folder_index = field_keys.index("monitorFolder")
-    assert returned_fields[monitor_folder_index]["label"] == "监控文件夹"
-    assert field_keys[monitor_folder_index + 1] == "sourcePath"
-    assert returned_fields[monitor_folder_index + 1]["group"] == "来源与归档"
+    library_index = field_keys.index("library")
+    assert returned_fields[library_index]["label"] == "书库"
+    assert field_keys[library_index + 1] == "sourcePath"
+    assert returned_fields[library_index + 1]["group"] == "来源与归档"
 
     for field, partial_condition in conditions_by_field.items():
         titles = _filtered_titles(
@@ -614,6 +615,7 @@ def test_filter_schema_size_and_option_query_stay_bounded_at_high_cardinality(
         db_session.add_all(
             [
                 LibraryWork(
+            library_id="test-library", 
                     id=f"large-filter-{index}",
                     title=f"Large filter {index}",
                     normalized_title=f"large filter {index}",
@@ -659,7 +661,7 @@ def test_filter_schema_size_and_option_query_stay_bounded_at_high_cardinality(
     assert not any("LIBRARYWORK.TAGS" in statement for statement in statements)
 
 
-def test_monitor_folder_filter_matches_real_volume_file_paths(
+def test_library_filter_matches_real_volume_file_paths(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -673,7 +675,7 @@ def test_monitor_folder_filter_matches_real_volume_file_paths(
     for volume_id, folder_id in stored_folder_ids.items():
         volume = db_session.get(LibraryVolume, volume_id)
         assert volume is not None
-        volume.monitor_folder_id = folder_id
+        volume.library_id = folder_id
     real_paths = {
         "file-alpha-1": "/books/alpha/星海列车/第一卷.epub",
         "file-alpha-2": "/outside/星海列车/第二卷.epub",
@@ -692,7 +694,7 @@ def test_monitor_folder_filter_matches_real_volume_file_paths(
             "combinator": "ALL",
             "conditions": [
                 {
-                    "field": "monitorFolder",
+                    "field": "library",
                     "operator": "equals",
                     "value": "folder-alpha",
                 }
@@ -706,7 +708,7 @@ def test_monitor_folder_filter_matches_real_volume_file_paths(
                 "combinator": "ALL",
                 "conditions": [
                     {
-                        "field": "monitorFolder",
+                        "field": "library",
                         "operator": "not_equals",
                         "value": "folder-alpha",
                     }
@@ -719,7 +721,7 @@ def test_monitor_folder_filter_matches_real_volume_file_paths(
             client,
             {
                 "combinator": "ALL",
-                "conditions": [{"field": "monitorFolder", "operator": "is_not_empty"}],
+                "conditions": [{"field": "library", "operator": "is_not_empty"}],
             },
         )
     ) == {"星海列车", "平凡日记"}
@@ -727,7 +729,7 @@ def test_monitor_folder_filter_matches_real_volume_file_paths(
         client,
         {
             "combinator": "ALL",
-            "conditions": [{"field": "monitorFolder", "operator": "is_empty"}],
+            "conditions": [{"field": "library", "operator": "is_empty"}],
         },
     ) == ["空白样本"]
 
@@ -969,9 +971,9 @@ def test_work_list_smart_filters_preserve_volume_authorization(
     db_session.commit()
     _add_filter_matrix_fixture(db_session, user)
     db_session.add(
-        UserMonitorFolderAccess(
+        UserLibraryAccess(
             user_id=user.id,
-            monitor_folder_id="folder-alpha",
+            library_id="folder-alpha",
         )
     )
     db_session.commit()

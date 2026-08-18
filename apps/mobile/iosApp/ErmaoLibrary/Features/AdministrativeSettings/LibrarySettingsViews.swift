@@ -23,7 +23,7 @@ struct LibrarySourcesView: View {
                         } icon: { Image(systemName: "externaldrive") }
                     }
                 }
-                Section(copy[.monitorFolders]) {
+                Section(copy[.libraries]) {
                     ForEach(snapshot.sources) { source in
                         Button { navigate(.librarySourceEditor(sourceID: source.id)) } label: { sourceRow(source) }.buttonStyle(.plain)
                     }

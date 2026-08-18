@@ -77,12 +77,12 @@ def logical_import_path(
     resolved = path.expanduser().resolve()
     roots: list[tuple[str, Path]] = []
     try:
-        if "MonitorFolder" in inspect(db.connection()).get_table_names():
-            from app.models.settings import MonitorFolder
+        if "Library" in inspect(db.connection()).get_table_names():
+            from app.models.library import Library
 
             for row in db.execute(
-                select(MonitorFolder.name, MonitorFolder.root_path).where(
-                    MonitorFolder.enabled.is_(True)
+                select(Library.name, Library.root_path).where(
+                    Library.enabled.is_(True)
                 )
             ):
                 try:

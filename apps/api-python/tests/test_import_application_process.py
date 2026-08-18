@@ -14,7 +14,7 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.errors import (
     ImportExecutionError,
-    MonitorFolderDeletedDuringImportError,
+    LibraryDeletedDuringImportError,
 )
 from app.modules.imports.application.fail import fail_claimed_import_task
 from app.modules.imports.application.process import process_import_task
@@ -43,22 +43,11 @@ class RecordingStore:
     def __init__(self, *, fail_at: str | None = None) -> None:
         self.fail_at = fail_at
         self.calls: list[str] = []
-        self.monitor_folder_available = True
+        self.library_available = True
 
-    def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
-        self.calls.append("monitor")
-        return self.monitor_folder_available
-
-    def link_work_to_monitor_shelf(
-        self,
-        monitor_folder_id: str | None,
-        work_id: str,
-        *,
-        created_at: int,
-    ) -> None:
-        self.calls.append("shelf")
-        if self.fail_at == "shelf":
-            raise RuntimeError("shelf synchronization failed")
+    def library_exists(self, library_id: str) -> bool:
+        self.calls.append("library")
+        return self.library_available
 
     def mark_download_completed(
         self,
@@ -121,7 +110,7 @@ def _task() -> ImportTaskDTO:
         source_path="/tmp/book.epub",
         origin="MANUAL",
         status="PARSING",
-        monitor_folder_id="folder-1",
+        library_id="folder-1",
     )
 
 
@@ -143,7 +132,7 @@ def test_process_import_commits_final_writes_once_after_post_success_hooks() -> 
     )
 
     assert result.work_id == "work-1"
-    assert store.calls == ["monitor", "monitor", "shelf", "download"]
+    assert store.calls == ["library", "library", "download"]
     assert unit_of_work.commits == 1
     assert unit_of_work.rollbacks == 0
     assert pipeline.completed == 1
@@ -174,7 +163,7 @@ def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
     assert not hasattr(pipeline.options, "requested_work_id")
 
 
-@pytest.mark.parametrize("failure", ["shelf", "download"])
+@pytest.mark.parametrize("failure", ["download"])
 def test_process_import_rolls_back_all_final_writes_when_post_hook_fails(
     failure: str,
 ) -> None:
@@ -200,13 +189,13 @@ def test_process_import_rolls_back_all_final_writes_when_post_hook_fails(
     assert pipeline.completed == 0
 
 
-def test_process_import_stops_before_pipeline_when_monitor_folder_was_deleted() -> None:
+def test_process_import_stops_before_pipeline_when_library_was_deleted() -> None:
     unit_of_work = RecordingUnitOfWork()
     store = RecordingStore()
-    store.monitor_folder_available = False
+    store.library_available = False
     pipeline = RecordingPipeline()
 
-    with pytest.raises(MonitorFolderDeletedDuringImportError):
+    with pytest.raises(LibraryDeletedDuringImportError):
         process_import_task(
             store,
             unit_of_work,
@@ -224,16 +213,16 @@ def test_process_import_stops_before_pipeline_when_monitor_folder_was_deleted() 
     assert pipeline.completed == 0
 
 
-def test_process_import_rolls_back_when_monitor_folder_is_deleted_during_pipeline() -> (
+def test_process_import_rolls_back_when_library_is_deleted_during_pipeline() -> (
     None
 ):
     unit_of_work = RecordingUnitOfWork()
     store = RecordingStore()
     pipeline = RecordingPipeline(
-        after_import=lambda: setattr(store, "monitor_folder_available", False)
+        after_import=lambda: setattr(store, "library_available", False)
     )
 
-    with pytest.raises(MonitorFolderDeletedDuringImportError):
+    with pytest.raises(LibraryDeletedDuringImportError):
         process_import_task(
             store,
             unit_of_work,
@@ -246,7 +235,7 @@ def test_process_import_rolls_back_when_monitor_folder_is_deleted_during_pipelin
             now=123,
         )
 
-    assert store.calls == ["monitor", "monitor"]
+    assert store.calls == ["library", "library"]
     assert unit_of_work.commits == 0
     assert unit_of_work.rollbacks == 1
     assert pipeline.completed == 0
@@ -256,10 +245,10 @@ class FailureRecordingStore:
     def __init__(self) -> None:
         self.failure: dict[str, object] | None = None
         self.event_staged = False
-        self.monitor_folder_available = False
+        self.library_available = False
 
-    def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
-        return self.monitor_folder_available
+    def library_exists(self, library_id: str) -> bool:
+        return self.library_available
 
     def fail_claimed(
         self,
@@ -294,7 +283,7 @@ class ExistingSourceProbe:
         return True
 
 
-def test_fail_claimed_import_is_terminal_when_monitor_folder_was_deleted() -> None:
+def test_fail_claimed_import_is_terminal_when_library_was_deleted() -> None:
     store = FailureRecordingStore()
     unit_of_work = RecordingUnitOfWork()
 
@@ -302,16 +291,16 @@ def test_fail_claimed_import_is_terminal_when_monitor_folder_was_deleted() -> No
         store,
         unit_of_work,
         _task(),
-        MonitorFolderDeletedDuringImportError(),
+        LibraryDeletedDuringImportError(),
         now=123,
         source_probe=ExistingSourceProbe(),
     )
 
     assert failed is True
     assert store.failure == {
-        "error_code": "MONITOR_FOLDER_NOT_FOUND",
-        "error_summary": "监控文件夹已在导入期间被删除",
-        "message": "监控文件夹已被删除，本次导入任务已结束",
+        "error_code": "LIBRARY_NOT_FOUND",
+        "error_summary": "书库已在导入期间被删除",
+        "message": "书库已被删除，本次导入任务已结束",
         "retryable": False,
     }
     assert store.event_staged is True
@@ -320,7 +309,7 @@ def test_fail_claimed_import_is_terminal_when_monitor_folder_was_deleted() -> No
 
 def test_fail_claimed_import_preserves_named_execution_failure() -> None:
     store = FailureRecordingStore()
-    store.monitor_folder_available = True
+    store.library_available = True
     unit_of_work = RecordingUnitOfWork()
 
     failed = fail_claimed_import_task(

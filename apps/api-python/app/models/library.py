@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -19,6 +20,56 @@ from app.db.base import Base
 from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
 
 
+class Library(Base):
+    __tablename__ = "Library"
+    __table_args__ = (
+        CheckConstraint(
+            "organizationMode IN ('FLAT', 'VOLUMES', 'AUDIOBOOK')",
+            name="Library_organizationMode_check",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    name: Mapped[str] = mapped_column(String(191), nullable=False)
+    root_path: Mapped[str] = mapped_column(
+        "rootPath", String(191), unique=True, nullable=False
+    )
+    organization_mode: Mapped[str] = mapped_column(
+        "organizationMode", String(32), nullable=False
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    ignore_patterns: Mapped[str | None] = mapped_column(
+        "ignorePatterns", Text, nullable=True
+    )
+    ignore_hidden: Mapped[bool] = mapped_column(
+        "ignoreHidden", Boolean, nullable=False, default=True, server_default="1"
+    )
+    min_file_size_bytes: Mapped[int] = mapped_column(
+        "minFileSizeBytes",
+        Integer,
+        nullable=False,
+        default=10240,
+        server_default="10240",
+    )
+    description: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
 class LibraryWork(Base):
     __tablename__ = "LibraryWork"
     __table_args__ = (
@@ -31,7 +82,7 @@ class LibraryWork(Base):
         Index("LibraryWork_organizeStatus_idx", "organizeStatus"),
         Index("LibraryWork_hidden_idx", "hidden"),
         Index("LibraryWork_organized_idx", "organized"),
-        Index("LibraryWork_monitorFolderId_idx", "monitorFolderId"),
+        Index("LibraryWork_libraryId_idx", "libraryId"),
         Index("LibraryWork_mergeKey_idx", "mergeKey"),
         Index("LibraryWork_facetIndexVersion_id_idx", "facetIndexVersion", "id"),
         Index("LibraryWork_createdAt_id_idx", "createdAt", "id"),
@@ -46,11 +97,11 @@ class LibraryWork(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    monitor_folder_id: Mapped[str | None] = mapped_column(
-        "monitorFolderId",
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
         String(191),
-        ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
     )
     origin: Mapped[str] = mapped_column(
         String(191), nullable=False, default="MANUAL", server_default="MANUAL"
@@ -191,16 +242,14 @@ class LibraryVolume(Base):
             "volumeIndex",
         ),
         Index(
-            "LibraryVolume_mediaVersionId_hidden_monitorFolderId_idx",
+            "LibraryVolume_mediaVersionId_hidden_idx",
             "mediaVersionId",
             "hidden",
-            "monitorFolderId",
         ),
         Index("LibraryVolume_format_idx", "format"),
         Index("LibraryVolume_identifier_idx", "identifier"),
         Index("LibraryVolume_isbn_idx", "isbn"),
         Index("LibraryVolume_resourceKey_idx", "resourceKey"),
-        Index("LibraryVolume_monitorFolderId_idx", "monitorFolderId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -209,12 +258,6 @@ class LibraryVolume(Base):
         String(191),
         ForeignKey("LibraryMediaVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
-    )
-    monitor_folder_id: Mapped[str | None] = mapped_column(
-        "monitorFolderId",
-        String(191),
-        ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
     )
     origin: Mapped[str] = mapped_column(
         String(191), nullable=False, default="MANUAL", server_default="MANUAL"

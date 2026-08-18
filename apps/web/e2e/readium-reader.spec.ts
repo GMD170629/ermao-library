@@ -79,7 +79,7 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
     const item = body as { clientId: string; locator: Record<string, unknown>; baseRevision: number };
     return route.fulfill({ json: { ok: true, data: { schemaVersion: 4, clientId: item.clientId, revision: item.baseRevision + 1, locator: item.locator, displayPercent: 0, receivedAtEpochMillis: Date.now() } } });
   }
-  if (pathname === '/api/auth/me') return route.fulfill({ json: { ok: true, data: { user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' }, authorization: { isAdmin: true, canManageSystem: true, allLibraryScopes: true, monitorFolderIds: [], canViewManualImports: true, authzVersion: 1 } } } });
+  if (pathname === '/api/auth/me') return route.fulfill({ json: { ok: true, data: { user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' }, authorization: { isAdmin: true, canManageSystem: true, allLibraryScopes: true, libraryIds: [], canViewManualImports: true, authzVersion: 1 } } } });
   return route.fulfill({ json: { ok: true, data: {} } });
 }
 

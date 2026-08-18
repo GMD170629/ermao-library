@@ -16,11 +16,13 @@ from sqlalchemy import (
     not_,
     or_,
     select,
+    true,
 )
 from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import AuthorizationContext, volume_visibility_predicate
 from app.models.library import (
+    Library,
     LibraryFacet,
     LibraryFile,
     LibraryMediaVersion,
@@ -29,7 +31,6 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
@@ -180,7 +181,7 @@ def _relation_text(
     return not_(predicate) if negative else predicate
 
 
-def resolve_monitor_folder_roots(
+def resolve_library_roots(
     db: Session,
     expression: FilterExpression,
     context: AuthorizationContext,
@@ -188,7 +189,7 @@ def resolve_monitor_folder_roots(
     conditions = tuple(
         condition
         for condition in expression.conditions
-        if condition.field == "monitorFolder"
+        if condition.field == "library"
     )
     if not conditions:
         return {}
@@ -198,15 +199,15 @@ def resolve_monitor_folder_roots(
     requested_ids = {
         str(condition.value) for condition in conditions if condition.value is not None
     }
-    if not context.is_admin and not context.monitor_folder_ids:
+    if not context.is_admin and not context.library_ids:
         return {}
-    statement = select(MonitorFolder.id, MonitorFolder.root_path)
+    statement = select(Library.id, Library.root_path)
     if not context.is_admin:
-        statement = statement.where(MonitorFolder.id.in_(context.monitor_folder_ids))
+        statement = statement.where(Library.id.in_(context.library_ids))
     if not include_all_accessible:
         if not requested_ids:
             return {}
-        statement = statement.where(MonitorFolder.id.in_(requested_ids))
+        statement = statement.where(Library.id.in_(requested_ids))
     roots: dict[str, str] = {}
     for folder_id, root_path in db.execute(statement).all():
         normalized = _normalized_monitor_root(str(root_path))
@@ -241,50 +242,22 @@ def _path_has_prefix(
     return and_(path >= prefix, path < f"{prefix}\U0010ffff")
 
 
-def _monitor_folder(
+def _library(
     volume: type[LibraryVolume],
     media_version: type[LibraryMediaVersion],
     visible: ColumnElement[bool],
     condition: FilterCondition,
-    monitor_folder_roots: Mapping[str, str],
+    library_roots: Mapping[str, str],
 ) -> ColumnElement[bool]:
-    folder_ids = (
-        tuple(monitor_folder_roots)
-        if condition.operator in {"is_empty", "is_not_empty"}
-        else (str(condition.value or ""),)
-    )
-    roots = tuple(
-        monitor_folder_roots[folder_id]
-        for folder_id in folder_ids
-        if folder_id in monitor_folder_roots
-    )
-    if not roots:
-        return (
-            false()
-            if condition.operator in {"equals", "is_not_empty"}
-            else not_(false())
-        )
-    file = aliased(LibraryFile)
-    path_matches = or_(
-        *(
-            _path_has_prefix(file.path, prefix)
-            for root in roots
-            for prefix in _root_prefixes(root)
-        )
-    )
-    matching_volume = exists(
-        select(file.id)
-        .join(volume, volume.id == file.volume_id)
-        .join(media_version, media_version.id == volume.media_version_id)
-        .where(visible, path_matches)
-    )
     if condition.operator == "is_empty":
-        return not_(matching_volume)
+        return false()
     if condition.operator == "is_not_empty":
-        return matching_volume
-    return (
-        not_(matching_volume) if condition.operator == "not_equals" else matching_volume
-    )
+        return true()
+    library_id = str(condition.value or "")
+    if not library_id:
+        return false() if condition.operator == "equals" else true()
+    matches = LibraryWork.library_id == library_id
+    return not_(matches) if condition.operator == "not_equals" else matches
 
 
 def _reading_status(
@@ -331,7 +304,7 @@ def _condition(
     context: AuthorizationContext,
     user_id: str | None,
     shelf_owner_user_id: str | None,
-    monitor_folder_roots: Mapping[str, str],
+    library_roots: Mapping[str, str],
 ) -> ColumnElement[bool]:
     field = condition.field
     if field == "readingStatus" and user_id:
@@ -385,13 +358,13 @@ def _condition(
             shelf.id,
             condition,
         )
-    if field == "monitorFolder":
-        return _monitor_folder(
+    if field == "library":
+        return _library(
             volume,
             media_version,
             visible,
             condition,
-            monitor_folder_roots,
+            library_roots,
         )
     if field == "sourcePath":
         file = aliased(LibraryFile)
@@ -469,7 +442,7 @@ def compile_filter_expression(
     context: AuthorizationContext,
     user_id: str | None = None,
     shelf_owner_user_id: str | None = None,
-    monitor_folder_roots: Mapping[str, str] | None = None,
+    library_roots: Mapping[str, str] | None = None,
 ) -> ColumnElement[bool] | None:
     predicates = [
         _condition(
@@ -477,7 +450,7 @@ def compile_filter_expression(
             context=context,
             user_id=user_id,
             shelf_owner_user_id=shelf_owner_user_id,
-            monitor_folder_roots=monitor_folder_roots or {},
+            library_roots=library_roots or {},
         )
         for condition in expression.conditions
     ]

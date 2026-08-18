@@ -9,6 +9,7 @@ from typing_extensions import TypedDict
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.system_events import SystemEvent
+from app.modules.library.domain.layout import LibraryOrganizationMode
 
 SystemSettingValue = str | int | float | bool | list[str] | None
 
@@ -125,15 +126,12 @@ class SystemStatusCheck(HttpContractModel):
     message: str
 
 
-class EnabledMonitorFolder(HttpContractModel):
+class EnabledLibrary(HttpContractModel):
     id: str
     name: str
     root_path: str = Field(alias="rootPath")
-    shelf_id: str | None = Field(alias="shelfId")
+    organization_mode: LibraryOrganizationMode = Field(alias="organizationMode")
     enabled: bool
-    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
-        alias="mediaKindPolicy"
-    )
     ignore_patterns: str | None = Field(alias="ignorePatterns")
     ignore_hidden: bool = Field(alias="ignoreHidden")
     min_file_size_bytes: int = Field(alias="minFileSizeBytes")
@@ -160,7 +158,7 @@ class SystemRecognizedImportMetadata(TypedDict):
 
 class SystemImportTaskSummary(HttpContractModel):
     id: str
-    monitor_folder_id: str | None = Field(alias="monitorFolderId")
+    library_id: str | None = Field(alias="libraryId")
     work_id: str | None = Field(alias="workId")
     volume_id: str | None = Field(alias="volumeId")
     origin: str
@@ -199,8 +197,8 @@ class SystemImportTaskSummary(HttpContractModel):
 class DashboardSystemStatusPayload(HttpContractModel):
     database: SystemStatusCheck
     worker: SystemStatusCheck
-    enabled_monitor_folders: list[EnabledMonitorFolder] = Field(
-        alias="enabledMonitorFolders"
+    enabled_libraries: list[EnabledLibrary] = Field(
+        alias="enabledLibraries"
     )
     current_import_task: SystemImportTaskSummary | None = Field(
         alias="currentImportTask"

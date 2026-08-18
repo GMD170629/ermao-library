@@ -66,6 +66,7 @@ def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
         role="admin",
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="exact-work",
         origin="MANUAL",
         title="Exact Reader",

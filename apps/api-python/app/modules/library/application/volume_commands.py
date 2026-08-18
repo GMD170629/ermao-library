@@ -16,7 +16,7 @@ class LibraryActor:
     can_manage_system: bool
     is_admin: bool
     can_view_manual_imports: bool
-    monitor_folder_ids: tuple[str, ...]
+    library_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +28,7 @@ class VolumeContext:
     title: str
     sort_order: int
     format: str
-    monitor_folder_id: str | None
+    library_id: str | None
     author: str | None
     work_title: str
     source_path: Path | None

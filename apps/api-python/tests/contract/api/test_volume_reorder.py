@@ -26,6 +26,7 @@ def _login_manager(client, db: Session) -> User:
 
 def _add_volume_series(db: Session) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="reorder-work",
         origin="MANUAL",
         title="Reorder work",
@@ -117,6 +118,7 @@ def test_volume_move_rejects_a_volume_outside_the_requested_work(
     _login_manager(client, db_session)
     _add_volume_series(db_session)
     other_work = LibraryWork(
+            library_id="test-library", 
         id="other-work",
         origin="MANUAL",
         title="Other work",

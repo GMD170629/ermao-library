@@ -7,7 +7,7 @@ from app.models.auth import (
     ReaderBookmark,
     Session,
     User,
-    UserMonitorFolderAccess,
+    UserLibraryAccess,
     UserPreference,
 )
 from app.models.import_pipeline import (
@@ -24,6 +24,7 @@ from app.models.import_pipeline import (
 )
 from app.models.library import (
     ExternalMetadataCache,
+    Library,
     LibraryFacet,
     LibraryFile,
     LibraryMediaVersion,
@@ -56,7 +57,6 @@ from app.models.organize import (
 )
 from app.models.settings import (
     BookIdentityCache,
-    MonitorFolder,
     QueueControlOperation,
     QueueRuntimeState,
     ReaderBookPreference,
@@ -84,6 +84,7 @@ __all__ = [
     "ImportTask",
     "ImportWorkItem",
     "KindleSendTask",
+    "Library",
     "LibraryFacet",
     "LibraryFile",
     "LibraryMediaVersion",
@@ -104,7 +105,6 @@ __all__ = [
     "MetadataWritebackOperation",
     "MetadataWritebackPreparation",
     "MetadataWritebackTarget",
-    "MonitorFolder",
     "OrganizeJob",
     "OrganizePolicy",
     "OrganizeRun",
@@ -128,7 +128,7 @@ __all__ = [
     "SystemSetting",
     "User",
     "UserMediaHistory",
-    "UserMonitorFolderAccess",
+    "UserLibraryAccess",
     "UserPreference",
     "WorkDetailPreference",
 ]

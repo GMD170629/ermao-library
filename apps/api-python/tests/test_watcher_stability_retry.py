@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import app.worker.watcher as watcher_module
 import pytest
 from app.worker.watcher import (
-    MonitorFolderConfig,
+    LibraryConfig,
     WatchState,
     WorkerFileHandler,
     WorkerManager,
@@ -19,14 +19,14 @@ from watchdog.events import FileMovedEvent
 
 def test_atomic_publish_rename_is_scheduled_for_monitoring(tmp_path: Path) -> None:
     source = tmp_path / "published.epub"
-    folder = MonitorFolderConfig(id="folder-1", root_path=str(tmp_path))
-    scheduled: list[tuple[Path, MonitorFolderConfig]] = []
+    folder = LibraryConfig(id="folder-1", root_path=str(tmp_path))
+    scheduled: list[tuple[Path, LibraryConfig]] = []
 
     class RecordingManager:
         def schedule_import(
             self,
             path: Path,
-            scheduled_folder: MonitorFolderConfig,
+            scheduled_folder: LibraryConfig,
             _state: WatchState,
         ) -> None:
             scheduled.append((path, scheduled_folder))
@@ -48,7 +48,7 @@ def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
     source = tmp_path / "changed.epub"
     source.write_bytes(b"content")
     deferred = Event()
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-1",
         root_path=str(tmp_path),
         min_file_size_bytes=1,
@@ -101,10 +101,10 @@ def test_refresh_worker_state_closes_projection_session_before_path_io(
 
         def join(self, *, timeout: int) -> None: ...
 
-    folder = MonitorFolderConfig(id="folder-1", root_path=str(tmp_path))
+    folder = LibraryConfig(id="folder-1", root_path=str(tmp_path))
     monkeypatch.setattr(
         watcher_module,
-        "list_enabled_monitor_folders",
+        "list_enabled_libraries",
         lambda _db: (
             [{"id": folder.id, "rootPath": folder.root_path}]
             if session_active
@@ -118,7 +118,7 @@ def test_refresh_worker_state_closes_projection_session_before_path_io(
     )
     monkeypatch.setattr(
         watcher_module,
-        "enabled_monitor_folders",
+        "enabled_libraries",
         lambda _rows, _settings: (
             (folder,)
             if not session_active
@@ -138,7 +138,7 @@ def test_refresh_worker_state_closes_projection_session_before_path_io(
     )
     monkeypatch.setattr(
         manager.security,
-        "validate_monitor_folder",
+        "validate_library_root",
         lambda path: (
             SimpleNamespace(real_path=Path(path))
             if not session_active
@@ -171,8 +171,8 @@ def test_manual_rescan_prepares_all_folders_before_one_database_checkpoint(
             session_active = False
 
     folders = (
-        MonitorFolderConfig(id="folder-1", root_path=str(tmp_path / "one")),
-        MonitorFolderConfig(id="folder-2", root_path=str(tmp_path / "two")),
+        LibraryConfig(id="folder-1", root_path=str(tmp_path / "one")),
+        LibraryConfig(id="folder-2", root_path=str(tmp_path / "two")),
     )
     persisted_scan_jobs = []
 
@@ -184,7 +184,7 @@ def test_manual_rescan_prepares_all_folders_before_one_database_checkpoint(
     manager = WorkerManager(SessionContext, test_settings)
     monkeypatch.setattr(
         manager.security,
-        "validate_monitor_folder",
+        "validate_library_root",
         lambda path: (
             SimpleNamespace(real_path=Path(path))
             if not session_active
@@ -206,7 +206,7 @@ def test_manual_rescan_prepares_all_folders_before_one_database_checkpoint(
     )
 
     assert session_count == 1
-    assert {request.monitor_folder_id for request in persisted_scan_jobs} == {
+    assert {request.library_id for request in persisted_scan_jobs} == {
         "folder-1",
         "folder-2",
     }
@@ -218,7 +218,7 @@ def test_watcher_retries_a_transient_database_lock_without_losing_event(
 ) -> None:
     source = tmp_path / "locked.epub"
     source.write_bytes(b"book")
-    folder = MonitorFolderConfig(id="folder-locked", root_path=str(tmp_path))
+    folder = LibraryConfig(id="folder-locked", root_path=str(tmp_path))
     state = WatchState(observer=object(), root_path=tmp_path, config_signature="test")
     factory_calls = 0
     enqueued: list[Path] = []
@@ -283,7 +283,7 @@ def test_watcher_recovers_exhausted_database_lock_with_folder_scan(
 ) -> None:
     source = tmp_path / "still-locked.epub"
     source.write_bytes(b"book")
-    folder = MonitorFolderConfig(id="folder-recovery", root_path=str(tmp_path))
+    folder = LibraryConfig(id="folder-recovery", root_path=str(tmp_path))
     state = WatchState(observer=object(), root_path=tmp_path, config_signature="test")
     recovery_scans: list[tuple[str, Path, str]] = []
 
@@ -319,7 +319,7 @@ def test_watcher_recovers_exhausted_database_lock_with_folder_scan(
         "_schedule_scan_request",
         lambda **kwargs: recovery_scans.append(
             (
-                kwargs["monitor_folder_id"],
+                kwargs["library_id"],
                 kwargs["root_path"],
                 kwargs["trigger"],
             )
@@ -337,7 +337,7 @@ def test_watcher_audio_events_debounce_into_delayed_directory_scan(
 ) -> None:
     source = tmp_path / "001.mp3"
     source.write_bytes(b"audio")
-    folder = MonitorFolderConfig(
+    folder = LibraryConfig(
         id="folder-audio-watch",
         root_path=str(tmp_path),
         stability_check_enabled=True,

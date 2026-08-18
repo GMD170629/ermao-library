@@ -90,7 +90,7 @@ def test_uses_actual_source_hash_when_mobi_parser_is_unavailable() -> None:
         access_scope=ReaderAccessScope(
             is_admin=True,
             can_view_manual_imports=True,
-            monitor_folder_ids=(),
+            library_ids=(),
         ),
     )
 

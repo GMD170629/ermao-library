@@ -30,15 +30,15 @@ def fail_claimed_import_task(
 
     reset_failed_import_checkpoint(unit_of_work)
     source = Path(task.source_path or "")
-    monitor_folder_missing = (
-        task.monitor_folder_id is not None
-        and not store.monitor_folder_exists(task.monitor_folder_id)
+    library_missing = (
+        task.library_id is not None
+        and not store.library_exists(task.library_id)
     )
     source_missing = not source_probe.exists(source)
-    if monitor_folder_missing:
-        error_code = "MONITOR_FOLDER_NOT_FOUND"
-        error_summary = "监控文件夹已在导入期间被删除"
-        message = "监控文件夹已被删除，本次导入任务已结束"
+    if library_missing:
+        error_code = "LIBRARY_NOT_FOUND"
+        error_summary = "书库已在导入期间被删除"
+        message = "书库已被删除，本次导入任务已结束"
         retryable = False
     elif source_missing:
         error_code = "SOURCE_NOT_FOUND"

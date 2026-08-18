@@ -5,9 +5,8 @@ import json
 from sqlalchemy import text
 
 from app.core.auth import hash_password
-from app.db.base import Base
-from app.db.bootstrap import apply_schema
 from app.models.auth import User
+from tests.conftest import recreate_application_schema
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
@@ -16,16 +15,14 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 
 PASSWORD = "starshipnas"
 
 
 def _prepare_schema(db_session) -> User:
     db_session.rollback()
-    engine = db_session.get_bind()
-    Base.metadata.drop_all(engine)
-    apply_schema(engine)
+    recreate_application_schema(db_session.get_bind())
     admin = User(
         email="admin@example.com",
         name="管理员",
@@ -51,13 +48,15 @@ def _logout(client) -> None:
 
 def _seed_library(db_session) -> None:
     folders = [
-        MonitorFolder(id="folder-a", name="A 书库", root_path="/library/folder-a"),
-        MonitorFolder(id="folder-b", name="B 书库", root_path="/library/folder-b"),
+        Library(
+            organization_mode="FLAT", id="folder-a", name="A 书库", root_path="/library/folder-a"),
+        Library(
+            organization_mode="FLAT", id="folder-b", name="B 书库", root_path="/library/folder-b"),
     ]
     works = [
         LibraryWork(
             id="work-a",
-            monitor_folder_id="folder-a",
+            library_id="folder-a",
             origin="WATCH",
             title="A 范围作品",
             normalized_title="A 范围作品",
@@ -68,7 +67,7 @@ def _seed_library(db_session) -> None:
         ),
         LibraryWork(
             id="work-b",
-            monitor_folder_id="folder-b",
+            library_id="folder-b",
             origin="WATCH",
             title="B 范围作品",
             normalized_title="B 范围作品",
@@ -79,7 +78,7 @@ def _seed_library(db_session) -> None:
         ),
         LibraryWork(
             id="work-merged",
-            monitor_folder_id="folder-a",
+            library_id="folder-a",
             origin="WATCH",
             title="跨范围合并作品",
             normalized_title="跨范围合并作品",
@@ -100,13 +99,12 @@ def _seed_library(db_session) -> None:
         ("volume-a", "media-a", "folder-a", "A 电子书", 0),
         ("volume-b", "media-b", "folder-b", "B 电子书", 0),
         ("volume-merged-a", "media-merged", "folder-a", "合并 A 电子书", 0),
-        ("volume-merged-b", "media-merged", "folder-b", "合并 B 电子书", 1),
+        ("volume-merged-b", "media-merged", "folder-a", "合并 B 电子书", 1),
     )
     volumes = [
         LibraryVolume(
             id=volume_id,
             media_version_id=media_version_id,
-            monitor_folder_id=folder_id,
             origin="WATCH",
             title=title,
             sort_order=sort_order,
@@ -121,9 +119,6 @@ def _seed_library(db_session) -> None:
             id=f"file-{volume_id}",
             volume_id=volume_id,
             path=f"library/{folder_id}/{volume_id}.epub",
-            fingerprint=f"sha256:{'a' * 64}",
-            full_hash="a" * 64,
-            hash_status="COMPLETED",
             mtime_ms=1,
             kind="EPUB",
             mime_type="application/epub+zip",
@@ -135,7 +130,7 @@ def _seed_library(db_session) -> None:
     tasks = [
         ImportTask(
             id=task_id,
-            monitor_folder_id=folder_id,
+            library_id=folder_id,
             origin="WATCH",
             status="COMPLETED",
             original_name=f"{task_id}.epub",
@@ -146,7 +141,15 @@ def _seed_library(db_session) -> None:
         )
         for task_id, folder_id in (("task-a", "folder-a"), ("task-b", "folder-b"))
     ]
-    db_session.add_all(folders + works + media_versions + volumes + files + tasks)
+    db_session.add_all(folders)
+    db_session.flush()
+    db_session.add_all(works)
+    db_session.flush()
+    db_session.add_all(media_versions)
+    db_session.flush()
+    db_session.add_all(volumes)
+    db_session.flush()
+    db_session.add_all(files + tasks)
     db_session.commit()
 
 
@@ -169,7 +172,7 @@ def _create_user(
             "role": role,
             "canManageSystem": can_manage_system,
             "canViewManualImports": manual,
-            "monitorFolderIds": folder_ids or [],
+            "libraryIds": folder_ids or [],
             "locale": locale,
         },
     )
@@ -191,7 +194,7 @@ def test_admin_user_lifecycle_and_last_active_admin_guard(client, db_session) ->
         locale="en-US",
     )
     assert member["role"] == "member"
-    assert member["authorization"]["monitorFolderIds"] == ["folder-a"]
+    assert member["authorization"]["libraryIds"] == ["folder-a"]
     assert member["authorization"]["canManageSystem"] is True
     assert member["locale"] == "en-US"
 
@@ -246,7 +249,7 @@ def test_admin_user_lifecycle_and_last_active_admin_guard(client, db_session) ->
     assert (
         db_session.execute(
             text(
-                "SELECT COUNT(*) FROM `UserMonitorFolderAccess` WHERE `userId` = :user_id"
+                "SELECT COUNT(*) FROM `UserLibraryAccess` WHERE `userId` = :user_id"
             ),
             {"user_id": member["id"]},
         ).scalar()
@@ -326,7 +329,10 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
     merged_payload = merged.json()["data"]["book"]
     assert {item["mediaKind"] for item in merged_payload["mediaVersions"]} == {"EBOOK"}
     merged_volumes = merged_payload["mediaVersions"][0]["volumes"]
-    assert {volume["id"] for volume in merged_volumes} == {"volume-merged-a"}
+    assert {volume["id"] for volume in merged_volumes} == {
+        "volume-merged-a",
+        "volume-merged-b",
+    }
     assert "folder-b" not in json.dumps(merged_payload)
 
     assert client.get("/api/works/work-b").status_code == 404
@@ -338,7 +344,7 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
     assert {item["id"] for item in import_tasks.json()["data"]["tasks"]} == {"task-a"}
     rescan = client.post("/api/import-tasks/rescan")
     assert rescan.status_code == 202
-    assert {job["monitorFolderId"] for job in rescan.json()["data"]["jobs"]} == {
+    assert {job["libraryId"] for job in rescan.json()["data"]["jobs"]} == {
         "folder-a"
     }
 
@@ -383,7 +389,7 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
             "rules": {
                 "conditions": [
                     {
-                        "field": "monitorFolder",
+                        "field": "library",
                         "operator": "equals",
                         "value": "folder-b",
                     }
@@ -431,11 +437,9 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     assert shelf.status_code == 201
     bootstrap = client.get("/api/reader/v4/volumes/volume-a/bootstrap")
     assert bootstrap.status_code == 200
-    content_fingerprint = bootstrap.json()["data"]["contentFingerprint"]
     bookmark = client.put(
         "/api/reader/v4/volumes/volume-a/bookmarks",
         json={
-            "contentFingerprint": content_fingerprint,
             "bookmarks": [
                 {
                     "id": "reflowable:epub:position:chapter.xhtml:0.25",
@@ -466,7 +470,6 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
             percent=50,
             extra="{}",
             schema_version=3,
-            content_fingerprint=content_fingerprint,
             location_type="epub",
             location_json=json.dumps(
                 {"type": "epub", "href": "chapter.xhtml", "progression": 0.5}
@@ -494,7 +497,6 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     assert second_shelves == []
     second_bookmarks = client.get(
         "/api/reader/v4/volumes/volume-a/bookmarks",
-        params={"contentFingerprint": content_fingerprint},
     )
     assert second_bookmarks.status_code == 200
     assert second_bookmarks.json()["data"]["bookmarks"] == []
@@ -537,3 +539,117 @@ def test_member_filter_options_are_scoped_in_sql_and_bypass_manager_middleware(
         "A 范围作者",
         "共享作者",
     ]
+
+
+def test_library_scope_controls_work_volume_and_file_access(client, db_session) -> None:
+    from app.core.authorization import (
+        can_access_file,
+        can_access_library,
+        can_access_volume,
+        can_access_work,
+    )
+
+    admin = _prepare_schema(db_session)
+    _seed_library(db_session)
+    _login(client, admin.email)
+    member = _create_user(
+        client,
+        email="scope-member@example.com",
+        folder_ids=["folder-a"],
+    )
+    member_row = db_session.get(User, member["id"])
+    assert member_row is not None
+
+    assert can_access_library(db_session, admin, "folder-a")
+    assert can_access_library(db_session, admin, "folder-b")
+    assert can_access_library(db_session, member_row, "folder-a")
+    assert not can_access_library(db_session, member_row, "folder-b")
+
+    assert can_access_work(db_session, member_row, "work-a")
+    assert not can_access_work(db_session, member_row, "work-b")
+    assert can_access_volume(db_session, member_row, "volume-a")
+    assert not can_access_volume(db_session, member_row, "volume-b")
+    assert can_access_file(db_session, member_row, "file-volume-a")
+    assert not can_access_file(db_session, member_row, "file-volume-b")
+
+
+def test_member_can_access_library_work_without_volumes(db_session) -> None:
+    from app.core.authorization import can_access_work
+    from app.models.auth import UserLibraryAccess
+
+    admin = _prepare_schema(db_session)
+    db_session.add(
+        Library(
+            id="folder-empty",
+            name="空作品书库",
+            root_path="/library/folder-empty",
+            organization_mode="FLAT",
+        )
+    )
+    db_session.add(
+        LibraryWork(
+            id="work-empty",
+            library_id="folder-empty",
+            origin="WATCH",
+            title="尚无卷册",
+            normalized_title="尚无卷册",
+            tags="[]",
+        )
+    )
+    member = User(
+        email="empty-work@example.com",
+        name="成员",
+        password_hash=hash_password(PASSWORD),
+        role="member",
+    )
+    db_session.add(member)
+    db_session.flush()
+    db_session.add(UserLibraryAccess(user_id=member.id, library_id="folder-empty"))
+    db_session.commit()
+
+    assert can_access_work(db_session, member, "work-empty")
+    assert not can_access_work(db_session, member, "missing-work")
+
+
+def test_delete_library_removes_catalog_but_keeps_source_files(
+    client, db_session, tmp_path
+) -> None:
+    from sqlalchemy import select
+
+    from app.models.library import Library
+
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    source_file = library_root / "book.epub"
+    source_file.write_bytes(b"epub")
+    admin = _prepare_schema(db_session)
+    _login(client, admin.email)
+    created = client.post(
+        "/api/libraries",
+        json={
+            "name": "Keep Files",
+            "rootPath": str(library_root),
+            "organizationMode": "FLAT",
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    library_id = created.json()["data"]["library"]["id"]
+    db_session.add(
+        LibraryWork(
+            id="delete-work",
+            library_id=library_id,
+            origin="WATCH",
+            title="将被删除的作品",
+            normalized_title="将被删除的作品",
+            tags="[]",
+        )
+    )
+    db_session.commit()
+
+    deleted = client.delete(f"/api/libraries/{library_id}")
+    assert deleted.status_code == 200, deleted.text
+    db_session.expire_all()
+    assert db_session.scalar(select(Library.id).where(Library.id == library_id)) is None
+    assert db_session.get(LibraryWork, "delete-work") is None
+    assert source_file.exists()

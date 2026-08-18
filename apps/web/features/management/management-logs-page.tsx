@@ -51,14 +51,14 @@ function levelLabel(level: string) {
 }
 
 function sourceLabel(source: string) {
-  return { import: '导入', download: '下载', folder: '监控文件夹', kindle: 'Kindle', library: '书库', system: '系统' }[source] ?? source;
+  return { import: '导入', download: '下载', folder: '书库', kindle: 'Kindle', library: '书库', system: '系统' }[source] ?? source;
 }
 
 function targetHref(event: SystemEvent) {
   if (event.targetType === 'work' && event.targetId) return `/works/${event.targetId}`;
   if (event.targetType === 'kindleSendTask') return '/settings/email?tab=queue';
   if (event.targetType === 'importTask') return '/settings/library';
-  if (event.targetType === 'monitorFolder') return '/settings/library';
+  if (event.targetType === 'library') return '/settings/library';
   return '';
 }
 

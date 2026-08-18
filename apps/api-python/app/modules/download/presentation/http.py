@@ -59,7 +59,7 @@ def _has_table(db: Session, table: str) -> bool:
         return False
 
 
-def _enabled_monitor_folder_for_path(
+def _enabled_library_for_path(
     folders: tuple[dict[str, Any], ...],
     target: Path,
 ) -> dict[str, Any] | None:
@@ -79,10 +79,10 @@ def _enabled_monitor_folder_for_path(
     return None
 
 
-def _load_enabled_monitor_folders(db: Session) -> tuple[dict[str, Any], ...]:
+def _load_enabled_libraries(db: Session) -> tuple[dict[str, Any], ...]:
     folders = (
-        tuple(import_http_store.list_enabled_monitor_folder_rows(db))
-        if _has_table(db, "MonitorFolder")
+        tuple(import_http_store.list_enabled_library_rows(db))
+        if _has_table(db, "Library")
         else ()
     )
     db.close()
@@ -116,7 +116,7 @@ def list_download_tasks(
     tasks = [
         task.to_legacy_dict() for task in list_download_tasks_query(db, limit=1000)
     ]
-    folders = _load_enabled_monitor_folders(db)
+    folders = _load_enabled_libraries(db)
     return ok(
         {
             "tasks": [
@@ -126,7 +126,7 @@ def list_download_tasks(
                         task.get("remoteRef"), task.get("remoteRef")
                     ),
                     "sourceName": None,
-                    "autoImport": _enabled_monitor_folder_for_path(
+                    "autoImport": _enabled_library_for_path(
                         folders, Path(str(task.get("savePath") or ""))
                     )
                     is not None,
@@ -198,11 +198,11 @@ async def create_download_task(
         last_target_path=save_path,
         event=prepared_event,
     ).to_legacy_dict()
-    folders = _load_enabled_monitor_folders(db)
+    folders = _load_enabled_libraries(db)
     return ok(
         {
             "task": task,
-            "autoImport": _enabled_monitor_folder_for_path(folders, target_dir)
+            "autoImport": _enabled_library_for_path(folders, target_dir)
             is not None,
         },
         status_code=201,
@@ -420,4 +420,4 @@ def mutate_download_task(
         )
         task = updated.to_legacy_dict() if updated is not None else task
         return ok({"task": task, "action": action})
-    return fail("下载文件会由监控文件夹自动识别入库，无需手动导入", status_code=400)
+    return fail("下载文件会由书库自动识别入库，无需手动导入", status_code=400)

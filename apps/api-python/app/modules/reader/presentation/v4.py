@@ -156,7 +156,7 @@ def _access_scope(db: Session, user: User) -> ReaderAccessScope:
     return ReaderAccessScope(
         is_admin=context.is_admin,
         can_view_manual_imports=context.can_view_manual_imports,
-        monitor_folder_ids=context.monitor_folder_ids,
+        library_ids=context.library_ids,
     )
 
 
@@ -164,7 +164,7 @@ def _publication_access_scope(scope: ReaderAccessScope) -> PublicationAccessScop
     return PublicationAccessScope(
         is_admin=scope.is_admin,
         can_view_manual_imports=scope.can_view_manual_imports,
-        monitor_folder_ids=tuple(scope.monitor_folder_ids),
+        library_ids=tuple(scope.library_ids),
     )
 
 

@@ -20,7 +20,7 @@ from app.infrastructure.local_metadata_policy import (
     prepare_local_metadata_priority,
 )
 from app.models.common import db_timestamp
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
@@ -250,11 +250,11 @@ class SessionImportOrchestrationServices:
             cache_hit=identity.cache_hit,
         )
 
-    def monitor_root_path(self, monitor_folder_id: str | None) -> Path | None:
-        if monitor_folder_id is None:
+    def monitor_root_path(self, library_id: str | None) -> Path | None:
+        if library_id is None:
             return None
         root_path = self._db.scalar(
-            select(MonitorFolder.root_path).where(MonitorFolder.id == monitor_folder_id)
+            select(Library.root_path).where(Library.id == library_id)
         )
         self._unit_of_work.release()
         if root_path is None:

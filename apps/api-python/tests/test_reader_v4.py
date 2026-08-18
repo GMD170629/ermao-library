@@ -45,6 +45,7 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
         Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
     work = LibraryWork(
+            library_id="test-library", 
         id="work-reader-v3",
         origin="MANUAL",
         title="Reader v4",

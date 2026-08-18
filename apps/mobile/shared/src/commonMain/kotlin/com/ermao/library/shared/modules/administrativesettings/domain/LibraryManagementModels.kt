@@ -1,6 +1,6 @@
 package com.ermao.library.shared.modules.administrativesettings.domain
 
-data class MonitorFolder(
+data class Library(
     val id: String,
     val name: String,
     val rootPath: String,
@@ -15,14 +15,14 @@ data class MonitorFolder(
     val updatedAt: String,
 )
 
-data class MonitorFolders(
-    val folders: List<MonitorFolder>,
+data class Libraries(
+    val folders: List<Library>,
     val monitorRoot: String?,
     val lastUploadTargetPath: String?,
     val lastDownloadTargetPath: String?,
 )
 
-data class MonitorFolderDraft(
+data class LibraryDraft(
     val rootPath: String,
     val name: String?,
     val shelfId: String?,
@@ -64,7 +64,7 @@ data class ImportTaskFilter(
 
 data class ImportTask(
     val id: String,
-    val monitorFolderId: String?,
+    val libraryId: String?,
     val workId: String?,
     val volumeId: String?,
     val origin: String,
@@ -140,7 +140,7 @@ enum class ImportScanStatus(val wireValue: String) {
 
 data class ImportScanJob(
     val id: String,
-    val monitorFolderId: String?,
+    val libraryId: String?,
     val rootPath: String,
     val trigger: String,
     val status: ImportScanStatus,

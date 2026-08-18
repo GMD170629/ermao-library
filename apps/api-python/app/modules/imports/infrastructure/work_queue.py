@@ -70,7 +70,7 @@ def insert_prepared_scan_jobs(
     job_rows = [
         {
             "id": request.job_id,
-            "monitorFolderId": request.monitor_folder_id,
+            "libraryId": request.library_id,
             "actorUserId": request.actor_user_id,
             "rootPath": request.root_path,
             "trigger": request.trigger,
@@ -141,7 +141,7 @@ def scan_job_dto(row: ImportScanJob) -> ImportScanJobDTO:
     )
     return ImportScanJobDTO(
         id=row.id,
-        monitor_folder_id=row.monitor_folder_id,
+        library_id=row.library_id,
         actor_user_id=row.actor_user_id,
         root_path=row.root_path,
         trigger=row.trigger,
@@ -250,14 +250,14 @@ def ensure_import_work_item(
 def create_or_reuse_scan_job(
     db: Session,
     *,
-    monitor_folder_id: str,
+    library_id: str,
     actor_user_id: str | None,
     root_path: Path,
     trigger: str,
     available_at: datetime | None = None,
 ) -> tuple[ImportScanJobDTO, bool]:
     canonical = root_path.expanduser().resolve()
-    dedupe_key = f"scan:{monitor_folder_id}:{source_key(canonical)}"
+    dedupe_key = f"scan:{library_id}:{source_key(canonical)}"
     existing_work = db.scalar(
         select(ImportWorkItem).where(ImportWorkItem.dedupe_key == dedupe_key).limit(1)
     )
@@ -273,7 +273,7 @@ def create_or_reuse_scan_job(
     work_id = f"work_{uuid4().hex}"
     job = ImportScanJob(
         id=job_id,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
         actor_user_id=actor_user_id,
         root_path=str(canonical),
         trigger=trigger,
@@ -293,7 +293,7 @@ def create_or_reuse_scan_job(
     db.execute(
         insert(ImportScanJob.__table__).values(
             id=job_id,
-            monitorFolderId=monitor_folder_id,
+            libraryId=library_id,
             actorUserId=actor_user_id,
             rootPath=str(canonical),
             trigger=trigger,
@@ -337,14 +337,14 @@ def get_scan_job(db: Session, job_id: str) -> ImportScanJobDTO | None:
 def list_scan_jobs(
     db: Session,
     *,
-    monitor_folder_ids: tuple[str, ...] | None,
+    library_ids: tuple[str, ...] | None,
     status: str | None,
     limit: int = 20,
 ) -> list[ImportScanJobDTO]:
     statement = select(ImportScanJob)
-    if monitor_folder_ids is not None:
+    if library_ids is not None:
         statement = statement.where(
-            ImportScanJob.monitor_folder_id.in_(monitor_folder_ids)
+            ImportScanJob.library_id.in_(library_ids)
         )
     if status:
         statement = statement.where(ImportScanJob.status == status)

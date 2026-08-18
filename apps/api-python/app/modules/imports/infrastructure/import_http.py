@@ -1,4 +1,4 @@
-"""ORM helpers for import-task and monitor-folder HTTP adapters."""
+"""ORM helpers for import-task and library HTTP adapters."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import (
     AuthorizationContext,
-    monitor_folder_visibility_predicate,
+    library_visibility_predicate,
 )
-from app.models.auth import User, UserMonitorFolderAccess
+from app.models.auth import User, UserLibraryAccess
 from app.models.import_pipeline import (
     BookConversionTask,
     ImportAsset,
@@ -19,7 +19,7 @@ from app.models.import_pipeline import (
     ImportTask,
 )
 from app.models.library import LibraryWork
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.imports.infrastructure.monitor import upsert_system_setting
 
 
@@ -42,7 +42,7 @@ def list_import_tasks_page(
     keyword: str | None = None,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     filters: list[Any] = [
-        monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+        library_visibility_predicate(context, ImportTask.library_id)
     ]
     normalized_status = str(status or "").strip().upper()
     if normalized_status and normalized_status != "ALL":
@@ -67,7 +67,7 @@ def list_import_tasks_page(
             )
         )
 
-    scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+    scope = library_visibility_predicate(context, ImportTask.library_id)
     scope_counts = db.execute(
         select(
             func.count().label("total"),
@@ -126,16 +126,16 @@ def hydrate_import_task_page(
     if not tasks:
         return []
     task_ids = [str(task["id"]) for task in tasks]
-    monitor_folder_ids = {
-        str(task["monitorFolderId"]) for task in tasks if task.get("monitorFolderId")
+    library_ids = {
+        str(task["libraryId"]) for task in tasks if task.get("libraryId")
     }
     work_ids = {str(task["workId"]) for task in tasks if task.get("workId")}
 
-    monitor_folders = {
+    libraries = {
         str(row["id"]): dict(row)
         for row in db.execute(
-            select(MonitorFolder.__table__).where(
-                MonitorFolder.id.in_(monitor_folder_ids)
+            select(Library.__table__).where(
+                Library.id.in_(library_ids)
             )
         )
         .mappings()
@@ -196,8 +196,8 @@ def hydrate_import_task_page(
     return [
         {
             **task,
-            "_pageMonitorFolder": monitor_folders.get(
-                str(task.get("monitorFolderId") or "")
+            "_pageLibrary": libraries.get(
+                str(task.get("libraryId") or "")
             ),
             "_pageWork": works.get(str(task.get("workId") or "")),
             "_pageLogs": logs_by_task_id[str(task["id"])],
@@ -208,7 +208,7 @@ def hydrate_import_task_page(
 
 
 def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> int:
-    scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+    scope = library_visibility_predicate(context, ImportTask.library_id)
     terminal = select(ImportTask.id).where(
         ImportTask.status.in_(("COMPLETED", "FAILED")),
         scope,
@@ -231,7 +231,7 @@ def list_terminal_import_task_ids(
     db: Session,
     context: AuthorizationContext,
 ) -> tuple[str, ...]:
-    scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+    scope = library_visibility_predicate(context, ImportTask.library_id)
     return tuple(
         str(task_id)
         for task_id in db.scalars(
@@ -314,10 +314,10 @@ def request_monitor_rescan(db: Session, requested_value: str) -> None:
     upsert_system_setting(db, "monitor.rescanRequestedAt", requested_value)
 
 
-def list_monitor_folders(db: Session) -> list[dict[str, Any]]:
+def list_libraries(db: Session) -> list[dict[str, Any]]:
     rows = (
         db.execute(
-            select(MonitorFolder.__table__).order_by(MonitorFolder.created_at.desc())
+            select(Library.__table__).order_by(Library.created_at.desc())
         )
         .mappings()
         .all()
@@ -325,12 +325,12 @@ def list_monitor_folders(db: Session) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def list_enabled_monitor_folder_rows(db: Session) -> list[dict[str, Any]]:
+def list_enabled_library_rows(db: Session) -> list[dict[str, Any]]:
     rows = (
         db.execute(
-            select(MonitorFolder.__table__)
-            .where(MonitorFolder.enabled.is_(True))
-            .order_by(MonitorFolder.created_at.desc(), MonitorFolder.id.desc())
+            select(Library.__table__)
+            .where(Library.enabled.is_(True))
+            .order_by(Library.created_at.desc(), Library.id.desc())
         )
         .mappings()
         .all()
@@ -338,13 +338,13 @@ def list_enabled_monitor_folder_rows(db: Session) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def list_monitor_root_paths(db: Session) -> list[str]:
+def list_library_root_paths(db: Session) -> list[str]:
     return [
         str(path)
         for path in db.scalars(
-            select(MonitorFolder.root_path)
-            .where(MonitorFolder.root_path.is_not(None))
-            .order_by(MonitorFolder.created_at.desc(), MonitorFolder.id.desc())
+            select(Library.root_path)
+            .where(Library.root_path.is_not(None))
+            .order_by(Library.created_at.desc(), Library.id.desc())
         ).all()
         if path
     ]
@@ -394,11 +394,11 @@ def import_status_snapshot(
     )
 
 
-def get_monitor_folder(db: Session, folder_id: str) -> dict[str, Any] | None:
+def get_library(db: Session, folder_id: str) -> dict[str, Any] | None:
     row = (
         db.execute(
-            select(MonitorFolder.__table__)
-            .where(MonitorFolder.id == folder_id)
+            select(Library.__table__)
+            .where(Library.id == folder_id)
             .limit(1)
         )
         .mappings()
@@ -407,33 +407,30 @@ def get_monitor_folder(db: Session, folder_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def get_monitor_folder_by_root_path(
+def get_library_by_root_path(
     db: Session,
     root_path: str,
     *,
     exclude_id: str | None = None,
 ) -> dict[str, Any] | None:
-    filters = [MonitorFolder.root_path == root_path]
+    filters = [Library.root_path == root_path]
     if exclude_id is not None:
-        filters.append(MonitorFolder.id != exclude_id)
+        filters.append(Library.id != exclude_id)
     row = (
-        db.execute(select(MonitorFolder.__table__).where(*filters).limit(1))
+        db.execute(select(Library.__table__).where(*filters).limit(1))
         .mappings()
         .first()
     )
     return dict(row) if row else None
 
 
-def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]:
+def create_library(db: Session, values: dict[str, Any]) -> dict[str, Any]:
     prepared_values = {
         "id": str(values["id"]),
         "name": str(values["name"]),
         "rootPath": str(values["rootPath"]),
-        "shelfId": (
-            str(values["shelfId"]) if values.get("shelfId") is not None else None
-        ),
+        "organizationMode": str(values["organizationMode"]),
         "enabled": bool(values.get("enabled", True)),
-        "mediaKindPolicy": str(values.get("mediaKindPolicy") or "MIXED"),
         "ignorePatterns": (
             str(values["ignorePatterns"])
             if values.get("ignorePatterns") is not None
@@ -449,21 +446,20 @@ def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]
         "createdAt": values["createdAt"],
         "updatedAt": values["updatedAt"],
     }
-    db.execute(insert(MonitorFolder.__table__).values(prepared_values))
-    return get_monitor_folder(db, str(prepared_values["id"])) or prepared_values
+    db.execute(insert(Library.__table__).values(prepared_values))
+    return get_library(db, str(prepared_values["id"])) or prepared_values
 
 
-def update_monitor_folder(
-    db: Session, folder_id: str, values: dict[str, Any]
+def update_library(
+    db: Session, library_id: str, values: dict[str, Any]
 ) -> dict[str, Any] | None:
-    if db.get(MonitorFolder, folder_id) is None:
+    if db.get(Library, library_id) is None:
         return None
     mapping = {
         "name": "name",
         "rootPath": "root_path",
-        "shelfId": "shelf_id",
+        "organizationMode": "organization_mode",
         "enabled": "enabled",
-        "mediaKindPolicy": "media_kind_policy",
         "ignorePatterns": "ignore_patterns",
         "ignoreHidden": "ignore_hidden",
         "minFileSizeBytes": "min_file_size_bytes",
@@ -477,11 +473,11 @@ def update_monitor_folder(
             prepared_values[attribute] = value
     if prepared_values:
         db.execute(
-            update(MonitorFolder)
-            .where(MonitorFolder.id == folder_id)
+            update(Library)
+            .where(Library.id == library_id)
             .values(**prepared_values)
         )
-    return get_monitor_folder(db, folder_id)
+    return get_library(db, library_id)
 
 
 def reset_import_task_for_retry(
@@ -536,18 +532,18 @@ def reset_conversion_for_retry(
     return previous
 
 
-def delete_monitor_folder(
+def delete_library(
     db: Session, folder_id: str, *, updated_at: Any
 ) -> tuple[bool, list[str]]:
     affected_user_ids = [
         str(item)
         for item in db.scalars(
-            select(UserMonitorFolderAccess.user_id).where(
-                UserMonitorFolderAccess.monitor_folder_id == folder_id
+            select(UserLibraryAccess.user_id).where(
+                UserLibraryAccess.library_id == folder_id
             )
         ).all()
     ]
-    result = db.execute(delete(MonitorFolder).where(MonitorFolder.id == folder_id))
+    result = db.execute(delete(Library).where(Library.id == folder_id))
     deleted = bool(result.rowcount)
     if deleted and affected_user_ids:
         db.execute(
@@ -561,15 +557,15 @@ def delete_monitor_folder(
     return deleted, affected_user_ids
 
 
-def list_monitor_folder_access_user_ids(
+def list_library_access_user_ids(
     db: Session,
     folder_id: str,
 ) -> tuple[str, ...]:
     return tuple(
         str(user_id)
         for user_id in db.scalars(
-            select(UserMonitorFolderAccess.user_id).where(
-                UserMonitorFolderAccess.monitor_folder_id == folder_id
+            select(UserLibraryAccess.user_id).where(
+                UserLibraryAccess.library_id == folder_id
             )
         ).all()
     )

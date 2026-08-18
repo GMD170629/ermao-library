@@ -15,11 +15,11 @@ def _insert_work(db, work_id, title, author):
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor,
+                id, libraryId, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                 hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                :id, 'MANUAL', :title, :title, :author, :author, 'UNKNOWN',
+                :id, 'test-library', 'MANUAL', :title, :title, :author, :author, 'UNKNOWN',
                 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, :merge_key, 'now', 'now'
             )
             """
@@ -288,6 +288,7 @@ def test_manual_metadata_uses_representative_volume_to_update_entire_media_versi
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     work = LibraryWork(
+            library_id="test-library", 
         id="work-version-metadata",
         title="多卷作品",
         normalized_title="多卷作品",

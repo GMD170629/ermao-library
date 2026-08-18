@@ -27,7 +27,6 @@ from app.models.library import (
     UserMediaHistory,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
-from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
 
 
@@ -1120,12 +1119,6 @@ def audio_bundle_fully_imported(db: Session, paths: list[str]) -> bool:
     ).all()
     volume_ids = {str(row[0] or "") for row in rows}
     return len(rows) == len(paths) and len(volume_ids) == 1
-
-
-def get_monitor_folder_shelf_id(db: Session, monitor_folder_id: str) -> str | None:
-    return db.scalar(
-        select(MonitorFolder.shelf_id).where(MonitorFolder.id == monitor_folder_id)
-    )
 
 
 def shelf_exists(db: Session, shelf_id: str) -> bool:

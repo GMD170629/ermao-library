@@ -29,13 +29,13 @@ from app.modules.auth.infrastructure.password_authentication import (
     SqlAlchemyUserCredentialReader,
 )
 from app.modules.auth.infrastructure.user_data import (
-    list_monitor_folder_ids,
-    prepare_monitor_folder_access,
+    list_library_ids,
+    prepare_library_access,
     prepare_personal_user_deletion,
     prepare_user_preferences,
     prepare_user_with_preferences,
-    validate_monitor_folder_ids,
-    write_prepared_monitor_folder_access,
+    validate_library_ids,
+    write_prepared_library_access,
     write_prepared_personal_user_deletion,
     write_prepared_user_preferences,
     write_prepared_user_with_preferences,
@@ -264,14 +264,14 @@ def persist_admin_user_create(
         {"locale": locale},
         prepared_at,
     )
-    prepared_folders = prepare_monitor_folder_access(
+    prepared_folders = prepare_library_access(
         user.id,
         folder_ids,
         prepared_at,
     )
     with AuthWriteTransaction(db):
         write_prepared_user_with_preferences(db, prepared_user)
-        write_prepared_monitor_folder_access(db, prepared_folders)
+        write_prepared_library_access(db, prepared_folders)
         write_prepared_system_events(db, (event,))
 
 
@@ -289,7 +289,7 @@ def persist_admin_user_update(
     user_statement = update(User).where(User.id == user_id).values(**user_values)
     session_statement = delete(UserSession).where(UserSession.user_id == user_id)
     prepared_folders = (
-        prepare_monitor_folder_access(user_id, folder_ids, updated_at)
+        prepare_library_access(user_id, folder_ids, updated_at)
         if folder_ids is not None
         else None
     )
@@ -301,7 +301,7 @@ def persist_admin_user_update(
     with AuthWriteTransaction(db):
         db.execute(user_statement)
         if prepared_folders is not None:
-            write_prepared_monitor_folder_access(db, prepared_folders)
+            write_prepared_library_access(db, prepared_folders)
         if prepared_preferences is not None:
             write_prepared_user_preferences(db, prepared_preferences)
         if disable_sessions:
@@ -391,7 +391,7 @@ __all__ = [
     "build_password_authentication_runtime",
     "build_password_authenticator",
     "delete_expired_or_disabled_sessions",
-    "list_monitor_folder_ids",
+    "list_library_ids",
     "persist_account_avatar",
     "persist_account_email",
     "persist_account_name",
@@ -409,5 +409,5 @@ __all__ = [
     "persist_session_refresh",
     "persist_user_preferences",
     "remove_password_reset_request",
-    "validate_monitor_folder_ids",
+    "validate_library_ids",
 ]

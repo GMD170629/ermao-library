@@ -48,6 +48,7 @@ def _seed_volume(
     db_session: Session, source_path: Path
 ) -> tuple[LibraryVolume, LibraryFile]:
     work = LibraryWork(
+            library_id="test-library", 
         id="navigation-work",
         origin="MANUAL",
         title="Publication Navigation",
@@ -157,7 +158,7 @@ def _ensure(
 _ADMIN = PublicationAccessScope(
     is_admin=True,
     can_view_manual_imports=True,
-    monitor_folder_ids=(),
+    library_ids=(),
 )
 
 

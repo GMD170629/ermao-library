@@ -74,7 +74,7 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
                 {
                     "id": f"scale-volume-{index:06d}",
                     "media_version_id": f"scale-media-{index:06d}",
-                    "monitor_folder_id": None,
+                    "library_id": None,
                     "origin": "MANUAL",
                     "title": "Volume 1",
                     "sort_order": 0,
@@ -148,7 +148,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
         is_admin=False,
         can_manage_system=False,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
     recent, recent_vm_steps = _sqlite_vm_steps(
@@ -282,7 +282,7 @@ def test_continue_reading_does_not_scan_every_visible_volume(
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
 

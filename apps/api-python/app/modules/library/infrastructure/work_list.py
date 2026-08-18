@@ -27,7 +27,7 @@ from app.modules.library.application.work_list import (
 )
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
-    resolve_monitor_folder_roots,
+    resolve_library_roots,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
@@ -251,7 +251,7 @@ def _predicates(
             )
         )
     if query.filter_expression is not None:
-        monitor_folder_roots = resolve_monitor_folder_roots(
+        library_roots = resolve_library_roots(
             db,
             query.filter_expression,
             context,
@@ -261,7 +261,7 @@ def _predicates(
             context=context,
             user_id=user.id,
             shelf_owner_user_id=user.id,
-            monitor_folder_roots=monitor_folder_roots,
+            library_roots=library_roots,
         )
         if dynamic_filter is not None:
             predicates.append(dynamic_filter)

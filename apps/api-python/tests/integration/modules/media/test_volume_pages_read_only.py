@@ -47,6 +47,7 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
             role="admin",
         )
         work = LibraryWork(
+            library_id="test-library", 
             id="comic-lock-work",
             origin="MANUAL",
             title="Comic lock",

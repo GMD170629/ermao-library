@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from app.core.auth import hash_password
 from app.core.config import Settings
-from app.models.auth import ReaderBookmark, User, UserMonitorFolderAccess
+from app.models.auth import ReaderBookmark, User, UserLibraryAccess
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
@@ -17,7 +17,7 @@ from app.models.library import (
     LibraryWork,
     UserMediaHistory,
 )
-from app.models.settings import MonitorFolder
+from app.models.library import Library
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
     BatchVolumeOutcome,
@@ -56,6 +56,7 @@ def _login_admin(client: TestClient, db: Session) -> User:
 
 def _volume_aggregate(db: Session, user: User) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="delete-volume-work",
         origin="MANUAL",
         title="Delete volume",
@@ -172,6 +173,7 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     user = _login_admin(client, db_session)
     now = datetime.now(UTC)
     work = LibraryWork(
+            library_id="test-library", 
         id="reclassify-work",
         origin="MANUAL",
         title="Reclassify",
@@ -339,6 +341,7 @@ def _batch_volume_aggregate(
     volume_ids: tuple[str, ...],
 ) -> tuple[LibraryWork, list[LibraryVolume]]:
     work = LibraryWork(
+            library_id="test-library", 
         id=work_id,
         origin="MANUAL",
         title="Batch work",
@@ -654,6 +657,7 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
     user = _login_admin(client, db_session)
     now = datetime.now(UTC)
     work = LibraryWork(
+            library_id="test-library", 
         id="continue-work",
         origin="MANUAL",
         title="Continue",
@@ -758,6 +762,7 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     test_settings: Settings,
 ) -> None:
     work = LibraryWork(
+            library_id="test-library", 
         id="import-cleanup-work",
         origin="MANUAL",
         title="Import cleanup",
@@ -829,25 +834,27 @@ def test_move_volume_hides_an_unauthorized_target_work(
         role="member",
         can_manage_system=True,
     )
-    source_folder = MonitorFolder(
+    source_folder = Library(
+            organization_mode="FLAT", 
         id="source-folder",
         name="Source",
         root_path="/source",
     )
-    target_folder = MonitorFolder(
+    target_folder = Library(
+            organization_mode="FLAT", 
         id="target-folder",
         name="Target",
         root_path="/target",
     )
-    access = UserMonitorFolderAccess(
+    access = UserLibraryAccess(
         user_id=user.id,
-        monitor_folder_id=source_folder.id,
+        library_id=source_folder.id,
     )
 
     def aggregate(prefix: str, folder_id: str) -> tuple[LibraryWork, LibraryVolume]:
         work = LibraryWork(
             id=f"{prefix}-work",
-            monitor_folder_id=folder_id,
+            library_id=folder_id,
             origin="WATCH",
             title=prefix,
             normalized_title=prefix,
@@ -863,7 +870,6 @@ def test_move_volume_hides_an_unauthorized_target_work(
         volume = LibraryVolume(
             id=f"{prefix}-volume",
             media_version_id=media.id,
-            monitor_folder_id=folder_id,
             title=prefix,
             sort_order=0,
             format="EPUB",
@@ -910,7 +916,7 @@ def test_delete_volume_rolls_back_when_persistence_fails() -> None:
                 title="Volume",
                 sort_order=0,
                 format="EPUB",
-                monitor_folder_id=None,
+                library_id=None,
                 author=None,
                 work_title="Work",
                 source_path=Path("volume.epub"),
@@ -935,7 +941,7 @@ def test_delete_volume_rolls_back_when_persistence_fails() -> None:
         can_manage_system=True,
         is_admin=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
     )
 
     with pytest.raises(RuntimeError, match="persistence failed"):
@@ -968,7 +974,7 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
                 title=volume_id,
                 sort_order=0 if volume_id == "one" else 1000,
                 format="EPUB",
-                monitor_folder_id=None,
+                library_id=None,
                 author="Author",
                 work_title="Work",
                 source_path=Path(f"{volume_id}.epub"),
@@ -1023,7 +1029,7 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
         can_manage_system=True,
         is_admin=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
     )
 
     with pytest.raises(RuntimeError, match="second mutation failed"):
@@ -1051,6 +1057,7 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
 
     def aggregate(prefix: str) -> tuple[LibraryWork, LibraryVolume]:
         work = LibraryWork(
+            library_id="test-library", 
             id=f"undo-{prefix}-work",
             origin="MANUAL",
             title=prefix,

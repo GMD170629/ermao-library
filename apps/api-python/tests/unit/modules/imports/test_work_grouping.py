@@ -51,8 +51,8 @@ class GroupingServices:
             logical_path=filename,
         )
 
-    def monitor_root_path(self, monitor_folder_id: str | None) -> Path | None:
-        return self._monitor_root if monitor_folder_id == "monitor" else None
+    def monitor_root_path(self, library_id: str | None) -> Path | None:
+        return self._monitor_root if library_id == "monitor" else None
 
     def list_sibling_files(self, _path: Path) -> DirectorySiblingSnapshotDTO:
         return DirectorySiblingSnapshotDTO(paths=self._siblings, complete=True)
@@ -81,7 +81,7 @@ def _options(
         source_file_path=path,
         original_name=path.name,
         origin="MONITOR_FOLDER",
-        monitor_folder_id="monitor",
+        library_id="monitor",
         media_kind_policy=media_kind_policy,
     )
 

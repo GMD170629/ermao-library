@@ -20,7 +20,8 @@ from app.core.config import Settings
 from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportScanJob
-from app.models.settings import MonitorFolder, QueueControlOperation, SystemSetting
+from app.models.library import Library
+from app.models.settings import QueueControlOperation, SystemSetting
 from app.modules.imports.application.claim import (
     claim_next_import_task as claim_next_import_task_command,
 )
@@ -59,13 +60,13 @@ from app.modules.imports.application.maintenance_commands import (
     persist_import_retry,
     persist_terminal_import_clear,
 )
-from app.modules.imports.application.monitor_folder_commands import (
-    PreparedMonitorFolderCreate,
-    PreparedMonitorFolderDelete,
-    PreparedMonitorFolderUpdate,
-    persist_monitor_folder_create,
-    persist_monitor_folder_delete,
-    persist_monitor_folder_update,
+from app.modules.imports.application.library_commands import (
+    PreparedLibraryCreate,
+    PreparedLibraryDelete,
+    PreparedLibraryUpdate,
+    persist_library_create,
+    persist_library_delete,
+    persist_library_update,
 )
 from app.modules.imports.application.ports import ImportMetadataObserver
 from app.modules.imports.application.process import (
@@ -92,10 +93,6 @@ from app.modules.imports.application.scan_checkpoint import (
 )
 from app.modules.imports.application.scan_jobs import PreparedImportScanJob
 from app.modules.imports.application.scan_requests import persist_scan_requests
-from app.modules.imports.application.shelf_link import (
-    PreparedImportShelfLink,
-    persist_import_shelf_link,
-)
 from app.modules.imports.application.work_queue_dto import (
     ImportScanJobDTO,
     ImportWorkItemDTO,
@@ -112,12 +109,12 @@ from app.modules.imports.infrastructure.deletion_write import (
 from app.modules.imports.infrastructure.directory_scan import (
     IgnoredImportSource,
     ImportIgnoreReason,
-    MonitorFolderConfig,
+    LibraryConfig,
     ScanSummary,
     import_file_ignore_reason,
     import_source_meets_minimum_size,
     is_proven_audio_bundle_directory,
-    monitor_folder_config,
+    library_config,
     scan_directory_for_imports,
     should_ignore_file,
     should_ignore_path,
@@ -132,8 +129,8 @@ from app.modules.imports.infrastructure.maintenance_write import (
     SqlAlchemyImportMaintenanceWriteStore,
 )
 from app.modules.imports.infrastructure.managed_pipeline import SessionImportPipeline
-from app.modules.imports.infrastructure.monitor_folder_write import (
-    SqlAlchemyMonitorFolderWriteStore,
+from app.modules.imports.infrastructure.library_write import (
+    SqlAlchemyLibraryWriteStore,
 )
 from app.modules.imports.infrastructure.queue_maintenance import (
     SqlAlchemyImportQueueMaintenanceStore,
@@ -148,7 +145,6 @@ from app.modules.imports.infrastructure.scan_checkpoint import (
     SqlAlchemyScanCheckpointStore,
 )
 from app.modules.imports.infrastructure.scan_requests import SqlAlchemyScanRequestStore
-from app.modules.imports.infrastructure.shelf_link import SqlAlchemyImportShelfLinkStore
 from app.modules.imports.infrastructure.source_probe import LocalImportSourceProbe
 from app.modules.imports.infrastructure.streaming_scan import StreamingDirectoryScanner
 from app.modules.imports.infrastructure.system_events import (
@@ -326,45 +322,34 @@ def persist_import_task_retry(
     )
 
 
-def persist_watched_import_shelf_link(
+def persist_import_library_create(
     db: Session,
-    prepared: PreparedImportShelfLink,
+    prepared: PreparedLibraryCreate,
 ) -> None:
-    persist_import_shelf_link(
-        SqlAlchemyImportShelfLinkStore(db),
+    persist_library_create(
+        SqlAlchemyLibraryWriteStore(db),
         SqlAlchemyImportUnitOfWork(db),
         prepared,
     )
 
 
-def persist_import_monitor_folder_create(
+def persist_import_library_update(
     db: Session,
-    prepared: PreparedMonitorFolderCreate,
+    prepared: PreparedLibraryUpdate,
 ) -> None:
-    persist_monitor_folder_create(
-        SqlAlchemyMonitorFolderWriteStore(db),
+    persist_library_update(
+        SqlAlchemyLibraryWriteStore(db),
         SqlAlchemyImportUnitOfWork(db),
         prepared,
     )
 
 
-def persist_import_monitor_folder_update(
+def persist_import_library_delete(
     db: Session,
-    prepared: PreparedMonitorFolderUpdate,
-) -> None:
-    persist_monitor_folder_update(
-        SqlAlchemyMonitorFolderWriteStore(db),
-        SqlAlchemyImportUnitOfWork(db),
-        prepared,
-    )
-
-
-def persist_import_monitor_folder_delete(
-    db: Session,
-    prepared: PreparedMonitorFolderDelete,
+    prepared: PreparedLibraryDelete,
 ) -> bool:
-    return persist_monitor_folder_delete(
-        SqlAlchemyMonitorFolderWriteStore(db),
+    return persist_library_delete(
+        SqlAlchemyLibraryWriteStore(db),
         SqlAlchemyImportUnitOfWork(db),
         prepared,
     )
@@ -482,7 +467,7 @@ def prepare_import_enqueue_command(
     original_name: str | None = None,
     requested_title: str | None = None,
     requested_author: str | None = None,
-    monitor_folder_id: str | None = None,
+    library_id: str | None = None,
     message: str = "等待后台处理",
     allow_terminal_requeue: bool = False,
 ) -> StageImportCommand:
@@ -494,7 +479,7 @@ def prepare_import_enqueue_command(
         original_name=original_name,
         requested_title=requested_title,
         requested_author=requested_author,
-        monitor_folder_id=monitor_folder_id,
+        library_id=library_id,
         message=message,
         allow_terminal_requeue=allow_terminal_requeue,
     )
@@ -507,7 +492,7 @@ def load_import_enqueue_command_projection(
     return load_import_enqueue_projection(
         db,
         canonical_source_path=str(command.source_path),
-        monitor_folder_id=command.monitor_folder_id,
+        library_id=command.library_id,
         allow_terminal_requeue=command.allow_terminal_requeue,
     )
 
@@ -557,11 +542,11 @@ def get_import_scan_job(db: Session, job_id: str) -> ImportScanJobDTO | None:
 def list_import_scan_jobs(
     db: Session,
     *,
-    monitor_folder_ids: tuple[str, ...] | None,
+    library_ids: tuple[str, ...] | None,
     status: str | None,
 ) -> list[ImportScanJobDTO]:
     return persistent_work_queue.list_scan_jobs(
-        db, monitor_folder_ids=monitor_folder_ids, status=status
+        db, library_ids=library_ids, status=status
     )
 
 
@@ -590,7 +575,7 @@ def recover_interrupted_import_deletions(
 ) -> tuple[int, int]:
     monitor_roots = [
         Path(root).expanduser()
-        for root in import_http_store.list_monitor_root_paths(db)
+        for root in import_http_store.list_library_root_paths(db)
         if root.strip()
     ]
     files = LocalImportDeletionFiles(
@@ -609,7 +594,7 @@ def _recover_interrupted_import_deletions_without_open_session(
     settings: Settings,
 ) -> tuple[int, int]:
     with db_factory() as db:
-        monitor_roots = tuple(import_http_store.list_monitor_root_paths(db))
+        monitor_roots = tuple(import_http_store.list_library_root_paths(db))
     allowed_roots = [
         Path(root).expanduser() for root in monitor_roots if root.strip()
     ]
@@ -831,7 +816,7 @@ class ImportWorkerRuntime:
                 db.execute(
                     select(
                         ImportScanJob.id.label("id"),
-                        ImportScanJob.monitor_folder_id.label("monitorFolderId"),
+                        ImportScanJob.library_id.label("libraryId"),
                         ImportScanJob.root_path.label("rootPath"),
                         ImportScanJob.trigger.label("trigger"),
                         ImportScanJob.status.label("status"),
@@ -854,25 +839,24 @@ class ImportWorkerRuntime:
             )
             active_imports = persistent_work_queue.active_import_work_count(db)
             folder_row = None
-            monitor_folder_id = (
-                str(job_row["monitorFolderId"])
-                if job_row is not None and job_row["monitorFolderId"]
+            library_id = (
+                str(job_row["libraryId"])
+                if job_row is not None and job_row["libraryId"]
                 else None
             )
-            if monitor_folder_id is not None:
+            if library_id is not None:
                 folder_row = (
                     db.execute(
                         select(
-                            MonitorFolder.id.label("id"),
-                            MonitorFolder.root_path.label("rootPath"),
-                            MonitorFolder.shelf_id.label("shelfId"),
-                            MonitorFolder.ignore_hidden.label("ignoreHidden"),
-                            MonitorFolder.ignore_patterns.label("ignorePatterns"),
-                            MonitorFolder.min_file_size_bytes.label(
+                            Library.id.label("id"),
+                            Library.root_path.label("rootPath"),
+                            Library.ignore_hidden.label("ignoreHidden"),
+                            Library.ignore_patterns.label("ignorePatterns"),
+                            Library.min_file_size_bytes.label(
                                 "minFileSizeBytes"
                             ),
-                            MonitorFolder.enabled.label("enabled"),
-                        ).where(MonitorFolder.id == monitor_folder_id)
+                            Library.enabled.label("enabled"),
+                        ).where(Library.id == library_id)
                     )
                     .mappings()
                     .first()
@@ -964,10 +948,10 @@ class ImportWorkerRuntime:
                 level="error",
                 target_type="importScanJob",
                 target_id=job_id,
-                message="监控文件夹扫描失败",
+                message="书库扫描失败",
                 metadata={
                     "rootPath": str(job.get("rootPath") or ""),
-                    "error": "监控文件夹已删除或停用",
+                    "error": "书库已删除或停用",
                 },
             )
             self._persist_scan_checkpoint(
@@ -981,7 +965,7 @@ class ImportWorkerRuntime:
                             *existing_samples,
                             {
                                 "path": str(job.get("rootPath") or ""),
-                                "error": "监控文件夹已删除或停用",
+                                "error": "书库已删除或停用",
                             },
                         ],
                         "finished_at": finished_at,
@@ -1013,7 +997,7 @@ class ImportWorkerRuntime:
         restart_count = int(job.get("restartCount") or 0) + int(restarted)
         if scanner is None:
             preferences = _preferences_from_raw_values(projection.preference_values)
-            folder_config = monitor_folder_config(dict(folder), preferences=preferences)
+            folder_config = library_config(dict(folder), preferences=preferences)
             scanner = StreamingDirectoryScanner(
                 Path(str(job.get("rootPath") or "")), folder_config
             )
@@ -1028,7 +1012,7 @@ class ImportWorkerRuntime:
                     action="scan.started",
                     target_type="importScanJob",
                     target_id=job_id,
-                    message="开始扫描监控文件夹",
+                    message="开始扫描书库",
                     metadata={
                         "rootPath": str(job.get("rootPath") or ""),
                         "trigger": str(job.get("trigger") or ""),
@@ -1042,13 +1026,13 @@ class ImportWorkerRuntime:
             candidate_projection = load_scan_candidate_projection(
                 db,
                 sources,
-                monitor_folder_id=str(folder["id"]),
+                library_id=str(folder["id"]),
             )
         checkpoint_at = db_timestamp()
         candidate_batch = prepare_scan_candidate_batch(
             sources,
             candidate_projection,
-            monitor_folder_id=str(folder["id"]),
+            library_id=str(folder["id"]),
             now_ms=now_timestamp_ms(),
             now=checkpoint_at,
         )
@@ -1082,7 +1066,7 @@ class ImportWorkerRuntime:
                     action="scan.progress",
                     target_type="importScanJob",
                     target_id=job_id,
-                    message="监控文件夹扫描进行中",
+                    message="书库扫描进行中",
                     metadata={
                         "filesScanned": counters["filesScanned"],
                         "candidatesFound": counters["candidatesFound"],
@@ -1118,7 +1102,7 @@ class ImportWorkerRuntime:
                     level="warning" if counters["errorCount"] else "info",
                     target_type="importScanJob",
                     target_id=job_id,
-                    message="监控文件夹扫描完成",
+                    message="书库扫描完成",
                     metadata={
                         "rootPath": str(job.get("rootPath") or ""),
                         "filesScanned": counters["filesScanned"],
@@ -1212,7 +1196,7 @@ __all__ = [
     "IgnoredImportSource",
     "ImportIgnoreReason",
     "ImportWorkerRuntime",
-    "MonitorFolderConfig",
+    "LibraryConfig",
     "ScanSummary",
     "StreamingDirectoryScanner",
     "cancel_import_scan_job",
@@ -1232,7 +1216,7 @@ __all__ = [
     "list_import_scan_jobs",
     "load_persisted_scan_requests",
     "load_known_import_paths",
-    "monitor_folder_config",
+    "library_config",
     "monitor_repository",
     "execute_import_enqueue_write",
     "load_import_enqueue_command_projection",
@@ -1240,16 +1224,15 @@ __all__ = [
     "prepare_import_enqueue_command",
     "prepare_import_enqueue_write",
     "persist_import_events",
-    "persist_import_monitor_folder_create",
-    "persist_import_monitor_folder_delete",
-    "persist_import_monitor_folder_update",
+    "persist_import_library_create",
+    "persist_import_library_delete",
+    "persist_import_library_update",
     "persist_import_enqueue_write",
     "persist_import_queue_operation_checkpoint",
     "persist_import_rescan_completion",
     "persist_import_scan_requests",
     "persist_import_task_retry",
     "persist_terminal_import_tasks_clear",
-    "persist_watched_import_shelf_link",
     "process_import_task",
     "recover_interrupted_import_deletions",
     "recover_stale_import_tasks",

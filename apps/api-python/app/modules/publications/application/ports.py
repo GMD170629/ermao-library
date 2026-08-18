@@ -15,7 +15,7 @@ from app.modules.publications.domain.model import (
 class PublicationAccessScope:
     is_admin: bool
     can_view_manual_imports: bool
-    monitor_folder_ids: tuple[str, ...]
+    library_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

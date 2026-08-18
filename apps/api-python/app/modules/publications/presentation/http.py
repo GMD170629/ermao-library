@@ -76,7 +76,7 @@ def _access_scope(db: Session, user: User) -> PublicationAccessScope:
     return PublicationAccessScope(
         is_admin=actor.is_admin,
         can_view_manual_imports=actor.can_view_manual_imports,
-        monitor_folder_ids=tuple(actor.monitor_folder_ids),
+        library_ids=tuple(actor.library_ids),
     )
 
 

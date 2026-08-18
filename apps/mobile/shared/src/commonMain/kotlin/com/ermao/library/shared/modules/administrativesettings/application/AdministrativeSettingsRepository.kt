@@ -44,9 +44,9 @@ import com.ermao.library.shared.modules.administrativesettings.domain.MetadataPi
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProvider
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviderUpdate
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviders
-import com.ermao.library.shared.modules.administrativesettings.domain.MonitorFolder
-import com.ermao.library.shared.modules.administrativesettings.domain.MonitorFolderDraft
-import com.ermao.library.shared.modules.administrativesettings.domain.MonitorFolders
+import com.ermao.library.shared.modules.administrativesettings.domain.Library
+import com.ermao.library.shared.modules.administrativesettings.domain.LibraryDraft
+import com.ermao.library.shared.modules.administrativesettings.domain.Libraries
 import com.ermao.library.shared.modules.administrativesettings.domain.OpdsSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.OpfQueueStatus
 import com.ermao.library.shared.modules.administrativesettings.domain.OrganizeCandidates
@@ -86,10 +86,10 @@ interface AdministrativeSettingsRepository {
     suspend fun resetUserPassword(context: AdministrativeSettingsContext, userId: String, password: String): AdministrativeSettingsResult<ManagedPasswordChange>
     suspend fun deleteUser(context: AdministrativeSettingsContext, userId: String, confirmation: String): AdministrativeSettingsResult<DeletedManagedUser>
 
-    suspend fun loadMonitorFolders(context: AdministrativeSettingsContext): AdministrativeSettingsResult<MonitorFolders>
-    suspend fun createMonitorFolder(context: AdministrativeSettingsContext, folder: MonitorFolderDraft): AdministrativeSettingsResult<MonitorFolder>
-    suspend fun updateMonitorFolder(context: AdministrativeSettingsContext, folderId: String, folder: MonitorFolderDraft): AdministrativeSettingsResult<MonitorFolder>
-    suspend fun deleteMonitorFolder(context: AdministrativeSettingsContext, folderId: String): AdministrativeSettingsResult<Boolean>
+    suspend fun loadLibraries(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Libraries>
+    suspend fun createLibrary(context: AdministrativeSettingsContext, folder: LibraryDraft): AdministrativeSettingsResult<Library>
+    suspend fun updateLibrary(context: AdministrativeSettingsContext, folderId: String, folder: LibraryDraft): AdministrativeSettingsResult<Library>
+    suspend fun deleteLibrary(context: AdministrativeSettingsContext, folderId: String): AdministrativeSettingsResult<Boolean>
     suspend fun loadDirectory(context: AdministrativeSettingsContext, path: String?): AdministrativeSettingsResult<DirectoryNode>
 
     suspend fun listImportTasks(context: AdministrativeSettingsContext, filter: ImportTaskFilter): AdministrativeSettingsResult<ImportTaskPage>

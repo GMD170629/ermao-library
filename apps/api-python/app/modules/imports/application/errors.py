@@ -62,8 +62,8 @@ class ComicArchiveInvalidError(ComicArchiveError):
     """A comic archive is malformed or unsupported."""
 
 
-class MonitorFolderDeletedDuringImportError(RuntimeError):
-    """The monitor-folder configuration disappeared while its task was running."""
+class LibraryDeletedDuringImportError(RuntimeError):
+    """The library configuration disappeared while its task was running."""
 
     def __init__(self) -> None:
-        super().__init__("监控文件夹已在导入期间被删除")
+        super().__init__("书库已在导入期间被删除")
