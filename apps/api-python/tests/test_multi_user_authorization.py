@@ -23,8 +23,9 @@ PASSWORD = "starshipnas"
 
 def _prepare_schema(db_session) -> User:
     db_session.rollback()
-    Base.metadata.create_all(db_session.get_bind())
-    apply_schema(db_session.get_bind())
+    engine = db_session.get_bind()
+    Base.metadata.drop_all(engine)
+    apply_schema(engine)
     admin = User(
         email="admin@example.com",
         name="管理员",

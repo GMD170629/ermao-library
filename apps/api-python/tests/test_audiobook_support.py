@@ -111,8 +111,9 @@ class _FakeAudioDirectoryEntry:
 
 def _initialize_schema(db_session) -> None:
     db_session.rollback()
-    Base.metadata.create_all(db_session.get_bind())
-    apply_schema(db_session.get_bind())
+    engine = db_session.get_bind()
+    Base.metadata.drop_all(engine)
+    apply_schema(engine)
     db_session.expire_all()
 
 

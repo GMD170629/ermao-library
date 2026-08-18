@@ -1,4 +1,4 @@
-"""Database bootstrap: schema migrations via Alembic, then baseline seed data."""
+"""Database bootstrap: fresh-install schema via Alembic, then baseline seed data."""
 
 from __future__ import annotations
 

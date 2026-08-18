@@ -213,7 +213,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                 )
             )
 
-        apply_schema(engine, settings)
+        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
 
         assert head_revision(engine) == "0028_remove_publication_render_cache"
         upgraded_volume = _table(engine, "LibraryVolume")
@@ -320,11 +320,6 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                 opts={"compare_type": True, "compare_server_default": True},
             )
             assert compare_metadata(context, Base.metadata) == []
-        assert list(
-            settings.database_path.parent.glob(
-                "migrations/shuku-before-alembic-*.sqlite3"
-            )
-        )
     finally:
         engine.dispose()
 
@@ -389,7 +384,7 @@ def test_contract_discards_conversion_without_source_volume_and_completes_upgrad
                 == "0006_media_versions_backfill"
             )
 
-        apply_schema(engine, settings)
+        _run_alembic(engine, lambda config: command.upgrade(config, "head"))
 
         with engine.connect() as connection:
             assert (

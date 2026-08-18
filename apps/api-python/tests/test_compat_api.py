@@ -5656,9 +5656,11 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
 def test_backup_create_download_and_restore_database_export(
     client, db_session, test_settings
 ):
-    Base.metadata.create_all(db_session.get_bind())
+    db_session.rollback()
+    engine = db_session.get_bind()
+    Base.metadata.drop_all(engine)
+    apply_schema(engine)
     create_worker_tables(db_session)
-    apply_schema(db_session.get_bind())
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
     write_metadata_source_seed_rows(
@@ -7144,7 +7146,10 @@ def test_imported_comic_serves_archive_page(
     archive = client.get(publication["downloadArtifact"]["url"])
     assert archive.status_code == 200
     assert archive.content == comic.read_bytes()
-    assert hashlib.sha256(archive.content).hexdigest() in publication["downloadArtifact"]["contentHash"]
+    assert (
+        hashlib.sha256(archive.content).hexdigest()
+        in publication["downloadArtifact"]["contentHash"]
+    )
 
     assert client.get(f"/api/volumes/{volume_id}/pages").status_code == 410
     assert client.get(f"/api/volumes/{volume_id}/pages/1").status_code == 410
@@ -7203,7 +7208,9 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
     )
     archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     db_session.execute(
-        text("UPDATE LibraryFile SET fullHash = :hash, fingerprint = :fingerprint WHERE id = 'archive-file'"),
+        text(
+            "UPDATE LibraryFile SET fullHash = :hash, fingerprint = :fingerprint WHERE id = 'archive-file'"
+        ),
         {"hash": archive_hash, "fingerprint": f"sha256:{archive_hash}"},
     )
     db_session.commit()
@@ -7219,15 +7226,15 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(
     assert original.headers["content-type"].startswith("image/jpeg")
     assert original.headers["x-comic-image-variant"] == "original"
 
-    data_saver = client.get(page_url, params={**page_params, "imageVariant": "data-saver"})
+    data_saver = client.get(
+        page_url, params={**page_params, "imageVariant": "data-saver"}
+    )
     assert data_saver.status_code == 200
     assert data_saver.content[:4] == b"RIFF"
     assert data_saver.content[8:12] == b"WEBP"
     assert data_saver.headers["content-type"].startswith("image/webp")
     assert data_saver.headers["x-comic-image-variant"] == "data-saver"
-    assert (
-        data_saver.headers["x-comic-image-quality"] == "webp;q=75;max-edge=2048"
-    )
+    assert data_saver.headers["x-comic-image-quality"] == "webp;q=75;max-edge=2048"
     assert float(data_saver.headers["x-comic-image-compression-ratio"]) < 1
     assert len(data_saver.content) < len(source_jpeg)
     assert data_saver.headers["etag"] != original.headers["etag"]

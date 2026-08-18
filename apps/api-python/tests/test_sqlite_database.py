@@ -9,9 +9,10 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import inspect, select, text, update
+from sqlalchemy import create_engine, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
 from app.db import bootstrap as bootstrap_module
@@ -145,17 +146,6 @@ def _alembic_version(connection) -> str | None:
 
 def _application_tables(engine) -> set[str]:
     return set(inspect(engine).get_table_names()) - {"alembic_version"}
-
-
-def _drop_alembic_version(connection) -> None:
-    connection.exec_driver_sql("DROP TABLE IF EXISTS `alembic_version`")
-
-
-def _alembic_backup_paths(settings: Settings) -> list[Path]:
-    migrations_dir = settings.database_path.parent / "migrations"
-    if not migrations_dir.is_dir():
-        return []
-    return sorted(migrations_dir.glob("shuku-before-alembic-*.sqlite3"))
 
 
 def _default_text(value: object) -> str:
@@ -312,55 +302,6 @@ def test_alembic_baseline_matches_sqlalchemy_metadata(tmp_path) -> None:
         engine.dispose()
 
 
-def test_management_query_indexes_upgrade_and_downgrade(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_sqlite_engine(settings.database_path)
-    index_names = {
-        "LibraryWork": {"LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx"},
-        "ImportTask": {
-            "ImportTask_monitorFolderId_createdAt_id_idx",
-            "ImportTask_monitorFolderId_status_createdAt_id_idx",
-        },
-        "SystemEvent": {
-            "SystemEvent_createdAt_id_idx",
-            "SystemEvent_targetType_createdAt_id_idx",
-        },
-    }
-    try:
-        _run_alembic(
-            engine,
-            lambda config: command.upgrade(config, "0014_dashboard_query_indexes"),
-        )
-        inspector = inspect(engine)
-        for table, expected_names in index_names.items():
-            assert expected_names.isdisjoint(
-                {index["name"] for index in inspector.get_indexes(table)}
-            )
-
-        _run_alembic(
-            engine,
-            lambda config: command.upgrade(config, "0015_management_query_indexes"),
-        )
-        inspector = inspect(engine)
-        for table, expected_names in index_names.items():
-            assert expected_names <= {
-                index["name"] for index in inspector.get_indexes(table)
-            }
-
-        _run_alembic(
-            engine,
-            lambda config: command.downgrade(config, "0014_dashboard_query_indexes"),
-        )
-        inspector = inspect(engine)
-        for table, expected_names in index_names.items():
-            assert expected_names.isdisjoint(
-                {index["name"] for index in inspector.get_indexes(table)}
-            )
-    finally:
-        engine.dispose()
-
-
 def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
@@ -427,191 +368,44 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
         engine.dispose()
 
 
-def test_bootstrap_upgrades_0001_database_to_media_version_head(tmp_path) -> None:
+def test_apply_schema_accepts_current_head_without_changing_revision(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        expected = head_revision(engine)
+        with engine.connect() as connection:
+            assert _alembic_version(connection) == expected
+
+        runner_module.apply_schema(engine, settings)
+
+        with engine.connect() as connection:
+            assert _alembic_version(connection) == expected
+        assert _application_tables(engine) == EXPECTED_TABLES
+        assert not (settings.database_path.parent / "migrations").exists()
+    finally:
+        engine.dispose()
+
+
+def test_apply_schema_rejects_old_alembic_revision(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(settings.database_path)
+    old_revision = "0021_reader_v4_exact_progress"
     try:
-        _run_alembic(
-            engine, lambda config: command.upgrade(config, "0001_current_schema")
-        )
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO `LibraryWork` "
-                    "(`id`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `workType`, "
-                    "`status`, `tags`, `mergeKey`, `updatedAt`) "
-                    "VALUES ('legacy-work', '旧作品', '旧作品', '旧作者', '旧作者', 'EPUB', "
-                    "'WANT', '[]', 'legacy-identity-key', CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO `LibraryFacet` "
-                    "(`id`, `kind`, `name`, `normalizedName`, `aliases`, `updatedAt`) "
-                    "VALUES ('legacy-facet', 'TAG', '旧标签', '旧标签', '[\"旧别名\"]', CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO `OrganizeJob` "
-                    "(`id`, `workId`, `status`, `issueCodes`, `summary`, `updatedAt`) "
-                    "VALUES ('legacy-job', 'legacy-work', 'FAILED', '[]', '保持失败', CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO `MetadataLookupTask` "
-                    "(`id`, `workId`, `organizeJobId`, `status`, `providerOrder`, `attempts`, "
-                    "`finishedAt`, `updatedAt`) "
-                    "VALUES ('legacy-lookup', 'legacy-work', 'legacy-job', 'NO_MATCH', "
-                    "'[]', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.exec_driver_sql(
-                "UPDATE alembic_version SET version_num = '0001_current_schema'"
-            )
-            connection.exec_driver_sql("PRAGMA user_version = 14")
-
-        bootstrap_database(engine, settings)
+        _run_alembic(engine, lambda config: command.upgrade(config, old_revision))
+        with pytest.raises(
+            RuntimeError,
+            match=(
+                r"Database revision '0021_reader_v4_exact_progress' is not supported"
+                r".*Expected '.*'.*fresh installation"
+            ),
+        ):
+            runner_module.apply_schema(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == head_revision(engine)
-            assert (
-                connection.execute(
-                    text(
-                        "SELECT `mergeKey` FROM `LibraryWork` WHERE `id` = 'legacy-work'"
-                    )
-                ).scalar_one()
-                == "legacy-identity-key"
-            )
-            assert connection.execute(
-                text(
-                    "SELECT `status`, `attempts` FROM `MetadataLookupTask` "
-                    "WHERE `id` = 'legacy-lookup'"
-                )
-            ).one() == ("NO_MATCH", 2)
-            assert connection.execute(
-                text(
-                    "SELECT `status`, `summary` FROM `OrganizeJob` WHERE `id` = 'legacy-job'"
-                )
-            ).one() == ("FAILED", "保持失败")
-            assert (
-                connection.execute(
-                    text(
-                        "SELECT `aliases` FROM `LibraryFacet` WHERE `id` = 'legacy-facet'"
-                    )
-                ).scalar_one()
-                == '["旧别名"]'
-            )
-            assert (
-                connection.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `SystemSetting` WHERE `key` LIKE 'migration.%'"
-                    )
-                ).scalar_one()
-                == 0
-            )
-        assert _alembic_backup_paths(settings)
-    finally:
-        engine.dispose()
-
-
-def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage-v14"))
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        _run_alembic(
-            engine,
-            lambda config: command.upgrade(config, "0003_import_work_queue"),
-        )
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO SystemSetting (`key`, `value`, `updatedAt`) "
-                    "VALUES ('v14-preserved', 'yes', CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.exec_driver_sql("DROP TABLE alembic_version")
-            connection.exec_driver_sql("PRAGMA user_version = 14")
-
-        bootstrap_database(engine, settings)
-
-        with engine.connect() as connection:
-            assert _alembic_version(connection) == "0028_remove_publication_render_cache"
-            inspector = inspect(connection)
-            assert "LibraryWork_hidden_createdAt_id_idx" in {
-                index["name"] for index in inspector.get_indexes("LibraryWork")
-            }
-            assert "LibraryVolume_mediaVersionId_hidden_monitorFolderId_idx" in {
-                index["name"] for index in inspector.get_indexes("LibraryVolume")
-            }
-            assert "LibraryReadingProgress_userId_updatedAt_volumeId_idx" in {
-                index["name"]
-                for index in inspector.get_indexes("LibraryReadingProgress")
-            }
-            assert "UserMediaHistory_userId_updatedAt_mediaVersionId_idx" in {
-                index["name"] for index in inspector.get_indexes("UserMediaHistory")
-            }
-            assert "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx" in {
-                index["name"] for index in inspector.get_indexes("LibraryWork")
-            }
-            assert "ImportTask_monitorFolderId_createdAt_id_idx" in {
-                index["name"] for index in inspector.get_indexes("ImportTask")
-            }
-            assert "ImportTask_monitorFolderId_status_createdAt_id_idx" in {
-                index["name"] for index in inspector.get_indexes("ImportTask")
-            }
-            assert "SystemEvent_createdAt_id_idx" in {
-                index["name"] for index in inspector.get_indexes("SystemEvent")
-            }
-            assert "SystemEvent_targetType_createdAt_id_idx" in {
-                index["name"] for index in inspector.get_indexes("SystemEvent")
-            }
-            assert (
-                connection.execute(
-                    text(
-                        "SELECT `value` FROM SystemSetting "
-                        "WHERE `key` = 'v14-preserved'"
-                    )
-                ).scalar_one()
-                == "yes"
-            )
-        assert _alembic_backup_paths(settings)
-    finally:
-        engine.dispose()
-
-
-@pytest.mark.parametrize("user_version", [0, 1, 13])
-def test_bootstrap_rejects_pre_v14_or_incomplete_database(
-    tmp_path, user_version
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / f"storage-{user_version}"))
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        with engine.begin() as connection:
-            connection.exec_driver_sql(
-                "CREATE TABLE LegacySentinel (value TEXT NOT NULL)"
-            )
-            connection.exec_driver_sql(
-                "INSERT INTO LegacySentinel (value) VALUES ('preserve-me')"
-            )
-            connection.exec_driver_sql(f"PRAGMA user_version = {user_version}")
-
-        with pytest.raises(RuntimeError, match="pre-v14"):
-            bootstrap_database(engine, settings)
-
-        with engine.connect() as connection:
-            assert (
-                connection.exec_driver_sql(
-                    "SELECT value FROM LegacySentinel"
-                ).scalar_one()
-                == "preserve-me"
-            )
-            assert _alembic_version(connection) is None
-        assert _alembic_backup_paths(settings) == []
+            assert _alembic_version(connection) == old_revision
+        assert not (settings.database_path.parent / "migrations").exists()
     finally:
         engine.dispose()
 
@@ -622,11 +416,46 @@ def test_complete_create_all_database_without_revision_is_rejected(tmp_path) -> 
     engine = create_sqlite_engine(settings.database_path)
     try:
         Base.metadata.create_all(engine)
-        with pytest.raises(RuntimeError, match="未标记版本"):
+        with pytest.raises(RuntimeError, match="fresh installation"):
             bootstrap_database(engine, settings)
         with engine.connect() as connection:
             assert _alembic_version(connection) is None
-        assert _alembic_backup_paths(settings) == []
+        assert not (settings.database_path.parent / "migrations").exists()
+    finally:
+        engine.dispose()
+
+
+def test_apply_schema_bootstraps_empty_in_memory_database() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    try:
+        runner_module.apply_schema(engine)
+        assert _application_tables(engine) == EXPECTED_TABLES
+        with engine.connect() as connection:
+            assert _alembic_version(connection) == head_revision(engine)
+    finally:
+        engine.dispose()
+
+
+def test_apply_schema_rejects_nonempty_unversioned_in_memory_database() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE User (id TEXT PRIMARY KEY NOT NULL)"
+            )
+        with pytest.raises(RuntimeError, match="fresh installation"):
+            runner_module.apply_schema(engine)
+        with engine.connect() as connection:
+            assert _alembic_version(connection) is None
+        assert "User" in _application_tables(engine)
     finally:
         engine.dispose()
 
