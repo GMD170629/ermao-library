@@ -13,6 +13,7 @@ from app.db.current.runner import current_alembic_config, upgrade_current_schema
 
 REVISION_0002 = "0002_catalog_scan_topology"
 REVISION_0003 = "0003_catalog_watcher_reconcile"
+REVISION_0004 = "0004_catalog_content_processing"
 
 
 def _upgrade_to(database_path: Path, revision: str) -> None:
@@ -134,10 +135,10 @@ def test_fresh_head_has_bounded_watcher_schema(tmp_path: Path) -> None:
     finally:
         engine.dispose()
 
-    assert _version(database_path) == REVISION_0003
+    assert _version(database_path) == REVISION_0004
 
 
-def test_explicit_empty_0002_upgrade_reaches_0003_and_is_repeatable(
+def test_explicit_empty_0002_upgrade_reaches_current_head_and_is_repeatable(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "current.sqlite3"
@@ -147,7 +148,7 @@ def test_explicit_empty_0002_upgrade_reaches_0003_and_is_repeatable(
     _upgrade_to(database_path, REVISION_0003)
     _upgrade_to(database_path, "head")
 
-    assert _version(database_path) == REVISION_0003
+    assert _version(database_path) == REVISION_0004
 
 
 def test_watcher_and_presence_constraints_reject_impossible_rows(

@@ -30,6 +30,7 @@ class SqlAlchemyReconcileDiagnosticRepository:
         observed_at: datetime,
     ) -> None:
         require_live_reconcile(self._session, fence, now=observed_at)
+        new_rows: dict[str, LayoutDiagnostic] = {}
         for diagnostic in diagnostics:
             code = enum_value(diagnostic.code)
             scope = "/".join(diagnostic.unit_path)
@@ -45,39 +46,41 @@ class SqlAlchemyReconcileDiagnosticRepository:
                 code,
                 related_digest,
             )
-            row = self._session.scalar(
-                select(LayoutDiagnostic).where(
-                    LayoutDiagnostic.id == diagnostic_id,
-                    LayoutDiagnostic.library_id == fence.library_id,
-                    LayoutDiagnostic.reconcile_origin_id == fence.intent_id,
+            row = new_rows.get(diagnostic_id)
+            if row is None:
+                row = self._session.scalar(
+                    select(LayoutDiagnostic).where(
+                        LayoutDiagnostic.id == diagnostic_id,
+                        LayoutDiagnostic.library_id == fence.library_id,
+                        LayoutDiagnostic.reconcile_origin_id == fence.intent_id,
+                    )
                 )
-            )
             parameters: dict[str, object] = {
                 "relatedPaths": list(related[:_RELATED_PATH_LIMIT]),
                 "relatedPathCount": len(related),
                 "relatedPathsDigest": related_digest,
             }
             if row is None:
-                self._session.add(
-                    LayoutDiagnostic(
-                        id=diagnostic_id,
-                        library_id=fence.library_id,
-                        scan_run_id=None,
-                        reconcile_origin_id=fence.intent_id,
-                        generation=fence.presence_generation,
-                        config_revision=fence.config_revision,
-                        scope_relative_path=scope,
-                        code=code,
-                        severity="WARNING",
-                        parameters=parameters,
-                        first_observed_at=observed_at,
-                        last_observed_at=observed_at,
-                    )
+                row = LayoutDiagnostic(
+                    id=diagnostic_id,
+                    library_id=fence.library_id,
+                    scan_run_id=None,
+                    reconcile_origin_id=fence.intent_id,
+                    generation=fence.presence_generation,
+                    config_revision=fence.config_revision,
+                    scope_relative_path=scope,
+                    code=code,
+                    severity="WARNING",
+                    parameters=parameters,
+                    first_observed_at=observed_at,
+                    last_observed_at=observed_at,
                 )
+                new_rows[diagnostic_id] = row
             else:
                 row.last_observed_at = observed_at
                 row.resolved_at = None
                 row.parameters = parameters
+        self._session.add_all(new_rows.values())
         self._session.flush()
 
 

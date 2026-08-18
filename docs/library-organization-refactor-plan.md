@@ -994,22 +994,81 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 独立门禁；PR 5A 的 full-scan 测试不宣称 watcher，PR5B dormant 合同也不宣称 production backend
 已经能观察所有 disconnect/overflow。
 
-### PR 6 — 深度内容索引与 revision
+### PR 6A — required content、manifest 与 readiness（当前 dormant 切片）
 
-- 接入现有 parser 的公开能力，禁止深引旧 grouping helper；
-- content/required-manifest/optional-manifest/metadata revisions 与 canonical source digest；
+- 在 full scan/reconcile 的 fenced SourceObservation flush 同一事务中写 required source fact；
+  首次 `PRIMARY/AUDIO_TRACK` 建 `SourceContentFact`，首次 sidecar/ignored/noise/unsupported 不建行，
+  仅既有 required fact 变为非 required 时保留单调 revision 并转 `INELIGIBLE`；
+- source input revision 对 typed admission/format、filesystem identity/stat、policy 或显式 watcher
+  `MODIFY` 变化单调推进；同 origin + 相同 facts 重试幂等。origin 只作追踪/去重且不含 raw path，
+  不作 content equality、也不 FK 到会删除的 scan/reconcile work；
+- stat 只触发 rehash，不证明 byte equality。即使 inode/size/mtime 被恢复，full digest 与 READY
+  digest 不同也必须先以 owned CAS 推进 source fact revision，再发布新 digest；digest 相同可复用；
+- required manifest canonical facts 产生三个独立 fingerprint：公开 `sourceBytesDigest`
+  （即 `requiredManifestDigest`）含 topologyVersion + order/format/size/fullDigest；内部
+  `contentFactsDigest` 再绑定 morphology/assetId/role；内部 `deliveryFactsDigest` 再绑定 canonical
+  MIME 与 delivery policy/version。canonical JSON 为 ASCII、无无意义空白、asset order 从 0 连续；
+- final complete required manifest `ACTIVE` CAS 是 `contentRevision` 与
+  `requiredManifestRevision` 唯一线性化点：首次只允许 `0/0 -> 1/1`；content facts 变化两轴都
+  `+1`；MIME/delivery-only 只 required `+1`；三 fingerprint 相同则 retarget/reuse 且 revision
+  不变。source observation 只投影自身有界 current membership；topology pointer CAS 只推进一行
+  per-Library projection state 的 `requestedEpoch`，idle→pending 时发一个 Library-level wake，绝不
+  枚举 descendant Volume，也不在 pointer CAS 中增 business revision；
+- dormant `RunNextContentTopologyProjection` 无 lease/通用 job 表，每次只持有一个 global-writer
+  短事务：按 current ACTIVE topology 与 REQUIRED_MANIFEST processing mismatch、`volumeId` keyset
+  `LIMIT 501`，最多把前 500 个 Volume 置 `PENDING` 并 upsert processing，然后同 txn 推进 cursor
+  与 continuation wake。state 仅含 requested/claimed/applied epoch + nullable cursor；sweep 期间的新
+  requested 不打断旧 sweep，旧 tail 才 applied old claim、claim latest、cursor 清零并从头重扫，
+  stable tail 才三轴相等。crash 只能落在整批提交前或后，不产生半 cursor；
+- required ACTIVE manifest 只有在其 `topologyUnitRevisionId` 等于 owner
+  `TopologyUnit.activeRevisionId` 时才是 current/openable；因此 pointer 切换后 sweep 前的旧 READY
+  也不可读。same-canonical retarget 只 O(1) 更新 header topology fence、恢复 current readiness，
+  immutable entries 与两条 business revision 都不变；
+- ACTIVE manifest entry 的 source fact revision/stat/identity 只是 immutable build provenance；
+  current READY fact 的 full digest/canonical facts 相同可把 opening/delivery retarget 到当前 expected
+  stat/identity，既不改 entry 也不增 business revision，handle-open 仍核对 current fact；
+- required manifest 只保留 `STAGING | ACTIVE`。新 attempt 删除旧 STAGING（entries cascade）；
+  final transaction 先 delete + flush 旧 ACTIVE header/entries，再 promote 完整 STAGING。SQLite
+  reader 在 commit 前见旧 snapshot、commit 后见新 snapshot，rollback 恢复旧 ACTIVE；每 Volume
+  最多一个 ACTIVE + 一个 STAGING，PR9 以 current revisions/validator 拒绝 stale manifest；
+- `READY` 要求所有 required assets 当前 READY、required manifest 当前 ACTIVE、并且
+  required opening 对同一两轴 revision vector 成功且落 `PublicationFingerprint`。opening pending
+  时 fingerprint 可为 null；稳定 opening 格式失败才可 `UNREADABLE`。digest/opening 的 I/O、权限、
+  root/source 漂移与 lease loss 只 retry/stale；navigation、optional artwork、metadata 不阻 READY；
+- digest/opening 大读通过 <=1 MiB progress 与 <=250 ms ACTIVE/lease checkpoint 中止旧 worker；
+  opening READY 只要求所有 source 完成，不要求把每个文件再次全读；稳定 UNREADABLE 可在首个
+  格式失败提前结束；ZIP/PDF 等合法 parser 可 seek/re-read，绝对 I/O/seek/archive-expansion 预算
+  由 PR6B 各格式 secure facade 与真实 FS 测试定义，不从 physical size 猜统一倍数；任一
+  checkpoint 异常会永久 poison 当前 attempt；
+  manifest entries 每批最多 500 且每批先 heartbeat，最后单独 fenced activation；
+- 本切片只保留 domain/application/ports、secure read-only digest adapter 与持久化合同；不注册
+  production worker/router，不接旧 parser/publications/grouping/private helper，不写用户目录。
+
+验收：same-stat different bytes、same digest touch、MIME-only、equal bytes/new assetId、旧 owner、
+PAUSED/REMOVING、10,000 asset batching 与 rollback 都不产生错误 revision/readiness；当前 production
+composition 仍无 PR6 worker/route。
+
+### PR 6B — sidecar、opening/parser 与 optional/metadata processors（后续）
+
+- 在同一 fenced SourceObservation flush 中，从内存 typed admission evidence 写一行/SourceEntry 的
+  durable、policy-versioned `SourceSidecarFact`；事实在 PENDING/RUNNING/RESOLVED/AMBIGUOUS 后仍
+  保留，resolver/persistence 不得根据 filename 重新猜 `SidecarRole`；
 - 新增纯结构 `SidecarOwnerResolver`：只按 frozen SourceEntry/topology、filename scope 与
-  OPF/artwork/LRC/CUE 固定规则挂 SourceAttachment；同优先级 owner ambiguous 时不挂载并写
-  `SIDECAR_OWNER_AMBIGUOUS`。resolver 不读取 sidecar 内容或 metadata 来改组，并按角色推进
-  content/optional-manifest/metadata revision；
-- 在同一 fenced SourceObservation flush 中，从内存里的 typed admission evidence 写幂等、
-  policy-versioned sidecar-resolution intent；不得由 persistence 根据文件名重猜角色，也不得依赖
-  PR5 事后无法恢复的瞬时 DTO；
-- processor/policy-versioned navigation、cover、metadata、search jobs；
-- parser failure 只更新 readiness/diagnostic，不改变 topology；
-- 新路径从未实现标题、兄弟、AI、mediaKind 结构决策，旧生产路径暂不改。
+  OPF/artwork/LRC/CUE 固定规则选择 owner；同一 physical scope 折叠后优先最具体
+  `Volume > Version > Work`，distinct same-priority 才 ambiguous，不挂载并写
+  `SIDECAR_OWNER_AMBIGUOUS`。resolver 不读取内容/metadata 来改组；
+- OPF/artwork/LRC/CUE 默认都不是 required asset；role/policy 的明确 processor 结果才可推进相应
+  content/optional/metadata truth。Work/Version artwork 不同步 fanout 所有 descendant Volume；Reader
+  effective artwork vector 显式引用 chosen attachment/owner revision；
+- parser 通过新的窄 public facade 只返回描述/opening/navigation facts，不复用旧 title/series
+  grouping 或 publications private API；每个 source/<=1 MiB 长读继续使用 progress checkpoint；
+- processor/version-specific navigation、cover、metadata、search job 用 owned lease + current
+  topology/source/revision vector CAS；parser failure 只更新 readiness/diagnostic，不改变 topology；
+- 新路径没有标题、兄弟、AI、`mediaKind` 结构决策，不做 source writeback，不注册 production
+  worker/router；生产接线仍留 PR11。
 
-验收：同 slot 内容替换触发正确 revision，旧 job/outbox 不覆盖新结果。
+验收：owner ambiguity、角色四类、旧 processor CAS、optional/metadata no-fanout、parser failure 与
+legacy/private-import boundary 独立门禁通过，且 PR6A required manifest/readiness 语义不被扩宽。
 
 ### PR 7 — 三种模式的 source placement
 

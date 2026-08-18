@@ -3,35 +3,49 @@ from .adapters import (
     UtcClock,
     UuidIdGenerator,
 )
+from .content_topology_repository import (
+    SqlAlchemyContentTopologyActivationRepository,
+    SqlAlchemyContentTopologyProjectionRepository,
+)
+from .content_uow import SqlAlchemyContentUnitOfWork, SqlAlchemyContentUowFactory
 from .enums import (
     AssetRole,
     AssetValidationState,
     AttachmentRole,
     AuditActorKind,
+    ContentOriginKind,
+    ContentProcessorKind,
     FullRescanReason,
     GrantLevel,
     IgnoreRuleKind,
     LayoutState,
     LibraryControlState,
     LibraryHealth,
+    ManifestKind,
     OperationState,
+    ProcessorState,
     ReconcileIntentPhase,
     ReconcileIntentState,
     ReconcileMovedEntryType,
+    RequiredDeliveryPolicy,
+    RequiredManifestState,
     RevisionState,
     ScanFailureCode,
     ScanStage,
     ScanState,
     SlotState,
+    SourceContentState,
     SourceEntryType,
     TopologyUnitKind,
     VersionKind,
+    VolumeContentState,
     WritePolicy,
 )
 from .models import (
     AdministrativeAuditEvent,
     CatalogLibrary,
     CatalogOutbox,
+    ContentTopologyProjectionState,
     LayoutDiagnostic,
     LibraryIgnoreRule,
     LibraryReconcileIntent,
@@ -45,6 +59,7 @@ from .models import (
     OperationStagingLock,
     PathCollisionObservation,
     SourceAttachment,
+    SourceContentFact,
     SourceWriteOperation,
     TopologyAssetMembership,
     TopologyUnit,
@@ -54,6 +69,9 @@ from .models import (
     TopologyWorkProjection,
     UserLibraryGrant,
     VolumeAsset,
+    VolumeManifestEntry,
+    VolumeManifestHeader,
+    VolumeProcessingFact,
     WorkVersion,
 )
 from .repositories import (
@@ -65,6 +83,7 @@ from .repositories import (
     SqlAlchemyLibraryWritePolicy,
     SqlAlchemyOutboxPort,
 )
+from .required_manifest_repository import SqlAlchemyRequiredManifestRepository
 from .root_registry import (
     RootRegistryBusy,
     SqlAlchemyRootRegistry,
@@ -76,6 +95,10 @@ from .scan_run_repositories import (
     SqlAlchemyScanLibraryRepository,
 )
 from .scan_uow import SqlAlchemyScanUnitOfWork, SqlAlchemyScanUowFactory
+from .source_content_repositories import (
+    SqlAlchemySourceContentObservationRepository,
+    SqlAlchemySourceContentWorkRepository,
+)
 from .source_observation_repositories import (
     SqlAlchemyPathCollisionRepository,
     SqlAlchemyScanDiagnosticRepository,
@@ -87,6 +110,10 @@ from .topology_repository import (
     disc_number_to_storage,
 )
 from .uow import SqlAlchemyLibraryUnitOfWork
+from .volume_processing_repository import (
+    SqlAlchemyContentLibraryRepository,
+    SqlAlchemyVolumeProcessingRepository,
+)
 from .watcher_repository import (
     SqlAlchemyReconcileLibraryRepository,
     SqlAlchemyWatcherJournalRepository,
@@ -102,6 +129,9 @@ __all__ = [
     "AuditActorKind",
     "CatalogLibrary",
     "CatalogOutbox",
+    "ContentOriginKind",
+    "ContentProcessorKind",
+    "ContentTopologyProjectionState",
     "FullRescanReason",
     "GrantLevel",
     "IgnoreRuleKind",
@@ -118,12 +148,16 @@ __all__ = [
     "LibraryVolume",
     "LibraryWatcherState",
     "LibraryWork",
+    "ManifestKind",
     "OperationStagingLock",
     "OperationState",
     "PathCollisionObservation",
+    "ProcessorState",
     "ReconcileIntentPhase",
     "ReconcileIntentState",
     "ReconcileMovedEntryType",
+    "RequiredDeliveryPolicy",
+    "RequiredManifestState",
     "RevisionState",
     "RootRegistryBusy",
     "ScanFailureCode",
@@ -132,9 +166,16 @@ __all__ = [
     "SecureScopeEpochGenerator",
     "SlotState",
     "SourceAttachment",
+    "SourceContentFact",
+    "SourceContentState",
     "SourceEntryType",
     "SourceWriteOperation",
     "SqlAlchemyAuditPort",
+    "SqlAlchemyContentLibraryRepository",
+    "SqlAlchemyContentTopologyActivationRepository",
+    "SqlAlchemyContentTopologyProjectionRepository",
+    "SqlAlchemyContentUnitOfWork",
+    "SqlAlchemyContentUowFactory",
     "SqlAlchemyFullScanRepository",
     "SqlAlchemyIgnoreRuleRepository",
     "SqlAlchemyLibraryGrantRepository",
@@ -145,6 +186,7 @@ __all__ = [
     "SqlAlchemyOutboxPort",
     "SqlAlchemyPathCollisionRepository",
     "SqlAlchemyReconcileLibraryRepository",
+    "SqlAlchemyRequiredManifestRepository",
     "SqlAlchemyRootRegistry",
     "SqlAlchemyRootRegistryLease",
     "SqlAlchemyRootScanWorkRepository",
@@ -152,8 +194,11 @@ __all__ = [
     "SqlAlchemyScanLibraryRepository",
     "SqlAlchemyScanUnitOfWork",
     "SqlAlchemyScanUowFactory",
+    "SqlAlchemySourceContentObservationRepository",
+    "SqlAlchemySourceContentWorkRepository",
     "SqlAlchemySourceObservationRepository",
     "SqlAlchemyTopologyRepository",
+    "SqlAlchemyVolumeProcessingRepository",
     "SqlAlchemyWatcherJournalRepository",
     "SqlAlchemyWatcherScanCoordinationRepository",
     "SqlAlchemyWatcherUnitOfWork",
@@ -170,6 +215,10 @@ __all__ = [
     "UuidIdGenerator",
     "VersionKind",
     "VolumeAsset",
+    "VolumeContentState",
+    "VolumeManifestEntry",
+    "VolumeManifestHeader",
+    "VolumeProcessingFact",
     "WorkVersion",
     "WritePolicy",
     "disc_number_from_storage",

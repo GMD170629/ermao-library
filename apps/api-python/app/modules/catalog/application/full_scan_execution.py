@@ -6,6 +6,14 @@ from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from datetime import datetime
 
+from app.modules.catalog.application.content_dto import FullScanContentOrigin
+from app.modules.catalog.application.content_events import (
+    ContentWakeReason,
+    append_content_available,
+)
+from app.modules.catalog.application.content_observations import (
+    observed_content_sources,
+)
 from app.modules.catalog.application.ports import (
     Clock,
 )
@@ -815,13 +823,37 @@ class _ScanExecution:
             collisions: tuple[PathCollision, ...] = ()
             bindings: tuple[SourcePathBinding, ...] = ()
             if self._pending_observations:
+                pending_observations = tuple(self._pending_observations)
                 outcome = uow.sources.upsert_observations(
                     fence,
-                    tuple(self._pending_observations),
+                    pending_observations,
                     observed_at=now,
                 )
                 collisions = outcome.collisions
                 bindings = outcome.bindings
+                try:
+                    content_observations = observed_content_sources(
+                        pending_observations,
+                        outcome,
+                        origin=FullScanContentOrigin(
+                            self.run.scan_id,
+                            self.run.generation,
+                        ),
+                    )
+                except (TypeError, ValueError) as error:
+                    raise ScanStale() from error
+                if content_observations:
+                    content_outcome = uow.content_observations.observe_sources(
+                        fence,
+                        content_observations,
+                        observed_at=now,
+                    )
+                    if content_outcome.work_available:
+                        append_content_available(
+                            uow.outbox,
+                            library_id=self.run.library_id,
+                            reason=ContentWakeReason.SOURCE_OBSERVED,
+                        )
             collision_diagnostics = tuple(
                 ScanDiagnostic(
                     ViolationCode.PATH_NORMALIZATION_COLLISION,
@@ -985,6 +1017,17 @@ class _ScanExecution:
                 fence, tuple(staged), activated_at=now
             ):
                 raise ScanStale()
+            content_activation = uow.content_topology.record_topology_activation(
+                fence,
+                tuple(staged),
+                activated_at=now,
+            )
+            if content_activation.wake_required:
+                append_content_available(
+                    uow.outbox,
+                    library_id=self.run.library_id,
+                    reason=ContentWakeReason.TOPOLOGY_ACTIVATED,
+                )
             append_activation_outboxes(
                 uow,
                 run=self.run,
@@ -1056,6 +1099,17 @@ class _ScanExecution:
             updated = self._heartbeat_in_uow(uow, fence, now=now)
             if not uow.topology.activate_staging_group(fence, staged, activated_at=now):
                 raise ScanStale()
+            content_activation = uow.content_topology.record_topology_activation(
+                fence,
+                staged,
+                activated_at=now,
+            )
+            if content_activation.wake_required:
+                append_content_available(
+                    uow.outbox,
+                    library_id=self.run.library_id,
+                    reason=ContentWakeReason.TOPOLOGY_ACTIVATED,
+                )
             append_activation_outboxes(
                 uow,
                 run=self.run,

@@ -767,6 +767,7 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
         asset = session.scalar(select(VolumeAsset))
         assert volume is not None and asset is not None
         volume.content_state = "READY"
+        volume.publication_fingerprint = "sha256:" + "a" * 64
         asset.validation_state = AssetValidationState.READY
 
     comic_plan = _flat_plan(

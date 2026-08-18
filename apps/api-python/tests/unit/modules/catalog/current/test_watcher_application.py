@@ -7,6 +7,10 @@ from typing import Literal, Self
 
 import pytest
 
+from app.modules.catalog.application.content_dto import (
+    ExplicitSourceModify,
+    SourceContentObservationOutcome,
+)
 from app.modules.catalog.application.ports import OutboxEvent
 from app.modules.catalog.application.scan_dto import ScanLibrarySnapshot
 from app.modules.catalog.application.watcher_dto import (
@@ -131,10 +135,14 @@ class _Store:
         self.libraries = self
         self.watcher = self
         self.sources = self
+        self.content_observations = self
         self.topology = None
         self.diagnostics = None
         self.commits = 0
         self.rollbacks = 0
+        self.explicit_modifications: list[ExplicitSourceModify] = []
+        self.write_order: list[str] = []
+        self.append_succeeds = True
 
     def get_for_reconcile_for_update(
         self, library_id: str
@@ -146,6 +154,17 @@ class _Store:
 
     def get_synthetic_root_identity(self, library_id: str) -> str | None:
         return self.root_identity if library_id == self.library.library_id else None
+
+    def mark_explicit_modify(
+        self,
+        modification: ExplicitSourceModify,
+        *,
+        observed_at: datetime,
+    ) -> SourceContentObservationOutcome | None:
+        assert observed_at == NOW
+        self.write_order.append("content_modify")
+        self.explicit_modifications.append(modification)
+        return SourceContentObservationOutcome((), 0, False)
 
     def find_overlapping_pending(
         self,
@@ -173,6 +192,9 @@ class _Store:
         intent: ReconcileIntent,
         replaced_intent_ids: tuple[str, ...],
     ) -> ReconcileIntent | None:
+        self.write_order.append("watcher_cas")
+        if not self.append_succeeds:
+            return None
         if self.state.latest_sequence != expected_latest_sequence:
             return None
         self.pending = [
@@ -193,6 +215,7 @@ class _Store:
         observed_at: datetime,
     ) -> FullRescanTransition | None:
         assert observed_at == NOW and library_id == self.library.library_id
+        self.write_order.append("watcher_cas")
         if self.state.latest_sequence != expected_latest_sequence:
             return None
         sequence = expected_latest_sequence + 1
@@ -494,3 +517,37 @@ def test_stale_watcher_root_identity_cannot_fence_the_current_library() -> None:
 
     assert store.state.full_rescan_reason is None
     assert store.pending == []
+
+
+def test_exact_file_modify_linearizes_sequence_before_content_revision() -> None:
+    store = _Store()
+
+    _record(
+        store,
+        WatcherPathEvent(
+            WatcherPathEventKind.MODIFY,
+            ("Book.epub",),
+            WatcherEntryHint.FILE,
+        ),
+    )
+
+    assert store.write_order == ["watcher_cas", "content_modify"]
+    assert store.explicit_modifications[0].origin.watcher_sequence == 1
+
+
+def test_watcher_cas_loser_never_mutates_content() -> None:
+    store = _Store()
+    store.append_succeeds = False
+
+    with pytest.raises(WatcherStale):
+        _record(
+            store,
+            WatcherPathEvent(
+                WatcherPathEventKind.MODIFY,
+                ("Book.epub",),
+                WatcherEntryHint.FILE,
+            ),
+        )
+
+    assert store.write_order == ["watcher_cas"]
+    assert store.explicit_modifications == []

@@ -31,28 +31,37 @@ from .enums import (
     AssetValidationState,
     AttachmentRole,
     AuditActorKind,
+    ContentOriginKind,
+    ContentProcessorKind,
     FullRescanReason,
     GrantLevel,
     IgnoreRuleKind,
     LayoutState,
     LibraryControlState,
     LibraryHealth,
+    ManifestKind,
     OperationState,
+    ProcessorState,
     ReconcileIntentPhase,
     ReconcileIntentState,
     ReconcileMovedEntryType,
+    RequiredDeliveryPolicy,
+    RequiredManifestState,
     RevisionState,
     ScanFailureCode,
     ScanStage,
     ScanState,
     SlotState,
+    SourceContentState,
     SourceEntryType,
     TopologyUnitKind,
     VersionKind,
+    VolumeContentState,
     WritePolicy,
 )
 
 _ID = String(191)
+_SHA256 = String(71)
 _ENUM = {"native_enum": False, "create_constraint": True}
 
 
@@ -385,8 +394,8 @@ class LibraryVolume(CurrentBase):
     reading_morphology: Mapped[str] = mapped_column(
         "readingMorphology", String(32), nullable=False
     )
-    content_state: Mapped[str] = mapped_column(
-        "contentState", String(32), nullable=False
+    content_state: Mapped[VolumeContentState] = mapped_column(
+        "contentState", Enum(VolumeContentState, **_ENUM), nullable=False
     )
     content_revision: Mapped[int] = mapped_column(
         "contentRevision", BigInteger, nullable=False, default=0
@@ -1194,6 +1203,346 @@ class TopologyAssetMembership(CurrentBase):
     )
 
 
+class ContentTopologyProjectionState(CurrentBase):
+    """One durable per-library cursor for bounded active-topology projection."""
+
+    __tablename__ = "ContentTopologyProjectionState"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId"],
+            ["CatalogLibrary.id"],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ContentTopologyProjectionState_pending_idx",
+            "requestedEpoch",
+            "appliedEpoch",
+            "libraryId",
+        ),
+    )
+
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, primary_key=True)
+    requested_epoch: Mapped[int] = mapped_column(
+        "requestedEpoch", BigInteger, nullable=False, default=0
+    )
+    claimed_epoch: Mapped[int] = mapped_column(
+        "claimedEpoch", BigInteger, nullable=False, default=0
+    )
+    applied_epoch: Mapped[int] = mapped_column(
+        "appliedEpoch", BigInteger, nullable=False, default=0
+    )
+    cursor_volume_id: Mapped[str | None] = mapped_column("cursorVolumeId", _ID)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class SourceContentFact(CurrentBase):
+    """Current bounded inspection fact for one admitted source file."""
+
+    __tablename__ = "SourceContentFact"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "sourceEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, primary_key=True)
+    source_entry_id: Mapped[str] = mapped_column("sourceEntryId", _ID, primary_key=True)
+    input_revision: Mapped[int] = mapped_column(
+        "inputRevision", BigInteger, nullable=False
+    )
+    work_revision: Mapped[int] = mapped_column(
+        "workRevision", BigInteger, nullable=False
+    )
+    digest_input_revision: Mapped[int | None] = mapped_column(
+        "digestInputRevision", BigInteger
+    )
+    admission: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_format: Mapped[str | None] = mapped_column("sourceFormat", String(64))
+    filesystem_identity: Mapped[str] = mapped_column(
+        "filesystemIdentity", String(191), nullable=False
+    )
+    device_id: Mapped[int] = mapped_column("deviceId", BigInteger, nullable=False)
+    file_id: Mapped[int] = mapped_column("fileId", BigInteger, nullable=False)
+    size_bytes: Mapped[int] = mapped_column("sizeBytes", BigInteger, nullable=False)
+    modified_ns: Mapped[int] = mapped_column("modifiedNs", BigInteger, nullable=False)
+    policy_version: Mapped[int] = mapped_column(
+        "policyVersion", Integer, nullable=False
+    )
+    origin_kind: Mapped[ContentOriginKind] = mapped_column(
+        "originKind", Enum(ContentOriginKind, **_ENUM), nullable=False
+    )
+    origin_id: Mapped[str | None] = mapped_column("originId", _ID)
+    origin_sequence: Mapped[int] = mapped_column(
+        "originSequence", BigInteger, nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        "availableAt", DateTime(timezone=True), nullable=False
+    )
+    state: Mapped[SourceContentState] = mapped_column(
+        Enum(SourceContentState, **_ENUM), nullable=False
+    )
+    content_digest: Mapped[str | None] = mapped_column("contentDigest", _SHA256)
+    lease_owner: Mapped[str | None] = mapped_column("leaseOwner", _ID)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class VolumeManifestHeader(CurrentBase):
+    """Immutable manifest header; only ACTIVE rows are Reader-visible."""
+
+    __tablename__ = "VolumeManifestHeader"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "volumeId"],
+            ["LibraryVolume.libraryId", "LibraryVolume.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "topologyUnitRevisionId"],
+            ["TopologyUnitRevision.libraryId", "TopologyUnitRevision.id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("libraryId", "id", name="VolumeManifestHeader_library_id_key"),
+        UniqueConstraint(
+            "libraryId",
+            "volumeId",
+            "id",
+            name="VolumeManifestHeader_volume_id_key",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "volumeId",
+            "kind",
+            "processorVersion",
+            "processingRevision",
+            name="VolumeManifestHeader_build_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    volume_id: Mapped[str] = mapped_column("volumeId", _ID, nullable=False)
+    kind: Mapped[ManifestKind] = mapped_column(
+        Enum(ManifestKind, **_ENUM), nullable=False
+    )
+    state: Mapped[RequiredManifestState] = mapped_column(
+        Enum(RequiredManifestState, **_ENUM), nullable=False
+    )
+    topology_unit_revision_id: Mapped[str] = mapped_column(
+        "topologyUnitRevisionId", _ID, nullable=False
+    )
+    processor_version: Mapped[str] = mapped_column(
+        "processorVersion", String(64), nullable=False
+    )
+    processing_revision: Mapped[int] = mapped_column(
+        "processingRevision", BigInteger, nullable=False
+    )
+    topology_version: Mapped[int] = mapped_column(
+        "topologyVersion", Integer, nullable=False
+    )
+    reading_morphology: Mapped[str] = mapped_column(
+        "readingMorphology", String(32), nullable=False
+    )
+    delivery_policy: Mapped[RequiredDeliveryPolicy] = mapped_column(
+        "deliveryPolicy", Enum(RequiredDeliveryPolicy, **_ENUM), nullable=False
+    )
+    delivery_policy_version: Mapped[int] = mapped_column(
+        "deliveryPolicyVersion", Integer, nullable=False
+    )
+    base_content_revision: Mapped[int] = mapped_column(
+        "baseContentRevision", BigInteger, nullable=False
+    )
+    base_required_manifest_revision: Mapped[int] = mapped_column(
+        "baseRequiredManifestRevision", BigInteger, nullable=False
+    )
+    published_content_revision: Mapped[int | None] = mapped_column(
+        "publishedContentRevision", BigInteger
+    )
+    published_required_manifest_revision: Mapped[int | None] = mapped_column(
+        "publishedRequiredManifestRevision", BigInteger
+    )
+    expected_entry_count: Mapped[int] = mapped_column(
+        "expectedEntryCount", Integer, nullable=False
+    )
+    staged_entry_count: Mapped[int] = mapped_column(
+        "stagedEntryCount", Integer, nullable=False
+    )
+    source_bytes_digest: Mapped[str] = mapped_column(
+        "sourceBytesDigest", _SHA256, nullable=False
+    )
+    content_facts_digest: Mapped[str] = mapped_column(
+        "contentFactsDigest", _SHA256, nullable=False
+    )
+    delivery_facts_digest: Mapped[str] = mapped_column(
+        "deliveryFactsDigest", _SHA256, nullable=False
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(
+        "activatedAt", DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class VolumeManifestEntry(CurrentBase):
+    """One canonical, ordered required asset snapshot in a manifest."""
+
+    __tablename__ = "VolumeManifestEntry"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "volumeId", "manifestId"],
+            [
+                "VolumeManifestHeader.libraryId",
+                "VolumeManifestHeader.volumeId",
+                "VolumeManifestHeader.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "assetId"],
+            ["VolumeAsset.libraryId", "VolumeAsset.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "sourceEntryId"],
+            ["LibrarySourceEntry.libraryId", "LibrarySourceEntry.id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "manifestId",
+            "assetOrder",
+            name="VolumeManifestEntry_order_key",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "manifestId",
+            "assetId",
+            name="VolumeManifestEntry_asset_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    volume_id: Mapped[str] = mapped_column("volumeId", _ID, nullable=False)
+    manifest_id: Mapped[str] = mapped_column("manifestId", _ID, nullable=False)
+    asset_id: Mapped[str] = mapped_column("assetId", _ID, nullable=False)
+    source_entry_id: Mapped[str] = mapped_column("sourceEntryId", _ID, nullable=False)
+    source_fact_revision: Mapped[int] = mapped_column(
+        "sourceFactRevision", BigInteger, nullable=False
+    )
+    role: Mapped[AssetRole] = mapped_column(Enum(AssetRole, **_ENUM), nullable=False)
+    source_format: Mapped[str] = mapped_column(
+        "sourceFormat", String(64), nullable=False
+    )
+    mime_type: Mapped[str] = mapped_column("mimeType", String(191), nullable=False)
+    size_bytes: Mapped[int] = mapped_column("sizeBytes", BigInteger, nullable=False)
+    content_digest: Mapped[str] = mapped_column(
+        "contentDigest", _SHA256, nullable=False
+    )
+    filesystem_identity: Mapped[str] = mapped_column(
+        "filesystemIdentity", String(191), nullable=False
+    )
+    modified_ns: Mapped[int] = mapped_column("modifiedNs", BigInteger, nullable=False)
+    asset_order: Mapped[int] = mapped_column("assetOrder", Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class VolumeProcessingFact(CurrentBase):
+    """Current leased processing intent for one Volume capability."""
+
+    __tablename__ = "VolumeProcessingFact"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["libraryId", "volumeId"],
+            ["LibraryVolume.libraryId", "LibraryVolume.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["libraryId", "activeTopologyRevisionId"],
+            ["TopologyUnitRevision.libraryId", "TopologyUnitRevision.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, primary_key=True)
+    volume_id: Mapped[str] = mapped_column("volumeId", _ID, primary_key=True)
+    processor_kind: Mapped[ContentProcessorKind] = mapped_column(
+        "processorKind",
+        Enum(ContentProcessorKind, **_ENUM),
+        primary_key=True,
+    )
+    work_revision: Mapped[int] = mapped_column(
+        "workRevision", BigInteger, nullable=False
+    )
+    processor_version: Mapped[str] = mapped_column(
+        "processorVersion", String(64), nullable=False
+    )
+    active_topology_revision_id: Mapped[str] = mapped_column(
+        "activeTopologyRevisionId", _ID, nullable=False
+    )
+    expected_content_revision: Mapped[int] = mapped_column(
+        "expectedContentRevision", BigInteger, nullable=False
+    )
+    expected_required_manifest_revision: Mapped[int] = mapped_column(
+        "expectedRequiredManifestRevision", BigInteger, nullable=False
+    )
+    input_fingerprint: Mapped[str] = mapped_column(
+        "inputFingerprint", _SHA256, nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        "availableAt", DateTime(timezone=True), nullable=False
+    )
+    state: Mapped[ProcessorState] = mapped_column(
+        Enum(ProcessorState, **_ENUM), nullable=False
+    )
+    failure_code: Mapped[str | None] = mapped_column("failureCode", String(96))
+    lease_owner: Mapped[str | None] = mapped_column("leaseOwner", _ID)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 class SourceWriteOperation(CurrentBase):
     __tablename__ = "SourceWriteOperation"
     __table_args__ = (
@@ -1742,6 +2091,408 @@ cast(Table, TopologyAssetMembership.__table__).append_constraint(
         name="TopologyAssetMembership_disc_ck",
     )
 )
+cast(Table, LibraryVolume.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            LibraryVolume.content_revision >= 0,
+            LibraryVolume.required_manifest_revision >= 0,
+            LibraryVolume.optional_manifest_revision >= 0,
+            LibraryVolume.metadata_revision >= 0,
+            or_(
+                and_(
+                    LibraryVolume.content_revision == 0,
+                    LibraryVolume.required_manifest_revision == 0,
+                ),
+                and_(
+                    LibraryVolume.content_revision > 0,
+                    LibraryVolume.required_manifest_revision > 0,
+                ),
+            ),
+        ),
+        name="LibraryVolume_revision_vector_ck",
+    )
+)
+cast(Table, LibraryVolume.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            LibraryVolume.publication_fingerprint.is_(None),
+            and_(
+                func.length(LibraryVolume.publication_fingerprint) == 71,
+                LibraryVolume.publication_fingerprint.regexp_match(
+                    r"^sha256:[0-9a-f]{64}$"
+                ),
+            ),
+        ),
+        name="LibraryVolume_publication_fingerprint_ck",
+    )
+)
+cast(Table, LibraryVolume.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            LibraryVolume.content_state != VolumeContentState.READY,
+            LibraryVolume.publication_fingerprint.is_not(None),
+        ),
+        name="LibraryVolume_ready_fingerprint_ck",
+    )
+)
+cast(Table, LibraryVolume.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryVolume.required_manifest_revision == 0,
+                LibraryVolume.required_manifest_digest.is_(None),
+            ),
+            and_(
+                LibraryVolume.required_manifest_revision > 0,
+                LibraryVolume.required_manifest_digest.is_not(None),
+                func.length(LibraryVolume.required_manifest_digest) == 71,
+                LibraryVolume.required_manifest_digest.regexp_match(
+                    r"^sha256:[0-9a-f]{64}$"
+                ),
+            ),
+        ),
+        name="LibraryVolume_required_revision_shape_ck",
+    )
+)
+cast(Table, ContentTopologyProjectionState.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            ContentTopologyProjectionState.applied_epoch >= 0,
+            ContentTopologyProjectionState.applied_epoch
+            <= ContentTopologyProjectionState.claimed_epoch,
+            ContentTopologyProjectionState.claimed_epoch
+            <= ContentTopologyProjectionState.requested_epoch,
+            or_(
+                ContentTopologyProjectionState.applied_epoch
+                != ContentTopologyProjectionState.claimed_epoch,
+                ContentTopologyProjectionState.cursor_volume_id.is_(None),
+            ),
+        ),
+        name="ContentTopologyProjectionState_epoch_ck",
+    )
+)
+cast(Table, SourceContentFact.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            SourceContentFact.input_revision > 0,
+            or_(
+                SourceContentFact.digest_input_revision.is_(None),
+                and_(
+                    SourceContentFact.digest_input_revision > 0,
+                    SourceContentFact.digest_input_revision
+                    <= SourceContentFact.input_revision,
+                ),
+            ),
+            SourceContentFact.device_id >= 0,
+            SourceContentFact.file_id >= 0,
+            SourceContentFact.size_bytes >= 0,
+            SourceContentFact.policy_version > 0,
+            SourceContentFact.work_revision >= 0,
+            SourceContentFact.origin_sequence > 0,
+        ),
+        name="SourceContentFact_positive_ck",
+    )
+)
+cast(Table, SourceContentFact.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                SourceContentFact.origin_kind == ContentOriginKind.WATCHER,
+                SourceContentFact.origin_id.is_(None),
+            ),
+            and_(
+                SourceContentFact.origin_kind.in_(
+                    (ContentOriginKind.FULL_SCAN, ContentOriginKind.RECONCILE)
+                ),
+                SourceContentFact.origin_id.is_not(None),
+            ),
+        ),
+        name="SourceContentFact_origin_shape_ck",
+    )
+)
+cast(Table, SourceContentFact.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                SourceContentFact.content_digest.is_(None),
+                SourceContentFact.digest_input_revision.is_(None),
+            ),
+            and_(
+                SourceContentFact.content_digest.is_not(None),
+                SourceContentFact.digest_input_revision.is_not(None),
+                func.length(SourceContentFact.content_digest) == 71,
+                SourceContentFact.content_digest.regexp_match(r"^sha256:[0-9a-f]{64}$"),
+            ),
+        ),
+        name="SourceContentFact_digest_shape_ck",
+    )
+)
+cast(Table, SourceContentFact.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                or_(
+                    and_(
+                        SourceContentFact.admission == "PRIMARY",
+                        SourceContentFact.source_format.in_(
+                            (
+                                "EPUB",
+                                "MOBI",
+                                "AZW",
+                                "AZW3",
+                                "PRC",
+                                "TXT",
+                                "PDF",
+                                "CBZ",
+                                "CBR",
+                                "RAR",
+                                "ZIP",
+                            )
+                        ),
+                    ),
+                    and_(
+                        SourceContentFact.admission == "AUDIO_TRACK",
+                        SourceContentFact.source_format.in_(("MP3", "M4A", "M4B")),
+                    ),
+                ),
+                SourceContentFact.state != SourceContentState.INELIGIBLE,
+            ),
+            and_(
+                SourceContentFact.admission.in_(("SIDECAR", "UNSUPPORTED", "IGNORED")),
+                SourceContentFact.source_format.is_(None),
+                SourceContentFact.state == SourceContentState.INELIGIBLE,
+                SourceContentFact.content_digest.is_(None),
+                SourceContentFact.digest_input_revision.is_(None),
+            ),
+        ),
+        name="SourceContentFact_admission_shape_ck",
+    )
+)
+cast(Table, SourceContentFact.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                SourceContentFact.state == SourceContentState.PENDING,
+                SourceContentFact.lease_owner.is_(None),
+                SourceContentFact.lease_expires_at.is_(None),
+            ),
+            and_(
+                SourceContentFact.state == SourceContentState.RUNNING,
+                SourceContentFact.lease_owner.is_not(None),
+                SourceContentFact.lease_expires_at.is_not(None),
+            ),
+            and_(
+                SourceContentFact.state == SourceContentState.READY,
+                SourceContentFact.lease_owner.is_(None),
+                SourceContentFact.lease_expires_at.is_(None),
+                SourceContentFact.content_digest.is_not(None),
+                SourceContentFact.digest_input_revision
+                == SourceContentFact.input_revision,
+            ),
+            and_(
+                SourceContentFact.state == SourceContentState.INELIGIBLE,
+                SourceContentFact.lease_owner.is_(None),
+                SourceContentFact.lease_expires_at.is_(None),
+            ),
+        ),
+        name="SourceContentFact_state_shape_ck",
+    )
+)
+Index(
+    "SourceContentFact_claim_idx",
+    SourceContentFact.state,
+    SourceContentFact.available_at,
+    SourceContentFact.library_id,
+    SourceContentFact.source_entry_id,
+)
+cast(Table, VolumeManifestHeader.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            VolumeManifestHeader.processing_revision > 0,
+            func.length(func.trim(VolumeManifestHeader.processor_version)) > 0,
+            VolumeManifestHeader.topology_version > 0,
+            VolumeManifestHeader.delivery_policy_version > 0,
+            VolumeManifestHeader.base_content_revision >= 0,
+            VolumeManifestHeader.base_required_manifest_revision >= 0,
+            or_(
+                and_(
+                    VolumeManifestHeader.base_content_revision == 0,
+                    VolumeManifestHeader.base_required_manifest_revision == 0,
+                ),
+                and_(
+                    VolumeManifestHeader.base_content_revision > 0,
+                    VolumeManifestHeader.base_required_manifest_revision > 0,
+                ),
+            ),
+            VolumeManifestHeader.expected_entry_count.between(1, 10_000),
+            VolumeManifestHeader.staged_entry_count >= 0,
+            VolumeManifestHeader.staged_entry_count
+            <= VolumeManifestHeader.expected_entry_count,
+        ),
+        name="VolumeManifestHeader_bounds_ck",
+    )
+)
+cast(Table, VolumeManifestHeader.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                VolumeManifestHeader.published_content_revision.is_(None),
+                VolumeManifestHeader.published_required_manifest_revision.is_(None),
+            ),
+            and_(
+                VolumeManifestHeader.published_content_revision > 0,
+                VolumeManifestHeader.published_required_manifest_revision > 0,
+                VolumeManifestHeader.published_required_manifest_revision
+                == VolumeManifestHeader.base_required_manifest_revision + 1,
+                VolumeManifestHeader.published_content_revision.in_(
+                    (
+                        VolumeManifestHeader.base_content_revision,
+                        VolumeManifestHeader.base_content_revision + 1,
+                    )
+                ),
+                or_(
+                    VolumeManifestHeader.base_content_revision > 0,
+                    VolumeManifestHeader.published_content_revision == 1,
+                ),
+            ),
+        ),
+        name="VolumeManifestHeader_published_vector_ck",
+    )
+)
+cast(Table, VolumeManifestHeader.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            func.length(VolumeManifestHeader.source_bytes_digest) == 71,
+            VolumeManifestHeader.source_bytes_digest.regexp_match(
+                r"^sha256:[0-9a-f]{64}$"
+            ),
+            func.length(VolumeManifestHeader.content_facts_digest) == 71,
+            VolumeManifestHeader.content_facts_digest.regexp_match(
+                r"^sha256:[0-9a-f]{64}$"
+            ),
+            func.length(VolumeManifestHeader.delivery_facts_digest) == 71,
+            VolumeManifestHeader.delivery_facts_digest.regexp_match(
+                r"^sha256:[0-9a-f]{64}$"
+            ),
+        ),
+        name="VolumeManifestHeader_digest_shape_ck",
+    )
+)
+cast(Table, VolumeManifestHeader.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                VolumeManifestHeader.state == RequiredManifestState.STAGING,
+                VolumeManifestHeader.published_content_revision.is_(None),
+                VolumeManifestHeader.published_required_manifest_revision.is_(None),
+                VolumeManifestHeader.activated_at.is_(None),
+            ),
+            and_(
+                VolumeManifestHeader.state == RequiredManifestState.ACTIVE,
+                VolumeManifestHeader.staged_entry_count
+                == VolumeManifestHeader.expected_entry_count,
+                VolumeManifestHeader.published_content_revision.is_not(None),
+                VolumeManifestHeader.published_required_manifest_revision.is_not(None),
+                VolumeManifestHeader.activated_at.is_not(None),
+            ),
+        ),
+        name="VolumeManifestHeader_state_shape_ck",
+    )
+)
+Index(
+    "VolumeManifestHeader_one_active_idx",
+    VolumeManifestHeader.library_id,
+    VolumeManifestHeader.volume_id,
+    VolumeManifestHeader.kind,
+    unique=True,
+    sqlite_where=VolumeManifestHeader.state == RequiredManifestState.ACTIVE,
+)
+Index(
+    "VolumeManifestHeader_one_staging_idx",
+    VolumeManifestHeader.library_id,
+    VolumeManifestHeader.volume_id,
+    VolumeManifestHeader.kind,
+    unique=True,
+    sqlite_where=VolumeManifestHeader.state == RequiredManifestState.STAGING,
+)
+Index(
+    "VolumeManifestHeader_reader_idx",
+    VolumeManifestHeader.library_id,
+    VolumeManifestHeader.volume_id,
+    VolumeManifestHeader.kind,
+    VolumeManifestHeader.state,
+    VolumeManifestHeader.id,
+)
+cast(Table, VolumeManifestEntry.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            VolumeManifestEntry.source_fact_revision > 0,
+            VolumeManifestEntry.size_bytes >= 0,
+            VolumeManifestEntry.asset_order.between(0, 9_999),
+            VolumeManifestEntry.role.in_((AssetRole.PRIMARY, AssetRole.AUDIO_TRACK)),
+            VolumeManifestEntry.mime_type.regexp_match(
+                r"^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"
+            ),
+            func.length(VolumeManifestEntry.content_digest) == 71,
+            VolumeManifestEntry.content_digest.regexp_match(r"^sha256:[0-9a-f]{64}$"),
+        ),
+        name="VolumeManifestEntry_shape_ck",
+    )
+)
+cast(Table, VolumeProcessingFact.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            VolumeProcessingFact.work_revision > 0,
+            func.length(func.trim(VolumeProcessingFact.processor_version)) > 0,
+            VolumeProcessingFact.expected_content_revision >= 0,
+            VolumeProcessingFact.expected_required_manifest_revision >= 0,
+            func.length(VolumeProcessingFact.input_fingerprint) == 71,
+            VolumeProcessingFact.input_fingerprint.regexp_match(
+                r"^sha256:[0-9a-f]{64}$"
+            ),
+        ),
+        name="VolumeProcessingFact_revision_vector_ck",
+    )
+)
+cast(Table, VolumeProcessingFact.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                VolumeProcessingFact.state == ProcessorState.PENDING,
+                VolumeProcessingFact.lease_owner.is_(None),
+                VolumeProcessingFact.lease_expires_at.is_(None),
+                VolumeProcessingFact.failure_code.is_(None),
+            ),
+            and_(
+                VolumeProcessingFact.state == ProcessorState.RUNNING,
+                VolumeProcessingFact.lease_owner.is_not(None),
+                VolumeProcessingFact.lease_expires_at.is_not(None),
+                VolumeProcessingFact.failure_code.is_(None),
+            ),
+            and_(
+                VolumeProcessingFact.state == ProcessorState.READY,
+                VolumeProcessingFact.lease_owner.is_(None),
+                VolumeProcessingFact.lease_expires_at.is_(None),
+                VolumeProcessingFact.failure_code.is_(None),
+            ),
+            and_(
+                VolumeProcessingFact.state == ProcessorState.FAILED,
+                VolumeProcessingFact.lease_owner.is_(None),
+                VolumeProcessingFact.lease_expires_at.is_(None),
+                VolumeProcessingFact.failure_code.is_not(None),
+            ),
+        ),
+        name="VolumeProcessingFact_state_shape_ck",
+    )
+)
+Index(
+    "VolumeProcessingFact_claim_idx",
+    VolumeProcessingFact.library_id,
+    VolumeProcessingFact.processor_kind,
+    VolumeProcessingFact.state,
+    VolumeProcessingFact.available_at,
+    VolumeProcessingFact.volume_id,
+)
 cast(Table, SourceWriteOperation.__table__).append_constraint(
     CheckConstraint(
         SourceWriteOperation.expected_config_revision > 0,
@@ -1768,6 +2519,7 @@ __all__ = [
     "AdministrativeAuditEvent",
     "CatalogLibrary",
     "CatalogOutbox",
+    "ContentTopologyProjectionState",
     "LayoutDiagnostic",
     "LibraryIgnoreRule",
     "LibraryReconcileIntent",
@@ -1781,6 +2533,7 @@ __all__ = [
     "OperationStagingLock",
     "PathCollisionObservation",
     "SourceAttachment",
+    "SourceContentFact",
     "SourceWriteOperation",
     "TopologyAssetMembership",
     "TopologyUnit",
@@ -1790,5 +2543,8 @@ __all__ = [
     "TopologyWorkProjection",
     "UserLibraryGrant",
     "VolumeAsset",
+    "VolumeManifestEntry",
+    "VolumeManifestHeader",
+    "VolumeProcessingFact",
     "WorkVersion",
 ]

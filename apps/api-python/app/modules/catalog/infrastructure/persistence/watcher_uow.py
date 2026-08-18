@@ -13,12 +13,18 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from app.modules.catalog.domain.watcher import ReconcileConflict
 
+from .content_topology_repository import (
+    SqlAlchemyContentTopologyActivationRepository,
+)
 from .models import LibraryRootRegistryLock
 from .reconcile_diagnostic_repository import (
     SqlAlchemyReconcileDiagnosticRepository,
 )
 from .reconcile_source_repository import SqlAlchemyReconcileSourceRepository
 from .repositories import SqlAlchemyOutboxPort
+from .source_content_repositories import (
+    SqlAlchemySourceContentObservationRepository,
+)
 from .sqlite_errors import is_sqlite_busy_or_locked
 from .topology_repository import SqlAlchemyTopologyRepository
 from .watcher_repository import (
@@ -52,6 +58,12 @@ class SqlAlchemyWatcherUnitOfWork:
             self.sources = SqlAlchemyReconcileSourceRepository(session)
             self.topology = SqlAlchemyTopologyRepository(session)
             self.diagnostics = SqlAlchemyReconcileDiagnosticRepository(session)
+            self.content_observations = SqlAlchemySourceContentObservationRepository(
+                session
+            )
+            self.content_topology = SqlAlchemyContentTopologyActivationRepository(
+                session
+            )
             self.outbox = SqlAlchemyOutboxPort(session)
             return self
         except BaseException:

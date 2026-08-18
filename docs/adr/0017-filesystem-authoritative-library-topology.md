@@ -273,19 +273,126 @@ four monotonic revisions:
 - `metadataRevision` changes for descriptive metadata or artwork that cannot
   affect reading/restoration.
 
-An unknown external required-byte change conservatively increments both content
-and required-manifest revisions. Topology version 1 never rewrites embedded
-metadata, OPF, CUE/LRC, or other source bytes. User and provider metadata edits
-are database projections, so there is no privileged source-write path that can
-bypass this conservative rule.
+An unknown external required-byte change conservatively invalidates readiness
+and schedules content/required-manifest re-evaluation; observing the source or
+activating topology does not increment either business revision. PR 6A
+linearizes both revisions only when a complete required manifest becomes
+`ACTIVE`. Topology version 1
+never rewrites embedded metadata, OPF, CUE/LRC, or other source bytes. User and
+provider metadata edits are database projections, so there is no privileged
+source-write path that can bypass this conservative rule.
 
-The Volume `requiredManifestDigest` is SHA-256 over a canonical manifest containing
-`topologyVersion` and every required asset's order, source format, byte length,
-and full content digest. File size and mtime only trigger re-evaluation; they
-never prove content equality. Reader `PublicationFingerprint` remains the
-parser/normalization projection used by exact locators; it is distinct from this
-source-byte manifest digest and from the monotonic revision. An old Reader
-session, index job, or download may not publish against a different revision.
+PR 6 is delivered in two bounded slices. PR 6A owns required source facts,
+digests, required manifests, opening evidence, and readiness. A one-row
+`SourceContentFact` is created only for an admitted `PRIMARY` or `AUDIO_TRACK`.
+A first sidecar, ignored, noise, or unsupported observation creates no content
+fact. If an existing required fact becomes non-required, it becomes
+`INELIGIBLE`, invalidates its lease/digest use, and retains its monotonic input
+revision so a later required observation can safely advance it. First
+observation, typed admission/format, filesystem identity/stat, policy, and an
+explicit watcher `MODIFY` advance that input revision. Retrying the same origin
+with identical facts is idempotent; the origin is a retry token, not content
+equality. Size and mtime only schedule a full rehash. Conversely, a full rehash
+whose bytes differ must advance the source fact even when identity, size, and
+mtime were restored to their previous values.
+
+One canonical required-manifest value produces three SHA-256 fingerprints over
+ASCII JSON with sorted field construction, no insignificant whitespace, and
+required assets ordered contiguously from zero:
+
+- public `sourceBytesDigest` (published as `requiredManifestDigest`) contains
+  `topologyVersion` plus each asset's order, source format, size, and full digest;
+- internal `contentFactsDigest` additionally binds reading morphology, opaque
+  `assetId`, and role, so replacing membership with equal bytes is still a
+  Reader-content change;
+- internal `deliveryFactsDigest` additionally binds canonical MIME and the
+  required-delivery policy/version.
+
+The final `ACTIVE` manifest compare-and-set is the only PR 6A business-revision
+linearization point. The first manifest requires base revisions `0/0` and
+publishes `1/1`. A content-facts change increments both `contentRevision` and
+`requiredManifestRevision`; a delivery-only change increments only
+`requiredManifestRevision`; equal canonical facts reuse/retarget the current
+manifest and increment neither. `sourceBytesChanged` must imply
+`contentFactsChanged`, which must imply `deliveryFactsChanged`; fabricated
+fingerprint triples are rejected. Topology activation and source observation
+never increment these revisions. Source observation projects only its bounded
+current membership. A topology pointer transaction only increments one durable
+per-Library content-projection `requestedEpoch` and, on an idle-to-pending
+transition, publishes one library-level wake; it never enumerates descendant
+Volumes. A dormant content use case holds the global writer gate for one short
+transaction, selects at most 501 ACTIVE-topology/required-processing mismatches
+by `volumeId`, projects at most 500 Volumes to `PENDING`, advances a durable
+cursor, and publishes one continuation wake when work remains. It carries no
+lease and creates no additional per-Volume topology-work row; the bounded batch
+only retargets the existing required-manifest processing fact.
+
+The projection state records `requestedEpoch`, `claimedEpoch`, `appliedEpoch`,
+and an optional `cursorVolumeId`. A request arriving during a sweep does not
+starve that sweep: it continues to the old claimed tail, then atomically marks
+that epoch applied, claims the latest requested epoch, clears the cursor, and
+rescans from the beginning. Only a stable tail makes all three epochs equal.
+Cursor mutation, bounded readiness/processing projection, and the continuation
+wake commit together, so a crash either preserves the prior cursor or the whole
+next batch.
+
+An ACTIVE manifest entry's captured source-fact revision, stat, and filesystem
+identity are immutable build provenance, not permanent delivery equality. After
+a stat touch or equivalent re-observation, a current READY fact with the same
+full digest/canonical facts retargets required opening and delivery validation to
+the current expected stat/identity without rewriting the immutable entry or
+incrementing either business revision. Delivery still revalidates that current
+fact at handle-open time; it never serves bytes solely against stale provenance.
+An ACTIVE required manifest is current only while its
+`topologyUnitRevisionId` equals the owning `TopologyUnit.activeRevisionId`.
+Consequently a pointer change hides an old READY result immediately, before the
+bounded projection sweep reaches that Volume. Equal canonical facts may later
+retarget the ACTIVE header to the new topology revision in O(1), restore current
+opening/readiness, and keep both business revisions unchanged; immutable entries
+remain build provenance.
+
+Required-manifest persistence has only `STAGING | ACTIVE`. Starting a new
+attempt deletes any prior incomplete STAGING header and its cascaded entries.
+The final transaction deletes and flushes the previous ACTIVE header/entries,
+then promotes the complete STAGING header. A SQLite reader sees the old committed
+manifest before that commit and the new manifest after it; rollback restores the
+old ACTIVE manifest. Each Volume therefore retains at most one ACTIVE and one
+STAGING header instead of accumulating 10,000-entry history on every change.
+PR 9 requests bind the current revisions/validator and reject or refresh stale
+manifest IDs; old source bytes are never served merely because an old header was
+retained.
+
+PR 6A marks a Volume `READY` only when every required asset is current and
+`READY`, the required manifest is current and `ACTIVE`, and required opening
+succeeds for that exact two-axis revision vector. Successful opening must publish
+a `PublicationFingerprint`; the fingerprint may be null while opening is
+pending. A stable required-opening validation failure may make the Volume
+`UNREADABLE`. Digest I/O, permission, unavailable-root, lease, or source-change
+failures remain retry/stale outcomes and do not claim unreadable content.
+Navigation, optional artwork, and metadata never block PR 6A readiness.
+Required opening is not a second digest: a READY result must report every source
+completed, but parser reads may seek and consume only required structures. Each
+non-empty read reports at most 1 MiB of monotonic actual progress, and the
+application revalidates ACTIVE state/lease at most every 250 ms. ZIP/EPUB/PDF
+parsers may legitimately seek and reread, so this generic boundary does not
+derive an absolute I/O limit from physical size. PR 6B's format-specific secure
+facades own explicit I/O/seek/archive-expansion budgets and real-filesystem
+verification. A stable
+UNREADABLE result may stop at the first proven format failure. Any checkpoint
+failure permanently poisons the attempt, so an adapter that accidentally catches
+lease/stale cannot later publish after resume.
+`PublicationFingerprint` remains the parser/normalization projection used by
+exact locators; it is distinct from all three manifest fingerprints and from the
+monotonic revisions. An old Reader session, index job, or download may not
+publish against a different revision.
+
+PR 6B separately owns durable typed sidecar facts, structural owner resolution,
+optional manifests, navigation, metadata, artwork, and search processors. OPF,
+artwork, LRC, and CUE are not automatically required assets. A later policy may
+make a resolved sidecar Reader-relevant only through an explicit processor
+contract; it may not infer topology or silently join the PR 6A required set.
+Work/Version-owned artwork advances owner metadata/attachment truth without
+synchronously incrementing every descendant Volume revision.
 
 A one-to-one rename or reparent within the same library may preserve IDs when it
 is proven by a filesystem move cookie, a stable filesystem identity, or a unique
@@ -389,18 +496,20 @@ library's `organizationMode`, `topologyVersion`, `pathComparison`,
    owning `TopologyUnit.activeRevisionId` only after complete validation;
    incomplete staging is invisible and the previous active revision remains.
    Revision-keyed index jobs and outbox records are published with activation.
-6. The PR 5 generation scan passes recognized sidecars to the source-observation
-   port so their source entry is recorded as seen, but its schema does not yet
-   persist `SidecarRole`. They are not topology candidates and do not create a
-   `SourceAttachment` during structural reconciliation. PR 6 extends the same
-   fenced observation flush to enqueue an idempotent, policy-versioned typed
-   sidecar-resolution intent; it must use the admission evidence already in
-   memory and must not infer a role in the repository from a filename. The
-   post-commit `SidecarOwnerResolver` uses only that typed intent, the frozen
-   source topology, and filename scope to select one unambiguous owner for
-   OPF/artwork/LRC/CUE. Ambiguous candidates remain unattached with
-   `SIDECAR_OWNER_AMBIGUOUS`; neither sidecar bytes nor descriptive metadata may
-   change grouping, parentage, or order.
+6. The PR 5 generation scan passes recognized sidecars through the fenced
+   source-observation boundary so their source entry is recorded as seen, but
+   PR 6A deliberately creates no first `SourceContentFact` for them. They are
+   not topology candidates, required assets, or `SourceAttachment` rows. PR 6B
+   extends that same flush with one durable, policy-versioned
+   `SourceSidecarFact` per typed sidecar source. It captures `SidecarRole` from
+   the admission evidence already in memory and remains durable in pending,
+   resolved, or ambiguous form; the repository never guesses a role from the
+   filename and terminal work does not delete the only typed fact. The
+   `SidecarOwnerResolver` uses only that fact, frozen source topology, and
+   filename scope to select one unambiguous owner for OPF/artwork/LRC/CUE.
+   Ambiguous candidates remain unattached with `SIDECAR_OWNER_AMBIGUOUS`;
+   neither sidecar bytes nor descriptive metadata may change grouping,
+   parentage, or order.
 7. Expensive parsing, navigation, metadata, cover, and search indexing run after
    structural commit. A parse failure changes content readiness, not parentage.
 8. Only a fully successful scan of the still-accessible root may advance the

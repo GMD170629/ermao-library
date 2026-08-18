@@ -72,6 +72,7 @@ from .models import (
     AdministrativeAuditEvent,
     CatalogLibrary,
     CatalogOutbox,
+    ContentTopologyProjectionState,
     LibraryIgnoreRule,
     LibraryWatcherState,
     SourceWriteOperation,
@@ -168,6 +169,16 @@ class SqlAlchemyLibraryRepository:
                 latest_sequence=0,
                 overflow_through_sequence=None,
                 full_rescan_reason=None,
+                updated_at=library.created_at,
+            )
+        )
+        self._session.add(
+            ContentTopologyProjectionState(
+                library_id=library.id,
+                requested_epoch=0,
+                claimed_epoch=0,
+                applied_epoch=0,
+                cursor_volume_id=None,
                 updated_at=library.created_at,
             )
         )

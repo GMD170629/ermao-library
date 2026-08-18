@@ -12,6 +12,11 @@ import pytest
 from app.modules.catalog.application import (
     full_scan_execution as full_scan_execution_module,
 )
+from app.modules.catalog.application.content_dto import (
+    ContentTopologyProjectionRequestOutcome,
+    ContentTopologyProjectionState,
+    SourceContentObservationOutcome,
+)
 from app.modules.catalog.application.full_scan_execution import RunFullLibraryScan
 from app.modules.catalog.application.ports import AuditEvent, OutboxEvent
 from app.modules.catalog.application.scan_dto import (
@@ -267,6 +272,7 @@ class _Store:
         self.collisions = _CollisionSink()
         self.calls: list[str] = []
         self.observations: list[SourceObservation] = []
+        self.content_observation_calls = 0
         self.source_bindings: dict[tuple[str, ...], SourcePathBinding] = {}
         self.work_ids: dict[str, str] = {}
         self.version_ids: dict[tuple[str, str | None], str] = {}
@@ -767,6 +773,30 @@ class _Store:
             bindings=tuple(bindings),
         )
 
+    def observe_sources(
+        self,
+        _fence: object,
+        observations: tuple[object, ...],
+        *,
+        observed_at: datetime,
+    ) -> SourceContentObservationOutcome:
+        assert observed_at == NOW
+        self.content_observation_calls += len(observations)
+        return SourceContentObservationOutcome((), 0, False)
+
+    def record_topology_activation(
+        self,
+        _fence: object,
+        _staging: tuple[StagingRevision, ...],
+        *,
+        activated_at: datetime,
+    ) -> ContentTopologyProjectionRequestOutcome:
+        assert activated_at == NOW
+        return ContentTopologyProjectionRequestOutcome(
+            ContentTopologyProjectionState("library-1", 1, 0, 0, None),
+            False,
+        )
+
     # Topology repository
     def abandon_scan_staging(
         self, _fence: ScanFence, *, abandoned_at: datetime
@@ -986,6 +1016,8 @@ class _UnitOfWork:
         self.scans = store
         self.work_items = store
         self.sources = store
+        self.content_observations = store
+        self.content_topology = store
         self.topology = store
         self.diagnostics = store.diagnostics
         self.collisions = store.collisions
@@ -1720,6 +1752,7 @@ def test_pr5_passes_typed_sidecar_to_source_observation_without_materializing_it
     assert result.units_activated == 0
     assert store.plans == []
     assert len(store.observations) == 1
+    assert store.content_observation_calls == 1
     admission = store.observations[0].admission
     assert isinstance(admission, SourceAdmissionEvidence)
     assert admission.sidecar_role is role
@@ -1802,6 +1835,7 @@ def test_volumes_first_child_activates_parent_group_atomically(
     )
 
     assert result.units_activated == (0 if unchanged else 3)
+    assert store.content_observation_calls == 1
     assert len(store.plans) == 3
     assert [len(group) for group in store.activation_groups] == (
         [] if unchanged else [3]

@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.modules.catalog.application.content_dto import (
+    ExplicitSourceModify,
+    WatcherContentOrigin,
+)
+from app.modules.catalog.application.content_events import (
+    ContentWakeReason,
+    append_content_available,
+)
 from app.modules.catalog.application.ports import Clock, IdGenerator, OutboxEvent
 from app.modules.catalog.application.watcher_dto import (
     FullRescanTransition,
@@ -25,7 +33,10 @@ from app.modules.catalog.domain.watcher import (
     MAX_RECONCILE_SCOPES,
     FullRescanReason,
     ReconcileMoveEvidence,
+    WatcherEntryHint,
     WatcherMoveEvent,
+    WatcherPathEvent,
+    WatcherPathEventKind,
     WatcherStale,
     WatcherTrustLost,
     event_reconcile_scopes,
@@ -107,12 +118,15 @@ class RecordWatcherEvent:
             )
             if durable_root_identity != command.root_identity:
                 raise WatcherStale()
+            sequence = state.latest_sequence + 1
+            modification = self._explicit_modify(command, sequence=sequence)
             if state.full_rescan_reason is not None:
                 return self._force_full_scan(
                     uow,
                     state,
                     state.full_rescan_reason,
                     now,
+                    modification=modification,
                 )
             if isinstance(command.event, WatcherTrustLost):
                 return self._force_full_scan(
@@ -120,6 +134,7 @@ class RecordWatcherEvent:
                     state,
                     full_rescan_reason(command.event.reason),
                     now,
+                    modification=modification,
                 )
             scopes = event_reconcile_scopes(command.event, library.path_comparison)
             overlapping = uow.watcher.find_overlapping_pending(
@@ -136,6 +151,7 @@ class RecordWatcherEvent:
                     state,
                     FullRescanReason.JOURNAL_CAPACITY,
                     now,
+                    modification=modification,
                 )
             pending_ids = uow.watcher.pending_ids_up_to(
                 command.library_id,
@@ -151,8 +167,8 @@ class RecordWatcherEvent:
                     state,
                     FullRescanReason.JOURNAL_CAPACITY,
                     now,
+                    modification=modification,
                 )
-            sequence = state.latest_sequence + 1
             move_evidence = self._coalesced_move_evidence(command, overlapping)
             intent = ReconcileIntent(
                 intent_id=self._id_generator.new_id(),
@@ -188,6 +204,7 @@ class RecordWatcherEvent:
             )
             if stored is None:
                 raise WatcherStale()
+            self._record_explicit_modify(uow, modification, observed_at=now)
             if not overlapping:
                 _append_reconcile_available(
                     uow,
@@ -205,6 +222,25 @@ class RecordWatcherEvent:
                 intent_id=stored.intent_id,
                 full_rescan_reason=None,
             )
+
+    @staticmethod
+    def _explicit_modify(
+        command: RecordWatcherEventCommand,
+        *,
+        sequence: int,
+    ) -> ExplicitSourceModify | None:
+        event = command.event
+        if not (
+            isinstance(event, WatcherPathEvent)
+            and event.kind is WatcherPathEventKind.MODIFY
+            and event.entry_hint is WatcherEntryHint.FILE
+        ):
+            return None
+        return ExplicitSourceModify(
+            library_id=command.library_id,
+            relative_path=event.relative_path,
+            origin=WatcherContentOrigin(sequence),
+        )
 
     @staticmethod
     def _coalesced_move_evidence(
@@ -230,12 +266,34 @@ class RecordWatcherEvent:
                 distinct.append(proof)
         return distinct[0] if len(distinct) == 1 else None
 
+    @staticmethod
+    def _record_explicit_modify(
+        uow: WatcherUnitOfWork,
+        modification: ExplicitSourceModify | None,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        if modification is None:
+            return
+        outcome = uow.content_observations.mark_explicit_modify(
+            modification,
+            observed_at=observed_at,
+        )
+        if outcome is not None and outcome.work_available:
+            append_content_available(
+                uow.outbox,
+                library_id=modification.library_id,
+                reason=ContentWakeReason.SOURCE_OBSERVED,
+            )
+
     def _force_full_scan(
         self,
         uow: WatcherUnitOfWork,
         state: WatcherState,
         reason: FullRescanReason,
         observed_at: datetime,
+        *,
+        modification: ExplicitSourceModify | None,
     ) -> WatcherIngestResult:
         transition = uow.watcher.force_full_rescan(
             state.library_id,
@@ -245,6 +303,7 @@ class RecordWatcherEvent:
         )
         if transition is None:
             raise WatcherStale()
+        self._record_explicit_modify(uow, modification, observed_at=observed_at)
         if transition.newly_required:
             _append_full_scan_required(uow, transition=transition)
         uow.commit()

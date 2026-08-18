@@ -467,6 +467,7 @@ class SqlAlchemyScanDiagnosticRepository:
         observed_at: datetime,
     ) -> None:
         _require_live_fence(self._session, fence, now=observed_at)
+        new_rows: dict[str, LayoutDiagnostic] = {}
         for diagnostic in diagnostics:
             code = _enum_value(diagnostic.code)
             scope = "/".join(diagnostic.unit_path)
@@ -482,32 +483,34 @@ class SqlAlchemyScanDiagnosticRepository:
                 code,
                 related_digest,
             )
-            row = self._session.get(LayoutDiagnostic, diagnostic_id)
+            row = new_rows.get(diagnostic_id)
+            if row is None:
+                row = self._session.get(LayoutDiagnostic, diagnostic_id)
             parameters: dict[str, object] = {
                 "relatedPaths": list(related[:_DIAGNOSTIC_RELATED_PATH_LIMIT]),
                 "relatedPathCount": len(related),
                 "relatedPathsDigest": related_digest,
             }
             if row is None:
-                self._session.add(
-                    LayoutDiagnostic(
-                        id=diagnostic_id,
-                        library_id=fence.library_id,
-                        scan_run_id=fence.scan_id,
-                        generation=fence.generation,
-                        config_revision=fence.config_revision,
-                        scope_relative_path=scope,
-                        code=code,
-                        severity="WARNING",
-                        parameters=parameters,
-                        first_observed_at=observed_at,
-                        last_observed_at=observed_at,
-                    )
+                row = LayoutDiagnostic(
+                    id=diagnostic_id,
+                    library_id=fence.library_id,
+                    scan_run_id=fence.scan_id,
+                    generation=fence.generation,
+                    config_revision=fence.config_revision,
+                    scope_relative_path=scope,
+                    code=code,
+                    severity="WARNING",
+                    parameters=parameters,
+                    first_observed_at=observed_at,
+                    last_observed_at=observed_at,
                 )
+                new_rows[diagnostic_id] = row
             else:
                 row.last_observed_at = observed_at
                 row.resolved_at = None
                 row.parameters = parameters
+        self._session.add_all(new_rows.values())
         self._session.flush()
 
 

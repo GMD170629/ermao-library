@@ -8,6 +8,10 @@ from datetime import datetime
 from types import TracebackType
 from typing import Literal, Protocol, Self
 
+from app.modules.catalog.application.content_ports import (
+    ContentTopologyActivationRepository,
+    SourceContentObservationRepository,
+)
 from app.modules.catalog.application.ports import (
     AuditPort,
     LibraryGrantRepository,
@@ -432,6 +436,8 @@ class ScanUnitOfWork(Protocol):
     scans: FullScanRepository
     work_items: RootScanWorkRepository
     sources: SourceObservationRepository
+    content_observations: SourceContentObservationRepository
+    content_topology: ContentTopologyActivationRepository
     topology: TopologyRepository
     diagnostics: ScanDiagnosticRepository
     collisions: PathCollisionRepository

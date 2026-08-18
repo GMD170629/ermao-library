@@ -133,6 +133,50 @@ class AssetValidationState(StrEnum):
     UNREADABLE = "UNREADABLE"
 
 
+class ContentOriginKind(StrEnum):
+    FULL_SCAN = "FULL_SCAN"
+    RECONCILE = "RECONCILE"
+    WATCHER = "WATCHER"
+
+
+class SourceContentState(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    READY = "READY"
+    INELIGIBLE = "INELIGIBLE"
+
+
+class ManifestKind(StrEnum):
+    REQUIRED = "REQUIRED"
+
+
+class RequiredManifestState(StrEnum):
+    STAGING = "STAGING"
+    ACTIVE = "ACTIVE"
+
+
+class RequiredDeliveryPolicy(StrEnum):
+    ORIGINAL_SOURCE = "ORIGINAL_SOURCE"
+
+
+class ContentProcessorKind(StrEnum):
+    REQUIRED_MANIFEST = "REQUIRED_MANIFEST"
+    REQUIRED_OPENING = "REQUIRED_OPENING"
+
+
+class ProcessorState(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    READY = "READY"
+    FAILED = "FAILED"
+
+
+class VolumeContentState(StrEnum):
+    PENDING = "PENDING"
+    READY = "READY"
+    UNREADABLE = "UNREADABLE"
+
+
 class AttachmentRole(StrEnum):
     COVER = "COVER"
     OPF = "OPF"

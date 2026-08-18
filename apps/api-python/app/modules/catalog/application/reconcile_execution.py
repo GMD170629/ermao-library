@@ -6,6 +6,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.modules.catalog.application.content_dto import ReconcileContentOrigin
+from app.modules.catalog.application.content_events import (
+    ContentWakeReason,
+    append_content_available,
+)
+from app.modules.catalog.application.content_observations import (
+    observed_content_sources,
+)
 from app.modules.catalog.application.ports import Clock, OutboxEvent
 from app.modules.catalog.application.scan_dto import (
     DiscoveredSource,
@@ -967,13 +975,37 @@ class _ReconcileExecution:
             collisions: tuple[PathCollision, ...] = ()
             bindings: tuple[SourcePathBinding, ...] = ()
             if self._pending_observations:
+                pending_observations = tuple(self._pending_observations)
                 outcome = uow.sources.upsert_reconcile_observations(
                     self.fence,
-                    tuple(self._pending_observations),
+                    pending_observations,
                     observed_at=now,
                 )
                 collisions = outcome.collisions
                 bindings = outcome.bindings
+                try:
+                    content_observations = observed_content_sources(
+                        tuple(value.observation for value in pending_observations),
+                        outcome,
+                        origin=ReconcileContentOrigin(
+                            self.intent.intent_id,
+                            self.intent.through_sequence,
+                        ),
+                    )
+                except (TypeError, ValueError) as error:
+                    raise ReconcileStale() from error
+                if content_observations:
+                    content_outcome = uow.content_observations.observe_sources(
+                        self.fence,
+                        content_observations,
+                        observed_at=now,
+                    )
+                    if content_outcome.work_available:
+                        append_content_available(
+                            uow.outbox,
+                            library_id=self.intent.library_id,
+                            reason=ContentWakeReason.SOURCE_OBSERVED,
+                        )
             collision_diagnostics = tuple(
                 ScanDiagnostic(
                     ViolationCode.PATH_NORMALIZATION_COLLISION,
@@ -1135,6 +1167,17 @@ class _ReconcileExecution:
                 activated_at=now,
             ):
                 raise ReconcileStale()
+            content_activation = uow.content_topology.record_topology_activation(
+                self.fence,
+                tuple(staged),
+                activated_at=now,
+            )
+            if content_activation.wake_required:
+                append_content_available(
+                    uow.outbox,
+                    library_id=self.intent.library_id,
+                    reason=ContentWakeReason.TOPOLOGY_ACTIVATED,
+                )
             self._append_activation_outboxes(uow, tuple(staged))
             uow.commit()
             self.intent = updated
@@ -1202,6 +1245,17 @@ class _ReconcileExecution:
                 activated_at=now,
             ):
                 raise ReconcileStale()
+            content_activation = uow.content_topology.record_topology_activation(
+                self.fence,
+                staging,
+                activated_at=now,
+            )
+            if content_activation.wake_required:
+                append_content_available(
+                    uow.outbox,
+                    library_id=self.intent.library_id,
+                    reason=ContentWakeReason.TOPOLOGY_ACTIVATED,
+                )
             self._append_activation_outboxes(uow, staging)
             uow.commit()
             self.intent = updated

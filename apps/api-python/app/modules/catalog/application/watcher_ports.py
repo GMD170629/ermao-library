@@ -6,6 +6,10 @@ from datetime import datetime
 from types import TracebackType
 from typing import Literal, Protocol, Self, TypeAlias
 
+from app.modules.catalog.application.content_ports import (
+    ContentTopologyActivationRepository,
+    SourceContentObservationRepository,
+)
 from app.modules.catalog.application.ports import OutboxPort
 from app.modules.catalog.application.scan_dto import (
     DiscoveredSource,
@@ -392,6 +396,8 @@ class WatcherUnitOfWork(Protocol):
     libraries: ReconcileLibraryRepository
     watcher: WatcherJournalRepository
     sources: ReconcileSourceRepository
+    content_observations: SourceContentObservationRepository
+    content_topology: ContentTopologyActivationRepository
     topology: ReconcileTopologyRepository
     diagnostics: ReconcileDiagnosticRepository
     outbox: OutboxPort

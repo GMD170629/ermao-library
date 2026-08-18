@@ -38,6 +38,7 @@ from app.modules.catalog.infrastructure.persistence import (
     AdministrativeAuditEvent,
     CatalogLibrary,
     CatalogOutbox,
+    ContentTopologyProjectionState,
     LibraryIgnoreRule,
     LibraryRootRegistryLock,
     SqlAlchemyLibraryQueryRepository,
@@ -160,6 +161,14 @@ def test_uow_persists_library_acl_and_actor_scoped_cursor_page(
             == 1
         )
         assert session.scalar(select(func.count()).select_from(CatalogOutbox)) == 1
+        projection_state = session.get(ContentTopologyProjectionState, "library-1")
+        assert projection_state is not None
+        assert (
+            projection_state.requested_epoch,
+            projection_state.claimed_epoch,
+            projection_state.applied_epoch,
+            projection_state.cursor_volume_id,
+        ) == (0, 0, 0, None)
 
 
 def test_grant_mutations_preserve_the_last_administrator(
@@ -226,6 +235,7 @@ def test_uow_rolls_back_library_acl_audit_and_outbox_together(
             == 0
         )
         assert session.scalar(select(func.count()).select_from(CatalogOutbox)) == 0
+        assert session.get(ContentTopologyProjectionState, "library-1") is None
 
 
 def test_library_cas_persists_refreshed_root_fields(

@@ -11,6 +11,11 @@ import pytest
 from app.modules.catalog.application import (
     reconcile_execution as reconcile_execution_module,
 )
+from app.modules.catalog.application.content_dto import (
+    ContentTopologyProjectionRequestOutcome,
+    ContentTopologyProjectionState,
+    SourceContentObservationOutcome,
+)
 from app.modules.catalog.application.ports import OutboxEvent
 from app.modules.catalog.application.reconcile_execution import (
     RunNextReconcileSubtree,
@@ -409,6 +414,8 @@ class _ReconcileStore:
         self.libraries = self
         self.watcher = self
         self.sources = self
+        self.content_observations = self
+        self.content_topology = self
         self.topology = self
         self.diagnostics = self
         self.outbox = _Outbox()
@@ -420,6 +427,7 @@ class _ReconcileStore:
         self.excluded_observed_paths: list[tuple[str, ...]] = []
         self.complete_delete_count = 0
         self.upserted_observation_count = 0
+        self.content_observation_count = 0
         self.diagnostic_count = 0
         self._collision_emitted = False
         self.collision_on_directory_path: tuple[str, ...] | None = None
@@ -749,6 +757,30 @@ class _ReconcileStore:
             self._collision_emitted = True
         return SourceObservationOutcome(collisions, bindings)
 
+    def observe_sources(
+        self,
+        fence: object,
+        observations: tuple[object, ...],
+        *,
+        observed_at: datetime,
+    ) -> SourceContentObservationOutcome:
+        assert observed_at == NOW
+        self.content_observation_count += len(observations)
+        return SourceContentObservationOutcome((), 0, False)
+
+    def record_topology_activation(
+        self,
+        fence: object,
+        staging: tuple[object, ...],
+        *,
+        activated_at: datetime,
+    ) -> ContentTopologyProjectionRequestOutcome:
+        assert activated_at == NOW
+        return ContentTopologyProjectionRequestOutcome(
+            ContentTopologyProjectionState("library-1", 1, 0, 0, None),
+            False,
+        )
+
     def apply_proven_move(
         self,
         fence: object,
@@ -917,6 +949,7 @@ def test_present_ignored_directory_is_excluded_without_claiming_absence() -> Non
     assert result.disposition is ReconcileRunDisposition.COMPLETED
     assert store.excluded_observed_paths == [("Work",)]
     assert store.absence_confirmations == []
+    assert store.content_observation_count == 0
 
 
 def test_trusted_move_uses_fresh_absence_and_identity_to_preserve_source_id() -> None:
@@ -1014,6 +1047,7 @@ def test_move_to_ignored_name_preserves_id_but_records_observed_exclusion() -> N
 
     assert result.disposition is ReconcileRunDisposition.COMPLETED
     assert store.path_bindings[("new.bin",)].source_entry_id == "stable-source-id"
+    assert store.content_observation_count == 0
     assert store.excluded_observed_paths == [("new.bin",)]
     assert store.absence_confirmations == [("old.bin",)]
 
