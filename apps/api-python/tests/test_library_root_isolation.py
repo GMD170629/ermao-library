@@ -21,10 +21,16 @@ from app.models.library import (
 )
 from app.modules.imports.application.dto import ImportOptions
 from app.modules.library.application.volume_commands import (
+    BatchVolumeCommand,
     CrossLibraryStructuralError,
     LibraryActor,
     VolumeContext,
+    batch_volume_resources,
     move_volume_resource,
+)
+from app.modules.library.infrastructure.batch_volume_commands import (
+    _prepare_reparent_batch,
+    prepare_batch_volume_mutation,
 )
 from app.services.download_executor import DownloadExecutionResult
 from app.services.download_queue import process_next_download_task
@@ -82,6 +88,38 @@ def _work(
         import_status="COMPLETED",
     )
     return work, media, volume
+
+
+def _seed_cross_library_volume_pair(
+    db_session: Session,
+    *,
+    prefix: str,
+) -> tuple[LibraryWork, LibraryMediaVersion, LibraryVolume, LibraryWork]:
+    library_a = Library(
+        id=f"{prefix}-lib-a",
+        name="A",
+        root_path=f"/{prefix}-a",
+        organization_mode="FLAT",
+    )
+    library_b = Library(
+        id=f"{prefix}-lib-b",
+        name="B",
+        root_path=f"/{prefix}-b",
+        organization_mode="FLAT",
+    )
+    work_a, media_a, volume_a = _work(
+        work_id=f"{prefix}-work-a", library_id=library_a.id, title="三体"
+    )
+    work_b, media_b, volume_b = _work(
+        work_id=f"{prefix}-work-b", library_id=library_b.id, title="地球往事"
+    )
+    db_session.add_all([library_a, library_b])
+    db_session.flush()
+    db_session.add_all([work_a, work_b])
+    db_session.flush()
+    db_session.add_all([media_a, volume_a, media_b, volume_b])
+    db_session.commit()
+    return work_a, media_a, volume_a, work_b
 
 
 def test_identical_title_and_merge_key_create_separate_works_per_library(
@@ -375,3 +413,163 @@ def test_move_volume_resource_rolls_back_cross_library_attempt() -> None:
     assert port.moved is False
     assert unit_of_work.committed is False
     assert unit_of_work.rolled_back is True
+
+
+def test_batch_transfer_rejects_cross_library_without_mutation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    work_a, media_a, volume_a, work_b = _seed_cross_library_volume_pair(
+        db_session, prefix="batch-transfer"
+    )
+
+    transferred = client.post(
+        f"/api/works/{work_a.id}/volumes/batch",
+        json={
+            "action": "TRANSFER",
+            "volumeIds": [volume_a.id],
+            "targetWorkId": work_b.id,
+        },
+    )
+    assert transferred.status_code == 400
+    assert transferred.json()["error"]["code"] == "CROSS_LIBRARY_OPERATION"
+
+    db_session.expire_all()
+    persisted = db_session.get(LibraryVolume, volume_a.id)
+    assert persisted is not None
+    assert persisted.media_version_id == media_a.id
+    assert db_session.get(LibraryWork, work_a.id) is not None
+    assert db_session.get(LibraryWork, work_b.id) is not None
+    assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0
+
+
+def test_batch_transfer_resource_rolls_back_cross_library_attempt() -> None:
+    class RecordingPort:
+        applied = False
+
+        def can_access_work(self, **_kwargs: object) -> bool:
+            return True
+
+        def work_library_id(self, *, work_id: str) -> str:
+            return "library-a" if work_id == "source-work" else "library-b"
+
+        def get_volume_context(self, **_kwargs: object) -> VolumeContext:
+            return VolumeContext(
+                id="volume",
+                work_id="source-work",
+                media_version_id="media",
+                media_kind="EBOOK",
+                title="Volume",
+                sort_order=0,
+                format="EPUB",
+                library_id="library-a",
+                author=None,
+                work_title="Work",
+                source_path=Path("volume.epub"),
+            )
+
+        def get_volume_contexts(
+            self, *, volume_ids: tuple[str, ...], **kwargs: object
+        ) -> tuple[VolumeContext, ...]:
+            return tuple(
+                self.get_volume_context(volume_id=volume_id, **kwargs)
+                for volume_id in volume_ids
+            )
+
+        def apply_batch(self, **_kwargs: object) -> None:
+            self.applied = True
+            raise AssertionError("cross-library batch transfer must not persist")
+
+    class UnitOfWork:
+        committed = False
+        rolled_back = False
+
+        def commit(self) -> None:
+            self.committed = True
+
+        def rollback(self) -> None:
+            self.rolled_back = True
+
+    port = RecordingPort()
+    unit_of_work = UnitOfWork()
+    actor = LibraryActor(
+        user_id="actor",
+        can_manage_system=True,
+        is_admin=True,
+        can_view_manual_imports=True,
+        library_ids=(),
+    )
+
+    with pytest.raises(CrossLibraryStructuralError, match="CROSS_LIBRARY_OPERATION"):
+        batch_volume_resources(
+            port,
+            unit_of_work,
+            actor=actor,
+            work_id="source-work",
+            command=BatchVolumeCommand(
+                action="TRANSFER",
+                volume_ids=("volume",),
+                target_work_id="target-work",
+            ),
+            now=datetime.now(UTC),
+        )
+
+    assert port.applied is False
+    assert unit_of_work.committed is False
+    assert unit_of_work.rolled_back is True
+
+
+def test_batch_transfer_planner_rejects_cross_library(
+    db_session: Session,
+) -> None:
+    work_a, media_a, volume_a, work_b = _seed_cross_library_volume_pair(
+        db_session, prefix="batch-planner"
+    )
+    now = datetime.now(UTC)
+    context = VolumeContext(
+        id=volume_a.id,
+        work_id=work_a.id,
+        media_version_id=media_a.id,
+        media_kind="EBOOK",
+        title=volume_a.title,
+        sort_order=volume_a.sort_order,
+        format=volume_a.format,
+        library_id=work_a.library_id,
+        author=work_a.author,
+        work_title=work_a.title,
+        source_path=Path("volume.epub"),
+    )
+    command = BatchVolumeCommand(
+        action="TRANSFER",
+        volume_ids=(volume_a.id,),
+        target_work_id=work_b.id,
+    )
+
+    with pytest.raises(ValueError, match="CROSS_LIBRARY_OPERATION"):
+        prepare_batch_volume_mutation(
+            db_session,
+            actor_id="actor",
+            source_work_id=work_a.id,
+            contexts=(context,),
+            command=command,
+            now=now,
+        )
+    with pytest.raises(ValueError, match="CROSS_LIBRARY_OPERATION"):
+        _prepare_reparent_batch(
+            db_session,
+            actor_id="actor",
+            source_work_id=work_a.id,
+            target_work_id=work_b.id,
+            contexts=(context,),
+            target_kind=None,
+            now=now,
+        )
+
+    db_session.expire_all()
+    persisted = db_session.get(LibraryVolume, volume_a.id)
+    assert persisted is not None
+    assert persisted.media_version_id == media_a.id
+    assert db_session.get(LibraryWork, work_a.id) is not None
+    assert db_session.get(LibraryWork, work_b.id) is not None
+    assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0

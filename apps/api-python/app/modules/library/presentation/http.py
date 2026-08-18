@@ -3124,6 +3124,12 @@ def batch_work_volumes(
             status_code=403,
             code="SYSTEM_MANAGER_REQUIRED",
         )
+    except CrossLibraryStructuralError:
+        _raise_library_error(
+            "不能跨书库移动卷册",
+            status_code=400,
+            code="CROSS_LIBRARY_OPERATION",
+        )
     except InvalidVolumeChangeError as exc:
         _raise_library_error(
             "批量卷册操作请求无效",

@@ -250,6 +250,11 @@ def batch_volume_resources(
         _require_work_access(port, actor=actor, work_id=target_work_id)
 
     try:
+        if command.action == "TRANSFER":
+            source_library_id = port.work_library_id(work_id=work_id)
+            target_library_id = port.work_library_id(work_id=target_work_id)
+            if not source_library_id or source_library_id != target_library_id:
+                raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION")
         outcome = port.apply_batch(
             actor_id=actor.user_id,
             source_work_id=work_id,
@@ -258,8 +263,13 @@ def batch_volume_resources(
             now=now,
         )
         unit_of_work.commit()
+    except CrossLibraryStructuralError:
+        unit_of_work.rollback()
+        raise
     except ValueError as exc:
         unit_of_work.rollback()
+        if str(exc) == "CROSS_LIBRARY_OPERATION":
+            raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION") from exc
         raise VolumeNotFoundError(str(exc)) from exc
     except Exception:
         unit_of_work.rollback()

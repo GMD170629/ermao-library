@@ -236,6 +236,23 @@ def _prepare_history_reparent(
     return tuple(updates.values()), tuple(inserts), tuple(sorted(deletes))
 
 
+def _require_same_library(
+    db: Session, *, source_work_id: str, target_work_id: str
+) -> None:
+    source_library_id = db.scalar(
+        select(LibraryWork.library_id).where(LibraryWork.id == source_work_id)
+    )
+    target_library_id = db.scalar(
+        select(LibraryWork.library_id).where(LibraryWork.id == target_work_id)
+    )
+    if (
+        source_library_id is None
+        or target_library_id is None
+        or source_library_id != target_library_id
+    ):
+        raise ValueError("CROSS_LIBRARY_OPERATION")
+
+
 def _prepare_reparent_batch(
     db: Session,
     *,
@@ -255,6 +272,10 @@ def _prepare_reparent_batch(
     source_work = db.get(LibraryWork, source_work_id)
     if source_work is None:
         raise ValueError("Source work does not exist")
+    if source_work_id != target_work_id:
+        _require_same_library(
+            db, source_work_id=source_work_id, target_work_id=target_work_id
+        )
     target_kinds = tuple(
         dict.fromkeys(target_kind or media.media_kind for _volume, media in selected)
     )
@@ -1093,6 +1114,11 @@ def prepare_batch_volume_mutation(
             now=now,
         )
     if command.action == "TRANSFER":
+        _require_same_library(
+            db,
+            source_work_id=source_work_id,
+            target_work_id=str(command.target_work_id),
+        )
         return _prepare_reparent_batch(
             db,
             actor_id=actor_id,
