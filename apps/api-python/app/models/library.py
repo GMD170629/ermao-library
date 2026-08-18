@@ -193,6 +193,11 @@ class LibraryWork(Base):
 class LibraryVersion(Base):
     __tablename__ = "LibraryVersion"
     __table_args__ = (
+        UniqueConstraint(
+            "workId",
+            "sourceKey",
+            name="LibraryVersion_workId_sourceKey_key",
+        ),
         Index("LibraryVersion_workId_idx", "workId"),
         Index("LibraryVersion_sourceKey_idx", "sourceKey"),
     )

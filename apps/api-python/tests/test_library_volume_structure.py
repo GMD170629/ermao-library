@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -35,6 +36,7 @@ from app.modules.library.application.volume_commands import (
 )
 from app.modules.library.infrastructure.implicit_version import (
     IMPLICIT_VERSION_SOURCE_KEY,
+    get_or_create_implicit_version,
 )
 from app.modules.library.presentation.work_ops import (
     _delete_import_linked_library_scope,
@@ -148,6 +150,65 @@ def _volume_aggregate(db: Session, user: User) -> None:
     db.flush()
     db.add_all([file, progress, bookmark, task])
     db.commit()
+
+
+def test_implicit_version_identity_is_unique_per_work(db_session: Session) -> None:
+    _ensure_test_library(db_session)
+    work = LibraryWork(
+        library_id="test-library",
+        id="implicit-unique-work",
+        origin="MANUAL",
+        title="Implicit Unique",
+        normalized_title="implicit unique",
+        tags="[]",
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(
+        LibraryVersion(
+            id="implicit-unique-first",
+            work_id=work.id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryVersion(
+            id="implicit-unique-second",
+            work_id=work.id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_get_or_create_implicit_version_is_idempotent(db_session: Session) -> None:
+    _ensure_test_library(db_session)
+    work = LibraryWork(
+        library_id="test-library",
+        id="implicit-helper-work",
+        origin="MANUAL",
+        title="Implicit Helper",
+        normalized_title="implicit helper",
+        tags="[]",
+    )
+    db_session.add(work)
+    db_session.flush()
+
+    first = get_or_create_implicit_version(db_session, work.id)
+    second = get_or_create_implicit_version(db_session, work.id)
+
+    assert first.id == second.id
+    count = db_session.scalar(
+        select(func.count())
+        .select_from(LibraryVersion)
+        .where(
+            LibraryVersion.work_id == work.id,
+            LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
+        )
+    )
+    assert count == 1
 
 
 def test_delete_last_volume_cascades_and_undo_restores_volume_resources(

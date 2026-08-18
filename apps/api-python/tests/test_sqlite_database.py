@@ -29,6 +29,10 @@ from app.modules.backup.application.restore import PreparedRestorePlan
 from app.modules.backup.infrastructure.persistence import (
     SqlAlchemyBackupRestoreWriter,
 )
+from app.modules.library.infrastructure.implicit_version import (
+    IMPLICIT_VERSION_SOURCE_KEY,
+    get_or_create_implicit_version,
+)
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
 
@@ -994,6 +998,94 @@ def test_library_work_can_own_multiple_versions(tmp_path) -> None:
                 "source-epub",
                 "source-pdf",
             ]
+    finally:
+        engine.dispose()
+
+
+def test_library_version_rejects_duplicate_work_source_key(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            work = _seed_library_work(db, work_id="work-version-unique")
+            db.add(
+                LibraryVersion(
+                    id="version-implicit-first",
+                    work_id=work.id,
+                    source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                )
+            )
+            db.flush()
+            db.add(
+                LibraryVersion(
+                    id="version-implicit-second",
+                    work_id=work.id,
+                    source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db.commit()
+    finally:
+        engine.dispose()
+
+
+def test_library_version_allows_same_source_key_on_different_works(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            first_work = _seed_library_work(db, work_id="work-implicit-a")
+            second_work = _seed_library_work(db, work_id="work-implicit-b")
+            db.add_all(
+                [
+                    LibraryVersion(
+                        id="version-implicit-a",
+                        work_id=first_work.id,
+                        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                    ),
+                    LibraryVersion(
+                        id="version-implicit-b",
+                        work_id=second_work.id,
+                        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                    ),
+                ]
+            )
+            db.commit()
+
+            stored = db.scalars(
+                select(LibraryVersion)
+                .where(LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY)
+                .order_by(LibraryVersion.id)
+            ).all()
+            assert [version.work_id for version in stored] == [
+                first_work.id,
+                second_work.id,
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_get_or_create_implicit_version_returns_the_same_id(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            work = _seed_library_work(db, work_id="work-implicit-helper")
+            first = get_or_create_implicit_version(db, work.id)
+            second = get_or_create_implicit_version(db, work.id)
+            db.commit()
+
+            assert first.id == second.id
+            versions = db.scalars(
+                select(LibraryVersion).where(
+                    LibraryVersion.work_id == work.id,
+                    LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
+                )
+            ).all()
+            assert [version.id for version in versions] == [first.id]
     finally:
         engine.dispose()
 
