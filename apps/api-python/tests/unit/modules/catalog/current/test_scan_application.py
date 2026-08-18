@@ -9,6 +9,9 @@ from typing import Literal, Self
 
 import pytest
 
+from app.modules.catalog.application import (
+    full_scan_execution as full_scan_execution_module,
+)
 from app.modules.catalog.application.full_scan_execution import RunFullLibraryScan
 from app.modules.catalog.application.ports import AuditEvent, OutboxEvent
 from app.modules.catalog.application.scan_dto import (
@@ -16,6 +19,7 @@ from app.modules.catalog.application.scan_dto import (
     DiscoveredSource,
     DiscoveryEntryType,
     DiscoveryObservation,
+    FailFullLibraryScanCommand,
     FullScanRun,
     FullScanWorkItem,
     PathCollision,
@@ -25,6 +29,7 @@ from app.modules.catalog.application.scan_dto import (
     ScanLibrarySnapshot,
     SourceObservation,
     SourceObservationOutcome,
+    SourcePathBinding,
     StagingRevision,
     StartFullLibraryScanCommand,
     TakeOverFullLibraryScanCommand,
@@ -32,11 +37,22 @@ from app.modules.catalog.application.scan_dto import (
 )
 from app.modules.catalog.application.scan_lifecycle import (
     CancelFullLibraryScan,
+    FailFullLibraryScan,
     StartFullLibraryScan,
     TakeOverFullLibraryScan,
 )
 from app.modules.catalog.application.source_admission_ports import (
     SourceStatExpectation,
+)
+from app.modules.catalog.application.watcher_dto import (
+    BoundProjectionKind,
+    BoundTopologyProjection,
+    BoundTopologyStageBatch,
+    BoundTopologyUnitPlan,
+    FullScanWatcherStart,
+    WatcherFinalizeOutcome,
+    WatcherResumeOutcome,
+    WatcherState,
 )
 from app.modules.catalog.domain.access import GrantLevel, LibraryGrant
 from app.modules.catalog.domain.admission import (
@@ -55,15 +71,21 @@ from app.modules.catalog.domain.model import (
     SourceFormat,
 )
 from app.modules.catalog.domain.scan import (
+    MAX_AUDIO_TRACKS,
+    AssetMembershipPlan,
     ScanConflict,
     ScanDiagnostic,
     ScanRootIdentityChanged,
     ScanStage,
     ScanStale,
     ScanState,
-    TopologyStageBatch,
+    TopologyUnitKind,
     TopologyUnitPlan,
+    VersionProjectionPlan,
+    VolumeProjectionPlan,
+    WorkProjectionPlan,
 )
+from app.modules.catalog.domain.watcher import FullRescanReason
 
 NOW = datetime(2026, 8, 18, tzinfo=UTC)
 STAT = SourceStatExpectation(1, 2, 3, 4)
@@ -99,8 +121,11 @@ class _AuditSink:
 class _OutboxSink:
     def __init__(self) -> None:
         self.events: list[OutboxEvent] = []
+        self.fail_on_event_type: str | None = None
 
     def append(self, event: OutboxEvent) -> None:
+        if event.event_type == self.fail_on_event_type:
+            raise RuntimeError("outbox unavailable")
         self.events.append(event)
 
 
@@ -193,6 +218,7 @@ def _run(
         created_by_actor_id="admin-1",
         started_at=started,
         finished_at=None,
+        watcher_sequence_watermark=0,
     )
 
 
@@ -241,11 +267,21 @@ class _Store:
         self.collisions = _CollisionSink()
         self.calls: list[str] = []
         self.observations: list[SourceObservation] = []
+        self.source_bindings: dict[tuple[str, ...], SourcePathBinding] = {}
+        self.work_ids: dict[str, str] = {}
+        self.version_ids: dict[tuple[str, str | None], str] = {}
+        self.volume_ids: dict[str, str] = {}
+        self.asset_ids: dict[tuple[str, str], str] = {}
+        self.unit_ids: dict[tuple[TopologyUnitKind, str], str] = {}
+        self.next_topology_id = 0
         self.plans: list[TopologyUnitPlan] = []
         self.activation_groups: list[tuple[StagingRevision, ...]] = []
         self.scan_lease_updates: list[tuple[str, datetime]] = []
         self.work_lease_updates: list[tuple[str, datetime]] = []
         self.abandoned_scan_count = 0
+        self.watcher_sequence = 0
+        self.watcher_full_rescan_reason: FullRescanReason | None = None
+        self.watcher_pending = False
         self.commits = 0
         self.rollbacks = 0
 
@@ -314,6 +350,71 @@ class _Store:
         assert observed_at == NOW
         self.library = replace(self.library, observed_health=health)
         return True
+
+    # Full-scan/watcher coordination
+    def prepare_full_scan_start(
+        self,
+        library: ScanLibrarySnapshot,
+        *,
+        now: datetime,
+    ) -> FullScanWatcherStart | None:
+        assert library == self.library and now == NOW
+        self.calls.append("prepare_watcher")
+        return FullScanWatcherStart(
+            watcher_sequence_watermark=self.watcher_sequence,
+            topology_writer_fence=self.library.topology_writer_fence,
+        )
+
+    def finalize_full_scan(
+        self,
+        library_id: str,
+        *,
+        watcher_sequence_watermark: int,
+        completed_at: datetime,
+    ) -> WatcherFinalizeOutcome:
+        assert library_id == self.library.library_id and completed_at == NOW
+        assert watcher_sequence_watermark <= self.watcher_sequence
+        self.calls.append("finalize_watcher")
+        overflow_through = (
+            self.watcher_sequence
+            if self.watcher_full_rescan_reason is not None
+            else None
+        )
+        return WatcherFinalizeOutcome(
+            state=WatcherState(
+                library_id,
+                self.watcher_sequence,
+                overflow_through,
+                self.watcher_full_rescan_reason,
+            ),
+            discarded_intent_count=0,
+            replay_available=self.watcher_sequence > watcher_sequence_watermark,
+        )
+
+    def resume_after_full_scan_terminal(
+        self,
+        library_id: str,
+        *,
+        observed_at: datetime,
+    ) -> WatcherResumeOutcome:
+        assert library_id == self.library.library_id and observed_at == NOW
+        self.calls.append("resume_watcher")
+        overflow_through = (
+            self.watcher_sequence
+            if self.watcher_full_rescan_reason is not None
+            else None
+        )
+        return WatcherResumeOutcome(
+            state=WatcherState(
+                library_id,
+                self.watcher_sequence,
+                overflow_through,
+                self.watcher_full_rescan_reason,
+            ),
+            replay_available=(
+                self.watcher_pending and self.watcher_full_rescan_reason is None
+            ),
+        )
 
     # Scan run repository
     def get_active_for_update(self, library_id: str) -> FullScanRun | None:
@@ -636,20 +737,34 @@ class _Store:
     ) -> SourceObservationOutcome:
         assert observed_at == NOW
         self.observations.extend(observations)
+        bindings: list[SourcePathBinding] = []
+        for observation in observations:
+            path = observation.source.relative_path
+            binding = self.source_bindings.get(path)
+            if binding is None:
+                binding = SourcePathBinding(
+                    path,
+                    f"source-{len(self.source_bindings) + 1}",
+                    observation.source.filesystem_identity,
+                )
+                self.source_bindings[path] = binding
+            if binding not in bindings:
+                bindings.append(binding)
         if self.collision_paths is None or self.collision_emitted:
-            return SourceObservationOutcome()
+            return SourceObservationOutcome(bindings=tuple(bindings))
         second = self.collision_paths[1]
         if not any(value.source.relative_path == second for value in observations):
-            return SourceObservationOutcome()
+            return SourceObservationOutcome(bindings=tuple(bindings))
         self.collision_emitted = True
         return SourceObservationOutcome(
-            (
+            collisions=(
                 PathCollision(
                     parent_path=second[:-1],
                     comparison_key="collision-key",
                     related_paths=self.collision_paths,
                 ),
-            )
+            ),
+            bindings=tuple(bindings),
         )
 
     # Topology repository
@@ -674,33 +789,156 @@ class _Store:
             and abandoned_at == NOW
         )
 
-    def abandon_incomplete(
-        self, _fence: ScanFence, *, unit_key: str, abandoned_at: datetime
-    ) -> None:
-        assert unit_key and abandoned_at == NOW
+    def _new_topology_id(self, prefix: str) -> str:
+        self.next_topology_id += 1
+        return f"{prefix}-{self.next_topology_id}"
 
-    def get_active_revision_id(self, library_id: str, *, unit_key: str) -> str | None:
-        assert library_id == self.library.library_id and unit_key
+    def bind_plan(
+        self,
+        _fence: ScanFence,
+        plan: TopologyUnitPlan,
+        source_bindings: tuple[SourcePathBinding, ...],
+        *,
+        bound_at: datetime,
+    ) -> BoundTopologyUnitPlan | None:
+        assert bound_at == NOW
+        source_by_path = {
+            binding.relative_path: binding.source_entry_id
+            for binding in source_bindings
+        }
+        projections: list[BoundTopologyProjection] = []
+        for row_index, row in enumerate(plan.rows):
+            if isinstance(row, WorkProjectionPlan):
+                root_source_id = source_by_path[row.root_path]
+                stable_id = self.work_ids.get(root_source_id)
+                if stable_id is None:
+                    stable_id = self._new_topology_id("work")
+                    self.work_ids[root_source_id] = stable_id
+                projection = BoundTopologyProjection(
+                    row_index,
+                    BoundProjectionKind.WORK,
+                    stable_id,
+                    None,
+                    None,
+                    source_by_path[row.root_path],
+                    None,
+                    row.structure_key,
+                )
+            elif isinstance(row, VersionProjectionPlan):
+                parent_id = self.work_ids[source_by_path[row.work_path]]
+                root_source_id = (
+                    None if row.root_path is None else source_by_path[row.root_path]
+                )
+                version_key = (parent_id, root_source_id)
+                stable_id = self.version_ids.get(version_key)
+                if stable_id is None:
+                    stable_id = self._new_topology_id("version")
+                    self.version_ids[version_key] = stable_id
+                projection = BoundTopologyProjection(
+                    row_index,
+                    BoundProjectionKind.VERSION,
+                    stable_id,
+                    parent_id,
+                    BoundProjectionKind.WORK,
+                    None if row.root_path is None else source_by_path[row.root_path],
+                    None,
+                    row.structure_key,
+                )
+            elif isinstance(row, VolumeProjectionPlan):
+                work_id = self.work_ids[source_by_path[row.work_path]]
+                version_source_id = (
+                    None
+                    if row.version_path is None
+                    else source_by_path[row.version_path]
+                )
+                parent_id = self.version_ids[(work_id, version_source_id)]
+                root_source_id = source_by_path[row.root_path]
+                stable_id = self.volume_ids.get(root_source_id)
+                if stable_id is None:
+                    stable_id = self._new_topology_id("volume")
+                    self.volume_ids[root_source_id] = stable_id
+                projection = BoundTopologyProjection(
+                    row_index,
+                    BoundProjectionKind.VOLUME,
+                    stable_id,
+                    parent_id,
+                    BoundProjectionKind.VERSION,
+                    source_by_path[row.root_path],
+                    None,
+                    row.structure_key,
+                )
+            elif isinstance(row, AssetMembershipPlan):
+                parent_id = self.volume_ids[source_by_path[row.volume_path]]
+                source_id = source_by_path[row.source_path]
+                asset_key = (parent_id, source_id)
+                stable_id = self.asset_ids.get(asset_key)
+                if stable_id is None:
+                    stable_id = self._new_topology_id("asset")
+                    self.asset_ids[asset_key] = stable_id
+                projection = BoundTopologyProjection(
+                    row_index,
+                    BoundProjectionKind.ASSET,
+                    stable_id,
+                    parent_id,
+                    BoundProjectionKind.VOLUME,
+                    None,
+                    source_by_path[row.source_path],
+                    None,
+                )
+            else:
+                raise TypeError("unsupported topology projection")
+            projections.append(projection)
+        owner_kind = (
+            BoundProjectionKind.WORK
+            if plan.unit_kind
+            in {TopologyUnitKind.WORK_CONTAINER, TopologyUnitKind.AUDIOBOOK_WORK}
+            else BoundProjectionKind.VERSION
+            if plan.unit_kind is TopologyUnitKind.VERSION_CONTAINER
+            else BoundProjectionKind.VOLUME
+        )
+        owner_id = next(
+            value.stable_id for value in projections if value.kind is owner_kind
+        )
+        unit_key = (plan.unit_kind, owner_id)
+        unit_id = self.unit_ids.get(unit_key)
+        if unit_id is None:
+            unit_id = self._new_topology_id("unit")
+            self.unit_ids[unit_key] = unit_id
+        return BoundTopologyUnitPlan(
+            plan=plan,
+            unit_id=unit_id,
+            owner_stable_id=owner_id,
+            source_bindings=source_bindings,
+            projections=tuple(projections),
+        )
+
+    def abandon_incomplete(
+        self, _fence: ScanFence, *, unit_id: str, abandoned_at: datetime
+    ) -> None:
+        assert unit_id and abandoned_at == NOW
+
+    def get_active_revision_id(self, library_id: str, *, unit_id: str) -> str | None:
+        assert library_id == self.library.library_id and unit_id
         return None
 
     def begin_staging(
         self,
         _fence: ScanFence,
-        plan: TopologyUnitPlan,
+        plan: BoundTopologyUnitPlan,
         *,
         expected_active_revision_id: str | None,
         created_at: datetime,
     ) -> StagingRevision | None:
         assert expected_active_revision_id is None and created_at == NOW
-        self.plans.append(plan)
+        self.plans.append(plan.plan)
         if self.unchanged_topology:
             return None
         number = len(self.plans)
         return StagingRevision(
             revision_id=f"revision-{number}",
-            unit_id=f"unit-{number}",
+            unit_id=plan.unit_id,
             expected_active_revision_id=None,
-            expected_row_count=len(plan.rows),
+            expected_row_count=len(plan.plan.rows),
             staged_row_count=0,
         )
 
@@ -708,7 +946,7 @@ class _Store:
         self,
         _fence: ScanFence,
         staging: StagingRevision,
-        batch: TopologyStageBatch,
+        batch: BoundTopologyStageBatch,
         *,
         staged_at: datetime,
     ) -> StagingRevision:
@@ -751,6 +989,7 @@ class _UnitOfWork:
         self.topology = store
         self.diagnostics = store.diagnostics
         self.collisions = store.collisions
+        self.watcher = store
         self.grants = store
         self.audit = store.audit
         self.outbox = store.outbox
@@ -823,6 +1062,60 @@ class _Discovery:
     def open(self, *, canonical_root: str) -> _DiscoverySession:
         assert canonical_root
         return _DiscoverySession(self.identity, self.directories)
+
+
+class _LazyOversizedDiscoverySession:
+    def __init__(self, mode: OrganizationMode, track_count: int) -> None:
+        self._mode = mode
+        self._track_count = track_count
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    @property
+    def root_identity(self) -> str:
+        return "dev:root"
+
+    def iter_directory(
+        self,
+        relative_directory: tuple[str, ...],
+    ) -> Iterator[DiscoveryObservation]:
+        work = ("Work",)
+        version = ("Work", "Version")
+        volume = ("Work", "Version", "Volume")
+        if relative_directory == ():
+            return iter((_directory(work),))
+        if self._mode is OrganizationMode.AUDIOBOOK and relative_directory == work:
+            return (
+                _file(("Work", f"track-{index}.mp3"))
+                for index in range(self._track_count)
+            )
+        if relative_directory == work:
+            return iter((_directory(version),))
+        if relative_directory == version:
+            return iter((_directory(volume),))
+        if relative_directory == volume:
+            return (
+                _file((*volume, f"track-{index}.mp3"))
+                for index in range(self._track_count)
+            )
+        raise AssertionError(f"unexpected directory: {relative_directory!r}")
+
+    def revalidate_root_identity(self) -> str:
+        return self.root_identity
+
+
+class _LazyOversizedDiscovery:
+    def __init__(self, mode: OrganizationMode, track_count: int) -> None:
+        self._mode = mode
+        self._track_count = track_count
+
+    def open(self, *, canonical_root: str) -> _LazyOversizedDiscoverySession:
+        assert canonical_root == "/library"
+        return _LazyOversizedDiscoverySession(self._mode, self._track_count)
 
 
 class _Admission:
@@ -905,11 +1198,13 @@ def _directory(path: tuple[str, ...]) -> DiscoveredSource:
 
 def _execute_run(
     store: _Store,
-    discovery: _Discovery,
+    discovery: _Discovery | _LazyOversizedDiscovery,
     *,
     admission: _Admission | _AudioAdmission | _SidecarAdmission | _ForbiddenAdmission,
     lease_seconds: int = 60,
 ) -> object:
+    assert store.run is not None and store.run.lease_owner is not None
+    run = store.run
     return RunFullLibraryScan(
         unit_of_work_factory=_UnitOfWorkFactory(store),
         discovery=discovery,
@@ -918,9 +1213,9 @@ def _execute_run(
         monotonic_clock=_MonotonicClock(),
     ).execute(
         RunFullLibraryScanCommand(
-            "library-1",
-            "scan-1",
-            "worker-1",
+            run.library_id,
+            run.scan_id,
+            run.lease_owner,
             lease_seconds=lease_seconds,
         )
     )
@@ -941,6 +1236,21 @@ def test_start_rejects_a_current_live_run_without_mutating_it() -> None:
     assert store.run == active
     assert store.calls == []
     assert store.rollbacks == 1
+
+
+def test_start_captures_required_watcher_watermark_before_writer_reservation() -> None:
+    library = _library()
+    store = _Store(library)
+    store.watcher_sequence = 7
+
+    created = StartFullLibraryScan(
+        unit_of_work_factory=_UnitOfWorkFactory(store),
+        id_generator=_Ids(),
+        clock=_Clock(),
+    ).execute(StartFullLibraryScanCommand("admin-1", "library-1", "worker-1"))
+
+    assert created.watcher_sequence_watermark == 7
+    assert store.calls.index("prepare_watcher") < store.calls.index("reserve")
 
 
 @pytest.mark.parametrize(
@@ -971,10 +1281,11 @@ def test_start_atomically_invalidates_a_stale_live_run(
     assert created.root_path_snapshot == current_library.canonical_root
     assert store.work is not None
     assert store.work.root_path_snapshot == created.root_path_snapshot
-    assert store.calls[:4] == [
+    assert store.calls[:5] == [
         "cancel_invalidated",
         "abandon_cancelled",
         "delete_work",
+        "prepare_watcher",
         "reserve",
     ]
     assert [event.event_type for event in store.audit.events] == [
@@ -1037,7 +1348,12 @@ def test_admin_cancel_terminates_an_expired_live_run_without_a_live_lease(
     assert cancelled.topology_writer_fence == library.topology_writer_fence + 1
     assert store.work is None
     assert store.abandoned_scan_count == 0
-    assert store.calls[-3:] == ["cancel", "abandon_cancelled", "delete_work"]
+    assert store.calls[-4:] == [
+        "cancel",
+        "abandon_cancelled",
+        "delete_work",
+        "resume_watcher",
+    ]
     assert store.guard_mutation(old_fence, now=NOW) is False
     assert [event.event_type for event in store.audit.events] == [
         "LIBRARY_FULL_SCAN_CANCELLED"
@@ -1067,12 +1383,98 @@ def test_admin_cancel_uses_terminal_invalidation_for_a_stale_or_frozen_library(
     ).execute(CancelFullLibraryScanCommand("admin-1", "library-1", "scan-1"))
 
     assert cancelled.state is ScanState.CANCELLED
-    assert store.calls[-3:] == [
+    assert store.calls[-4:] == [
         "cancel_invalidated",
         "abandon_cancelled",
         "delete_work",
+        "resume_watcher",
     ]
     assert store.work is None
+
+
+@pytest.mark.parametrize("terminal", ("failed", "cancelled"))
+@pytest.mark.parametrize(
+    ("watcher_pending", "rescan_reason", "expected_follow_up"),
+    (
+        (False, None, None),
+        (True, None, "LIBRARY_RECONCILE_AVAILABLE"),
+        (False, FullRescanReason.BACKEND_OVERFLOW, "LIBRARY_FULL_SCAN_REQUIRED"),
+    ),
+)
+def test_terminal_scan_resumes_only_durable_watcher_work(
+    terminal: str,
+    watcher_pending: bool,
+    rescan_reason: FullRescanReason | None,
+    expected_follow_up: str | None,
+) -> None:
+    library = _library()
+    run = _run(library, state=ScanState.RUNNING, root_identity="dev:root")
+    store = _Store(library, run=run, work=_work(run))
+    store.watcher_sequence = 7
+    store.watcher_pending = watcher_pending
+    store.watcher_full_rescan_reason = rescan_reason
+
+    if terminal == "failed":
+        result = FailFullLibraryScan(
+            unit_of_work_factory=_UnitOfWorkFactory(store),
+            clock=_Clock(),
+        ).execute(
+            FailFullLibraryScanCommand(
+                "library-1",
+                "scan-1",
+                "worker-1",
+                ScanFailureCode.IO_ERROR,
+            )
+        )
+        terminal_event = "LIBRARY_FULL_SCAN_FAILED"
+        assert result.state is ScanState.FAILED
+    else:
+        result = CancelFullLibraryScan(
+            unit_of_work_factory=_UnitOfWorkFactory(store),
+            clock=_Clock(),
+        ).execute(CancelFullLibraryScanCommand("admin-1", "library-1", "scan-1"))
+        terminal_event = "LIBRARY_FULL_SCAN_CANCELLED"
+        assert result.state is ScanState.CANCELLED
+
+    expected_events = [terminal_event]
+    if expected_follow_up is not None:
+        expected_events.append(expected_follow_up)
+    assert [event.event_type for event in store.outbox.events] == expected_events
+    assert store.calls[-1] == "resume_watcher"
+    assert store.commits == 1
+
+
+@pytest.mark.parametrize("terminal", ("failed", "cancelled"))
+def test_terminal_watcher_wake_failure_rolls_back_the_scan_transaction(
+    terminal: str,
+) -> None:
+    library = _library()
+    run = _run(library, state=ScanState.RUNNING, root_identity="dev:root")
+    store = _Store(library, run=run, work=_work(run))
+    store.watcher_pending = True
+    store.outbox.fail_on_event_type = "LIBRARY_RECONCILE_AVAILABLE"
+
+    with pytest.raises(RuntimeError, match="outbox unavailable"):
+        if terminal == "failed":
+            FailFullLibraryScan(
+                unit_of_work_factory=_UnitOfWorkFactory(store),
+                clock=_Clock(),
+            ).execute(
+                FailFullLibraryScanCommand(
+                    "library-1",
+                    "scan-1",
+                    "worker-1",
+                    ScanFailureCode.IO_ERROR,
+                )
+            )
+        else:
+            CancelFullLibraryScan(
+                unit_of_work_factory=_UnitOfWorkFactory(store),
+                clock=_Clock(),
+            ).execute(CancelFullLibraryScanCommand("admin-1", "library-1", "scan-1"))
+
+    assert store.rollbacks == 1
+    assert store.commits == 0
 
 
 def test_pending_claim_renews_run_and_root_work_to_one_deadline() -> None:
@@ -1130,6 +1532,49 @@ def test_each_large_unit_staging_batch_renews_the_paired_lease_before_commit() -
     assert all(value == deadline for _kind, value in store.work_lease_updates)
 
 
+@pytest.mark.parametrize(
+    "mode",
+    (OrganizationMode.AUDIOBOOK, OrganizationMode.VOLUMES),
+)
+def test_oversized_multi_asset_scan_bounds_opaque_binding_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: OrganizationMode,
+) -> None:
+    peak_binding_count = 0
+    original_flush = full_scan_execution_module._ScanExecution._flush_slice
+
+    def track_binding_count(
+        execution: full_scan_execution_module._ScanExecution,
+        *,
+        force: bool,
+    ) -> None:
+        nonlocal peak_binding_count
+        original_flush(execution, force=force)
+        peak_binding_count = max(
+            peak_binding_count,
+            len(execution._source_bindings),
+        )
+
+    monkeypatch.setattr(
+        full_scan_execution_module._ScanExecution,
+        "_flush_slice",
+        track_binding_count,
+    )
+    library = _library(mode=mode)
+    run = _run(library)
+    store = _Store(library, run=run, work=_work(run))
+
+    result = _execute_run(
+        store,
+        _LazyOversizedDiscovery(mode, MAX_AUDIO_TRACKS * 2),
+        admission=_AudioAdmission(),
+    )
+
+    assert result.units_activated == 0
+    assert store.run is not None and store.run.state is ScanState.COMPLETED
+    assert peak_binding_count <= MAX_AUDIO_TRACKS + 500
+
+
 def test_empty_scan_binds_durable_root_and_finalizes_generation() -> None:
     library = _library(state=LibraryControlState.ACTIVATING)
     run = _run(library)
@@ -1152,6 +1597,72 @@ def test_empty_scan_binds_durable_root_and_finalizes_generation() -> None:
         "LIBRARY_FULL_SCAN_COMPLETED"
     ]
     assert store.audit.events == []
+
+
+def test_finalize_emits_one_reconcile_signal_for_events_after_watermark() -> None:
+    library = _library()
+    run = _run(library)
+    store = _Store(library, run=run, work=_work(run))
+    store.watcher_sequence = 1
+
+    _execute_run(
+        store,
+        _Discovery("dev:root", {(): ()}),
+        admission=_ForbiddenAdmission(),
+    )
+
+    assert [event.event_type for event in store.outbox.events] == [
+        "LIBRARY_FULL_SCAN_COMPLETED",
+        "LIBRARY_RECONCILE_AVAILABLE",
+    ]
+
+
+def test_finalize_keeps_concurrent_rescan_fence_and_emits_one_scan_signal() -> None:
+    library = _library()
+    run = _run(library)
+    store = _Store(library, run=run, work=_work(run))
+    store.watcher_sequence = 1
+    store.watcher_full_rescan_reason = FullRescanReason.BACKEND_OVERFLOW
+
+    _execute_run(
+        store,
+        _Discovery("dev:root", {(): ()}),
+        admission=_ForbiddenAdmission(),
+    )
+
+    required = [
+        event
+        for event in store.outbox.events
+        if event.event_type == "LIBRARY_FULL_SCAN_REQUIRED"
+    ]
+    assert len(required) == 1
+    assert dict(required[0].payload) == {
+        "scanId": "scan-1",
+        "generation": 1,
+        "reason": "BACKEND_OVERFLOW",
+        "throughSequence": 1,
+    }
+
+
+def test_finalize_follow_up_outbox_failure_rolls_back_terminal_transaction() -> None:
+    library = _library()
+    run = _run(library)
+    store = _Store(library, run=run, work=_work(run))
+    store.watcher_sequence = 1
+    store.outbox.fail_on_event_type = "LIBRARY_RECONCILE_AVAILABLE"
+
+    with pytest.raises(RuntimeError, match="outbox unavailable"):
+        _execute_run(
+            store,
+            _Discovery("dev:root", {(): ()}),
+            admission=_ForbiddenAdmission(),
+        )
+
+    assert store.rollbacks == 1
+    assert all(
+        event.event_type != "LIBRARY_RECONCILE_AVAILABLE"
+        for event in store.outbox.events
+    )
 
 
 def test_replaced_physical_root_fails_without_overwriting_durable_identity() -> None:
@@ -1306,6 +1817,94 @@ def test_volumes_first_child_activates_parent_group_atomically(
         == {"scanId", "generation", "unitId", "unitRevisionId"}
         for event in activated
     )
+
+
+def test_full_scan_reuses_opaque_ids_only_for_the_exact_raw_slot() -> None:
+    library = _library()
+    first_run = _run(library)
+    store = _Store(library, run=first_run, work=_work(first_run))
+    original = ("book.txt",)
+    original_source = DiscoveredSource(
+        original,
+        DiscoveryEntryType.FILE,
+        "dev:77",
+        STAT,
+    )
+
+    _execute_run(
+        store,
+        _Discovery("dev:root", {(): (original_source,)}),
+        admission=_Admission(),
+    )
+    original_source_id = store.source_bindings[original].source_entry_id
+    original_work_id = store.work_ids[original_source_id]
+    original_unit_id = next(iter(store.unit_ids.values()))
+
+    second_run = _run(store.library, scan_id="scan-2", generation=2)
+    store.run = second_run
+    store.work = _work(second_run)
+    _execute_run(
+        store,
+        _Discovery("dev:root", {(): (original_source,)}),
+        admission=_Admission(),
+    )
+
+    assert store.source_bindings[original].source_entry_id == original_source_id
+    assert store.work_ids[original_source_id] == original_work_id
+    assert original_unit_id in store.unit_ids.values()
+
+
+def test_full_scan_does_not_infer_offline_rename_from_filesystem_identity() -> None:
+    library = _library()
+    first_run = _run(library)
+    store = _Store(library, run=first_run, work=_work(first_run))
+    original = ("book.txt",)
+    renamed = ("renamed.txt",)
+
+    _execute_run(
+        store,
+        _Discovery(
+            "dev:root",
+            {
+                (): (
+                    DiscoveredSource(
+                        original,
+                        DiscoveryEntryType.FILE,
+                        "dev:77",
+                        STAT,
+                    ),
+                )
+            },
+        ),
+        admission=_Admission(),
+    )
+    original_source_id = store.source_bindings[original].source_entry_id
+    original_work_id = store.work_ids[original_source_id]
+
+    second_run = _run(store.library, scan_id="scan-2", generation=2)
+    store.run = second_run
+    store.work = _work(second_run)
+    _execute_run(
+        store,
+        _Discovery(
+            "dev:root",
+            {
+                (): (
+                    DiscoveredSource(
+                        renamed,
+                        DiscoveryEntryType.FILE,
+                        "dev:77",
+                        STAT,
+                    ),
+                )
+            },
+        ),
+        admission=_Admission(),
+    )
+
+    renamed_source_id = store.source_bindings[renamed].source_entry_id
+    assert renamed_source_id != original_source_id
+    assert store.work_ids[renamed_source_id] != original_work_id
 
 
 @pytest.mark.parametrize(

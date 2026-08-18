@@ -51,23 +51,6 @@ def comparison_components(
     return normalized
 
 
-def path_token(path: tuple[str, ...], comparison: PathComparison) -> str:
-    return "".join(
-        f"{len(component.encode('utf-8'))}:{component}"
-        for component in comparison_components(path, comparison)
-    )
-
-
-def raw_path_token(path: tuple[str, ...]) -> str:
-    return "".join(
-        f"{len(component.encode('utf-8'))}:{component}" for component in path
-    )
-
-
-def source_entry_id(library_id: str, path: tuple[str, ...]) -> str:
-    return stable_id("source", library_id, raw_path_token(path))
-
-
 def library_fence_conditions(
     fence: ScanFence,
 ) -> tuple[ColumnElement[bool], ...]:
@@ -142,9 +125,7 @@ __all__ = [
     "guard_mutation",
     "library_fence_conditions",
     "library_fence_exists",
-    "path_token",
     "require_live_fence",
     "scan_fence_conditions",
-    "source_entry_id",
     "stable_id",
 ]

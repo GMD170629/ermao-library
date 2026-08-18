@@ -1,20 +1,32 @@
-"""SQLAlchemy persistence for staged catalog topology projections."""
+"""SQLAlchemy persistence for opaque-identity topology projections."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import cast
+from typing import NoReturn, cast
 
-from sqlalchemy import and_, exists, func, select, update
+from sqlalchemy import and_, exists, func, select, union_all, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import InstrumentedAttribute
+from sqlalchemy.sql.elements import ColumnElement
 
-from app.modules.catalog.application.scan_dto import ScanFence, StagingRevision
-from app.modules.catalog.domain.model import PathComparison
+from app.modules.catalog.application.scan_dto import (
+    ScanFence,
+    SourcePathBinding,
+    StagingRevision,
+)
+from app.modules.catalog.application.watcher_dto import (
+    BoundProjectionKind,
+    BoundTopologyProjection,
+    BoundTopologyStageBatch,
+    BoundTopologyUnitPlan,
+    ReconcileFence,
+    required_topology_source_paths,
+)
 from app.modules.catalog.domain.scan import (
     AssetMembershipPlan,
     ScanStale,
-    TopologyStageBatch,
     TopologyUnitPlan,
     VersionProjectionPlan,
     VolumeProjectionPlan,
@@ -23,6 +35,7 @@ from app.modules.catalog.domain.scan import (
 from app.modules.catalog.domain.scan import (
     TopologyUnitKind as DomainTopologyUnitKind,
 )
+from app.modules.catalog.domain.watcher import ReconcileStale
 
 from .enums import (
     AssetRole,
@@ -31,6 +44,7 @@ from .enums import (
     RevisionState,
     ScanState,
     SlotState,
+    SourceEntryType,
     TopologyUnitKind,
     VersionKind,
 )
@@ -48,20 +62,17 @@ from .models import (
     VolumeAsset,
     WorkVersion,
 )
-from .scan_fencing import (
-    path_token as _path_token,
-)
-from .scan_fencing import (
-    require_live_fence as _require_live_fence,
-)
-from .scan_fencing import (
-    source_entry_id as _source_entry_id,
-)
-from .scan_fencing import (
-    stable_id as _stable_id,
-)
+from .reconcile_fencing import require_live_reconcile
+from .scan_fencing import comparison_components, require_live_fence, stable_id
 
-_SOURCE_VALIDATION_CHUNK = 400
+TopologyFence = ScanFence | ReconcileFence
+ProjectionPlan = (
+    WorkProjectionPlan
+    | VersionProjectionPlan
+    | VolumeProjectionPlan
+    | AssetMembershipPlan
+)
+_QUERY_CHUNK = 400
 
 
 def disc_number_to_storage(value: int) -> int | None:
@@ -76,59 +87,169 @@ def disc_number_from_storage(value: int | None) -> int:
     return 0 if value is None else value
 
 
-def _work_id(library_id: str, path: tuple[str, ...], comparison: PathComparison) -> str:
-    return _stable_id("work", library_id, _path_token(path, comparison))
+def _raise_stale(fence: TopologyFence) -> NoReturn:
+    if isinstance(fence, ScanFence):
+        raise ScanStale()
+    raise ReconcileStale()
 
 
-def _version_id(
-    library_id: str,
-    *,
-    work_path: tuple[str, ...],
-    version_path: tuple[str, ...] | None,
-    comparison: PathComparison,
-) -> str:
-    if version_path is None:
-        return _stable_id(
-            "version",
-            library_id,
-            _path_token(work_path, comparison),
-            "implicit",
+def _require_fence(session: Session, fence: TopologyFence, *, now: datetime) -> None:
+    if isinstance(fence, ScanFence):
+        require_live_fence(session, fence, now=now)
+    else:
+        require_live_reconcile(session, fence, now=now)
+
+
+def _presence_generation(fence: TopologyFence) -> int:
+    if isinstance(fence, ScanFence):
+        return fence.generation
+    return fence.presence_generation
+
+
+def _origin_id(fence: TopologyFence) -> str:
+    return fence.scan_id if isinstance(fence, ScanFence) else fence.intent_id
+
+
+def _origin_conditions(fence: TopologyFence) -> tuple[ColumnElement[bool], ...]:
+    if isinstance(fence, ScanFence):
+        return (
+            TopologyUnitRevision.scan_run_id == fence.scan_id,
+            TopologyUnitRevision.reconcile_origin_id.is_(None),
         )
-    return _stable_id("version", library_id, _path_token(version_path, comparison))
+    return (
+        TopologyUnitRevision.scan_run_id.is_(None),
+        TopologyUnitRevision.reconcile_origin_id == fence.intent_id,
+    )
 
 
-def _volume_id(
-    library_id: str, path: tuple[str, ...], comparison: PathComparison
+def _origin_values(fence: TopologyFence) -> tuple[str | None, str | None]:
+    if isinstance(fence, ScanFence):
+        return fence.scan_id, None
+    return None, fence.intent_id
+
+
+def _work_stable_id(library_id: str, root_source_entry_id: str) -> str:
+    return stable_id("work", library_id, root_source_entry_id)
+
+
+def _version_stable_id(
+    library_id: str,
+    work_stable_id: str,
+    root_source_entry_id: str | None,
 ) -> str:
-    return _stable_id("volume", library_id, _path_token(path, comparison))
+    if root_source_entry_id is None:
+        return stable_id("version", library_id, work_stable_id, "implicit")
+    return stable_id("version", library_id, root_source_entry_id)
 
 
-def _unit_id(library_id: str, unit_key: str) -> str:
-    return _stable_id("unit", library_id, unit_key)
+def _volume_stable_id(library_id: str, root_source_entry_id: str) -> str:
+    return stable_id("volume", library_id, root_source_entry_id)
+
+
+def _asset_stable_id(library_id: str, source_entry_id: str, role: str) -> str:
+    return stable_id("asset", library_id, source_entry_id, role)
+
+
+def _unit_stable_id(
+    library_id: str, unit_kind: DomainTopologyUnitKind, owner_stable_id: str
+) -> str:
+    return stable_id("unit", library_id, unit_kind.value, owner_stable_id)
 
 
 def _revision_row_count(session: Session, revision_id: str) -> int:
-    projection_models = (
-        TopologyWorkProjection,
-        TopologyVersionProjection,
-        TopologyVolumeProjection,
-        TopologyAssetMembership,
+    projection_rows = union_all(
+        select(TopologyWorkProjection.id).where(
+            TopologyWorkProjection.unit_revision_id == revision_id
+        ),
+        select(TopologyVersionProjection.id).where(
+            TopologyVersionProjection.unit_revision_id == revision_id
+        ),
+        select(TopologyVolumeProjection.id).where(
+            TopologyVolumeProjection.unit_revision_id == revision_id
+        ),
+        select(TopologyAssetMembership.id).where(
+            TopologyAssetMembership.unit_revision_id == revision_id
+        ),
     )
-    return sum(
-        session.scalar(
-            select(func.count())
-            .select_from(model)
-            .where(model.unit_revision_id == revision_id)
-        )
+    return (
+        session.scalar(select(func.count()).select_from(projection_rows.subquery()))
         or 0
-        for model in projection_models
     )
+
+
+def _source_ids_are_valid(
+    session: Session,
+    fence: TopologyFence,
+    source_ids: set[str],
+    *,
+    pending_proofs: dict[str, int] | None = None,
+    allow_reconcile_pending: bool = False,
+) -> bool:
+    loaded: dict[str, LibrarySourceEntry] = {}
+    frontier = set(source_ids)
+    generation = _presence_generation(fence)
+    while frontier:
+        ordered = tuple(sorted(frontier))
+        rows: dict[str, LibrarySourceEntry] = {}
+        for offset in range(0, len(ordered), _QUERY_CHUNK):
+            rows.update(
+                (row.id, row)
+                for row in session.scalars(
+                    select(LibrarySourceEntry).where(
+                        LibrarySourceEntry.library_id == fence.library_id,
+                        LibrarySourceEntry.id.in_(
+                            ordered[offset : offset + _QUERY_CHUNK]
+                        ),
+                    )
+                )
+            )
+        if set(rows) != frontier:
+            return False
+        if any(
+            row.last_seen_generation != generation
+            or row.absence_confirmed_at is not None
+            or row.layout_state is not LayoutState.PRESENT
+            or row.slot_state is not SlotState.ACTIVE
+            for row in rows.values()
+        ):
+            return False
+        loaded.update(rows)
+        frontier = {
+            row.parent_entry_id
+            for row in rows.values()
+            if row.parent_entry_id is not None and row.parent_entry_id not in loaded
+        }
+    for row in loaded.values():
+        if row.parent_entry_id is None:
+            if row.entry_type is not SourceEntryType.SYNTHETIC_ROOT:
+                return False
+            continue
+        parent = loaded.get(row.parent_entry_id)
+        if parent is None or parent.entry_type not in {
+            SourceEntryType.SYNTHETIC_ROOT,
+            SourceEntryType.DIRECTORY,
+        }:
+            return False
+        if row.observed_parent_presence_epoch == parent.children_presence_epoch:
+            continue
+        if row.pending_observed_parent_presence_epoch == parent.children_presence_epoch:
+            continue
+        pending_epoch = row.pending_observed_parent_presence_epoch
+        if (
+            not isinstance(fence, ReconcileFence)
+            or pending_epoch is None
+            or pending_epoch != parent.next_children_presence_epoch
+        ):
+            return False
+        if allow_reconcile_pending:
+            continue
+        if pending_proofs is None or pending_proofs.get(row.id) != pending_epoch:
+            return False
+    return True
 
 
 def _revision_sources_valid(
-    session: Session,
-    fence: ScanFence,
-    revision: TopologyUnitRevision,
+    session: Session, fence: TopologyFence, revision: TopologyUnitRevision
 ) -> bool:
     source_ids = {revision.unit_root_entry_id}
     source_ids.update(
@@ -140,15 +261,15 @@ def _revision_sources_valid(
         )
     )
     source_ids.update(
-        source_id
-        for source_id in session.scalars(
+        value
+        for value in session.scalars(
             select(TopologyVersionProjection.root_entry_id).where(
                 TopologyVersionProjection.library_id == fence.library_id,
                 TopologyVersionProjection.unit_revision_id == revision.id,
                 TopologyVersionProjection.root_entry_id.is_not(None),
             )
         )
-        if source_id is not None
+        if value is not None
     )
     source_ids.update(
         session.scalars(
@@ -166,372 +287,165 @@ def _revision_sources_valid(
             )
         )
     )
-    return _source_ids_are_valid(session, fence, source_ids)
-
-
-def _source_ids_are_valid(
-    session: Session,
-    fence: ScanFence,
-    source_ids: set[str],
-) -> bool:
-    validated_ids: set[str] = set()
-    frontier = set(source_ids)
-    while frontier:
-        ordered_ids = tuple(sorted(frontier))
-        valid_rows: dict[str, str | None] = {}
-        for offset in range(0, len(ordered_ids), _SOURCE_VALIDATION_CHUNK):
-            for entry_id, parent_entry_id in session.execute(
-                select(
-                    LibrarySourceEntry.id,
-                    LibrarySourceEntry.parent_entry_id,
-                ).where(
-                    LibrarySourceEntry.library_id == fence.library_id,
-                    LibrarySourceEntry.id.in_(
-                        ordered_ids[offset : offset + _SOURCE_VALIDATION_CHUNK]
-                    ),
-                    LibrarySourceEntry.last_seen_generation == fence.generation,
-                    LibrarySourceEntry.layout_state == LayoutState.PRESENT,
-                    LibrarySourceEntry.slot_state == SlotState.ACTIVE,
-                )
-            ):
-                valid_rows[entry_id] = parent_entry_id
-        if set(valid_rows) != frontier:
-            return False
-        validated_ids.update(frontier)
-        frontier = {
-            parent_entry_id
-            for parent_entry_id in valid_rows.values()
-            if parent_entry_id is not None and parent_entry_id not in validated_ids
-        }
-    return True
-
-
-def _plan_sources_valid(
-    session: Session,
-    fence: ScanFence,
-    plan: TopologyUnitPlan,
-) -> bool:
-    source_ids = {_source_entry_id(fence.library_id, plan.unit_root_path)}
-    for row in plan.rows:
-        if isinstance(
-            row, WorkProjectionPlan | VersionProjectionPlan | VolumeProjectionPlan
-        ):
-            root_path = row.root_path
-            if root_path is not None:
-                source_ids.add(_source_entry_id(fence.library_id, root_path))
-        elif isinstance(row, AssetMembershipPlan):
-            source_ids.add(_source_entry_id(fence.library_id, row.source_path))
-    return _source_ids_are_valid(session, fence, source_ids)
-
-
-def _ensure_work(session: Session, library_id: str, work_id: str) -> None:
-    if session.get(LibraryWork, work_id) is None:
-        session.add(LibraryWork(id=work_id, library_id=library_id))
-
-
-def _ensure_version(session: Session, library_id: str, version_id: str) -> None:
-    if session.get(WorkVersion, version_id) is None:
-        session.add(WorkVersion(id=version_id, library_id=library_id))
-
-
-def _ensure_volume(
-    session: Session,
-    library_id: str,
-    volume_id: str,
-    *,
-    reading_morphology: str,
-    staged_at: datetime,
-) -> None:
-    row = session.get(LibraryVolume, volume_id)
-    if row is None:
-        session.add(
-            LibraryVolume(
-                id=volume_id,
-                library_id=library_id,
-                reading_morphology=reading_morphology,
-                content_state="PENDING",
-                created_at=staged_at,
-                updated_at=staged_at,
-            )
-        )
-
-
-def _prepare_projection_dependencies(
-    session: Session,
-    fence: ScanFence,
-    batch: TopologyStageBatch,
-    *,
-    comparison: PathComparison,
-    staged_at: datetime,
-) -> dict[str, LibrarySourceEntry]:
-    """Persist stable identities before projection rows reference them."""
-
-    work_ids: set[str] = set()
-    version_ids: set[str] = set()
-    volume_ids: set[str] = set()
-    source_ids: set[str] = set()
-    volume_morphologies: dict[str, str] = {}
-    asset_specs: dict[str, tuple[str, str]] = {}
-    for row in batch.rows:
-        if isinstance(row, WorkProjectionPlan):
-            work_ids.add(_work_id(fence.library_id, row.root_path, comparison))
-            source_ids.add(_source_entry_id(fence.library_id, row.root_path))
-        elif isinstance(row, VersionProjectionPlan):
-            work_ids.add(_work_id(fence.library_id, row.work_path, comparison))
-            version_ids.add(
-                _version_id(
-                    fence.library_id,
-                    work_path=row.work_path,
-                    version_path=row.root_path,
-                    comparison=comparison,
-                )
-            )
-            if row.root_path is not None:
-                source_ids.add(_source_entry_id(fence.library_id, row.root_path))
-        elif isinstance(row, VolumeProjectionPlan):
-            work_ids.add(_work_id(fence.library_id, row.work_path, comparison))
-            version_ids.add(
-                _version_id(
-                    fence.library_id,
-                    work_path=row.work_path,
-                    version_path=row.version_path,
-                    comparison=comparison,
-                )
-            )
-            volume_id = _volume_id(fence.library_id, row.root_path, comparison)
-            morphology = row.reading_morphology.value
-            existing_morphology = volume_morphologies.setdefault(volume_id, morphology)
-            if existing_morphology != morphology:
-                raise ScanStale()
-            volume_ids.add(volume_id)
-            source_ids.add(_source_entry_id(fence.library_id, row.root_path))
-        else:
-            source_id = _source_entry_id(fence.library_id, row.source_path)
-            source_ids.add(source_id)
-            volume_ids.add(_volume_id(fence.library_id, row.volume_path, comparison))
-            asset_id = _stable_id("asset", fence.library_id, source_id)
-            asset_spec = (source_id, row.source_format.value)
-            existing_asset_spec = asset_specs.setdefault(asset_id, asset_spec)
-            if existing_asset_spec != asset_spec:
-                raise ScanStale()
-
-    sources: dict[str, LibrarySourceEntry] = {}
-    ordered_source_ids = tuple(sorted(source_ids))
-    for offset in range(0, len(ordered_source_ids), _SOURCE_VALIDATION_CHUNK):
-        sources.update(
-            (source.id, source)
-            for source in session.scalars(
-                select(LibrarySourceEntry).where(
-                    LibrarySourceEntry.library_id == fence.library_id,
-                    LibrarySourceEntry.id.in_(
-                        ordered_source_ids[offset : offset + _SOURCE_VALIDATION_CHUNK]
-                    ),
-                )
-            )
-        )
-    if set(sources) != source_ids:
-        raise ScanStale()
-
-    existing_work_ids: set[str] = set()
-    ordered_work_ids = tuple(sorted(work_ids))
-    for offset in range(0, len(ordered_work_ids), _SOURCE_VALIDATION_CHUNK):
-        existing_work_ids.update(
-            session.scalars(
-                select(LibraryWork.id).where(
-                    LibraryWork.library_id == fence.library_id,
-                    LibraryWork.id.in_(
-                        ordered_work_ids[offset : offset + _SOURCE_VALIDATION_CHUNK]
-                    ),
-                )
-            )
-        )
-    existing_version_ids: set[str] = set()
-    ordered_version_ids = tuple(sorted(version_ids))
-    for offset in range(0, len(ordered_version_ids), _SOURCE_VALIDATION_CHUNK):
-        existing_version_ids.update(
-            session.scalars(
-                select(WorkVersion.id).where(
-                    WorkVersion.library_id == fence.library_id,
-                    WorkVersion.id.in_(
-                        ordered_version_ids[offset : offset + _SOURCE_VALIDATION_CHUNK]
-                    ),
-                )
-            )
-        )
-    existing_volume_ids: set[str] = set()
-    ordered_volume_ids = tuple(sorted(volume_ids))
-    for offset in range(0, len(ordered_volume_ids), _SOURCE_VALIDATION_CHUNK):
-        existing_volume_ids.update(
-            session.scalars(
-                select(LibraryVolume.id).where(
-                    LibraryVolume.library_id == fence.library_id,
-                    LibraryVolume.id.in_(
-                        ordered_volume_ids[offset : offset + _SOURCE_VALIDATION_CHUNK]
-                    ),
-                )
-            )
-        )
-    missing_volume_ids = volume_ids - existing_volume_ids
-    if not missing_volume_ids.issubset(volume_morphologies):
-        raise ScanStale()
-    asset_ids = set(asset_specs)
-    existing_asset_ids: set[str] = set()
-    ordered_asset_ids = tuple(sorted(asset_ids))
-    for offset in range(0, len(ordered_asset_ids), _SOURCE_VALIDATION_CHUNK):
-        existing_asset_ids.update(
-            session.scalars(
-                select(VolumeAsset.id).where(
-                    VolumeAsset.library_id == fence.library_id,
-                    VolumeAsset.id.in_(
-                        ordered_asset_ids[offset : offset + _SOURCE_VALIDATION_CHUNK]
-                    ),
-                )
-            )
-        )
-    session.add_all(
-        [
-            LibraryWork(id=work_id, library_id=fence.library_id)
-            for work_id in work_ids - existing_work_ids
-        ]
+    return _source_ids_are_valid(
+        session,
+        fence,
+        source_ids,
+        allow_reconcile_pending=isinstance(fence, ReconcileFence),
     )
-    session.add_all(
-        [
-            WorkVersion(id=version_id, library_id=fence.library_id)
-            for version_id in version_ids - existing_version_ids
-        ]
-    )
-    session.add_all(
-        [
-            LibraryVolume(
-                id=volume_id,
-                library_id=fence.library_id,
-                reading_morphology=volume_morphologies[volume_id],
-                content_state="PENDING",
-                created_at=staged_at,
-                updated_at=staged_at,
-            )
-            for volume_id in missing_volume_ids
-        ]
-    )
-    session.add_all(
-        [
-            VolumeAsset(
-                id=asset_id,
-                library_id=fence.library_id,
-                source_format=asset_specs[asset_id][1],
-                size_bytes=sources[asset_specs[asset_id][0]].size_bytes,
-                validation_state=AssetValidationState.PENDING,
-                created_at=staged_at,
-                updated_at=staged_at,
-            )
-            for asset_id in asset_ids - existing_asset_ids
-        ]
-    )
-    session.flush()
-    return sources
 
 
-def _owner_ids(
-    fence: ScanFence, plan: TopologyUnitPlan
-) -> tuple[str | None, str | None, str | None]:
-    comparison = PathComparison(fence.path_comparison)
-    if plan.unit_kind in {
+def _work_binding(
+    fence: TopologyFence,
+    row_index: int,
+    row: WorkProjectionPlan,
+    sources: dict[tuple[str, ...], SourcePathBinding],
+) -> BoundTopologyProjection:
+    source_id = sources[row.root_path].source_entry_id
+    structure_key = stable_id(
+        "structure",
+        fence.library_id,
+        str(fence.topology_version),
+        "work",
+        comparison_components((row.root_path[-1],), fence.path_comparison)[0],
+    )
+    return BoundTopologyProjection(
+        row_index,
+        BoundProjectionKind.WORK,
+        _work_stable_id(fence.library_id, source_id),
+        None,
+        None,
+        source_id,
+        None,
+        structure_key,
+    )
+
+
+def _version_binding(
+    fence: TopologyFence,
+    row_index: int,
+    row: VersionProjectionPlan,
+    sources: dict[tuple[str, ...], SourcePathBinding],
+) -> BoundTopologyProjection:
+    work_id = _work_stable_id(fence.library_id, sources[row.work_path].source_entry_id)
+    root_id = None if row.root_path is None else sources[row.root_path].source_entry_id
+    local_key = (
+        "$implicit"
+        if row.root_path is None
+        else comparison_components((row.root_path[-1],), fence.path_comparison)[0]
+    )
+    structure_key = stable_id(
+        "structure",
+        fence.library_id,
+        str(fence.topology_version),
+        "version",
+        work_id,
+        row.kind.value,
+        local_key,
+    )
+    return BoundTopologyProjection(
+        row_index,
+        BoundProjectionKind.VERSION,
+        _version_stable_id(fence.library_id, work_id, root_id),
+        work_id,
+        BoundProjectionKind.WORK,
+        root_id,
+        None,
+        structure_key,
+    )
+
+
+def _volume_binding(
+    fence: TopologyFence,
+    row_index: int,
+    row: VolumeProjectionPlan,
+    sources: dict[tuple[str, ...], SourcePathBinding],
+) -> BoundTopologyProjection:
+    work_id = _work_stable_id(fence.library_id, sources[row.work_path].source_entry_id)
+    version_root_id = (
+        None if row.version_path is None else sources[row.version_path].source_entry_id
+    )
+    version_id = _version_stable_id(fence.library_id, work_id, version_root_id)
+    root_id = sources[row.root_path].source_entry_id
+    structure_key = stable_id(
+        "structure",
+        fence.library_id,
+        str(fence.topology_version),
+        "volume",
+        version_id,
+        row.source_kind.value,
+        comparison_components((row.root_path[-1],), fence.path_comparison)[0],
+    )
+    return BoundTopologyProjection(
+        row_index,
+        BoundProjectionKind.VOLUME,
+        _volume_stable_id(fence.library_id, root_id),
+        version_id,
+        BoundProjectionKind.VERSION,
+        root_id,
+        None,
+        structure_key,
+    )
+
+
+def _asset_binding(
+    fence: TopologyFence,
+    row_index: int,
+    row: AssetMembershipPlan,
+    sources: dict[tuple[str, ...], SourcePathBinding],
+) -> BoundTopologyProjection:
+    volume_source_id = sources[row.volume_path].source_entry_id
+    source_id = sources[row.source_path].source_entry_id
+    return BoundTopologyProjection(
+        row_index,
+        BoundProjectionKind.ASSET,
+        _asset_stable_id(fence.library_id, source_id, row.role.value),
+        _volume_stable_id(fence.library_id, volume_source_id),
+        BoundProjectionKind.VOLUME,
+        None,
+        source_id,
+        None,
+    )
+
+
+def _projection_binding(
+    fence: TopologyFence,
+    row_index: int,
+    row: ProjectionPlan,
+    sources: dict[tuple[str, ...], SourcePathBinding],
+) -> BoundTopologyProjection:
+    if isinstance(row, WorkProjectionPlan):
+        return _work_binding(fence, row_index, row, sources)
+    if isinstance(row, VersionProjectionPlan):
+        return _version_binding(fence, row_index, row, sources)
+    if isinstance(row, VolumeProjectionPlan):
+        return _volume_binding(fence, row_index, row, sources)
+    return _asset_binding(fence, row_index, row, sources)
+
+
+def _owner_kind(unit_kind: DomainTopologyUnitKind) -> BoundProjectionKind:
+    if unit_kind in {
         DomainTopologyUnitKind.WORK_CONTAINER,
         DomainTopologyUnitKind.AUDIOBOOK_WORK,
     }:
-        return _work_id(fence.library_id, plan.owner_path, comparison), None, None
-    if plan.unit_kind is DomainTopologyUnitKind.VERSION_CONTAINER:
-        return (
-            None,
-            _version_id(
-                fence.library_id,
-                work_path=plan.owner_path[:-1],
-                version_path=plan.owner_path,
-                comparison=comparison,
-            ),
-            None,
-        )
-    return None, None, _volume_id(fence.library_id, plan.owner_path, comparison)
-
-
-def _ensure_unit_owner(
-    session: Session,
-    fence: ScanFence,
-    plan: TopologyUnitPlan,
-    *,
-    created_at: datetime,
-) -> TopologyUnit:
-    work_owner_id, version_owner_id, volume_owner_id = _owner_ids(fence, plan)
-    if work_owner_id is not None:
-        _ensure_work(session, fence.library_id, work_owner_id)
-    if version_owner_id is not None:
-        _ensure_version(session, fence.library_id, version_owner_id)
-    if volume_owner_id is not None:
-        volume_plan = next(
-            (
-                row
-                for row in plan.rows
-                if isinstance(row, VolumeProjectionPlan)
-                and _volume_id(
-                    fence.library_id,
-                    row.root_path,
-                    PathComparison(fence.path_comparison),
-                )
-                == volume_owner_id
-            ),
-            None,
-        )
-        morphology = (
-            "REFLOWABLE"
-            if volume_plan is None
-            else volume_plan.reading_morphology.value
-        )
-        _ensure_volume(
-            session,
-            fence.library_id,
-            volume_owner_id,
-            reading_morphology=morphology,
-            staged_at=created_at,
-        )
-    session.flush()
-    unit_id = _unit_id(fence.library_id, plan.unit_key)
-    unit = session.get(TopologyUnit, unit_id)
-    if unit is None:
-        unit = TopologyUnit(
-            id=unit_id,
-            library_id=fence.library_id,
-            unit_kind=TopologyUnitKind(plan.unit_kind.value),
-            work_owner_id=work_owner_id,
-            version_owner_id=version_owner_id,
-            volume_owner_id=volume_owner_id,
-            active_revision_id=None,
-            created_at=created_at,
-        )
-        session.add(unit)
-        session.flush()
-    elif (
-        unit.unit_kind != TopologyUnitKind(plan.unit_kind.value)
-        or unit.work_owner_id != work_owner_id
-        or unit.version_owner_id != version_owner_id
-        or unit.volume_owner_id != volume_owner_id
-    ):
-        raise ScanStale()
-    return unit
+        return BoundProjectionKind.WORK
+    if unit_kind is DomainTopologyUnitKind.VERSION_CONTAINER:
+        return BoundProjectionKind.VERSION
+    return BoundProjectionKind.VOLUME
 
 
 def _expected_signature(
-    fence: ScanFence, plan: TopologyUnitPlan
+    bound: BoundTopologyUnitPlan,
 ) -> tuple[tuple[object, ...], ...]:
-    comparison = PathComparison(fence.path_comparison)
     signature: list[tuple[object, ...]] = []
-    for row in plan.rows:
+    for row, projection in zip(bound.plan.rows, bound.projections, strict=True):
         if isinstance(row, WorkProjectionPlan):
             signature.append(
                 (
                     "work",
-                    _work_id(fence.library_id, row.root_path, comparison),
-                    _source_entry_id(fence.library_id, row.root_path),
-                    row.structure_key,
+                    projection.stable_id,
+                    projection.root_source_entry_id,
+                    projection.structure_key,
                     row.source_name,
                     row.sort_key,
                 )
@@ -540,20 +454,11 @@ def _expected_signature(
             signature.append(
                 (
                     "version",
-                    _version_id(
-                        fence.library_id,
-                        work_path=row.work_path,
-                        version_path=row.root_path,
-                        comparison=comparison,
-                    ),
-                    _work_id(fence.library_id, row.work_path, comparison),
-                    (
-                        None
-                        if row.root_path is None
-                        else _source_entry_id(fence.library_id, row.root_path)
-                    ),
+                    projection.stable_id,
+                    projection.parent_stable_id,
+                    projection.root_source_entry_id,
                     row.kind.value,
-                    row.structure_key,
+                    projection.structure_key,
                     row.source_name,
                     row.sort_key,
                 )
@@ -562,17 +467,12 @@ def _expected_signature(
             signature.append(
                 (
                     "volume",
-                    _volume_id(fence.library_id, row.root_path, comparison),
-                    _version_id(
-                        fence.library_id,
-                        work_path=row.work_path,
-                        version_path=row.version_path,
-                        comparison=comparison,
-                    ),
-                    _source_entry_id(fence.library_id, row.root_path),
+                    projection.stable_id,
+                    projection.parent_stable_id,
+                    projection.root_source_entry_id,
                     row.source_kind.value,
                     row.reading_morphology.value,
-                    row.structure_key,
+                    projection.structure_key,
                     row.source_name,
                     row.sort_key,
                 )
@@ -581,8 +481,8 @@ def _expected_signature(
             signature.append(
                 (
                     "asset",
-                    _volume_id(fence.library_id, row.volume_path, comparison),
-                    _source_entry_id(fence.library_id, row.source_path),
+                    projection.parent_stable_id,
+                    projection.source_entry_id,
                     row.role.value,
                     row.source_format.value,
                     disc_number_to_storage(row.disc_number),
@@ -647,7 +547,7 @@ def _stored_signature(
                 volume_projection.sort_key,
             )
         )
-    for membership in session.scalars(
+    for asset_membership in session.scalars(
         select(TopologyAssetMembership).where(
             TopologyAssetMembership.unit_revision_id == revision_id
         )
@@ -655,33 +555,256 @@ def _stored_signature(
         signature.append(
             (
                 "asset",
-                membership.volume_id,
-                membership.source_entry_id,
-                membership.role.value,
-                membership.source_format,
-                membership.disc_number,
-                membership.asset_order,
-                membership.required_for_reading,
+                asset_membership.volume_id,
+                asset_membership.source_entry_id,
+                asset_membership.role.value,
+                asset_membership.source_format,
+                asset_membership.disc_number,
+                asset_membership.asset_order,
+                asset_membership.required_for_reading,
             )
         )
     return tuple(sorted(signature, key=repr))
 
 
-def _apply_activated_stable_facts(
+def _existing_ids(
     session: Session,
-    fence: ScanFence,
+    id_column: InstrumentedAttribute[str],
+    library_column: InstrumentedAttribute[str],
+    library_id: str,
+    identifiers: set[str],
+) -> set[str]:
+    found: set[str] = set()
+    ordered = tuple(sorted(identifiers))
+    for offset in range(0, len(ordered), _QUERY_CHUNK):
+        found.update(
+            session.scalars(
+                select(id_column).where(
+                    library_column == library_id,
+                    id_column.in_(ordered[offset : offset + _QUERY_CHUNK]),
+                )
+            )
+        )
+    return found
+
+
+def _ensure_unit_owner(
+    session: Session,
+    fence: TopologyFence,
+    bound: BoundTopologyUnitPlan,
+    *,
+    created_at: datetime,
+) -> TopologyUnit:
+    owner = next(
+        (
+            value
+            for value in bound.projections
+            if value.stable_id == bound.owner_stable_id
+        ),
+        None,
+    )
+    if owner is None:
+        _raise_stale(fence)
+    owner_ids: tuple[str | None, str | None, str | None]
+    if owner.kind is BoundProjectionKind.WORK:
+        if session.get(LibraryWork, owner.stable_id) is None:
+            session.add(LibraryWork(id=owner.stable_id, library_id=fence.library_id))
+        owner_ids = (owner.stable_id, None, None)
+    elif owner.kind is BoundProjectionKind.VERSION:
+        if session.get(WorkVersion, owner.stable_id) is None:
+            session.add(WorkVersion(id=owner.stable_id, library_id=fence.library_id))
+        owner_ids = (None, owner.stable_id, None)
+    else:
+        volume_plan = next(
+            (
+                row
+                for row, projection in zip(
+                    bound.plan.rows, bound.projections, strict=True
+                )
+                if projection.stable_id == owner.stable_id
+                and isinstance(row, VolumeProjectionPlan)
+            ),
+            None,
+        )
+        if volume_plan is None:
+            _raise_stale(fence)
+        if session.get(LibraryVolume, owner.stable_id) is None:
+            session.add(
+                LibraryVolume(
+                    id=owner.stable_id,
+                    library_id=fence.library_id,
+                    reading_morphology=volume_plan.reading_morphology.value,
+                    content_state="PENDING",
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+            )
+        owner_ids = (None, None, owner.stable_id)
+    session.flush()
+    unit = session.get(TopologyUnit, bound.unit_id)
+    expected_kind = TopologyUnitKind(bound.plan.unit_kind.value)
+    if unit is None:
+        unit = TopologyUnit(
+            id=bound.unit_id,
+            library_id=fence.library_id,
+            unit_kind=expected_kind,
+            work_owner_id=owner_ids[0],
+            version_owner_id=owner_ids[1],
+            volume_owner_id=owner_ids[2],
+            active_revision_id=None,
+            created_at=created_at,
+        )
+        session.add(unit)
+        session.flush()
+    elif (
+        unit.library_id != fence.library_id
+        or unit.unit_kind is not expected_kind
+        or unit.work_owner_id != owner_ids[0]
+        or unit.version_owner_id != owner_ids[1]
+        or unit.volume_owner_id != owner_ids[2]
+    ):
+        _raise_stale(fence)
+    return unit
+
+
+def _prepare_dependencies(
+    session: Session,
+    fence: TopologyFence,
+    batch: BoundTopologyStageBatch,
+    *,
+    staged_at: datetime,
+) -> dict[str, LibrarySourceEntry]:
+    work_ids: set[str] = set()
+    version_ids: set[str] = set()
+    volume_ids: set[str] = set()
+    morphologies: dict[str, str] = {}
+    asset_specs: dict[str, tuple[str, str]] = {}
+    source_ids: set[str] = set()
+    for row, binding in zip(batch.rows, batch.bindings, strict=True):
+        if isinstance(row, WorkProjectionPlan):
+            work_ids.add(binding.stable_id)
+            if binding.root_source_entry_id is not None:
+                source_ids.add(binding.root_source_entry_id)
+        elif isinstance(row, VersionProjectionPlan):
+            version_ids.add(binding.stable_id)
+            if binding.parent_stable_id is None:
+                _raise_stale(fence)
+            work_ids.add(binding.parent_stable_id)
+            if binding.root_source_entry_id is not None:
+                source_ids.add(binding.root_source_entry_id)
+        elif isinstance(row, VolumeProjectionPlan):
+            volume_ids.add(binding.stable_id)
+            if binding.parent_stable_id is None or binding.root_source_entry_id is None:
+                _raise_stale(fence)
+            version_ids.add(binding.parent_stable_id)
+            source_ids.add(binding.root_source_entry_id)
+            previous = morphologies.setdefault(
+                binding.stable_id, row.reading_morphology.value
+            )
+            if previous != row.reading_morphology.value:
+                _raise_stale(fence)
+        else:
+            if binding.parent_stable_id is None or binding.source_entry_id is None:
+                _raise_stale(fence)
+            volume_ids.add(binding.parent_stable_id)
+            source_ids.add(binding.source_entry_id)
+            previous_asset = asset_specs.setdefault(
+                binding.stable_id,
+                (binding.source_entry_id, row.source_format.value),
+            )
+            if previous_asset != (binding.source_entry_id, row.source_format.value):
+                _raise_stale(fence)
+    sources: dict[str, LibrarySourceEntry] = {}
+    ordered_sources = tuple(sorted(source_ids))
+    for offset in range(0, len(ordered_sources), _QUERY_CHUNK):
+        sources.update(
+            (row.id, row)
+            for row in session.scalars(
+                select(LibrarySourceEntry).where(
+                    LibrarySourceEntry.library_id == fence.library_id,
+                    LibrarySourceEntry.id.in_(
+                        ordered_sources[offset : offset + _QUERY_CHUNK]
+                    ),
+                )
+            )
+        )
+    existing_works = _existing_ids(
+        session, LibraryWork.id, LibraryWork.library_id, fence.library_id, work_ids
+    )
+    existing_versions = _existing_ids(
+        session,
+        WorkVersion.id,
+        WorkVersion.library_id,
+        fence.library_id,
+        version_ids,
+    )
+    existing_volumes = _existing_ids(
+        session,
+        LibraryVolume.id,
+        LibraryVolume.library_id,
+        fence.library_id,
+        volume_ids,
+    )
+    missing_volumes = volume_ids - existing_volumes
+    if not missing_volumes.issubset(morphologies):
+        _raise_stale(fence)
+    existing_assets = _existing_ids(
+        session,
+        VolumeAsset.id,
+        VolumeAsset.library_id,
+        fence.library_id,
+        set(asset_specs),
+    )
+    session.add_all(
+        LibraryWork(id=value, library_id=fence.library_id)
+        for value in work_ids - existing_works
+    )
+    session.add_all(
+        WorkVersion(id=value, library_id=fence.library_id)
+        for value in version_ids - existing_versions
+    )
+    session.add_all(
+        LibraryVolume(
+            id=value,
+            library_id=fence.library_id,
+            reading_morphology=morphologies[value],
+            content_state="PENDING",
+            created_at=staged_at,
+            updated_at=staged_at,
+        )
+        for value in missing_volumes
+    )
+    session.add_all(
+        VolumeAsset(
+            id=value,
+            library_id=fence.library_id,
+            source_format=asset_specs[value][1],
+            size_bytes=sources[asset_specs[value][0]].size_bytes,
+            validation_state=AssetValidationState.PENDING,
+            created_at=staged_at,
+            updated_at=staged_at,
+        )
+        for value in set(asset_specs) - existing_assets
+    )
+    session.flush()
+    return sources
+
+
+def _apply_activated_facts(
+    session: Session,
+    library_id: str,
     revision_ids: tuple[str, ...],
     *,
     activated_at: datetime,
 ) -> None:
-    volume_projection_exists = exists(
+    volume_exists = exists(
         select(TopologyVolumeProjection.id).where(
             TopologyVolumeProjection.library_id == LibraryVolume.library_id,
             TopologyVolumeProjection.volume_id == LibraryVolume.id,
             TopologyVolumeProjection.unit_revision_id.in_(revision_ids),
         )
     )
-    activated_morphology = (
+    morphology = (
         select(TopologyVolumeProjection.reading_morphology)
         .where(
             TopologyVolumeProjection.library_id == LibraryVolume.library_id,
@@ -694,12 +817,9 @@ def _apply_activated_stable_facts(
     )
     session.execute(
         update(LibraryVolume)
-        .where(
-            LibraryVolume.library_id == fence.library_id,
-            volume_projection_exists,
-        )
+        .where(LibraryVolume.library_id == library_id, volume_exists)
         .values(
-            reading_morphology=activated_morphology,
+            reading_morphology=morphology,
             content_state="PENDING",
             updated_at=activated_at,
         )
@@ -711,7 +831,7 @@ def _apply_activated_stable_facts(
             TopologyAssetMembership.unit_revision_id.in_(revision_ids),
         )
     )
-    activated_source_format = (
+    source_format = (
         select(TopologyAssetMembership.source_format)
         .where(
             TopologyAssetMembership.library_id == VolumeAsset.library_id,
@@ -722,7 +842,7 @@ def _apply_activated_stable_facts(
         .correlate(VolumeAsset)
         .scalar_subquery()
     )
-    activated_size = (
+    source_size = (
         select(LibrarySourceEntry.size_bytes)
         .join(
             TopologyAssetMembership,
@@ -742,13 +862,10 @@ def _apply_activated_stable_facts(
     )
     session.execute(
         update(VolumeAsset)
-        .where(
-            VolumeAsset.library_id == fence.library_id,
-            membership_exists,
-        )
+        .where(VolumeAsset.library_id == library_id, membership_exists)
         .values(
-            source_format=activated_source_format,
-            size_bytes=activated_size,
+            source_format=source_format,
+            size_bytes=source_size,
             validation_state=AssetValidationState.PENDING,
             updated_at=activated_at,
         )
@@ -760,12 +877,13 @@ class SqlAlchemyTopologyRepository:
         self._session = session
 
     def abandon_scan_staging(self, fence: ScanFence, *, abandoned_at: datetime) -> None:
-        _require_live_fence(self._session, fence, now=abandoned_at)
+        require_live_fence(self._session, fence, now=abandoned_at)
         self._session.execute(
             update(TopologyUnitRevision)
             .where(
                 TopologyUnitRevision.library_id == fence.library_id,
                 TopologyUnitRevision.scan_run_id == fence.scan_id,
+                TopologyUnitRevision.reconcile_origin_id.is_(None),
                 TopologyUnitRevision.state == RevisionState.STAGING,
             )
             .values(state=RevisionState.ABANDONED)
@@ -780,7 +898,7 @@ class SqlAlchemyTopologyRepository:
         abandoned_at: datetime,
     ) -> bool:
         del abandoned_at
-        cancelled_run = exists(
+        cancelled = exists(
             select(LibraryScanRun.id).where(
                 LibraryScanRun.id == scan_id,
                 LibraryScanRun.library_id == library_id,
@@ -792,78 +910,148 @@ class SqlAlchemyTopologyRepository:
             .where(
                 TopologyUnitRevision.library_id == library_id,
                 TopologyUnitRevision.scan_run_id == scan_id,
+                TopologyUnitRevision.reconcile_origin_id.is_(None),
                 TopologyUnitRevision.state == RevisionState.STAGING,
-                cancelled_run,
+                cancelled,
             )
             .values(state=RevisionState.ABANDONED)
         )
         self._session.flush()
-        return bool(self._session.scalar(select(cancelled_run)))
+        return bool(self._session.scalar(select(cancelled)))
+
+    def bind_plan(
+        self,
+        fence: TopologyFence,
+        plan: TopologyUnitPlan,
+        source_bindings: tuple[SourcePathBinding, ...],
+        *,
+        bound_at: datetime | None = None,
+    ) -> BoundTopologyUnitPlan | None:
+        if bound_at is not None:
+            _require_fence(self._session, fence, now=bound_at)
+        if tuple(value.relative_path for value in source_bindings) != (
+            required_topology_source_paths(plan)
+        ) or len({value.source_entry_id for value in source_bindings}) != len(
+            source_bindings
+        ):
+            return None
+        sources = {value.relative_path: value for value in source_bindings}
+        try:
+            projections = tuple(
+                _projection_binding(fence, index, row, sources)
+                for index, row in enumerate(plan.rows)
+            )
+            owner_source_id = sources[plan.owner_path].source_entry_id
+            owner = next(
+                value
+                for value in projections
+                if value.kind is _owner_kind(plan.unit_kind)
+                and value.root_source_entry_id == owner_source_id
+            )
+        except (KeyError, StopIteration):
+            return None
+        if not _source_ids_are_valid(
+            self._session,
+            fence,
+            {value.source_entry_id for value in source_bindings},
+            pending_proofs={
+                value.source_entry_id: value.pending_parent_presence_epoch
+                for value in source_bindings
+                if value.pending_parent_presence_epoch is not None
+            },
+        ):
+            return None
+        return BoundTopologyUnitPlan(
+            plan=plan,
+            unit_id=_unit_stable_id(fence.library_id, plan.unit_kind, owner.stable_id),
+            owner_stable_id=owner.stable_id,
+            source_bindings=source_bindings,
+            projections=projections,
+        )
 
     def abandon_incomplete(
-        self, fence: ScanFence, *, unit_key: str, abandoned_at: datetime
+        self,
+        fence: TopologyFence,
+        *,
+        unit_id: str,
+        abandoned_at: datetime,
     ) -> None:
-        _require_live_fence(self._session, fence, now=abandoned_at)
+        _require_fence(self._session, fence, now=abandoned_at)
         self._session.execute(
             update(TopologyUnitRevision)
             .where(
                 TopologyUnitRevision.library_id == fence.library_id,
-                TopologyUnitRevision.unit_id == _unit_id(fence.library_id, unit_key),
+                TopologyUnitRevision.unit_id == unit_id,
                 TopologyUnitRevision.state == RevisionState.STAGING,
+                *_origin_conditions(fence),
             )
             .values(state=RevisionState.ABANDONED)
         )
         self._session.flush()
 
-    def get_active_revision_id(self, library_id: str, *, unit_key: str) -> str | None:
+    def get_active_revision_id(self, library_id: str, *, unit_id: str) -> str | None:
         return self._session.scalar(
             select(TopologyUnit.active_revision_id).where(
                 TopologyUnit.library_id == library_id,
-                TopologyUnit.id == _unit_id(library_id, unit_key),
+                TopologyUnit.id == unit_id,
             )
         )
 
     def begin_staging(
         self,
-        fence: ScanFence,
-        plan: TopologyUnitPlan,
+        fence: TopologyFence,
+        plan: BoundTopologyUnitPlan,
         *,
         expected_active_revision_id: str | None,
         created_at: datetime,
     ) -> StagingRevision | None:
-        _require_live_fence(self._session, fence, now=created_at)
-        if not _plan_sources_valid(self._session, fence, plan):
-            raise ScanStale()
+        _require_fence(self._session, fence, now=created_at)
+        if not _source_ids_are_valid(
+            self._session,
+            fence,
+            {value.source_entry_id for value in plan.source_bindings},
+            pending_proofs={
+                value.source_entry_id: value.pending_parent_presence_epoch
+                for value in plan.source_bindings
+                if value.pending_parent_presence_epoch is not None
+            },
+        ):
+            _raise_stale(fence)
         unit = _ensure_unit_owner(self._session, fence, plan, created_at=created_at)
         if unit.active_revision_id != expected_active_revision_id:
-            raise ScanStale()
+            _raise_stale(fence)
         if expected_active_revision_id is not None and _stored_signature(
             self._session, expected_active_revision_id
-        ) == _expected_signature(fence, plan):
+        ) == _expected_signature(plan):
             return None
-        latest_revision = self._session.scalar(
+        latest = self._session.scalar(
             select(func.max(TopologyUnitRevision.revision)).where(
                 TopologyUnitRevision.library_id == fence.library_id,
                 TopologyUnitRevision.unit_id == unit.id,
             )
         )
-        revision_number = (latest_revision or 0) + 1
-        revision_id = _stable_id(
+        revision_number = (latest or 0) + 1
+        revision_id = stable_id(
             "revision",
             fence.library_id,
             unit.id,
-            fence.scan_id,
+            _origin_id(fence),
             str(revision_number),
         )
+        scan_origin, reconcile_origin = _origin_values(fence)
+        root = {value.relative_path: value for value in plan.source_bindings}.get(
+            plan.plan.unit_root_path
+        )
+        if root is None:
+            _raise_stale(fence)
         self._session.add(
             TopologyUnitRevision(
                 id=revision_id,
                 library_id=fence.library_id,
                 unit_id=unit.id,
-                scan_run_id=fence.scan_id,
-                unit_root_entry_id=_source_entry_id(
-                    fence.library_id, plan.unit_root_path
-                ),
+                scan_run_id=scan_origin,
+                reconcile_origin_id=reconcile_origin,
+                unit_root_entry_id=root.source_entry_id,
                 revision=revision_number,
                 state=RevisionState.STAGING,
                 created_at=created_at,
@@ -871,167 +1059,134 @@ class SqlAlchemyTopologyRepository:
         )
         self._session.flush()
         return StagingRevision(
-            revision_id=revision_id,
-            unit_id=unit.id,
-            expected_active_revision_id=expected_active_revision_id,
-            expected_row_count=len(plan.rows),
-            staged_row_count=0,
+            revision_id,
+            unit.id,
+            expected_active_revision_id,
+            len(plan.plan.rows),
+            0,
         )
 
     def append_staging_batch(
         self,
-        fence: ScanFence,
+        fence: TopologyFence,
         staging: StagingRevision,
-        batch: TopologyStageBatch,
+        batch: BoundTopologyStageBatch,
         *,
         staged_at: datetime,
     ) -> StagingRevision:
-        _require_live_fence(self._session, fence, now=staged_at)
+        _require_fence(self._session, fence, now=staged_at)
         revision = self._session.scalar(
             select(TopologyUnitRevision)
             .where(
                 TopologyUnitRevision.id == staging.revision_id,
                 TopologyUnitRevision.library_id == fence.library_id,
                 TopologyUnitRevision.unit_id == staging.unit_id,
-                TopologyUnitRevision.scan_run_id == fence.scan_id,
                 TopologyUnitRevision.state == RevisionState.STAGING,
+                *_origin_conditions(fence),
             )
             .with_for_update()
         )
-        actual_count = _revision_row_count(self._session, staging.revision_id)
+        count = _revision_row_count(self._session, staging.revision_id)
         if (
             revision is None
-            or actual_count != staging.staged_row_count
+            or count != staging.staged_row_count
             or batch.first_row != staging.staged_row_count
-            or actual_count + len(batch.rows) > staging.expected_row_count
-            or batch.complete
-            != (actual_count + len(batch.rows) == staging.expected_row_count)
+            or count + len(batch.rows) > staging.expected_row_count
+            or batch.complete != (count + len(batch.rows) == staging.expected_row_count)
         ):
-            raise ScanStale()
-        comparison = PathComparison(fence.path_comparison)
-        sources = _prepare_projection_dependencies(
-            self._session,
-            fence,
-            batch,
-            comparison=comparison,
-            staged_at=staged_at,
+            _raise_stale(fence)
+        sources = _prepare_dependencies(
+            self._session, fence, batch, staged_at=staged_at
         )
-        with self._session.no_autoflush:
-            for row_index, row in enumerate(batch.rows, start=batch.first_row):
-                self._append_projection(
-                    fence,
-                    revision,
-                    row,
-                    row_index=row_index,
-                    comparison=comparison,
-                    sources=sources,
-                )
+        for row, binding in zip(batch.rows, batch.bindings, strict=True):
+            self._append_projection(fence, revision, row, binding, sources)
         self._session.flush()
         staged_count = _revision_row_count(self._session, staging.revision_id)
-        if staged_count != actual_count + len(batch.rows):
-            raise ScanStale()
+        if staged_count != count + len(batch.rows):
+            _raise_stale(fence)
         return StagingRevision(
-            revision_id=staging.revision_id,
-            unit_id=staging.unit_id,
-            expected_active_revision_id=staging.expected_active_revision_id,
-            expected_row_count=staging.expected_row_count,
-            staged_row_count=staged_count,
+            staging.revision_id,
+            staging.unit_id,
+            staging.expected_active_revision_id,
+            staging.expected_row_count,
+            staged_count,
         )
 
     def _append_projection(
         self,
-        fence: ScanFence,
+        fence: TopologyFence,
         revision: TopologyUnitRevision,
-        row: WorkProjectionPlan
-        | VersionProjectionPlan
-        | VolumeProjectionPlan
-        | AssetMembershipPlan,
-        *,
-        row_index: int,
-        comparison: PathComparison,
+        row: ProjectionPlan,
+        binding: BoundTopologyProjection,
         sources: dict[str, LibrarySourceEntry],
     ) -> None:
+        row_index = str(binding.row_index)
         if isinstance(row, WorkProjectionPlan):
-            source = sources[_source_entry_id(fence.library_id, row.root_path)]
-            work_id = _work_id(fence.library_id, row.root_path, comparison)
+            if binding.root_source_entry_id not in sources:
+                _raise_stale(fence)
             self._session.add(
                 TopologyWorkProjection(
-                    id=_stable_id("work_projection", revision.id, str(row_index)),
+                    id=stable_id("work_projection", revision.id, row_index),
                     library_id=fence.library_id,
                     unit_revision_id=revision.id,
-                    work_id=work_id,
-                    root_entry_id=source.id,
-                    structure_key=row.structure_key,
+                    work_id=binding.stable_id,
+                    root_entry_id=binding.root_source_entry_id,
+                    structure_key=cast(str, binding.structure_key),
                     source_name=row.source_name,
                     sort_key=row.sort_key,
                 )
             )
             return
         if isinstance(row, VersionProjectionPlan):
-            work_id = _work_id(fence.library_id, row.work_path, comparison)
-            version_id = _version_id(
-                fence.library_id,
-                work_path=row.work_path,
-                version_path=row.root_path,
-                comparison=comparison,
-            )
-            root_entry_id = (
-                None
-                if row.root_path is None
-                else sources[_source_entry_id(fence.library_id, row.root_path)].id
-            )
+            if binding.parent_stable_id is None:
+                _raise_stale(fence)
             self._session.add(
                 TopologyVersionProjection(
-                    id=_stable_id("version_projection", revision.id, str(row_index)),
+                    id=stable_id("version_projection", revision.id, row_index),
                     library_id=fence.library_id,
                     unit_revision_id=revision.id,
-                    version_id=version_id,
-                    work_id=work_id,
-                    root_entry_id=root_entry_id,
+                    version_id=binding.stable_id,
+                    work_id=binding.parent_stable_id,
+                    root_entry_id=binding.root_source_entry_id,
                     kind=VersionKind(row.kind.value),
-                    structure_key=row.structure_key,
+                    structure_key=cast(str, binding.structure_key),
                     source_name=row.source_name,
                     sort_key=row.sort_key,
                 )
             )
             return
         if isinstance(row, VolumeProjectionPlan):
-            source = sources[_source_entry_id(fence.library_id, row.root_path)]
-            work_id = _work_id(fence.library_id, row.work_path, comparison)
-            version_id = _version_id(
-                fence.library_id,
-                work_path=row.work_path,
-                version_path=row.version_path,
-                comparison=comparison,
-            )
-            volume_id = _volume_id(fence.library_id, row.root_path, comparison)
+            if (
+                binding.parent_stable_id is None
+                or binding.root_source_entry_id not in sources
+            ):
+                _raise_stale(fence)
             self._session.add(
                 TopologyVolumeProjection(
-                    id=_stable_id("volume_projection", revision.id, str(row_index)),
+                    id=stable_id("volume_projection", revision.id, row_index),
                     library_id=fence.library_id,
                     unit_revision_id=revision.id,
-                    volume_id=volume_id,
-                    version_id=version_id,
-                    root_entry_id=source.id,
+                    volume_id=binding.stable_id,
+                    version_id=binding.parent_stable_id,
+                    root_entry_id=binding.root_source_entry_id,
                     source_kind=row.source_kind,
                     reading_morphology=row.reading_morphology.value,
-                    structure_key=row.structure_key,
+                    structure_key=cast(str, binding.structure_key),
                     source_name=row.source_name,
                     sort_key=row.sort_key,
                 )
             )
             return
-        source = sources[_source_entry_id(fence.library_id, row.source_path)]
-        volume_id = _volume_id(fence.library_id, row.volume_path, comparison)
-        asset_id = _stable_id("asset", fence.library_id, source.id)
+        if binding.parent_stable_id is None or binding.source_entry_id not in sources:
+            _raise_stale(fence)
         self._session.add(
             TopologyAssetMembership(
-                id=_stable_id("asset_membership", revision.id, str(row_index)),
+                id=stable_id("asset_membership", revision.id, row_index),
                 library_id=fence.library_id,
                 unit_revision_id=revision.id,
-                asset_id=asset_id,
-                volume_id=volume_id,
-                source_entry_id=source.id,
+                asset_id=binding.stable_id,
+                volume_id=binding.parent_stable_id,
+                source_entry_id=binding.source_entry_id,
                 role=AssetRole(row.role.value),
                 source_format=row.source_format.value,
                 disc_number=disc_number_to_storage(row.disc_number),
@@ -1042,12 +1197,12 @@ class SqlAlchemyTopologyRepository:
 
     def activate_staging_group(
         self,
-        fence: ScanFence,
+        fence: TopologyFence,
         staging: tuple[StagingRevision, ...],
         *,
         activated_at: datetime,
     ) -> bool:
-        _require_live_fence(self._session, fence, now=activated_at)
+        _require_fence(self._session, fence, now=activated_at)
         if not staging or len({value.unit_id for value in staging}) != len(staging):
             return False
         validated: list[tuple[StagingRevision, TopologyUnitRevision]] = []
@@ -1058,8 +1213,8 @@ class SqlAlchemyTopologyRepository:
                     TopologyUnitRevision.id == expected.revision_id,
                     TopologyUnitRevision.library_id == fence.library_id,
                     TopologyUnitRevision.unit_id == expected.unit_id,
-                    TopologyUnitRevision.scan_run_id == fence.scan_id,
                     TopologyUnitRevision.state == RevisionState.STAGING,
+                    *_origin_conditions(fence),
                 )
                 .with_for_update()
             )
@@ -1076,10 +1231,10 @@ class SqlAlchemyTopologyRepository:
             ):
                 return False
             validated.append((expected, revision))
-        for expected, _revision in validated:
+        for expected, _ in validated:
             if expected.expected_active_revision_id is None:
                 continue
-            result = self._session.execute(
+            superseded = self._session.execute(
                 update(TopologyUnitRevision)
                 .where(
                     TopologyUnitRevision.id == expected.expected_active_revision_id,
@@ -1089,10 +1244,10 @@ class SqlAlchemyTopologyRepository:
                 )
                 .values(state=RevisionState.SUPERSEDED)
             )
-            if cast(CursorResult[object], result).rowcount != 1:
+            if cast(CursorResult[object], superseded).rowcount != 1:
                 return False
-        for expected, _revision in validated:
-            result = self._session.execute(
+        for expected, _ in validated:
+            activated = self._session.execute(
                 update(TopologyUnitRevision)
                 .where(
                     TopologyUnitRevision.id == expected.revision_id,
@@ -1102,31 +1257,32 @@ class SqlAlchemyTopologyRepository:
                 )
                 .values(state=RevisionState.ACTIVE)
             )
-            if cast(CursorResult[object], result).rowcount != 1:
+            if cast(CursorResult[object], activated).rowcount != 1:
                 return False
-        _apply_activated_stable_facts(
+        revision_ids = tuple(value.revision_id for value, _ in validated)
+        _apply_activated_facts(
             self._session,
-            fence,
-            tuple(expected.revision_id for expected, _revision in validated),
+            fence.library_id,
+            revision_ids,
             activated_at=activated_at,
         )
-        for expected, _revision in validated:
-            pointer_condition = (
+        for expected, _ in validated:
+            pointer = (
                 TopologyUnit.active_revision_id.is_(None)
                 if expected.expected_active_revision_id is None
                 else TopologyUnit.active_revision_id
                 == expected.expected_active_revision_id
             )
-            result = self._session.execute(
+            updated = self._session.execute(
                 update(TopologyUnit)
                 .where(
                     TopologyUnit.id == expected.unit_id,
                     TopologyUnit.library_id == fence.library_id,
-                    pointer_condition,
+                    pointer,
                 )
                 .values(active_revision_id=expected.revision_id)
             )
-            if cast(CursorResult[object], result).rowcount != 1:
+            if cast(CursorResult[object], updated).rowcount != 1:
                 return False
         self._session.flush()
         return True

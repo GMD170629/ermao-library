@@ -16,6 +16,7 @@ from app.modules.catalog.application.scan_dto import (
     ScanFence,
     SourceObservation,
     SourceObservationOutcome,
+    SourcePathBinding,
 )
 from app.modules.catalog.domain.admission import SourceAdmissionEvidence
 from app.modules.catalog.domain.ordering import natural_path_key
@@ -37,13 +38,17 @@ from .scan_fencing import (
     require_live_fence as _require_live_fence,
 )
 from .scan_fencing import (
-    source_entry_id as _source_entry_id,
-)
-from .scan_fencing import (
     stable_id as _stable_id,
 )
+from .source_path_resolution import (
+    SOURCE_QUERY_CHUNK as _SOURCE_PREFETCH_CHUNK,
+)
+from .source_path_resolution import (
+    new_opaque_source_id,
+    paths_with_ancestors,
+    resolve_raw_paths,
+)
 
-_SOURCE_PREFETCH_CHUNK = 400
 _DIAGNOSTIC_RELATED_PATH_LIMIT = 32
 
 
@@ -68,12 +73,16 @@ class SqlAlchemySourceObservationRepository:
         observed_at: datetime,
     ) -> bool:
         _require_live_fence(self._session, fence, now=observed_at)
-        root_id = _source_entry_id(fence.library_id, ())
-        root = self._session.get(LibrarySourceEntry, root_id)
+        root = self._session.scalar(
+            select(LibrarySourceEntry).where(
+                LibrarySourceEntry.library_id == fence.library_id,
+                LibrarySourceEntry.entry_type == SourceEntryType.SYNTHETIC_ROOT,
+            )
+        )
         if root is None:
             self._session.add(
                 LibrarySourceEntry(
-                    id=root_id,
+                    id=_stable_id("source_root", fence.library_id),
                     library_id=fence.library_id,
                     parent_entry_id=None,
                     local_name="$root",
@@ -83,7 +92,9 @@ class SqlAlchemySourceObservationRepository:
                     last_seen_generation=fence.generation,
                     absence_confirmed_at=None,
                     children_presence_epoch=0,
+                    next_children_presence_epoch=0,
                     observed_parent_presence_epoch=None,
+                    pending_observed_parent_presence_epoch=None,
                     layout_state=LayoutState.PRESENT,
                     slot_state=SlotState.ACTIVE,
                     created_at=observed_at,
@@ -109,8 +120,11 @@ class SqlAlchemySourceObservationRepository:
         observed_at: datetime,
     ) -> SourceObservationOutcome:
         _require_live_fence(self._session, fence, now=observed_at)
-        root = self._session.get(
-            LibrarySourceEntry, _source_entry_id(fence.library_id, ())
+        root = self._session.scalar(
+            select(LibrarySourceEntry).where(
+                LibrarySourceEntry.library_id == fence.library_id,
+                LibrarySourceEntry.entry_type == SourceEntryType.SYNTHETIC_ROOT,
+            )
         )
         if (
             root is None
@@ -118,25 +132,46 @@ class SqlAlchemySourceObservationRepository:
             or root.filesystem_identity != fence.root_identity
         ):
             raise ScanStale()
-        prepared_by_id: dict[str, _PreparedObservation] = {}
-        for observation in sorted(
-            observations, key=lambda value: len(value.source.relative_path)
-        ):
+        sorted_observations = sorted(
+            observations,
+            key=lambda value: (
+                len(value.source.relative_path),
+                value.source.relative_path,
+            ),
+        )
+        paths = tuple(
+            dict.fromkeys(value.source.relative_path for value in sorted_observations)
+        )
+        resolved = resolve_raw_paths(
+            self._session,
+            fence.library_id,
+            paths_with_ancestors(paths),
+        )
+        prepared_by_path: dict[tuple[str, ...], _PreparedObservation] = {}
+        path_ids: dict[tuple[str, ...], str] = {(): root.id}
+        path_ids.update((path, row.id) for path, row in resolved.items())
+        for observation in sorted_observations:
             if observation.generation != fence.generation:
                 raise ScanStale()
             path = observation.source.relative_path
-            entry_id = _source_entry_id(fence.library_id, path)
+            parent_id = path_ids.get(path[:-1])
+            if parent_id is None:
+                raise ScanStale()
+            entry_id = path_ids.get(path)
+            if entry_id is None:
+                entry_id = new_opaque_source_id()
+                path_ids[path] = entry_id
             local_name = path[-1]
-            prepared_by_id[entry_id] = _PreparedObservation(
+            prepared_by_path[path] = _PreparedObservation(
                 observation=observation,
                 entry_id=entry_id,
-                parent_id=_source_entry_id(fence.library_id, path[:-1]),
+                parent_id=parent_id,
                 local_name=local_name,
                 local_name_key=_comparison_components(
                     (local_name,), fence.path_comparison
                 )[0],
             )
-        prepared = tuple(prepared_by_id.values())
+        prepared = tuple(prepared_by_path.values())
         existing_by_id: dict[str, LibrarySourceEntry] = {}
         entry_ids = tuple(
             dict.fromkeys(
@@ -255,9 +290,11 @@ class SqlAlchemySourceObservationRepository:
                     last_seen_generation=fence.generation,
                     absence_confirmed_at=None,
                     children_presence_epoch=0,
+                    next_children_presence_epoch=0,
                     observed_parent_presence_epoch=(
                         parent_entry.children_presence_epoch
                     ),
+                    pending_observed_parent_presence_epoch=None,
                     layout_state=layout_state,
                     slot_state=slot_state,
                     created_at=observed_at,
@@ -283,6 +320,7 @@ class SqlAlchemySourceObservationRepository:
                 current_entry.observed_parent_presence_epoch = (
                     parent_entry.children_presence_epoch
                 )
+                current_entry.pending_observed_parent_presence_epoch = None
                 current_entry.layout_state = layout_state
                 current_entry.slot_state = slot_state
                 current_entry.updated_at = observed_at
@@ -322,7 +360,15 @@ class SqlAlchemySourceObservationRepository:
                         value[0][1],
                     ),
                 )
-            )
+            ),
+            bindings=tuple(
+                SourcePathBinding(
+                    relative_path=value.observation.source.relative_path,
+                    source_entry_id=value.entry_id,
+                    filesystem_identity=value.observation.source.filesystem_identity,
+                )
+                for value in prepared
+            ),
         )
 
 
@@ -339,8 +385,15 @@ class SqlAlchemyPathCollisionRepository:
     ) -> None:
         _require_live_fence(self._session, fence, now=observed_at)
         prepared: list[tuple[str, str, str, dict[str, object]]] = []
+        parent_paths = tuple(
+            dict.fromkeys(collision.parent_path for collision in collisions)
+        )
+        parent_rows = resolve_raw_paths(self._session, fence.library_id, parent_paths)
         for collision in collisions:
-            parent_id = _source_entry_id(fence.library_id, collision.parent_path)
+            parent = parent_rows.get(collision.parent_path)
+            if parent is None:
+                raise ScanStale()
+            parent_id = parent.id
             collision_group_id = _stable_id(
                 "collision_group",
                 fence.library_id,

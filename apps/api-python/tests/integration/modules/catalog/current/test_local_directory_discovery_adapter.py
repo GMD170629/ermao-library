@@ -13,6 +13,7 @@ from app.modules.catalog.application.scan_dto import (
     DiscoveryEntryType,
     DiscoveryIssue,
     DiscoveryIssueCode,
+    TargetedPathAbsent,
 )
 from app.modules.catalog.application.scan_ports import (
     DirectoryChangedDuringDiscovery,
@@ -83,6 +84,81 @@ def test_discovery_streams_direct_children_and_preserves_host_names(
     ]
 
 
+def test_targeted_observation_distinguishes_stable_presence_and_absence(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.epub"
+    source.write_bytes(b"book")
+
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(tmp_path.resolve())
+    ) as session:
+        present = session.observe_path(("book.epub",))
+        absent = session.observe_path(("missing.epub",))
+
+    assert isinstance(present, DiscoveredSource)
+    assert present.relative_path == ("book.epub",)
+    assert present.entry_type is DiscoveryEntryType.FILE
+    assert (
+        present.filesystem_identity == f"{source.stat().st_dev}:{source.stat().st_ino}"
+    )
+    assert absent == TargetedPathAbsent(relative_path=("missing.epub",))
+
+
+def test_targeted_absence_requires_two_no_follow_lookups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_stat = discovery_module.os.stat
+    missing_lookups = 0
+
+    def counting_stat(
+        path: str | bytes | int,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        nonlocal missing_lookups
+        try:
+            return real_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+        except FileNotFoundError:
+            if path == "missing.epub" and dir_fd is not None:
+                missing_lookups += 1
+            raise
+
+    monkeypatch.setattr(discovery_module.os, "stat", counting_stat)
+
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(tmp_path.resolve())
+    ) as session:
+        observed = session.observe_path(("missing.epub",))
+
+    assert observed == TargetedPathAbsent(relative_path=("missing.epub",))
+    assert missing_lookups == 2
+
+
+def test_targeted_observation_preserves_distinct_nfd_and_nfc_host_names(
+    tmp_path: Path,
+) -> None:
+    nfd_name = unicodedata.normalize("NFD", "café.epub")
+    nfc_name = unicodedata.normalize("NFC", "café.epub")
+    assert nfd_name != nfc_name
+    (tmp_path / nfd_name).write_bytes(b"decomposed")
+    (tmp_path / nfc_name).write_bytes(b"composed")
+
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(tmp_path.resolve())
+    ) as session:
+        nfd_source = session.observe_path((nfd_name,))
+        nfc_source = session.observe_path((nfc_name,))
+
+    assert isinstance(nfd_source, DiscoveredSource)
+    assert isinstance(nfc_source, DiscoveredSource)
+    assert nfd_source.relative_path == (nfd_name,)
+    assert nfc_source.relative_path == (nfc_name,)
+    assert nfd_source.filesystem_identity != nfc_source.filesystem_identity
+
+
 @pytest.mark.parametrize(
     "relative_directory",
     [
@@ -108,6 +184,36 @@ def test_relative_directory_rejects_injectable_components(
         pytest.raises(InvalidDiscoveryRelativePath) as caught,
     ):
         session.iter_directory(relative_directory)
+
+    assert str(caught.value) == "INVALID_DISCOVERY_RELATIVE_PATH"
+    assert str(tmp_path) not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        (),
+        ("",),
+        (".",),
+        ("..",),
+        ("/absolute",),
+        ("nested/path",),
+        ("nested\\path",),
+        ("name\x00suffix",),
+        ("invalid-\udcff",),
+    ],
+)
+def test_targeted_observation_rejects_injectable_paths(
+    tmp_path: Path,
+    relative_path: tuple[str, ...],
+) -> None:
+    with (
+        LocalDirectoryDiscoveryAdapter().open(
+            canonical_root=str(tmp_path.resolve())
+        ) as session,
+        pytest.raises(InvalidDiscoveryRelativePath) as caught,
+    ):
+        session.observe_path(relative_path)
 
     assert str(caught.value) == "INVALID_DISCOVERY_RELATIVE_PATH"
     assert str(tmp_path) not in str(caught.value)
@@ -175,6 +281,30 @@ def test_symlink_and_special_children_are_typed_without_following(
     assert by_path[("event.pipe",)].expected_stat is None
     assert all("secret.txt" not in entry.relative_path for entry in by_path.values())
     assert secret.read_bytes() == b"outside bytes"
+
+
+def test_targeted_observation_never_follows_leaf_or_ancestor_symlinks(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-targeted-outside"
+    outside.mkdir()
+    secret = outside / "secret.epub"
+    secret.write_bytes(b"outside")
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(tmp_path.resolve())
+    ) as session:
+        leaf = session.observe_path(("linked",))
+        with pytest.raises(DirectoryChangedDuringDiscovery) as caught:
+            session.observe_path(("linked", "secret.epub"))
+
+    assert isinstance(leaf, DiscoveredSource)
+    assert leaf.entry_type is DiscoveryEntryType.SYMLINK
+    assert leaf.expected_stat is None
+    assert str(caught.value) == "DIRECTORY_CHANGED_DURING_DISCOVERY"
+    assert str(outside) not in str(caught.value)
+    assert secret.read_bytes() == b"outside"
 
 
 def test_host_names_preserve_nfd_and_unsafe_names_emit_path_free_issues(
@@ -248,8 +378,13 @@ def test_discovery_does_not_read_bytes_or_open_for_writing(
     monkeypatch.setattr(discovery_module.os, "read", unexpected_read)
     monkeypatch.setattr(discovery_module.os, "pread", unexpected_read)
 
-    observations = _observations(tmp_path)
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(tmp_path.resolve())
+    ) as session:
+        targeted = session.observe_path(("book.epub",))
+        observations = list(session.iter_directory(()))
 
+    assert isinstance(targeted, DiscoveredSource)
     assert len(observations) == 2
     after_source = source.stat()
     after_child = child.stat()
@@ -294,6 +429,25 @@ def test_session_closes_directory_iterators_on_completion_and_early_exit(
 
     assert _descriptor_count() == baseline
     assert list(stream) == []
+
+
+def test_targeted_observation_releases_every_temporary_descriptor(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "book.epub").write_bytes(b"book")
+    baseline = _descriptor_count()
+
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(tmp_path.resolve())
+    ) as session:
+        root_only = _descriptor_count()
+        assert root_only == baseline + 1
+        for _index in range(50):
+            session.observe_path(("book.epub",))
+            session.observe_path(("missing.epub",))
+            assert _descriptor_count() == root_only
+
+    assert _descriptor_count() == baseline
 
 
 def test_iterator_error_closes_all_owned_descriptors(tmp_path: Path) -> None:
@@ -387,6 +541,101 @@ def test_directory_stream_detects_relative_ancestor_rebind(tmp_path: Path) -> No
             list(stream)
 
 
+def test_targeted_observation_rejects_a_leaf_replaced_between_stats(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "book.epub"
+    source.write_bytes(b"first")
+    replacement = tmp_path / "replacement.epub"
+    replacement.write_bytes(b"second")
+    real_stat = discovery_module.os.stat
+    leaf_stats = 0
+
+    def racing_stat(
+        path: str | bytes | int,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        nonlocal leaf_stats
+        result = real_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+        if path == "book.epub" and dir_fd is not None:
+            leaf_stats += 1
+            if leaf_stats == 1:
+                source.unlink()
+                replacement.rename(source)
+        return result
+
+    monkeypatch.setattr(discovery_module.os, "stat", racing_stat)
+
+    with (
+        LocalDirectoryDiscoveryAdapter().open(
+            canonical_root=str(tmp_path.resolve())
+        ) as session,
+        pytest.raises(DirectoryChangedDuringDiscovery) as caught,
+    ):
+        session.observe_path(("book.epub",))
+
+    assert str(caught.value) == "DIRECTORY_CHANGED_DURING_DISCOVERY"
+    assert str(source) not in str(caught.value)
+
+
+def test_targeted_observation_never_reports_absence_across_a_create_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    appeared = tmp_path / "appeared.epub"
+    real_stat = discovery_module.os.stat
+    injected_absence = False
+
+    def racing_stat(
+        path: str | bytes | int,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        nonlocal injected_absence
+        if path == "appeared.epub" and dir_fd is not None and not injected_absence:
+            injected_absence = True
+            appeared.write_bytes(b"appeared")
+            raise FileNotFoundError
+        return real_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(discovery_module.os, "stat", racing_stat)
+
+    with (
+        LocalDirectoryDiscoveryAdapter().open(
+            canonical_root=str(tmp_path.resolve())
+        ) as session,
+        pytest.raises(DirectoryChangedDuringDiscovery),
+    ):
+        session.observe_path(("appeared.epub",))
+
+
+def test_targeted_observation_revalidates_the_canonical_root_binding(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "anchor"
+    root = anchor / "library"
+    root.mkdir(parents=True)
+    (root / "old.epub").write_bytes(b"old")
+    displaced = tmp_path / "displaced"
+
+    with LocalDirectoryDiscoveryAdapter().open(
+        canonical_root=str(root.resolve())
+    ) as session:
+        anchor.rename(displaced)
+        root.mkdir(parents=True)
+        (root / "new.epub").write_bytes(b"new")
+
+        with pytest.raises(DirectoryChangedDuringDiscovery) as caught:
+            session.observe_path(("old.epub",))
+
+    assert str(caught.value) == "DIRECTORY_CHANGED_DURING_DISCOVERY"
+    assert str(root) not in str(caught.value)
+
+
 def test_permission_denial_is_typed_path_free_and_preserves_cause(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -419,6 +668,37 @@ def test_permission_denial_is_typed_path_free_and_preserves_cause(
     assert str(caught.value) == "DIRECTORY_PERMISSION_DENIED"
     assert isinstance(caught.value.__cause__, PermissionError)
     assert str(restricted) not in str(caught.value)
+
+
+def test_targeted_permission_denial_is_typed_path_free_and_preserves_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_stat = discovery_module.os.stat
+
+    def denied_leaf_stat(
+        path: str | bytes | int,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        if path == "private.epub" and dir_fd is not None:
+            raise PermissionError("denied /private/library/private.epub")
+        return real_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(discovery_module.os, "stat", denied_leaf_stat)
+
+    with (
+        LocalDirectoryDiscoveryAdapter().open(
+            canonical_root=str(tmp_path.resolve())
+        ) as session,
+        pytest.raises(DirectoryPermissionDenied) as caught,
+    ):
+        session.observe_path(("private.epub",))
+
+    assert str(caught.value) == "DIRECTORY_PERMISSION_DENIED"
+    assert isinstance(caught.value.__cause__, PermissionError)
+    assert str(tmp_path) not in str(caught.value)
 
 
 class _FakeDirectoryEntry:

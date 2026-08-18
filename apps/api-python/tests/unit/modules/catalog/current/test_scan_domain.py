@@ -348,6 +348,7 @@ def make_run(
         created_by_actor_id="admin",
         started_at=started,
         finished_at=None if live else now,
+        watcher_sequence_watermark=0,
     )
 
 

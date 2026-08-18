@@ -7,7 +7,7 @@ from alembic import command
 from sqlalchemy import MetaData, Table, inspect, select
 
 from app.db.current.engine import create_current_engine
-from app.db.current.runner import current_alembic_config, upgrade_current_schema
+from app.db.current.runner import current_alembic_config
 
 REVISION_0001 = "0001_system_and_catalog_core"
 REVISION_0002 = "0002_catalog_scan_topology"
@@ -36,7 +36,7 @@ def _version(database_path: Path) -> str:
 
 def test_fresh_head_has_catalog_scan_topology_schema(tmp_path: Path) -> None:
     database_path = tmp_path / "current.sqlite3"
-    upgrade_current_schema(database_path)
+    _upgrade_to(database_path, REVISION_0002)
 
     engine = create_current_engine(database_path)
     try:
@@ -117,7 +117,7 @@ def test_explicit_empty_0001_upgrade_reaches_0002_and_is_repeatable(
     assert _version(database_path) == REVISION_0001
 
     _upgrade_to(database_path, REVISION_0002)
-    _upgrade_to(database_path, "head")
+    _upgrade_to(database_path, REVISION_0002)
 
     assert _version(database_path) == REVISION_0002
     engine = create_current_engine(database_path)

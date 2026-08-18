@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from datetime import datetime
 
@@ -23,6 +23,7 @@ from app.modules.catalog.application.scan_dto import (
     ScanFailureCode,
     ScanFence,
     SourceObservation,
+    SourcePathBinding,
     StagingRevision,
 )
 from app.modules.catalog.application.scan_lifecycle import (
@@ -54,6 +55,11 @@ from app.modules.catalog.application.source_admission_ports import (
     SourceChangedDuringProbe,
     SourceProbePermissionDenied,
     SourceProbeUnavailable,
+)
+from app.modules.catalog.application.watcher_dto import (
+    BoundTopologyStageBatch,
+    BoundTopologyUnitPlan,
+    required_topology_source_paths,
 )
 from app.modules.catalog.domain.admission import (
     SourceAdmissionEvidence,
@@ -94,6 +100,20 @@ from app.modules.catalog.domain.scan import (
 _MAX_CANDIDATES_PER_SLICE = 500
 _MAX_OBSERVATIONS_PER_SLICE = 5_000
 _MAX_SLICE_SECONDS = 0.250
+
+
+def _iter_bound_stage_batches(
+    plan: BoundTopologyUnitPlan,
+) -> Iterator[BoundTopologyStageBatch]:
+    for batch in iter_stage_batches(plan.plan):
+        yield BoundTopologyStageBatch(
+            first_row=batch.first_row,
+            rows=batch.rows,
+            bindings=plan.projections[
+                batch.first_row : batch.first_row + len(batch.rows)
+            ],
+            complete=batch.complete,
+        )
 
 
 class RunFullLibraryScan:
@@ -352,6 +372,8 @@ class _ScanExecution:
         )
         self._pending_observations: list[SourceObservation] = []
         self._pending_diagnostics: list[ScanDiagnostic] = []
+        self._source_bindings: dict[tuple[str, ...], SourcePathBinding] = {}
+        self._bounded_binding_paths: set[tuple[str, ...]] | None = None
         self._slice_observation_count = 0
         self._slice_candidate_count = 0
         self._slice_started = monotonic_clock.seconds()
@@ -376,6 +398,7 @@ class _ScanExecution:
             if source is None or self._ignored(source.relative_path):
                 continue
             self._process_layout_unit((source,))
+            self._source_bindings.clear()
 
     def _scan_volumes(self) -> None:
         for observation in self._session.iter_directory(()):
@@ -384,6 +407,7 @@ class _ScanExecution:
                 continue
             if work.entry_type is not DiscoveryEntryType.DIRECTORY:
                 self._process_layout_unit((work,))
+                self._discard_source_bindings_under(work.relative_path)
                 continue
             work_entry = self._observe(work)
             if work_entry is None:
@@ -394,6 +418,7 @@ class _ScanExecution:
                     continue
                 if child.entry_type is not DiscoveryEntryType.DIRECTORY:
                     self._process_layout_unit((work, child))
+                    self._discard_source_bindings_under(child.relative_path)
                     continue
                 version_entry = self._observe(child)
                 if version_entry is None:
@@ -410,9 +435,14 @@ class _ScanExecution:
                             self._process_probed_unit(
                                 (work_entry, version_entry, *bundle)
                             )
+                        self._discard_source_bindings_under(volume.relative_path)
                     else:
                         self._process_layout_unit((work, child, volume))
-            self._flush_slice(force=False)
+                        self._discard_source_bindings_under(volume.relative_path)
+                self._flush_slice(force=True)
+                self._discard_source_bindings_under(child.relative_path)
+            self._flush_slice(force=True)
+            self._discard_source_bindings_under(work.relative_path)
 
     def _scan_audiobook(self) -> None:
         for observation in self._session.iter_directory(()):
@@ -421,56 +451,72 @@ class _ScanExecution:
                 continue
             if work.entry_type is not DiscoveryEntryType.DIRECTORY:
                 self._process_layout_unit((work,))
+                self._discard_source_bindings_under(work.relative_path)
                 continue
-            work_entry = self._observe(work)
-            if work_entry is None:
-                continue
-            entries: list[ProbedEntry] = [work_entry]
-            track_count = 0
-            structural_count = 1
-            overflow_code: ViolationCode | ScanObservationCode | None = None
-            for child in self._walk_audiobook_work(work.relative_path):
-                entry = self._observe(child)
-                if entry is None:
+            self._begin_bounded_binding_retention(work.relative_path)
+            try:
+                self._allow_bounded_binding(work.relative_path)
+                work_entry = self._observe(work)
+                if work_entry is None:
+                    self._drop_bounded_binding(work.relative_path)
+                    self._flush_slice(force=True)
                     continue
-                if overflow_code is not None:
-                    continue
-                if (
-                    entry.admission is AdmissionKind.AUDIO_TRACK
-                    and entry.entry_type is EntryType.FILE
-                ):
-                    track_count += 1
-                    if track_count > MAX_AUDIO_TRACKS:
-                        overflow_code = ViolationCode.AUDIO_TRACK_LIMIT_EXCEEDED
-                if entry.entry_type in {
-                    EntryType.DIRECTORY,
-                    EntryType.SYMLINK,
-                    EntryType.JUNCTION,
-                }:
-                    structural_count += 1
-                    if structural_count > MAX_STRUCTURAL_ENTRIES_PER_UNIT:
+                entries: list[ProbedEntry] = [work_entry]
+                track_count = 0
+                structural_count = 1
+                overflow_code: ViolationCode | ScanObservationCode | None = None
+                for child in self._walk_audiobook_work(work.relative_path):
+                    self._allow_bounded_binding(child.relative_path)
+                    entry = self._observe(child)
+                    if entry is None:
+                        self._drop_bounded_binding(child.relative_path)
+                        continue
+                    if overflow_code is not None:
+                        self._drop_bounded_binding(child.relative_path)
+                        continue
+                    if (
+                        entry.admission is AdmissionKind.AUDIO_TRACK
+                        and entry.entry_type is EntryType.FILE
+                    ):
+                        track_count += 1
+                        if track_count > MAX_AUDIO_TRACKS:
+                            overflow_code = ViolationCode.AUDIO_TRACK_LIMIT_EXCEEDED
+                    if entry.entry_type in {
+                        EntryType.DIRECTORY,
+                        EntryType.SYMLINK,
+                        EntryType.JUNCTION,
+                    }:
+                        structural_count += 1
+                        if structural_count > MAX_STRUCTURAL_ENTRIES_PER_UNIT:
+                            overflow_code = (
+                                ScanObservationCode.TOPOLOGY_UNIT_ENTRY_LIMIT_EXCEEDED
+                            )
+                    if (
+                        len(entries)
+                        >= MAX_AUDIO_TRACKS + MAX_STRUCTURAL_ENTRIES_PER_UNIT
+                    ):
                         overflow_code = (
                             ScanObservationCode.TOPOLOGY_UNIT_ENTRY_LIMIT_EXCEEDED
                         )
-                if len(entries) >= MAX_AUDIO_TRACKS + MAX_STRUCTURAL_ENTRIES_PER_UNIT:
-                    overflow_code = (
-                        ScanObservationCode.TOPOLOGY_UNIT_ENTRY_LIMIT_EXCEEDED
-                    )
+                    if overflow_code is not None:
+                        entries.clear()
+                        self._overflow_bounded_bindings(work.relative_path)
+                        continue
+                    entries.append(entry)
                 if overflow_code is not None:
-                    entries.clear()
-                    continue
-                entries.append(entry)
-            if overflow_code is not None:
-                self._pending_diagnostics.append(
-                    ScanDiagnostic(
-                        overflow_code,
-                        work.relative_path,
-                        (work.relative_path,),
+                    self._pending_diagnostics.append(
+                        ScanDiagnostic(
+                            overflow_code,
+                            work.relative_path,
+                            (work.relative_path,),
+                        )
                     )
-                )
-                self._flush_slice(force=True)
-            else:
-                self._process_probed_unit(tuple(entries))
+                    self._flush_slice(force=True)
+                else:
+                    self._process_probed_unit(tuple(entries))
+            finally:
+                self._end_bounded_binding_retention()
+            self._discard_source_bindings_under(work.relative_path)
 
     def _walk_audiobook_work(
         self, work_path: tuple[str, ...]
@@ -503,70 +549,90 @@ class _ScanExecution:
     def _collect_bundle(
         self, volume: DiscoveredSource
     ) -> tuple[ProbedEntry, ...] | None:
-        volume_entry = self._observe(volume)
-        if volume_entry is None:
-            return ()
-        entries: list[ProbedEntry] = [volume_entry]
-        track_count = 0
-        structural_count = 1
-        overflow_code: ViolationCode | ScanObservationCode | None = None
+        self._begin_bounded_binding_retention(volume.relative_path)
+        try:
+            self._allow_bounded_binding(volume.relative_path)
+            volume_entry = self._observe(volume)
+            if volume_entry is None:
+                self._drop_bounded_binding(volume.relative_path)
+                self._flush_slice(force=True)
+                return ()
+            entries: list[ProbedEntry] = [volume_entry]
+            track_count = 0
+            structural_count = 1
+            overflow_code: ViolationCode | ScanObservationCode | None = None
 
-        def retain(entry: ProbedEntry | None) -> None:
-            nonlocal track_count, structural_count, overflow_code
-            if entry is None or overflow_code is not None:
-                return
-            if entry.admission is AdmissionKind.AUDIO_TRACK:
-                track_count += 1
-                if track_count > MAX_AUDIO_TRACKS:
-                    overflow_code = ViolationCode.AUDIO_TRACK_LIMIT_EXCEEDED
-            if entry.entry_type in {
-                EntryType.DIRECTORY,
-                EntryType.SYMLINK,
-                EntryType.JUNCTION,
-            }:
-                structural_count += 1
-                if structural_count > MAX_STRUCTURAL_ENTRIES_PER_UNIT:
+            def retain(
+                entry: ProbedEntry | None,
+                relative_path: tuple[str, ...],
+            ) -> None:
+                nonlocal track_count, structural_count, overflow_code
+                if entry is None or overflow_code is not None:
+                    self._drop_bounded_binding(relative_path)
+                    return
+                if entry.admission is AdmissionKind.AUDIO_TRACK:
+                    track_count += 1
+                    if track_count > MAX_AUDIO_TRACKS:
+                        overflow_code = ViolationCode.AUDIO_TRACK_LIMIT_EXCEEDED
+                if entry.entry_type in {
+                    EntryType.DIRECTORY,
+                    EntryType.SYMLINK,
+                    EntryType.JUNCTION,
+                }:
+                    structural_count += 1
+                    if structural_count > MAX_STRUCTURAL_ENTRIES_PER_UNIT:
+                        overflow_code = (
+                            ScanObservationCode.TOPOLOGY_UNIT_ENTRY_LIMIT_EXCEEDED
+                        )
+                if len(entries) >= MAX_AUDIO_TRACKS + MAX_STRUCTURAL_ENTRIES_PER_UNIT:
                     overflow_code = (
                         ScanObservationCode.TOPOLOGY_UNIT_ENTRY_LIMIT_EXCEEDED
                     )
-            if len(entries) >= MAX_AUDIO_TRACKS + MAX_STRUCTURAL_ENTRIES_PER_UNIT:
-                overflow_code = ScanObservationCode.TOPOLOGY_UNIT_ENTRY_LIMIT_EXCEEDED
-            if overflow_code is not None:
-                entries.clear()
-                return
-            entries.append(entry)
+                if overflow_code is not None:
+                    entries.clear()
+                    self._overflow_bounded_bindings(volume.relative_path)
+                    return
+                entries.append(entry)
 
-        for observation in self._session.iter_directory(volume.relative_path):
-            child = self._source_or_issue(observation)
-            if child is None or self._ignored(child.relative_path):
-                continue
-            entry = self._observe(child)
-            retain(entry)
-            if (
-                child.entry_type is DiscoveryEntryType.DIRECTORY
-                and parse_disc_component(child.relative_path[-1]) is not None
-            ):
-                for disc_observation in self._session.iter_directory(
-                    child.relative_path
+            for observation in self._session.iter_directory(volume.relative_path):
+                child = self._source_or_issue(observation)
+                if child is None or self._ignored(child.relative_path):
+                    continue
+                self._allow_bounded_binding(child.relative_path)
+                entry = self._observe(child)
+                retain(entry, child.relative_path)
+                if (
+                    child.entry_type is DiscoveryEntryType.DIRECTORY
+                    and parse_disc_component(child.relative_path[-1]) is not None
                 ):
-                    disc_child = self._source_or_issue(disc_observation)
-                    if disc_child is None or self._ignored(disc_child.relative_path):
-                        continue
-                    disc_entry = self._observe(disc_child)
-                    retain(disc_entry)
-                    self._flush_slice(force=False)
-            self._flush_slice(force=False)
-        if overflow_code is not None:
-            self._pending_diagnostics.append(
-                ScanDiagnostic(
-                    overflow_code,
-                    volume.relative_path,
-                    (volume.relative_path,),
+                    for disc_observation in self._session.iter_directory(
+                        child.relative_path
+                    ):
+                        disc_child = self._source_or_issue(disc_observation)
+                        if disc_child is None or self._ignored(
+                            disc_child.relative_path
+                        ):
+                            continue
+                        self._allow_bounded_binding(disc_child.relative_path)
+                        disc_entry = self._observe(disc_child)
+                        retain(disc_entry, disc_child.relative_path)
+                        self._flush_slice(force=False)
+                self._flush_slice(force=False)
+            if overflow_code is not None:
+                self._pending_diagnostics.append(
+                    ScanDiagnostic(
+                        overflow_code,
+                        volume.relative_path,
+                        (volume.relative_path,),
+                    )
                 )
-            )
+                self._flush_slice(force=True)
+                self._discard_source_bindings_under(volume.relative_path)
+                return None
             self._flush_slice(force=True)
-            return None
-        return tuple(entries)
+            return tuple(entries)
+        finally:
+            self._end_bounded_binding_retention()
 
     def _process_layout_unit(self, sources: tuple[DiscoveredSource, ...]) -> None:
         entries = tuple(entry for source in sources if (entry := self._observe(source)))
@@ -747,6 +813,7 @@ class _ScanExecution:
             if not uow.scans.guard_mutation(fence, now=now):
                 raise ScanLeaseLost()
             collisions: tuple[PathCollision, ...] = ()
+            bindings: tuple[SourcePathBinding, ...] = ()
             if self._pending_observations:
                 outcome = uow.sources.upsert_observations(
                     fence,
@@ -754,6 +821,7 @@ class _ScanExecution:
                     observed_at=now,
                 )
                 collisions = outcome.collisions
+                bindings = outcome.bindings
             collision_diagnostics = tuple(
                 ScanDiagnostic(
                     ViolationCode.PATH_NORMALIZATION_COLLISION,
@@ -782,6 +850,12 @@ class _ScanExecution:
             )
             uow.commit()
             self.run = updated
+        self._source_bindings.update(
+            (binding.relative_path, binding)
+            for binding in bindings
+            if self._bounded_binding_paths is None
+            or binding.relative_path in self._bounded_binding_paths
+        )
         for collision in collisions:
             for related_path in collision.related_paths:
                 blocked_unit = collision_unit_path(
@@ -795,6 +869,52 @@ class _ScanExecution:
         self._slice_observation_count = 0
         self._slice_candidate_count = 0
         self._slice_started = self._monotonic_clock.seconds()
+
+    def _bindings_for_plan(
+        self, plan: TopologyUnitPlan
+    ) -> tuple[SourcePathBinding, ...]:
+        try:
+            return tuple(
+                self._source_bindings[path]
+                for path in required_topology_source_paths(plan)
+            )
+        except KeyError as error:
+            raise ScanStale() from error
+
+    def _discard_source_bindings_under(self, relative_path: tuple[str, ...]) -> None:
+        for path in tuple(self._source_bindings):
+            if path[: len(relative_path)] == relative_path:
+                del self._source_bindings[path]
+
+    def _begin_bounded_binding_retention(
+        self,
+        unit_root: tuple[str, ...],
+    ) -> None:
+        if self._bounded_binding_paths is not None:
+            raise RuntimeError("bounded binding retention cannot be nested")
+        self._bounded_binding_paths = {
+            unit_root[:depth] for depth in range(1, len(unit_root) + 1)
+        }
+
+    def _end_bounded_binding_retention(self) -> None:
+        self._bounded_binding_paths = None
+
+    def _allow_bounded_binding(self, relative_path: tuple[str, ...]) -> None:
+        if self._bounded_binding_paths is None:
+            raise RuntimeError("bounded binding retention is not active")
+        self._bounded_binding_paths.add(relative_path)
+
+    def _drop_bounded_binding(self, relative_path: tuple[str, ...]) -> None:
+        if self._bounded_binding_paths is None:
+            raise RuntimeError("bounded binding retention is not active")
+        self._bounded_binding_paths.discard(relative_path)
+        self._discard_source_bindings_under(relative_path)
+
+    def _overflow_bounded_bindings(self, unit_root: tuple[str, ...]) -> None:
+        if self._bounded_binding_paths is None:
+            raise RuntimeError("bounded binding retention is not active")
+        self._bounded_binding_paths.clear()
+        self._discard_source_bindings_under(unit_root)
 
     def _candidate_blocked(self, candidate: VolumeCandidate) -> bool:
         candidate_unit = (
@@ -830,21 +950,29 @@ class _ScanExecution:
             if not uow.scans.guard_mutation(fence, now=now):
                 raise ScanLeaseLost()
             for plan in group.units:
+                bound = uow.topology.bind_plan(
+                    fence,
+                    plan,
+                    self._bindings_for_plan(plan),
+                    bound_at=now,
+                )
+                if bound is None:
+                    raise ScanStale()
                 uow.topology.abandon_incomplete(
-                    fence, unit_key=plan.unit_key, abandoned_at=now
+                    fence, unit_id=bound.unit_id, abandoned_at=now
                 )
                 active = uow.topology.get_active_revision_id(
-                    self.run.library_id, unit_key=plan.unit_key
+                    self.run.library_id, unit_id=bound.unit_id
                 )
                 revision = uow.topology.begin_staging(
                     fence,
-                    plan,
+                    bound,
                     expected_active_revision_id=active,
                     created_at=now,
                 )
                 if revision is None:
                     continue
-                batch = next(iter(iter_stage_batches(plan)))
+                batch = next(iter(_iter_bound_stage_batches(bound)))
                 revision = uow.topology.append_staging_batch(
                     fence, revision, batch, staged_at=now
                 )
@@ -867,22 +995,30 @@ class _ScanExecution:
             return len(staged)
 
     def _stage_unit(self, plan: TopologyUnitPlan) -> StagingRevision | None:
-        batches = iter(iter_stage_batches(plan))
-        first_batch = next(batches)
         now = self._clock.now()
         with self._unit_of_work_factory() as uow:
             fence = self.run.fence()
             if not uow.scans.guard_mutation(fence, now=now):
                 raise ScanLeaseLost()
+            bound = uow.topology.bind_plan(
+                fence,
+                plan,
+                self._bindings_for_plan(plan),
+                bound_at=now,
+            )
+            if bound is None:
+                raise ScanStale()
+            batches = iter(_iter_bound_stage_batches(bound))
+            first_batch = next(batches)
             uow.topology.abandon_incomplete(
-                fence, unit_key=plan.unit_key, abandoned_at=now
+                fence, unit_id=bound.unit_id, abandoned_at=now
             )
             active = uow.topology.get_active_revision_id(
-                self.run.library_id, unit_key=plan.unit_key
+                self.run.library_id, unit_id=bound.unit_id
             )
             staging = uow.topology.begin_staging(
                 fence,
-                plan,
+                bound,
                 expected_active_revision_id=active,
                 created_at=now,
             )

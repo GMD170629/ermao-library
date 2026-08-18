@@ -23,14 +23,22 @@ from app.modules.catalog.application.scan_dto import (
     ScanLibrarySnapshot,
     SourceObservation,
     SourceObservationOutcome,
+    SourcePathBinding,
     StagingRevision,
+    TargetedPathObservation,
     WriterReservation,
+)
+from app.modules.catalog.application.watcher_dto import (
+    BoundTopologyStageBatch,
+    BoundTopologyUnitPlan,
+    FullScanWatcherStart,
+    WatcherFinalizeOutcome,
+    WatcherResumeOutcome,
 )
 from app.modules.catalog.domain.library import LibraryHealth
 from app.modules.catalog.domain.scan import (
     ScanDiagnostic,
     ScanStage,
-    TopologyStageBatch,
     TopologyUnitPlan,
 )
 
@@ -80,6 +88,9 @@ class DirectoryDiscoverySession(
     def iter_directory(
         self, relative_directory: tuple[str, ...]
     ) -> Iterator[DiscoveryObservation]: ...
+
+    def observe_path(self, relative_path: tuple[str, ...]) -> TargetedPathObservation:
+        """Observe one non-root path without following links."""
 
     def revalidate_root_identity(self) -> str:
         """Freshly walk the canonical binding and return its current identity."""
@@ -288,7 +299,8 @@ class SourceObservationRepository(Protocol):
         observations: tuple[SourceObservation, ...],
         *,
         observed_at: datetime,
-    ) -> SourceObservationOutcome: ...
+    ) -> SourceObservationOutcome:
+        """Persist facts and return one exact opaque binding per distinct path."""
 
 
 class PathCollisionRepository(Protocol):
@@ -324,18 +336,33 @@ class TopologyRepository(Protocol):
     ) -> bool:
         """Clean staging only after proving the named run is already CANCELLED."""
 
+    def bind_plan(
+        self,
+        fence: ScanFence,
+        plan: TopologyUnitPlan,
+        source_bindings: tuple[SourcePathBinding, ...],
+        *,
+        bound_at: datetime,
+    ) -> BoundTopologyUnitPlan | None:
+        """Resolve exact raw slots to opaque stable IDs under the scan fence.
+
+        This operation must never derive stable IDs from a relative path or
+        ``plan.unit_key``. It reuses an exact parent/raw-slot binding or
+        allocates a new opaque identity.
+        """
+
     def abandon_incomplete(
-        self, fence: ScanFence, *, unit_key: str, abandoned_at: datetime
+        self, fence: ScanFence, *, unit_id: str, abandoned_at: datetime
     ) -> None: ...
 
     def get_active_revision_id(
-        self, library_id: str, *, unit_key: str
+        self, library_id: str, *, unit_id: str
     ) -> str | None: ...
 
     def begin_staging(
         self,
         fence: ScanFence,
-        plan: TopologyUnitPlan,
+        plan: BoundTopologyUnitPlan,
         *,
         expected_active_revision_id: str | None,
         created_at: datetime,
@@ -346,7 +373,7 @@ class TopologyRepository(Protocol):
         self,
         fence: ScanFence,
         staging: StagingRevision,
-        batch: TopologyStageBatch,
+        batch: BoundTopologyStageBatch,
         *,
         staged_at: datetime,
     ) -> StagingRevision: ...
@@ -361,6 +388,45 @@ class TopologyRepository(Protocol):
         """Atomically validate complete revisions and move every group pointer."""
 
 
+class WatcherScanCoordinationRepository(Protocol):
+    def prepare_full_scan_start(
+        self,
+        library: ScanLibrarySnapshot,
+        *,
+        now: datetime,
+    ) -> FullScanWatcherStart | None:
+        """Capture a watermark or reject a live reconcile writer.
+
+        A live reconcile whose full snapshot still matches conflicts. An
+        expired or already-invalidated reconcile writer is fenced, its staging
+        abandoned, and its work deleted in this same uncommitted operation.
+        The returned writer fence is the current value that the full scan must
+        reserve from.
+        """
+
+    def finalize_full_scan(
+        self,
+        library_id: str,
+        *,
+        watcher_sequence_watermark: int,
+        completed_at: datetime,
+    ) -> WatcherFinalizeOutcome:
+        """Discard covered intents and conditionally clear the rescan fence."""
+
+    def resume_after_full_scan_terminal(
+        self,
+        library_id: str,
+        *,
+        observed_at: datetime,
+    ) -> WatcherResumeOutcome:
+        """Read durable follow-up work after FAILED/CANCELLED.
+
+        This does not delete journal rows or clear an overflow fence. It reports
+        the fence first, otherwise whether any PENDING intent needs one
+        library-level wake, inside the caller's terminal transaction.
+        """
+
+
 class ScanUnitOfWork(Protocol):
     libraries: ScanLibraryRepository
     scans: FullScanRepository
@@ -369,6 +435,7 @@ class ScanUnitOfWork(Protocol):
     topology: TopologyRepository
     diagnostics: ScanDiagnosticRepository
     collisions: PathCollisionRepository
+    watcher: WatcherScanCoordinationRepository
     grants: LibraryGrantRepository
     audit: AuditPort
     outbox: OutboxPort
@@ -410,4 +477,5 @@ __all__ = [
     "ScanUowFactory",
     "SourceObservationRepository",
     "TopologyRepository",
+    "WatcherScanCoordinationRepository",
 ]

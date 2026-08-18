@@ -15,6 +15,7 @@ from app.modules.catalog.application.scan_dto import (
     DiscoveryIssue,
     DiscoveryIssueCode,
     DiscoveryObservation,
+    TargetedPathAbsent,
 )
 from app.modules.catalog.application.scan_ports import (
     DirectoryChangedDuringDiscovery,
@@ -156,6 +157,32 @@ def _validate_relative_directory(relative_directory: tuple[str, ...]) -> None:
         raise InvalidDiscoveryRelativePath()
 
 
+def _validate_relative_path(relative_path: tuple[str, ...]) -> None:
+    _validate_relative_directory(relative_path)
+    if not relative_path:
+        raise InvalidDiscoveryRelativePath()
+
+
+def _discovered_source(
+    relative_path: tuple[str, ...], source_stat: os.stat_result
+) -> DiscoveredSource:
+    entry_type = _entry_type(source_stat)
+    expected_stat = None
+    if entry_type is DiscoveryEntryType.FILE:
+        expected_stat = SourceStatExpectation(
+            device_id=source_stat.st_dev,
+            file_id=source_stat.st_ino,
+            size_bytes=source_stat.st_size,
+            modified_ns=source_stat.st_mtime_ns,
+        )
+    return DiscoveredSource(
+        relative_path=relative_path,
+        entry_type=entry_type,
+        filesystem_identity=_identity(source_stat),
+        expected_stat=expected_stat,
+    )
+
+
 def _open_canonical_root(canonical_root: str) -> tuple[int, os.stat_result]:
     if not _PLATFORM_SUPPORTED:
         raise DirectoryRootUnavailable()
@@ -243,6 +270,33 @@ class _LocalDirectoryDiscoverySession:
         )
         self._streams.add(stream)
         return stream
+
+    def observe_path(
+        self, relative_path: tuple[str, ...]
+    ) -> DiscoveredSource | TargetedPathAbsent:
+        """Observe one path without following it or trusting a racing lookup."""
+
+        _validate_relative_path(relative_path)
+        parent_path = relative_path[:-1]
+        leaf_name = relative_path[-1]
+        opened = self._open_relative_directory(parent_path)
+        try:
+            initial_stat = self._stat_leaf(opened.descriptor, leaf_name)
+            self._verify_directory(parent_path, opened)
+            confirmed_stat = self._stat_leaf(opened.descriptor, leaf_name)
+            self._verify_root_binding()
+            if initial_stat is None and confirmed_stat is None:
+                return TargetedPathAbsent(relative_path=relative_path)
+            if (
+                initial_stat is None
+                or confirmed_stat is None
+                or _directory_signature(initial_stat)
+                != _directory_signature(confirmed_stat)
+            ):
+                raise DirectoryChangedDuringDiscovery()
+            return _discovered_source(relative_path, confirmed_stat)
+        finally:
+            os.close(opened.descriptor)
 
     def revalidate_root_identity(self) -> str:
         self._active_root_stat()
@@ -341,6 +395,28 @@ class _LocalDirectoryDiscoverySession:
         finally:
             os.close(rebound.descriptor)
 
+    def _verify_root_binding(self) -> None:
+        active_stat = self._active_root_stat()
+        rebound_descriptor, rebound_stat = _open_canonical_root(self._canonical_root)
+        try:
+            if _identity_signature(active_stat) != _identity_signature(rebound_stat):
+                raise DirectoryChangedDuringDiscovery()
+        finally:
+            os.close(rebound_descriptor)
+
+    @staticmethod
+    def _stat_leaf(parent_descriptor: int, leaf_name: str) -> os.stat_result | None:
+        try:
+            return os.stat(
+                leaf_name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            _raise_directory_error(error)
+
     def _forget(self, stream: _DirectoryObservationIterator) -> None:
         self._streams.discard(stream)
 
@@ -417,20 +493,9 @@ class _DirectoryObservationIterator(Iterator[DiscoveryObservation]):
             entry_stat = entry.stat(follow_symlinks=False)
         except OSError as error:
             _raise_directory_error(error)
-        entry_type = _entry_type(entry_stat)
-        expected_stat = None
-        if entry_type is DiscoveryEntryType.FILE:
-            expected_stat = SourceStatExpectation(
-                device_id=entry_stat.st_dev,
-                file_id=entry_stat.st_ino,
-                size_bytes=entry_stat.st_size,
-                modified_ns=entry_stat.st_mtime_ns,
-            )
-        return DiscoveredSource(
-            relative_path=(*self._relative_directory, entry.name),
-            entry_type=entry_type,
-            filesystem_identity=_identity(entry_stat),
-            expected_stat=expected_stat,
+        return _discovered_source(
+            (*self._relative_directory, entry.name),
+            entry_stat,
         )
 
 

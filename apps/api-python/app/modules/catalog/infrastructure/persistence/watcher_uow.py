@@ -1,4 +1,4 @@
-"""Transaction owner for generation-scoped catalog scans."""
+"""Transaction owner for watcher ingestion and targeted reconciliation."""
 
 from __future__ import annotations
 
@@ -11,33 +11,26 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
-from app.modules.catalog.domain.scan import ScanConflict
+from app.modules.catalog.domain.watcher import ReconcileConflict
 
 from .models import LibraryRootRegistryLock
-from .repositories import (
-    SqlAlchemyAuditPort,
-    SqlAlchemyLibraryGrantRepository,
-    SqlAlchemyOutboxPort,
+from .reconcile_diagnostic_repository import (
+    SqlAlchemyReconcileDiagnosticRepository,
 )
-from .scan_run_repositories import (
-    SqlAlchemyFullScanRepository,
-    SqlAlchemyRootScanWorkRepository,
-    SqlAlchemyScanLibraryRepository,
-)
-from .source_observation_repositories import (
-    SqlAlchemyPathCollisionRepository,
-    SqlAlchemyScanDiagnosticRepository,
-    SqlAlchemySourceObservationRepository,
-)
+from .reconcile_source_repository import SqlAlchemyReconcileSourceRepository
+from .repositories import SqlAlchemyOutboxPort
 from .sqlite_errors import is_sqlite_busy_or_locked
 from .topology_repository import SqlAlchemyTopologyRepository
-from .watcher_repository import SqlAlchemyWatcherScanCoordinationRepository
+from .watcher_repository import (
+    SqlAlchemyReconcileLibraryRepository,
+    SqlAlchemyWatcherJournalRepository,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class SqlAlchemyScanUnitOfWork:
-    """Own one explicit writer transaction for a bounded scan mutation."""
+class SqlAlchemyWatcherUnitOfWork:
+    """Own one explicit SQLite writer transaction for watcher work."""
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
@@ -54,16 +47,11 @@ class SqlAlchemyScanUnitOfWork:
             self._transaction = transaction
             transaction.__enter__()
             self._acquire_writer_gate()
-            self.libraries = SqlAlchemyScanLibraryRepository(session)
-            self.scans = SqlAlchemyFullScanRepository(session)
-            self.work_items = SqlAlchemyRootScanWorkRepository(session)
-            self.sources = SqlAlchemySourceObservationRepository(session)
+            self.libraries = SqlAlchemyReconcileLibraryRepository(session)
+            self.watcher = SqlAlchemyWatcherJournalRepository(session)
+            self.sources = SqlAlchemyReconcileSourceRepository(session)
             self.topology = SqlAlchemyTopologyRepository(session)
-            self.diagnostics = SqlAlchemyScanDiagnosticRepository(session)
-            self.collisions = SqlAlchemyPathCollisionRepository(session)
-            self.watcher = SqlAlchemyWatcherScanCoordinationRepository(session)
-            self.grants = SqlAlchemyLibraryGrantRepository(session)
-            self.audit = SqlAlchemyAuditPort(session)
+            self.diagnostics = SqlAlchemyReconcileDiagnosticRepository(session)
             self.outbox = SqlAlchemyOutboxPort(session)
             return self
         except BaseException:
@@ -72,7 +60,7 @@ class SqlAlchemyScanUnitOfWork:
 
     def _acquire_writer_gate(self) -> None:
         if self._session is None:
-            raise RuntimeError("Catalog scan unit of work is not active")
+            raise RuntimeError("Catalog watcher unit of work is not active")
         statement = (
             update(LibraryRootRegistryLock)
             .where(LibraryRootRegistryLock.id == 1)
@@ -82,7 +70,7 @@ class SqlAlchemyScanUnitOfWork:
             result = self._session.execute(statement)
         except OperationalError as exc:
             if is_sqlite_busy_or_locked(exc):
-                raise ScanConflict() from exc
+                raise ReconcileConflict() from exc
             raise
         if cast(CursorResult[object], result).rowcount != 1:
             raise RuntimeError("current root registry lock is not initialized")
@@ -92,11 +80,11 @@ class SqlAlchemyScanUnitOfWork:
         try:
             session.rollback()
         except Exception:
-            logger.exception("catalog scan unit of work enter rollback failed")
+            logger.exception("catalog watcher unit of work enter rollback failed")
         try:
             session.close()
         except Exception:
-            logger.exception("catalog scan unit of work enter close failed")
+            logger.exception("catalog watcher unit of work enter close failed")
         finally:
             self._session = None
             self._transaction = None
@@ -125,12 +113,12 @@ class SqlAlchemyScanUnitOfWork:
 
     def commit(self) -> None:
         if self._session is None:
-            raise RuntimeError("Catalog scan unit of work is not active")
+            raise RuntimeError("Catalog watcher unit of work is not active")
         try:
             self._session.commit()
         except OperationalError as exc:
             if is_sqlite_busy_or_locked(exc):
-                raise ScanConflict() from exc
+                raise ReconcileConflict() from exc
             raise
         self._committed = True
 
@@ -139,12 +127,12 @@ class SqlAlchemyScanUnitOfWork:
             self._session.rollback()
 
 
-class SqlAlchemyScanUowFactory:
+class SqlAlchemyWatcherUowFactory:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
 
-    def __call__(self) -> SqlAlchemyScanUnitOfWork:
-        return SqlAlchemyScanUnitOfWork(self._session_factory)
+    def __call__(self) -> SqlAlchemyWatcherUnitOfWork:
+        return SqlAlchemyWatcherUnitOfWork(self._session_factory)
 
 
-__all__ = ["SqlAlchemyScanUnitOfWork", "SqlAlchemyScanUowFactory"]
+__all__ = ["SqlAlchemyWatcherUnitOfWork", "SqlAlchemyWatcherUowFactory"]

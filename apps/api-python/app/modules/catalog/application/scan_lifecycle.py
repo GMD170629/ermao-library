@@ -32,6 +32,10 @@ from app.modules.catalog.application.scan_runtime_policy import (
     SCANNABLE_LIBRARY_STATES,
     scan_lease_deadline,
 )
+from app.modules.catalog.application.watcher_dto import (
+    WatcherFinalizeOutcome,
+    WatcherResumeOutcome,
+)
 from app.modules.catalog.domain.access import GrantLevel, grant_allows
 from app.modules.catalog.domain.library import LibraryHealth
 from app.modules.catalog.domain.scan import (
@@ -92,6 +96,45 @@ def _append_system_scan_outbox(
             (("scanId", run.scan_id), ("generation", run.generation)),
         )
     )
+
+
+def _append_watcher_follow_up_outbox(
+    uow: ScanUnitOfWork,
+    *,
+    run: FullScanRun,
+    outcome: WatcherFinalizeOutcome | WatcherResumeOutcome,
+) -> None:
+    reason = outcome.state.full_rescan_reason
+    if reason is not None:
+        uow.outbox.append(
+            OutboxEvent(
+                "LIBRARY_FULL_SCAN_REQUIRED",
+                run.library_id,
+                "SYSTEM",
+                (
+                    ("scanId", run.scan_id),
+                    ("generation", run.generation),
+                    ("reason", reason.value),
+                    (
+                        "throughSequence",
+                        outcome.state.overflow_through_sequence or 0,
+                    ),
+                ),
+            )
+        )
+    elif outcome.replay_available:
+        uow.outbox.append(
+            OutboxEvent(
+                "LIBRARY_RECONCILE_AVAILABLE",
+                run.library_id,
+                "SYSTEM",
+                (
+                    ("scanId", run.scan_id),
+                    ("generation", run.generation),
+                    ("latestSequence", outcome.state.latest_sequence),
+                ),
+            )
+        )
 
 
 def append_activation_outboxes(
@@ -185,9 +228,12 @@ class StartFullLibraryScan:
                     "LIBRARY_FULL_SCAN_INVALIDATED",
                     run=cancelled,
                 )
+            watcher_start = uow.watcher.prepare_full_scan_start(library, now=now)
+            if watcher_start is None:
+                raise ScanConflict()
             reservation = uow.libraries.reserve_topology_writer(
                 command.library_id,
-                expected_topology_writer_fence=library.topology_writer_fence,
+                expected_topology_writer_fence=watcher_start.topology_writer_fence,
                 expected_next_generation=library.next_scan_generation,
             )
             if reservation is None:
@@ -214,6 +260,7 @@ class StartFullLibraryScan:
                 created_by_actor_id=command.actor_id,
                 started_at=None,
                 finished_at=None,
+                watcher_sequence_watermark=(watcher_start.watcher_sequence_watermark),
             )
             uow.scans.insert(run)
             uow.work_items.insert_root(
@@ -371,6 +418,15 @@ class FailFullLibraryScan:
             ):
                 raise ScanStale()
             _append_system_scan_outbox(uow, "LIBRARY_FULL_SCAN_FAILED", run=failed)
+            watcher_outcome = uow.watcher.resume_after_full_scan_terminal(
+                failed.library_id,
+                observed_at=now,
+            )
+            _append_watcher_follow_up_outbox(
+                uow,
+                run=failed,
+                outcome=watcher_outcome,
+            )
             uow.commit()
             return failed
 
@@ -432,6 +488,15 @@ class CancelFullLibraryScan:
                 actor_id=command.actor_id,
                 run=cancelled,
             )
+            watcher_outcome = uow.watcher.resume_after_full_scan_terminal(
+                cancelled.library_id,
+                observed_at=now,
+            )
+            _append_watcher_follow_up_outbox(
+                uow,
+                run=cancelled,
+                outcome=watcher_outcome,
+            )
             uow.commit()
             return cancelled
 
@@ -472,6 +537,11 @@ class FinalizeFullLibraryScan:
             uow.topology.abandon_scan_staging(fence, abandoned_at=now)
             if not uow.libraries.finalize_generation(fence, completed_at=now):
                 raise ScanStale()
+            watcher_outcome = uow.watcher.finalize_full_scan(
+                current.library_id,
+                watcher_sequence_watermark=current.watcher_sequence_watermark,
+                completed_at=now,
+            )
             completed = uow.scans.complete(fence, completed_at=now)
             if completed is None:
                 raise ScanStale()
@@ -481,6 +551,11 @@ class FinalizeFullLibraryScan:
                 raise ScanStale()
             _append_system_scan_outbox(
                 uow, "LIBRARY_FULL_SCAN_COMPLETED", run=completed
+            )
+            _append_watcher_follow_up_outbox(
+                uow,
+                run=completed,
+                outcome=watcher_outcome,
             )
             uow.commit()
             return completed

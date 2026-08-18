@@ -73,6 +73,7 @@ from .models import (
     CatalogLibrary,
     CatalogOutbox,
     LibraryIgnoreRule,
+    LibraryWatcherState,
     SourceWriteOperation,
     UserLibraryGrant,
 )
@@ -161,6 +162,15 @@ class SqlAlchemyLibraryRepository:
             updated_at=library.updated_at,
         )
         self._session.add(row)
+        self._session.add(
+            LibraryWatcherState(
+                library_id=library.id,
+                latest_sequence=0,
+                overflow_through_sequence=None,
+                full_rescan_reason=None,
+                updated_at=library.created_at,
+            )
+        )
         # Root identity is protected by a unique constraint.  Flushing here
         # lets the application report a stable conflict before adding grants.
         self._session.flush()

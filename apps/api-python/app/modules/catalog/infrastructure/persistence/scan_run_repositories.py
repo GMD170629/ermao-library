@@ -100,6 +100,7 @@ def _full_scan_from_rows(run: LibraryScanRun, library: CatalogLibrary) -> FullSc
         path_comparison=PathComparison(_enum_value(run.path_comparison_snapshot)),
         root_identity=run.root_identity_snapshot,
         topology_writer_fence=run.topology_writer_fence,
+        watcher_sequence_watermark=run.watcher_sequence_watermark,
         state=DomainScanState(_enum_value(run.state)),
         stage=DomainScanStage(_enum_value(run.stage)),
         lease_owner=run.lease_owner,
@@ -320,6 +321,7 @@ class SqlAlchemyFullScanRepository:
                 topology_version_snapshot=run.topology_version,
                 root_identity_snapshot=run.root_identity,
                 topology_writer_fence=run.topology_writer_fence,
+                watcher_sequence_watermark=run.watcher_sequence_watermark,
                 state=ScanState(run.state),
                 failure_code=(
                     None

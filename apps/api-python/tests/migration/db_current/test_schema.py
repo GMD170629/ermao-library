@@ -239,7 +239,7 @@ def test_current_downgrade_is_rejected_without_mutating_schema(tmp_path: Path) -
         version_table = Table("alembic_version_v2", MetaData(), autoload_with=engine)
         with engine.connect() as connection:
             assert connection.scalars(select(version_table.c.version_num)).all() == [
-                "0002_catalog_scan_topology"
+                "0003_catalog_watcher_reconcile"
             ]
     finally:
         engine.dispose()

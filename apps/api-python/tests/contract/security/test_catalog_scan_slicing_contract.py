@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import TracebackType
-from typing import Literal, Self
+from typing import Literal, Self, cast
 
 import pytest
 
@@ -24,10 +24,18 @@ from app.modules.catalog.application.scan_dto import (
     SourceObservation,
     SourceObservationOutcome,
 )
+from app.modules.catalog.application.scan_ports import (
+    DirectoryDiscoveryPort,
+    ScanUowFactory,
+)
 from app.modules.catalog.application.source_admission_ports import (
     SourceAdmissionPort,
     SourceChangedDuringProbe,
     SourceStatExpectation,
+)
+from app.modules.catalog.application.watcher_dto import (
+    WatcherFinalizeOutcome,
+    WatcherState,
 )
 from app.modules.catalog.domain.admission import (
     AdmissionRejectionReason,
@@ -298,6 +306,7 @@ class _ScanStore:
             path_comparison=PathComparison.SENSITIVE,
             root_identity=_ROOT_IDENTITY,
             topology_writer_fence=1,
+            watcher_sequence_watermark=0,
             state=ScanState.RUNNING,
             failure_code=None,
             stage=ScanStage.DISCOVER,
@@ -451,6 +460,22 @@ class _ScanStore:
     def finalize_generation(self, _fence: object, *, completed_at: datetime) -> bool:
         return completed_at == _NOW
 
+    def finalize_full_scan(
+        self,
+        library_id: str,
+        *,
+        watcher_sequence_watermark: int,
+        completed_at: datetime,
+    ) -> WatcherFinalizeOutcome:
+        assert library_id == "library-1"
+        assert watcher_sequence_watermark == 0
+        assert completed_at == _NOW
+        return WatcherFinalizeOutcome(
+            WatcherState("library-1", 0, None, None),
+            discarded_intent_count=0,
+            replay_available=False,
+        )
+
     def complete(self, _fence: object, *, completed_at: datetime) -> FullScanRun:
         self.run = replace(
             self.run,
@@ -478,6 +503,7 @@ class _FakeUnitOfWork:
         self.work_items = store
         self.sources = store
         self.topology = _ForbiddenTopology()
+        self.watcher = store
         self.diagnostics = _DiagnosticSink(store.diagnostic_batches)
         self.collisions = _CollisionSink()
         self.grants = store
@@ -551,8 +577,8 @@ def _run_scan(
         block_topology_with_collision=block_topology_with_collision,
     )
     result = RunFullLibraryScan(
-        unit_of_work_factory=_UnitOfWorkFactory(store),
-        discovery=discovery,
+        unit_of_work_factory=cast(ScanUowFactory, _UnitOfWorkFactory(store)),
+        discovery=cast(DirectoryDiscoveryPort, discovery),
         admission=admission,
         clock=_FixedClock(),
         monotonic_clock=monotonic,

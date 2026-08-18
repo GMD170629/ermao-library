@@ -8,8 +8,8 @@ When accepted for the current release, this ADR changes earlier decisions as fol
 
 | Earlier authority | Generation-2 treatment |
 | --- | --- |
-| ADR 0002 | Supersede the singleton `ImportWorkItem`, old import-history API, and absolute-path deduplication. Preserve the 5,000-entry, 500-candidate, 250-ms slice limits, high-water backpressure, lease recovery, and restart-from-subtree-root behavior. |
-| ADR 0003 | Preserve one 10,000-track budget across an entire `AUDIOBOOK` Work, including all of its Volumes and transparent disc directories. |
+| ADR 0002 | Supersede the singleton `ImportWorkItem`, old import-history API, absolute-path deduplication, and queue stability-delay/debounce semantics. Preserve the 5,000-entry, 500-candidate, 250-ms slice limits, high-water backpressure, lease recovery, and restart-from-subtree-root behavior. |
+| ADR 0003 | Supersede watcher debounce. Preserve one 10,000-track budget across an entire `AUDIOBOOK` Work, including all of its Volumes and transparent disc directories. |
 | ADR 0004 and `docs/media-version-volume-upgrade.md` | Supersede the media-version topology and structural mutation decisions. |
 | ADR 0008 and ADR 0015 | Preserve authorization-version invalidation, verified-session behavior, and the rule that transient network failure is not explicit revocation. Replace monitor-folder authorization with Library grants. |
 | ADR 0010 | Supersede the single-file download manifest and Reader-v4 identity. Preserve private authorization namespaces, validated temporary storage, atomic publication, and bounded revocation for already stored bytes. |
@@ -353,9 +353,13 @@ the command never partially rebinds progress. An unrelated root must be register
 as a new Library. The scanner never infers a cross-root relocation.
 
 Topology version 1 does not write hidden identity manifests such as `.shuku-id`
-into user directories. Consequently, preserving identity after an offline rename
-on a filesystem without stable file IDs is best-effort rather than guaranteed.
-Guaranteeing it would require a separate opt-in manifest decision.
+into user directories. It therefore does not infer an offline/full-scan rename
+from a filesystem identity: the old slot becomes missing and the new slot gets
+new opaque IDs. Identity is preserved only for a trusted watcher MOVE whose
+execution-time no-follow evidence proves the old path absent, the new identity
+equal to one current ACTIVE-slot, PRESENT, layout-valid source's unique persisted
+identity, the same Library scope, and no collision or newer successor. Any failed proof degrades to ordinary targeted
+reconciliation rather than guessing.
 
 ### 4. Reconcile generations; do not treat discovery as one-time import
 
@@ -413,11 +417,29 @@ any invalid ancestor makes it `INVALID`. Reappearance restores an existing file
 node when identity is unambiguous. A reappearing directory keeps its absence
 marker, and therefore all descendants hidden, until a successful full subtree
 enumeration reaches a terminal valid, invalid, or empty observation. Each
-directory has a monotonic `childrenPresenceEpoch`; enumeration increments it and
-stamps every seen child with `observedParentPresenceEpoch`. After terminal
-enumeration the marker may clear even for an empty or invalid directory, while
-unstamped old descendants remain effectively `MISSING`. An interrupted scan
-keeps the marker. A single create event never revives stale descendants.
+directory has published `childrenPresenceEpoch` and monotonic
+`nextChildrenPresenceEpoch`. Every directory attempt atomically advances `next`
+and stamps seen children with that unique proposed value in
+`pendingObservedParentPresenceEpoch`, without replacing their old observed
+snapshot. Natural iterator exhaustion plus directory/root/fence revalidation
+performs an O(1) parent flip to proposed. A child is effectively present only
+when its observed epoch or pending epoch equals the parent's current epoch.
+After the flip, pending rows are folded by SourceEntry-ID keyset in batches of
+at most 5,000; the intent is deleted only after FOLD completes. A crash before
+the flip leaves the old snapshot visible, and a retry allocates a new proposed
+epoch so an orphan from the old attempt cannot become seen. The marker may clear
+after a terminal empty or invalid enumeration, while unstamped old descendants
+remain `MISSING`. A single create event never revives stale descendants.
+
+Single-pass targeted materialization may bind a not-yet-visible child only under
+the live reconcile fence and only when its explicit binding carries the same
+pending epoch as the row and the parent's monotonic `next` value. Every non-root
+physical ancestor referenced by the topology plan, including transparent Disc
+directories, needs its own binding/proof; a leaf cannot authorize an arbitrary
+future-pending ancestor. Query visibility remains based on current, not next. A
+physically present top-level path excluded by an ignore/noise rule refreshes an
+existing row and marks layout invalid without setting `absenceConfirmedAt`;
+only an explicit absent stat may set that marker.
 
 A full scan is incrementally visible, not a database-wide point-in-time snapshot.
 Each verified topology unit may become visible before the run ends; an eventual
@@ -443,33 +465,62 @@ at most for an already-linearized atomic publish window rather than racing it.
 Delivery is intentionally split without changing this terminal design. PR 5A
 implements dormant bounded full-generation scanning, topology materialization,
 and generation finalization only. The watcher journal, overflow fence, replay,
-and targeted subtree reconciliation described below are a separate PR 5B/12;
-PR 5A does not expose or imply watcher behavior.
+and targeted subtree reconciliation described below are the separate dormant
+PR 5B/12; PR 5A does not expose or imply watcher behavior, and PR 5B does not
+register a production worker or router.
 
 While a full scan is running or finalizing, watcher events are durably journaled
-after a scan-start watermark and do not write topology. The journal coalesces by
-normalized path/subtree and is capped at 2,000 pending records per Library. On
-overflow it replaces them with one `FULL_RESCAN_REQUIRED_AFTER_GENERATION`
-fence, advances only a constant-size latest-event sequence, and stops appending
-per-path rows. That fence is cleared only by a successful full scan that started
-after the latest recorded event sequence, so overflow cannot lose a change or
-grow without bound.
+after a scan-start watermark and do not write topology. One per-Library watcher
+state plus coalesced/leased reconcile intents is sufficient; there is no third
+generic event store. Intents coalesce by at most two raw top-level scopes and
+are capped at 2,000 PENDING rows per Library. The 2,001st event enters one
+constant-size full-rescan fence before appending another intent. If a reconcile
+worker is RUNNING, that same transaction invalidates its topology writer,
+abandons its origin STAGING, and deletes all intents; it does not invalidate a
+RUNNING/FINALIZING full scan. The fence is cleared only by a successful full
+scan whose start watermark covers the through sequence and saw no later event.
 
 Finalization uses one compare-and-set transaction to verify the writer fence,
 run state, generation, configuration, root identity, mode, and topology version,
 advance `lastSuccessfulGeneration`, and mark the run successful. Missing is initially projected by
 `lastSeenGeneration < lastSuccessfulGeneration`, backed by an index, rather than
-updated across millions of rows in that transaction. Journaled events are then
-replayed in order; subtree reconciliation never advances a full-scan generation.
-After stability delay, a targeted delete reconcile may mark one observed entry as
-explicitly absent; descendants inherit that ancestor absence without row-by-row
-updates. A file reappearance or proven move may clear/replace its marker; a
-directory follows the full-subtree rule above.
+updated across millions of rows in that transaction. Covered intents are
+discarded in that transaction; a remaining PENDING row emits one Library-level
+reconcile wake, while an uncovered fence emits one full-scan-required wake.
+Workers claim by `firstSequence,id`; this first sequence is ordering only. An
+overlapping successor is newer when its `throughSequence` exceeds the running
+intent fence's through sequence, including a coalesced row whose first sequence
+is older. Outbox payloads never promise a transient intent-row ID. Subtree
+reconciliation never advances a full-scan generation.
+A targeted delete reconcile uses fresh no-follow observations before it may mark
+one observed entry as explicitly absent; descendants inherit that ancestor
+absence without row-by-row updates. A file reappearance or proven move may
+clear/replace its marker; a directory follows the full-subtree rule above.
 
 Filesystem watchers are accelerators, not the source of truth. Create, modify,
 delete, file move, and directory move events enqueue idempotent subtree
-reconciliation. Periodic and manual full scans repair missed events. Every queued
-item checks `configRevision`; stale work exits without publication.
+reconciliation. Journaling remains active while a Library is ACTIVATING, ACTIVE,
+or PAUSED; Pause stops scans/publication/source writes, not lightweight event
+capture. Only ACTIVE with a successful generation can claim reconcile work.
+The existing transactional `LIBRARY_RESUMED` outbox event is also a
+Library-level reconcile wake: PR 11 workers always claim the next durable
+PENDING intent by Library and never depend on an intent-row ID or an older wake
+that may have been consumed while the Library was paused.
+After Pause/Resume, a pending or running intent whose root/mode/comparison/
+topology/root identity still match may atomically restamp the current control-only
+configuration and restart; a structural mismatch requires a full scan. Periodic
+and manual full scans repair missed events.
+
+The application exposes explicit trust-loss inputs for DISCONNECTED,
+BACKEND_OVERFLOW, and UNTRUSTED observations (plus root binding loss), all of
+which require a full scan. The default watchdog `Observer` cannot prove kernel
+queue overflow or root disconnect/unmount, and directory moves can produce
+synthetic descendant events. Therefore PR 11 may connect only a backend that
+reports health/overflow explicitly and guarantees the trusted parent directory
+MOVE precedes ignorable synthetic descendants; otherwise the observation is
+UNTRUSTED. Exact root directory MODIFY is only redundant parent-mtime noise,
+whereas root DELETE/MOVE loses trust. The database 2,000-row capacity fence is
+not evidence that a backend queue did or did not overflow.
 
 An `scandir` iterator is never serialized. While its lease and process remain
 alive, the runtime retains a bounded ephemeral iterator/frontier across
@@ -605,7 +656,8 @@ policy, and topology version before any incrementally visible node can commit. A
 discovery-complete first scan changes it to `ACTIVE`; layout diagnostics do not
 make infrastructure discovery incomplete. A failed first scan remains locked in
 `ACTIVATING` with error health and may only retry or remove. Pause stops new scans
-and source operations but does not hide existing readable data.
+and source operations but does not hide existing readable data; lightweight
+watcher journaling remains active so Resume cannot lose paused-period changes.
 
 Authorization uses an explicit `UserLibraryGrant` with
 `READ | CURATE | ADMIN`. The creator receives `ADMIN`; an application-wide
@@ -734,8 +786,8 @@ materialized activation could attach state to different content. A user who
 wants a different grammar removes the registration and creates a new one,
 receiving new catalog IDs; activation failure does not unlock these fields.
 
-Ignore and stability rules may change through a version-checked command. The
-change increments `configRevision`, cancels stale work, and requires a full scan.
+Ignore rules may change through a version-checked command. The change increments
+`configRevision`, cancels stale work, and requires a full scan.
 
 ## Consequences
 

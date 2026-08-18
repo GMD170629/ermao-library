@@ -76,6 +76,30 @@ class ScanFailureCode(StrEnum):
     ROOT_IDENTITY_CHANGED = "ROOT_IDENTITY_CHANGED"
 
 
+class FullRescanReason(StrEnum):
+    JOURNAL_CAPACITY = "JOURNAL_CAPACITY"
+    DISCONNECTED = "DISCONNECTED"
+    BACKEND_OVERFLOW = "BACKEND_OVERFLOW"
+    UNTRUSTED = "UNTRUSTED"
+    ROOT_CHANGED = "ROOT_CHANGED"
+    COLLISION_RECHECK = "COLLISION_RECHECK"
+
+
+class ReconcileIntentState(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+
+
+class ReconcileIntentPhase(StrEnum):
+    EXECUTE = "EXECUTE"
+    FOLD = "FOLD"
+
+
+class ReconcileMovedEntryType(StrEnum):
+    FILE = "FILE"
+    DIRECTORY = "DIRECTORY"
+
+
 class VersionKind(StrEnum):
     IMPLICIT = "IMPLICIT"
     DIRECTORY = "DIRECTORY"

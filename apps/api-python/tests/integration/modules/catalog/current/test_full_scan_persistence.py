@@ -24,9 +24,15 @@ from app.modules.catalog.application.scan_dto import (
     FullScanWorkItem,
     PathCollision,
     SourceObservation,
+    SourcePathBinding,
 )
 from app.modules.catalog.application.source_admission_ports import (
     SourceStatExpectation,
+)
+from app.modules.catalog.application.watcher_dto import (
+    BoundTopologyStageBatch,
+    BoundTopologyUnitPlan,
+    required_topology_source_paths,
 )
 from app.modules.catalog.domain.admission import (
     AudioCodec,
@@ -46,7 +52,6 @@ from app.modules.catalog.domain.scan import (
     AssetMembershipPlan,
     ReadingMorphology,
     ScanConflict,
-    ScanStale,
     TopologyStageBatch,
     TopologyUnitPlan,
     VersionProjectionPlan,
@@ -82,11 +87,13 @@ from app.modules.catalog.infrastructure.persistence import (
     LibraryScanWorkItem,
     LibrarySourceEntry,
     LibraryVolume,
+    LibraryWatcherState,
     PathCollisionObservation,
     RevisionState,
     ScanState,
     SlotState,
     SourceEntryType,
+    SqlAlchemyScanUnitOfWork,
     SqlAlchemyScanUowFactory,
     TopologyUnit,
     TopologyUnitRevision,
@@ -172,6 +179,13 @@ def _seed_library(
                     level=GrantLevel.ADMIN,
                     scope_epoch=1,
                 ),
+                LibraryWatcherState(
+                    library_id="library",
+                    latest_sequence=0,
+                    overflow_through_sequence=None,
+                    full_rescan_reason=None,
+                    updated_at=datetime.now(UTC),
+                ),
             )
         )
 
@@ -199,6 +213,7 @@ def _pending_run(now: datetime) -> FullScanRun:
         created_by_actor_id="admin",
         started_at=None,
         finished_at=None,
+        watcher_sequence_watermark=0,
     )
 
 
@@ -481,6 +496,7 @@ def test_source_batch_preserves_names_collisions_presence_and_query_budget(
             )
         )
         assert {child.observed_parent_presence_epoch for child in children} == {0}
+        shelf.next_children_presence_epoch = 1
         shelf.children_presence_epoch = 1
         session.commit()
 
@@ -533,13 +549,8 @@ def test_source_batch_preserves_names_collisions_presence_and_query_budget(
         path=("Folder", "left.pdf"),
         unit_suffix="blocked-left",
     )
-    with SqlAlchemyScanUowFactory(factory)() as uow, pytest.raises(ScanStale):
-        uow.topology.begin_staging(
-            running.fence(),
-            blocked_plan,
-            expected_active_revision_id=None,
-            created_at=now + timedelta(seconds=2),
-        )
+    with SqlAlchemyScanUowFactory(factory)() as uow:
+        assert _bind_plan(uow, running, blocked_plan, outcome.bindings) is None
 
 
 def test_large_collision_group_has_linear_bounded_evidence(persistence) -> None:
@@ -615,13 +626,8 @@ def test_reverse_order_directory_collision_keeps_children_but_blocks_publish(
         path=("folder", "right.pdf"),
         unit_suffix="blocked-right",
     )
-    with SqlAlchemyScanUowFactory(factory)() as uow, pytest.raises(ScanStale):
-        uow.topology.begin_staging(
-            running.fence(),
-            blocked_plan,
-            expected_active_revision_id=None,
-            created_at=now,
-        )
+    with SqlAlchemyScanUowFactory(factory)() as uow:
+        assert _bind_plan(uow, running, blocked_plan, outcome.bindings) is None
     with SqlAlchemyScanUowFactory(factory)() as uow:
         assert uow.scans.set_stage(
             running.fence(),
@@ -689,6 +695,33 @@ def _flat_plan(
     )
 
 
+def _bind_plan(
+    uow: SqlAlchemyScanUnitOfWork,
+    run: FullScanRun,
+    plan: TopologyUnitPlan,
+    available_bindings: tuple[SourcePathBinding, ...],
+) -> BoundTopologyUnitPlan | None:
+    fence = run.fence()
+    by_path = {binding.relative_path: binding for binding in available_bindings}
+    required = required_topology_source_paths(plan)
+    if any(path not in by_path for path in required):
+        return None
+    bindings = tuple(by_path[path] for path in required)
+    return uow.topology.bind_plan(fence, plan, bindings)
+
+
+def _bound_batch(
+    plan: BoundTopologyUnitPlan,
+    batch: TopologyStageBatch,
+) -> BoundTopologyStageBatch:
+    return BoundTopologyStageBatch(
+        first_row=batch.first_row,
+        rows=batch.rows,
+        bindings=plan.projections[batch.first_row : batch.first_row + len(batch.rows)],
+        complete=batch.complete,
+    )
+
+
 def test_topology_pointer_and_stable_facts_change_only_on_activation(
     persistence,
 ) -> None:
@@ -698,7 +731,7 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
     _insert_pending_scan(factory, now)
     running = _bind_running_scan(factory, now)
     with SqlAlchemyScanUowFactory(factory)() as uow:
-        uow.sources.upsert_observations(
+        source_outcome = uow.sources.upsert_observations(
             running.fence(), (_file_observation(("book.bin",)),), observed_at=now
         )
         uow.commit()
@@ -707,9 +740,11 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
         source_format=SourceFormat.PDF, morphology=ReadingMorphology.PDF
     )
     with SqlAlchemyScanUowFactory(factory)() as uow:
+        bound_pdf = _bind_plan(uow, running, pdf_plan, source_outcome.bindings)
+        assert bound_pdf is not None
         staging = uow.topology.begin_staging(
             running.fence(),
-            pdf_plan,
+            bound_pdf,
             expected_active_revision_id=None,
             created_at=now,
         )
@@ -717,12 +752,10 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
         staging = uow.topology.append_staging_batch(
             running.fence(),
             staging,
-            TopologyStageBatch(0, pdf_plan.rows, True),
+            _bound_batch(bound_pdf, TopologyStageBatch(0, pdf_plan.rows, True)),
             staged_at=now,
         )
-        unit = uow.topology.get_active_revision_id(
-            "library", unit_key=pdf_plan.unit_key
-        )
+        unit = uow.topology.get_active_revision_id("library", unit_id=bound_pdf.unit_id)
         assert unit is None
         assert uow.topology.activate_staging_group(
             running.fence(), (staging,), activated_at=now
@@ -740,13 +773,16 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
         source_format=SourceFormat.CBZ, morphology=ReadingMorphology.COMIC
     )
     with SqlAlchemyScanUowFactory(factory)() as uow:
+        bound_comic = _bind_plan(uow, running, comic_plan, source_outcome.bindings)
+        assert bound_comic is not None
+        assert bound_comic.unit_id == bound_pdf.unit_id
         active = uow.topology.get_active_revision_id(
-            "library", unit_key=comic_plan.unit_key
+            "library", unit_id=bound_comic.unit_id
         )
         assert active is not None
         comic_staging = uow.topology.begin_staging(
             running.fence(),
-            comic_plan,
+            bound_comic,
             expected_active_revision_id=active,
             created_at=now + timedelta(seconds=1),
         )
@@ -754,7 +790,10 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
         comic_staging = uow.topology.append_staging_batch(
             running.fence(),
             comic_staging,
-            TopologyStageBatch(0, comic_plan.rows, True),
+            _bound_batch(
+                bound_comic,
+                TopologyStageBatch(0, comic_plan.rows, True),
+            ),
             staged_at=now + timedelta(seconds=1),
         )
         uow.commit()
@@ -797,10 +836,12 @@ def test_topology_pointer_and_stable_facts_change_only_on_activation(
         volume.content_state = "READY"
         asset.validation_state = AssetValidationState.READY
     with SqlAlchemyScanUowFactory(factory)() as uow:
+        unchanged = _bind_plan(uow, running, comic_plan, source_outcome.bindings)
+        assert unchanged is not None
         assert (
             uow.topology.begin_staging(
                 running.fence(),
-                comic_plan,
+                unchanged,
                 expected_active_revision_id=comic_staging.revision_id,
                 created_at=now + timedelta(seconds=3),
             )
@@ -835,7 +876,9 @@ def test_ten_thousand_track_topology_pipeline_has_bounded_statements(
         ),
     )
     with SqlAlchemyScanUowFactory(factory)() as uow:
-        uow.sources.upsert_observations(running.fence(), observations, observed_at=now)
+        source_outcome = uow.sources.upsert_observations(
+            running.fence(), observations, observed_at=now
+        )
         uow.commit()
 
     rows = (
@@ -893,9 +936,11 @@ def test_ten_thousand_track_topology_pipeline_has_bounded_statements(
     event.listen(engine, "before_cursor_execute", count_statement)
     try:
         with SqlAlchemyScanUowFactory(factory)() as uow:
+            bound_plan = _bind_plan(uow, running, plan, source_outcome.bindings)
+            assert bound_plan is not None
             staging = uow.topology.begin_staging(
                 running.fence(),
-                plan,
+                bound_plan,
                 expected_active_revision_id=None,
                 created_at=now,
             )
@@ -904,7 +949,10 @@ def test_ten_thousand_track_topology_pipeline_has_bounded_statements(
         for batch in iter_stage_batches(plan):
             with SqlAlchemyScanUowFactory(factory)() as uow:
                 staging = uow.topology.append_staging_batch(
-                    running.fence(), staging, batch, staged_at=now
+                    running.fence(),
+                    staging,
+                    _bound_batch(bound_plan, batch),
+                    staged_at=now,
                 )
                 uow.commit()
         with SqlAlchemyScanUowFactory(factory)() as uow:

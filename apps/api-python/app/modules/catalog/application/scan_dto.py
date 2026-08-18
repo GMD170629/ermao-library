@@ -145,6 +145,19 @@ DiscoveryObservation: TypeAlias = DiscoveredSource | DiscoveryIssue
 
 
 @dataclass(frozen=True, slots=True)
+class TargetedPathAbsent:
+    """A no-follow targeted observation proving one relative path is absent."""
+
+    relative_path: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _relative_path(self.relative_path, "relative_path")
+
+
+TargetedPathObservation: TypeAlias = DiscoveredSource | TargetedPathAbsent
+
+
+@dataclass(frozen=True, slots=True)
 class ScanLibrarySnapshot:
     library_id: str
     canonical_root: str
@@ -246,6 +259,7 @@ class FullScanRun:
     created_by_actor_id: str | None
     started_at: datetime | None
     finished_at: datetime | None
+    watcher_sequence_watermark: int
 
     @property
     def root_path_snapshot(self) -> str:
@@ -277,6 +291,7 @@ class FullScanRun:
             _integer(value, field_name, minimum=1)
         _integer(self.discovered_count, "discovered_count")
         _integer(self.diagnostic_count, "diagnostic_count")
+        _integer(self.watcher_sequence_watermark, "watcher_sequence_watermark")
         live_states = {
             ScanState.PENDING,
             ScanState.RUNNING,
@@ -434,12 +449,43 @@ class PathCollision:
 
 
 @dataclass(frozen=True, slots=True)
+class SourcePathBinding:
+    """An explicit raw-path to opaque SourceEntry identity binding."""
+
+    relative_path: tuple[str, ...]
+    source_entry_id: str
+    filesystem_identity: str | None
+    pending_parent_presence_epoch: int | None = None
+
+    def __post_init__(self) -> None:
+        _relative_path(self.relative_path, "relative_path", root=True)
+        _identifier(self.source_entry_id, "source_entry_id")
+        if self.filesystem_identity is not None:
+            _identifier(self.filesystem_identity, "filesystem_identity")
+        if self.pending_parent_presence_epoch is not None:
+            _integer(
+                self.pending_parent_presence_epoch,
+                "pending_parent_presence_epoch",
+                minimum=1,
+            )
+            if len(self.relative_path) == 1:
+                raise ValueError(
+                    "a synthetic-root child cannot carry a parent presence epoch"
+                )
+
+
+@dataclass(frozen=True, slots=True)
 class SourceObservationOutcome:
     collisions: tuple[PathCollision, ...] = ()
+    bindings: tuple[SourcePathBinding, ...] = ()
 
     def __post_init__(self) -> None:
         if any(not isinstance(value, PathCollision) for value in self.collisions):
             raise TypeError("collisions must contain PathCollision values")
+        if any(not isinstance(value, SourcePathBinding) for value in self.bindings):
+            raise TypeError("bindings must contain SourcePathBinding values")
+        if len({value.relative_path for value in self.bindings}) != len(self.bindings):
+            raise ValueError("bindings cannot repeat a relative path")
 
 
 @dataclass(frozen=True, slots=True)
@@ -622,9 +668,12 @@ __all__ = [
     "ScanLibrarySnapshot",
     "SourceObservation",
     "SourceObservationOutcome",
+    "SourcePathBinding",
     "StagingRevision",
     "StartFullLibraryScanCommand",
     "TakeOverFullLibraryScanCommand",
+    "TargetedPathAbsent",
+    "TargetedPathObservation",
     "TopologyMaterialization",
     "WriterReservation",
 ]

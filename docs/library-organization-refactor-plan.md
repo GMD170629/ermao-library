@@ -114,7 +114,7 @@ erDiagram
 | `writePolicy` | `READ_ONLY | READ_WRITE` |
 | `controlState` | `DRAFT | ACTIVATING | ACTIVE | PAUSED | REMOVING` |
 | `observedHealth` | `UNKNOWN | HEALTHY | UNAVAILABLE | ERROR`，不是用户控制状态 |
-| `configRevision` | 忽略规则、稳定时间等配置的乐观并发版本 |
+| `configRevision` | 忽略规则等配置的乐观并发版本 |
 | `topologyWriterFence` | 每次 writer lease acquire/takeover 单调递增；所有拓扑写入必须 CAS |
 | `sourceMutationFence` | 短时跨进程 gate；串行 final publish/relocate 与控制/ACL 写 |
 | `nextScanGeneration` | 单调递增的 generation 分配器 |
@@ -158,9 +158,11 @@ REMOVING；它不能成为无法释放 root claim/ADMIN grant 的终止状态。
 | `filesystemIdentity` | 可空、平台证据，不作为跨库 identity |
 | `sizeBytes` / `modifiedNs` | 变化提示，不证明内容相同 |
 | `lastSeenGeneration` | missing projection 输入 |
-| `absenceConfirmedAt` | watcher/subtree stat 明确不存在时设置；文件身份确认或目录完整 subtree scan 后清除 |
-| `childrenPresenceEpoch` | 目录每次 reappearance/完整子树重验前递增，作旧 child 失效 fence |
-| `observedParentPresenceEpoch` | child 被当前 parent enumeration 看见时复制 parent epoch |
+| `absenceConfirmedAt` | 仅在 watcher/subtree no-follow stat 明确不存在时设置；实际存在但被 ignore/noise 排除时不得设置 |
+| `childrenPresenceEpoch` | 目录已发布的完整 child snapshot epoch |
+| `nextChildrenPresenceEpoch` | 单调分配器；每次 directory reconcile attempt 原子递增，crash 重试不能复用旧 proposed epoch |
+| `observedParentPresenceEpoch` | child 已折叠到的 parent snapshot epoch |
+| `pendingObservedParentPresenceEpoch` | 本次 attempt 看见 child 的 proposed epoch；flip 前不替换旧可见 snapshot |
 | `layoutState` | `PRESENT | INVALID`；`MISSING` 由 generation/confirmed absence 投影 |
 | `slotState` | `ACTIVE | RETIRED`；retired tombstone 不占当前名称槽 |
 
@@ -180,14 +182,24 @@ move 进入 missing tombstone 的规则固定：内容身份匹配则复用 tomb
 tombstone 的旧 projection 仅保留历史/用户状态，退出普通查询且不占名称槽。
 
 完整 relative path 是有限层祖先 join 后的边界投影。Work/Version/Volume 各自引用 root
-entry；隐式 Version 可不引用 entry。查询时状态优先级固定为：任一 child 的
-`observedParentPresenceEpoch != parent.childrenPresenceEpoch` 即 MISSING；否则完整 SourceEntry 和
+entry；隐式 Version 可不引用 entry。查询时状态优先级固定为：任一 child 必须满足
+`observedParentPresenceEpoch == parent.childrenPresenceEpoch OR
+pendingObservedParentPresenceEpoch == parent.childrenPresenceEpoch`，否则即 MISSING；然后完整 SourceEntry 和
 Work/Version/Volume parent chain 中任一节点有 `absenceConfirmedAt` 或
 `lastSeenGeneration < lastSuccessfulGeneration => MISSING`；否则任一祖先
 `layoutState=INVALID => INVALID`；否则 `PRESENT`。内容 `PENDING/READY/UNREADABLE` 是另一条
 轴，不能把 parser 错误伪装成目录 missing。目录 delete 只需标记一个 ancestor，不批量更新
 后代；目录重现时逐层递增目录 epoch 并 stamp 实际看到的 child。完整枚举以 valid、INVALID 或
 empty observation 任一终态结束后可清 marker；未看到的旧 child 因 epoch mismatch 仍为 MISSING。
+Targeted directory reconcile 开始时分配唯一 proposed epoch，slice 只写 child 的 pending epoch；
+自然穷尽并通过目录 stat/root/fence 校验后，以 O(1) CAS 把 parent current epoch 翻到 proposed。
+flip 前读者仍见旧 observed snapshot；flip 后 pending==current 立即构成新 snapshot。随后以 SourceEntry
+ID keyset 每批最多 5,000 行把 effective pending 折叠到 observed，FOLD 完成后才删除 intent。
+crash 遗留 pending 因小于 parent next/current 而不可见且安全；full scan seen upsert 清对应 pending。
+单遍 targeted materialization 在 flip 前只可绑定显式携带
+`pendingObservedParentPresenceEpoch == row.pending == parent.nextChildrenPresenceEpoch` 的当前 attempt
+source。Topology plan 引用路径的每个非根物理祖先（包括 Disc 目录）都必须有独立 binding；叶子
+不能替任意 future-pending 祖先背书。此证明仅供 live reconcile binder，普通查询仍只看 current。
 中断则不清 marker，单个 create event 不能复活陈旧后代。
 
 `SourceAttachment` 携带不可变 `libraryId`，使用可空 `workId/versionId/volumeId` typed
@@ -334,10 +346,14 @@ set；至少保留一个合法 track，否则 Volume 进入 INVALID。基础设�
   10,000 tracks 并同样分批写；最后一个带 writer fence 的 CAS 才切 owner active revision；
 - incomplete staging 对查询不可见，旧 active revision 保留；cleanup 可分批删除 abandoned rows。
 
-`WatcherJournalState` / `WatcherJournalEntry`：按 normalized subtree 合并；每 Library 最多
-2,000 pending entries。溢出时用一个 `FULL_RESCAN_REQUIRED_AFTER_GENERATION` fence 替换路径
-记录，只在常数大小 state row 推进 `latestEventSequence`；只有从最新 sequence 之后开始且成功
-finalize 的 full scan 才可清 fence。
+`LibraryWatcherState` / `LibraryReconcileIntent`：同一 intent 行兼作按 normalized top-level scope
+合并的 journal 与 leased work；每 Library 最多 2,000 个 PENDING intent。每行保存
+`firstSequence/throughSequence` 并按 `firstSequence,id` claim；MOVE 可保留 exact old/new proof，但
+`firstSequence` 只负责排序；successor 必须按 overlap 且 `throughSequence` 大于 running fence
+的 through sequence 判定，不能因 coalesce 保留较早 first 而漏检。任一 intent 最多两个 raw
+top-level scope。溢出时原子失效 RUNNING reconcile writer、废弃其
+STAGING、删除所有 PENDING/RUNNING intent，并在 constant-size state row 保存 full-rescan reason
+与 through sequence。只有 watermark 覆盖 fence 且期间没有更新 sequence 的成功 full scan才可清。
 
 `LayoutDiagnostic`：
 
@@ -498,8 +514,8 @@ Reader artwork 解析采用 Volume attachment > Version attachment > Work attach
    250 ms 后提交结果/heartbeat 并 cooperative yield；live lease 在进程内保留有界 ephemeral
    iterator/frontier，不序列化它，lease 丢失后从该 subtree root 幂等重扫。
 4. `SourceAdmissionProbe` 执行 extension -> MIME -> magic/container -> 最低限度 bounded
-   probe，生成明确的 primary/sidecar/audio/bundle evidence。probe 前后验证 stat；变化时按
-   stability delay 重排，不发布半写内容。`.zip` 不直接等于漫画。
+   probe，生成明确的 primary/sidecar/audio/bundle evidence。probe 前后验证 stat；变化时记录
+   source drift 并等待后续 reconcile，不发布半写内容。`.zip` 不直接等于漫画。
 5. 按上述有界最小拓扑单元调用纯 `LayoutInterpreter`。任何 multi-asset Volume 与 AUDIOBOOK
    Work 都以 hidden `TopologyUnitRevision` 分成最多 500 rows/250 ms 的 staging transaction，
    并在完整校验后以一次 fenced `activeRevisionId` CAS 激活；旧 active revision 在此之前继续
@@ -513,7 +529,9 @@ Reader artwork 解析采用 Volume attachment > Version attachment > Work attach
 9. `CompleteScanGeneration` 用 CAS 验证 run/config/root/mode/topology version，推进 last
    successful generation；`lastSeenGeneration < lastSuccessfulGeneration` 投影为 MISSING，
    不在一个事务更新百万行。
-10. 按 scan-start watermark 顺序重放 full scan 期间记录的 watcher journal。
+10. 以 scan-start watermark 删除完全覆盖的 intent；若水位后仍有 PENDING，事务内只写一个
+    library-level `LIBRARY_RECONCILE_AVAILABLE` wake；若 full-rescan fence 未被水位完全覆盖，
+    写一个 `LIBRARY_FULL_SCAN_REQUIRED`，不逐事件发布 outbox。
 
 扫描不在内存构造整棵目录树，也不为 180 万项创建 timer。可以重复发现与 upsert，但
 不得产生重复结构节点或重复索引任务。全量扫描采用增量可见：已验证单元可以立即出现；
@@ -530,20 +548,46 @@ CAS fence + run state + configRevision + allowed controlState，stale worker zer
 ### 5.2 watcher
 
 - create/modify/delete/file move/directory move 都变成持久 `ReconcileSubtree` intent；
-- stability delay 和 debounce 由队列控制；journal 按 normalized path/subtree 合并且每 Library
-  最多 2,000 pending rows；溢出后替换成一个
-  `FULL_RESCAN_REQUIRED_AFTER_GENERATION` fence，只更新常数大小 latest-event sequence；
+- `ACTIVATING | ACTIVE | PAUSED` 都继续轻量 journal；Pause 只停扫描/发布/source write，不能让
+  watcher 离线丢变化。仅 `ACTIVE + lastSuccessfulGeneration` 可 claim targeted reconcile；现有
+  事务性 `LIBRARY_RESUMED` 事件同时是 library-level reconcile wake，worker 必须按 Library 重新
+  claim 最早 PENDING，不能依赖可能已在 PAUSED 期间消费的旧 wake 或瞬时 intentId；
+- intent 只保存一或两个 top-level raw scope 及 comparison key；MOVE 另存 exact old/new path。
+  唯一 MOVE proof 与普通重叠事件合并时保留；多个不同 proof 不猜链，清 proof 后按 scope 重扫；
+- application 将 `availableAt` 设为事件入队时间；正确性依赖 journal 合并、执行期 no-follow/stat
+  fence、successor 检查与周期全量扫描，不依赖延时稳定窗口。PR11 backend 可以为性能做
+  debounce，但不得改变正确性；journal 按 scope overlap 合并且每 Library 最多 2,000 PENDING
+  rows。第 2,001 个在 append 前直接进入 constant-size full-rescan fence；
 - overflow fence 只有在最新 sequence 之后开始的完整 scan 成功后才清除；期间不再追加逐路径
   journal，确保既有界又不会把 overflow 误当已对账；
-- move 事件保留 old/new relative path 与平台 identity，用于一对一 ID 迁移；
-- watcher 断开、溢出或事件不可信时只触发完整 scan，不自行猜测删除；
+- live RUNNING reconcile 遇 overflow 时，同一事务递增 topology writer fence、废弃该 origin 的
+  STAGING、删除全部 intent 并立 fence；旧 worker 后续 publish 必须 zero-row。full scan
+  RUNNING/FINALIZING 时只 journal，不递增它持有的 writer fence；
+- trusted MOVE 原始事件只保留 old/new relative path。执行期必须重新 no-follow 观察：old 明确
+  absent、new filesystem identity 与当前 ACTIVE-slot/PRESENT/layout-valid 的持久 old 唯一匹配、
+  同库且无 collision/successor 时才 O(1)
+  rebind 并保留 IDs；否则降级 targeted reconcile。离线或 overflow 后 rename 没有 trusted MOVE，
+  明确定义为旧项 missing + 新 SourceEntry/新稳定 ID，不凭 filesystem identity 推断；
+- 显式 `WatcherTrustLost(DISCONNECTED | BACKEND_OVERFLOW | UNTRUSTED)` 与 root binding loss 只触发
+  完整 scan，不自行猜测删除；
 - 周期全量扫描是最终一致性的保证。
 - WorkItem 数量有高水位，不能为每个文件或永久目录各保留一行。
-- delete 在 stability delay 后重新 stat；确认缺失才设置 entry absence marker，不推进 full
+- delete 执行时重新 no-follow stat；确认缺失才设置 entry absence marker，不推进 full
   generation。file reappear 在身份明确时可清 marker；directory reappear 只触发 full subtree
   reconcile，逐层推进 presence epoch；完整成功并得到 valid activation、INVALID 或 empty
   observation 任一终态后才清 marker，旧未见 child 由 epoch mismatch 保持 MISSING；已证明 move
   走原子 identity 更新。
+- targeted upsert 若发现 normalization collision，原子把相关 current slots 标为 COLLIDING/INVALID，
+  写带 reconcile origin 的 diagnostic 并阻断相关 unit；完成安全 presence flip 后，由当前 owner
+  进入 `COLLISION_RECHECK` full-rescan fence。PR5B 不给 scan-scoped `PathCollisionObservation` 增加
+  reconcile 外键；完整 scan 负责重新取证或解除碰撞。
+
+默认 watchdog `Observer` 不能证明底层 `IN_Q_OVERFLOW`、root disconnect/unmount，也会在父目录
+move 后产生 synthetic descendant events。PR5B 只冻结 mapper/application/持久化合同且生产组合根
+保持 dormant：exact root directory MODIFY 作为冗余 parent-mtime 忽略；root DELETE/MOVE 或
+synthetic/未知根事件进入 trust-lost；受信父 `DirMoved` 必须先于可忽略的 synthetic descendants。
+PR11 接线前必须选择或补充能显式报告 health/overflow、保证该排序的 backend；否则事件映射为
+UNTRUSTED 并要求 full scan。数据库 2,000 行容量 fence 不等于 backend queue overflow 证据。
 
 ### 5.3 文件变化和重命名
 
@@ -929,17 +973,26 @@ composition root，因此不存在双读、双写或两套结构同时成为真�
 
 验收：百万级 fixture 内存有界；失败扫描不产生 missing 风暴；混合格式不生成媒体桶。
 
-### [PR 5B/12] — watcher journal 与 subtree reconcile（下一独立 PR）
+### [PR 5B/12] — watcher journal 与 subtree reconcile（当前独立 PR）
 
-- bounded watcher journal、scan-start watermark、每 Library 2,000 行上限与 constant-size
-  overflow rescan fence；
+- 两表最小模型：per-Library watcher state + coalesced/leased reconcile intent；scan-start watermark、
+  每 Library 2,000 个 PENDING 上限与 constant-size overflow rescan fence；
 - full scan RUNNING/FINALIZING 期间 watcher 只追加/合并 journal，不直接发布 topology；
 - create/modify/delete/file move/directory move 转成幂等 subtree reconcile intent，按序 replay；
 - targeted subtree reconcile 不推进 full generation；watcher 断开、溢出或不可信只触发新的
-  full scan，不自行猜测全局 missing。
+  full scan，不自行猜测全局 missing；
+- 单次 lazy traversal 同时写 source pending presence 与 bounded topology unit；directory attempt 用
+  monotonic next/proposed epoch，O(1) flip 后每批最多 5,000 行 FOLD；查询必须检查完整 ancestor
+  absence + effective presence 公式，不遍历百万 active unit 做 deactivate；
+- PAUSED 继续 journal，Resume 后仅 config/control revision 变化的 PENDING/RUNNING work 可重拍当前
+  snapshot；root/mode/pathComparison/topology/root identity 变化一律进入 full-rescan fence。PR11
+  将 `LIBRARY_RESUMED` 作为按 Library claim-next 的 reconcile wake，无 PENDING 时自然 no-op；
+- PR5B 仍不注册生产 worker/router。默认 watchdog backend 的 health/overflow 能力不足，PR11 满足
+  上述显式 trust-loss 和 parent-move 排序门禁前不得接线。
 
-验收：journal/replay/overflow 与 subtree recovery 独立门禁；PR 5A 的 full-scan 测试不宣称
-watcher 已实现。
+验收：journal/replay/overflow、trusted MOVE/fallback、presence crash recovery 与 subtree recovery
+独立门禁；PR 5A 的 full-scan 测试不宣称 watcher，PR5B dormant 合同也不宣称 production backend
+已经能观察所有 disconnect/overflow。
 
 ### PR 6 — 深度内容索引与 revision
 

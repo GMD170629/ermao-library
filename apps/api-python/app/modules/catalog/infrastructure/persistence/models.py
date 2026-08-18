@@ -31,12 +31,16 @@ from .enums import (
     AssetValidationState,
     AttachmentRole,
     AuditActorKind,
+    FullRescanReason,
     GrantLevel,
     IgnoreRuleKind,
     LayoutState,
     LibraryControlState,
     LibraryHealth,
     OperationState,
+    ReconcileIntentPhase,
+    ReconcileIntentState,
+    ReconcileMovedEntryType,
     RevisionState,
     ScanFailureCode,
     ScanStage,
@@ -109,6 +113,125 @@ class CatalogLibrary(CurrentBase):
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
         nullable=False,
+    )
+
+
+class LibraryWatcherState(CurrentBase):
+    __tablename__ = "LibraryWatcherState"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+    )
+
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, primary_key=True)
+    latest_sequence: Mapped[int] = mapped_column(
+        "latestSequence", BigInteger, nullable=False, default=0
+    )
+    overflow_through_sequence: Mapped[int | None] = mapped_column(
+        "overflowThroughSequence", BigInteger
+    )
+    full_rescan_reason: Mapped[FullRescanReason | None] = mapped_column(
+        "fullRescanReason", Enum(FullRescanReason, **_ENUM)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class LibraryReconcileIntent(CurrentBase):
+    __tablename__ = "LibraryReconcileIntent"
+    __table_args__ = (
+        ForeignKeyConstraint(["libraryId"], ["CatalogLibrary.id"], ondelete="CASCADE"),
+        UniqueConstraint(
+            "libraryId",
+            "throughSequence",
+            name="LibraryReconcileIntent_library_through_key",
+        ),
+        Index(
+            "LibraryReconcileIntent_claim_idx",
+            "libraryId",
+            "state",
+            "availableAt",
+            "firstSequence",
+            "id",
+        ),
+        Index(
+            "LibraryReconcileIntent_lease_idx",
+            "libraryId",
+            "state",
+            "leaseExpiresAt",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True)
+    library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
+    first_sequence: Mapped[int] = mapped_column(
+        "firstSequence", BigInteger, nullable=False
+    )
+    through_sequence: Mapped[int] = mapped_column(
+        "throughSequence", BigInteger, nullable=False
+    )
+    scope1_path: Mapped[str] = mapped_column("scope1Path", Text, nullable=False)
+    scope1_key: Mapped[str] = mapped_column("scope1Key", Text, nullable=False)
+    scope2_path: Mapped[str | None] = mapped_column("scope2Path", Text)
+    scope2_key: Mapped[str | None] = mapped_column("scope2Key", Text)
+    coalesce_key: Mapped[str] = mapped_column(
+        "coalesceKey", String(191), nullable=False
+    )
+    move_old_path: Mapped[list[str] | None] = mapped_column(
+        "moveOldPath", JSON(none_as_null=True)
+    )
+    move_new_path: Mapped[list[str] | None] = mapped_column(
+        "moveNewPath", JSON(none_as_null=True)
+    )
+    moved_entry_type: Mapped[ReconcileMovedEntryType | None] = mapped_column(
+        "movedEntryType", Enum(ReconcileMovedEntryType, **_ENUM)
+    )
+    state: Mapped[ReconcileIntentState] = mapped_column(
+        Enum(ReconcileIntentState, **_ENUM), nullable=False
+    )
+    phase: Mapped[ReconcileIntentPhase] = mapped_column(
+        Enum(ReconcileIntentPhase, **_ENUM), nullable=False
+    )
+    lease_owner: Mapped[str | None] = mapped_column("leaseOwner", _ID)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", DateTime(timezone=True)
+    )
+    topology_writer_fence: Mapped[int | None] = mapped_column(
+        "topologyWriterFence", BigInteger
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(
+        "availableAt", DateTime(timezone=True), nullable=False
+    )
+    fold_after_source_entry_id: Mapped[str | None] = mapped_column(
+        "foldAfterSourceEntryId", _ID
+    )
+    config_revision: Mapped[int] = mapped_column(
+        "configRevision", BigInteger, nullable=False
+    )
+    organization_mode: Mapped[OrganizationMode] = mapped_column(
+        "organizationMode", Enum(OrganizationMode, **_ENUM), nullable=False
+    )
+    topology_version: Mapped[int] = mapped_column(
+        "topologyVersion", Integer, nullable=False
+    )
+    path_comparison: Mapped[PathComparison] = mapped_column(
+        "pathComparison", Enum(PathComparison, **_ENUM), nullable=False
+    )
+    root_path_snapshot: Mapped[str] = mapped_column(
+        "rootPathSnapshot", Text, nullable=False
+    )
+    root_identity_snapshot: Mapped[str] = mapped_column(
+        "rootIdentitySnapshot", String(191), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt", DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), nullable=False
     )
 
 
@@ -364,10 +487,16 @@ class LibrarySourceEntry(CurrentBase):
         "absenceConfirmedAt", DateTime(timezone=True)
     )
     children_presence_epoch: Mapped[int] = mapped_column(
-        "childrenPresenceEpoch", BigInteger, default=0
+        "childrenPresenceEpoch", BigInteger, nullable=False, default=0
+    )
+    next_children_presence_epoch: Mapped[int] = mapped_column(
+        "nextChildrenPresenceEpoch", BigInteger, nullable=False, default=0
     )
     observed_parent_presence_epoch: Mapped[int | None] = mapped_column(
         "observedParentPresenceEpoch", BigInteger
+    )
+    pending_observed_parent_presence_epoch: Mapped[int | None] = mapped_column(
+        "pendingObservedParentPresenceEpoch", BigInteger
     )
     layout_state: Mapped[LayoutState] = mapped_column(
         "layoutState", Enum(LayoutState, **_ENUM), nullable=False
@@ -471,6 +600,9 @@ class LibraryScanRun(CurrentBase):
     )
     topology_writer_fence: Mapped[int] = mapped_column(
         "topologyWriterFence", BigInteger, nullable=False
+    )
+    watcher_sequence_watermark: Mapped[int] = mapped_column(
+        "watcherSequenceWatermark", BigInteger, nullable=False
     )
     state: Mapped[ScanState] = mapped_column(Enum(ScanState, **_ENUM), nullable=False)
     failure_code: Mapped[ScanFailureCode | None] = mapped_column(
@@ -742,6 +874,7 @@ class LayoutDiagnostic(CurrentBase):
     id: Mapped[str] = mapped_column(_ID, primary_key=True)
     library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
     scan_run_id: Mapped[str | None] = mapped_column("scanRunId", _ID)
+    reconcile_origin_id: Mapped[str | None] = mapped_column("reconcileOriginId", _ID)
     generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
     config_revision: Mapped[int] = mapped_column(
         "configRevision", BigInteger, nullable=False
@@ -852,7 +985,8 @@ class TopologyUnitRevision(CurrentBase):
     id: Mapped[str] = mapped_column(_ID, primary_key=True)
     library_id: Mapped[str] = mapped_column("libraryId", _ID, nullable=False)
     unit_id: Mapped[str] = mapped_column("unitId", _ID, nullable=False)
-    scan_run_id: Mapped[str] = mapped_column("scanRunId", _ID, nullable=False)
+    scan_run_id: Mapped[str | None] = mapped_column("scanRunId", _ID)
+    reconcile_origin_id: Mapped[str | None] = mapped_column("reconcileOriginId", _ID)
     unit_root_entry_id: Mapped[str] = mapped_column(
         "unitRootEntryId", _ID, nullable=False
     )
@@ -1243,6 +1377,119 @@ cast(Table, CatalogLibrary.__table__).append_constraint(
         name="CatalogLibrary_scan_generation_ck",
     )
 )
+cast(Table, LibraryWatcherState.__table__).append_constraint(
+    CheckConstraint(
+        LibraryWatcherState.latest_sequence >= 0,
+        name="LibraryWatcherState_latest_sequence_ck",
+    )
+)
+cast(Table, LibraryWatcherState.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryWatcherState.overflow_through_sequence.is_(None),
+                LibraryWatcherState.full_rescan_reason.is_(None),
+            ),
+            and_(
+                LibraryWatcherState.overflow_through_sequence.is_not(None),
+                LibraryWatcherState.overflow_through_sequence > 0,
+                LibraryWatcherState.overflow_through_sequence
+                <= LibraryWatcherState.latest_sequence,
+                LibraryWatcherState.full_rescan_reason.is_not(None),
+            ),
+        ),
+        name="LibraryWatcherState_overflow_shape_ck",
+    )
+)
+cast(Table, LibraryReconcileIntent.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            LibraryReconcileIntent.first_sequence > 0,
+            LibraryReconcileIntent.through_sequence
+            >= LibraryReconcileIntent.first_sequence,
+            LibraryReconcileIntent.attempt >= 0,
+            LibraryReconcileIntent.config_revision > 0,
+            LibraryReconcileIntent.topology_version > 0,
+        ),
+        name="LibraryReconcileIntent_positive_ck",
+    )
+)
+cast(Table, LibraryReconcileIntent.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryReconcileIntent.scope2_path.is_(None),
+                LibraryReconcileIntent.scope2_key.is_(None),
+            ),
+            and_(
+                LibraryReconcileIntent.scope2_path.is_not(None),
+                LibraryReconcileIntent.scope2_key.is_not(None),
+            ),
+        ),
+        name="LibraryReconcileIntent_scope_shape_ck",
+    )
+)
+cast(Table, LibraryReconcileIntent.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryReconcileIntent.move_old_path.is_(None),
+                LibraryReconcileIntent.move_new_path.is_(None),
+                LibraryReconcileIntent.moved_entry_type.is_(None),
+            ),
+            and_(
+                LibraryReconcileIntent.move_old_path.is_not(None),
+                LibraryReconcileIntent.move_new_path.is_not(None),
+                LibraryReconcileIntent.moved_entry_type.is_not(None),
+            ),
+        ),
+        name="LibraryReconcileIntent_move_shape_ck",
+    )
+)
+cast(Table, LibraryReconcileIntent.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryReconcileIntent.state == ReconcileIntentState.PENDING,
+                LibraryReconcileIntent.lease_owner.is_(None),
+                LibraryReconcileIntent.lease_expires_at.is_(None),
+                LibraryReconcileIntent.topology_writer_fence.is_(None),
+            ),
+            and_(
+                LibraryReconcileIntent.state == ReconcileIntentState.RUNNING,
+                LibraryReconcileIntent.lease_owner.is_not(None),
+                LibraryReconcileIntent.lease_expires_at.is_not(None),
+                LibraryReconcileIntent.topology_writer_fence > 0,
+            ),
+        ),
+        name="LibraryReconcileIntent_lease_shape_ck",
+    )
+)
+cast(Table, LibraryReconcileIntent.__table__).append_constraint(
+    CheckConstraint(
+        or_(
+            and_(
+                LibraryReconcileIntent.phase == ReconcileIntentPhase.EXECUTE,
+                LibraryReconcileIntent.fold_after_source_entry_id.is_(None),
+            ),
+            LibraryReconcileIntent.phase == ReconcileIntentPhase.FOLD,
+        ),
+        name="LibraryReconcileIntent_phase_shape_ck",
+    )
+)
+Index(
+    "LibraryReconcileIntent_one_pending_key_idx",
+    LibraryReconcileIntent.library_id,
+    LibraryReconcileIntent.coalesce_key,
+    unique=True,
+    sqlite_where=LibraryReconcileIntent.state == ReconcileIntentState.PENDING,
+)
+Index(
+    "LibraryReconcileIntent_one_running_idx",
+    LibraryReconcileIntent.library_id,
+    unique=True,
+    sqlite_where=LibraryReconcileIntent.state == ReconcileIntentState.RUNNING,
+)
 cast(Table, LibraryRootRegistryLock.__table__).append_constraint(
     CheckConstraint(
         LibraryRootRegistryLock.id == 1, name="LibraryRootRegistryLock_singleton_ck"
@@ -1258,6 +1505,24 @@ cast(Table, LibrarySourceEntry.__table__).append_constraint(
             ),
         ),
         name="LibrarySourceEntry_root_shape_ck",
+    )
+)
+cast(Table, LibrarySourceEntry.__table__).append_constraint(
+    CheckConstraint(
+        and_(
+            LibrarySourceEntry.children_presence_epoch >= 0,
+            LibrarySourceEntry.next_children_presence_epoch
+            >= LibrarySourceEntry.children_presence_epoch,
+            or_(
+                LibrarySourceEntry.observed_parent_presence_epoch.is_(None),
+                LibrarySourceEntry.observed_parent_presence_epoch >= 0,
+            ),
+            or_(
+                LibrarySourceEntry.pending_observed_parent_presence_epoch.is_(None),
+                LibrarySourceEntry.pending_observed_parent_presence_epoch > 0,
+            ),
+        ),
+        name="LibrarySourceEntry_presence_epoch_ck",
     )
 )
 cast(Table, LibrarySourceEntry.__table__).append_constraint(
@@ -1284,9 +1549,35 @@ Index(
     sqlite_where=LibrarySourceEntry.slot_state == SlotState.ACTIVE,
 )
 Index(
+    "LibrarySourceEntry_live_raw_slot_idx",
+    LibrarySourceEntry.library_id,
+    LibrarySourceEntry.parent_entry_id,
+    LibrarySourceEntry.local_name,
+    unique=True,
+    sqlite_where=LibrarySourceEntry.slot_state != SlotState.RETIRED,
+)
+Index(
     "LibrarySourceEntry_generation_idx",
     LibrarySourceEntry.library_id,
     LibrarySourceEntry.last_seen_generation,
+)
+Index(
+    "LibrarySourceEntry_pending_presence_idx",
+    LibrarySourceEntry.library_id,
+    LibrarySourceEntry.parent_entry_id,
+    LibrarySourceEntry.pending_observed_parent_presence_epoch,
+    LibrarySourceEntry.id,
+)
+Index(
+    "LibrarySourceEntry_identity_idx",
+    LibrarySourceEntry.library_id,
+    LibrarySourceEntry.filesystem_identity,
+)
+Index(
+    "LibrarySourceEntry_raw_slot_idx",
+    LibrarySourceEntry.library_id,
+    LibrarySourceEntry.parent_entry_id,
+    LibrarySourceEntry.local_name,
 )
 Index(
     "LibraryScanRun_one_active_idx",
@@ -1295,6 +1586,27 @@ Index(
     sqlite_where=LibraryScanRun.state.in_(
         [ScanState.PENDING, ScanState.RUNNING, ScanState.FINALIZING]
     ),
+)
+cast(Table, LibraryScanRun.__table__).append_constraint(
+    CheckConstraint(
+        LibraryScanRun.watcher_sequence_watermark >= 0,
+        name="LibraryScanRun_watcher_watermark_ck",
+    )
+)
+cast(Table, LayoutDiagnostic.__table__).append_constraint(
+    CheckConstraint(
+        (
+            (LayoutDiagnostic.scan_run_id.is_not(None)).cast(Integer)
+            + (LayoutDiagnostic.reconcile_origin_id.is_not(None)).cast(Integer)
+            == 1
+        ),
+        name="LayoutDiagnostic_origin_ck",
+    )
+)
+Index(
+    "LayoutDiagnostic_reconcile_origin_idx",
+    LayoutDiagnostic.library_id,
+    LayoutDiagnostic.reconcile_origin_id,
 )
 cast(Table, SourceAttachment.__table__).append_constraint(
     CheckConstraint(
@@ -1377,6 +1689,22 @@ cast(Table, TopologyUnitRevision.__table__).append_constraint(
         TopologyUnitRevision.revision > 0, name="TopologyUnitRevision_revision_ck"
     )
 )
+cast(Table, TopologyUnitRevision.__table__).append_constraint(
+    CheckConstraint(
+        (
+            (TopologyUnitRevision.scan_run_id.is_not(None)).cast(Integer)
+            + (TopologyUnitRevision.reconcile_origin_id.is_not(None)).cast(Integer)
+            == 1
+        ),
+        name="TopologyUnitRevision_origin_ck",
+    )
+)
+Index(
+    "TopologyUnitRevision_reconcile_origin_idx",
+    TopologyUnitRevision.library_id,
+    TopologyUnitRevision.reconcile_origin_id,
+    TopologyUnitRevision.state,
+)
 Index(
     "TopologyUnitRevision_one_active_idx",
     TopologyUnitRevision.library_id,
@@ -1442,11 +1770,13 @@ __all__ = [
     "CatalogOutbox",
     "LayoutDiagnostic",
     "LibraryIgnoreRule",
+    "LibraryReconcileIntent",
     "LibraryRootRegistryLock",
     "LibraryScanRun",
     "LibraryScanWorkItem",
     "LibrarySourceEntry",
     "LibraryVolume",
+    "LibraryWatcherState",
     "LibraryWork",
     "OperationStagingLock",
     "PathCollisionObservation",
