@@ -40,9 +40,7 @@ class CheckpointingImportLibraryQueries:
 
     def count_audio_files_for_media_version(self, media_version_id: str) -> int:
         with self._projection:
-            return self._queries.count_audio_files_for_media_version(
-                media_version_id
-            )
+            return self._queries.count_audio_files_for_media_version(media_version_id)
 
     def count_audiobook_media_kind_media_versions(
         self, work_id: str, media_kind: str
@@ -84,9 +82,7 @@ class CheckpointingImportLibraryQueries:
         with self._projection:
             self._queries.delete_audio_metadata_sources(media_version_id)
 
-    def detach_audio_chapters_for_media_version(
-        self, media_version_id: str
-    ) -> None:
+    def detach_audio_chapters_for_media_version(self, media_version_id: str) -> None:
         with self._projection:
             self._queries.detach_audio_chapters_for_media_version(media_version_id)
 
@@ -146,9 +142,7 @@ class CheckpointingImportLibraryQueries:
         with self._projection:
             return self._queries.find_work_cover_media_version(work_id)
 
-    def get_conversion_by_import_task_id(
-        self, import_task_id: str
-    ) -> Record | None:
+    def get_conversion_by_import_task_id(self, import_task_id: str) -> Record | None:
         with self._projection:
             return self._queries.get_conversion_by_import_task_id(import_task_id)
 
@@ -162,17 +156,13 @@ class CheckpointingImportLibraryQueries:
         self, task_id: str, source_path: str
     ) -> Record | None:
         with self._projection:
-            return self._queries.get_import_asset_by_task_and_path(
-                task_id, source_path
-            )
+            return self._queries.get_import_asset_by_task_and_path(task_id, source_path)
 
     def get_import_task_by_id(self, task_id: str) -> Record | None:
         with self._projection:
             return self._queries.get_import_task_by_id(task_id)
 
-    def get_latest_audio_tags_metadata(
-        self, media_version_id: str
-    ) -> Record | None:
+    def get_latest_audio_tags_metadata(self, media_version_id: str) -> Record | None:
         with self._projection:
             return self._queries.get_latest_audio_tags_metadata(media_version_id)
 
@@ -180,9 +170,7 @@ class CheckpointingImportLibraryQueries:
         with self._projection:
             return self._queries.get_media_version_by_id(media_version_id)
 
-    def get_media_version_cover_path(
-        self, media_version_id: str
-    ) -> Record | None:
+    def get_media_version_cover_path(self, media_version_id: str) -> Record | None:
         with self._projection:
             return self._queries.get_media_version_cover_path(media_version_id)
 
@@ -204,9 +192,7 @@ class CheckpointingImportLibraryQueries:
                 work_id, media_version_id
             )
 
-    def get_pending_import_task_for_source(
-        self, source_path: str
-    ) -> Record | None:
+    def get_pending_import_task_for_source(self, source_path: str) -> Record | None:
         with self._projection:
             return self._queries.get_pending_import_task_for_source(source_path)
 
@@ -218,21 +204,23 @@ class CheckpointingImportLibraryQueries:
         with self._projection:
             return self._queries.get_work_by_id(work_id)
 
-    def get_work_by_merge_key(self, merge_key: str) -> Record | None:
+    def get_work_by_merge_key(self, library_id: str, merge_key: str) -> Record | None:
         with self._projection:
-            return self._queries.get_work_by_merge_key(merge_key)
+            return self._queries.get_work_by_merge_key(library_id, merge_key)
 
-    def get_work_by_normalized_title(self, normalized_title: str) -> Record | None:
+    def get_work_by_normalized_title(
+        self, library_id: str, normalized_title: str
+    ) -> Record | None:
         with self._projection:
-            return self._queries.get_work_by_normalized_title(normalized_title)
+            return self._queries.get_work_by_normalized_title(
+                library_id, normalized_title
+            )
 
     def has_generated_cover_path(self, work_id: str, cover_path: str) -> bool:
         with self._projection:
             return self._queries.has_generated_cover_path(work_id, cover_path)
 
-    def list_audio_chapter_units_for_file_ordered(
-        self, file_id: str
-    ) -> list[Record]:
+    def list_audio_chapter_units_for_file_ordered(self, file_id: str) -> list[Record]:
         with self._projection:
             return self._queries.list_audio_chapter_units_for_file_ordered(file_id)
 
@@ -244,13 +232,9 @@ class CheckpointingImportLibraryQueries:
         self, media_version_id: str
     ) -> list[Record]:
         with self._projection:
-            return self._queries.list_audio_chapters_for_media_version(
-                media_version_id
-            )
+            return self._queries.list_audio_chapters_for_media_version(media_version_id)
 
-    def list_audio_files_for_media_version(
-        self, media_version_id: str
-    ) -> list[Record]:
+    def list_audio_files_for_media_version(self, media_version_id: str) -> list[Record]:
         with self._projection:
             return self._queries.list_audio_files_for_media_version(media_version_id)
 
@@ -262,9 +246,7 @@ class CheckpointingImportLibraryQueries:
                 media_version_id, volume_id
             )
 
-    def list_audiobook_consumption_for_works(
-        self, work_ids: list[str]
-    ) -> list[Record]:
+    def list_audiobook_consumption_for_works(self, work_ids: list[str]) -> list[Record]:
         with self._projection:
             return self._queries.list_audiobook_consumption_for_works(work_ids)
 
@@ -276,9 +258,7 @@ class CheckpointingImportLibraryQueries:
         with self._projection:
             return self._queries.list_library_files_by_paths(paths)
 
-    def list_media_versions_by_ids(
-        self, media_version_ids: list[str]
-    ) -> list[Record]:
+    def list_media_versions_by_ids(self, media_version_ids: list[str]) -> list[Record]:
         with self._projection:
             return self._queries.list_media_versions_by_ids(media_version_ids)
 
@@ -298,9 +278,7 @@ class CheckpointingImportLibraryQueries:
                 media_version_ids
             )
 
-    def list_reflowable_chapters_for_volume(
-        self, volume_id: str
-    ) -> list[Record]:
+    def list_reflowable_chapters_for_volume(self, volume_id: str) -> list[Record]:
         with self._projection:
             return self._queries.list_reflowable_chapters_for_volume(volume_id)
 
@@ -345,16 +323,16 @@ class CheckpointingImportLibraryQueries:
             )
 
     def list_works_by_merge_key_prefix(
-        self, merge_key_prefix: str
+        self, library_id: str, merge_key_prefix: str
     ) -> list[Record]:
         with self._projection:
-            return self._queries.list_works_by_merge_key_prefix(merge_key_prefix)
+            return self._queries.list_works_by_merge_key_prefix(
+                library_id, merge_key_prefix
+            )
 
     def sum_audio_duration_for_media_version(self, media_version_id: str) -> int:
         with self._projection:
-            return self._queries.sum_audio_duration_for_media_version(
-                media_version_id
-            )
+            return self._queries.sum_audio_duration_for_media_version(media_version_id)
 
     def sum_audio_duration_for_volume(self, volume_id: str) -> int:
         with self._projection:
@@ -362,27 +340,19 @@ class CheckpointingImportLibraryQueries:
 
     def sum_audio_file_size_for_media_version(self, media_version_id: str) -> int:
         with self._projection:
-            return self._queries.sum_audio_file_size_for_media_version(
-                media_version_id
-            )
+            return self._queries.sum_audio_file_size_for_media_version(media_version_id)
 
     def sum_file_size_bytes_for_media_version(self, media_version_id: str) -> int:
         with self._projection:
-            return self._queries.sum_file_size_bytes_for_media_version(
-                media_version_id
-            )
+            return self._queries.sum_file_size_bytes_for_media_version(media_version_id)
 
-    def sum_volume_chapter_count_for_media_version(
-        self, media_version_id: str
-    ) -> int:
+    def sum_volume_chapter_count_for_media_version(self, media_version_id: str) -> int:
         with self._projection:
             return self._queries.sum_volume_chapter_count_for_media_version(
                 media_version_id
             )
 
-    def sum_volume_page_count_for_media_version(
-        self, media_version_id: str
-    ) -> int:
+    def sum_volume_page_count_for_media_version(self, media_version_id: str) -> int:
         with self._projection:
             return self._queries.sum_volume_page_count_for_media_version(
                 media_version_id

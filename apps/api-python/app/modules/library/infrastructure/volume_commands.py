@@ -85,6 +85,12 @@ class SqlAlchemyVolumeStructure:
             is not None
         )
 
+    def work_library_id(self, *, work_id: str) -> str | None:
+        work = self._db.get(LibraryWork, work_id)
+        if work is None:
+            return None
+        return str(work.library_id)
+
     def apply_batch(
         self,
         *,

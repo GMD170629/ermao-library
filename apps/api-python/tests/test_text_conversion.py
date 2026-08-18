@@ -47,6 +47,11 @@ from app.services.text_conversion import (
 from tests.test_worker_importer import create_worker_tables
 
 
+def _options(**kwargs: object) -> ImportOptions:
+    kwargs.setdefault("library_id", "test-library")
+    return ImportOptions(**kwargs)  # type: ignore[arg-type]
+
+
 def _persist_import_enqueue(
     db_session: Session,
     source_path: Path,
@@ -120,7 +125,7 @@ def insert_import_task(
         volume_id = f"volume-{source_key}"
         db.add(
             LibraryWork(
-            library_id="test-library", 
+                library_id="test-library",
                 id=work_id,
                 title=source.stem,
                 normalized_title=source.stem.casefold(),
@@ -467,7 +472,7 @@ def test_legacy_conversion_origin_preserves_source_format(
     source_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="MANUAL",
             original_name=source.name,
@@ -476,7 +481,7 @@ def test_legacy_conversion_origin_preserves_source_format(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
@@ -492,7 +497,7 @@ def test_legacy_conversion_origin_preserves_source_format(
     retried = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
@@ -780,9 +785,7 @@ def test_direct_user_epub_import_bypasses_libmobi_normalizer(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
-            source_file_path=source, origin="MANUAL", original_name=source.name
-        ),
+        _options(source_file_path=source, origin="MANUAL", original_name=source.name),
     )
 
     assert result.format == "epub"
@@ -866,7 +869,8 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
         "/api/libraries",
         json={
             "name": "Conversion uploads",
-            "rootPath": str(upload_dir), "organizationMode": "FLAT",
+            "rootPath": str(upload_dir),
+            "organizationMode": "FLAT",
             "enabled": True,
         },
     )

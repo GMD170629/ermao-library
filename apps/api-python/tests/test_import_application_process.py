@@ -147,6 +147,7 @@ def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
         source_path="/tmp/book.epub",
         origin="MANUAL",
         status="PARSING",
+        library_id="folder-1",
         work_id="previous-result-work",
     )
 
@@ -213,9 +214,38 @@ def test_process_import_stops_before_pipeline_when_library_was_deleted() -> None
     assert pipeline.completed == 0
 
 
-def test_process_import_rolls_back_when_library_is_deleted_during_pipeline() -> (
-    None
-):
+def test_process_import_stops_when_library_id_is_missing() -> None:
+    unit_of_work = RecordingUnitOfWork()
+    store = RecordingStore()
+    pipeline = RecordingPipeline()
+    task = ImportTaskDTO(
+        id="task-unscoped",
+        source_path="/tmp/book.epub",
+        origin="MANUAL",
+        status="PARSING",
+        library_id=None,
+    )
+
+    with pytest.raises(LibraryDeletedDuringImportError):
+        process_import_task(
+            store,
+            unit_of_work,
+            pipeline,
+            ImportRuntimeConfig(
+                storage_root=Path("/tmp"),
+                audiobook_max_file_bytes=1,
+            ),
+            task,
+            now=123,
+        )
+
+    assert pipeline.imports == 0
+    assert store.calls == []
+    assert unit_of_work.rollbacks == 1
+    assert pipeline.completed == 0
+
+
+def test_process_import_rolls_back_when_library_is_deleted_during_pipeline() -> None:
     unit_of_work = RecordingUnitOfWork()
     store = RecordingStore()
     pipeline = RecordingPipeline(
@@ -291,6 +321,38 @@ def test_fail_claimed_import_is_terminal_when_library_was_deleted() -> None:
         store,
         unit_of_work,
         _task(),
+        LibraryDeletedDuringImportError(),
+        now=123,
+        source_probe=ExistingSourceProbe(),
+    )
+
+    assert failed is True
+    assert store.failure == {
+        "error_code": "LIBRARY_NOT_FOUND",
+        "error_summary": "书库已在导入期间被删除",
+        "message": "书库已被删除，本次导入任务已结束",
+        "retryable": False,
+    }
+    assert store.event_staged is True
+    assert unit_of_work.commits == 1
+
+
+def test_fail_claimed_import_is_terminal_when_library_id_is_missing() -> None:
+    store = FailureRecordingStore()
+    store.library_available = True
+    unit_of_work = RecordingUnitOfWork()
+    task = ImportTaskDTO(
+        id="task-unscoped",
+        source_path="/tmp/book.epub",
+        origin="MANUAL",
+        status="PARSING",
+        library_id=None,
+    )
+
+    failed = fail_claimed_import_task(
+        store,
+        unit_of_work,
+        task,
         LibraryDeletedDuringImportError(),
         now=123,
         source_probe=ExistingSourceProbe(),

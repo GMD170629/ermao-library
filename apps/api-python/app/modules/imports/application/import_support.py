@@ -20,6 +20,7 @@ from app.modules.imports.application.dto import (
     ImportResult,
     SeriesVolumeInfo,
 )
+from app.modules.imports.application.errors import ImportExecutionError
 from app.modules.imports.application.identity_policy import (
     UNKNOWN_AUTHOR,
     normalize_identity_part,
@@ -369,10 +370,19 @@ def _ensure_work(
     queries: ImportLibraryQueries,
     data: dict[str, Any],
 ) -> tuple[dict[str, Any], bool]:
+    library_id = str(data.get("libraryId") or "").strip()
+    if not library_id:
+        raise ImportExecutionError(
+            "LIBRARY_REQUIRED",
+            "导入必须指定所属书库",
+            retryable=False,
+        )
     merge_key = str(data["mergeKey"])
     existing = queries.get_work_by_merge_key(
-        merge_key
-    ) or queries.get_work_by_normalized_title(_normalize_key(data["title"]))
+        library_id, merge_key
+    ) or queries.get_work_by_normalized_title(library_id, _normalize_key(data["title"]))
+    if existing and str(existing.get("libraryId") or "") != library_id:
+        existing = None
     if existing:
         incoming_author = str(data.get("author") or "").strip()
         current_author = str(existing.get("author") or "").strip()
@@ -393,7 +403,7 @@ def _ensure_work(
     row = store.insert_library_work(
         columns={
             "id": _id(),
-            "libraryId": data.get("libraryId"),
+            "libraryId": library_id,
             "origin": data["origin"],
             "title": data["title"],
             "normalizedTitle": _normalize_key(data["title"]),

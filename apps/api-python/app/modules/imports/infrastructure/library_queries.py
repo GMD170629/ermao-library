@@ -240,32 +240,44 @@ def get_work_by_id(db: Session, work_id: str) -> dict[str, Any] | None:
     return _get_work(db, LibraryWork.id == work_id)
 
 
-def get_work_by_merge_key(db: Session, merge_key: str) -> dict[str, Any] | None:
-    return _get_work(db, LibraryWork.merge_key == merge_key)
+def get_work_by_merge_key(
+    db: Session, library_id: str, merge_key: str
+) -> dict[str, Any] | None:
+    return _get_work(
+        db,
+        LibraryWork.library_id == library_id,
+        LibraryWork.merge_key == merge_key,
+    )
 
 
 def get_work_by_normalized_title(
-    db: Session, normalized_title: str
+    db: Session, library_id: str, normalized_title: str
 ) -> dict[str, Any] | None:
     """Return the earliest existing work with the final normalized title."""
 
     return _first_record(
         db,
         select(LibraryWork.__table__)
-        .where(LibraryWork.normalized_title == normalized_title)
+        .where(
+            LibraryWork.library_id == library_id,
+            LibraryWork.normalized_title == normalized_title,
+        )
         .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
     )
 
 
 def list_works_by_merge_key_prefix(
-    db: Session, merge_key_prefix: str
+    db: Session, library_id: str, merge_key_prefix: str
 ) -> list[dict[str, Any]]:
-    """List deterministic fuzzy-merge candidates within one source directory."""
+    """List deterministic fuzzy-merge candidates within one library."""
 
     return _records(
         db,
         select(LibraryWork.__table__)
-        .where(LibraryWork.merge_key.startswith(merge_key_prefix, autoescape=True))
+        .where(
+            LibraryWork.library_id == library_id,
+            LibraryWork.merge_key.startswith(merge_key_prefix, autoescape=True),
+        )
         .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
     )
 

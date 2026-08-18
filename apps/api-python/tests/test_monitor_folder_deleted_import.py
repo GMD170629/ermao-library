@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.imports import fail_claimed_import_task, process_import_task
 from app.core.config import Settings
 from app.models.import_pipeline import ImportTask
-from app.models.library import Library
+from app.models.library import Library, LibraryWork
 from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.imports.application.errors import (
     LibraryDeletedDuringImportError,
@@ -75,3 +75,44 @@ def test_claimed_import_fails_terminally_when_library_is_deleted(
     assert stored.lease_owner is None
     assert stored.lease_expires_at is None
     assert stored.finished_at is not None
+
+
+def test_pending_import_without_library_id_fails_terminally(
+    db_session: Session,
+    test_settings: Settings,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "unscoped.epub"
+    source.write_bytes(b"queued")
+    task_row = ImportTask(
+        id="task-without-library",
+        library_id=None,
+        origin="WATCH",
+        status="PARSING",
+        original_name=source.name,
+        source_path=str(source),
+        lease_owner="worker-1",
+    )
+    db_session.add(task_row)
+    db_session.commit()
+    task = ImportTaskDTO(
+        id=task_row.id,
+        library_id=task_row.library_id,
+        origin=task_row.origin,
+        status=task_row.status,
+        original_name=task_row.original_name,
+        source_path=task_row.source_path,
+        lease_owner=task_row.lease_owner,
+    )
+
+    with pytest.raises(LibraryDeletedDuringImportError) as captured:
+        process_import_task(db_session, test_settings, task)
+    assert fail_claimed_import_task(db_session, task, captured.value) is True
+
+    db_session.expire_all()
+    stored = db_session.scalar(select(ImportTask).where(ImportTask.id == task.id))
+    assert stored is not None
+    assert stored.status == "FAILED"
+    assert stored.error_code == "LIBRARY_NOT_FOUND"
+    assert stored.retryable is False
+    assert db_session.scalar(select(LibraryWork.id).limit(1)) is None

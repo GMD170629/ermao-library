@@ -94,9 +94,10 @@ def refresh_existing_reflowable_source(
     volume_id = str(volume["id"])
     file_id = str(file_row["id"])
     source_stat = source_path.stat()
-    content_changed = (
-        int(file_row.get("sizeBytes") or -1) != source_stat.st_size
-        or int(file_row.get("mtimeMs") or -1) != int(source_stat.st_mtime * 1000)
+    content_changed = int(
+        file_row.get("sizeBytes") or -1
+    ) != source_stat.st_size or int(file_row.get("mtimeMs") or -1) != int(
+        source_stat.st_mtime * 1000
     )
     if not file_row.get("volumeId"):
         store.update_library_file(
@@ -168,7 +169,11 @@ def refresh_existing_reflowable_source(
     work_values: dict[str, object] = {"updatedAt": _now()}
     if selected_title != current_title or selected_author != current_author:
         merge_key = _work_merge_key(selected_title)
-        merge_conflict = queries.get_work_by_merge_key(merge_key)
+        work = queries.get_work_by_id(existing.work_id)
+        library_id = str((work or {}).get("libraryId") or "")
+        merge_conflict = (
+            queries.get_work_by_merge_key(library_id, merge_key) if library_id else None
+        )
         work_values.update(
             title=selected_title,
             author=selected_author,

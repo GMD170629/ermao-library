@@ -72,6 +72,11 @@ from app.worker.watcher import (
 from tests.test_worker_importer import write_epub_metadata_fixture
 
 
+def _options(**kwargs: object) -> ImportOptions:
+    kwargs.setdefault("library_id", "test-library")
+    return ImportOptions(**kwargs)  # type: ignore[arg-type]
+
+
 def _persist_import_enqueue(
     db_session,
     source_path: Path,
@@ -141,7 +146,12 @@ def _login(
 def _enable_upload_monitor(client, target: Path, name: str) -> None:
     response = client.post(
         "/api/libraries",
-        json={"name": name, "rootPath": str(target), "organizationMode": "FLAT", "enabled": True},
+        json={
+            "name": name,
+            "rootPath": str(target),
+            "organizationMode": "FLAT",
+            "enabled": True,
+        },
     )
     assert response.status_code == 201
 
@@ -242,7 +252,7 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=audio_dir, origin="MANUAL", original_name=audio_dir.name
         ),
     )
@@ -693,7 +703,7 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     epub_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
     )
     audio_result, _audio_dir = _import_audio_fixture(
         db_session, test_settings, monkeypatch, tmp_path
@@ -779,7 +789,7 @@ def test_audio_bundle_groups_with_same_title_works_across_media(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first_epub,
             origin="MANUAL",
             original_name=first_epub.name,
@@ -788,7 +798,7 @@ def test_audio_bundle_groups_with_same_title_works_across_media(
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_epub,
             origin="MANUAL",
             original_name=second_epub.name,
@@ -812,7 +822,7 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     same_path = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=original_dir,
             origin="MANUAL",
             original_name=original_dir.name,
@@ -839,7 +849,7 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     moved = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=moved_dir,
             origin="MANUAL",
             original_name=moved_dir.name,
@@ -893,7 +903,7 @@ def test_audio_partial_content_overlap_runs_normal_import(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=overlap_dir,
             origin="MANUAL",
             original_name=overlap_dir.name,
@@ -939,7 +949,7 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=folder,
             origin="MANUAL",
             requested_title="重复音轨",
@@ -1005,7 +1015,7 @@ def test_file_import_does_not_apply_browser_upload_bundle_byte_limit(
     result = import_managed_book(
         db_session,
         local_settings,
-        ImportOptions(
+        _options(
             source_file_path=folder, origin="WATCH", requested_title="大型本地有声书"
         ),
     )
@@ -1037,7 +1047,7 @@ def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
     first = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=first_path,
             origin="MANUAL",
             requested_title="同一本书",
@@ -1047,7 +1057,7 @@ def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
     second = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=second_path,
             origin="MANUAL",
             requested_title="同一本书",
@@ -1235,7 +1245,7 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
     user_a = _login(client, db_session, email="listener-a@example.com")
     db_session.add(
         LibraryWork(
-            library_id="test-library", 
+            library_id="test-library",
             id="mixed-work",
             origin="MANUAL",
             title="Mixed media work",
@@ -1353,7 +1363,7 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     _initialize_schema(db_session)
     user = _login(client, db_session, email="volume-switch@example.com")
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="switch-work",
         origin="MANUAL",
         title="Two audio volumes",
@@ -1706,7 +1716,7 @@ def test_nested_author_directory_is_not_used_as_audiobook_author(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
         ),
     )
@@ -1789,7 +1799,7 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
         ),
     )
@@ -1982,9 +1992,7 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
         import_managed_book(
             db_session,
             test_settings,
-            ImportOptions(
-                source_file_path=path, origin="WATCH", original_name=path.name
-            ),
+            _options(source_file_path=path, origin="WATCH", original_name=path.name),
         )
         for path in paths
     ]
@@ -2320,7 +2328,7 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
         ),
     )
@@ -2386,7 +2394,7 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     updated = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
         ),
     )
@@ -2439,7 +2447,7 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
         import_managed_book(
             db_session,
             test_settings,
-            ImportOptions(
+            _options(
                 source_file_path=path,
                 origin="WATCH",
                 original_name=path.name,
@@ -2559,7 +2567,7 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     reconciled = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(
+        _options(
             source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
         ),
     )

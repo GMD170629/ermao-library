@@ -100,6 +100,7 @@ from app.modules.library.application.request_mutations import (
 )
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
+    CrossLibraryStructuralError,
     InvalidVolumeChangeError,
     LibraryActor,
     LibraryAuthorizationError,
@@ -3280,6 +3281,7 @@ def move_work_volume(
 ) -> Annotated[
     WorkStructureMutationResponse,
     ErrorResponses(
+        LibraryBadRequestError,
         LibraryForbiddenError,
         LibraryNotFoundError,
     ),
@@ -3314,6 +3316,12 @@ def move_work_volume(
             "需要系统管理权限",
             status_code=403,
             code="SYSTEM_MANAGER_REQUIRED",
+        )
+    except CrossLibraryStructuralError:
+        _raise_library_error(
+            "不能跨书库移动卷册",
+            status_code=400,
+            code="CROSS_LIBRARY_OPERATION",
         )
     source_work = _get_work(db, work_id)
     target_work = _get_work(db, payload.target_work_id)

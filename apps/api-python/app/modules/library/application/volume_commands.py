@@ -102,6 +102,8 @@ class BatchVolumeOutcome:
 class VolumeStructurePort(Protocol):
     def can_access_work(self, *, actor: LibraryActor, work_id: str) -> bool: ...
 
+    def work_library_id(self, *, work_id: str) -> str | None: ...
+
     def get_volume_context(
         self, *, actor: LibraryActor, work_id: str, volume_id: str
     ) -> VolumeContext | None: ...
@@ -198,6 +200,10 @@ class LibraryAuthorizationError(Exception):
 
 class InvalidVolumeChangeError(Exception):
     pass
+
+
+class CrossLibraryStructuralError(InvalidVolumeChangeError):
+    """A structural operation targeted works that belong to different libraries."""
 
 
 def batch_volume_resources(
@@ -367,6 +373,10 @@ def move_volume_resource(
     )
     _require_work_access(port, actor=actor, work_id=target_work_id)
     try:
+        source_library_id = port.work_library_id(work_id=source_work_id)
+        target_library_id = port.work_library_id(work_id=target_work_id)
+        if not source_library_id or source_library_id != target_library_id:
+            raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION")
         result = port.move_volume(
             actor_id=actor.user_id,
             source_work_id=source_work_id,
@@ -376,8 +386,13 @@ def move_volume_resource(
         )
         unit_of_work.commit()
         return result
+    except CrossLibraryStructuralError:
+        unit_of_work.rollback()
+        raise
     except ValueError as exc:
         unit_of_work.rollback()
+        if str(exc) == "CROSS_LIBRARY_OPERATION":
+            raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION") from exc
         raise VolumeNotFoundError(str(exc)) from exc
     except Exception:
         unit_of_work.rollback()

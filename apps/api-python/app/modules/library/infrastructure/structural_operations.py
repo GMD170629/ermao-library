@@ -103,11 +103,24 @@ def prepare_volume_move(
     ).one_or_none()
     if source is None:
         raise ValueError("卷册不存在或不属于该作品")
-    if not target_work_prepared and (
-        db.scalar(select(LibraryWork.id).where(LibraryWork.id == target_work_id))
-        is None
-    ):
-        raise ValueError("目标作品不存在")
+    if not target_work_prepared:
+        if (
+            db.scalar(select(LibraryWork.id).where(LibraryWork.id == target_work_id))
+            is None
+        ):
+            raise ValueError("目标作品不存在")
+        source_library_id = db.scalar(
+            select(LibraryWork.library_id).where(LibraryWork.id == source_work_id)
+        )
+        target_library_id = db.scalar(
+            select(LibraryWork.library_id).where(LibraryWork.id == target_work_id)
+        )
+        if (
+            source_library_id is None
+            or target_library_id is None
+            or source_library_id != target_library_id
+        ):
+            raise ValueError("CROSS_LIBRARY_OPERATION")
 
     volume, source_media_version = source
     target_media_version = (

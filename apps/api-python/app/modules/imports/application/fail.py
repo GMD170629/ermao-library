@@ -9,7 +9,10 @@ from app.modules.imports.application.commands import (
     reset_failed_import_checkpoint,
 )
 from app.modules.imports.application.dto import ImportTaskDTO
-from app.modules.imports.application.errors import ImportExecutionError
+from app.modules.imports.application.errors import (
+    ImportExecutionError,
+    LibraryDeletedDuringImportError,
+)
 from app.modules.imports.application.ports import (
     ImportSourceProbe,
     ImportTaskStore,
@@ -31,8 +34,9 @@ def fail_claimed_import_task(
     reset_failed_import_checkpoint(unit_of_work)
     source = Path(task.source_path or "")
     library_missing = (
-        task.library_id is not None
-        and not store.library_exists(task.library_id)
+        isinstance(error, LibraryDeletedDuringImportError)
+        or task.library_id is None
+        or not store.library_exists(task.library_id)
     )
     source_missing = not source_probe.exists(source)
     if library_missing:

@@ -269,6 +269,9 @@ def _merge_works(
     ]
     if len(source_rows) != len(sources) or not source_rows:
         raise ValueError("请选择至少一条可合并的作品")
+    library_ids = {str(row.get("libraryId") or "") for row in (target, *source_rows)}
+    if len(library_ids) != 1 or "" in library_ids:
+        raise ValueError("不能跨书库合并作品")
 
     all_work_ids = [target_work_id, *sources]
     media_versions = library_works.list_media_versions_for_works(db, all_work_ids)

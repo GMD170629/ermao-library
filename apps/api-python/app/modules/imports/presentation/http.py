@@ -57,6 +57,7 @@ from app.modules.imports.presentation.schemas import (
 )
 from app.modules.imports.presentation.writes import router as writes_router
 from app.modules.imports.public import parse_release_title
+from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.schemas.responses import fail, ok
 from app.services.system_events import (
     prepare_system_event,
@@ -86,9 +87,7 @@ def _visible_import_task_or_none(
     db: Session, user: User, task_id: str
 ) -> dict[str, Any] | None:
     task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_library(
-        db, user, task.get("libraryId")
-    ):
+    if task is None or not can_access_library(db, user, task.get("libraryId")):
         return None
     return task
 
@@ -138,9 +137,7 @@ def library_tree(
     if auth_error:
         return auth_error
     if purpose == "upload":
-        library = (
-            enabled_library_for_path(db, Path(path)) if path else None
-        )
+        library = enabled_library_for_path(db, Path(path)) if path else None
         library_id = str((library or {}).get("id") or "") or None
         if (
             library is None
@@ -181,9 +178,7 @@ async def create_library(
     existing_library = import_http_store.get_library_by_root_path(db, root_path)
     db.close()
     if existing_library:
-        return fail(
-            "书库路径已存在", status_code=409, details={"rootPath": root_path}
-        )
+        return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
     library_id = f"py_{time_ns()}"
     checkpoint_at = _now()
     library: dict[str, object] = {
@@ -216,9 +211,7 @@ async def create_library(
             PreparedLibraryCreate(library, prepared_event),
         )
     except IntegrityError:
-        return fail(
-            "书库路径已存在", status_code=409, details={"rootPath": root_path}
-        )
+        return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
     return ok({"library": library}, status_code=201)
 
 
@@ -236,7 +229,9 @@ async def update_library(
         return auth_error
     values = payload.model_dump(by_alias=True, exclude_unset=True)
     if "organizationMode" in values and values["organizationMode"] is not None:
-        values["organizationMode"] = str(values["organizationMode"])
+        values["organizationMode"] = LibraryOrganizationMode(
+            values["organizationMode"]
+        ).value
     existing = import_http_store.get_library(db, library_id)
     if not existing:
         return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")

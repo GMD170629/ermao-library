@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.modules.imports.application.ports import ImportUnitOfWork
+from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.modules.system.public import PreparedSystemEvent
 
 
@@ -53,11 +54,15 @@ def prepare_library_update_values(
         "description": "description",
         "updatedAt": "updated_at",
     }
-    return {
+    prepared = {
         target: value
         for key, value in values.items()
         if (target := mapping.get(key)) is not None
     }
+    mode = prepared.get("organization_mode")
+    if mode is not None:
+        prepared["organization_mode"] = LibraryOrganizationMode(mode).value
+    return prepared
 
 
 def persist_library_create(

@@ -98,6 +98,13 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
             try:
                 library_id = _library_id(db, downloaded_path)
                 db.close()
+                if library_id is None:
+                    print(
+                        f"[download-queue] downloaded {task['id']} "
+                        "but file is outside enabled libraries; import skipped",
+                        flush=True,
+                    )
+                    return True
                 import_task = enqueue_download_import_command(
                     db,
                     task_id=str(task["id"]),

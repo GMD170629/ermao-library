@@ -25,9 +25,7 @@ def _ensure_library_exists(
     store: ImportTaskStore,
     library_id: str | None,
 ) -> None:
-    if library_id is not None and not store.library_exists(
-        library_id
-    ):
+    if library_id is None or not store.library_exists(library_id):
         raise LibraryDeletedDuringImportError
 
 
