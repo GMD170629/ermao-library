@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -78,8 +79,8 @@ def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
     cover = db.scalar(
         select(LibraryVolume.cover_path)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryMediaVersion.work_id == work_id,
@@ -154,7 +155,7 @@ def collect_storage_values(
     volumes = (
         db.scalars(
             select(LibraryVolume).where(
-                LibraryVolume.media_version_id.in_(media_version_ids)
+                LibraryVolume.version_id.in_(media_version_ids)
             )
         ).all()
         if media_version_ids

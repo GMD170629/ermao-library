@@ -18,7 +18,7 @@ from app.core.authorization import (
 from app.models.library import (
     LibraryFacet,
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
@@ -40,16 +40,16 @@ CATALOG_READY_IMPORT_STATUSES = ("COMPLETED", "IMPORTED", "READY")
 
 
 def _eligible_volume_exists(context: AuthorizationContext) -> ColumnElement[bool]:
-    media_version = aliased(LibraryMediaVersion)
+    media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     file = aliased(LibraryFile)
     return exists(
         select(volume.id)
-        .join(media_version, media_version.id == volume.media_version_id)
+        .join(media_version, media_version.id == volume.version_id)
         .join(file, file.volume_id == volume.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            media_version.media_kind.in_(CATALOG_MEDIA_KINDS),
+            media_version.source_key.in_(CATALOG_MEDIA_KINDS),
             volume.hidden.is_(False),
             volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
             volume_visibility_predicate(context, volume),
@@ -106,16 +106,16 @@ def _work_predicates(
 def _latest_eligible_volume_at(
     context: AuthorizationContext,
 ) -> ScalarSelect[datetime]:
-    media_version = aliased(LibraryMediaVersion)
+    media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     file = aliased(LibraryFile)
     return (
         select(func.max(volume.updated_at))
-        .join(media_version, media_version.id == volume.media_version_id)
+        .join(media_version, media_version.id == volume.version_id)
         .join(file, file.volume_id == volume.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            media_version.media_kind.in_(CATALOG_MEDIA_KINDS),
+            media_version.source_key.in_(CATALOG_MEDIA_KINDS),
             volume.hidden.is_(False),
             volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
             volume_visibility_predicate(context, volume),
@@ -293,8 +293,8 @@ class SqlAlchemyCatalogQueries:
         )
         rows = self._db.execute(
             select(
-                LibraryMediaVersion.work_id,
-                LibraryMediaVersion.media_kind,
+                LibraryVersion.work_id,
+                LibraryVersion.source_key.label("media_kind"),
                 LibraryVolume,
                 LibraryFile.id.label("file_id"),
                 LibraryFile.mime_type,
@@ -302,19 +302,19 @@ class SqlAlchemyCatalogQueries:
                 LibraryFile.updated_at.label("file_updated_at"),
             )
             .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+                LibraryVersion,
+                LibraryVersion.id == LibraryVolume.version_id,
             )
             .join(LibraryFile, LibraryFile.id == preferred_file_id)
             .where(
-                LibraryMediaVersion.work_id.in_(work_ids),
-                LibraryMediaVersion.media_kind.in_(CATALOG_MEDIA_KINDS),
+                LibraryVersion.work_id.in_(work_ids),
+                LibraryVersion.source_key.in_(CATALOG_MEDIA_KINDS),
                 LibraryVolume.hidden.is_(False),
                 LibraryVolume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
                 volume_visibility_predicate(context),
             )
             .order_by(
-                LibraryMediaVersion.work_id.asc(),
+                LibraryVersion.work_id.asc(),
                 LibraryVolume.sort_order.asc(),
                 LibraryVolume.volume_index.asc(),
                 LibraryVolume.id.asc(),

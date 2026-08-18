@@ -14,6 +14,7 @@ from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
 from app.models.library import (
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryReadingProgress,
     LibraryVolume,
     LibraryWork,
@@ -115,7 +116,7 @@ class SqlAlchemyLibraryRequestMutations:
             )
             .join(
                 LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+                LibraryVersion.id == LibraryVolume.version_id,
             )
             .where(
                 LibraryMediaVersion.work_id.in_(command.work_ids),

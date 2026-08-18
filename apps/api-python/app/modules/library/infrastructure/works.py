@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryReadingProgress,
     LibraryVolume,
     LibraryWork,
@@ -115,8 +116,8 @@ def list_progress_for_works(db: Session, work_ids: list[str]) -> list[dict[str, 
         select(LibraryReadingProgress.id, LibraryMediaVersion.work_id)
         .join(LibraryVolume, LibraryVolume.id == LibraryReadingProgress.volume_id)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryMediaVersion.work_id.in_(work_ids))
     ).all()
@@ -195,7 +196,7 @@ def move_media_version_to_work(
         return source.id
     db.execute(
         update(LibraryVolume)
-        .where(LibraryVolume.media_version_id == source.id)
+        .where(LibraryVolume.version_id == source.id)
         .values(media_version_id=target.id, updated_at=now)
     )
     for history in db.scalars(

@@ -168,7 +168,7 @@ def list_volumes_for_media_version(
 ) -> list[dict[str, object]]:
     volumes = db.scalars(
         select(LibraryVolume)
-        .where(LibraryVolume.media_version_id == media_version_id)
+        .where(LibraryVolume.version_id == media_version_id)
         .order_by(
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
@@ -201,7 +201,7 @@ def list_progress_for_media_version(
             LibraryVolume.id == LibraryReadingProgress.volume_id,
         )
         .where(
-            LibraryVolume.media_version_id == media_version_id,
+            LibraryVolume.version_id == media_version_id,
             LibraryReadingProgress.user_id == user_id,
         )
         .order_by(

@@ -13,7 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
@@ -208,6 +208,8 @@ class LibraryVersion(Base):
     source_name: Mapped[str | None] = mapped_column(
         "sourceName", Text, nullable=True
     )
+    work: Mapped[LibraryWork] = relationship()
+    volumes: Mapped[list[LibraryVolume]] = relationship(back_populates="version")
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -267,17 +269,15 @@ class LibraryMediaVersion(Base):
 class LibraryVolume(Base):
     __tablename__ = "LibraryVolume"
     __table_args__ = (
+        Index("LibraryVolume_versionId_sortOrder_idx", "versionId", "sortOrder"),
         Index(
-            "LibraryVolume_mediaVersionId_sortOrder_idx", "mediaVersionId", "sortOrder"
-        ),
-        Index(
-            "LibraryVolume_mediaVersionId_volumeIndex_idx",
-            "mediaVersionId",
+            "LibraryVolume_versionId_volumeIndex_idx",
+            "versionId",
             "volumeIndex",
         ),
         Index(
-            "LibraryVolume_mediaVersionId_hidden_idx",
-            "mediaVersionId",
+            "LibraryVolume_versionId_hidden_idx",
+            "versionId",
             "hidden",
         ),
         Index("LibraryVolume_format_idx", "format"),
@@ -287,12 +287,13 @@ class LibraryVolume(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    media_version_id: Mapped[str] = mapped_column(
-        "mediaVersionId",
+    version_id: Mapped[str] = mapped_column(
+        "versionId",
         String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
+    version: Mapped[LibraryVersion] = relationship(back_populates="volumes")
     origin: Mapped[str] = mapped_column(
         String(191), nullable=False, default="MANUAL", server_default="MANUAL"
     )

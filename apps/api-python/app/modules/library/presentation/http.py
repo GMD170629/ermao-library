@@ -75,6 +75,7 @@ from app.db.session import get_db
 from app.models.auth import User
 from app.models.library import (
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
 )
 from app.modules.library.application.filter_options import LibraryFilterOptionSource
@@ -793,7 +794,7 @@ def management_folders(
             )
             .join(
                 LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+                LibraryVersion.id == LibraryVolume.version_id,
             )
             .where(LibraryVolume.hidden.is_(False))
             .group_by(LibraryMediaVersion.work_id)
@@ -1336,8 +1337,8 @@ def get_work_volume_reading_units(
     volume_belongs_to_work = db.scalar(
         select(LibraryVolume.id)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryVolume.id == volume_id,
@@ -1695,8 +1696,8 @@ def _first_volume(db: Session, work_id: str) -> dict[str, Any] | None:
     volume = db.scalar(
         select(LibraryVolume)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryMediaVersion.work_id == work_id, LibraryVolume.hidden.is_(False))
         .order_by(
@@ -3518,7 +3519,7 @@ async def apply_work_metadata(
                 select(LibraryMediaVersion)
                 .join(
                     LibraryVolume,
-                    LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                    LibraryVolume.version_id == LibraryVersion.id,
                 )
                 .where(
                     LibraryVolume.id == payload.volume_id,
@@ -3542,7 +3543,7 @@ async def apply_work_metadata(
                 code="MEDIA_VERSION_TARGET_REQUIRED",
             )
         volume_query = select(LibraryVolume).where(
-            LibraryVolume.media_version_id == target_media_version.id,
+            LibraryVolume.version_id == target_media_version.id,
             LibraryVolume.hidden.is_(False),
         )
         if not apply_to_all_volumes:

@@ -14,8 +14,8 @@ from app.core.authorization import (
 from app.models.auth import User
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
@@ -36,14 +36,14 @@ def _visible_volume_exists(
     context: AuthorizationContext,
     *extra: ColumnElement[bool],
 ) -> ColumnElement[bool]:
-    media_version = aliased(LibraryMediaVersion)
+    media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     return exists(
         select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
             exists(
                 select(volume.id).where(
-                    volume.media_version_id == media_version.id,
+                    volume.version_id == media_version.id,
                     volume.hidden.is_(False),
                     volume_visibility_predicate(context, volume),
                     *extra,
@@ -58,15 +58,15 @@ def _media_kind_predicate(
 ) -> ColumnElement[bool] | None:
     if not media_kinds:
         return None
-    media_version = aliased(LibraryMediaVersion)
+    media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     return exists(
         select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
-            media_version.media_kind.in_(media_kinds),
+            media_version.source_key.in_(media_kinds),
             exists(
                 select(volume.id).where(
-                    volume.media_version_id == media_version.id,
+                    volume.version_id == media_version.id,
                     volume.hidden.is_(False),
                     volume_visibility_predicate(context, volume),
                 )
@@ -108,14 +108,14 @@ def _type_predicate(
     }
     if normalized not in supported_formats:
         return None
-    media_version = aliased(LibraryMediaVersion)
+    media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     return exists(
         select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
             exists(
                 select(volume.id).where(
-                    volume.media_version_id == media_version.id,
+                    volume.version_id == media_version.id,
                     volume.format == normalized,
                     volume.hidden.is_(False),
                     volume_visibility_predicate(context, volume),
@@ -133,13 +133,13 @@ def _status_predicate(
         normalized = "UNREAD"
     if normalized not in {"UNREAD", "READING", "FINISHED"}:
         return None
-    media_version = aliased(LibraryMediaVersion)
+    media_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     progress = aliased(LibraryReadingProgress)
     started = exists(
         select(progress.id)
         .join(volume, volume.id == progress.volume_id)
-        .join(media_version, media_version.id == volume.media_version_id)
+        .join(media_version, media_version.id == volume.version_id)
         .where(
             media_version.work_id == LibraryWork.id,
             progress.user_id == user_id,
@@ -161,7 +161,7 @@ def _status_predicate(
                     ),
                 )
                 .where(
-                    volume.media_version_id == media_version.id,
+                    volume.version_id == media_version.id,
                     volume.hidden.is_(False),
                     volume_visibility_predicate(context, volume),
                     func.coalesce(progress.percent, 0) < 100,
@@ -315,18 +315,18 @@ def list_works(db: Session, user: User, query: WorkListQuery) -> WorkListResult:
     if query.sort == "recent_read":
         latest_read = (
             select(
-                LibraryMediaVersion.work_id.label("work_id"),
+                LibraryVersion.work_id.label("work_id"),
                 func.max(LibraryReadingProgress.updated_at).label("last_read_at"),
             )
             .join(
-                LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id
+                LibraryVolume, LibraryVolume.version_id == LibraryVersion.id
             )
             .join(
                 LibraryReadingProgress,
                 LibraryReadingProgress.volume_id == LibraryVolume.id,
             )
             .where(LibraryReadingProgress.user_id == user.id)
-            .group_by(LibraryMediaVersion.work_id)
+            .group_by(LibraryVersion.work_id)
             .subquery()
         )
         statement = statement.outerjoin(

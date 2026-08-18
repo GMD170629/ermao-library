@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryReadingUnit,
     LibraryVolume,
 )
@@ -18,10 +18,10 @@ from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 def get_volume_context(db: Session, volume_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
+        select(LibraryVolume, LibraryVersion)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryVolume.id == volume_id)
     ).first()
@@ -31,19 +31,19 @@ def get_volume_context(db: Session, volume_id: str) -> dict[str, Any] | None:
     payload = entity_as_legacy_dict(volume)
     payload.update(
         workId=media_version.work_id,
-        mediaKind=media_version.media_kind,
-        mediaVersionId=media_version.id,
+        mediaKind=media_version.source_key,
+        versionId=media_version.id,
     )
     return payload
 
 
 def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryReadingUnit, LibraryVolume, LibraryMediaVersion)
+        select(LibraryReadingUnit, LibraryVolume, LibraryVersion)
         .join(LibraryVolume, LibraryVolume.id == LibraryReadingUnit.volume_id)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryReadingUnit.id == unit_id)
     ).first()
@@ -53,8 +53,8 @@ def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     payload = entity_as_legacy_dict(unit)
     payload.update(
         workId=media_version.work_id,
-        mediaKind=media_version.media_kind,
-        mediaVersionId=media_version.id,
+        mediaKind=media_version.source_key,
+        versionId=media_version.id,
         format=volume.format,
     )
     return payload
@@ -65,10 +65,10 @@ def list_file_paths_for_work(db: Session, work_id: str) -> list[str]:
         select(LibraryFile.path)
         .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
-        .where(LibraryMediaVersion.work_id == work_id)
+        .where(LibraryVersion.work_id == work_id)
     ).all()
     return [str(path) for path in paths if path]
 
@@ -77,14 +77,14 @@ def get_volume_for_work(
     db: Session, *, volume_id: str, work_id: str
 ) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
+        select(LibraryVolume, LibraryVersion)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryVolume.id == volume_id,
-            LibraryMediaVersion.work_id == work_id,
+            LibraryVersion.work_id == work_id,
             LibraryVolume.hidden.is_(False),
         )
     ).first()
@@ -95,7 +95,7 @@ def get_volume_for_work(
     payload.update(
         sourceWorkId=media_version.work_id,
         sourceFormat=volume.format,
-        mediaVersionId=media_version.id,
+        versionId=media_version.id,
     )
     return payload
 

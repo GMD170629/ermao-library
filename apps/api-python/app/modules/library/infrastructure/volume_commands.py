@@ -19,6 +19,7 @@ from app.models.common import cuid
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     UserMediaHistory,
@@ -138,12 +139,12 @@ class SqlAlchemyVolumeStructure:
             .scalar_subquery()
         )
         rows = self._db.execute(
-            select(LibraryVolume, LibraryWork, LibraryMediaVersion, source_path)
+            select(LibraryVolume, LibraryWork, LibraryVersion, source_path)
             .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+                LibraryVersion,
+                LibraryVersion.id == LibraryVolume.version_id,
             )
-            .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
+            .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
             .where(
                 LibraryVolume.id.in_(volume_ids),
                 LibraryWork.id == work_id,
@@ -155,8 +156,8 @@ class SqlAlchemyVolumeStructure:
             volume.id: VolumeContext(
                 id=volume.id,
                 work_id=work.id,
-                media_version_id=volume.media_version_id,
-                media_kind=media_version.media_kind,
+                media_version_id=volume.version_id,
+                media_kind=media_version.source_key,
                 title=volume.title,
                 sort_order=volume.sort_order,
                 format=volume.format,
@@ -191,21 +192,21 @@ class SqlAlchemyVolumeStructure:
         volume = self._db.get(LibraryVolume, volume_id)
         if volume is None:
             raise ValueError("Volume does not exist")
-        source_media = self._db.get(LibraryMediaVersion, volume.media_version_id)
+        source_media = self._db.get(LibraryVersion, volume.version_id)
         if source_media is None or source_media.work_id != source_work_id:
             raise ValueError("Volume does not belong to work")
         source_volume_count = int(
             self._db.scalar(
                 select(func.count(LibraryVolume.id)).where(
-                    LibraryVolume.media_version_id == source_media.id
+                    LibraryVolume.version_id == source_media.id
                 )
             )
             or 0
         )
         source_media_count = int(
             self._db.scalar(
-                select(func.count(LibraryMediaVersion.id)).where(
-                    LibraryMediaVersion.work_id == source_work_id
+                select(func.count(LibraryVersion.id)).where(
+                    LibraryVersion.work_id == source_work_id
                 )
             )
             or 0
@@ -324,14 +325,14 @@ class SqlAlchemyVolumeStructure:
         volume = self._db.get(LibraryVolume, volume_id)
         if volume is None:
             raise ValueError("Volume does not exist")
-        source_media = self._db.get(LibraryMediaVersion, volume.media_version_id)
+        source_media = self._db.get(LibraryVersion, volume.version_id)
         if source_media is None or source_media.work_id != work_id:
             raise ValueError("Volume does not belong to work")
         selected = (
             list(
                 self._db.scalars(
                     select(LibraryVolume)
-                    .where(LibraryVolume.media_version_id == source_media.id)
+                    .where(LibraryVolume.version_id == source_media.id)
                     .order_by(
                         LibraryVolume.sort_order.asc(),
                         LibraryVolume.created_at.asc(),
@@ -343,9 +344,9 @@ class SqlAlchemyVolumeStructure:
             else [volume]
         )
         target_media = self._db.scalar(
-            select(LibraryMediaVersion).where(
-                LibraryMediaVersion.work_id == work_id,
-                LibraryMediaVersion.media_kind == target_media_kind,
+            select(LibraryVersion).where(
+                LibraryVersion.work_id == work_id,
+                LibraryVersion.source_key == target_media_kind,
             )
         )
         target_created = target_media is None
@@ -381,7 +382,7 @@ class SqlAlchemyVolumeStructure:
             target_count = int(
                 self._db.scalar(
                     select(func.count(LibraryVolume.id)).where(
-                        LibraryVolume.media_version_id == target_id
+                        LibraryVolume.version_id == target_id
                     )
                 )
                 or 0
@@ -390,7 +391,7 @@ class SqlAlchemyVolumeStructure:
                 selected_update_rows.append(
                     {
                         "id": selected_volume.id,
-                        "media_version_id": target_id,
+                        "version_id": target_id,
                         "sort_order": (target_count + offset) * 1000,
                         "classification_source": "USER",
                         "classification_reason": "USER_OVERRIDE",
@@ -402,7 +403,7 @@ class SqlAlchemyVolumeStructure:
                 self._db.scalars(
                     select(LibraryVolume)
                     .where(
-                        LibraryVolume.media_version_id == source_id,
+                        LibraryVolume.version_id == source_id,
                         LibraryVolume.id.not_in(moved_ids),
                     )
                     .order_by(LibraryVolume.sort_order, LibraryVolume.id)
@@ -502,6 +503,18 @@ class SqlAlchemyVolumeStructure:
         )
         if target_created:
             self._db.execute(
+                insert(LibraryVersion),
+                [
+                    {
+                        "id": target_id,
+                        "work_id": work_id,
+                        "source_key": target_media_kind,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                ],
+            )
+            self._db.execute(
                 insert(LibraryMediaVersion),
                 [
                     {
@@ -525,11 +538,11 @@ class SqlAlchemyVolumeStructure:
             self._db.execute(statement)
         if source_id != target_id and not remaining:
             self._db.execute(
-                delete(LibraryMediaVersion).where(LibraryMediaVersion.id == source_id)
+                delete(LibraryVersion).where(LibraryVersion.id == source_id)
             )
         self._db.execute(
-            update(LibraryMediaVersion)
-            .where(LibraryMediaVersion.id == target_id)
+            update(LibraryVersion)
+            .where(LibraryVersion.id == target_id)
             .values(updated_at=now)
         )
         operation_store.write_prepared_operation(self._db, operation)

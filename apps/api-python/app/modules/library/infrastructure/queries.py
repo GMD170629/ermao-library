@@ -11,7 +11,7 @@ from app.core.authorization import (
 from app.models.auth import User
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
@@ -79,7 +79,7 @@ class SqlAlchemyLibraryQueries:
             if status_predicate is not None:
                 predicates.append(status_predicate)
         if criteria.media_kinds:
-            media_version = aliased(LibraryMediaVersion)
+            media_version = aliased(LibraryVersion)
             volume = aliased(LibraryVolume)
             volume_predicates = [volume.hidden.is_(False)]
             if context is not None:
@@ -88,10 +88,10 @@ class SqlAlchemyLibraryQueries:
                 exists(
                     select(media_version.id).where(
                         media_version.work_id == LibraryWork.id,
-                        media_version.media_kind.in_(criteria.media_kinds),
+                        media_version.source_key.in_(criteria.media_kinds),
                         exists(
                             select(volume.id).where(
-                                volume.media_version_id == media_version.id,
+                                volume.version_id == media_version.id,
                                 *volume_predicates,
                             )
                         ),

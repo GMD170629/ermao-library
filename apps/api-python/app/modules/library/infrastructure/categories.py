@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.library import (
     LibraryFacet,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryVolumeFacet,
     LibraryWork,
@@ -96,10 +97,10 @@ def get_work(db: Session, work_id: str) -> dict[str, Any] | None:
 
 def get_volume(db: Session, volume_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
+        select(LibraryVolume, LibraryVersion)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryVolume.id == volume_id)
     ).first()
@@ -115,10 +116,10 @@ def list_volumes_by_ids(db: Session, volume_ids: list[str]) -> list[dict[str, An
     if not volume_ids:
         return []
     rows = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
+        select(LibraryVolume, LibraryVersion)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(LibraryVolume.id.in_(volume_ids))
     ).all()

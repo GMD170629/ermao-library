@@ -14,6 +14,7 @@ from app.core.authorization import (
 )
 from app.models.library import (
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryReadingProgress,
     LibraryVolume,
     LibraryWork,
@@ -64,7 +65,7 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
             )
             .join(
                 LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                LibraryVolume.version_id == LibraryVersion.id,
             )
             .outerjoin(
                 LibraryReadingProgress,

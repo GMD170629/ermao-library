@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.authorization import AuthorizationContext, volume_visibility_predicate
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -50,12 +50,12 @@ class SqlAlchemyMediaResourceRepository:
         rows = self._session.execute(
             select(LibraryWork.title, LibraryVolume, LibraryFile)
             .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.work_id == LibraryWork.id,
+                LibraryVersion,
+                LibraryVersion.work_id == LibraryWork.id,
             )
             .join(
                 LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                LibraryVolume.version_id == LibraryVersion.id,
             )
             .outerjoin(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
             .where(
@@ -65,7 +65,7 @@ class SqlAlchemyMediaResourceRepository:
                 volume_visibility_predicate(actor),
             )
             .order_by(
-                LibraryMediaVersion.media_kind,
+                LibraryVersion.source_key,
                 LibraryVolume.sort_order,
                 LibraryVolume.created_at,
                 LibraryVolume.id,
@@ -100,20 +100,20 @@ class SqlAlchemyMediaResourceRepository:
         fallback = self._session.scalar(
             select(LibraryVolume.cover_path)
             .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+                LibraryVersion,
+                LibraryVersion.id == LibraryVolume.version_id,
             )
             .where(
-                LibraryMediaVersion.work_id == work_id,
+                LibraryVersion.work_id == work_id,
                 LibraryVolume.hidden.is_(False),
                 LibraryVolume.cover_path.is_not(None),
                 LibraryVolume.cover_path != "",
             )
             .order_by(
                 case(
-                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                    (LibraryMediaVersion.media_kind == "COMIC", 1),
-                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                    (LibraryVersion.source_key == "EBOOK", 0),
+                    (LibraryVersion.source_key == "COMIC", 1),
+                    (LibraryVersion.source_key == "AUDIOBOOK", 2),
                     else_=3,
                 ),
                 LibraryVolume.sort_order,

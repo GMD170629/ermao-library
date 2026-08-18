@@ -213,7 +213,7 @@ class VolumeClassification(HttpContractModel):
 
 class LibraryVolume(HttpContractModel):
     id: str
-    media_version_id: str = Field(alias="mediaVersionId")
+    version_id: str = Field(alias="versionId")
     title: str
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     sort_order: int = Field(alias="sortOrder")
@@ -268,7 +268,7 @@ class LibraryMediaVersion(HttpContractModel):
 
 class WorkDetailVolume(HttpContractModel):
     id: str
-    media_version_id: str = Field(alias="mediaVersionId")
+    version_id: str = Field(alias="versionId")
     title: str
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     sort_order: int = Field(alias="sortOrder")
@@ -660,7 +660,7 @@ class ReadingUnitsPage(HttpContractModel):
 
 class VolumeSection(HttpContractModel):
     id: str
-    media_version_id: str = Field(alias="mediaVersionId")
+    version_id: str = Field(alias="versionId")
     title: str
     index: float
     file_id: str = Field(alias="fileId")
@@ -739,7 +739,7 @@ class WorkDetailSummaryPayload(HttpContractModel):
 
 
 class WorkVolumePagePayload(HttpContractModel):
-    media_version_id: str = Field(alias="mediaVersionId")
+    version_id: str = Field(alias="versionId")
     media_kind: MediaKind = Field(alias="mediaKind")
     volumes: list[WorkDetailVolume]
     page: int

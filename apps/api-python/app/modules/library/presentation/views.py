@@ -37,6 +37,7 @@ from app.models.auth import User
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
@@ -355,7 +356,7 @@ def _available_media_kinds_by_work(
         select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
         .where(LibraryMediaVersion.work_id.in_(work_ids))
         .order_by(
-            LibraryMediaVersion.work_id.asc(),
+            LibraryVersion.work_id.asc(),
             case(
                 (LibraryMediaVersion.media_kind == "EBOOK", 0),
                 (LibraryMediaVersion.media_kind == "COMIC", 1),
@@ -418,17 +419,17 @@ def _management_work_views(
     user = db.get(User, user_id)
     context = authorization_context(db, user) if user is not None else None
     filters = [
-        LibraryMediaVersion.work_id.in_(work_ids),
+        LibraryVersion.work_id.in_(work_ids),
         LibraryVolume.hidden.is_(False),
     ]
     if context is not None:
         filters.append(volume_visibility_predicate(context))
     rows = db.execute(
-        select(LibraryMediaVersion, LibraryVolume)
-        .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
+        select(LibraryVersion, LibraryVolume)
+        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
         .where(*filters)
         .order_by(
-            LibraryMediaVersion.work_id,
+            LibraryVersion.work_id,
             LibraryVolume.sort_order,
             LibraryVolume.created_at,
             LibraryVolume.id,
@@ -458,7 +459,7 @@ def _management_work_views(
     for work in works:
         work_resources = resources.get(str(work["id"]), [])
         media_kinds = list(
-            dict.fromkeys(media.media_kind for media, _volume in work_resources)
+            dict.fromkeys(media.source_key for media, _volume in work_resources)
         )
         percents = [
             float(progresses[volume.id].percent) if volume.id in progresses else 0.0
@@ -528,7 +529,7 @@ def _library_volume_view(
     reader_type = reader_type_for_format(volume.format)
     return {
         "id": volume.id,
-        "mediaVersionId": media_version_id,
+        "versionId": media_version_id,
         "title": volume.title,
         "volumeIndex": volume.volume_index,
         "sortOrder": volume.sort_order,
@@ -597,7 +598,7 @@ def _work_detail_volume_view(
     source_files = files if files is not None else volume.get("files", [])
     return {
         "id": volume["id"],
-        "mediaVersionId": volume["mediaVersionId"],
+        "versionId": volume["versionId"],
         "title": volume["title"],
         "volumeIndex": volume.get("volumeIndex"),
         "sortOrder": volume["sortOrder"],
@@ -713,17 +714,17 @@ def _load_work_view_batch(
     user = db.get(User, user_id) if user_id else None
     context = authorization_context(db, user) if user is not None else None
     filters = [
-        LibraryMediaVersion.work_id.in_(work_ids),
+        LibraryVersion.work_id.in_(work_ids),
         LibraryVolume.hidden.is_(False),
     ]
     if context is not None:
         filters.append(volume_visibility_predicate(context))
     rows = db.execute(
-        select(LibraryMediaVersion, LibraryVolume)
-        .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
+        select(LibraryVersion, LibraryVolume)
+        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
         .where(*filters)
         .order_by(
-            LibraryMediaVersion.work_id.asc(),
+            LibraryVersion.work_id.asc(),
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
             LibraryVolume.id.asc(),
@@ -849,16 +850,16 @@ def _work_view(
         user = db.get(User, user_id) if user_id else None
         context = authorization_context(db, user) if user is not None else None
         filters = [
-            LibraryMediaVersion.work_id == work_id,
+            LibraryVersion.work_id == work_id,
             LibraryVolume.hidden.is_(False),
         ]
         if context is not None:
             filters.append(volume_visibility_predicate(context))
         rows = db.execute(
-            select(LibraryMediaVersion, LibraryVolume)
+            select(LibraryVersion, LibraryVolume)
             .join(
                 LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                LibraryVolume.version_id == LibraryVersion.id,
             )
             .where(*filters)
             .order_by(
@@ -907,7 +908,7 @@ def _work_view(
     )
     media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
     ordered = sorted(
-        grouped.values(), key=lambda item: media_order.get(item[0].media_kind, 99)
+        grouped.values(), key=lambda item: media_order.get(item[0].source_key, 99)
     )
     incomplete: dict[str, list[LibraryVolume]] = {}
     all_volumes: list[LibraryVolume] = []
@@ -956,7 +957,7 @@ def _work_view(
         )
         if (
             continue_volume is not None
-            and continue_volume.media_version_id == media_version.id
+            and continue_volume.version_id == media_version.id
             and all(volume.id != continue_volume.id for volume in selected)
         ):
             selected.append(continue_volume)
@@ -979,7 +980,7 @@ def _work_view(
     media_views = [
         {
             "id": media_version.id,
-            "mediaKind": media_version.media_kind,
+            "mediaKind": media_version.source_key,
             "completed": bool(volumes) and not incomplete[media_version.id],
             "volumeCount": len(volumes),
             "sizeBytes": sum(volume.size_bytes for volume in volumes),
@@ -1022,7 +1023,7 @@ def _work_view(
         "metadataLookupError": (metadata_lookup or {}).get("errorSummary"),
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work_id, work, size="medium"),
-        "recentMediaKind": recent_media.media_kind if recent_media else None,
+        "recentMediaKind": recent_media.source_key if recent_media else None,
         "continueVolumeId": continue_volume.id if continue_volume else None,
         "continueVolumeTitle": continue_volume.title if continue_volume else None,
         "continueVolumeProgress": float(progresses[continue_volume.id].percent)
@@ -1230,15 +1231,15 @@ def _work_volume_page_view(
 ) -> dict[str, Any] | None:
     context = authorization_context(db, user)
     media_version = db.scalar(
-        select(LibraryMediaVersion).where(
-            LibraryMediaVersion.id == media_version_id,
-            LibraryMediaVersion.work_id == work_id,
+        select(LibraryVersion).where(
+            LibraryVersion.id == media_version_id,
+            LibraryVersion.work_id == work_id,
         )
     )
     if media_version is None:
         return None
     filters = [
-        LibraryVolume.media_version_id == media_version_id,
+        LibraryVolume.version_id == media_version_id,
         LibraryVolume.hidden.is_(False),
         volume_visibility_predicate(context),
     ]
@@ -1280,8 +1281,8 @@ def _work_volume_page_view(
         ).all():
             files[file.volume_id].append(file)
     return {
-        "mediaVersionId": media_version.id,
-        "mediaKind": media_version.media_kind,
+        "versionId": media_version.id,
+        "mediaKind": media_version.source_key,
         "volumes": [
             _library_volume_page_view(
                 volume,
@@ -1311,12 +1312,12 @@ def _work_reading_units_view(
     volume = db.scalar(
         select(LibraryVolume)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryVolume.id == volume_id,
-            LibraryMediaVersion.work_id == work_id,
+            LibraryVersion.work_id == work_id,
             LibraryVolume.hidden.is_(False),
             volume_visibility_predicate(context),
         )

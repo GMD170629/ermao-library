@@ -14,6 +14,7 @@ from app.models.library import (
     LibraryMediaVersion,
     LibraryOperation,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     UserMediaHistory,
@@ -34,6 +35,13 @@ from app.modules.library.presentation.work_ops import (
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
+
+
+def _parent(*, id: str, work_id: str, kind: str) -> tuple[LibraryVersion, LibraryMediaVersion]:
+    return (
+        LibraryVersion(id=id, work_id=work_id, source_key=kind),
+        LibraryMediaVersion(id=id, work_id=work_id, media_kind=kind),
+    )
 
 
 def _login_admin(client: TestClient, db: Session) -> User:
@@ -79,14 +87,12 @@ def _volume_aggregate(db: Session, user: User) -> None:
         normalized_author="author",
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id="delete-volume-media",
-        work_id=work.id,
-        media_kind="EBOOK",
+    version, media_version = _parent(
+        id="delete-volume-media", work_id=work.id, kind="EBOOK"
     )
     volume = LibraryVolume(
         id="delete-volume-resource",
-        media_version_id=media_version.id,
+        version_id=media_version.id,
         title="Volume",
         sort_order=0,
         format="EPUB",
@@ -132,7 +138,7 @@ def _volume_aggregate(db: Session, user: User) -> None:
     )
     db.add(work)
     db.flush()
-    db.add_all([media_version, volume])
+    db.add_all([version, media_version, volume])
     db.flush()
     db.add_all([file, progress, bookmark, task])
     db.commit()
@@ -155,6 +161,7 @@ def test_delete_last_volume_cascades_and_undo_restores_volume_resources(
     assert payload["operation"]["action"] == "DELETE_VOLUME"
     db_session.expire_all()
     assert db_session.get(LibraryWork, "delete-volume-work") is None
+    assert db_session.get(LibraryVersion, "delete-volume-media") is None
     assert db_session.get(LibraryMediaVersion, "delete-volume-media") is None
     assert db_session.get(LibraryVolume, "delete-volume-resource") is None
     assert db_session.get(LibraryFile, "delete-volume-file") is None
@@ -170,6 +177,7 @@ def test_delete_last_volume_cascades_and_undo_restores_volume_resources(
     assert undo.json()["data"]["restored"] is True
     db_session.expire_all()
     assert db_session.get(LibraryWork, "delete-volume-work") is not None
+    assert db_session.get(LibraryVersion, "delete-volume-media") is not None
     assert db_session.get(LibraryMediaVersion, "delete-volume-media") is not None
     assert db_session.get(LibraryVolume, "delete-volume-resource") is not None
     assert db_session.get(LibraryFile, "delete-volume-file") is not None
@@ -198,15 +206,15 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
         normalized_author="author",
         tags="[]",
     )
-    ebook = LibraryMediaVersion(
-        id="reclassify-ebook", work_id=work.id, media_kind="EBOOK"
+    ebook_version, ebook = _parent(
+        id="reclassify-ebook", work_id=work.id, kind="EBOOK"
     )
-    comic = LibraryMediaVersion(
-        id="reclassify-comic", work_id=work.id, media_kind="COMIC"
+    comic_version, comic = _parent(
+        id="reclassify-comic", work_id=work.id, kind="COMIC"
     )
     moved = LibraryVolume(
         id="reclassify-moved",
-        media_version_id=ebook.id,
+        version_id=ebook.id,
         title="Moved",
         sort_order=0,
         format="EPUB",
@@ -218,7 +226,7 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     )
     remaining = LibraryVolume(
         id="reclassify-remaining",
-        media_version_id=ebook.id,
+        version_id=ebook.id,
         title="Remaining",
         sort_order=1000,
         format="EPUB",
@@ -227,7 +235,7 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     )
     existing_target = LibraryVolume(
         id="reclassify-target",
-        media_version_id=comic.id,
+        version_id=comic.id,
         title="Target",
         sort_order=0,
         format="CBZ",
@@ -271,7 +279,7 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add_all([ebook, comic])
+    db_session.add_all([ebook_version, comic_version, ebook, comic])
     db_session.flush()
     db_session.add_all([moved, remaining, existing_target])
     db_session.flush()
@@ -294,7 +302,7 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     db_session.expire_all()
     moved_after = db_session.get(LibraryVolume, moved.id)
     assert moved_after is not None
-    assert moved_after.media_version_id == comic.id
+    assert moved_after.version_id == comic.id
     assert moved_after.classification_source == "USER"
     assert moved_after.classification_reason == "USER_OVERRIDE"
     assert moved_after.suggested_media_kind is None
@@ -312,7 +320,7 @@ def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
     db_session.expire_all()
     restored = db_session.get(LibraryVolume, moved.id)
     assert restored is not None
-    assert restored.media_version_id == ebook.id
+    assert restored.version_id == ebook.id
     assert restored.classification_source == "AUTO"
     assert restored.suggested_media_kind == "COMIC"
     assert (
@@ -366,15 +374,15 @@ def _batch_volume_aggregate(
         normalized_author="author",
         tags="[]",
     )
-    media = LibraryMediaVersion(
+    version, media = _parent(
         id=f"{work_id}-ebook",
         work_id=work.id,
-        media_kind="EBOOK",
+        kind="EBOOK",
     )
     volumes = [
         LibraryVolume(
             id=volume_id,
-            media_version_id=media.id,
+            version_id=media.id,
             title=f"Volume {index}",
             sort_order=index * 1000,
             format="EPUB",
@@ -385,7 +393,7 @@ def _batch_volume_aggregate(
     ]
     db.add(work)
     db.flush()
-    db.add_all([media, *volumes])
+    db.add_all([version, media, *volumes])
     db.commit()
     return work, volumes
 
@@ -416,8 +424,8 @@ def test_batch_reclassify_updates_every_selected_volume_in_one_contract(
     assert len(payload["operationIds"]) == 2
     db_session.expire_all()
     media_kinds = db_session.scalars(
-        select(LibraryMediaVersion.media_kind)
-        .join(LibraryVolume)
+        select(LibraryVersion.source_key)
+        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
         .where(LibraryVolume.id.in_([volume.id for volume in volumes]))
     ).all()
     assert media_kinds == ["COMIC", "COMIC"]
@@ -484,8 +492,8 @@ def test_batch_transfer_split_and_delete_preserve_their_public_results(
     assert transfer.json()["data"]["targetWorkIds"] == [transfer_target.id]
     db_session.expire_all()
     transferred_work_ids = db_session.scalars(
-        select(LibraryMediaVersion.work_id)
-        .join(LibraryVolume)
+        select(LibraryVersion.work_id)
+        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
         .where(LibraryVolume.id.in_([volume.id for volume in transfer_volumes]))
     ).all()
     assert transferred_work_ids == [transfer_target.id, transfer_target.id]
@@ -511,8 +519,8 @@ def test_batch_transfer_split_and_delete_preserve_their_public_results(
     db_session.expire_all()
     split_work_ids = set(
         db_session.scalars(
-            select(LibraryMediaVersion.work_id)
-            .join(LibraryVolume)
+            select(LibraryVersion.work_id)
+            .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
             .where(LibraryVolume.id.in_([volume.id for volume in split_volumes]))
         ).all()
     )
@@ -683,19 +691,19 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
         normalized_author="author",
         tags="[]",
     )
-    ebook = LibraryMediaVersion(
+    ebook_version, ebook = _parent(
         id="continue-ebook",
         work_id=work.id,
-        media_kind="EBOOK",
+        kind="EBOOK",
     )
-    comic = LibraryMediaVersion(
+    comic_version, comic = _parent(
         id="continue-comic",
         work_id=work.id,
-        media_kind="COMIC",
+        kind="COMIC",
     )
     ebook_volume = LibraryVolume(
         id="continue-ebook-volume",
-        media_version_id=ebook.id,
+        version_id=ebook.id,
         title="Ebook",
         sort_order=0,
         format="EPUB",
@@ -704,7 +712,7 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
     )
     comic_first = LibraryVolume(
         id="continue-comic-first",
-        media_version_id=comic.id,
+        version_id=comic.id,
         title="Comic first",
         sort_order=0,
         format="CBZ",
@@ -713,7 +721,7 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
     )
     comic_second = LibraryVolume(
         id="continue-comic-second",
-        media_version_id=comic.id,
+        version_id=comic.id,
         title="Comic second",
         sort_order=1000,
         format="CBZ",
@@ -722,7 +730,7 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add_all([ebook, comic])
+    db_session.add_all([ebook_version, comic_version, ebook, comic])
     db_session.flush()
     db_session.add_all([ebook_volume, comic_first, comic_second])
     db_session.flush()
@@ -738,19 +746,19 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
                 extra="{}",
                 updated_at=now,
             ),
-            UserMediaHistory(
-                id="continue-ebook-history",
-                user_id=user.id,
-                media_version_id=ebook.id,
-                last_volume_id=ebook_volume.id,
+                UserMediaHistory(
+                    id="continue-ebook-history",
+                    user_id=user.id,
+                    media_version_id=ebook.id,
+                    last_volume_id=ebook_volume.id,
                 created_at=now - timedelta(hours=1),
                 updated_at=now - timedelta(hours=1),
             ),
-            UserMediaHistory(
-                id="continue-comic-history",
-                user_id=user.id,
-                media_version_id=comic.id,
-                last_volume_id=comic_second.id,
+                UserMediaHistory(
+                    id="continue-comic-history",
+                    user_id=user.id,
+                    media_version_id=comic.id,
+                    last_volume_id=comic_second.id,
                 created_at=now,
                 updated_at=now,
             ),
@@ -789,14 +797,14 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
         normalized_author="author",
         tags="[]",
     )
-    media = LibraryMediaVersion(
+    version, media = _parent(
         id="import-cleanup-media",
         work_id=work.id,
-        media_kind="EBOOK",
+        kind="EBOOK",
     )
     first = LibraryVolume(
         id="import-cleanup-first",
-        media_version_id=media.id,
+        version_id=media.id,
         title="First",
         sort_order=0,
         format="EPUB",
@@ -805,7 +813,7 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     )
     second = LibraryVolume(
         id="import-cleanup-second",
-        media_version_id=media.id,
+        version_id=media.id,
         title="Second",
         sort_order=1000,
         format="PDF",
@@ -814,7 +822,7 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add(media)
+    db_session.add_all([version, media])
     db_session.flush()
     db_session.add_all([first, second])
     db_session.commit()
@@ -828,6 +836,7 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     assert first_result["deleted"] is True
     assert first_result["deletedWorkRecord"] is False
     assert db_session.get(LibraryWork, work.id) is not None
+    assert db_session.get(LibraryVersion, media.id) is not None
     assert db_session.get(LibraryMediaVersion, media.id) is not None
     assert db_session.get(LibraryVolume, second.id) is not None
 
@@ -841,6 +850,7 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     assert second_result["deleted"] is True
     assert second_result["deletedWorkRecord"] is True
     assert db_session.get(LibraryWork, work.id) is None
+    assert db_session.get(LibraryVersion, media.id) is None
     assert db_session.get(LibraryMediaVersion, media.id) is None
 
 
@@ -884,14 +894,14 @@ def test_move_volume_hides_an_unauthorized_target_work(
             normalized_author="author",
             tags="[]",
         )
-        media = LibraryMediaVersion(
+        version, media = _parent(
             id=f"{prefix}-media",
             work_id=work.id,
-            media_kind="EBOOK",
+            kind="EBOOK",
         )
         volume = LibraryVolume(
             id=f"{prefix}-volume",
-            media_version_id=media.id,
+            version_id=media.id,
             title=prefix,
             sort_order=0,
             format="EPUB",
@@ -900,7 +910,7 @@ def test_move_volume_hides_an_unauthorized_target_work(
         )
         db_session.add(work)
         db_session.flush()
-        db_session.add_all([media, volume])
+        db_session.add_all([version, media, volume])
         return work, volume
 
     db_session.add_all([user, source_folder, target_folder])
@@ -925,7 +935,7 @@ def test_move_volume_hides_an_unauthorized_target_work(
     db_session.expire_all()
     persisted = db_session.get(LibraryVolume, source_volume.id)
     assert persisted is not None
-    assert persisted.media_version_id == "source-media"
+    assert persisted.version_id == "source-media"
 
 
 def test_delete_volume_rolls_back_when_persistence_fails() -> None:
@@ -1093,14 +1103,14 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
             normalized_author="author",
             tags="[]",
         )
-        media = LibraryMediaVersion(
+        version, media = _parent(
             id=f"undo-{prefix}-media",
             work_id=work.id,
-            media_kind="EBOOK",
+            kind="EBOOK",
         )
         volume = LibraryVolume(
             id=f"undo-{prefix}-volume",
-            media_version_id=media.id,
+            version_id=media.id,
             title=prefix,
             sort_order=0,
             format="EPUB",
@@ -1109,7 +1119,7 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
         )
         db_session.add(work)
         db_session.flush()
-        db_session.add_all([media, volume])
+        db_session.add_all([version, media, volume])
         return work, volume
 
     source_work, source_volume = aggregate("source")
@@ -1124,7 +1134,7 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     moved_data = moved.json()["data"]
     db_session.expire_all()
     assert db_session.get(LibraryWork, source_work.id) is None
-    assert db_session.get(LibraryVolume, source_volume.id).media_version_id == (
+    assert db_session.get(LibraryVolume, source_volume.id).version_id == (
         "undo-target-media"
     )
     undo_move = client.post(
@@ -1133,7 +1143,7 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     assert undo_move.status_code == 200
     db_session.expire_all()
     assert db_session.get(LibraryWork, source_work.id) is not None
-    assert db_session.get(LibraryVolume, source_volume.id).media_version_id == (
+    assert db_session.get(LibraryVolume, source_volume.id).version_id == (
         "undo-source-media"
     )
 
@@ -1154,6 +1164,48 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     db_session.expire_all()
     assert db_session.get(LibraryWork, source_work.id) is not None
     assert db_session.get(LibraryWork, split_work_id) is None
-    assert db_session.get(LibraryVolume, source_volume.id).media_version_id == (
+    assert db_session.get(LibraryVolume, source_volume.id).version_id == (
         "undo-source-media"
     )
+
+
+def test_library_volume_belongs_to_library_version(db_session: Session) -> None:
+    _ensure_test_library(db_session)
+    work = LibraryWork(
+        library_id="test-library",
+        id="volume-version-work",
+        origin="MANUAL",
+        title="Version link",
+        normalized_title="versionlink",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    version, media = _parent(
+        id="volume-version-parent",
+        work_id=work.id,
+        kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id="volume-version-volume",
+        version_id=version.id,
+        title="Linked volume",
+        sort_order=0,
+        format="EPUB",
+        resource_key="volume-version:linked",
+        import_status="COMPLETED",
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([version, media, volume])
+    db_session.commit()
+    db_session.expire_all()
+
+    persisted = db_session.get(LibraryVolume, volume.id)
+    assert persisted is not None
+    assert persisted.version_id == version.id
+    assert persisted.version.id == version.id
+    assert persisted.version.work_id == work.id
+    assert "mediaVersionId" not in LibraryVolume.__table__.c
+    assert "versionId" in LibraryVolume.__table__.c
+    assert not hasattr(persisted, "media_version_id")

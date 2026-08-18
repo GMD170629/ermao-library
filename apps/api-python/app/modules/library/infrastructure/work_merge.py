@@ -19,6 +19,7 @@ from app.models.import_pipeline import BookConversionTask, ImportTask, KindleSen
 from app.models.library import (
     LibraryMediaVersion,
     LibraryOperation,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     UserMediaHistory,
@@ -93,7 +94,7 @@ class SqlAlchemyWorkMergeGateway:
 
     def _load(
         self, work_ids: tuple[str, ...]
-    ) -> tuple[list[LibraryWork], list[LibraryMediaVersion], list[LibraryVolume]]:
+    ) -> tuple[list[LibraryWork], list[LibraryVersion], list[LibraryVolume]]:
         works_by_id = {
             work.id: work
             for work in self._db.scalars(
@@ -107,10 +108,10 @@ class SqlAlchemyWorkMergeGateway:
         works = [works_by_id[work_id] for work_id in work_ids]
         media_versions = list(
             self._db.scalars(
-                select(LibraryMediaVersion)
-                .where(LibraryMediaVersion.work_id.in_(work_ids))
+                select(LibraryVersion)
+                .where(LibraryVersion.work_id.in_(work_ids))
                 .order_by(
-                    LibraryMediaVersion.created_at.asc(), LibraryMediaVersion.id.asc()
+                    LibraryVersion.created_at.asc(), LibraryVersion.id.asc()
                 )
             ).all()
         )
@@ -118,7 +119,7 @@ class SqlAlchemyWorkMergeGateway:
         volumes = list(
             self._db.scalars(
                 select(LibraryVolume)
-                .where(LibraryVolume.media_version_id.in_(media_ids))
+                .where(LibraryVolume.version_id.in_(media_ids))
                 .order_by(
                     LibraryVolume.sort_order.asc(),
                     LibraryVolume.created_at.asc(),
@@ -133,14 +134,14 @@ class SqlAlchemyWorkMergeGateway:
     def _ordered_volumes(
         self,
         work_ids: tuple[str, ...],
-        media_versions: list[LibraryMediaVersion],
+        media_versions: list[LibraryVersion],
         volumes: list[LibraryVolume],
     ) -> list[tuple[str, LibraryVolume]]:
         media_by_id = {media.id: media for media in media_versions}
         source_positions = {work_id: index for index, work_id in enumerate(work_ids)}
         return sorted(
             (
-                (media_by_id[volume.media_version_id].media_kind, volume)
+                (media_by_id[volume.version_id].source_key, volume)
                 for volume in volumes
             ),
             key=lambda item: (
@@ -151,7 +152,7 @@ class SqlAlchemyWorkMergeGateway:
                 item[1].volume_index
                 if item[1].volume_index is not None and isfinite(item[1].volume_index)
                 else 0,
-                source_positions[media_by_id[item[1].media_version_id].work_id],
+                source_positions[media_by_id[item[1].version_id].work_id],
                 item[1].sort_order,
                 item[1].created_at,
                 item[1].id,
@@ -166,7 +167,7 @@ class SqlAlchemyWorkMergeGateway:
         groups: dict[str, list[dict[str, object]]] = defaultdict(list)
         default_cover_volume_id = ordered[0][1].id
         for media_kind, volume in ordered:
-            source_work = work_by_id[media_by_id[volume.media_version_id].work_id]
+            source_work = work_by_id[media_by_id[volume.version_id].work_id]
             has_cover = bool(volume.cover_path or source_work.cover_path)
             if has_cover and not any(
                 item.get("hasCover") for values in groups.values() for item in values
@@ -332,7 +333,7 @@ class SqlAlchemyWorkMergeGateway:
         media_by_id = {media.id: media for media in media_versions}
         source_work_by_id = {work.id: work for work in works}
         selected_source_work = source_work_by_id[
-            media_by_id[selected_cover.media_version_id].work_id
+            media_by_id[selected_cover.version_id].work_id
         ]
         cover_path = selected_cover.cover_path or selected_source_work.cover_path
         cover_status = (
@@ -372,11 +373,21 @@ class SqlAlchemyWorkMergeGateway:
         }
         media_kinds = tuple(
             sorted(
-                {media.media_kind for media in media_versions},
+                {media.source_key for media in media_versions},
                 key=lambda value: MEDIA_KIND_ORDER.get(value, 99),
             )
         )
         new_media_ids = {kind: cuid() for kind in media_kinds}
+        version_rows = tuple(
+            {
+                "id": new_media_ids[kind],
+                "work_id": new_work_id,
+                "source_key": kind,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for kind in media_kinds
+        )
         media_rows = tuple(
             {
                 "id": new_media_ids[kind],
@@ -395,7 +406,7 @@ class SqlAlchemyWorkMergeGateway:
             volume_update_rows.append(
                 {
                     "id": volume.id,
-                    "media_version_id": new_media_ids[kind],
+                    "version_id": new_media_ids[kind],
                     "sort_order": kind_positions[kind],
                     "updated_at": now,
                 }
@@ -419,7 +430,7 @@ class SqlAlchemyWorkMergeGateway:
         )
         for history in histories:
             history_groups[
-                (history.user_id, media_by_id[history.media_version_id].media_kind)
+                (history.user_id, media_by_id[history.media_version_id].source_key)
             ].append(history)
         history_loser_ids: list[str] = []
         history_winner_rows: list[dict[str, object]] = []
@@ -456,7 +467,7 @@ class SqlAlchemyWorkMergeGateway:
                 "id": row.id,
                 "work_id": new_work_id,
                 "media_version_id": (
-                    new_media_ids[media_by_id[row.media_version_id].media_kind]
+                    new_media_ids[media_by_id[row.media_version_id].source_key]
                     if row.media_version_id in media_by_id
                     else row.media_version_id
                 ),
@@ -472,7 +483,7 @@ class SqlAlchemyWorkMergeGateway:
                 "id": row.id,
                 "work_id": new_work_id,
                 "media_version_id": (
-                    new_media_ids[media_by_id[row.media_version_id].media_kind]
+                    new_media_ids[media_by_id[row.media_version_id].source_key]
                     if row.media_version_id in media_by_id
                     else row.media_version_id
                 ),
@@ -549,10 +560,18 @@ class SqlAlchemyWorkMergeGateway:
             for chunk in sqlite_parameter_chunks(shelf_rows, parameters_per_row=3)
         )
         source_media_delete_statements = tuple(
-            delete(LibraryMediaVersion).where(LibraryMediaVersion.id.in_(chunk))
+            (
+                delete(LibraryMediaVersion).where(LibraryMediaVersion.id.in_(chunk)),
+                delete(LibraryVersion).where(LibraryVersion.id.in_(chunk)),
+            )
             for chunk in sqlite_parameter_chunks(
                 tuple(source_media_ids), parameters_per_row=1
             )
+        )
+        source_media_delete_statements = tuple(
+            statement
+            for pair in source_media_delete_statements
+            for statement in pair
         )
         result = MergeResult(
             work_id=new_work_id,
@@ -570,6 +589,7 @@ class SqlAlchemyWorkMergeGateway:
         )
 
         self._db.execute(insert(LibraryWork), [work_row])
+        self._db.execute(insert(LibraryVersion), list(version_rows))
         self._db.execute(insert(LibraryMediaVersion), list(media_rows))
         self._db.execute(update(LibraryVolume), volume_update_rows)
         for statement in history_delete_statements:

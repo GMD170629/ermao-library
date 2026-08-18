@@ -800,9 +800,22 @@ def _undo_operation(
             raise ValueError("撤销数据不完整")
         library_operations.insert_snapshot(
             db,
-            "LibraryMediaVersion",
+            "LibraryVersion",
             source_media,
         )
+        media_kind = source_media.get("sourceKey") or source_media.get("mediaKind")
+        if media_kind:
+            library_operations.insert_snapshot(
+                db,
+                "LibraryMediaVersion",
+                {
+                    "id": source_media.get("id"),
+                    "workId": source_media.get("workId"),
+                    "mediaKind": media_kind,
+                    "createdAt": source_media.get("createdAt"),
+                    "updatedAt": source_media.get("updatedAt"),
+                },
+            )
         library_operations.insert_snapshot(db, "LibraryVolume", volume)
         for history in inverse.get("mediaHistories") or []:
             library_operations.insert_snapshot(db, "UserMediaHistory", history)
@@ -821,9 +834,35 @@ def _undo_operation(
         volumes = inverse.get("volumes") or []
         if not source_media or not volumes:
             raise ValueError("撤销数据不完整")
-        library_operations.insert_snapshot(db, "LibraryMediaVersion", source_media)
+        library_operations.insert_snapshot(db, "LibraryVersion", source_media)
+        source_kind = source_media.get("sourceKey") or source_media.get("mediaKind")
+        if source_kind:
+            library_operations.insert_snapshot(
+                db,
+                "LibraryMediaVersion",
+                {
+                    "id": source_media.get("id"),
+                    "workId": source_media.get("workId"),
+                    "mediaKind": source_kind,
+                    "createdAt": source_media.get("createdAt"),
+                    "updatedAt": source_media.get("updatedAt"),
+                },
+            )
         if isinstance(target_media, dict) and target_media:
-            library_operations.insert_snapshot(db, "LibraryMediaVersion", target_media)
+            library_operations.insert_snapshot(db, "LibraryVersion", target_media)
+            target_kind = target_media.get("sourceKey") or target_media.get("mediaKind")
+            if target_kind:
+                library_operations.insert_snapshot(
+                    db,
+                    "LibraryMediaVersion",
+                    {
+                        "id": target_media.get("id"),
+                        "workId": target_media.get("workId"),
+                        "mediaKind": target_kind,
+                        "createdAt": target_media.get("createdAt"),
+                        "updatedAt": target_media.get("updatedAt"),
+                    },
+                )
         for volume in volumes:
             library_operations.insert_snapshot(db, "LibraryVolume", volume)
         history_media_ids = [

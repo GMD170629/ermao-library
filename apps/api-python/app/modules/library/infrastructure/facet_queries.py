@@ -15,6 +15,7 @@ from app.core.authorization import (
 from app.models.library import (
     LibraryFacet,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
@@ -42,7 +43,7 @@ def media_kind_counts(
             LibraryMediaVersion.media_kind.label("value"),
             func.count(func.distinct(LibraryMediaVersion.work_id)).label("count"),
         )
-        .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
+        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
         .where(
             LibraryVolume.hidden.is_(False),
             volume_visibility_predicate(context),

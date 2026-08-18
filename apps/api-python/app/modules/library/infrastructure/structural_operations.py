@@ -12,7 +12,7 @@ from sqlalchemy.sql.base import Executable
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import LibraryMediaVersion, LibraryVersion, LibraryVolume, LibraryWork
 from app.modules.library.application.dto import MoveVolumeResult
 
 
@@ -22,14 +22,14 @@ class PreparedVolumeMove:
     result: MoveVolumeResult
 
 
-def _media_version_for_work(
-    db: Session, *, work_id: str, media_kind: str
-) -> LibraryMediaVersion | None:
+def _version_for_work(
+    db: Session, *, work_id: str, source_key: str
+) -> LibraryVersion | None:
     return db.scalar(
-        select(LibraryMediaVersion)
+        select(LibraryVersion)
         .where(
-            LibraryMediaVersion.work_id == work_id,
-            LibraryMediaVersion.media_kind == media_kind,
+            LibraryVersion.work_id == work_id,
+            LibraryVersion.source_key == source_key,
         )
         .limit(1)
     )
@@ -46,7 +46,7 @@ def _ordered_volume_rows(
                 LibraryVolume.sort_order,
                 LibraryVolume.created_at,
             )
-            .where(LibraryVolume.media_version_id == media_version_id)
+            .where(LibraryVolume.version_id == media_version_id)
             .order_by(
                 LibraryVolume.sort_order.asc(),
                 LibraryVolume.created_at.asc(),
@@ -91,14 +91,14 @@ def prepare_volume_move(
     """Project and prepare one resource move before acquiring a write lock."""
 
     source = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
+        select(LibraryVolume, LibraryVersion)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
         .where(
             LibraryVolume.id == volume_id,
-            LibraryMediaVersion.work_id == source_work_id,
+            LibraryVersion.work_id == source_work_id,
         )
     ).one_or_none()
     if source is None:
@@ -122,44 +122,47 @@ def prepare_volume_move(
         ):
             raise ValueError("CROSS_LIBRARY_OPERATION")
 
-    volume, source_media_version = source
-    target_media_version = (
+    volume, source_version = source
+    target_version = (
         None
         if target_work_prepared
-        else _media_version_for_work(
-            db, work_id=target_work_id, media_kind=source_media_version.media_kind
+        else _version_for_work(
+            db, work_id=target_work_id, source_key=source_version.source_key
         )
     )
-    source_media_version_id = source_media_version.id
-    created = target_media_version is None
-    target_media_version_id = (
-        cuid() if target_media_version is None else target_media_version.id
-    )
+    source_version_id = source_version.id
+    created = target_version is None
+    target_version_id = cuid() if target_version is None else target_version.id
     source_rows = [
         row
-        for row in _ordered_volume_rows(db, source_media_version_id)
+        for row in _ordered_volume_rows(db, source_version_id)
         if row[0] != volume_id
     ]
     target_rows = (
-        []
-        if target_work_prepared
-        else _ordered_volume_rows(db, target_media_version_id)
+        [] if target_work_prepared else _ordered_volume_rows(db, target_version_id)
     )
     target_rows.append((volume.id, volume.sort_order, volume.created_at))
-    source_media_ids = tuple(
+    source_version_ids = tuple(
         db.scalars(
-            select(LibraryMediaVersion.id).where(
-                LibraryMediaVersion.work_id == source_work_id
-            )
+            select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
         ).all()
     )
     write_statements: list[Executable] = []
     if created:
         write_statements.append(
-            insert(LibraryMediaVersion).values(
-                id=target_media_version_id,
+            insert(LibraryVersion).values(
+                id=target_version_id,
                 work_id=target_work_id,
-                media_kind=source_media_version.media_kind,
+                source_key=source_version.source_key,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        write_statements.append(
+            insert(LibraryMediaVersion).values(
+                id=target_version_id,
+                work_id=target_work_id,
+                media_kind=source_version.source_key,
                 created_at=now,
                 updated_at=now,
             )
@@ -167,17 +170,15 @@ def prepare_volume_move(
     write_statements.append(
         update(LibraryVolume)
         .where(LibraryVolume.id == volume_id)
-        .values(media_version_id=target_media_version_id, updated_at=now)
+        .values(version_id=target_version_id, updated_at=now)
     )
     write_statements.extend(_prepare_volume_order_statements(source_rows, now))
     write_statements.extend(_prepare_volume_order_statements(target_rows, now))
     if not source_rows:
         write_statements.append(
-            delete(LibraryMediaVersion).where(
-                LibraryMediaVersion.id == source_media_version_id
-            )
+            delete(LibraryVersion).where(LibraryVersion.id == source_version_id)
         )
-        if len(source_media_ids) == 1:
+        if len(source_version_ids) == 1:
             write_statements.append(
                 delete(LibraryWork).where(LibraryWork.id == source_work_id)
             )
@@ -189,8 +190,8 @@ def prepare_volume_move(
     return PreparedVolumeMove(
         statements=tuple(write_statements),
         result=MoveVolumeResult(
-            source_media_version_id=source_media_version_id,
-            target_media_version_id=target_media_version_id,
+            source_media_version_id=source_version_id,
+            target_media_version_id=target_version_id,
             target_work_id=target_work_id,
             transfer_mode=("CREATED_MEDIA_VERSION" if created else "APPENDED_VOLUME"),
         ),
@@ -233,7 +234,7 @@ def reorder_volume(
 ) -> bool:
     volumes = db.execute(
         select(LibraryVolume.id, LibraryVolume.sort_order)
-        .where(LibraryVolume.media_version_id == media_version_id)
+        .where(LibraryVolume.version_id == media_version_id)
         .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
     ).all()
     index = next(

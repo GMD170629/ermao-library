@@ -20,6 +20,7 @@ from app.models.import_pipeline import DownloadTask, ImportTask
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryReadingProgress,
     LibraryVolume,
     LibraryWork,
@@ -68,7 +69,7 @@ def _visible_media_volume_exists(
             (progress.volume_id == volume.id) & (progress.user_id == user_id),
         )
         .where(
-            volume.media_version_id == media_version_id,
+            volume.version_id == media_version_id,
             volume.hidden.is_(False),
             volume_visibility_predicate(context, volume),
         )
@@ -135,9 +136,9 @@ def _progress_activity_candidate(
     history = aliased(UserMediaHistory)
     row = db.execute(
         select(
-            LibraryVolume.media_version_id,
+            LibraryVolume.version_id.label("media_version_id"),
             LibraryReadingProgress.updated_at.label("recent_at"),
-            LibraryMediaVersion.media_kind,
+            LibraryVersion.source_key.label("media_kind"),
             LibraryWork.id.label("work_id"),
         )
         .join(
@@ -145,10 +146,10 @@ def _progress_activity_candidate(
             LibraryVolume.id == LibraryReadingProgress.volume_id,
         )
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
+        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
         .where(
             LibraryReadingProgress.user_id == user_id,
             LibraryWork.hidden.is_(False),
@@ -157,21 +158,21 @@ def _progress_activity_candidate(
             ~exists(
                 select(history.id).where(
                     history.user_id == user_id,
-                    history.media_version_id == LibraryMediaVersion.id,
+                    history.media_version_id == LibraryVersion.id,
                 )
             ),
             _visible_media_volume_exists(
                 context,
                 user_id,
-                LibraryMediaVersion.id,
+                LibraryVersion.id,
                 unfinished_only=unfinished_only,
             ),
         )
         .order_by(
             LibraryReadingProgress.updated_at.desc(),
-            _media_priority(LibraryMediaVersion.media_kind),
+            _media_priority(LibraryVersion.source_key),
             LibraryWork.id.asc(),
-            LibraryMediaVersion.id.asc(),
+            LibraryVersion.id.asc(),
         )
         .limit(1)
     ).first()
@@ -237,21 +238,21 @@ def _first_visible_media_id(
     unfinished_only: bool,
 ) -> str | None:
     return db.scalar(
-        select(LibraryMediaVersion.id)
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
+        select(LibraryVersion.id)
+        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
         .where(
             LibraryWork.hidden.is_(False),
             _visible_media_volume_exists(
                 context,
                 user_id,
-                LibraryMediaVersion.id,
+                LibraryVersion.id,
                 unfinished_only=unfinished_only,
             ),
         )
         .order_by(
-            _media_priority(LibraryMediaVersion.media_kind),
+            _media_priority(LibraryVersion.source_key),
             LibraryWork.id.asc(),
-            LibraryMediaVersion.id.asc(),
+            LibraryVersion.id.asc(),
         )
         .limit(1)
     )
@@ -390,8 +391,8 @@ def recent_reading(
             LibraryWork.cover_path,
             latest_read_at,
         )
-        .join(LibraryMediaVersion, LibraryMediaVersion.work_id == LibraryWork.id)
-        .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
+        .join(LibraryVersion, LibraryVersion.work_id == LibraryWork.id)
+        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
         .join(
             LibraryReadingProgress, LibraryReadingProgress.volume_id == LibraryVolume.id
         )
@@ -457,12 +458,12 @@ def continue_reading_progress(
     rows = db.execute(
         select(
             LibraryVolume.id.label("volume_id"),
-            LibraryVolume.media_version_id,
+            LibraryVolume.version_id,
             LibraryVolume.title.label("volume_title"),
             LibraryVolume.sort_order,
             LibraryVolume.narrator,
             LibraryVolume.format.label("volume_format"),
-            LibraryMediaVersion.media_kind,
+            LibraryVersion.source_key.label("media_kind"),
             LibraryWork.id.label("work_id"),
             LibraryWork.title.label("work_title"),
             LibraryWork.author,
@@ -476,10 +477,10 @@ def continue_reading_progress(
         )
         .select_from(LibraryVolume)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryVersion,
+            LibraryVersion.id == LibraryVolume.version_id,
         )
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
+        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
         .outerjoin(
             LibraryReadingProgress,
             (LibraryReadingProgress.volume_id == LibraryVolume.id)
@@ -487,17 +488,17 @@ def continue_reading_progress(
         )
         .outerjoin(
             UserMediaHistory,
-            (UserMediaHistory.media_version_id == LibraryMediaVersion.id)
+            (UserMediaHistory.media_version_id == LibraryVersion.id)
             & (UserMediaHistory.user_id == user_id),
         )
         .where(
-            LibraryMediaVersion.id == selected_media_id,
+            LibraryVersion.id == selected_media_id,
             LibraryWork.hidden.is_(False),
             LibraryVolume.hidden.is_(False),
             volume_visibility_predicate(context),
         )
         .order_by(
-            LibraryMediaVersion.id.asc(),
+            LibraryVersion.id.asc(),
             LibraryVolume.sort_order.asc(),
             LibraryVolume.id.asc(),
         )

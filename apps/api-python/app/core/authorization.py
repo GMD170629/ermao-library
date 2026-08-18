@@ -13,6 +13,7 @@ from app.models.auth import User, UserLibraryAccess, UserPreference
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -98,11 +99,11 @@ def volume_visibility_predicate(
     if context.is_admin:
         return volume.id.is_not(None)
     accessible_work = aliased(LibraryWork)
-    accessible_media_version = aliased(LibraryMediaVersion)
+    accessible_version = aliased(LibraryVersion)
     return exists(
         select(accessible_work.id).where(
-            accessible_media_version.id == volume.media_version_id,
-            accessible_work.id == accessible_media_version.work_id,
+            accessible_version.id == volume.version_id,
+            accessible_work.id == accessible_version.work_id,
             work_visibility_predicate(context, accessible_work),
         )
     )
