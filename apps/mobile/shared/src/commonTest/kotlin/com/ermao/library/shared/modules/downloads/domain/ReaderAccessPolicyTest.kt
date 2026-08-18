@@ -51,6 +51,10 @@ class ReaderAccessPolicyTest {
             type.name,
             type,
             DownloadSource("/api/volumes/volume/file", mime, 10),
+            "version",
+            IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
+            null,
+            false,
         )
         return CompletedDownloadArtifact(descriptor, "local://volume", 10, 1)
     }

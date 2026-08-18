@@ -26,38 +26,107 @@ class DownloadsTest {
     }
 
     @Test
-    fun completedCatalogUsesWorkMediaVersionVolumeHierarchyAndStableLegacyFallback() {
+    fun completedCatalogGroupsByWorkThenVersionAndKeepsVolumeOrder() {
         val primary = namespace("server", "user", 1)
-        val current = descriptor(primary, "work", "volume-2", 20, volumeTitle = "Second").copy(
-            mediaVersionId = "media-ebook",
-            mediaKind = "EBOOK",
-            mediaVersionCompleted = true,
+        val implicitFirst = descriptor(primary, "work", "volume-2", 20, volumeTitle = "Second").copy(
+            versionId = "version-implicit",
+            versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
+            versionSourceName = null,
+            versionCompleted = true,
             volumeIndex = 2.0,
             volumeSortOrder = 2,
         )
-        val first = descriptor(primary, "work", "volume-1", 10, volumeTitle = "First").copy(
-            mediaVersionId = "media-ebook",
-            mediaKind = "EBOOK",
-            mediaVersionCompleted = true,
+        val implicitSecond = descriptor(primary, "work", "volume-1", 10, volumeTitle = "First").copy(
+            versionId = "version-implicit",
+            versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
+            versionCompleted = true,
             volumeIndex = 1.0,
             volumeSortOrder = 1,
         )
-        val comic = descriptor(primary, "work", "volume-comic", 30, volumeTitle = "Comic").copy(
-            mediaVersionId = "media-comic",
-            mediaKind = "COMIC",
-            readerType = DownloadReaderType.Comic,
+        val named = descriptor(primary, "work", "volume-named", 30, volumeTitle = "Named").copy(
+            versionId = "version-named",
+            versionSourceKey = "kindle",
+            versionSourceName = "Kindle",
+            readerType = DownloadReaderType.Pdf,
         )
-        val legacy = descriptor(primary, "work", "legacy-volume", 40, volumeTitle = "Legacy")
+        val laterNamed = descriptor(primary, "work", "volume-later", 40, volumeTitle = "Later").copy(
+            versionId = "version-later",
+            versionSourceKey = "web",
+            versionSourceName = "Web",
+        )
 
         val work = completedDownloadsByWork(
             primary,
-            listOf(artifact(current, 20), artifact(first, 10), artifact(comic, 30), artifact(legacy, 40)),
+            listOf(
+                artifact(implicitFirst, 20),
+                artifact(implicitSecond, 10),
+                artifact(named, 30),
+                artifact(laterNamed, 40),
+            ),
         ).single()
 
-        assertEquals(listOf("media-ebook", "legacy-volume:legacy-volume", "media-comic"), work.mediaVersions.map { it.mediaVersionId })
-        assertEquals(listOf("volume-1", "volume-2"), work.mediaVersions.first().artifacts.map { it.identity.volumeId })
-        assertEquals(work.mediaVersions.flatMap { it.artifacts }, work.artifacts)
-        assertEquals(listOf("work"), completedDownloadsByWork(primary, work.artifacts, "Legacy").map { it.workId })
+        assertEquals(
+            listOf("version-implicit", "version-named", "version-later"),
+            work.versions.map { it.versionId },
+        )
+        assertEquals(listOf("volume-1", "volume-2"), work.versions.first().artifacts.map { it.identity.volumeId })
+        assertEquals("__implicit__", work.versions.first().sourceKey)
+        assertEquals("Kindle", work.versions[1].sourceName)
+        assertEquals(work.versions.flatMap { it.artifacts }, work.artifacts)
+    }
+
+    @Test
+    fun sameVersionKeepsEpubPdfComicAndAudioTogetherWithoutMediaKindGroups() {
+        val primary = namespace("server", "user", 1)
+        val versionId = "version-shared"
+        val artifacts = listOf(
+            DownloadReaderType.Reflowable to "EPUB",
+            DownloadReaderType.Pdf to "PDF",
+            DownloadReaderType.Comic to "CBZ",
+            DownloadReaderType.Audio to "AUDIO",
+        ).mapIndexed { index, (readerType, format) ->
+            artifact(
+                descriptor(
+                    primary,
+                    "work",
+                    "volume-$index",
+                    10L + index,
+                    volumeTitle = format,
+                ).copy(
+                    format = format,
+                    readerType = readerType,
+                    versionId = versionId,
+                    versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
+                    volumeSortOrder = index,
+                ),
+                10L + index,
+            )
+        }
+
+        val work = completedDownloadsByWork(primary, artifacts).single()
+        assertEquals(listOf(versionId), work.versions.map { it.versionId })
+        assertEquals(4, work.versions.single().artifacts.size)
+        assertEquals(listOf("EPUB", "PDF", "CBZ", "AUDIO"), work.versions.single().artifacts.map { it.descriptor.format })
+    }
+
+    @Test
+    fun productionDownloadsCodeDoesNotUseMediaVersionContract() {
+        val directory = java.io.File("src/commonMain/kotlin/com/ermao/library/shared/modules/downloads")
+        val forbidden = listOf(
+            "mediaVersionId",
+            "mediaVersionCompleted",
+            "DownloadedMediaVersion",
+            "effectiveMediaVersionId",
+            "DownloadMediaKind",
+            "parseDownloadMediaKind",
+            "legacyMediaVersionId",
+            "legacyMediaKind",
+        )
+        val hits = directory.walkTopDown().filter { it.isFile && it.extension == "kt" }.flatMap { file ->
+            val text = file.readText()
+            forbidden.filter { token -> token in text }.map { token -> "${file.name}: $token" }
+        }.toList()
+        assertEquals(emptyList(), hits)
     }
 
     @Test
@@ -112,6 +181,10 @@ class DownloadsTest {
         format = "EPUB",
         readerType = DownloadReaderType.Reflowable,
         source = DownloadSource("/api/volumes/$volumeId/file", "application/epub+zip", bytes),
+        versionId = "version-$volumeId",
+        versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
+        versionSourceName = null,
+        versionCompleted = false,
     )
 
     private fun artifact(

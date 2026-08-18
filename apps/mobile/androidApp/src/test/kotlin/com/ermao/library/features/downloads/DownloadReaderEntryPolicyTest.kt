@@ -66,6 +66,8 @@ class DownloadReaderEntryPolicyTest {
         volumeTitle = "Volume",
         format = "EPUB",
         readerType = "reflowable",
+        versionId = "version",
+        versionSourceKey = "__implicit__",
         sourceApiPath = "/api/files/file",
         sourceMimeType = "application/epub+zip",
         expectedBytes = 8,

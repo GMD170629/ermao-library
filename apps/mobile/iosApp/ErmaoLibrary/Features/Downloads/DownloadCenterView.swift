@@ -352,13 +352,13 @@ struct DownloadCenterView: View {
                         Text(group.author)
                             .appTextStyle(.caption)
                             .foregroundStyle(theme.textSecondary)
-                        ForEach(group.mediaVersions) { mediaVersion in
+                        ForEach(group.versions) { version in
                             Divider()
                             VStack(alignment: .leading, spacing: .spaceHalf) {
-                                Label(mediaKindTitle(mediaVersion.mediaKind), systemImage: mediaKindImage(mediaVersion.mediaKind))
+                                Label(versionTitle(version), systemImage: "square.stack.3d.up")
                                     .appTextStyle(.label)
                                     .foregroundStyle(theme.textSecondary)
-                                ForEach(mediaVersion.records) { record in
+                                ForEach(version.records) { record in
                                     Button { open(record) } label: {
                                         HStack(spacing: .space1) {
                                             VStack(alignment: .leading, spacing: .spaceHalf) {
@@ -401,7 +401,7 @@ struct DownloadCenterView: View {
                 ForEach(store.failedRecords) { record in
                     VStack(alignment: .leading, spacing: .space1) {
                         Text(record.workTitle).appTextStyle(.headline)
-                        Text("\(mediaKindName(record.mediaKind)) · \(record.volumeTitle)")
+                        Text("\(versionLabel(record)) · \(record.volumeTitle)")
                             .appTextStyle(.caption)
                             .foregroundStyle(theme.textSecondary)
                         Text(errorMessage(record.stableErrorCode))
@@ -425,7 +425,7 @@ struct DownloadCenterView: View {
     private func taskRow(_ record: ManagedDownloadRecord) -> some View {
         VStack(alignment: .leading, spacing: .space1) {
             Text(record.workTitle).appTextStyle(.headline)
-            Text("\(mediaKindName(record.mediaKind)) · \(record.volumeTitle) · \(record.format)")
+            Text("\(versionLabel(record)) · \(record.volumeTitle) · \(record.format)")
                 .appTextStyle(.caption)
                 .foregroundStyle(theme.textSecondary)
             if let progress = record.progress {
@@ -507,28 +507,21 @@ struct DownloadCenterView: View {
         }
     }
 
-    private func mediaKindTitle(_ kind: LibraryMediaKind) -> LocalizedStringKey {
-        switch kind {
-        case .ebook: "library.media.ebook"
-        case .comic: "library.media.comic"
-        case .audiobook: "library.media.audiobook"
-        }
+    private func versionTitle(_ version: ManagedDownloadVersionGroup) -> String {
+        versionLabel(sourceName: version.sourceName, sourceKey: version.sourceKey)
     }
 
-    private func mediaKindImage(_ kind: LibraryMediaKind) -> String {
-        switch kind {
-        case .ebook: "book.closed"
-        case .comic: "rectangle.stack"
-        case .audiobook: "headphones"
-        }
+    private func versionLabel(_ record: ManagedDownloadRecord) -> String {
+        versionLabel(sourceName: record.versionSourceName, sourceKey: record.versionSourceKey)
     }
 
-    private func mediaKindName(_ kind: LibraryMediaKind) -> String {
-        switch kind {
-        case .ebook: String(localized: "library.media.ebook")
-        case .comic: String(localized: "library.media.comic")
-        case .audiobook: String(localized: "library.media.audiobook")
+    private func versionLabel(sourceName: String?, sourceKey: String) -> String {
+        let named = sourceName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !named.isEmpty { return named }
+        if sourceKey == ManagedDownloadGrouping.implicitSourceKey {
+            return String(localized: "downloads.version.implicit")
         }
+        return sourceKey
     }
 }
 

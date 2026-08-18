@@ -130,8 +130,10 @@ class DownloadPreparationViewModelTest {
         format = "EPUB",
         readerType = DownloadReaderType.Reflowable,
         source = DownloadSource("/api/files/file", "application/epub+zip", 8),
-        mediaVersionId = "media-version",
-        mediaKind = "EBOOK",
+        versionId = "version-1",
+        versionSourceKey = "__implicit__",
+        versionSourceName = null,
+        versionCompleted = false,
     )
 
     private fun context(): DownloadRequestContext {

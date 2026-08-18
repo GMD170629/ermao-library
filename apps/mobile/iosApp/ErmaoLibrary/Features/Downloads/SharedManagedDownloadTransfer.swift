@@ -17,8 +17,10 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
         let descriptor = try await loadDescriptor(context: context, volumeID: volumeID)
         descriptors.save(descriptor, key: descriptorKey(context, volumeID))
         return ManagedDownloadBootstrap(
-            mediaVersionID: descriptor.mediaVersionId,
-            mediaKind: try mediaKind(descriptor.mediaKind),
+            versionID: descriptor.versionId,
+            versionSourceKey: descriptor.versionSourceKey,
+            versionSourceName: descriptor.versionSourceName,
+            versionCompleted: descriptor.versionCompleted?.boolValue,
             readerType: try readerType(descriptor.readerType),
             expectedBytes: descriptor.source.totalBytes
         )
@@ -122,13 +124,6 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
         case .audio: .audio
         default: throw ManagedDownloadTransferError.invalidResponse
         }
-    }
-
-    private func mediaKind(_ value: String) throws -> LibraryMediaKind {
-        guard let kind = LibraryMediaKind(rawValue: value.uppercased()) else {
-            throw ManagedDownloadTransferError.invalidResponse
-        }
-        return kind
     }
 
     private func map(_ error: AppError) -> ManagedDownloadTransferError {

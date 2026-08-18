@@ -136,7 +136,7 @@ class AndroidDownloadCatalog(
     )
 
     private companion object {
-        const val CATALOG_SCHEMA_VERSION = 1
+        const val CATALOG_SCHEMA_VERSION = 2
     }
 }
 

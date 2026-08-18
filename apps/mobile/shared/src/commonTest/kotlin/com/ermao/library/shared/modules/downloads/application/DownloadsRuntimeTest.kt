@@ -28,16 +28,20 @@ class DownloadsRuntimeTest {
             namespace = artifact.identity.namespace,
             volumeId = artifact.identity.volumeId,
             targetWorkId = "work-b",
-            targetMediaVersionId = "media-b",
-            targetMediaKind = "COMIC",
+            targetVersionId = "version-b",
+            targetVersionSourceKey = "kindle",
+            targetVersionSourceName = "Kindle",
             targetWorkTitle = "Moved work",
             targetWorkAuthor = "Author B",
             targetCoverApiPath = "/api/works/work-b/cover",
+            targetVersionCompleted = true,
         )
 
         assertEquals("work-b", moved?.identity?.workId)
-        assertEquals("media-b", moved?.descriptor?.mediaVersionId)
-        assertEquals("COMIC", moved?.descriptor?.mediaKind)
+        assertEquals("version-b", moved?.descriptor?.versionId)
+        assertEquals("kindle", moved?.descriptor?.versionSourceKey)
+        assertEquals("Kindle", moved?.descriptor?.versionSourceName)
+        assertEquals(true, moved?.descriptor?.versionCompleted)
         assertEquals(artifact.localReference, moved?.localReference)
         assertEquals(listOf(moved), catalog.listArtifacts(artifact.identity.namespace))
     }
@@ -79,6 +83,10 @@ class DownloadsRuntimeTest {
         "EPUB",
         DownloadReaderType.Reflowable,
         DownloadSource("/api/volumes/volume/file", "application/epub+zip", 10),
+        versionId = "version",
+        versionSourceKey = "__implicit__",
+        versionSourceName = null,
+        versionCompleted = false,
     )
 
     private fun artifact() = CompletedDownloadArtifact(descriptor(), "local://volume", 10, 1)

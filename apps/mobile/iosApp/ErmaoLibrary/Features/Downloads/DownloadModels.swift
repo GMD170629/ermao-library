@@ -47,12 +47,13 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     var workID: String
     var workTitle: String
     var workAuthor: String
-    /// Nil only for manifests written before media-version grouping shipped.
-    var mediaVersionID: String?
+    var versionID: String
+    var versionSourceKey: String
+    var versionSourceName: String?
+    var versionCompleted: Bool?
     let volumeID: String
     let volumeTitle: String
     let format: String
-    var mediaKind: LibraryMediaKind
     let readerType: ManagedDownloadReaderType
     var state: ManagedDownloadState
     var verification: ManagedDownloadVerification
@@ -73,22 +74,16 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     var isVerifiedOfflineCopy: Bool {
         state == .completed && verification == .verified && localRelativePath != nil
     }
-
-    var effectiveMediaVersionID: String {
-        guard let value = mediaVersionID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else {
-            return "legacy-volume:\(volumeID)"
-        }
-        return value
-    }
 }
 
-struct ManagedDownloadMediaVersionGroup: Identifiable, Equatable, Sendable {
-    let mediaVersionID: String
-    let mediaKind: LibraryMediaKind
+struct ManagedDownloadVersionGroup: Identifiable, Equatable, Sendable {
+    let versionID: String
+    let sourceKey: String
+    let sourceName: String?
+    let isServerComplete: Bool?
     let records: [ManagedDownloadRecord]
 
-    var id: String { mediaVersionID }
+    var id: String { versionID }
     var totalBytes: Int64 { records.reduce(0) { $0 + $1.receivedBytes } }
 }
 
@@ -96,13 +91,15 @@ struct ManagedDownloadWorkGroup: Identifiable, Equatable, Sendable {
     let workID: String
     let title: String
     let author: String
-    let mediaVersions: [ManagedDownloadMediaVersionGroup]
+    let versions: [ManagedDownloadVersionGroup]
 
     var id: String { workID }
-    var totalBytes: Int64 { mediaVersions.reduce(0) { $0 + $1.totalBytes } }
+    var totalBytes: Int64 { versions.reduce(0) { $0 + $1.totalBytes } }
 }
 
 enum ManagedDownloadGrouping {
+    static let implicitSourceKey = "__implicit__"
+
     static func completed(records: [ManagedDownloadRecord], query: String) -> [ManagedDownloadWorkGroup] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let completed = records.filter { record in
@@ -114,41 +111,41 @@ enum ManagedDownloadGrouping {
         var workGroups: [ManagedDownloadWorkGroup] = []
         for (workID, workRecords) in Dictionary(grouping: completed, by: \.workID) {
             guard let first = workRecords.first else { continue }
-            var versions: [ManagedDownloadMediaVersionGroup] = []
-            for (mediaVersionID, versionRecords) in Dictionary(
-                grouping: workRecords,
-                by: \.effectiveMediaVersionID
-            ) {
+            var versions: [ManagedDownloadVersionGroup] = []
+            for (versionID, versionRecords) in Dictionary(grouping: workRecords, by: \.versionID) {
                 guard let firstVersion = versionRecords.first else { continue }
-                versions.append(ManagedDownloadMediaVersionGroup(
-                    mediaVersionID: mediaVersionID,
-                    mediaKind: firstVersion.mediaKind,
+                versions.append(ManagedDownloadVersionGroup(
+                    versionID: versionID,
+                    sourceKey: firstVersion.versionSourceKey,
+                    sourceName: firstVersion.versionSourceName,
+                    isServerComplete: firstVersion.versionCompleted,
                     records: versionRecords.sorted {
                         $0.volumeTitle.localizedStandardCompare($1.volumeTitle) == .orderedAscending
                     }
                 ))
             }
-            versions.sort {
-                let lhs = mediaKindSortOrder($0.mediaKind)
-                let rhs = mediaKindSortOrder($1.mediaKind)
-                return lhs == rhs ? $0.mediaVersionID < $1.mediaVersionID : lhs < rhs
-            }
+            versions.sort(by: versionOrder)
             workGroups.append(ManagedDownloadWorkGroup(
-                    workID: workID,
-                    title: first.workTitle,
-                    author: first.workAuthor,
-                    mediaVersions: versions
+                workID: workID,
+                title: first.workTitle,
+                author: first.workAuthor,
+                versions: versions
             ))
         }
         return workGroups.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
-    private static func mediaKindSortOrder(_ kind: LibraryMediaKind) -> Int {
-        switch kind {
-        case .ebook: 0
-        case .comic: 1
-        case .audiobook: 2
-        }
+    private static func versionOrder(_ lhs: ManagedDownloadVersionGroup, _ rhs: ManagedDownloadVersionGroup) -> Bool {
+        let lhsImplicit = lhs.sourceKey == implicitSourceKey ? 0 : 1
+        let rhsImplicit = rhs.sourceKey == implicitSourceKey ? 0 : 1
+        if lhsImplicit != rhsImplicit { return lhsImplicit < rhsImplicit }
+        let lhsName = lhs.sourceName ?? ""
+        let rhsName = rhs.sourceName ?? ""
+        let nameOrder = lhsName.localizedStandardCompare(rhsName)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        let keyOrder = lhs.sourceKey.localizedStandardCompare(rhs.sourceKey)
+        if keyOrder != .orderedSame { return keyOrder == .orderedAscending }
+        return lhs.versionID < rhs.versionID
     }
 }
 
@@ -159,8 +156,10 @@ struct ManagedDownloadRequest: Sendable {
 }
 
 struct ManagedDownloadBootstrap: Sendable {
-    let mediaVersionID: String
-    let mediaKind: LibraryMediaKind
+    let versionID: String
+    let versionSourceKey: String
+    let versionSourceName: String?
+    let versionCompleted: Bool?
     let readerType: ManagedDownloadReaderType
     let expectedBytes: Int64?
 }

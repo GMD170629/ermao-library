@@ -18,7 +18,7 @@ actor ManagedDownloadStore {
                 in: .userDomainMask
             ).first ?? FileManager.default.temporaryDirectory
             self.rootDirectory = applicationSupport.appendingPathComponent(
-                "com.ermao.library/managed-downloads-v1",
+                "com.ermao.library/managed-downloads-v2",
                 isDirectory: true
             )
         }
@@ -58,17 +58,21 @@ actor ManagedDownloadStore {
         namespace: String,
         work: WorkCard,
         volume: WorkVolume,
-        mediaVersionID: String,
-        mediaKind: LibraryMediaKind,
+        versionID: String,
+        versionSourceKey: String,
+        versionSourceName: String?,
+        versionCompleted: Bool?,
         readerType: ManagedDownloadReaderType,
         expectedBytes: Int64?,
         now: Date = Date()
     ) throws -> ManagedDownloadRecord {
+        precondition(!versionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        precondition(!versionSourceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         var manifest = try loadManifest(namespace: namespace)
         if let existingIndex = manifest.records.firstIndex(where: { $0.volumeID == volume.id }) {
             let existing = manifest.records[existingIndex]
-            if existing.effectiveMediaVersionID == mediaVersionID,
-               existing.mediaKind == mediaKind,
+            if existing.versionID == versionID,
+               existing.versionSourceKey == versionSourceKey,
                existing.readerType == readerType {
                 return existing
             }
@@ -91,11 +95,13 @@ actor ManagedDownloadStore {
             workID: work.id,
             workTitle: work.title,
             workAuthor: work.author,
-            mediaVersionID: mediaVersionID,
+            versionID: versionID,
+            versionSourceKey: versionSourceKey,
+            versionSourceName: versionSourceName,
+            versionCompleted: versionCompleted,
             volumeID: volume.id,
             volumeTitle: volume.title,
             format: volume.formatLabel,
-            mediaKind: mediaKind,
             readerType: readerType,
             state: .queued,
             verification: .pending,
@@ -232,7 +238,15 @@ actor ManagedDownloadStore {
     private func loadManifest(namespace: String) throws -> Manifest {
         let url = manifestURL(namespace)
         guard FileManager.default.fileExists(atPath: url.path) else { return Manifest(records: []) }
-        return try decoder.decode(Manifest.self, from: Data(contentsOf: url))
+        do {
+            return try decoder.decode(Manifest.self, from: Data(contentsOf: url))
+        } catch {
+            let directory = namespaceDirectory(namespace)
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+            return Manifest(records: [])
+        }
     }
 
     private func saveManifest(_ manifest: Manifest, namespace: String) throws {

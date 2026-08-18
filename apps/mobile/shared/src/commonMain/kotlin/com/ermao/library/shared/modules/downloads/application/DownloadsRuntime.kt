@@ -49,23 +49,25 @@ class DownloadsRuntime(
 
     /**
      * Keeps a verified local file available when a server-side management operation moves
-     * the same volume into another work or media version. The byte reference is unchanged;
+     * the same volume into another work or version. The byte reference is unchanged;
      * only its catalog ownership is rewritten after the remote mutation succeeds.
      */
     suspend fun rehomeCompletedArtifact(
         namespace: DownloadNamespace,
         volumeId: String,
         targetWorkId: String,
-        targetMediaVersionId: String,
-        targetMediaKind: String,
+        targetVersionId: String,
+        targetVersionSourceKey: String,
+        targetVersionSourceName: String?,
         targetWorkTitle: String,
         targetWorkAuthor: String?,
         targetCoverApiPath: String?,
+        targetVersionCompleted: Boolean? = null,
     ): CompletedDownloadArtifact? {
         require(volumeId.isNotBlank())
         require(targetWorkId.isNotBlank())
-        require(targetMediaVersionId.isNotBlank())
-        require(targetMediaKind.isNotBlank())
+        require(targetVersionId.isNotBlank())
+        require(targetVersionSourceKey.isNotBlank())
         require(targetWorkTitle.isNotBlank())
         val current = artifact(namespace, volumeId) ?: return null
         val moved = current.copy(
@@ -74,8 +76,10 @@ class DownloadsRuntime(
                 workTitle = targetWorkTitle,
                 workAuthor = targetWorkAuthor,
                 coverApiPath = targetCoverApiPath,
-                mediaVersionId = targetMediaVersionId,
-                mediaKind = targetMediaKind,
+                versionId = targetVersionId,
+                versionSourceKey = targetVersionSourceKey,
+                versionSourceName = targetVersionSourceName,
+                versionCompleted = targetVersionCompleted,
             ),
         )
         catalog.saveArtifact(moved)

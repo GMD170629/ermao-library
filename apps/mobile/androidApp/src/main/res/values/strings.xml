@@ -483,10 +483,11 @@
     <string name="downloads_remove_title">Remove download?</string>
     <string name="downloads_remove_message">Remove the managed download for “%1$s” from this device?</string>
     <string name="downloads_remove_action">Remove</string>
-    <plurals name="downloads_media_version_summary">
+    <plurals name="downloads_version_summary">
         <item quantity="one">%1$d volume · %2$s</item>
         <item quantity="other">%1$d volumes · %2$s</item>
     </plurals>
+    <string name="downloads_version_implicit">Default version</string>
     <string name="download_checking_local">Checking the current downloaded copy…</string>
     <string name="download_preparing_task">Creating download task…</string>
     <string name="download_progress_detail">%1$s of %2$s · %3$d%%</string>

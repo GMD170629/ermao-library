@@ -62,6 +62,8 @@ class AndroidDownloadCatalogTest {
             volumeTitle = "Volume",
             format = "EPUB",
             readerType = "reflowable",
+            versionId = "version",
+            versionSourceKey = "__implicit__",
             sourceApiPath = "/api/volumes/volume/file",
             sourceMimeType = "application/epub+zip",
             expectedBytes = 4,

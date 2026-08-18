@@ -116,11 +116,19 @@ class WorkManagementViewModel(
         mutate(
             completion = WorkManagementCompletion.VolumeReclassified,
             block = { repository.reclassifyVolume(context, workId, volumeId, mediaKind) },
-            onSuccess = success@{ outcome ->
-                val targetMediaVersionId = outcome.targetMediaVersionId ?: return@success
+            onSuccess = success@{ _ ->
+                val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
                 downloadsRuntime.rehomeCompletedArtifact(
-                    downloadNamespace, volumeId, workId, targetMediaVersionId, mediaKind.wireValue,
-                    workTitle, workAuthor, coverApiPath,
+                    namespace = downloadNamespace,
+                    volumeId = volumeId,
+                    targetWorkId = workId,
+                    targetVersionId = artifact.descriptor.versionId,
+                    targetVersionSourceKey = artifact.descriptor.versionSourceKey,
+                    targetVersionSourceName = artifact.descriptor.versionSourceName,
+                    targetWorkTitle = workTitle,
+                    targetWorkAuthor = workAuthor,
+                    targetCoverApiPath = coverApiPath,
+                    targetVersionCompleted = artifact.descriptor.versionCompleted,
                 )
             },
         )
@@ -132,11 +140,18 @@ class WorkManagementViewModel(
             block = { repository.splitVolume(context, workId, volumeId, title, author) },
             onSuccess = success@{ outcome ->
                 val targetWorkId = outcome.targetWorkId ?: return@success
-                val targetMediaVersionId = outcome.targetMediaVersionId ?: return@success
                 val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
                 downloadsRuntime.rehomeCompletedArtifact(
-                    downloadNamespace, volumeId, targetWorkId, targetMediaVersionId,
-                    artifact.descriptor.mediaKind, title, author, artifact.descriptor.coverApiPath,
+                    namespace = downloadNamespace,
+                    volumeId = volumeId,
+                    targetWorkId = targetWorkId,
+                    targetVersionId = artifact.descriptor.versionId,
+                    targetVersionSourceKey = artifact.descriptor.versionSourceKey,
+                    targetVersionSourceName = artifact.descriptor.versionSourceName,
+                    targetWorkTitle = title,
+                    targetWorkAuthor = author,
+                    targetCoverApiPath = artifact.descriptor.coverApiPath,
+                    targetVersionCompleted = artifact.descriptor.versionCompleted,
                 )
             },
         )
@@ -147,11 +162,19 @@ class WorkManagementViewModel(
             completion = WorkManagementCompletion.VolumeTransferred,
             block = { repository.transferVolume(context, workId, volumeId, target.id) },
             onSuccess = success@{ outcome ->
-                val targetMediaVersionId = outcome.targetMediaVersionId ?: return@success
+                val targetWorkId = outcome.targetWorkId ?: target.id
                 val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
                 downloadsRuntime.rehomeCompletedArtifact(
-                    downloadNamespace, volumeId, target.id, targetMediaVersionId,
-                    artifact.descriptor.mediaKind, target.title, target.author, null,
+                    namespace = downloadNamespace,
+                    volumeId = volumeId,
+                    targetWorkId = targetWorkId,
+                    targetVersionId = artifact.descriptor.versionId,
+                    targetVersionSourceKey = artifact.descriptor.versionSourceKey,
+                    targetVersionSourceName = artifact.descriptor.versionSourceName,
+                    targetWorkTitle = target.title,
+                    targetWorkAuthor = target.author,
+                    targetCoverApiPath = null,
+                    targetVersionCompleted = artifact.descriptor.versionCompleted,
                 )
             },
         )

@@ -431,6 +431,8 @@ private fun fixtureCompletedDownload(
     volumeTitle = volume.title,
     format = volume.format,
     readerType = volume.readerType,
+    versionId = "version-${volume.id}",
+    versionSourceKey = "__implicit__",
     sourceApiPath = "/api/volumes/${volume.id}/file",
     sourceMimeType = "application/epub+zip",
     expectedBytes = volume.sizeBytes,

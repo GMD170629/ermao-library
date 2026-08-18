@@ -28,28 +28,29 @@ class AndroidDownloadModelsTest {
     }
 
     @Test
-    fun completedWorkPreservesMediaVersionThenVolumeHierarchy() {
+    fun completedWorkPreservesVersionThenVolumeHierarchy() {
         val records = listOf(
             record("task-2", "work-1", "Book", "Author", "Volume 2", "two.bin", completed = true).copy(
-                mediaVersionId = "media-ebook",
-                mediaKind = "EBOOK",
+                versionId = "version-implicit",
+                versionSourceKey = "__implicit__",
                 volumeSortOrder = 2,
             ),
             record("task-1", "work-1", "Book", "Author", "Volume 1", "one.bin", completed = true).copy(
-                mediaVersionId = "media-ebook",
-                mediaKind = "EBOOK",
+                versionId = "version-implicit",
+                versionSourceKey = "__implicit__",
                 volumeSortOrder = 1,
             ),
-            record("task-3", "work-1", "Book", "Author", "Comic", "comic.bin", completed = true).copy(
-                mediaVersionId = "media-comic",
-                mediaKind = "COMIC",
+            record("task-3", "work-1", "Book", "Author", "Kindle", "kindle.bin", completed = true).copy(
+                versionId = "version-kindle",
+                versionSourceKey = "kindle",
+                versionSourceName = "Kindle",
             ),
         )
 
         val work = groupReadableDownloads(records, "") { true }.single()
 
-        assertEquals(listOf("media-ebook", "media-comic"), work.mediaVersions.map { it.mediaVersionId })
-        assertEquals(listOf("Volume 1", "Volume 2"), work.mediaVersions.first().volumes.map { it.volumeTitle })
+        assertEquals(listOf("version-implicit", "version-kindle"), work.versions.map { it.versionId })
+        assertEquals(listOf("Volume 1", "Volume 2"), work.versions.first().volumes.map { it.volumeTitle })
     }
 
     @Test
@@ -78,6 +79,8 @@ class AndroidDownloadModelsTest {
         volumeTitle = volume,
         format = "EPUB",
         readerType = "reflowable",
+        versionId = "version-$taskId",
+        versionSourceKey = "__implicit__",
         sourceApiPath = "/api/volumes/$taskId-volume/file",
         sourceMimeType = "application/epub+zip",
         expectedBytes = 20,

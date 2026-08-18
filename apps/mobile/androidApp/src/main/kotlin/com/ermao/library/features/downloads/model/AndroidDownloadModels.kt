@@ -38,9 +38,10 @@ data class AndroidDownloadRecord(
     val volumeTitle: String,
     val format: String,
     val readerType: String,
-    val mediaVersionId: String = "legacy-volume:$volumeId",
-    val mediaKind: String = readerType.toLegacyMediaKind(),
-    val mediaVersionCompleted: Boolean? = null,
+    val versionId: String,
+    val versionSourceKey: String,
+    val versionSourceName: String? = null,
+    val versionCompleted: Boolean? = null,
     val sourceApiPath: String,
     val sourceMimeType: String,
     val expectedBytes: Long,
@@ -59,6 +60,8 @@ data class AndroidDownloadRecord(
         require(taskId.isNotBlank())
         require(workId.isNotBlank())
         require(volumeId.isNotBlank())
+        require(versionId.isNotBlank())
+        require(versionSourceKey.isNotBlank())
         require(sourceApiPath.startsWith("/api/"))
         require(sourceMimeType.isNotBlank())
         require(expectedBytes >= 0)
@@ -77,16 +80,17 @@ data class DownloadedWorkGroup(
     val title: String,
     val author: String,
     val coverUrl: String,
-    val mediaVersions: List<DownloadedMediaVersionGroup>,
+    val versions: List<DownloadedVersionGroup>,
 ) {
-    val volumes: List<AndroidDownloadRecord> get() = mediaVersions.flatMap(DownloadedMediaVersionGroup::volumes)
+    val volumes: List<AndroidDownloadRecord> get() = versions.flatMap(DownloadedVersionGroup::volumes)
     val totalBytes: Long get() = volumes.sumOf(AndroidDownloadRecord::expectedBytes)
     val lastOpenedAtEpochMillis: Long? get() = volumes.mapNotNull(AndroidDownloadRecord::lastOpenedAtEpochMillis).maxOrNull()
 }
 
-data class DownloadedMediaVersionGroup(
-    val mediaVersionId: String,
-    val mediaKind: String,
+data class DownloadedVersionGroup(
+    val versionId: String,
+    val sourceKey: String,
+    val sourceName: String?,
     val isServerComplete: Boolean?,
     val volumes: List<AndroidDownloadRecord>,
 ) {
@@ -116,16 +120,17 @@ fun groupReadableDownloads(
                     .thenBy(AndroidDownloadRecord::volumeId),
             )
             val first = sorted.first()
-            val mediaVersions = sorted.groupBy(AndroidDownloadRecord::mediaVersionId).values.map { mediaVolumes ->
-                val media = mediaVolumes.first()
-                DownloadedMediaVersionGroup(
-                    mediaVersionId = media.mediaVersionId,
-                    mediaKind = media.mediaKind,
-                    isServerComplete = media.mediaVersionCompleted,
-                    volumes = mediaVolumes,
+            val versions = sorted.groupBy(AndroidDownloadRecord::versionId).values.map { versionVolumes ->
+                val version = versionVolumes.first()
+                DownloadedVersionGroup(
+                    versionId = version.versionId,
+                    sourceKey = version.versionSourceKey,
+                    sourceName = version.versionSourceName,
+                    isServerComplete = version.versionCompleted,
+                    volumes = versionVolumes,
                 )
-            }
-            DownloadedWorkGroup(first.workId, first.workTitle, first.author, first.coverUrl, mediaVersions)
+            }.sortedWith(downloadedVersionComparator)
+            DownloadedWorkGroup(first.workId, first.workTitle, first.author, first.coverUrl, versions)
         }
         .sortedWith(
             compareByDescending<DownloadedWorkGroup> { it.lastOpenedAtEpochMillis ?: Long.MIN_VALUE }
@@ -135,8 +140,10 @@ fun groupReadableDownloads(
         .toList()
 }
 
-private fun String.toLegacyMediaKind(): String = when {
-    equals("comic", true) -> "COMIC"
-    equals("audio", true) -> "AUDIOBOOK"
-    else -> "EBOOK"
-}
+private const val IMPLICIT_VERSION_SOURCE_KEY = "__implicit__"
+
+private val downloadedVersionComparator =
+    compareBy<DownloadedVersionGroup> { if (it.sourceKey == IMPLICIT_VERSION_SOURCE_KEY) 0 else 1 }
+        .thenBy(nullsLast(String.CASE_INSENSITIVE_ORDER)) { it.sourceName }
+        .thenBy { it.sourceKey.lowercase() }
+        .thenBy(DownloadedVersionGroup::versionId)

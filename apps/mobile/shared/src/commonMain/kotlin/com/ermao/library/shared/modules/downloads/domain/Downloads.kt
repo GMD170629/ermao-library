@@ -17,12 +17,7 @@ data class DownloadNamespace(
 
 enum class DownloadReaderType { Reflowable, Pdf, Comic, Audio }
 
-enum class DownloadMediaKind(val wireValue: String) {
-    Ebook("EBOOK"),
-    Comic("COMIC"),
-    Audiobook("AUDIOBOOK"),
-    Unknown("UNKNOWN"),
-}
+const val IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY = "__implicit__"
 
 data class DownloadSource(
     val apiPath: String,
@@ -56,10 +51,10 @@ data class DownloadDescriptor(
     val format: String,
     val readerType: DownloadReaderType,
     val source: DownloadSource,
-    /** Legacy manifests deterministically place an unknown volume in its own media-version group. */
-    val mediaVersionId: String = legacyMediaVersionId(identity.volumeId),
-    val mediaKind: String = legacyMediaKind(readerType),
-    val mediaVersionCompleted: Boolean? = null,
+    val versionId: String,
+    val versionSourceKey: String,
+    val versionSourceName: String?,
+    val versionCompleted: Boolean? = null,
     val volumeIndex: Double? = null,
     val volumeSortOrder: Int? = null,
 ) {
@@ -67,8 +62,8 @@ data class DownloadDescriptor(
         require(workTitle.isNotBlank())
         require(volumeTitle.isNotBlank())
         require(format.isNotBlank())
-        require(mediaVersionId.isNotBlank())
-        require(mediaKind.isNotBlank())
+        require(versionId.isNotBlank())
+        require(versionSourceKey.isNotBlank())
         require(coverApiPath == null || coverApiPath.isSafeApiPath())
         require(volumeIndex == null || volumeIndex.isFinite())
         require(volumeSortOrder == null || volumeSortOrder >= 0)
@@ -188,32 +183,34 @@ data class DownloadedWork(
     val title: String,
     val author: String?,
     val coverApiPath: String?,
-    val mediaVersions: List<DownloadedMediaVersion>,
+    val versions: List<DownloadedVersion>,
     val artifacts: List<CompletedDownloadArtifact>,
 ) {
     init {
         require(workId.isNotBlank())
         require(title.isNotBlank())
-        require(mediaVersions.isNotEmpty())
+        require(versions.isNotEmpty())
         require(artifacts.isNotEmpty())
         require(artifacts.all { it.identity.workId == workId })
-        require(mediaVersions.flatMap(DownloadedMediaVersion::artifacts) == artifacts)
+        require(versions.flatMap(DownloadedVersion::artifacts) == artifacts)
     }
 
     val totalBytes: Long = artifacts.sumOf { it.verifiedBytes }
     val lastOpenedAtEpochMillis: Long? = artifacts.mapNotNull { it.lastOpenedAtEpochMillis }.maxOrNull()
 }
 
-data class DownloadedMediaVersion(
-    val mediaVersionId: String,
-    val mediaKind: DownloadMediaKind,
+data class DownloadedVersion(
+    val versionId: String,
+    val sourceKey: String,
+    val sourceName: String?,
     val isServerComplete: Boolean?,
     val artifacts: List<CompletedDownloadArtifact>,
 ) {
     init {
-        require(mediaVersionId.isNotBlank())
+        require(versionId.isNotBlank())
+        require(sourceKey.isNotBlank())
         require(artifacts.isNotEmpty())
-        require(artifacts.all { it.descriptor.effectiveMediaVersionId == mediaVersionId })
+        require(artifacts.all { it.descriptor.versionId == versionId })
     }
 
     val totalBytes: Long = artifacts.sumOf { it.verifiedBytes }
@@ -231,32 +228,29 @@ fun completedDownloadsByWork(
         .groupBy { it.identity.workId }
         .values
         .map { workArtifacts ->
-            val mediaVersions = workArtifacts
-                .groupBy { it.descriptor.effectiveMediaVersionId }
+            val versions = workArtifacts
+                .groupBy { it.descriptor.versionId }
                 .values
-                .map { mediaArtifacts ->
-                    val orderedVolumes = mediaArtifacts.sortedWith(volumeArtifactComparator)
-                    val media = orderedVolumes.first().descriptor
-                    DownloadedMediaVersion(
-                        mediaVersionId = orderedVolumes.first().descriptor.effectiveMediaVersionId,
-                        mediaKind = media.mediaKind.toDownloadMediaKindOrUnknown(),
-                        isServerComplete = media.mediaVersionCompleted,
+                .map { versionArtifacts ->
+                    val orderedVolumes = versionArtifacts.sortedWith(volumeArtifactComparator)
+                    val version = orderedVolumes.first().descriptor
+                    DownloadedVersion(
+                        versionId = version.versionId,
+                        sourceKey = version.versionSourceKey,
+                        sourceName = version.versionSourceName,
+                        isServerComplete = version.versionCompleted,
                         artifacts = orderedVolumes,
                     )
                 }
-                .sortedWith(
-                    compareBy<DownloadedMediaVersion> { it.mediaKind.sortOrder }
-                        .thenBy { if (it.mediaVersionId.startsWith("legacy-volume:")) 1 else 0 }
-                        .thenBy { it.mediaVersionId },
-                )
-            val ordered = mediaVersions.flatMap(DownloadedMediaVersion::artifacts)
+                .sortedWith(downloadedVersionComparator)
+            val ordered = versions.flatMap(DownloadedVersion::artifacts)
             val first = ordered.first().descriptor
             DownloadedWork(
                 workId = first.identity.workId,
                 title = first.workTitle,
                 author = first.workAuthor,
                 coverApiPath = first.coverApiPath,
-                mediaVersions = mediaVersions,
+                versions = versions,
                 artifacts = ordered,
             )
         }
@@ -270,35 +264,17 @@ fun completedDownloadsByWork(
         .toList()
 }
 
-val DownloadDescriptor.effectiveMediaVersionId: String
-    get() = mediaVersionId
-
-private fun legacyMediaVersionId(volumeId: String): String = "legacy-volume:$volumeId"
-
-private fun legacyMediaKind(readerType: DownloadReaderType): String = when (readerType) {
-    DownloadReaderType.Comic -> DownloadMediaKind.Comic.wireValue
-    DownloadReaderType.Audio -> DownloadMediaKind.Audiobook.wireValue
-    DownloadReaderType.Reflowable,
-    DownloadReaderType.Pdf,
-    -> DownloadMediaKind.Ebook.wireValue
-}
-
-private fun String.toDownloadMediaKindOrUnknown(): DownloadMediaKind =
-    DownloadMediaKind.entries.firstOrNull { it.wireValue == trim().uppercase() } ?: DownloadMediaKind.Unknown
-
 private val volumeArtifactComparator =
     compareBy<CompletedDownloadArtifact> { it.descriptor.volumeSortOrder ?: Int.MAX_VALUE }
         .thenBy { it.descriptor.volumeIndex ?: Double.MAX_VALUE }
         .thenBy { it.descriptor.volumeTitle.lowercase() }
         .thenBy { it.identity.volumeId }
 
-private val DownloadMediaKind.sortOrder: Int
-    get() = when (this) {
-        DownloadMediaKind.Ebook -> 0
-        DownloadMediaKind.Comic -> 1
-        DownloadMediaKind.Audiobook -> 2
-        DownloadMediaKind.Unknown -> 3
-    }
+private val downloadedVersionComparator =
+    compareBy<DownloadedVersion> { if (it.sourceKey == IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY) 0 else 1 }
+        .thenBy(nullsLast(String.CASE_INSENSITIVE_ORDER)) { it.sourceName }
+        .thenBy { it.sourceKey.lowercase() }
+        .thenBy { it.versionId }
 
 private val activeStatuses = setOf(
     DownloadTaskStatus.Queued,

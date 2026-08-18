@@ -30,7 +30,10 @@ class DownloadVolumeRuntimeTest {
         )
 
         val ready = assertIs<DownloadVolumeResult.ReadyToOpen>(result)
-        assertEquals("media", ready.artifact.descriptor.mediaVersionId)
+        assertEquals("version", ready.artifact.descriptor.versionId)
+        assertEquals("__implicit__", ready.artifact.descriptor.versionSourceKey)
+        assertEquals(null, ready.artifact.descriptor.versionSourceName)
+        assertEquals(true, ready.artifact.descriptor.versionCompleted)
         assertEquals(
             listOf(
                 DownloadVolumeObservationKind.Preparing,
@@ -87,9 +90,10 @@ class DownloadVolumeRuntimeTest {
         format = "EPUB",
         readerType = DownloadReaderType.Reflowable,
         source = DownloadSource("/api/volumes/volume/file", "application/epub+zip", 10),
-        mediaVersionId = "media",
-        mediaKind = "EBOOK",
-        mediaVersionCompleted = true,
+        versionId = "version",
+        versionSourceKey = "__implicit__",
+        versionSourceName = null,
+        versionCompleted = true,
         volumeIndex = 1.0,
         volumeSortOrder = 0,
     )

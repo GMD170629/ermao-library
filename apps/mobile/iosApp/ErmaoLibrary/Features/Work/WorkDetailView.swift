@@ -980,14 +980,17 @@ struct WorkDetailView: View {
         case .volumeReclassified, .volumeSplit, .volumeTransferred:
             if let pending = managementStore.pendingOwnership,
                let outcome = managementStore.lastOutcome,
-               let mediaVersionID = outcome.targetMediaVersionId {
+               let record = downloads.record(for: pending.volumeID),
+               record.isVerifiedOfflineCopy {
                 downloads.rehomeCompleted(
                     volumeID: pending.volumeID,
                     targetWorkID: outcome.targetWorkId ?? pending.workID ?? detail?.work.id ?? "",
                     targetWorkTitle: pending.workTitle,
                     targetWorkAuthor: pending.workAuthor,
-                    targetMediaVersionID: mediaVersionID,
-                    targetMediaKind: pending.mediaKind
+                    targetVersionID: record.versionID,
+                    targetVersionSourceKey: record.versionSourceKey,
+                    targetVersionSourceName: record.versionSourceName,
+                    targetVersionCompleted: record.versionCompleted
                 )
             }
         default: break

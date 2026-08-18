@@ -23,7 +23,6 @@ import com.ermao.library.shared.modules.downloads.application.DownloadTransferRe
 import com.ermao.library.shared.modules.downloads.application.DownloadsGateway
 import com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
-import com.ermao.library.shared.modules.downloads.domain.DownloadMediaKind
 import com.ermao.library.shared.modules.downloads.domain.DownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.DownloadSource
 import com.ermao.library.shared.modules.downloads.domain.isSafeMediaApiPath
@@ -216,13 +215,6 @@ class KtorDownloadsGateway(
         require(parseDownloadReaderType(volume.requiredString("readerType")) == readerType) {
             "Bootstrap reader type is inconsistent"
         }
-        val mediaKind = when (readerType) {
-            DownloadReaderType.Reflowable,
-            DownloadReaderType.Pdf,
-            -> DownloadMediaKind.Ebook
-            DownloadReaderType.Comic -> DownloadMediaKind.Comic
-            DownloadReaderType.Audio -> DownloadMediaKind.Audiobook
-        }
         val files = this["files"] as? JsonArray ?: throw IllegalArgumentException("Bootstrap files are missing")
         val fileUrl = requiredString("fileUrl")
         require(fileUrl.isSafeMediaApiPath()) { "Bootstrap file URL is invalid" }
@@ -237,7 +229,7 @@ class KtorDownloadsGateway(
                 }
                 sourceFormat.uppercase()
             }
-            DownloadReaderType.Comic -> DownloadMediaKind.Comic.wireValue
+            DownloadReaderType.Comic -> "COMIC"
             else -> volumeFormat.uppercase()
         }
         val sourceFile = sourceFiles
@@ -281,9 +273,10 @@ class KtorDownloadsGateway(
                 mimeType = sourceMime,
                 totalBytes = sourceSize,
             ),
-            mediaVersionId = version.requiredString("id"),
-            mediaKind = mediaKind.wireValue,
-            mediaVersionCompleted = requiredBoolean("versionCompleted"),
+            versionId = version.requiredString("id"),
+            versionSourceKey = version.requiredString("sourceKey"),
+            versionSourceName = version.optionalString("sourceName"),
+            versionCompleted = requiredBoolean("versionCompleted"),
             volumeIndex = volume.optionalDouble("volumeIndex"),
             volumeSortOrder = volume.requiredNonNegativeInt("sortOrder"),
         )
@@ -358,11 +351,4 @@ fun parseDownloadReaderType(value: String): DownloadReaderType = when (value.tri
     "comic" -> DownloadReaderType.Comic
     "audio" -> DownloadReaderType.Audio
     else -> throw IllegalArgumentException("Unsupported reader type")
-}
-
-fun parseDownloadMediaKind(value: String): DownloadMediaKind = when (value.trim().uppercase()) {
-    "EBOOK" -> DownloadMediaKind.Ebook
-    "COMIC" -> DownloadMediaKind.Comic
-    "AUDIOBOOK" -> DownloadMediaKind.Audiobook
-    else -> throw IllegalArgumentException("Unsupported media kind")
 }

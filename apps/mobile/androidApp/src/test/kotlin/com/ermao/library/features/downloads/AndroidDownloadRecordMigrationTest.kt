@@ -1,13 +1,14 @@
 package com.ermao.library.features.downloads
 
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
-import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.junit.Test
 
 class AndroidDownloadRecordMigrationTest {
     @Test
-    fun legacyManifestWithoutMediaVersionFieldsGetsDeterministicFallback() {
+    fun catalogWithoutVersionFieldsIsRejected() {
         val legacy = """
             {
               "taskId":"task","namespace":{"serverIdentity":"server","userId":"user","authorizationVersion":2},
@@ -20,9 +21,8 @@ class AndroidDownloadRecordMigrationTest {
             }
         """.trimIndent()
 
-        val record = Json.decodeFromString<AndroidDownloadRecord>(legacy)
-
-        assertEquals("legacy-volume:volume", record.mediaVersionId)
-        assertEquals("EBOOK", record.mediaKind)
+        assertFailsWith<SerializationException> {
+            Json.decodeFromString<AndroidDownloadRecord>(legacy)
+        }
     }
 }

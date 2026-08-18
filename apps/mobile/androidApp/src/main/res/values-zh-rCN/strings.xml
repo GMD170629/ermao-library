@@ -476,9 +476,10 @@
     <string name="downloads_remove_title">移除下载？</string>
     <string name="downloads_remove_message">要从此设备移除《%1$s》的受管下载吗？</string>
     <string name="downloads_remove_action">移除</string>
-    <plurals name="downloads_media_version_summary">
+    <plurals name="downloads_version_summary">
         <item quantity="other">%1$d 卷 · %2$s</item>
     </plurals>
+    <string name="downloads_version_implicit">默认版本</string>
     <string name="download_checking_local">正在检查当前已下载副本…</string>
     <string name="download_preparing_task">正在创建下载任务…</string>
     <string name="download_progress_detail">已下载 %1$s / %2$s · %3$d%%</string>

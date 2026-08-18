@@ -3,7 +3,6 @@ package com.ermao.library.shared.modules.downloads
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.modules.downloads.infrastructure.parseDownloadReaderType
-import com.ermao.library.shared.modules.downloads.infrastructure.parseDownloadMediaKind
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
@@ -21,7 +20,6 @@ typealias DownloadCatalogRepository = com.ermao.library.shared.modules.downloads
 typealias CompletedTransfer = com.ermao.library.shared.modules.downloads.application.CompletedTransfer
 typealias DownloadDescriptor = com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
 typealias DownloadIdentity = com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
-typealias DownloadMediaKind = com.ermao.library.shared.modules.downloads.domain.DownloadMediaKind
 typealias DownloadNamespace = com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 typealias DownloadProgressObserver = com.ermao.library.shared.modules.downloads.application.DownloadProgressObserver
 typealias DownloadRequestContext = com.ermao.library.shared.modules.downloads.application.DownloadRequestContext
@@ -44,7 +42,7 @@ typealias DownloadVolumeResult = com.ermao.library.shared.modules.downloads.appl
 typealias DownloadVolumeReadyToOpen = com.ermao.library.shared.modules.downloads.application.DownloadVolumeResult.ReadyToOpen
 typealias DownloadVolumeFailure = com.ermao.library.shared.modules.downloads.application.DownloadVolumeResult.Failure
 typealias DownloadVolumeRuntime = com.ermao.library.shared.modules.downloads.application.DownloadVolumeRuntime
-typealias DownloadedMediaVersion = com.ermao.library.shared.modules.downloads.domain.DownloadedMediaVersion
+typealias DownloadedVersion = com.ermao.library.shared.modules.downloads.domain.DownloadedVersion
 typealias DownloadedWork = com.ermao.library.shared.modules.downloads.domain.DownloadedWork
 typealias DownloadsRuntime = com.ermao.library.shared.modules.downloads.application.DownloadsRuntime
 typealias InMemoryDownloadCatalogRepository = com.ermao.library.shared.modules.downloads.application.InMemoryDownloadCatalogRepository
@@ -70,8 +68,6 @@ fun PrivateDataNamespace.toDownloadNamespace(): DownloadNamespace = DownloadName
 )
 
 fun downloadReaderType(value: String): DownloadReaderType = parseDownloadReaderType(value)
-
-fun downloadMediaKind(value: String): DownloadMediaKind = parseDownloadMediaKind(value)
 
 fun downloadStartEvent(): DownloadTaskEvent =
     com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Start

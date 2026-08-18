@@ -42,18 +42,39 @@ class KtorDownloadsGatewayTest {
 
         val result = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume"))
         assertEquals("work", result.bootstrap.descriptor.identity.workId)
-        assertEquals("media", result.bootstrap.descriptor.mediaVersionId)
-        assertEquals("EBOOK", result.bootstrap.descriptor.mediaKind)
+        assertEquals("version-1", result.bootstrap.descriptor.versionId)
+        assertEquals("__implicit__", result.bootstrap.descriptor.versionSourceKey)
+        assertEquals(null, result.bootstrap.descriptor.versionSourceName)
+        assertEquals(false, result.bootstrap.descriptor.versionCompleted)
         assertEquals(2, result.bootstrap.descriptor.volumeSortOrder)
         assertEquals(6, result.bootstrap.descriptor.source.totalBytes)
         Unit
     }
 
     @Test
-    fun bootstrapRejectsContradictoryMediaVersionIdentity() = runBlocking {
+    fun bootstrapPersistsNamedVersionSource() = runBlocking {
+        val named = BOOTSTRAP
+            .replace("\"sourceKey\":\"__implicit__\"", "\"sourceKey\":\"kindle\"")
+            .replace("\"sourceName\":null", "\"sourceName\":\"Kindle\"")
+            .replace("\"versionCompleted\":false", "\"versionCompleted\":true")
+        val gateway = gateway {
+            respond(named, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume"))
+            .bootstrap.descriptor
+        assertEquals("version-1", descriptor.versionId)
+        assertEquals("kindle", descriptor.versionSourceKey)
+        assertEquals("Kindle", descriptor.versionSourceName)
+        assertEquals(true, descriptor.versionCompleted)
+        Unit
+    }
+
+    @Test
+    fun bootstrapRejectsContradictoryVersionIdentity() = runBlocking {
         val gateway = gateway {
             respond(
-                BOOTSTRAP.replace("\"versionId\":\"media\"", "\"versionId\":\"other\""),
+                BOOTSTRAP.replace("\"versionId\":\"version-1\"", "\"versionId\":\"other\""),
                 HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, "application/json"),
             )
@@ -100,7 +121,8 @@ class KtorDownloadsGatewayTest {
             .bootstrap.descriptor
 
         assertEquals("CBZ", descriptor.format)
-        assertEquals("COMIC", descriptor.mediaKind)
+        assertEquals("version-1", descriptor.versionId)
+        assertEquals("__implicit__", descriptor.versionSourceKey)
         assertEquals("/api/reader/v4/volumes/volume/comic/archive", descriptor.source.apiPath)
         assertEquals("application/vnd.comicbook+zip", descriptor.source.mimeType)
         assertEquals(12, descriptor.source.totalBytes)
@@ -248,7 +270,7 @@ class KtorDownloadsGatewayTest {
     }
 
     private companion object {
-        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"work","title":"Book","author":"Author","coverUrl":"/api/works/work/cover"},"version":{"id":"media","workId":"work","sourceKey":"__implicit__","sourceName":null},"versionCompleted":false,"volume":{"id":"volume","versionId":"media","title":"Volume","volumeIndex":1.5,"sortOrder":2,"format":"EPUB","readerType":"reflowable"},"files":[{"id":"file","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":6,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file"}}"""
-        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"work","title":"Comic","author":"Author","coverUrl":"/api/works/work/cover"},"version":{"id":"media","workId":"work","sourceKey":"__implicit__","sourceName":null},"versionCompleted":false,"volume":{"id":"volume","versionId":"media","title":"Volume","volumeIndex":1.0,"sortOrder":0,"format":"CBZ","readerType":"comic"},"files":[{"id":"file","kind":"COMIC","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file","publication":{"kind":"comic","manifestUrl":"/api/reader/v4/volumes/volume/comic/manifest","pageUrlTemplate":"/api/reader/v4/volumes/volume/comic/pages/{pageIndex}","imageVariants":["original"],"downloadArtifact":{"url":"/api/reader/v4/volumes/volume/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
+        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"work","title":"Book","author":"Author","coverUrl":"/api/works/work/cover"},"version":{"id":"version-1","workId":"work","sourceKey":"__implicit__","sourceName":null},"versionCompleted":false,"volume":{"id":"volume","versionId":"version-1","title":"Volume","volumeIndex":1.5,"sortOrder":2,"format":"EPUB","readerType":"reflowable"},"files":[{"id":"file","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":6,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file"}}"""
+        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"work","title":"Comic","author":"Author","coverUrl":"/api/works/work/cover"},"version":{"id":"version-1","workId":"work","sourceKey":"__implicit__","sourceName":null},"versionCompleted":false,"volume":{"id":"volume","versionId":"version-1","title":"Volume","volumeIndex":1.0,"sortOrder":0,"format":"CBZ","readerType":"comic"},"files":[{"id":"file","kind":"COMIC","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file","publication":{"kind":"comic","manifestUrl":"/api/reader/v4/volumes/volume/comic/manifest","pageUrlTemplate":"/api/reader/v4/volumes/volume/comic/pages/{pageIndex}","imageVariants":["original"],"downloadArtifact":{"url":"/api/reader/v4/volumes/volume/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
     }
 }

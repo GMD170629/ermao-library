@@ -45,7 +45,7 @@ import com.ermao.library.features.downloads.application.DownloadCenterUiState
 import com.ermao.library.features.downloads.application.DownloadedWorkUiState
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.DownloadedWorkGroup
-import com.ermao.library.features.downloads.model.DownloadedMediaVersionGroup
+import com.ermao.library.features.downloads.model.DownloadedVersionGroup
 import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
@@ -172,11 +172,11 @@ fun DownloadedWorkScreen(
         else if (work == null) ContentAreaMessage(stringResource(R.string.downloads_unavailable_title), stringResource(R.string.downloads_unavailable_message), modifier = Modifier.padding(padding))
         else LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item { Text(work.author, color = theme.colors.textSecondary, modifier = Modifier.padding(theme.spacing.three)) }
-            work.mediaVersions.forEach { mediaVersion ->
-                item(key = "media-${mediaVersion.mediaVersionId}") {
-                    MediaVersionHeader(mediaVersion)
+            work.versions.forEach { version ->
+                item(key = "version-${version.versionId}") {
+                    VersionHeader(version)
                 }
-                items(mediaVersion.volumes, key = AndroidDownloadRecord::volumeId) { volume ->
+                items(version.volumes, key = AndroidDownloadRecord::volumeId) { volume ->
                     Row(
                         Modifier.fillMaxWidth().clickable { onOpenVolume(volume) }.padding(horizontal = theme.spacing.four, vertical = theme.spacing.two),
                         verticalAlignment = Alignment.CenterVertically,
@@ -195,16 +195,16 @@ fun DownloadedWorkScreen(
 }
 
 @Composable
-private fun MediaVersionHeader(mediaVersion: DownloadedMediaVersionGroup) {
+private fun VersionHeader(version: DownloadedVersionGroup) {
     val theme = WarmPageThemeValues
     Column(Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.one)) {
-        Text(mediaKindLabel(mediaVersion.mediaKind), style = theme.typography.sectionTitle)
+        Text(versionLabel(version.sourceName, version.sourceKey), style = theme.typography.sectionTitle)
         Text(
             pluralStringResource(
-                R.plurals.downloads_media_version_summary,
-                mediaVersion.volumes.size,
-                mediaVersion.volumes.size,
-                formatBytes(mediaVersion.totalBytes),
+                R.plurals.downloads_version_summary,
+                version.volumes.size,
+                version.volumes.size,
+                formatBytes(version.totalBytes),
             ),
             color = theme.colors.textSecondary,
             style = theme.typography.caption,
@@ -213,13 +213,17 @@ private fun MediaVersionHeader(mediaVersion: DownloadedMediaVersionGroup) {
 }
 
 @Composable
-private fun mediaKindLabel(mediaKind: String): String = stringResource(
-    when (mediaKind.uppercase()) {
-        "COMIC" -> R.string.media_comic
-        "AUDIOBOOK" -> R.string.media_audiobook
-        else -> R.string.media_ebook
-    },
-)
+private fun versionLabel(sourceName: String?, sourceKey: String): String {
+    val named = sourceName?.trim().orEmpty()
+    if (named.isNotEmpty()) return named
+    return if (sourceKey == IMPLICIT_VERSION_SOURCE_KEY) {
+        stringResource(R.string.downloads_version_implicit)
+    } else {
+        sourceKey
+    }
+}
+
+private const val IMPLICIT_VERSION_SOURCE_KEY = "__implicit__"
 
 @Composable private fun SectionTitle(resource: Int) = Text(stringResource(resource), style = WarmPageThemeValues.typography.sectionTitle, modifier = Modifier.padding(horizontal = WarmPageThemeValues.spacing.three))
 
@@ -231,7 +235,7 @@ private fun ActiveRow(record: AndroidDownloadRecord, onCancel: ((String) -> Unit
     Column(Modifier.padding(horizontal = theme.spacing.three), verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.CloudDownload, null); Text(record.workTitle, Modifier.padding(start = theme.spacing.one).weight(1f)); Text("${(progress * 100).toInt()}%") }
         Text(
-            stringResource(R.string.downloads_task_context, mediaKindLabel(record.mediaKind), record.volumeTitle),
+            stringResource(R.string.downloads_task_context, versionLabel(record.versionSourceName, record.versionSourceKey), record.volumeTitle),
             color = theme.colors.textSecondary,
         )
         LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth().height(4.dp), color = theme.colors.brandAccent, trackColor = theme.colors.divider)
@@ -274,7 +278,7 @@ private fun FailedRow(
         Column(Modifier.padding(start = theme.spacing.two).weight(1f)) {
             Text(record.workTitle)
             Text(
-                stringResource(R.string.downloads_task_context, mediaKindLabel(record.mediaKind), record.volumeTitle),
+                stringResource(R.string.downloads_task_context, versionLabel(record.versionSourceName, record.versionSourceKey), record.volumeTitle),
                 color = theme.colors.textSecondary,
             )
             Text(downloadFailureSummary(record.errorCode), color = theme.colors.textSecondary)

@@ -66,8 +66,10 @@ final class DownloadStoreTests: XCTestCase {
                 availableMediaKinds: [.ebook]
             ),
             volume: volume,
-            mediaVersionID: bootstrap.mediaVersionID,
-            mediaKind: bootstrap.mediaKind,
+            versionID: bootstrap.versionID,
+            versionSourceKey: bootstrap.versionSourceKey,
+            versionSourceName: bootstrap.versionSourceName,
+            versionCompleted: bootstrap.versionCompleted,
             readerType: bootstrap.readerType,
             expectedBytes: bootstrap.expectedBytes
         )
@@ -198,8 +200,10 @@ final class DownloadStoreTests: XCTestCase {
                 availableMediaKinds: [.ebook]
             ),
             volume: volume,
-            mediaVersionID: volume.mediaVersionID,
-            mediaKind: .ebook,
+            versionID: original.versionID,
+            versionSourceKey: "__implicit__",
+            versionSourceName: nil,
+            versionCompleted: false,
             readerType: .reflowable,
             expectedBytes: 4
         )
@@ -209,7 +213,7 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(records.count, 1)
     }
 
-    func testChangedMediaVersionIdentityReplacesVolumeRecord() async throws {
+    func testChangedVersionIdentityReplacesVolumeRecord() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let original = try await makeRecord(store: store)
         let volume = WorkVolume(
@@ -234,17 +238,19 @@ final class DownloadStoreTests: XCTestCase {
                 availableMediaKinds: [.ebook]
             ),
             volume: volume,
-            mediaVersionID: volume.mediaVersionID,
-            mediaKind: .ebook,
+            versionID: volume.mediaVersionID,
+            versionSourceKey: "__implicit__",
+            versionSourceName: nil,
+            versionCompleted: false,
             readerType: .reflowable,
             expectedBytes: 4
         )
 
         XCTAssertNotEqual(replacement.id, original.id)
-        XCTAssertEqual(replacement.mediaVersionID, "media-version-new")
+        XCTAssertEqual(replacement.versionID, "media-version-new")
     }
 
-    func testRealMediaVersionIdentityPersistsAndGroupsVolumesBelowWork() async throws {
+    func testRealVersionIdentityPersistsAndGroupsVolumesBelowWork() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let first = try await makeRecord(store: store, volumeID: "volume-1")
         let second = try await makeRecord(store: store, volumeID: "volume-2")
@@ -252,30 +258,29 @@ final class DownloadStoreTests: XCTestCase {
         let secondCompleted = try await complete(second, in: store)
 
         let reloaded = try await store.records(namespace: namespace)
-        XCTAssertEqual(Set(reloaded.compactMap(\.mediaVersionID)), ["media-version-ebook"])
+        XCTAssertEqual(Set(reloaded.map(\.versionID)), ["version-implicit"])
 
         let groups = ManagedDownloadGrouping.completed(
             records: [firstCompleted, secondCompleted],
             query: "Work"
         )
         XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups.single?.mediaVersions.count, 1)
-        XCTAssertEqual(groups.single?.mediaVersions.single?.mediaVersionID, "media-version-ebook")
-        XCTAssertEqual(groups.single?.mediaVersions.single?.records.count, 2)
+        XCTAssertEqual(groups.single?.versions.count, 1)
+        XCTAssertEqual(groups.single?.versions.single?.versionID, "version-implicit")
+        XCTAssertEqual(groups.single?.versions.single?.records.count, 2)
     }
 
-    func testLegacyManifestRecordWithoutMediaVersionRemainsDecodable() async throws {
-        let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
+    func testCatalogWithoutVersionFieldsIsDiscarded() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
         let record = try await makeRecord(store: store)
         let encoded = try JSONEncoder().encode(record)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        object.removeValue(forKey: "mediaVersionID")
+        object.removeValue(forKey: "versionID")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
 
-        let decoded = try JSONDecoder().decode(ManagedDownloadRecord.self, from: legacyData)
-
-        XCTAssertNil(decoded.mediaVersionID)
-        XCTAssertEqual(decoded.effectiveMediaVersionID, "legacy-volume:\(record.volumeID)")
+        XCTAssertThrowsError(try JSONDecoder().decode(ManagedDownloadRecord.self, from: legacyData))
     }
 
     func testOnlyCompletedVerifiedArtifactSkipsDownloadTransition() async throws {
@@ -326,8 +331,10 @@ final class DownloadStoreTests: XCTestCase {
                 isReadable: true,
                 isSelected: true
             ),
-            mediaVersionID: "media-version-ebook",
-            mediaKind: .ebook,
+            versionID: "version-implicit",
+            versionSourceKey: "__implicit__",
+            versionSourceName: nil,
+            versionCompleted: false,
             readerType: .reflowable,
             expectedBytes: 4
         )

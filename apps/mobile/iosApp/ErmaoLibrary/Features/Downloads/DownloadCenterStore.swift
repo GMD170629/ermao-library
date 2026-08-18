@@ -115,7 +115,7 @@ final class DownloadCenterStore: ObservableObject {
                 } else if bootstrap.readerType.requiresCompleteDownloadBeforeReading {
                     if let stale = record(for: volume.id),
                        stale.readerType != bootstrap.readerType ||
-                       stale.effectiveMediaVersionID != bootstrap.mediaVersionID {
+                       stale.versionID != bootstrap.versionID {
                         await removeForReplacement(stale)
                     }
                     try await enqueuePrepared(
@@ -200,15 +200,19 @@ final class DownloadCenterStore: ObservableObject {
         targetWorkID: String,
         targetWorkTitle: String,
         targetWorkAuthor: String,
-        targetMediaVersionID: String,
-        targetMediaKind: LibraryMediaKind
+        targetVersionID: String,
+        targetVersionSourceKey: String,
+        targetVersionSourceName: String?,
+        targetVersionCompleted: Bool?
     ) {
         guard var record = record(for: volumeID), record.isVerifiedOfflineCopy else { return }
         record.workID = targetWorkID
         record.workTitle = targetWorkTitle
         record.workAuthor = targetWorkAuthor
-        record.mediaVersionID = targetMediaVersionID
-        record.mediaKind = targetMediaKind
+        record.versionID = targetVersionID
+        record.versionSourceKey = targetVersionSourceKey
+        record.versionSourceName = targetVersionSourceName
+        record.versionCompleted = targetVersionCompleted
         record.updatedAt = Date()
         replace(record)
         Task {
@@ -268,20 +272,22 @@ final class DownloadCenterStore: ObservableObject {
     private func enqueuePrepared(
         work: WorkCard,
         volume: WorkVolume,
-        mediaKind: LibraryMediaKind,
+        mediaKind _: LibraryMediaKind,
         bootstrap: ManagedDownloadBootstrap,
         context: ContentRequestContext
     ) async throws {
-        guard bootstrap.mediaVersionID == volume.mediaVersionID,
-              bootstrap.mediaKind == mediaKind else {
+        guard !bootstrap.versionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !bootstrap.versionSourceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ManagedDownloadTransferError.invalidResponse
         }
         let record = try await repository.enqueue(
             namespace: context.namespaceKey,
             work: work,
             volume: volume,
-            mediaVersionID: bootstrap.mediaVersionID,
-            mediaKind: mediaKind,
+            versionID: bootstrap.versionID,
+            versionSourceKey: bootstrap.versionSourceKey,
+            versionSourceName: bootstrap.versionSourceName,
+            versionCompleted: bootstrap.versionCompleted,
             readerType: bootstrap.readerType,
             expectedBytes: bootstrap.expectedBytes
         )
