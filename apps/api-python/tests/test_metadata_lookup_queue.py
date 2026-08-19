@@ -2,6 +2,9 @@ import json
 import os
 
 import pytest
+from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
+
 from app.bootstrap.metadata import (
     prepare_metadata_source_seed_rows,
     write_metadata_source_seed_rows,
@@ -21,8 +24,6 @@ from app.services.organize_service import (
     metadata_candidate_title_exact_match,
     metadata_search_candidates,
 )
-from sqlalchemy import select, text
-from sqlalchemy.exc import OperationalError
 from tests.test_worker_importer import create_worker_tables
 
 
@@ -91,11 +92,22 @@ def _insert_lookup_fixture(
     db.execute(
         text(
             """
+            INSERT INTO LibraryVersion (
+                id, workId, sourceKey, createdAt, updatedAt
+            ) VALUES (
+                'version-default', 'work-lookup', '__implicit__', 'now', 'now'
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
             INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey, publisher,
+                id, versionId, origin, title, sortOrder, format, resourceKey, publisher,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
-                'volume-lookup', 'media-lookup', 'MANUAL', 'EPUB', 0, 'EPUB', 'epub:test', NULL,
+                'volume-lookup', 'version-default', 'MANUAL', 'EPUB', 0, 'EPUB', 'epub:test', NULL,
                 'COMPLETED', 1, 'PENDING', 0, 'now', 'now'
             )
             """
@@ -790,12 +802,16 @@ def test_remote_cover_publish_failure_compensates_and_retries(
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "PENDING"
 
-    work = db_session.execute(
-        text(
-            "SELECT coverPath, coverStatus FROM LibraryWork "
-            "WHERE id = 'work-lookup'"
+    work = (
+        db_session.execute(
+            text(
+                "SELECT coverPath, coverStatus FROM LibraryWork "
+                "WHERE id = 'work-lookup'"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert work["coverPath"] is None
     assert work["coverStatus"] == "PENDING"
     assert temporary_path.exists() is False

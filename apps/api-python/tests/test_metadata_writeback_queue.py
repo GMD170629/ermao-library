@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from sqlalchemy import select
+
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -17,6 +20,7 @@ from app.models.organize import (
     MetadataWritebackTarget,
     OrganizePolicy,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.infrastructure.writeback_queue import (
     enqueue_writeback,
@@ -28,54 +32,68 @@ from app.services.metadata_file_writeback import (
     process_next_metadata_writeback,
     schedule_work_metadata_writebacks,
 )
-from sqlalchemy import select
 
 
 def _library_source(
     db_session, source: Path, *, volume_index: float | None = None
 ) -> None:
     stat = source.stat()
-    db_session.add_all(
-        [
-            LibraryWork(
-            library_id="test-library", 
-                id="work-1",
-                title="快照标题",
-                normalized_title="快照标题",
-                author="作者",
-                normalized_author="作者",
-                description="简介",
-                tags='["科幻"]',
-            ),
-            LibraryMediaVersion(id="media-1", work_id="work-1", media_kind="EBOOK"),
-            LibraryVolume(
-                id="volume-1",
-                media_version_id="media-1",
-                title="第一卷",
-                volume_index=volume_index,
-                format="TXT",
-                resource_key="volume-1",
-                import_status="READY",
-            ),
-            LibraryFile(
-                id="file-1",
-                volume_id="volume-1",
-                path=str(source),
-                hash_status="READY",
-                mtime_ms=int(stat.st_mtime * 1000),
-                kind="BOOK",
-                mime_type="text/plain",
-                size_bytes=stat.st_size,
-            ),
-            ImportTask(
-                id="import-1",
-                volume_id="volume-1",
-                work_id="work-1",
-                origin="MANUAL",
-                status="COMPLETED",
-                source_path=str(source),
-            ),
-        ]
+    db_session.add(
+        LibraryWork(
+            library_id="test-library",
+            id="work-1",
+            title="快照标题",
+            normalized_title="快照标题",
+            author="作者",
+            normalized_author="作者",
+            description="简介",
+            tags='["科幻"]',
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryVersion(
+            id="version-default",
+            work_id="work-1",
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        )
+    )
+    db_session.add(
+        LibraryMediaVersion(id="media-1", work_id="work-1", media_kind="EBOOK")
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryVolume(
+            id="volume-1",
+            version_id="version-default",
+            title="第一卷",
+            volume_index=volume_index,
+            format="TXT",
+            resource_key="volume-1",
+            import_status="READY",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryFile(
+            id="file-1",
+            volume_id="volume-1",
+            path=str(source),
+            mtime_ms=int(stat.st_mtime * 1000),
+            kind="BOOK",
+            mime_type="text/plain",
+            size_bytes=stat.st_size,
+        )
+    )
+    db_session.add(
+        ImportTask(
+            id="import-1",
+            volume_id="volume-1",
+            work_id="work-1",
+            origin="MANUAL",
+            status="COMPLETED",
+            source_path=str(source),
+        )
     )
     db_session.commit()
 
@@ -198,9 +216,7 @@ def test_queue_capacity_defers_new_preparation_without_dropping_it(
     assert first.outcome == "QUEUED"
     assert second.outcome == "QUEUED"
     db_session.commit()
-    constrained = test_settings.model_copy(
-        update={"metadata_opf_queue_max_pending": 1}
-    )
+    constrained = test_settings.model_copy(update={"metadata_opf_queue_max_pending": 1})
     assert process_next_metadata_writeback(db_session, constrained) is True
     assert process_next_metadata_writeback(db_session, constrained) is True
     assert len(db_session.scalars(select(MetadataWritebackOperation)).all()) == 2
@@ -236,40 +252,42 @@ def test_multi_media_batch_defers_later_scope_when_capacity_is_full(
     second_source.write_bytes(b"second")
     _library_source(db_session, first_source)
     second_stat = second_source.stat()
-    db_session.add_all(
-        [
-            LibraryMediaVersion(
-                id="media-2", work_id="work-1", media_kind="AUDIOBOOK"
-            ),
-            LibraryVolume(
-                id="volume-2",
-                media_version_id="media-2",
-                title="有声版",
-                format="MP3",
-                resource_key="volume-2",
-                import_status="READY",
-            ),
-            LibraryFile(
-                id="file-2",
-                volume_id="volume-2",
-                path=str(second_source),
-                hash_status="READY",
-                mtime_ms=int(second_stat.st_mtime * 1000),
-                kind="AUDIO",
-                mime_type="audio/mpeg",
-                size_bytes=second_stat.st_size,
-            ),
-            ImportTask(
-                id="import-2",
-                volume_id="volume-2",
-                work_id="work-1",
-                origin="MANUAL",
-                status="COMPLETED",
-                source_path=str(second_source),
-            ),
-            OrganizePolicy(id="default", write_metadata_to_files=True),
-        ]
+    db_session.add(
+        LibraryMediaVersion(id="media-2", work_id="work-1", media_kind="AUDIOBOOK")
     )
+    db_session.add(
+        LibraryVolume(
+            id="volume-2",
+            version_id="version-default",
+            title="有声版",
+            format="MP3",
+            resource_key="volume-2",
+            import_status="READY",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryFile(
+            id="file-2",
+            volume_id="volume-2",
+            path=str(second_source),
+            mtime_ms=int(second_stat.st_mtime * 1000),
+            kind="AUDIO",
+            mime_type="audio/mpeg",
+            size_bytes=second_stat.st_size,
+        )
+    )
+    db_session.add(
+        ImportTask(
+            id="import-2",
+            volume_id="volume-2",
+            work_id="work-1",
+            origin="MANUAL",
+            status="COMPLETED",
+            source_path=str(second_source),
+        )
+    )
+    db_session.add(OrganizePolicy(id="default", write_metadata_to_files=True))
     db_session.commit()
     constrained_settings = test_settings.model_copy(
         update={"metadata_opf_queue_max_pending": 1}
@@ -302,37 +320,39 @@ def test_writeback_can_target_one_volume_in_media_version(
     second_source.write_text("第二卷")
     _library_source(db_session, first_source, volume_index=1)
     second_stat = second_source.stat()
-    db_session.add_all(
-        [
-            LibraryVolume(
-                id="volume-2",
-                media_version_id="media-1",
-                title="第二卷",
-                volume_index=2,
-                sort_order=2,
-                format="TXT",
-                resource_key="volume-2",
-                import_status="READY",
-            ),
-            LibraryFile(
-                id="file-2",
-                volume_id="volume-2",
-                path=str(second_source),
-                hash_status="READY",
-                mtime_ms=int(second_stat.st_mtime * 1000),
-                kind="BOOK",
-                mime_type="text/plain",
-                size_bytes=second_stat.st_size,
-            ),
-            ImportTask(
-                id="import-2",
-                volume_id="volume-2",
-                work_id="work-1",
-                origin="MANUAL",
-                status="COMPLETED",
-                source_path=str(second_source),
-            ),
-        ]
+    db_session.add(
+        LibraryVolume(
+            id="volume-2",
+            version_id="version-default",
+            title="第二卷",
+            volume_index=2,
+            sort_order=2,
+            format="TXT",
+            resource_key="volume-2",
+            import_status="READY",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryFile(
+            id="file-2",
+            volume_id="volume-2",
+            path=str(second_source),
+            mtime_ms=int(second_stat.st_mtime * 1000),
+            kind="BOOK",
+            mime_type="text/plain",
+            size_bytes=second_stat.st_size,
+        )
+    )
+    db_session.add(
+        ImportTask(
+            id="import-2",
+            volume_id="volume-2",
+            work_id="work-1",
+            origin="MANUAL",
+            status="COMPLETED",
+            source_path=str(second_source),
+        )
     )
     db_session.commit()
 

@@ -21,6 +21,7 @@ from app.models.import_pipeline import ImportAsset, ImportTask
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -31,6 +32,8 @@ from app.models.organize import (
     MetadataWritebackTarget,
     OrganizePolicy,
 )
+from app.modules.library.domain.media_kinds import media_kind_of
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.application.writeback import (
     NULL_SOURCE_REVISION,
     MetadataWritebackFileProjection,
@@ -152,6 +155,37 @@ def write_metadata_to_files_enabled(db: Session) -> bool:
     return bool(value)
 
 
+def _work_volume_order() -> tuple[object, ...]:
+    return (
+        case((LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0), else_=1),
+        func.coalesce(LibraryVersion.source_name, ""),
+        LibraryVersion.source_key.asc(),
+        LibraryVersion.id.asc(),
+        LibraryVolume.sort_order.asc(),
+        LibraryVolume.created_at.asc(),
+        LibraryVolume.id.asc(),
+    )
+
+
+def _visible_volumes_for_work(
+    db: Session,
+    *,
+    work_id: str,
+    volume_id: str | None = None,
+) -> tuple[LibraryVolume, ...]:
+    query = (
+        select(LibraryVolume)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .where(
+            LibraryVersion.work_id == work_id,
+            LibraryVolume.hidden.is_(False),
+        )
+    )
+    if volume_id is not None:
+        query = query.where(LibraryVolume.id == volume_id)
+    return tuple(db.scalars(query.order_by(*_work_volume_order())).all())
+
+
 def load_metadata_writeback_projection(
     db: Session,
     *,
@@ -164,31 +198,39 @@ def load_metadata_writeback_projection(
     work = db.scalar(select(LibraryWork).where(LibraryWork.id == work_id))
     if work is None:
         raise ValueError("作品不存在")
-    media_query = select(LibraryMediaVersion.id).where(
-        LibraryMediaVersion.work_id == work_id
-    )
-    if media_version_id is not None:
-        media_query = media_query.where(LibraryMediaVersion.id == media_version_id)
-    media_ids = tuple(
-        db.scalars(media_query.order_by(LibraryMediaVersion.created_at.asc())).all()
-    )
-    if media_version_id is not None and not media_ids:
-        raise ValueError("媒介版本不存在")
-    volume_query = select(LibraryVolume).where(
-        LibraryVolume.version_id.in_(media_ids),
-        LibraryVolume.hidden.is_(False),
-    )
-    if volume_id is not None:
-        volume_query = volume_query.where(LibraryVolume.id == volume_id)
-    volume_rows = tuple(
-        db.scalars(
-            volume_query.order_by(
-                LibraryVolume.version_id.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.id.asc(),
+    media_rows = tuple(
+        db.execute(
+            select(LibraryMediaVersion.id, LibraryMediaVersion.media_kind)
+            .where(LibraryMediaVersion.work_id == work_id)
+            .order_by(
+                LibraryMediaVersion.created_at.asc(),
+                LibraryMediaVersion.id.asc(),
             )
         ).all()
     )
+    media_by_kind = {str(row.media_kind): str(row.id) for row in media_rows}
+    if media_version_id is not None:
+        selected_media = next(
+            (row for row in media_rows if str(row.id) == media_version_id),
+            None,
+        )
+        if selected_media is None:
+            raise ValueError("媒介版本不存在")
+        selected_kind = str(selected_media.media_kind)
+        media_ids = (str(selected_media.id),)
+    else:
+        selected_kind = None
+        media_ids = tuple(str(row.id) for row in media_rows)
+    matched_volumes: list[tuple[LibraryVolume, str]] = []
+    for volume in _visible_volumes_for_work(db, work_id=work_id, volume_id=volume_id):
+        volume_kind = media_kind_of(volume)
+        if selected_kind is not None and volume_kind != selected_kind:
+            continue
+        matched_media_id = media_by_kind.get(volume_kind)
+        if matched_media_id is None:
+            continue
+        matched_volumes.append((volume, matched_media_id))
+    volume_rows = tuple(volume for volume, _media_id in matched_volumes)
     volume_ids = tuple(volume.id for volume in volume_rows)
     file_rows = (
         tuple(
@@ -254,7 +296,7 @@ def load_metadata_writeback_projection(
         volumes=tuple(
             MetadataWritebackVolumeProjection(
                 id=volume.id,
-                media_version_id=volume.version_id,
+                media_version_id=media_id,
                 title=volume.title,
                 description=volume.description,
                 volume_index=volume.volume_index,
@@ -267,7 +309,7 @@ def load_metadata_writeback_projection(
                 isbn=volume.isbn,
                 cover_path=volume.cover_path,
             )
-            for volume in volume_rows
+            for volume, media_id in matched_volumes
         ),
         files=tuple(
             MetadataWritebackFileProjection(

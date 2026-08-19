@@ -1,10 +1,14 @@
 import json
 
+from sqlalchemy import event, select, text
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import LibraryMediaVersion, LibraryVolume
+from app.models.library import LibraryMediaVersion, LibraryVersion, LibraryVolume
 from app.models.organize import MetadataLookupTask, OrganizeJob
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.presentation.schemas import MetadataProvider
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
@@ -24,8 +28,6 @@ from app.services.organize_scheduler import (
     update_organize_policy,
 )
 from app.services.organize_service import merge_works
-from sqlalchemy import event, select, text
-from sqlalchemy.orm import Session
 
 
 def _insert_work(
@@ -38,12 +40,21 @@ def _insert_work(
     db.execute(
         text(
             """
+            INSERT INTO `Library` (`id`, `name`, `rootPath`, `organizationMode`, `createdAt`, `updatedAt`)
+            SELECT 'test-library', 'Test Library', '/library/test', 'FLAT', 0, 0
+            WHERE NOT EXISTS (SELECT 1 FROM `Library` WHERE `id` = 'test-library')
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
             INSERT INTO `LibraryWork`
-                (`id`, `origin`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`,
+                (`id`, `libraryId`, `origin`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`,
                  `tags`, `metadataQuality`, `organizeStatus`, `hidden`, `organized`,
                  `createdAt`, `updatedAt`)
             VALUES
-                (:id, 'MANUAL', :title, :title, '未知作者', '未知作者', '[]', 0,
+                (:id, 'test-library', 'MANUAL', :title, :title, '未知作者', '未知作者', '[]', 0,
                  'UNASSESSED', 0, 0, :created_at, :created_at)
             """
         ),
@@ -71,17 +82,27 @@ def _insert_volume(
     volume_format: str,
     sort_order: int = 0,
 ) -> None:
-    db.add(
-        LibraryMediaVersion(
-            id=media_version_id,
-            work_id=work_id,
-            media_kind=media_kind,
+    version_id = f"version-{work_id}"
+    if db.get(LibraryVersion, version_id) is None:
+        db.add(
+            LibraryVersion(
+                id=version_id,
+                work_id=work_id,
+                source_key=IMPLICIT_VERSION_SOURCE_KEY,
+            )
         )
-    )
+    if db.get(LibraryMediaVersion, media_version_id) is None:
+        db.add(
+            LibraryMediaVersion(
+                id=media_version_id,
+                work_id=work_id,
+                media_kind=media_kind,
+            )
+        )
     db.add(
         LibraryVolume(
             id=volume_id,
-            media_version_id=media_version_id,
+            version_id=version_id,
             title=f"卷册 {volume_id}",
             format=volume_format,
             resource_key=f"resource:{volume_id}",
@@ -146,7 +167,7 @@ def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
             db.add(
                 LibraryVolume(
                     id="first-volume",
-                    media_version_id="ebook-media",
+                    version_id="version-volume-target-work",
                     title="第一卷",
                     format="EPUB",
                     resource_key="resource:first-volume",
@@ -234,11 +255,11 @@ def test_merge_works_coalesces_media_versions_and_appends_volumes(tmp_path) -> N
             ).all()
             source_pdf = db.get(LibraryVolume, "source-pdf")
             assert source_pdf is not None
-            assert source_pdf.media_version_id == "target-ebook"
-            assert source_pdf.sort_order == 8
-            assert db.get(LibraryVolume, "source-comic-volume").media_version_id == (
-                "source-comic"
-            )
+            assert source_pdf.version_id == "version-source-work"
+            assert source_pdf.sort_order == 1
+            comic_volume = db.get(LibraryVolume, "source-comic-volume")
+            assert comic_volume is not None
+            assert comic_volume.version_id == "version-source-work"
     finally:
         engine.dispose()
 

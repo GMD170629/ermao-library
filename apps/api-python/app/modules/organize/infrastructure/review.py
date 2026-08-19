@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.models.organize import OrganizeJob
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.organize.infrastructure.duplicates import volume_entity_as_dict
 from app.modules.organize.infrastructure.eligibility import (
     UNRESOLVED_JOB_STATUSES,
@@ -103,32 +104,39 @@ def get_unresolved_job_for_work(db: Session, work_id: str) -> dict[str, Any] | N
     return job_entity_as_legacy_dict(entity) if entity is not None else None
 
 
-def earliest_volume_id(db: Session, work_id: str) -> str | None:
-    if not _has_table(db, "LibraryVolume"):
-        return None
-    return db.scalar(
-        select(LibraryVolume.id)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.version_id,
-        )
-        .where(
-            LibraryMediaVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-        )
-        .order_by(
-            case(
-                (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                (LibraryMediaVersion.media_kind == "COMIC", 1),
-                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
-                else_=3,
-            ),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-        .limit(1)
+def _volumes_belonging_to_work(
+    db: Session, work_id: str, *, visible_only: bool
+) -> list[LibraryVolume]:
+    if not _has_table(db, "LibraryVolume") or not _has_table(db, "LibraryVersion"):
+        return []
+    query = (
+        select(LibraryVolume)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .where(LibraryVersion.work_id == work_id)
     )
+    if visible_only:
+        query = query.where(LibraryVolume.hidden.is_(False))
+    return list(
+        db.scalars(
+            query.order_by(
+                case(
+                    (LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
+                    else_=1,
+                ),
+                func.coalesce(LibraryVersion.source_name, ""),
+                LibraryVersion.source_key.asc(),
+                LibraryVersion.id.asc(),
+                LibraryVolume.sort_order.asc(),
+                LibraryVolume.created_at.asc(),
+                LibraryVolume.id.asc(),
+            )
+        ).all()
+    )
+
+
+def earliest_volume_id(db: Session, work_id: str) -> str | None:
+    volumes = _volumes_belonging_to_work(db, work_id, visible_only=True)
+    return volumes[0].id if volumes else None
 
 
 def insert_organize_job(
@@ -353,28 +361,10 @@ def load_job_context(db: Session, job: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def list_volumes_for_work(db: Session, work_id: str) -> list[dict[str, Any]]:
-    if not _has_table(db, "LibraryVolume"):
-        return []
-    rows = db.scalars(
-        select(LibraryVolume)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.version_id,
-        )
-        .where(LibraryMediaVersion.work_id == work_id)
-        .order_by(
-            case(
-                (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                (LibraryMediaVersion.media_kind == "COMIC", 1),
-                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
-                else_=3,
-            ),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-    ).all()
-    return [volume_entity_as_dict(row) for row in rows]
+    return [
+        volume_entity_as_dict(row)
+        for row in _volumes_belonging_to_work(db, work_id, visible_only=False)
+    ]
 
 
 def work_column_names(db: Session) -> set[str]:

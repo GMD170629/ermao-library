@@ -144,14 +144,16 @@ def collect_storage_values(
     media_version_rows = [
         entity_as_legacy_dict(media_version) for media_version in media_versions
     ]
-    media_version_ids = [media_version.id for media_version in media_versions]
-    volumes = (
-        db.scalars(
-            select(LibraryVolume).where(LibraryVolume.version_id.in_(media_version_ids))
-        ).all()
-        if media_version_ids
-        else []
-    )
+    volumes = db.scalars(
+        select(LibraryVolume)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .where(LibraryVersion.work_id == work_id)
+        .order_by(
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
+            LibraryVolume.id.asc(),
+        )
+    ).all()
     volume_ids = [volume.id for volume in volumes]
     files = (
         db.scalars(
