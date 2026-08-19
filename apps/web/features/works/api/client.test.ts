@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapWorkView, searchWorkTransferTargets, volumeFileDownloadUrl } from './client';
+import { mapWorkView, volumeFileDownloadUrl } from './client';
 
 test('builds an explicit attachment URL for a single-volume download', () => {
   assert.equal(
@@ -42,31 +42,4 @@ test('keeps server totals when the lean work detail contains only the first volu
   assert.equal(work.versions[0]?.volumes.length, 1);
   assert.equal(work.versions[0]?.volumes[0]?.readable, true);
   assert.equal(work.versions[0]?.volumes[0]?.versionId, 'version-1');
-});
-
-test('searches transfer targets and excludes the current work', async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input) => {
-    const url = String(input);
-    assert.match(url, /view=bookshelf/);
-    assert.match(url, /search=target/);
-    return new Response(JSON.stringify({
-      ok: true,
-      data: {
-        books: [
-          { id: 'current-work', title: 'Current', author: 'Author' },
-          { id: 'target-work', title: 'Target', author: 'Writer' }
-        ]
-      }
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-
-  try {
-    assert.deepEqual(
-      await searchWorkTransferTargets('target', 'current-work'),
-      [{ id: 'target-work', title: 'Target', author: 'Writer' }]
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });

@@ -6,7 +6,7 @@ import org.junit.Test
 
 class DownloadOwnershipRewriteTest {
     @Test
-    fun splitAndTransferUseServerTargetVersionAsImplicitLibraryVersion() {
+    fun splitUsesServerTargetVersionAsImplicitLibraryVersion() {
         val rewrite = downloadOwnershipRewriteForStructuralMove(
             targetWorkId = "work-target",
             targetVersionId = "version-target",

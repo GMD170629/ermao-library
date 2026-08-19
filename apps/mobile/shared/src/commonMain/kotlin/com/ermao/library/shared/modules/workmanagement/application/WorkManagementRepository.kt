@@ -14,7 +14,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementCont
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 
 interface WorkManagementRepository {
     suspend fun supportsNativeManagement(context: WorkManagementContext): WorkManagementResult<Boolean>
@@ -25,9 +24,7 @@ interface WorkManagementRepository {
     suspend fun updateVolume(context: WorkManagementContext, workId: String, volumeId: String, draft: VolumeMetadataDraft): WorkManagementResult<WorkMutationOutcome>
     suspend fun reclassifyVolume(context: WorkManagementContext, workId: String, volumeId: String, mediaKind: ManagedMediaKind): WorkManagementResult<WorkMutationOutcome>
     suspend fun splitVolume(context: WorkManagementContext, workId: String, volumeId: String, title: String, author: String?): WorkManagementResult<WorkMutationOutcome>
-    suspend fun transferVolume(context: WorkManagementContext, workId: String, volumeId: String, targetWorkId: String): WorkManagementResult<WorkMutationOutcome>
     suspend fun deleteVolume(context: WorkManagementContext, workId: String, volumeId: String): WorkManagementResult<WorkMutationOutcome>
-    suspend fun searchTransferTargets(context: WorkManagementContext, workId: String, query: String): WorkManagementResult<List<WorkTransferTarget>>
     suspend fun loadMetadataProviders(context: WorkManagementContext, mediaKind: ManagedMediaKind): WorkManagementResult<List<MetadataProvider>>
     suspend fun searchMetadata(context: WorkManagementContext, workId: String, providerId: String, query: String): WorkManagementResult<MetadataSearchResult>
     suspend fun applyMetadata(

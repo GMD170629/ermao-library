@@ -28,7 +28,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementCont
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.Dispatchers
@@ -95,42 +94,6 @@ class WorkManagementViewModelTest {
     }
 
     @Test
-    fun transferMovesCompletedDownloadToServerTargetWorkAndVersion() = runTest(dispatcher) {
-        val catalog = InMemoryDownloadCatalogRepository()
-        val runtime = DownloadsRuntime(catalog)
-        catalog.saveArtifact(artifact())
-        val viewModel = viewModel(
-            runtime,
-            FakeWorkManagementRepository(
-                transferOutcome = WorkMutationOutcome(
-                    workId = SOURCE_WORK_ID,
-                    targetWorkId = "work-target",
-                    targetVersionId = "version-target",
-                ),
-            ),
-        )
-        advanceUntilIdle()
-
-        viewModel.transferVolume(
-            "volume",
-            WorkTransferTarget("work-target", "Target Work", "Target Author"),
-        )
-        advanceUntilIdle()
-
-        val moved = requireNotNull(runtime.artifact(namespace, "volume"))
-        assertEquals("work-target", moved.identity.workId)
-        assertEquals("version-target", moved.descriptor.versionId)
-        assertEquals(STRUCTURAL_MOVE_VERSION_SOURCE_KEY, moved.descriptor.versionSourceKey)
-        assertNull(moved.descriptor.versionSourceName)
-        assertNull(moved.descriptor.versionCompleted)
-        assertEquals("local://volume", moved.localReference)
-        assertEquals(10, moved.verifiedBytes)
-        val grouped = runtime.downloadedWorks(namespace).single()
-        assertEquals("work-target", grouped.workId)
-        assertEquals(listOf("version-target"), grouped.versions.map { it.versionId })
-    }
-
-    @Test
     fun reclassifyLeavesDownloadVersionOwnershipUnchanged() = runTest(dispatcher) {
         val catalog = InMemoryDownloadCatalogRepository()
         val runtime = DownloadsRuntime(catalog)
@@ -186,33 +149,6 @@ class WorkManagementViewModelTest {
         assertEquals(WorkManagementCompletion.VolumeSplit, viewModel.uiState.value.completedMutation)
     }
 
-    @Test
-    fun missingTargetWorkIdLeavesLocalDownloadUnchangedEvenWhenTransferTargetIsKnown() = runTest(dispatcher) {
-        val catalog = InMemoryDownloadCatalogRepository()
-        val runtime = DownloadsRuntime(catalog)
-        val original = artifact()
-        catalog.saveArtifact(original)
-        val viewModel = viewModel(
-            runtime,
-            FakeWorkManagementRepository(
-                transferOutcome = WorkMutationOutcome(
-                    workId = SOURCE_WORK_ID,
-                    targetWorkId = null,
-                    targetVersionId = "version-target",
-                ),
-            ),
-        )
-        advanceUntilIdle()
-
-        viewModel.transferVolume(
-            "volume",
-            WorkTransferTarget("work-target", "Target Work", "Target Author"),
-        )
-        advanceUntilIdle()
-
-        assertEquals(original, runtime.artifact(namespace, "volume"))
-    }
-
     private fun viewModel(
         runtime: DownloadsRuntime,
         repository: WorkManagementRepository,
@@ -251,7 +187,6 @@ class WorkManagementViewModelTest {
 
     private class FakeWorkManagementRepository(
         private val splitOutcome: WorkMutationOutcome? = null,
-        private val transferOutcome: WorkMutationOutcome? = null,
         private val reclassifyOutcome: WorkMutationOutcome? = null,
     ) : WorkManagementRepository {
         override suspend fun supportsNativeManagement(context: WorkManagementContext) =
@@ -264,13 +199,6 @@ class WorkManagementViewModelTest {
             title: String,
             author: String?,
         ) = WorkManagementResult.Content(requireNotNull(splitOutcome))
-
-        override suspend fun transferVolume(
-            context: WorkManagementContext,
-            workId: String,
-            volumeId: String,
-            targetWorkId: String,
-        ) = WorkManagementResult.Content(requireNotNull(transferOutcome))
 
         override suspend fun reclassifyVolume(
             context: WorkManagementContext,
@@ -306,12 +234,6 @@ class WorkManagementViewModelTest {
             context: WorkManagementContext,
             workId: String,
             volumeId: String,
-        ) = unused()
-
-        override suspend fun searchTransferTargets(
-            context: WorkManagementContext,
-            workId: String,
-            query: String,
         ) = unused()
 
         override suspend fun loadMetadataProviders(

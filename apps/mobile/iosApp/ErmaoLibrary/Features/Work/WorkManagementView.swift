@@ -2,7 +2,7 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 enum WorkManagementTask: String, Identifiable {
-    case addSeries, editWork, recognize, cover, editVolume, mediaKind, split, transfer, kindle
+    case addSeries, editWork, recognize, cover, editVolume, mediaKind, split, kindle
     case deleteWork, deleteVolume
 
     var id: String { rawValue }
@@ -44,13 +44,12 @@ struct WorkManagementView: View {
     @State private var managedVolumeID: String?
     @State private var selectedKind: ErmaoShared.ManagedMediaKind = .ebook
     @State private var selectedReadingStatus: ErmaoShared.ManagedReadingStatus = .unread
-    @State private var selectedTransferTargetID: String?
     @State private var selectedKindleFileID: String?
     @State private var confirmsDeletion = false
     @State private var confirmsDownloadRemoval = false
     @State private var confirmsCoverRegeneration = false
 
-    private enum Page { case addSeries, editWork, editVolume, metadata, cover, readingStatus, mediaKind, split, transfer, kindle }
+    private enum Page { case addSeries, editWork, editVolume, metadata, cover, readingStatus, mediaKind, split, kindle }
 
     private var activeVolume: WorkVolume? {
         managedVolumeID.flatMap { id in detail.volumes.first { $0.id == id } }
@@ -69,7 +68,6 @@ struct WorkManagementView: View {
         case .editVolume: .editVolume
         case .mediaKind: .mediaKind
         case .split: .split
-        case .transfer: .transfer
         case .kindle: .kindle
         case .deleteWork, .deleteVolume: volume == nil ? .editWork : .editVolume
         }
@@ -84,7 +82,6 @@ struct WorkManagementView: View {
         case .editVolume: "management.editVolume"
         case .mediaKind: "management.mediaKind"
         case .split: "management.split"
-        case .transfer: "management.transfer"
         case .kindle: "management.kindle"
         case .deleteWork: "management.deleteWork"
         case .deleteVolume: "management.deleteVolume"
@@ -105,7 +102,6 @@ struct WorkManagementView: View {
             case .readingStatus: readingStatus
             case .mediaKind: mediaKind
             case .split: split
-            case .transfer: transfer
             case .kindle: kindle
             }
         }
@@ -130,7 +126,7 @@ struct WorkManagementView: View {
         .onChange(of: store.completedAction) { action in
             guard let action else { return }
             switch action {
-            case .volumeReclassified, .volumeSplit, .volumeTransferred, .volumeDeleted:
+            case .volumeReclassified, .volumeSplit, .volumeDeleted:
                 managedVolumeID = nil
                 onManagedVolumeChange(nil)
             default: break
@@ -351,31 +347,6 @@ struct WorkManagementView: View {
                     store.split(volume, title: title, author: author.nilIfBlank, mediaKind: volume.libraryMediaKind)
                 }
                 .disabled(title.isEmpty)
-            }
-        }
-    }
-
-    @ViewBuilder private var transfer: some View {
-        if let volume = activeVolume {
-            Section {
-                TextField("management.query", text: $query)
-                Button("management.search") { store.searchTransferTargets(query) }
-                ForEach(store.transferTargets, id: \.id) { target in
-                    Button {
-                        selectedTransferTargetID = target.id
-                    } label: {
-                        HStack {
-                            Text([target.title, target.author].filter { !$0.isEmpty }.joined(separator: " · "))
-                            Spacer()
-                            if selectedTransferTargetID == target.id { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-                Button("management.moveToSelectedWork") {
-                    guard let target = store.transferTargets.first(where: { $0.id == selectedTransferTargetID }) else { return }
-                    store.transfer(volume, target: target, mediaKind: volume.libraryMediaKind)
-                }
-                .disabled(hasActiveDownload || selectedTransferTargetID == nil)
             }
         }
     }

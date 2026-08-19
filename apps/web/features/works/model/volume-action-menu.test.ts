@@ -8,7 +8,7 @@ test('returns no management actions without system-management permission', () =>
 
 test('orders the primary actions and offers only the other media kinds', () => {
   const actions = volumeActionAvailability({ canManage: true, readable: true, mediaKind: 'AUDIOBOOK' });
-  assert.deepEqual(actions.map((item) => item.action), ['download', 'edit', 'set-media-kind', 'set-ebook', 'set-comic', 'split', 'transfer', 'delete']);
+  assert.deepEqual(actions.map((item) => item.action), ['download', 'edit', 'set-media-kind', 'set-ebook', 'set-comic', 'split', 'delete']);
 });
 
 test('disables unavailable navigation without hiding management actions', () => {

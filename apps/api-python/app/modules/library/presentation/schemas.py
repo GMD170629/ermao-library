@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import UploadFile
-from pydantic import Field
+from pydantic import ConfigDict, Field
 from typing_extensions import TypeAliasType
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
@@ -1007,10 +1007,6 @@ class UpdateVolumeRequest(HttpContractModel):
     hidden: bool | None = None
 
 
-class MoveVolumeRequest(HttpContractModel):
-    target_work_id: str = Field(alias="targetWorkId", min_length=1)
-
-
 class ReorderVolumeRequest(HttpContractModel):
     direction: Literal["up", "down"]
 
@@ -1025,35 +1021,12 @@ class SplitVolumeRequest(HttpContractModel):
     author: str | None = None
 
 
-class BatchVolumeRequestBase(HttpContractModel):
+class BatchVolumeRequest(HttpContractModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    action: str
     volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
-
-
-class BatchSetMediaKindRequest(BatchVolumeRequestBase):
-    action: Literal["SET_MEDIA_KIND"]
-    target_media_kind: MediaKind = Field(alias="targetMediaKind")
-
-
-class BatchSplitVolumesRequest(BatchVolumeRequestBase):
-    action: Literal["SPLIT"]
-
-
-class BatchTransferVolumesRequest(BatchVolumeRequestBase):
-    action: Literal["TRANSFER"]
-    target_work_id: str = Field(alias="targetWorkId", min_length=1)
-
-
-class BatchDeleteVolumesRequest(BatchVolumeRequestBase):
-    action: Literal["DELETE"]
-
-
-BatchVolumeRequest = Annotated[
-    BatchSetMediaKindRequest
-    | BatchSplitVolumesRequest
-    | BatchTransferVolumesRequest
-    | BatchDeleteVolumesRequest,
-    Field(discriminator="action"),
-]
+    target_media_kind: MediaKind | None = Field(default=None, alias="targetMediaKind")
 
 
 class BatchVolumeMutationPayload(HttpContractModel):

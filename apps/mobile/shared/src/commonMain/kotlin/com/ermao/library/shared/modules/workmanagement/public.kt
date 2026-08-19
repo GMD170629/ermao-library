@@ -28,8 +28,6 @@ typealias ManagedReadingStatus =
     com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 typealias WorkMutationOutcome =
     com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
-typealias WorkTransferTarget =
-    com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 typealias MetadataProvider =
     com.ermao.library.shared.modules.workmanagement.domain.MetadataProvider
 typealias MetadataField =

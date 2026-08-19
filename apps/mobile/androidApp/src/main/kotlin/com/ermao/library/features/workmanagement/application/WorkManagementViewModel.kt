@@ -21,7 +21,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementCont
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementErrorKind
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +36,6 @@ data class WorkManagementUiState(
     val fieldErrors: Map<String, List<String>> = emptyMap(),
     val completedMutation: WorkManagementCompletion? = null,
     val deletedWork: Boolean = false,
-    val transferTargets: List<WorkTransferTarget> = emptyList(),
     val metadataProviders: List<MetadataProvider> = emptyList(),
     val metadataCandidates: List<MetadataCandidate> = emptyList(),
     val metadataMessage: String? = null,
@@ -52,7 +50,6 @@ enum class WorkManagementCompletion {
     VolumeUpdated,
     VolumeReclassified,
     VolumeSplit,
-    VolumeTransferred,
     VolumeDeleted,
     MetadataApplied,
     KindleQueued,
@@ -130,23 +127,6 @@ class WorkManagementViewModel(
         )
     }
 
-    fun transferVolume(volumeId: String, target: WorkTransferTarget) {
-        mutate(
-            completion = WorkManagementCompletion.VolumeTransferred,
-            block = { repository.transferVolume(context, workId, volumeId, target.id) },
-            onSuccess = {
-                rehomeCompletedDownload(
-                    volumeId = volumeId,
-                    targetWorkId = it.targetWorkId,
-                    targetVersionId = it.targetVersionId,
-                    targetWorkTitle = target.title,
-                    targetWorkAuthor = target.author,
-                    targetCoverApiPath = null,
-                )
-            },
-        )
-    }
-
     fun deleteVolume(volumeId: String) {
         mutate(
             completion = WorkManagementCompletion.VolumeDeleted,
@@ -154,12 +134,6 @@ class WorkManagementViewModel(
             onSuccess = { downloadsRuntime.removeArtifact(downloadNamespace, volumeId) },
         )
     }
-
-    fun searchTransferTargets(query: String) = query(
-        prepare = { it.copy(transferTargets = emptyList()) },
-        block = { repository.searchTransferTargets(context, workId, query) },
-        onSuccess = { targets -> mutableUiState.update { it.copy(transferTargets = targets) } },
-    )
 
     fun loadMetadataProviders(mediaKind: ManagedMediaKind) = query(
         prepare = { it.copy(metadataProviders = emptyList(), metadataCandidates = emptyList()) },

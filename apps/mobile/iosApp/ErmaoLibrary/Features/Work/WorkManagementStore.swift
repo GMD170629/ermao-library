@@ -12,7 +12,7 @@ final class WorkManagementStore: ObservableObject {
     }
     enum Action: Equatable {
         case workUpdated, coverUpdated, workDeleted
-        case volumeUpdated, volumeReclassified, volumeSplit, volumeTransferred, volumeDeleted
+        case volumeUpdated, volumeReclassified, volumeSplit, volumeDeleted
         case metadataApplied, kindleQueued, readingStatusUpdated
     }
 
@@ -23,7 +23,6 @@ final class WorkManagementStore: ObservableObject {
     @Published private(set) var completedAction: Action?
     @Published private(set) var lastOutcome: ErmaoShared.WorkMutationOutcome?
     @Published private(set) var pendingOwnership: PendingOwnership?
-    @Published private(set) var transferTargets: [ErmaoShared.WorkTransferTarget] = []
     @Published private(set) var metadataProviders: [ErmaoShared.MetadataProvider] = []
     @Published private(set) var metadataCandidates: [ErmaoShared.MetadataCandidate] = []
     @Published private(set) var kindleSettings: ErmaoShared.KindleSettings?
@@ -161,30 +160,6 @@ final class WorkManagementStore: ObservableObject {
         runMutation(.volumeSplit) { [repository, context, workID] in
             try await repository.splitVolume(
                 context: context, workId: workID, volumeId: volume.id, title: title, author: author
-            )
-        }
-    }
-
-    func searchTransferTargets(_ query: String) {
-        runValue { [repository, context, workID] in
-            let result = try await repository.searchTransferTargets(context: context, workId: workID, query: query)
-            let values: [ErmaoShared.WorkTransferTarget] = try Self.value(result)
-            self.transferTargets = values
-        }
-    }
-
-    func transfer(
-        _ volume: WorkVolume,
-        target: ErmaoShared.WorkTransferTarget,
-        mediaKind: LibraryMediaKind
-    ) {
-        pendingOwnership = PendingOwnership(
-            volumeID: volume.id, workID: target.id, workTitle: target.title,
-            workAuthor: target.author, mediaKind: mediaKind
-        )
-        runMutation(.volumeTransferred) { [repository, context, workID] in
-            try await repository.transferVolume(
-                context: context, workId: workID, volumeId: volume.id, targetWorkId: target.id
             )
         }
     }

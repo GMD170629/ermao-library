@@ -188,7 +188,6 @@
     <string name="work_control_delete">Delete</string>
     <string name="work_control_change_media_type">Change media type</string>
     <string name="work_control_split">Split</string>
-    <string name="work_control_move">Move</string>
     <string name="work_control_selected_volume_format">%1$s · %2$s</string>
     <string name="work_quick_download">Download</string>
     <string name="work_quick_downloading">Downloading</string>
@@ -527,7 +526,6 @@
     <string name="management_edit_volume">Edit volume information</string>
     <string name="management_media_kind">Change media type</string>
     <string name="management_split">Split into a new book</string>
-    <string name="management_transfer">Move to another book</string>
     <string name="management_delete_volume">Delete volume</string>
     <string name="management_title">Title</string>
     <string name="management_author">Author</string>
@@ -571,5 +569,4 @@
     <string name="management_kindle_ready">Kindle delivery is ready</string>
     <string name="management_kindle_addresses">Recipient: %1$s\nSender: %2$s</string>
     <string name="management_add_to_kindle_queue">Add to send queue</string>
-    <string name="management_move_to_selected_work">Move to selected book</string>
 </resources>

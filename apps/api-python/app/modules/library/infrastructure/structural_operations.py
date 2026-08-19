@@ -16,7 +16,6 @@ from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
 from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.infrastructure.implicit_version import (
     IMPLICIT_VERSION_SOURCE_KEY,
-    get_or_create_implicit_version,
 )
 
 
@@ -70,16 +69,15 @@ def _prepare_volume_order_statements(
     return tuple(statements)
 
 
-def prepare_volume_move(
+def prepare_split_volume_move(
     db: Session,
     *,
     source_work_id: str,
     volume_id: str,
     target_work_id: str,
     now: datetime,
-    target_work_prepared: bool = False,
 ) -> PreparedVolumeMove:
-    """Project and prepare one resource move before acquiring a write lock."""
+    """Prepare moving one volume onto a newly created split work's implicit version."""
 
     source = db.execute(
         select(LibraryVolume, LibraryVersion)
@@ -94,59 +92,26 @@ def prepare_volume_move(
     ).one_or_none()
     if source is None:
         raise ValueError("卷册不存在或不属于该作品")
-    if not target_work_prepared:
-        if (
-            db.scalar(select(LibraryWork.id).where(LibraryWork.id == target_work_id))
-            is None
-        ):
-            raise ValueError("目标作品不存在")
-        source_library_id = db.scalar(
-            select(LibraryWork.library_id).where(LibraryWork.id == source_work_id)
-        )
-        target_library_id = db.scalar(
-            select(LibraryWork.library_id).where(LibraryWork.id == target_work_id)
-        )
-        if (
-            source_library_id is None
-            or target_library_id is None
-            or source_library_id != target_library_id
-        ):
-            raise ValueError("CROSS_LIBRARY_OPERATION")
 
     volume, source_version = source
     source_version_id = source_version.id
-    write_statements: list[Executable] = []
-    if target_work_prepared:
-        target_version_id = cuid()
-        created = True
-        write_statements.append(
-            insert(LibraryVersion).values(
-                id=target_version_id,
-                work_id=target_work_id,
-                source_key=IMPLICIT_VERSION_SOURCE_KEY,
-                source_name=None,
-                created_at=now,
-                updated_at=now,
-            )
+    target_version_id = cuid()
+    write_statements: list[Executable] = [
+        insert(LibraryVersion).values(
+            id=target_version_id,
+            work_id=target_work_id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+            source_name=None,
+            created_at=now,
+            updated_at=now,
         )
-        target_rows: list[tuple[str, int, datetime]] = []
-    else:
-        existing_implicit_id = db.scalar(
-            select(LibraryVersion.id).where(
-                LibraryVersion.work_id == target_work_id,
-                LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
-            )
-        )
-        target_version = get_or_create_implicit_version(db, target_work_id, now=now)
-        target_version_id = target_version.id
-        created = existing_implicit_id is None
-        target_rows = _ordered_volume_rows(db, target_version_id)
+    ]
     source_rows = [
         row
         for row in _ordered_volume_rows(db, source_version_id)
         if row[0] != volume_id
     ]
-    target_rows.append((volume.id, volume.sort_order, volume.created_at))
+    target_rows = [(volume.id, volume.sort_order, volume.created_at)]
     source_version_ids = tuple(
         db.scalars(
             select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
@@ -178,7 +143,7 @@ def prepare_volume_move(
             source_version_id=source_version_id,
             target_version_id=target_version_id,
             target_work_id=target_work_id,
-            transfer_mode=("CREATED_VERSION" if created else "APPENDED_VOLUME"),
+            transfer_mode="CREATED_VERSION",
         ),
     )
 
@@ -186,27 +151,6 @@ def prepare_volume_move(
 def execute_prepared_volume_move(db: Session, prepared: PreparedVolumeMove) -> None:
     for statement in prepared.statements:
         db.execute(statement)
-
-
-def move_volume_to_work(
-    db: Session,
-    *,
-    source_work_id: str,
-    volume_id: str,
-    target_work_id: str,
-    now: datetime,
-) -> MoveVolumeResult:
-    """Move one resource without using a volume number as identity."""
-
-    prepared = prepare_volume_move(
-        db,
-        source_work_id=source_work_id,
-        volume_id=volume_id,
-        target_work_id=target_work_id,
-        now=now,
-    )
-    execute_prepared_volume_move(db, prepared)
-    return prepared.result
 
 
 def reorder_volume(

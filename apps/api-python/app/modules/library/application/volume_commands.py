@@ -51,12 +51,6 @@ class OperationSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class VolumeMoveOutcome:
-    move: MoveVolumeResult
-    operation: OperationSummary
-
-
-@dataclass(frozen=True, slots=True)
 class VolumeSplitOutcome:
     target_work_id: str
     move: MoveVolumeResult
@@ -78,15 +72,11 @@ class VolumeReclassifyOutcome:
     operation: OperationSummary
 
 
-BatchVolumeAction = Literal["SET_MEDIA_KIND", "SPLIT", "TRANSFER", "DELETE"]
-
-
 @dataclass(frozen=True, slots=True)
 class BatchVolumeCommand:
-    action: BatchVolumeAction
+    action: str
     volume_ids: tuple[str, ...]
     target_media_kind: str | None = None
-    target_work_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,16 +108,6 @@ class VolumeStructurePort(Protocol):
     def update_volume(
         self, *, volume_id: str, changes: dict[str, object], now: datetime
     ) -> None: ...
-
-    def move_volume(
-        self,
-        *,
-        actor_id: str,
-        source_work_id: str,
-        volume_id: str,
-        target_work_id: str,
-        now: datetime,
-    ) -> VolumeMoveOutcome: ...
 
     def reorder_volume(
         self,
@@ -201,10 +181,6 @@ class InvalidVolumeChangeError(Exception):
     pass
 
 
-class CrossLibraryStructuralError(InvalidVolumeChangeError):
-    """A structural operation targeted works that belong to different libraries."""
-
-
 def batch_volume_resources(
     port: VolumeStructurePort,
     unit_of_work: UnitOfWork,
@@ -234,24 +210,16 @@ def batch_volume_resources(
     contexts.sort(key=lambda value: (value.version_id, value.sort_order, value.id))
 
     target_media_kind = (command.target_media_kind or "").strip().upper()
-    target_work_id = (command.target_work_id or "").strip()
+    if command.action not in {"SET_MEDIA_KIND", "SPLIT", "DELETE"}:
+        raise InvalidVolumeChangeError("INVALID_BATCH_OPERATION")
     if command.action == "SET_MEDIA_KIND" and target_media_kind not in {
         "EBOOK",
         "COMIC",
         "AUDIOBOOK",
     }:
         raise InvalidVolumeChangeError("INVALID_MEDIA_KIND")
-    if command.action == "TRANSFER":
-        if not target_work_id or target_work_id == work_id:
-            raise InvalidVolumeChangeError("INVALID_TARGET_WORK")
-        _require_work_access(port, actor=actor, work_id=target_work_id)
 
     try:
-        if command.action == "TRANSFER":
-            source_library_id = port.work_library_id(work_id=work_id)
-            target_library_id = port.work_library_id(work_id=target_work_id)
-            if not source_library_id or source_library_id != target_library_id:
-                raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION")
         outcome = port.apply_batch(
             actor_id=actor.user_id,
             source_work_id=work_id,
@@ -260,13 +228,8 @@ def batch_volume_resources(
             now=now,
         )
         unit_of_work.commit()
-    except CrossLibraryStructuralError:
-        unit_of_work.rollback()
-        raise
     except ValueError as exc:
         unit_of_work.rollback()
-        if str(exc) == "CROSS_LIBRARY_OPERATION":
-            raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION") from exc
         raise VolumeNotFoundError(str(exc)) from exc
     except Exception:
         unit_of_work.rollback()
@@ -356,52 +319,6 @@ def update_volume_resource(
     try:
         port.update_volume(volume_id=volume_id, changes=changes, now=now)
         unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def move_volume_resource(
-    port: VolumeStructurePort,
-    unit_of_work: UnitOfWork,
-    *,
-    actor: LibraryActor,
-    source_work_id: str,
-    volume_id: str,
-    target_work_id: str,
-    now: datetime,
-) -> VolumeMoveOutcome:
-    _require_work_access(port, actor=actor, work_id=source_work_id)
-    _require_manager(actor)
-    _require_volume(
-        port,
-        actor=actor,
-        work_id=source_work_id,
-        volume_id=volume_id,
-    )
-    _require_work_access(port, actor=actor, work_id=target_work_id)
-    try:
-        source_library_id = port.work_library_id(work_id=source_work_id)
-        target_library_id = port.work_library_id(work_id=target_work_id)
-        if not source_library_id or source_library_id != target_library_id:
-            raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION")
-        result = port.move_volume(
-            actor_id=actor.user_id,
-            source_work_id=source_work_id,
-            volume_id=volume_id,
-            target_work_id=target_work_id,
-            now=now,
-        )
-        unit_of_work.commit()
-        return result
-    except CrossLibraryStructuralError:
-        unit_of_work.rollback()
-        raise
-    except ValueError as exc:
-        unit_of_work.rollback()
-        if str(exc) == "CROSS_LIBRARY_OPERATION":
-            raise CrossLibraryStructuralError("CROSS_LIBRARY_OPERATION") from exc
-        raise VolumeNotFoundError(str(exc)) from exc
     except Exception:
         unit_of_work.rollback()
         raise

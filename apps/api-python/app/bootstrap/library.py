@@ -9,7 +9,6 @@ from app.bootstrap.system import write_prepared_system_events
 from app.core.config import Settings
 from app.models.auth import User
 from app.modules.library.application.bookshelf import ListBookshelfItems
-from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.application.filter_options import (
     GetLibraryFilterSchema,
     SearchLibraryFilterOptions,
@@ -65,9 +64,6 @@ from app.modules.library.infrastructure.request_mutations import (
     load_metadata_apply_job_ids as _load_metadata_apply_job_ids,
 )
 from app.modules.library.infrastructure.structural_operations import (
-    move_volume_to_work as _move_volume_to_work,
-)
-from app.modules.library.infrastructure.structural_operations import (
     reorder_volume as _reorder_volume,
 )
 from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeStructure
@@ -96,7 +92,6 @@ __all__ = [
     "list_works",
     "load_metadata_apply_job_ids",
     "load_work_facet_projections",
-    "move_volume_to_work",
     "prepare_work_facet_write",
     "reorder_volume",
     "smart_shelf_work_ids",
@@ -181,23 +176,6 @@ def list_works(
     query: WorkListQuery,
 ) -> WorkListResult:
     return _list_works(db, user, query)
-
-
-def move_volume_to_work(
-    db: Session,
-    *,
-    source_work_id: str,
-    volume_id: str,
-    target_work_id: str,
-    now: datetime,
-) -> MoveVolumeResult:
-    return _move_volume_to_work(
-        db,
-        source_work_id=source_work_id,
-        volume_id=volume_id,
-        target_work_id=target_work_id,
-        now=now,
-    )
 
 
 def reorder_volume(

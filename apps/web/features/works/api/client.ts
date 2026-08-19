@@ -142,12 +142,6 @@ export type VersionVolumePage = Readonly<{
   totalPages: number;
 }>;
 
-export type WorkTransferTarget = Readonly<{
-  id: string;
-  title: string;
-  author: string;
-}>;
-
 export function mapWorkView(value: unknown): WorkView {
   const root = record(value);
   const id = stringValue(root.id).trim();
@@ -234,32 +228,6 @@ export async function fetchAllVersionVolumes(
   return volumes;
 }
 
-export async function searchWorkTransferTargets(
-  search: string,
-  excludedWorkId: string,
-  signal?: AbortSignal
-): Promise<WorkTransferTarget[]> {
-  const query = new URLSearchParams({
-    page: '1',
-    pageSize: '20',
-    view: 'bookshelf',
-    visibility: 'active',
-    search: search.trim()
-  });
-  const data = record(await apiJson(`/api/works?${query}`, { signal }));
-  if (!Array.isArray(data.books)) throw new Error('目标图书搜索响应无效');
-  return data.books.flatMap((value) => {
-    const item = record(value);
-    const id = stringValue(item.id).trim();
-    if (!id || id === excludedWorkId) return [];
-    return [{
-      id,
-      title: stringValue(item.title, id),
-      author: stringValue(item.author)
-    }];
-  });
-}
-
 function mapChapterUnit(value: unknown): ChapterDetailUnit | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
@@ -312,7 +280,7 @@ export async function updateVolume(workId: string, volumeId: string, body: Recor
   });
 }
 
-export async function runVolumeAction(workId: string, volumeId: string, action: 'convert' | 'split' | 'move' | 'move-to', body?: Record<string, unknown>): Promise<void> {
+export async function runVolumeAction(workId: string, volumeId: string, action: 'convert' | 'split' | 'move', body?: Record<string, unknown>): Promise<void> {
   await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}/${action}`, {
     method: 'POST',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -345,7 +313,6 @@ export async function deleteVolume(workId: string, volumeId: string): Promise<vo
 export type VolumeBatchRequest =
   | Readonly<{ action: 'SET_MEDIA_KIND'; volumeIds: string[]; targetMediaKind: MediaKind }>
   | Readonly<{ action: 'SPLIT'; volumeIds: string[] }>
-  | Readonly<{ action: 'TRANSFER'; volumeIds: string[]; targetWorkId: string }>
   | Readonly<{ action: 'DELETE'; volumeIds: string[] }>;
 
 export type VolumeBatchResult = Readonly<{

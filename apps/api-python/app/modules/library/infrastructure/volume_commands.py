@@ -28,7 +28,6 @@ from app.modules.library.application.volume_commands import (
     NewWorkInput,
     VolumeContext,
     VolumeDeleteOutcome,
-    VolumeMoveOutcome,
     VolumeReclassifyOutcome,
     VolumeSplitOutcome,
 )
@@ -44,7 +43,7 @@ from app.modules.library.infrastructure.deletion import (
 )
 from app.modules.library.infrastructure.structural_operations import (
     execute_prepared_volume_move,
-    prepare_volume_move,
+    prepare_split_volume_move,
 )
 from app.modules.library.infrastructure.structural_operations import (
     reorder_volume as reorder_volume_within_version,
@@ -229,65 +228,6 @@ class SqlAlchemyVolumeStructure:
             "volume": entity_as_legacy_dict(volume),
         }
 
-    def move_volume(
-        self,
-        *,
-        actor_id: str,
-        source_work_id: str,
-        volume_id: str,
-        target_work_id: str,
-        now: datetime,
-    ) -> VolumeMoveOutcome:
-        if source_work_id == target_work_id:
-            raise ValueError("Source and target work must differ")
-        inverse = self._move_inverse(
-            source_work_id=source_work_id,
-            volume_id=volume_id,
-        )
-        volume_row = inverse.get("volume")
-        volume_title = (
-            str(volume_row.get("title") or volume_id)
-            if isinstance(volume_row, dict)
-            else volume_id
-        )
-        prepared_move = prepare_volume_move(
-            self._db,
-            source_work_id=source_work_id,
-            volume_id=volume_id,
-            target_work_id=target_work_id,
-            now=now,
-        )
-        inverse.update(
-            {
-                "targetWorkId": target_work_id,
-                "targetVersionId": prepared_move.result.target_version_id,
-                "targetVersionCreated": (
-                    prepared_move.result.transfer_mode == "CREATED_VERSION"
-                ),
-            }
-        )
-        operation = operation_store.prepare_operation_write(
-            user_id=actor_id,
-            action="MOVE_VOLUME",
-            target_type="volume",
-            target_id=volume_id,
-            summary=f"Moved volume {volume_title}",
-            payload={
-                "sourceWorkId": source_work_id,
-                "targetWorkId": target_work_id,
-                "volumeId": volume_id,
-            },
-            inverse=inverse,
-            now=now,
-        )
-        outcome = VolumeMoveOutcome(
-            move=prepared_move.result,
-            operation=operation_store.operation_summary(operation.record),
-        )
-        execute_prepared_volume_move(self._db, prepared_move)
-        operation_store.write_prepared_operation(self._db, operation)
-        return outcome
-
     def reorder_volume(
         self,
         *,
@@ -426,13 +366,12 @@ class SqlAlchemyVolumeStructure:
             new_work=new_work,
             now=now,
         )
-        prepared_move = prepare_volume_move(
+        prepared_move = prepare_split_volume_move(
             self._db,
             source_work_id=source_work_id,
             volume_id=volume_id,
             target_work_id=target_work_id,
             now=now,
-            target_work_prepared=True,
         )
         inverse.update(
             {

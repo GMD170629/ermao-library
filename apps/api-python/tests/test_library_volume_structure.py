@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.core.config import Settings
-from app.models.auth import ReaderBookmark, User, UserLibraryAccess
+from app.models.auth import ReaderBookmark, User
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     Library,
@@ -391,11 +391,11 @@ def test_volume_structure_openapi_has_explicit_volume_only_contract(
         {
             path: schema["paths"][path],
             f"{path}/move": schema["paths"][f"{path}/move"],
-            f"{path}/move-to": schema["paths"][f"{path}/move-to"],
             f"{path}/split": schema["paths"][f"{path}/split"],
             f"{path}/reclassify": schema["paths"][f"{path}/reclassify"],
         }
     )
+    assert f"{path}/move-to" not in schema["paths"]
     assert "editionId" not in volume_contract
     assert "SplitEdition" not in volume_contract
     payloads = schema["components"]["schemas"]
@@ -412,6 +412,13 @@ def test_volume_structure_openapi_has_explicit_volume_only_contract(
     assert "targetVersionId" not in reclassify_payload
     assert "SAME_MEDIA_KIND" in reclassify_request
     assert "MEDIA_VERSION" not in reclassify_request
+    assert "MoveVolumeRequest" not in payloads
+    batch_request = str(payloads["BatchVolumeRequest"])
+    assert "TRANSFER" not in batch_request
+    assert "targetWorkId" not in batch_request
+    openapi_paths = str(schema["paths"])
+    assert "move-to" not in openapi_paths
+    assert "transfer volume" not in openapi_paths.lower()
 
 
 def _batch_volume_aggregate(
@@ -557,7 +564,7 @@ def test_batch_prevalidation_rejects_cross_work_selection_without_mutation(
     assert db_session.get(LibraryVolume, foreign_volumes[0].id) is not None
 
 
-def test_batch_transfer_split_and_delete_preserve_their_public_results(
+def test_batch_transfer_is_rejected_and_split_and_delete_preserve_their_public_results(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -572,6 +579,7 @@ def test_batch_transfer_split_and_delete_preserve_their_public_results(
         work_id="batch-transfer-target",
         volume_ids=("batch-transfer-existing",),
     )
+    source_version_ids = [volume.version_id for volume in transfer_volumes]
 
     transfer = client.post(
         f"/api/works/{transfer_source.id}/volumes/batch",
@@ -582,17 +590,16 @@ def test_batch_transfer_split_and_delete_preserve_their_public_results(
         },
     )
 
-    assert transfer.status_code == 200
-    assert transfer.json()["data"]["deletedWork"] is True
-    assert transfer.json()["data"]["targetWorkIds"] == [transfer_target.id]
+    assert transfer.status_code == 400
+    assert transfer.json()["error"]["code"] == "INVALID_BATCH_OPERATION"
     db_session.expire_all()
-    transferred_work_ids = db_session.scalars(
-        select(LibraryVersion.work_id)
-        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
-        .where(LibraryVolume.id.in_([volume.id for volume in transfer_volumes]))
+    persisted_versions = db_session.scalars(
+        select(LibraryVolume.version_id).where(
+            LibraryVolume.id.in_([volume.id for volume in transfer_volumes])
+        )
     ).all()
-    assert transferred_work_ids == [transfer_target.id, transfer_target.id]
-    assert db_session.get(LibraryWork, transfer_source.id) is None
+    assert list(persisted_versions) == source_version_ids
+    assert db_session.get(LibraryWork, transfer_source.id) is not None
 
     split_source, split_volumes = _batch_volume_aggregate(
         db_session,
@@ -647,14 +654,13 @@ def test_batch_transfer_split_and_delete_preserve_their_public_results(
             select(func.count(LibraryOperation.id)).where(
                 LibraryOperation.target_id.in_(
                     [
-                        *[volume.id for volume in transfer_volumes],
                         *[volume.id for volume in split_volumes],
                         *[volume.id for volume in delete_volumes],
                     ]
                 )
             )
         )
-        == 6
+        == 4
     )
 
 
@@ -887,73 +893,11 @@ def test_continue_reading_uses_latest_unfinished_progress(
     assert item["resumeVolumeId"] != recent.id
 
 
-def test_move_transfer_and_split_keep_volume_progress_and_bookmarks(
+def test_split_keeps_volume_progress_and_bookmarks(
     client: TestClient,
     db_session: Session,
 ) -> None:
     user = _login_admin(client, db_session)
-
-    def single_volume(prefix: str) -> tuple[LibraryWork, LibraryVolume]:
-        work, volumes = _batch_volume_aggregate(
-            db_session,
-            work_id=f"{prefix}-work",
-            volume_ids=(f"{prefix}-volume",),
-        )
-        return work, volumes[0]
-
-    source, moved_volume = single_volume("keep-move-source")
-    target, _existing = single_volume("keep-move-target")
-    progress, bookmark = _attach_progress_and_bookmark(
-        db_session,
-        user_id=user.id,
-        volume_id=moved_volume.id,
-        suffix="keep-move",
-    )
-    move = client.post(
-        f"/api/works/{source.id}/volumes/{moved_volume.id}/move-to",
-        json={"targetWorkId": target.id},
-    )
-    assert move.status_code == 200
-    db_session.expire_all()
-    assert db_session.get(LibraryReadingProgress, progress.id) is not None
-    assert db_session.get(ReaderBookmark, bookmark.id) is not None
-    assert db_session.get(LibraryReadingProgress, progress.id).volume_id == (
-        moved_volume.id
-    )
-    assert db_session.get(ReaderBookmark, bookmark.id).volume_id == moved_volume.id
-
-    transfer_source, transfer_volumes = _batch_volume_aggregate(
-        db_session,
-        work_id="keep-transfer-source",
-        volume_ids=("keep-transfer-one", "keep-transfer-two"),
-    )
-    transfer_target, _ = _batch_volume_aggregate(
-        db_session,
-        work_id="keep-transfer-target",
-        volume_ids=("keep-transfer-existing",),
-    )
-    transfer_progress, transfer_bookmark = _attach_progress_and_bookmark(
-        db_session,
-        user_id=user.id,
-        volume_id=transfer_volumes[0].id,
-        suffix="keep-transfer",
-    )
-    transfer = client.post(
-        f"/api/works/{transfer_source.id}/volumes/batch",
-        json={
-            "action": "TRANSFER",
-            "volumeIds": [volume.id for volume in transfer_volumes],
-            "targetWorkId": transfer_target.id,
-        },
-    )
-    assert transfer.status_code == 200
-    db_session.expire_all()
-    assert db_session.get(LibraryReadingProgress, transfer_progress.id) is not None
-    assert db_session.get(ReaderBookmark, transfer_bookmark.id) is not None
-    assert db_session.get(LibraryReadingProgress, transfer_progress.id).volume_id == (
-        transfer_volumes[0].id
-    )
-
     split_source, split_volumes = _batch_volume_aggregate(
         db_session,
         work_id="keep-split-source",
@@ -977,6 +921,9 @@ def test_move_transfer_and_split_keep_volume_progress_and_bookmarks(
     assert db_session.get(LibraryReadingProgress, split_progress.id) is not None
     assert db_session.get(ReaderBookmark, split_bookmark.id) is not None
     assert db_session.get(LibraryReadingProgress, split_progress.id).volume_id == (
+        split_volumes[0].id
+    )
+    assert db_session.get(ReaderBookmark, split_bookmark.id).volume_id == (
         split_volumes[0].id
     )
 
@@ -1055,88 +1002,26 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
     assert db_session.get(LibraryMediaVersion, media_id) is None
 
 
-def test_move_volume_hides_an_unauthorized_target_work(
+def test_move_to_route_does_not_exist(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    user = User(
-        id="scoped-volume-manager",
-        email="scoped-volume-manager@example.com",
-        name="Scoped volume manager",
-        password_hash=hash_password("starshipnas"),
-        role="member",
-        can_manage_system=True,
+    _login_admin(client, db_session)
+    source, volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="move-to-absent-source",
+        volume_ids=("move-to-absent-volume",),
     )
-    source_folder = Library(
-        organization_mode="FLAT",
-        id="source-folder",
-        name="Source",
-        root_path="/source",
-    )
-    target_folder = Library(
-        organization_mode="FLAT",
-        id="target-folder",
-        name="Target",
-        root_path="/target",
-    )
-    access = UserLibraryAccess(
-        user_id=user.id,
-        library_id=source_folder.id,
-    )
-
-    def aggregate(prefix: str, folder_id: str) -> tuple[LibraryWork, LibraryVolume]:
-        work = LibraryWork(
-            id=f"{prefix}-work",
-            library_id=folder_id,
-            origin="WATCH",
-            title=prefix,
-            normalized_title=prefix,
-            author="Author",
-            normalized_author="author",
-            tags="[]",
-        )
-        version, media = _parent(
-            id=f"{prefix}-media",
-            work_id=work.id,
-            kind="EBOOK",
-        )
-        volume = LibraryVolume(
-            id=f"{prefix}-volume",
-            version_id=version.id,
-            title=prefix,
-            sort_order=0,
-            format="EPUB",
-            resource_key=f"{prefix}:volume",
-            import_status="COMPLETED",
-        )
-        db_session.add(work)
-        db_session.flush()
-        db_session.add_all([version, media, volume])
-        return work, volume
-
-    db_session.add_all([user, source_folder, target_folder])
-    db_session.flush()
-    db_session.add(access)
-    source_work, source_volume = aggregate("source", source_folder.id)
-    target_work, _target_volume = aggregate("target", target_folder.id)
-    db_session.commit()
+    version_id = volumes[0].version_id
     response = client.post(
-        "/api/auth/login",
-        json={"email": user.email, "password": "starshipnas"},
+        f"/api/works/{source.id}/volumes/{volumes[0].id}/move-to",
+        json={"targetWorkId": "any-target"},
     )
-    assert response.status_code == 200
-
-    move = client.post(
-        f"/api/works/{source_work.id}/volumes/{source_volume.id}/move-to",
-        json={"targetWorkId": target_work.id},
-    )
-
-    assert move.status_code == 404
-    assert move.json()["error"]["code"] == "WORK_NOT_FOUND"
+    assert response.status_code == 404
     db_session.expire_all()
-    persisted = db_session.get(LibraryVolume, source_volume.id)
+    persisted = db_session.get(LibraryVolume, volumes[0].id)
     assert persisted is not None
-    assert persisted.version_id == "source-media"
+    assert persisted.version_id == version_id
 
 
 def test_delete_volume_rolls_back_when_persistence_fails() -> None:
@@ -1286,81 +1171,44 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
     assert unit_of_work.committed is False
 
 
-def test_move_and_split_operations_restore_the_original_volume_parent(
+def test_split_operations_restore_the_original_volume_parent(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login_admin(client, db_session)
     _ensure_test_library(db_session)
 
-    def aggregate(prefix: str) -> tuple[LibraryWork, LibraryVolume]:
-        work = LibraryWork(
-            library_id="test-library",
-            id=f"undo-{prefix}-work",
-            origin="MANUAL",
-            title=prefix,
-            normalized_title=prefix,
-            author="Author",
-            normalized_author="author",
-            tags="[]",
-        )
-        version, media = _parent(
-            id=f"undo-{prefix}-media",
-            work_id=work.id,
-            kind="EBOOK",
-        )
-        volume = LibraryVolume(
-            id=f"undo-{prefix}-volume",
-            version_id=version.id,
-            title=prefix,
-            sort_order=0,
-            format="EPUB",
-            resource_key=f"undo:{prefix}",
-            import_status="COMPLETED",
-        )
-        db_session.add(work)
-        db_session.flush()
-        db_session.add_all([version, media, volume])
-        return work, volume
-
-    source_work, source_volume = aggregate("source")
-    target_work, _target_volume = aggregate("target")
+    work = LibraryWork(
+        library_id="test-library",
+        id="undo-source-work",
+        origin="MANUAL",
+        title="source",
+        normalized_title="source",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    version, media = _parent(
+        id="undo-source-media",
+        work_id=work.id,
+        kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id="undo-source-volume",
+        version_id=version.id,
+        title="source",
+        sort_order=0,
+        format="EPUB",
+        resource_key="undo:source",
+        import_status="COMPLETED",
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add_all([version, media, volume])
     db_session.commit()
 
-    moved = client.post(
-        f"/api/works/{source_work.id}/volumes/{source_volume.id}/move-to",
-        json={"targetWorkId": target_work.id},
-    )
-    assert moved.status_code == 200
-    moved_data = moved.json()["data"]
-    assert moved_data["sourceVersionId"] == "undo-source-media"
-    assert moved_data["targetVersionId"] == "undo-target-media"
-    assert moved_data["transferMode"] == "APPENDED_VOLUME"
-    move_inverse = json.loads(
-        db_session.get(LibraryOperation, moved_data["operation"]["id"]).inverse_json
-    )
-    assert "sourceVersion" in move_inverse
-    assert "targetVersionId" in move_inverse
-    assert "targetVersionCreated" in move_inverse
-    assert "sourceMediaVersion" not in move_inverse
-    assert "targetMediaVersionId" not in move_inverse
-    db_session.expire_all()
-    assert db_session.get(LibraryWork, source_work.id) is None
-    assert db_session.get(LibraryVolume, source_volume.id).version_id == (
-        "undo-target-media"
-    )
-    undo_move = client.post(
-        f"/api/library/operations/{moved_data['operation']['id']}/undo"
-    )
-    assert undo_move.status_code == 200
-    db_session.expire_all()
-    assert db_session.get(LibraryWork, source_work.id) is not None
-    assert db_session.get(LibraryVolume, source_volume.id).version_id == (
-        "undo-source-media"
-    )
-
     split = client.post(
-        f"/api/works/{source_work.id}/volumes/{source_volume.id}/split",
+        f"/api/works/{work.id}/volumes/{volume.id}/split",
         json={"title": "Split work"},
     )
     assert split.status_code == 200
@@ -1378,18 +1226,16 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
     assert split_inverse["targetVersionCreated"] is True
     assert "sourceMediaVersion" not in split_inverse
     db_session.expire_all()
-    assert db_session.get(LibraryWork, source_work.id) is None
+    assert db_session.get(LibraryWork, work.id) is None
     assert db_session.get(LibraryWork, split_work_id) is not None
     undo_split = client.post(
         f"/api/library/operations/{split_data['operation']['id']}/undo"
     )
     assert undo_split.status_code == 200
     db_session.expire_all()
-    assert db_session.get(LibraryWork, source_work.id) is not None
+    assert db_session.get(LibraryWork, work.id) is not None
     assert db_session.get(LibraryWork, split_work_id) is None
-    assert db_session.get(LibraryVolume, source_volume.id).version_id == (
-        "undo-source-media"
-    )
+    assert db_session.get(LibraryVolume, volume.id).version_id == "undo-source-media"
 
 
 def test_library_volume_belongs_to_library_version(db_session: Session) -> None:
@@ -1523,7 +1369,7 @@ def test_set_media_kind_does_not_move_volume_version(
     assert persisted.suggested_media_kind == "COMIC"
 
 
-def test_transfer_attaches_volume_to_target_implicit_version(
+def test_batch_transfer_leaves_volume_on_source_version(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -1539,6 +1385,7 @@ def test_transfer_attaches_volume_to_target_implicit_version(
         volume_ids=("transfer-implicit-existing",),
     )
     moved_id = source_volumes[0].id
+    source_version_id = source_volumes[0].version_id
     response = client.post(
         f"/api/works/{source.id}/volumes/batch",
         json={
@@ -1547,18 +1394,19 @@ def test_transfer_attaches_volume_to_target_implicit_version(
             "targetWorkId": target.id,
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_BATCH_OPERATION"
     db_session.expire_all()
+    moved = db_session.get(LibraryVolume, moved_id)
+    assert moved is not None
+    assert moved.version_id == source_version_id
     target_versions = list(
         db_session.scalars(
             select(LibraryVersion).where(LibraryVersion.work_id == target.id)
         ).all()
     )
     assert len(target_versions) == 1
-    assert target_versions[0].source_key == IMPLICIT_VERSION_SOURCE_KEY
-    moved = db_session.get(LibraryVolume, moved_id)
-    assert moved is not None
-    assert moved.version_id == target_versions[0].id
+    assert moved.version_id != target_versions[0].id
 
 
 def test_split_creates_exactly_one_implicit_version_on_new_work(
@@ -1794,34 +1642,27 @@ def test_delete_volume_keeps_version_when_siblings_remain(
     assert db_session.get(LibraryVolume, volumes[1].id) is None
 
 
-def test_move_to_reports_source_and_target_version_ids(
+def test_move_to_is_absent_from_openapi_and_returns_not_found(
     client: TestClient,
     db_session: Session,
 ) -> None:
+    schema = client.get("/openapi.json").json()
+    assert all("move-to" not in path for path in schema["paths"])
     _login_admin(client, db_session)
     source, source_volumes = _batch_volume_aggregate(
         db_session,
         work_id="move-report-source",
         volume_ids=("move-report-volume", "move-report-keep"),
     )
-    target, target_volumes = _batch_volume_aggregate(
-        db_session,
-        work_id="move-report-target",
-        volume_ids=("move-report-existing",),
-    )
-    source_version_id = source_volumes[0].version_id
-    target_version_id = target_volumes[0].version_id
     response = client.post(
         f"/api/works/{source.id}/volumes/{source_volumes[0].id}/move-to",
-        json={"targetWorkId": target.id},
+        json={"targetWorkId": "move-report-target"},
     )
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    assert payload["sourceVersionId"] == source_version_id
-    assert payload["targetVersionId"] == target_version_id
-    assert payload["targetWorkId"] == target.id
-    assert payload["transferMode"] == "APPENDED_VOLUME"
-    assert "targetMediaVersionId" not in payload
+    assert response.status_code == 404
+    db_session.expire_all()
+    persisted = db_session.get(LibraryVolume, source_volumes[0].id)
+    assert persisted is not None
+    assert persisted.version_id == source_volumes[0].version_id
 
 
 def test_structural_operation_modules_do_not_use_media_version_contract_names() -> None:

@@ -26,7 +26,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementErro
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -158,19 +157,6 @@ class KtorWorkManagementRepository(
         encoder.encodeToString(SplitRequest(title.trim(), author.normalized())),
     )
 
-    override suspend fun transferVolume(
-        context: WorkManagementContext,
-        workId: String,
-        volumeId: String,
-        targetWorkId: String,
-    ): WorkManagementResult<WorkMutationOutcome> = mutationCall(
-        context,
-        ApiMethod.Post,
-        "${volumePath(workId, volumeId)}/move-to",
-        workId,
-        encoder.encodeToString(TransferRequest(targetWorkId)),
-    )
-
     override suspend fun deleteVolume(
         context: WorkManagementContext,
         workId: String,
@@ -181,33 +167,6 @@ class KtorWorkManagementRepository(
         volumePath(workId, volumeId),
         workId,
     )
-
-    override suspend fun searchTransferTargets(
-        context: WorkManagementContext,
-        workId: String,
-        query: String,
-    ): WorkManagementResult<List<WorkTransferTarget>> = call(
-        context,
-        ApiMethod.Get,
-        "/api/works",
-        queryParameters = mapOf(
-            "page" to listOf("1"),
-            "pageSize" to listOf("20"),
-            "view" to listOf("bookshelf"),
-            "visibility" to listOf("active"),
-            "search" to listOf(query.trim()),
-        ),
-    ) { data ->
-        val books = data.array("books") ?: return@call protocolFailure("TRANSFER_TARGETS_MISSING")
-        WorkManagementResult.Content(
-            books.mapNotNull { element ->
-                val book = element as? JsonObject ?: return@mapNotNull null
-                val id = book.string("id") ?: return@mapNotNull null
-                if (id == workId) return@mapNotNull null
-                WorkTransferTarget(id, book.string("title") ?: id, book.string("author").orEmpty())
-            },
-        )
-    }
 
     override suspend fun loadMetadataProviders(
         context: WorkManagementContext,
@@ -415,9 +374,6 @@ private data class ReclassifyRequest(val targetMediaKind: String, val applyTo: S
 
 @Serializable
 private data class SplitRequest(val title: String, val author: String?)
-
-@Serializable
-private data class TransferRequest(val targetWorkId: String)
 
 @Serializable
 private data class MetadataSearchRequest(val source: String, val query: String)

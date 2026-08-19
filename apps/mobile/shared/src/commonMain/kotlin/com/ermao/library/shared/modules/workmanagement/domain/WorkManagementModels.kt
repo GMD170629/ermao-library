@@ -77,12 +77,6 @@ enum class ManagedReadingStatus(val wireValue: String) {
     Finished("FINISHED"),
 }
 
-data class WorkTransferTarget(
-    val id: String,
-    val title: String,
-    val author: String,
-)
-
 data class WorkMutationOutcome(
     val workId: String,
     val deletedWork: Boolean = false,

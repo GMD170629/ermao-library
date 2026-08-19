@@ -182,7 +182,6 @@
     <string name="work_control_delete">删除</string>
     <string name="work_control_change_media_type">修改媒体类型</string>
     <string name="work_control_split">拆分</string>
-    <string name="work_control_move">移动</string>
     <string name="work_control_selected_volume_format">%1$s · %2$s</string>
     <string name="work_quick_download">下载</string>
     <string name="work_quick_downloading">下载中</string>
@@ -519,7 +518,6 @@
     <string name="management_edit_volume">编辑卷册信息</string>
     <string name="management_media_kind">修改媒体类型</string>
     <string name="management_split">拆分为新图书</string>
-    <string name="management_transfer">移动到其他图书</string>
     <string name="management_delete_volume">删除卷册</string>
     <string name="management_title">标题</string>
     <string name="management_author">作者</string>
@@ -563,5 +561,4 @@
     <string name="management_kindle_ready">Kindle 发送已就绪</string>
     <string name="management_kindle_addresses">收件人：%1$s\n发件人：%2$s</string>
     <string name="management_add_to_kindle_queue">加入发送队列</string>
-    <string name="management_move_to_selected_work">移动到所选图书</string>
 </resources>

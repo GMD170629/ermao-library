@@ -270,7 +270,7 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(groups.single?.versions.single?.records.count, 2)
     }
 
-    func testSplitAndTransferRewriteUseServerTargetVersion() {
+    func testSplitRewriteUsesServerTargetVersion() {
         let rewrite = DownloadOwnershipRewrite.forMove(
             .split,
             targetWorkID: "work-target",
@@ -283,16 +283,6 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(rewrite?.targetVersionSourceKey, ManagedDownloadGrouping.implicitSourceKey)
         XCTAssertNil(rewrite?.targetVersionSourceName)
         XCTAssertNil(rewrite?.targetVersionCompleted)
-
-        let transferred = DownloadOwnershipRewrite.forMove(
-            .transfer,
-            targetWorkID: "work-target",
-            targetVersionID: "version-target",
-            targetWorkTitle: "Target Work",
-            targetWorkAuthor: "Author"
-        )
-        XCTAssertEqual(transferred?.targetVersionID, "version-target")
-        XCTAssertEqual(transferred?.targetVersionSourceKey, "__implicit__")
     }
 
     func testReclassifyDoesNotRewriteDownloadVersion() {
@@ -319,10 +309,10 @@ final class DownloadStoreTests: XCTestCase {
         )
         XCTAssertNil(
             DownloadOwnershipRewrite.forMove(
-                .transfer,
+                .split,
                 targetWorkID: nil,
                 targetVersionID: "version-target",
-                targetWorkTitle: "Target Work",
+                targetWorkTitle: "Split Work",
                 targetWorkAuthor: "Author"
             )
         )
@@ -398,10 +388,10 @@ final class DownloadStoreTests: XCTestCase {
 
         let rewrite = try XCTUnwrap(
             DownloadOwnershipRewrite.forMove(
-                .transfer,
+                .split,
                 targetWorkID: "work-target",
                 targetVersionID: "version-target",
-                targetWorkTitle: "Target Work",
+                targetWorkTitle: "Split Work",
                 targetWorkAuthor: "Author"
             )
         )

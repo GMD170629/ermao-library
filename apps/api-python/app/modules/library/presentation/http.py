@@ -98,7 +98,6 @@ from app.modules.library.application.request_mutations import (
 )
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
-    CrossLibraryStructuralError,
     InvalidVolumeChangeError,
     LibraryActor,
     LibraryAuthorizationError,
@@ -108,7 +107,6 @@ from app.modules.library.application.volume_commands import (
     WorkNotFoundError,
     batch_volume_resources,
     delete_volume_resource,
-    move_volume_resource,
     reclassify_volume_resource,
     reorder_volume_resource,
     split_volume_resource,
@@ -119,8 +117,6 @@ from app.modules.library.presentation.filter_mappers import (
     filter_schema_payload,
 )
 from app.modules.library.presentation.schemas import (
-    BatchSetMediaKindRequest,
-    BatchTransferVolumesRequest,
     BatchVolumeMutationResponse,
     BatchVolumeRequest,
     BulkCoverRequest,
@@ -154,7 +150,6 @@ from app.modules.library.presentation.schemas import (
     MetadataApplyResponse,
     MetadataSearchRequest,
     MetadataSearchResponse,
-    MoveVolumeRequest,
     OperationsResponse,
     ReclassifyVolumeRequest,
     ReclassifyVolumeResponse,
@@ -2823,16 +2818,7 @@ def batch_work_volumes(
             command=BatchVolumeCommand(
                 action=payload.action,
                 volume_ids=tuple(payload.volume_ids),
-                target_media_kind=(
-                    payload.target_media_kind
-                    if isinstance(payload, BatchSetMediaKindRequest)
-                    else None
-                ),
-                target_work_id=(
-                    payload.target_work_id
-                    if isinstance(payload, BatchTransferVolumesRequest)
-                    else None
-                ),
+                target_media_kind=payload.target_media_kind,
             ),
             now=_now(),
         )
@@ -2853,12 +2839,6 @@ def batch_work_volumes(
             "需要系统管理权限",
             status_code=403,
             code="SYSTEM_MANAGER_REQUIRED",
-        )
-    except CrossLibraryStructuralError:
-        _raise_library_error(
-            "不能跨书库移动卷册",
-            status_code=400,
-            code="CROSS_LIBRARY_OPERATION",
         )
     except InvalidVolumeChangeError as exc:
         _raise_library_error(
@@ -2996,78 +2976,6 @@ def reorder_work_volume(
             ),
             "workId": work_id,
             "volumeId": volume_id,
-        }
-    )
-
-
-@router.post("/works/{work_id}/volumes/{volume_id}/move-to")
-def move_work_volume(
-    work_id: str,
-    volume_id: str,
-    payload: MoveVolumeRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    WorkStructureMutationResponse,
-    ErrorResponses(
-        LibraryBadRequestError,
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    try:
-        outcome = move_volume_resource(
-            volume_structure_commands(db),
-            db,
-            actor=_library_actor(db, user),
-            source_work_id=work_id,
-            volume_id=volume_id,
-            target_work_id=payload.target_work_id,
-            now=_now(),
-        )
-    except WorkNotFoundError:
-        _raise_library_error(
-            "作品不存在或无权访问",
-            status_code=404,
-            code="WORK_NOT_FOUND",
-        )
-    except VolumeNotFoundError:
-        _raise_library_error(
-            "卷册不存在或不属于该作品",
-            status_code=404,
-            code="VOLUME_NOT_FOUND",
-        )
-    except LibraryAuthorizationError:
-        _raise_library_error(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    except CrossLibraryStructuralError:
-        _raise_library_error(
-            "不能跨书库移动卷册",
-            status_code=400,
-            code="CROSS_LIBRARY_OPERATION",
-        )
-    source_work = _get_work(db, work_id)
-    target_work = _get_work(db, payload.target_work_id)
-    return WorkStructureMutationResponse(
-        data={
-            "book": (_work_view(db, source_work, user.id) if source_work else None),
-            "targetBook": (
-                _work_view(db, target_work, user.id) if target_work else None
-            ),
-            "workId": work_id,
-            "targetWorkId": payload.target_work_id,
-            "volumeId": volume_id,
-            "sourceVersionId": outcome.move.source_version_id,
-            "targetVersionId": outcome.move.target_version_id,
-            "transferMode": outcome.move.transfer_mode,
-            "operation": _operation_payload(outcome.operation),
         }
     )
 

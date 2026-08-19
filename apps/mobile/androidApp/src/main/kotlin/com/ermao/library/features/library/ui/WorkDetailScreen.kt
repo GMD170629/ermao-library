@@ -40,7 +40,6 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Equalizer
@@ -173,7 +172,7 @@ private enum class BookControlAction {
 }
 
 private enum class VolumeControlAction {
-    MarkUnread, Download, Edit, ChangeMediaType, Split, Move, SendToKindle, Delete,
+    MarkUnread, Download, Edit, ChangeMediaType, Split, SendToKindle, Delete,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -408,7 +407,6 @@ fun WorkDetailScreen(
                     VolumeControlAction.Edit -> WorkManagementTask.EditVolume
                     VolumeControlAction.ChangeMediaType -> WorkManagementTask.MediaKind
                     VolumeControlAction.Split -> WorkManagementTask.Split
-                    VolumeControlAction.Move -> WorkManagementTask.Transfer
                     VolumeControlAction.SendToKindle -> WorkManagementTask.Kindle
                     VolumeControlAction.Delete -> WorkManagementTask.DeleteVolume
                     VolumeControlAction.MarkUnread,
@@ -1930,7 +1928,6 @@ private fun WorkDetailControlMenu(
                     add(WarmPageFloatingMenuAction(VolumeControlAction.Edit, stringResource(R.string.work_control_edit), Icons.Outlined.Edit))
                     add(WarmPageFloatingMenuAction(VolumeControlAction.ChangeMediaType, stringResource(R.string.work_control_change_media_type), Icons.Outlined.Layers, enabled = !activeDownload))
                     add(WarmPageFloatingMenuAction(VolumeControlAction.Split, stringResource(R.string.work_control_split), Icons.Outlined.Splitscreen, enabled = !activeDownload))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.Move, stringResource(R.string.work_control_move), Icons.Outlined.MoveToInbox, enabled = !activeDownload))
                     if (kindleEligible) add(WarmPageFloatingMenuAction(VolumeControlAction.SendToKindle, stringResource(R.string.work_control_send_kindle), Icons.AutoMirrored.Outlined.Send))
                     add(WarmPageFloatingMenuAction(VolumeControlAction.Delete, stringResource(R.string.work_control_delete), Icons.Outlined.DeleteOutline, enabled = !activeDownload, destructive = true))
                 }
@@ -1945,7 +1942,6 @@ private fun WorkDetailControlMenu(
                         VolumeControlAction.Edit,
                         VolumeControlAction.ChangeMediaType,
                         VolumeControlAction.Split,
-                        VolumeControlAction.Move,
                         VolumeControlAction.SendToKindle,
                         VolumeControlAction.Delete,
                         -> onVolumeTask(action, volume)

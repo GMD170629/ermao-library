@@ -6,7 +6,6 @@ export type VolumeActionId =
   | 'set-comic'
   | 'set-audiobook'
   | 'split'
-  | 'transfer'
   | 'delete';
 
 export type VolumeActionAvailability = Readonly<{
@@ -36,7 +35,6 @@ export function volumeActionAvailability({
   if (mediaKind !== 'AUDIOBOOK') actions.push({ action: 'set-audiobook', disabled: false });
   actions.push(
     { action: 'split', disabled: false },
-    { action: 'transfer', disabled: false },
     { action: 'delete', disabled: false }
   );
   return actions;

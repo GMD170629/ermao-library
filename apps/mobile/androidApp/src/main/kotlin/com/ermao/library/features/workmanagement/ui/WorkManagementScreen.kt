@@ -31,7 +31,6 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.compose.material.icons.outlined.Source
 import androidx.compose.material.icons.outlined.Splitscreen
 import androidx.compose.material3.HorizontalDivider
@@ -82,7 +81,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
 import com.ermao.library.shared.modules.workmanagement.domain.VolumeMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.ui.components.WarmPagePrimaryAction
@@ -104,7 +102,6 @@ enum class WorkManagementTask {
     EditVolume,
     MediaKind,
     Split,
-    Transfer,
     Kindle,
     DeleteWork,
     DeleteVolume,
@@ -230,9 +227,6 @@ fun WorkManagementTaskSheet(
                         MediaKindForm(it, content, activeDownload, viewModel)
                     }
                     WorkManagementTask.Split -> volume?.let { SplitForm(it, activeDownload, viewModel) }
-                    WorkManagementTask.Transfer -> volume?.let {
-                        TransferForm(it, activeDownload, state, viewModel)
-                    }
                     WorkManagementTask.Kindle -> KindleForm(content, volume, state, viewModel)
                     WorkManagementTask.DeleteWork,
                     WorkManagementTask.DeleteVolume,
@@ -269,7 +263,6 @@ private fun WorkManagementTask.titleResource(): Int = when (this) {
     WorkManagementTask.EditVolume -> R.string.management_edit_volume
     WorkManagementTask.MediaKind -> R.string.management_media_kind
     WorkManagementTask.Split -> R.string.management_split
-    WorkManagementTask.Transfer -> R.string.management_transfer
     WorkManagementTask.Kindle -> R.string.management_kindle
     WorkManagementTask.DeleteWork -> R.string.management_delete_work
     WorkManagementTask.DeleteVolume -> R.string.management_delete_volume
@@ -616,52 +609,6 @@ private fun SplitForm(volume: VolumeContent, blocked: Boolean, viewModel: WorkMa
         enabled = !blocked && title.isNotBlank(),
         onClick = { viewModel.splitVolume(volume.id, title, author.ifBlank { null }) },
         modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun TransferForm(
-    volume: VolumeContent,
-    blocked: Boolean,
-    state: WorkManagementUiState,
-    viewModel: WorkManagementViewModel,
-) {
-    var query by remember { mutableStateOf("") }
-    var selectedTarget by remember { mutableStateOf<WorkTransferTarget?>(null) }
-    Field(query, { query = it }, R.string.management_query)
-    WarmPagePrimaryAction(
-        label = stringResource(R.string.management_search),
-        enabled = !blocked,
-        onClick = { viewModel.searchTransferTargets(query) },
-        modifier = Modifier.fillMaxWidth(),
-    )
-    state.transferTargets.forEach { target ->
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .clickable(enabled = !blocked) { selectedTarget = target }
-                .padding(vertical = WarmPageThemeValues.spacing.half),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(
-                selected = selectedTarget?.id == target.id,
-                enabled = !blocked,
-                onClick = { selectedTarget = target },
-            )
-            Text(
-                text = listOf(target.title, target.author).filter(String::isNotBlank).joinToString(" · "),
-                style = WarmPageThemeValues.typography.body,
-                color = if (blocked) WarmPageThemeValues.colors.textTertiary else WarmPageThemeValues.colors.textPrimary,
-            )
-        }
-        HorizontalDivider(color = WarmPageThemeValues.colors.divider)
-    }
-    WarmPagePrimaryAction(
-        label = stringResource(R.string.management_move_to_selected_work),
-        enabled = !blocked && selectedTarget != null,
-        modifier = Modifier.fillMaxWidth(),
-        onClick = { selectedTarget?.let { viewModel.transferVolume(volume.id, it) } },
     )
 }
 

@@ -99,7 +99,6 @@ struct ManagedDownloadWorkGroup: Identifiable, Equatable, Sendable {
 
 enum DownloadStructuralMove {
     case split
-    case transfer
     case reclassify
 }
 
@@ -112,7 +111,7 @@ struct DownloadOwnershipRewrite: Equatable, Sendable {
     let targetVersionSourceName: String?
     let targetVersionCompleted: Bool?
 
-    /// Split/transfer rewrite catalog ownership onto the server target Work and Version.
+    /// Split rewrite catalog ownership onto the server target Work and Version.
     /// Reclassify does not change Version and therefore never rewrites ownership.
     static func forMove(
         _ move: DownloadStructuralMove,
@@ -124,7 +123,7 @@ struct DownloadOwnershipRewrite: Equatable, Sendable {
         switch move {
         case .reclassify:
             return nil
-        case .split, .transfer:
+        case .split:
             let workID = targetWorkID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let versionID = targetVersionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !workID.isEmpty, !versionID.isEmpty, !targetWorkTitle.isEmpty else { return nil }

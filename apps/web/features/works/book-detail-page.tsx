@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, Download, Edit3, Ellipsis, Headphones, ImageUp, Images, LoaderCircle, MoveRight, RefreshCw, RotateCcw, Scissors, Send, Settings2, Trash2, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, Download, Edit3, Ellipsis, Headphones, ImageUp, Images, LoaderCircle, RefreshCw, RotateCcw, Scissors, Send, Settings2, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Cover } from '../../components/book/cover';
@@ -14,7 +14,7 @@ import { Select } from '../../components/ui/select';
 import type { MediaKind, ReaderType, VersionResource, VolumeResource, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n } from '@/i18n/provider';
-import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl, type WorkTransferTarget } from './api/client';
+import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl } from './api/client';
 import { useVolumeWallSelection } from './application/use-volume-wall-selection';
 import { displayVolumeNumber, formatDuration, mediaKindOfVolume, selectedVolumeForWork, shouldShowVersionHeadings, versionDisplayTitle, workDetailHref, workDetailReturnHref } from './work-detail';
 import { smallVolumeCoverUrl } from './volume-cover-url';
@@ -58,7 +58,6 @@ const VOLUME_ACTION_DETAILS: Record<VolumeActionId, { label: string; description
   'set-comic': { label: '设置为漫画', description: '使用漫画方式管理和阅读', icon: Images },
   'set-audiobook': { label: '设置为有声书', description: '使用有声书方式管理和收听', icon: Headphones },
   split: { label: '拆分为作品', description: '将卷册拆分为独立图书', icon: Scissors },
-  transfer: { label: '转移', description: '移动到另一图书的对应版本', icon: MoveRight },
   delete: { label: '删除', description: '删除卷册及其阅读数据', icon: Trash2 }
 };
 
@@ -221,68 +220,6 @@ function VolumeContextEditDialog({
   </div>;
 }
 
-function VolumeContextTransferDialog({ work, volumes, onClose, onTransferred }: { work: WorkView; volumes: VolumeResource[]; onClose: () => void; onTransferred: (deletedWork: boolean) => Promise<void> }) {
-  const feedback = useToast();
-  const { t } = useI18n();
-  const [targetSearch, setTargetSearch] = useState('');
-  const [targets, setTargets] = useState<WorkTransferTarget[]>([]);
-  const [selectedTargetId, setSelectedTargetId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [transferring, setTransferring] = useState(false);
-
-  useEffect(() => {
-    if (!volumes.length) return;
-    setTargetSearch('');
-    setTargets([]);
-    setSelectedTargetId('');
-    setError('');
-  }, [volumes]);
-
-  useEffect(() => {
-    if (!volumes.length) return;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      setLoading(true);
-      setError('');
-      void searchWorkTransferTargets(targetSearch, work.id, controller.signal).then(setTargets).catch((reason) => {
-        if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(reason instanceof Error ? reason.message : t('目标图书加载失败'));
-      }).finally(() => setLoading(false));
-    }, 250);
-    return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [targetSearch, t, volumes, work.id]);
-
-  if (!volumes.length) return null;
-  const transfer = async () => {
-    if (!selectedTargetId) return;
-    setTransferring(true);
-    try {
-      const result = await runVolumeBatchAction(work.id, { action: 'TRANSFER', volumeIds: volumes.map((volume) => volume.id), targetWorkId: selectedTargetId });
-      await onTransferred(result.deletedWork);
-      feedback.success(t('已转移 {value0} 个卷册', { value0: volumes.length }));
-      onClose();
-    } catch (reason) {
-      feedback.error(reason instanceof Error ? reason.message : t('卷册转移失败'));
-    } finally {
-      setTransferring(false);
-    }
-  };
-  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-stone-950/40 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('转移卷册')}>
-    <div className="w-full max-w-xl rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
-      <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-stone-950"><I18nText>转移卷册</I18nText></h2><p className="mt-2 text-sm text-stone-600">{volumes.length === 1 ? <span data-i18n-skip>{volumes[0]?.title}</span> : t('将转移 {value0} 个卷册', { value0: volumes.length })}</p></div><button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label={t('关闭')}><X size={18} /></button></div>
-      <label className="mt-5 block text-sm font-medium text-stone-700"><I18nText>目标图书</I18nText><input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder={t('搜索标题或作者')} className="mt-2 h-11 w-full rounded-xl border border-stone-200 px-3 text-sm outline-none focus:border-orange-300" /></label>
-      <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
-        {targets.map((target) => <button key={target.id} type="button" onClick={() => setSelectedTargetId(target.id)} className={cn('w-full rounded-xl border p-3 text-left transition', selectedTargetId === target.id ? 'border-orange-200 bg-[#fff4ef]' : 'border-stone-100 bg-stone-50 hover:bg-stone-100')}><span data-i18n-skip className="block truncate text-sm font-medium text-stone-950">{target.title}</span><span data-i18n-skip className="mt-1 block truncate text-xs text-stone-500">{target.author}</span></button>)}
-        {loading ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>正在搜索…</I18nText></div> : null}
-        {!loading && error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
-        {!loading && !error && targets.length === 0 ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>没有找到可转移的目标图书</I18nText></div> : null}
-      </div>
-      <p className="mt-4 text-xs leading-5 text-stone-500"><I18nText>卷册及其阅读数据将移动到目标图书，并按媒介类型归入对应版本。</I18nText></p>
-      <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button><Button icon={MoveRight} loading={transferring} loadingText={t('转移中')} disabled={!selectedTargetId} onClick={() => void transfer()}><I18nText>确认转移</I18nText></Button></div>
-    </div>
-  </div>;
-}
-
 function visibleVersionVolumes(version: VersionResource): VolumeResource[] {
   return version.volumes
     .filter((volume) => !volume.hidden)
@@ -311,7 +248,6 @@ function StructureVersionCard({
   showHeading,
   managementMode,
   canManage,
-  returnHref,
   onLoadAll,
   onRefresh
 }: {
@@ -320,7 +256,6 @@ function StructureVersionCard({
   showHeading: boolean;
   managementMode: boolean;
   canManage: boolean;
-  returnHref: string;
   onLoadAll: () => Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
@@ -328,13 +263,6 @@ function StructureVersionCard({
   const feedback = useToast();
   const { formatNumber, t } = useI18n();
   const [managedVolumeId, setManagedVolumeId] = useState<string | null>(null);
-  const [movingVolumeId, setMovingVolumeId] = useState<string | null>(null);
-  const [targetSearch, setTargetSearch] = useState('');
-  const [transferTargets, setTransferTargets] = useState<WorkTransferTarget[]>([]);
-  const [selectedTargetWorkId, setSelectedTargetWorkId] = useState('');
-  const [targetsLoading, setTargetsLoading] = useState(false);
-  const [targetError, setTargetError] = useState('');
-  const [transferring, setTransferring] = useState(false);
   const [busyMoveId, setBusyMoveId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
@@ -342,7 +270,6 @@ function StructureVersionCard({
   const volumes = visibleVersionVolumes(version);
   const { visibleVolumes, canToggle } = structureVolumeList(volumes, expanded, version.volumeCount);
   const firstReadableVolume = volumes.find((volume) => volume.readable) ?? null;
-  const movingVolume = volumes.find((volume) => volume.id === movingVolumeId) ?? null;
   const totalSizeBytes = version.sizeBytes;
   const sizeLabel = totalSizeBytes > 0
     ? totalSizeBytes >= 1024 ** 3
@@ -379,52 +306,6 @@ function StructureVersionCard({
     }
   };
 
-  useEffect(() => {
-    if (!movingVolume) return;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      setTargetsLoading(true);
-      setTargetError('');
-      void searchWorkTransferTargets(targetSearch, work.id, controller.signal)
-        .then(setTransferTargets)
-        .catch((reason) => {
-          if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
-            setTargetError(reason instanceof Error ? reason.message : t('目标图书加载失败'));
-          }
-        })
-        .finally(() => setTargetsLoading(false));
-    }, 250);
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [movingVolume, targetSearch, t, work.id]);
-
-  const openTransfer = (volume: VolumeResource) => {
-    setMovingVolumeId(volume.id);
-    setTargetSearch('');
-    setTransferTargets([]);
-    setSelectedTargetWorkId('');
-    setTargetError('');
-  };
-
-  const transferVolume = async () => {
-    if (!movingVolume || !selectedTargetWorkId) return;
-    setTransferring(true);
-    try {
-      await runVolumeAction(work.id, movingVolume.id, 'move-to', { targetWorkId: selectedTargetWorkId });
-      setMovingVolumeId(null);
-      feedback.success(t('卷册已转移'));
-      const totalVolumes = work.versions.reduce((total, version) => total + version.volumeCount, 0);
-      if (totalVolumes <= 1) router.push(returnHref);
-      else await onRefresh();
-    } catch (reason) {
-      feedback.error(reason instanceof Error ? reason.message : t('卷册转移失败'));
-    } finally {
-      setTransferring(false);
-    }
-  };
-
   return (
     <article className="rounded-2xl border border-stone-200 bg-white">
       <div className="flex flex-wrap items-center gap-4 p-4 sm:p-5">
@@ -458,7 +339,6 @@ function StructureVersionCard({
                 <button type="button" disabled={busyMoveId !== null || index === 0} onClick={() => void moveVolume(volume, 'up')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('上移 {value0}', { value0: volume.title })}><ChevronUp size={16} /></button>
                 <button type="button" disabled={busyMoveId !== null || index === version.volumeCount - 1} onClick={() => void moveVolume(volume, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('下移 {value0}', { value0: volume.title })}><ChevronDown size={16} /></button>
                 <button type="button" aria-expanded={managedVolumeId === volume.id} onClick={() => setManagedVolumeId((current) => current === volume.id ? null : volume.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('编辑 {value0}', { value0: volume.title })}><Edit3 size={15} /></button>
-                <button type="button" onClick={() => openTransfer(volume)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('转移 {value0}', { value0: volume.title })}><MoveRight size={16} /></button>
               </div> : <button type="button" disabled={!volume.readable} onClick={() => router.push(readerHref(volume))} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('打开 {value0}', { value0: volume.title })}><ChevronRight size={16} /></button>}
             </div>
             {managementMode && managedVolumeId === volume.id ? <div className="pb-4 pt-2">
@@ -478,29 +358,6 @@ function StructureVersionCard({
           {loadingAll ? t('正在加载全部卷册…') : expanded ? t('收起卷册') : t('展开全部（共 {value0} 卷）', { value0: version.volumeCount })}
         </button> : null}
       </div> : <div className="border-t border-stone-100 px-5 py-3 text-sm text-stone-400"><I18nText>该版本还没有可见卷册</I18nText></div>}
-
-      {movingVolume ? <div className="fixed inset-0 z-[110] flex items-end justify-center bg-stone-950/40 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('转移卷册')}>
-        <div className="w-full max-w-xl rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
-          <div className="flex items-start justify-between gap-4">
-            <div><h2 className="text-lg font-semibold text-stone-950"><I18nText>转移卷册</I18nText></h2><p data-i18n-skip className="mt-2 text-sm text-stone-600">{movingVolume.title}</p></div>
-            <button type="button" onClick={() => setMovingVolumeId(null)} className="flex h-10 w-10 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label={t('关闭')}><X size={18} /></button>
-          </div>
-          <label className="mt-5 block text-sm font-medium text-stone-700"><I18nText>目标图书</I18nText>
-            <input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder={t('搜索标题或作者')} className="mt-2 h-11 w-full rounded-xl border border-stone-200 px-3 text-sm outline-none focus:border-orange-300" />
-          </label>
-          <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
-            {transferTargets.map((target) => <button key={target.id} type="button" onClick={() => setSelectedTargetWorkId(target.id)} className={cn('w-full rounded-xl border p-3 text-left transition', selectedTargetWorkId === target.id ? 'border-orange-200 bg-[#fff4ef]' : 'border-stone-100 bg-stone-50 hover:bg-stone-100')}>
-              <span data-i18n-skip className="block truncate text-sm font-medium text-stone-950">{target.title}</span>
-              <span data-i18n-skip className="mt-1 block truncate text-xs text-stone-500">{target.author}</span>
-            </button>)}
-            {targetsLoading ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>正在搜索…</I18nText></div> : null}
-            {!targetsLoading && targetError ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{targetError}</div> : null}
-            {!targetsLoading && !targetError && transferTargets.length === 0 ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>没有找到可转移的目标图书</I18nText></div> : null}
-          </div>
-          <p className="mt-4 text-xs leading-5 text-stone-500"><I18nText>卷册及其阅读数据将移动到目标图书，并按媒介类型归入对应版本。</I18nText></p>
-          <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setMovingVolumeId(null)}><I18nText>取消</I18nText></Button><Button icon={MoveRight} loading={transferring} loadingText={t('转移中')} disabled={!selectedTargetWorkId} onClick={() => void transferVolume()}><I18nText>确认转移</I18nText></Button></div>
-        </div>
-      </div> : null}
     </article>
   );
 }
@@ -665,7 +522,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [volumeMenuPosition, setVolumeMenuPosition] = useState<ContextMenuPosition | null>(null);
   const [volumeMenuAnchor, setVolumeMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [editingWallVolumeId, setEditingWallVolumeId] = useState<string | null>(null);
-  const [transferringWallVolumes, setTransferringWallVolumes] = useState(false);
   const [volumeActionBusy, setVolumeActionBusy] = useState<VolumeActionId | null>(null);
   const topActionsRef = useRef<HTMLDivElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -951,10 +807,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       if (selectedWallVolume) setEditingWallVolumeId(selectedWallVolume.id);
       return;
     }
-    if (action === 'transfer') {
-      setTransferringWallVolumes(true);
-      return;
-    }
     if (action === 'set-media-kind') return;
     if (action === 'delete') {
       const confirmed = await feedback.confirm({
@@ -1088,7 +940,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 showHeading
                 managementMode={managementMode}
                 canManage={canManage}
-                returnHref={returnHref}
                 onLoadAll={async () => { await loadAllVolumes(version.id); }}
                 onRefresh={async () => {
                   try {
@@ -1188,16 +1039,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         volume={allVolumes.find((volume) => volume.id === editingWallVolumeId) ?? null}
         onClose={() => setEditingWallVolumeId(null)}
         onSaved={refreshWallVolumes}
-      />
-      <VolumeContextTransferDialog
-        work={work}
-        volumes={transferringWallVolumes ? selectedWallVolumes : []}
-        onClose={() => setTransferringWallVolumes(false)}
-        onTransferred={async (deletedWork) => {
-          wallSelection.clear();
-          if (deletedWork) router.push(returnHref);
-          else await refreshWallVolumes();
-        }}
       />
 
       <MetadataLookupModal book={work} currentVersionId={selectedVolume?.versionId ?? null} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={refreshAfterMetadataApply} />

@@ -893,7 +893,6 @@ struct WorkDetailView: View {
                 actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editVolume, volumeID: volume.id) })
                 actions.append(action("mediaKind", "work.control.changeMediaType", "square.stack.3d.up", enabled: !activeDownload) { openManagement(.mediaKind, volumeID: volume.id) })
                 actions.append(action("split", "work.control.split", "arrow.triangle.branch", enabled: !activeDownload) { openManagement(.split, volumeID: volume.id) })
-                actions.append(action("move", "work.control.move", "arrow.right", enabled: !activeDownload) { openManagement(.transfer, volumeID: volume.id) })
                 if kindleEligible {
                     actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume.id) })
                 }
@@ -973,14 +972,12 @@ struct WorkDetailView: View {
             if let managedVolumeID { downloads.remove(volumeID: managedVolumeID) }
         case .volumeSplit:
             rewriteCompletedDownload(move: .split, store: managementStore)
-        case .volumeTransferred:
-            rewriteCompletedDownload(move: .transfer, store: managementStore)
         case .volumeReclassified:
             break
         default: break
         }
         managementTask = nil
-        if [.volumeReclassified, .volumeSplit, .volumeTransferred, .volumeDeleted].contains(action) {
+        if [.volumeReclassified, .volumeSplit, .volumeDeleted].contains(action) {
             managedVolumeID = nil
         }
         managementStore.consumeCompletion()

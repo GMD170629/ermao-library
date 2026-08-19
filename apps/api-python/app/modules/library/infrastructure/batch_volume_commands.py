@@ -147,23 +147,6 @@ def _remaining_by_version(
     return result
 
 
-def _require_same_library(
-    db: Session, *, source_work_id: str, target_work_id: str
-) -> None:
-    source_library_id = db.scalar(
-        select(LibraryWork.library_id).where(LibraryWork.id == source_work_id)
-    )
-    target_library_id = db.scalar(
-        select(LibraryWork.library_id).where(LibraryWork.id == target_work_id)
-    )
-    if (
-        source_library_id is None
-        or target_library_id is None
-        or source_library_id != target_library_id
-    ):
-        raise ValueError("CROSS_LIBRARY_OPERATION")
-
-
 def _prepare_set_media_kind_batch(
     db: Session,
     *,
@@ -235,158 +218,6 @@ def _prepare_set_media_kind_batch(
             deleted_work=False,
         ),
     )
-
-
-def _prepare_reparent_batch(
-    db: Session,
-    *,
-    actor_id: str,
-    source_work_id: str,
-    target_work_id: str,
-    contexts: tuple[VolumeContext, ...],
-    now: datetime,
-) -> PreparedBatchVolumeMutation:
-    volume_ids = tuple(context.id for context in contexts)
-    selected = _volume_entities(db, volume_ids)
-    selected_by_id = {volume.id: (volume, media) for volume, media in selected}
-    selected_ids = set(volume_ids)
-    source_media = {media.id: media for _volume, media in selected}
-    source_media_ids = tuple(source_media)
-    source_work = db.get(LibraryWork, source_work_id)
-    if source_work is None:
-        raise ValueError("Source work does not exist")
-    if source_work_id != target_work_id:
-        _require_same_library(
-            db, source_work_id=source_work_id, target_work_id=target_work_id
-        )
-    existing_implicit_id = db.scalar(
-        select(LibraryVersion.id).where(
-            LibraryVersion.work_id == target_work_id,
-            LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
-        )
-    )
-    target_version = get_or_create_implicit_version(db, target_work_id, now=now)
-    target_id = target_version.id
-    created_target_version = existing_implicit_id is None
-    existing_target_volumes = [
-        volume
-        for volume in db.scalars(
-            select(LibraryVolume)
-            .where(LibraryVolume.version_id == target_id)
-            .order_by(
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.id.asc(),
-            )
-        ).all()
-        if volume.id not in selected_ids
-    ]
-    remaining = _remaining_by_version(db, source_media_ids, selected_ids)
-    incoming = [
-        selected_by_id[context.id][0]
-        for context in contexts
-        if selected_by_id[context.id][0].version_id != target_id
-    ]
-    volume_updates: list[Mapping[str, object]] = []
-    start = len(existing_target_volumes)
-    for offset, volume in enumerate(incoming, start=1):
-        volume_updates.append(
-            {
-                "id": volume.id,
-                "version_id": target_id,
-                "sort_order": (start + offset) * 1000,
-                "updated_at": now,
-            }
-        )
-    remaining_updates = tuple(
-        {"id": volume.id, "sort_order": index * 1000, "updated_at": now}
-        for media_id in source_media_ids
-        for index, volume in enumerate(remaining.get(media_id, []))
-    )
-    empty_source_media_ids = tuple(
-        media_id
-        for media_id in source_media_ids
-        if media_id != target_id and not remaining.get(media_id)
-    )
-    all_source_media_ids = tuple(
-        db.scalars(
-            select(LibraryVersion.id).where(LibraryVersion.work_id == source_work_id)
-        ).all()
-    )
-    deletes_source_work = source_work_id != target_work_id and set(
-        all_source_media_ids
-    ).issubset(empty_source_media_ids)
-    source_dependents = (
-        operation_store.snapshot_work_dependents(db, source_work_id)
-        if deletes_source_work
-        else {}
-    )
-    operations = tuple(
-        operation_store.prepare_operation_write(
-            user_id=actor_id,
-            action="MOVE_VOLUME",
-            target_type="volume",
-            target_id=context.id,
-            summary=f"Moved volume {context.title}",
-            payload={
-                "sourceWorkId": source_work_id,
-                "targetWorkId": target_work_id,
-                "volumeId": context.id,
-            },
-            inverse={
-                "sourceWork": (
-                    entity_as_legacy_dict(source_work) if deletes_source_work else None
-                ),
-                "sourceWorkDependents": source_dependents,
-                "sourceVersion": entity_as_legacy_dict(selected_by_id[context.id][1]),
-                "volume": entity_as_legacy_dict(selected_by_id[context.id][0]),
-                "targetWorkId": target_work_id,
-                "targetVersionId": target_id,
-                "targetVersionCreated": created_target_version,
-            },
-            now=now,
-        )
-        for context in contexts
-    )
-    writes: list[PreparedSqlWrite] = []
-    writes.extend(
-        _parameter_writes(
-            update(LibraryVolume), tuple(volume_updates), parameters_per_row=4
-        )
-    )
-    writes.extend(
-        _parameter_writes(
-            update(LibraryVolume), remaining_updates, parameters_per_row=3
-        )
-    )
-    writes.extend(
-        _delete_writes(
-            LibraryVersion,
-            LibraryVersion.id,
-            empty_source_media_ids,
-        )
-    )
-    writes.append(
-        PreparedSqlWrite(
-            update(LibraryWork)
-            .where(LibraryWork.id == target_work_id)
-            .values(updated_at=now)
-        )
-    )
-    if deletes_source_work:
-        writes.append(
-            PreparedSqlWrite(
-                delete(LibraryWork).where(LibraryWork.id == source_work_id)
-            )
-        )
-    writes.extend(_operation_writes(operations))
-    outcome = BatchVolumeOutcome(
-        work_id=source_work_id,
-        affected_volume_ids=volume_ids,
-        target_work_ids=(target_work_id,) if source_work_id != target_work_id else (),
-        operation_ids=tuple(operation.record["id"] for operation in operations),
-        deleted_work=deletes_source_work,
-    )
-    return PreparedBatchVolumeMutation(tuple(writes), outcome)
 
 
 def _prepare_split_batch(
@@ -915,20 +746,6 @@ def prepare_batch_volume_mutation(
             target_kind=str(command.target_media_kind),
             now=now,
         )
-    if command.action == "TRANSFER":
-        _require_same_library(
-            db,
-            source_work_id=source_work_id,
-            target_work_id=str(command.target_work_id),
-        )
-        return _prepare_reparent_batch(
-            db,
-            actor_id=actor_id,
-            source_work_id=source_work_id,
-            target_work_id=str(command.target_work_id),
-            contexts=contexts,
-            now=now,
-        )
     if command.action == "SPLIT":
         return _prepare_split_batch(
             db,
@@ -937,13 +754,15 @@ def prepare_batch_volume_mutation(
             contexts=contexts,
             now=now,
         )
-    return _prepare_delete_batch(
-        db,
-        actor_id=actor_id,
-        source_work_id=source_work_id,
-        contexts=contexts,
-        now=now,
-    )
+    if command.action == "DELETE":
+        return _prepare_delete_batch(
+            db,
+            actor_id=actor_id,
+            source_work_id=source_work_id,
+            contexts=contexts,
+            now=now,
+        )
+    raise ValueError("INVALID_BATCH_OPERATION")
 
 
 def execute_batch_volume_mutation(
