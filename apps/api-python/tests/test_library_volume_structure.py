@@ -413,9 +413,18 @@ def test_volume_structure_openapi_has_explicit_volume_only_contract(
     assert "SAME_MEDIA_KIND" in reclassify_request
     assert "MEDIA_VERSION" not in reclassify_request
     assert "MoveVolumeRequest" not in payloads
-    batch_request = str(payloads["BatchVolumeRequest"])
-    assert "TRANSFER" not in batch_request
-    assert "targetWorkId" not in batch_request
+    batch_request_keys = {
+        "BatchSetMediaKindRequest",
+        "BatchSplitVolumesRequest",
+        "BatchDeleteVolumesRequest",
+    }
+    assert batch_request_keys.issubset(payloads.keys())
+    batch_request_schema_str = str({k: payloads[k] for k in batch_request_keys})
+    assert "TRANSFER" not in batch_request_schema_str
+    assert "targetWorkId" not in batch_request_schema_str
+    assert "SET_MEDIA_KIND" in batch_request_schema_str
+    assert "SPLIT" in batch_request_schema_str
+    assert "DELETE" in batch_request_schema_str
     openapi_paths = str(schema["paths"])
     assert "move-to" not in openapi_paths
     assert "transfer volume" not in openapi_paths.lower()
@@ -590,8 +599,7 @@ def test_batch_transfer_is_rejected_and_split_and_delete_preserve_their_public_r
         },
     )
 
-    assert transfer.status_code == 400
-    assert transfer.json()["error"]["code"] == "INVALID_BATCH_OPERATION"
+    assert transfer.status_code == 422
     db_session.expire_all()
     persisted_versions = db_session.scalars(
         select(LibraryVolume.version_id).where(
@@ -1394,8 +1402,7 @@ def test_batch_transfer_leaves_volume_on_source_version(
             "targetWorkId": target.id,
         },
     )
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "INVALID_BATCH_OPERATION"
+    assert response.status_code == 422
     db_session.expire_all()
     moved = db_session.get(LibraryVolume, moved_id)
     assert moved is not None

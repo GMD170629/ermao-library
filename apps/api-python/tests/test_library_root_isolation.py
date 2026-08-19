@@ -290,8 +290,7 @@ def test_batch_transfer_is_rejected_without_mutation(
             "targetWorkId": work_b.id,
         },
     )
-    assert transferred.status_code == 400
-    assert transferred.json()["error"]["code"] == "INVALID_BATCH_OPERATION"
+    assert transferred.status_code == 422
 
     db_session.expire_all()
     persisted = db_session.get(LibraryVolume, volume_a.id)

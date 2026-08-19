@@ -1021,12 +1021,29 @@ class SplitVolumeRequest(HttpContractModel):
     author: str | None = None
 
 
-class BatchVolumeRequest(HttpContractModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+BatchVolumeAction = Literal["SET_MEDIA_KIND", "SPLIT", "DELETE"]
 
-    action: str
+
+class BatchSetMediaKindRequest(HttpContractModel):
+    action: Literal["SET_MEDIA_KIND"]
     volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
-    target_media_kind: MediaKind | None = Field(default=None, alias="targetMediaKind")
+    target_media_kind: MediaKind = Field(alias="targetMediaKind")
+
+
+class BatchSplitVolumesRequest(HttpContractModel):
+    action: Literal["SPLIT"]
+    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
+
+
+class BatchDeleteVolumesRequest(HttpContractModel):
+    action: Literal["DELETE"]
+    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
+
+
+BatchVolumeRequest = Annotated[
+    BatchSetMediaKindRequest | BatchSplitVolumesRequest | BatchDeleteVolumesRequest,
+    Field(discriminator="action"),
+]
 
 
 class BatchVolumeMutationPayload(HttpContractModel):

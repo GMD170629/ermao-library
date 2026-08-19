@@ -2818,7 +2818,7 @@ def batch_work_volumes(
             command=BatchVolumeCommand(
                 action=payload.action,
                 volume_ids=tuple(payload.volume_ids),
-                target_media_kind=payload.target_media_kind,
+                target_media_kind=getattr(payload, "target_media_kind", None),
             ),
             now=_now(),
         )

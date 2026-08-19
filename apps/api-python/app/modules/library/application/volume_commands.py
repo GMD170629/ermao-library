@@ -72,9 +72,12 @@ class VolumeReclassifyOutcome:
     operation: OperationSummary
 
 
+BatchVolumeAction = Literal["SET_MEDIA_KIND", "SPLIT", "DELETE"]
+
+
 @dataclass(frozen=True, slots=True)
 class BatchVolumeCommand:
-    action: str
+    action: BatchVolumeAction
     volume_ids: tuple[str, ...]
     target_media_kind: str | None = None
 
