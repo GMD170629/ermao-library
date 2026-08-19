@@ -101,19 +101,6 @@ def list_files_for_volume(db: Session, volume_id: str) -> list[dict[str, object]
     return [entity_as_legacy_dict(file) for file in files]
 
 
-def list_volumes_for_media_version(
-    db: Session, media_version_id: str
-) -> list[dict[str, object]]:
-    volumes = db.scalars(
-        select(LibraryVolume)
-        .where(LibraryVolume.version_id == media_version_id)
-        .order_by(
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-    ).all()
-    return [entity_as_legacy_dict(volume) for volume in volumes]
 
 
 def latest_conversion_metadata(db: Session, volume_id: str) -> dict[str, object] | None:
@@ -129,25 +116,6 @@ def latest_conversion_metadata(db: Session, volume_id: str) -> dict[str, object]
     return entity_as_legacy_dict(metadata) if metadata is not None else None
 
 
-def list_progress_for_media_version(
-    db: Session, *, media_version_id: str, user_id: str
-) -> list[dict[str, object]]:
-    progress_rows = db.scalars(
-        select(LibraryReadingProgress)
-        .join(
-            LibraryVolume,
-            LibraryVolume.id == LibraryReadingProgress.volume_id,
-        )
-        .where(
-            LibraryVolume.version_id == media_version_id,
-            LibraryReadingProgress.user_id == user_id,
-        )
-        .order_by(
-            LibraryReadingProgress.updated_at.desc(),
-            LibraryReadingProgress.id.desc(),
-        )
-    ).all()
-    return [entity_as_legacy_dict(progress) for progress in progress_rows]
 
 
 def list_reading_units(db: Session, *, volume_id: str) -> list[dict[str, object]]:

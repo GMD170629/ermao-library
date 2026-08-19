@@ -73,7 +73,6 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
 from app.models.library import (
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
 )
@@ -3133,50 +3132,46 @@ async def apply_work_metadata(
     volume_fields = {"publisher", "publishedAt", "language", "isbn"}
     volume_selected = bool(volume_fields.intersection(fields))
     volume_required = volume_selected
-    target_media_version: LibraryMediaVersion | None = None
+    target_version_id: str | None = None
     target_volumes: list[LibraryVolume] = []
     if volume_required:
-        if payload.media_version_id:
-            target_media_version = db.scalar(
-                select(LibraryMediaVersion).where(
-                    LibraryMediaVersion.id == payload.media_version_id,
-                    LibraryMediaVersion.work_id == work_id,
+        if payload.version_id:
+            version_exists = db.scalar(
+                select(LibraryVersion.id).where(
+                    LibraryVersion.id == payload.version_id,
+                    LibraryVersion.work_id == work_id,
                 )
             )
+            if version_exists:
+                target_version_id = payload.version_id
         elif payload.volume_id:
             if not can_access_volume(db, user, payload.volume_id):
                 _raise_library_error(
                     "卷册不存在", status_code=404, code="VOLUME_NOT_FOUND"
                 )
-            target_media_version = db.scalar(
-                select(LibraryMediaVersion)
-                .join(
-                    LibraryVolume,
-                    LibraryVolume.version_id == LibraryVersion.id,
-                )
-                .where(
+            target_version_id = db.scalar(
+                select(LibraryVolume.version_id).where(
                     LibraryVolume.id == payload.volume_id,
-                    LibraryMediaVersion.work_id == work_id,
                 )
             )
         else:
-            media_versions = list(
+            work_versions = list(
                 db.scalars(
-                    select(LibraryMediaVersion)
-                    .where(LibraryMediaVersion.work_id == work_id)
-                    .order_by(LibraryMediaVersion.created_at.asc())
+                    select(LibraryVersion.id)
+                    .where(LibraryVersion.work_id == work_id)
+                    .order_by(LibraryVersion.created_at.asc())
                 ).all()
             )
-            if len(media_versions) == 1:
-                target_media_version = media_versions[0]
-        if target_media_version is None:
+            if len(work_versions) == 1:
+                target_version_id = work_versions[0]
+        if target_version_id is None:
             _raise_library_error(
-                "无法确定当前媒体版本",
+                "无法确定目标版本",
                 status_code=400,
-                code="MEDIA_VERSION_TARGET_REQUIRED",
+                code="VERSION_TARGET_REQUIRED",
             )
         volume_query = select(LibraryVolume).where(
-            LibraryVolume.version_id == target_media_version.id,
+            LibraryVolume.version_id == target_version_id,
             LibraryVolume.hidden.is_(False),
         )
         if not apply_to_all_volumes:
@@ -3196,9 +3191,9 @@ async def apply_work_metadata(
         )
         if not target_volumes:
             _raise_library_error(
-                "当前媒体版本没有可应用的卷册",
+                "版本下没有可应用的卷册",
                 status_code=400,
-                code="MEDIA_VERSION_HAS_NO_VOLUMES",
+                code="VERSION_HAS_NO_VOLUMES",
             )
     patch = _metadata_field_patch(candidate, fields)
     if "title" in patch or "author" in patch:
@@ -3223,9 +3218,6 @@ async def apply_work_metadata(
     for volume_field in volume_fields:
         if volume_metadata.get(volume_field) is None:
             volume_metadata[volume_field] = candidate.get(volume_field)
-    target_media_version_id = (
-        target_media_version.id if target_media_version is not None else None
-    )
     target_volume_ids = tuple(volume.id for volume in target_volumes)
     target_volume_id = (
         target_volume_ids[0] if target_volume_ids and not apply_to_all_volumes else None
@@ -3303,7 +3295,7 @@ async def apply_work_metadata(
             work_id=work_id,
             source="MANUAL_METADATA_APPLY",
             values=patch,
-            media_version_id=target_media_version_id,
+            media_version_id=target_version_id,
             volume_id=target_volume_id,
             volume_values_by_id=volume_values_by_id,
         )

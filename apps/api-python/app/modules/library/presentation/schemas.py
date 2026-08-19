@@ -987,7 +987,7 @@ class MetadataApplyRequest(HttpContractModel):
     source: str | None = None
     candidate: MetadataApplyCandidate
     fields: list[MetadataApplyField] = Field(min_length=1)
-    media_version_id: str | None = Field(default=None, alias="mediaVersionId")
+    version_id: str | None = Field(default=None, alias="versionId")
     volume_id: str | None = Field(default=None, alias="volumeId")
     write_metadata_to_files: bool = Field(default=False, alias="writeMetadataToFiles")
 

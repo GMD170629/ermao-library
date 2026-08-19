@@ -1,4 +1,4 @@
-"""Typed MediaVersion-to-Volume joins for library adapters."""
+"""Typed Version-to-Volume joins for library adapters."""
 
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ def get_volume_context(db: Session, volume_id: str) -> dict[str, Any] | None:
     ).first()
     if row is None:
         return None
-    volume, media_version = row
+    volume, version = row
     payload = entity_as_legacy_dict(volume)
     payload.update(
-        workId=media_version.work_id,
+        workId=version.work_id,
         mediaKind=media_kind_of(volume),
-        versionId=media_version.id,
+        versionId=version.id,
     )
     return payload
 
@@ -50,12 +50,12 @@ def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     ).first()
     if row is None:
         return None
-    unit, volume, media_version = row
+    unit, volume, version = row
     payload = entity_as_legacy_dict(unit)
     payload.update(
-        workId=media_version.work_id,
+        workId=version.work_id,
         mediaKind=media_kind_of(volume),
-        versionId=media_version.id,
+        versionId=version.id,
         format=volume.format,
     )
     return payload
@@ -91,12 +91,12 @@ def get_volume_for_work(
     ).first()
     if row is None:
         return None
-    volume, media_version = row
+    volume, version = row
     payload = entity_as_legacy_dict(volume)
     payload.update(
-        sourceWorkId=media_version.work_id,
+        sourceWorkId=version.work_id,
         sourceFormat=volume.format,
-        versionId=media_version.id,
+        versionId=version.id,
     )
     return payload
 
