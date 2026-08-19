@@ -40,8 +40,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case persistOPF, localMetadataFirst, metadataPriority, recognitionScope
     case recognizeUnmatched, recognizeIncomplete, eligibleCount, nextRun, opfQueue
     case duplicatesTitle, duplicatesTab, categoriesTab, duplicateGroupsDetected
-    case compare, merge, mergeWorksTitle, canonicalWork
-    case mergeWarning, mergeWorks, categoryGovernanceTitle, author, tag, series
+    case compare, merge, categoryGovernanceTitle, author, tag, series
     case selectedCount, aliases, workCount, deleteCategory, mergeCategoriesTitle
     case targetCategory, confirmMerge, renameCategory, newCategoryName, confirmRename
     case operationHistory, undoOperation, undoOperationMessage
@@ -161,9 +160,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .recognizeIncomplete: "Missing Author or Cover", .eligibleCount: "Eligible Books", .nextRun: "Next Run",
         .opfQueue: "OPF Save Queue", .duplicatesTitle: "Duplicates & Categories", .duplicatesTab: "Duplicates",
         .categoriesTab: "Categories", .duplicateGroupsDetected: "Duplicate Groups Detected", .compare: "Compare",
-        .merge: "Merge", .mergeWorksTitle: "Merge Works?", .canonicalWork: "Canonical Work",
-        .mergeWarning: "Media files are preserved. Metadata and selected user state will be consolidated.",
-        .mergeWorks: "Merge Works", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
+        .merge: "Merge", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
         .tag: "Tags", .series: "Series", .selectedCount: "Selected", .aliases: "Aliases",
         .workCount: "Works", .deleteCategory: "Delete Category", .mergeCategoriesTitle: "Merge Categories",
         .targetCategory: "Target Category", .confirmMerge: "Confirm Merge", .renameCategory: "Rename Category",
@@ -282,8 +279,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .recognizeUnmatched: "尚未识别的读物", .recognizeIncomplete: "缺少作者或封面", .eligibleCount: "符合规则的读物",
         .nextRun: "下次执行", .opfQueue: "OPF 保存队列", .duplicatesTitle: "重复项与分类", .duplicatesTab: "重复项",
         .categoriesTab: "分类", .duplicateGroupsDetected: "检测到的重复组", .compare: "比较", .merge: "合并",
-        .mergeWorksTitle: "合并作品？", .canonicalWork: "保留的主作品", .mergeWarning: "媒体文件（封面、插图等）将保留，不会被删除。",
-        .mergeWorks: "合并作品", .categoryGovernanceTitle: "分类治理", .author: "作者", .tag: "标签", .series: "丛书",
+        .categoryGovernanceTitle: "分类治理", .author: "作者", .tag: "标签", .series: "丛书",
         .selectedCount: "已选择", .aliases: "别名", .workCount: "作品", .deleteCategory: "删除分类",
         .mergeCategoriesTitle: "合并分类", .targetCategory: "目标分类", .confirmMerge: "确认合并",
         .renameCategory: "重命名分类", .newCategoryName: "新名称", .confirmRename: "重命名",

@@ -186,7 +186,6 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.StartRecognition -> sharedRepository.recognizeOrganizeJob(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.DeleteOrganizeTask -> sharedRepository.deleteOrganizeJob(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.SaveRecognitionPolicy -> saveRecognitionPolicy(command)
-        is AdministrativeCommand.MergeDuplicates -> mergeDuplicates(command)
         is AdministrativeCommand.MergeCategories -> sharedRepository.mergeCategories(
             sharedContext, command.kind.toShared(), command.targetId, command.sourceIds.toList(),
         ).receipt(command)
@@ -423,16 +422,6 @@ class SharedAdministrativeSettingsAdapter(
             localMetadataPriority = draft.sourcePriority.mapNotNull { it.toSharedLocal() },
         )
         return sharedRepository.updateOrganizePolicy(sharedContext, updated).receipt(command)
-    }
-
-    private suspend fun mergeDuplicates(command: AdministrativeCommand.MergeDuplicates): AdministrativeResult<AdministrativeCommandReceipt> {
-        val page = when (val result = sharedRepository.listDuplicateGroups(sharedContext, 1, 100)) {
-            is SharedContent -> result.value
-            is SharedFailure -> return result.toLocalFailure()
-        }
-        val group = page.groups.firstOrNull { it.id == command.groupId } ?: return notFound("DUPLICATE_GROUP_NOT_FOUND")
-        if (group.works.none { it.id == command.canonicalWorkId }) return validationFailure("CANONICAL_WORK_NOT_IN_GROUP")
-        return sharedRepository.mergeDuplicateWorks(sharedContext, command.canonicalWorkId, group.works.map { it.id }.filter { it != command.canonicalWorkId }).receipt(command)
     }
 
     private suspend fun saveMetadataProviders(command: AdministrativeCommand.SaveMetadataProviders): AdministrativeResult<AdministrativeCommandReceipt> {

@@ -34,7 +34,6 @@ from app.bootstrap.library import (
     load_work_facet_projections,
     prepare_work_facet_write,
     volume_structure_commands,
-    work_merge_gateway,
 )
 from app.bootstrap.library import (
     bookshelf_items as get_bookshelf_items,
@@ -115,15 +114,6 @@ from app.modules.library.application.volume_commands import (
     split_volume_resource,
     update_volume_resource,
 )
-from app.modules.library.application.work_merge import (
-    CreateMergedWork,
-    MergeCommand,
-    MergeMetadata,
-    PreviewWorkMerge,
-    WorkMergeError,
-    WorkMergeInProgressError,
-    WorkMergeNotFoundError,
-)
 from app.modules.library.presentation.filter_mappers import (
     filter_options_payload,
     filter_schema_payload,
@@ -140,7 +130,6 @@ from app.modules.library.presentation.schemas import (
     CategoriesResponse,
     ContinueReadingResponse,
     CoverMutationResponse,
-    CreateWorkMergeRequest,
     DashboardSummaryResponse,
     DeleteCategoryResponse,
     DeletedWorkResponse,
@@ -161,8 +150,6 @@ from app.modules.library.presentation.schemas import (
     ManagementOverviewResponse,
     MergeCategoriesRequest,
     MergeCategoriesResponse,
-    MergeDuplicatesRequest,
-    MergeDuplicatesResponse,
     MetadataApplyRequest,
     MetadataApplyResponse,
     MetadataSearchRequest,
@@ -180,9 +167,6 @@ from app.modules.library.presentation.schemas import (
     UpdateVolumeRequest,
     UpdateWorkRequest,
     WorkDetailSummaryResponse,
-    WorkMergePreviewResponse,
-    WorkMergeResponse,
-    WorkMergeSelectionRequest,
     WorkReadingUnitsResponse,
     WorkResponse,
     WorksResponse,
@@ -255,7 +239,6 @@ from app.services.library_management import (
     list_categories,
     list_categories_page,
     merge_categories,
-    merge_works,
     operation_view,
     rename_category,
     undo_operation,
@@ -1460,112 +1443,6 @@ def _bulk_work_ids(raw_ids: Any, *, maximum: int = 500) -> list[str]:
     )[:maximum]
 
 
-def _require_merge_scope(db: Session, user: User, work_ids: list[str]) -> None:
-    if not can_manage_system(user):
-        _raise_library_error(
-            "需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED"
-        )
-    if any(not can_access_work(db, user, work_id) for work_id in work_ids):
-        _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
-
-
-def _raise_work_merge_error(error: WorkMergeError) -> Never:
-    if isinstance(error, WorkMergeNotFoundError):
-        _raise_library_error(str(error), status_code=404, code=error.code)
-    if isinstance(error, WorkMergeInProgressError):
-        _raise_library_error(str(error), status_code=409, code=error.code)
-    _raise_library_error(str(error), status_code=400, code=error.code)
-
-
-@router.post("/works/merge/preview")
-def preview_work_merge(
-    payload: WorkMergeSelectionRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    WorkMergePreviewResponse,
-    ErrorResponses(
-        LibraryBadRequestError,
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-        LibraryConflictError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    _require_merge_scope(db, user, payload.work_ids)
-    try:
-        preview = PreviewWorkMerge(work_merge_gateway(db)).execute(payload.work_ids)
-    except WorkMergeError as error:
-        _raise_work_merge_error(error)
-    return WorkMergePreviewResponse(
-        data={
-            "works": list(preview.works),
-            "mediaGroups": list(preview.media_groups),
-            "suggestedMetadata": {
-                "title": preview.suggested_metadata.title,
-                "author": preview.suggested_metadata.author,
-                "description": preview.suggested_metadata.description,
-                "seriesName": preview.suggested_metadata.series_name,
-                "seriesIndex": preview.suggested_metadata.series_index,
-                "tags": list(preview.suggested_metadata.tags),
-            },
-            "defaultCoverVolumeId": preview.default_cover_volume_id,
-            "writeMetadataToFiles": preview.write_metadata_to_files,
-        }
-    )
-
-
-@router.post("/works/merge")
-def create_work_merge(
-    payload: CreateWorkMergeRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    WorkMergeResponse,
-    ErrorResponses(
-        LibraryBadRequestError,
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-        LibraryConflictError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    _require_merge_scope(db, user, payload.work_ids)
-    try:
-        result = CreateMergedWork(work_merge_gateway(db), db).execute(
-            MergeCommand(
-                work_ids=tuple(payload.work_ids),
-                metadata=MergeMetadata(
-                    title=payload.metadata.title,
-                    author=payload.metadata.author,
-                    description=payload.metadata.description,
-                    series_name=payload.metadata.series_name,
-                    series_index=payload.metadata.series_index,
-                    tags=tuple(payload.metadata.tags),
-                ),
-                cover_volume_id=payload.cover_volume_id,
-                actor_id=user.id,
-            )
-        )
-    except WorkMergeError as error:
-        _raise_work_merge_error(error)
-    return WorkMergeResponse(
-        data={
-            "workId": result.work_id,
-            "sourceWorkIds": list(result.source_work_ids),
-            "mediaVersions": list(result.media_versions),
-            "metadataWritebacks": list(result.metadata_writebacks),
-            "operation": result.operation,
-        }
-    )
-
-
 def _first_volume(db: Session, work_id: str) -> dict[str, Any] | None:
     volume = db.scalar(
         select(LibraryVolume)
@@ -2745,28 +2622,6 @@ def library_duplicates(
             "totalPages": max(1, (total + page_size - 1) // page_size),
         }
     )
-
-
-@router.post("/library/duplicates/merge")
-async def merge_library_duplicates(
-    payload: MergeDuplicatesRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[MergeDuplicatesResponse, ErrorResponses(LibraryBadRequestError)]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    try:
-        result = merge_works(
-            db,
-            payload.target_work_id,
-            payload.source_work_ids,
-            user.id,
-        )
-    except ValueError as exc:
-        _raise_library_error(str(exc), status_code=400)
-    return MergeDuplicatesResponse(data=result)
 
 
 @router.get("/library/operations")

@@ -429,11 +429,6 @@ struct DuplicateGroup: Identifiable, Equatable, Sendable {
     let works: [DuplicateWork]
 }
 
-struct MergeDuplicateRequest: Equatable, Sendable {
-    let groupID: String
-    let canonicalWorkID: String
-}
-
 struct LibraryOperation: Identifiable, Equatable, Sendable {
     let id: String
     let action: String

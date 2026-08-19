@@ -660,7 +660,6 @@ enum class AdministrativeOperation {
     StartRecognition,
     CancelOrganizeTask,
     SaveRecognitionPolicy,
-    MergeDuplicates,
     MergeCategories,
     RenameCategory,
     DeleteCategory,

@@ -38,7 +38,6 @@ from app.modules.library.infrastructure.implicit_version import (
 )
 from app.services.download_executor import DownloadExecutionResult
 from app.services.download_queue import process_next_download_task
-from app.services.library_management import merge_works
 from tests.test_worker_importer import add_library, write_epub_metadata_fixture
 
 
@@ -285,47 +284,6 @@ def test_download_outside_enabled_library_does_not_enqueue_import(
     stored = db_session.get(DownloadTask, task.id)
     assert stored is not None
     assert stored.status == "downloaded"
-
-
-def test_merge_works_rejects_cross_library_without_mutation(
-    db_session: Session,
-) -> None:
-    library_a = Library(
-        id="merge-lib-a",
-        name="A",
-        root_path="/merge-a",
-        organization_mode="FLAT",
-    )
-    library_b = Library(
-        id="merge-lib-b",
-        name="B",
-        root_path="/merge-b",
-        organization_mode="FLAT",
-    )
-    work_a, media_a, volume_a = _work(
-        work_id="merge-work-a", library_id=library_a.id, title="三体"
-    )
-    work_b, media_b, volume_b = _work(
-        work_id="merge-work-b", library_id=library_b.id, title="三体"
-    )
-    db_session.add_all([library_a, library_b])
-    db_session.flush()
-    db_session.add_all([work_a, work_b])
-    db_session.flush()
-    db_session.add_all(
-        [volume_a.version, media_a, volume_a, volume_b.version, media_b, volume_b]
-    )
-    db_session.commit()
-
-    with pytest.raises(ValueError, match="跨书库"):
-        merge_works(db_session, work_a.id, [work_b.id], None)
-
-    db_session.expire_all()
-    assert db_session.get(LibraryWork, work_a.id) is not None
-    assert db_session.get(LibraryWork, work_b.id) is not None
-    assert db_session.get(LibraryMediaVersion, media_b.id) is not None
-    assert db_session.get(LibraryVolume, volume_b.id).version_id == volume_b.version_id
-    assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0
 
 
 def test_move_volume_rejects_cross_library_without_mutation(

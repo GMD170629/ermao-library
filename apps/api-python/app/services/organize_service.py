@@ -23,7 +23,6 @@ from app.bootstrap.organize import (
     dismiss_organize_job_command,
     fail_organize_job_command,
     insert_organize_suggestions_command,
-    merge_organize_works_command,
     refresh_duplicate_candidates_command,
     refresh_organize_job_command,
     set_organize_work_hidden_command,
@@ -413,18 +412,6 @@ def set_work_hidden(
         work_id=work_id,
         hidden=hidden,
         organize_status=organize_status,
-        timestamp=stamp,
-    )
-
-
-def merge_works(db: Session, source_work_id: str, target_work_id: str) -> None:
-    if source_work_id == target_work_id:
-        return
-    stamp = now()
-    merge_organize_works_command(
-        db,
-        source_work_id=source_work_id,
-        target_work_id=target_work_id,
         timestamp=stamp,
     )
 
@@ -1806,7 +1793,7 @@ def prepare_duplicate_candidate_rows(
             "target_work_id": str(candidate["id"]),
             "reasons": json_text(["title"]),
             "confidence": 0.75,
-            "suggested_action": "MERGE_WORKS",
+            "suggested_action": "HIDE_DUPLICATE",
             "status": "PENDING",
             "created_at": stamp,
             "updated_at": stamp,

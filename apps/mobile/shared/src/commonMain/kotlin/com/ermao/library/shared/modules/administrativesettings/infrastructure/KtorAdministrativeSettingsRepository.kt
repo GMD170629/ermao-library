@@ -339,26 +339,6 @@ internal class KtorAdministrativeSettingsRepository(
         )
     }
 
-    override suspend fun mergeDuplicateWorks(
-        context: AdministrativeSettingsContext,
-        targetWorkId: String,
-        sourceWorkIds: List<String>,
-    ): AdministrativeSettingsResult<DuplicateMergeResult> {
-        if (targetWorkId.isBlank() || sourceWorkIds.isEmpty() || targetWorkId in sourceWorkIds || sourceWorkIds.any(String::isBlank)) {
-            return invalid("INVALID_DUPLICATE_SELECTION", "sourceWorkIds")
-        }
-        return call(
-            context,
-            ApiMethod.Post,
-            "/api/library/duplicates/merge",
-            body = buildJsonObject {
-                put("targetWorkId", targetWorkId)
-                put("sourceWorkIds", JsonArray(sourceWorkIds.distinct().map(::JsonPrimitive)))
-            },
-            transform = JsonElement::toDuplicateMergeResult,
-        )
-    }
-
     override suspend fun listLibraryOperations(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/library/operations", transform = JsonElement::toLibraryOperations)
 

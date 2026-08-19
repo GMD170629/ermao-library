@@ -4,7 +4,14 @@ import pytest
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import (
+    Library,
+    LibraryMediaVersion,
+    LibraryVersion,
+    LibraryVolume,
+    LibraryWork,
+)
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.library.infrastructure.deletion import delete_work_records
 from app.services import library_management
 from app.services.library_filters import compile_filter_rules
@@ -14,7 +21,6 @@ from app.services.library_management import (
     duplicate_groups,
     list_categories,
     merge_categories,
-    merge_works,
     rename_category,
     smart_shelf_work_ids,
     sync_work_facets,
@@ -27,53 +33,62 @@ from sqlalchemy.orm import Session
 def _insert_work(
     db: Session, work_id: str, title: str, author: str, tags: list[str]
 ) -> None:
-    db.execute(
-        text(
-            "INSERT INTO `Library` (`id`, `name`, `rootPath`, `organizationMode`, `updatedAt`) "
-            "SELECT 'test-library', 'Test Library', '/library/test', 'FLAT', 0 "
-            "WHERE NOT EXISTS (SELECT 1 FROM `Library` WHERE `id` = 'test-library')"
+    if db.get(Library, "test-library") is None:
+        db.add(
+            Library(
+                id="test-library",
+                name="Test Library",
+                root_path="/library/test",
+                organization_mode="FLAT",
+            )
+        )
+        db.flush()
+    db.add(
+        LibraryWork(
+            id=work_id,
+            library_id="test-library",
+            origin="MANUAL",
+            title=title,
+            normalized_title=title.casefold().replace(" ", ""),
+            author=author,
+            normalized_author=author.casefold().replace(" ", ""),
+            tags=json.dumps(tags, ensure_ascii=False),
+            merge_key=f"{title.casefold()}:{author.casefold()}",
         )
     )
-    db.execute(
-        text(
-            "INSERT INTO `LibraryWork` (`id`, `libraryId`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `tags`, `mergeKey`, `updatedAt`) "
-            "VALUES (:id, 'test-library', :title, :normalized_title, :author, :normalized_author, :tags, :merge_key, '2026-07-22T00:00:00')"
-        ),
-        {
-            "id": work_id,
-            "title": title,
-            "normalized_title": title.casefold().replace(" ", ""),
-            "author": author,
-            "normalized_author": author.casefold().replace(" ", ""),
-            "tags": json.dumps(tags, ensure_ascii=False),
-            "merge_key": f"{title.casefold()}:{author.casefold()}",
-        },
+    db.flush()
+    db.add(
+        LibraryMediaVersion(
+            id=f"media-{work_id}",
+            work_id=work_id,
+            media_kind="EBOOK",
+        )
     )
-    db.execute(
-        text(
-            "INSERT INTO `LibraryMediaVersion` (`id`, `workId`, `mediaKind`, `updatedAt`) "
-            "VALUES (:id, :work_id, 'EBOOK', '2026-07-22T00:00:00')"
-        ),
-        {"id": f"media-{work_id}", "work_id": work_id},
+    db.add(
+        LibraryVersion(
+            id=f"version-{work_id}",
+            work_id=work_id,
+            source_key=IMPLICIT_VERSION_SOURCE_KEY,
+        )
     )
-    db.execute(
-        text(
-            "INSERT INTO `LibraryVolume` (`id`, `mediaVersionId`, `title`, `sortOrder`, `format`, `resourceKey`, `publisher`, `importStatus`, `updatedAt`) "
-            "VALUES (:id, :media_id, :title, 0, 'EPUB', :resource_key, :publisher, 'IMPORTED', '2026-07-22T00:00:00')"
-        ),
-        {
-            "id": f"volume-{work_id}",
-            "media_id": f"media-{work_id}",
-            "title": f"{title} 默认卷",
-            "resource_key": f"key-{work_id}",
-            "publisher": "星海出版社",
-        },
+    db.flush()
+    db.add(
+        LibraryVolume(
+            id=f"volume-{work_id}",
+            version_id=f"version-{work_id}",
+            title=f"{title} 默认卷",
+            format="EPUB",
+            resource_key=f"key-{work_id}",
+            publisher="星海出版社",
+            import_status="IMPORTED",
+            sort_order=0,
+        )
     )
     db.commit()
     sync_work_facets(db, work_id)
 
 
-def test_duplicates_smart_shelf_merge_and_undo_use_persisted_v9_data(tmp_path) -> None:
+def test_duplicates_and_smart_shelves_use_persisted_v9_data(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
@@ -90,23 +105,9 @@ def test_duplicates_smart_shelf_merge_and_undo_use_persisted_v9_data(tmp_path) -
                 "收藏",
                 "科幻小说",
             }
-
-            merged = merge_works(db, "work-a", ["work-b"], None)
-            assert db.get(LibraryWork, "work-b") is None
-            assert db.get(LibraryMediaVersion, "media-work-b") is None
-            assert (
-                db.get(LibraryVolume, "volume-work-b").media_version_id
-                == "media-work-a"
-            )
-            assert merged["operation"]["undoAvailable"] is True
-
-            undo_operation(db, merged["operation"]["id"], None)
             assert db.get(LibraryWork, "work-b") is not None
             assert db.get(LibraryMediaVersion, "media-work-b") is not None
-            assert (
-                db.get(LibraryVolume, "volume-work-b").media_version_id
-                == "media-work-b"
-            )
+            assert db.get(LibraryVolume, "volume-work-b").version_id == "version-work-b"
     finally:
         engine.dispose()
 
@@ -317,74 +318,6 @@ def test_deleting_a_work_only_author_uses_unknown_author_fallback(tmp_path) -> N
                     "SELECT `normalizedAuthor` FROM `LibraryWork` WHERE `id` = 'work-a'"
                 )
             ).scalar()
-    finally:
-        engine.dispose()
-
-
-def test_library_writes_rollback_when_facet_sync_fails(tmp_path, monkeypatch) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "work-a", "星海列车", "林川", ["科幻"])
-            _insert_work(db, "work-b", "远航日志", "周禾", ["旅行"])
-            original_sync = library_management.execute_work_facet_write
-
-            def fail_sync(*_args, **_kwargs) -> None:
-                raise RuntimeError("facet sync failed")
-
-            monkeypatch.setattr(
-                library_management, "execute_work_facet_write", fail_sync
-            )
-            with pytest.raises(RuntimeError, match="facet sync failed"):
-                merge_works(db, "work-a", ["work-b"], None)
-            assert (
-                db.execute(
-                    text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")
-                ).scalar()
-                == 0
-            )
-            assert (
-                db.execute(
-                    text(
-                        "SELECT media.workId FROM LibraryVolume AS volume JOIN LibraryMediaVersion AS media ON media.id = volume.mediaVersionId WHERE volume.id = 'volume-work-b'"
-                    )
-                ).scalar()
-                == "work-b"
-            )
-            assert (
-                db.execute(text("SELECT COUNT(*) FROM `LibraryOperation`")).scalar()
-                == 0
-            )
-
-            monkeypatch.setattr(
-                library_management,
-                "execute_work_facet_write",
-                original_sync,
-            )
-            merged = merge_works(db, "work-a", ["work-b"], None)
-            operation_id = str(merged["operation"]["id"])
-            monkeypatch.setattr(
-                library_management, "execute_work_facet_write", fail_sync
-            )
-            with pytest.raises(RuntimeError, match="facet sync failed"):
-                undo_operation(db, operation_id, None)
-            assert db.get(LibraryWork, "work-b") is None
-            assert db.get(LibraryMediaVersion, "media-work-b") is None
-            assert (
-                db.get(LibraryVolume, "volume-work-b").media_version_id
-                == "media-work-a"
-            )
-            assert (
-                db.execute(
-                    text(
-                        "SELECT `status` FROM `LibraryOperation` WHERE `id` = :operation_id"
-                    ),
-                    {"operation_id": operation_id},
-                ).scalar()
-                == "COMPLETED"
-            )
     finally:
         engine.dispose()
 

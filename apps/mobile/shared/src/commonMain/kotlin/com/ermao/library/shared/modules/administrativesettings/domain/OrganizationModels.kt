@@ -157,12 +157,6 @@ data class LibraryOperation(
     val undoAvailable: Boolean,
 )
 
-data class DuplicateMergeResult(
-    val targetWorkId: String,
-    val sourceWorkIds: List<String>,
-    val operation: LibraryOperation,
-)
-
 enum class CategoryKind(val wireValue: String) {
     Author("AUTHOR"),
     Tag("TAG"),

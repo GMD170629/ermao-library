@@ -615,15 +615,6 @@ internal fun JsonElement.toDuplicateGroupPage(): DuplicateGroupPage {
     )
 }
 
-internal fun JsonElement.toDuplicateMergeResult(): DuplicateMergeResult {
-    val root = objectValue("INVALID_DUPLICATE_MERGE").expectKeys("targetWorkId", "sourceWorkIds", "operation")
-    return DuplicateMergeResult(
-        targetWorkId = root.requiredString("targetWorkId"),
-        sourceWorkIds = root.requiredStringList("sourceWorkIds"),
-        operation = root.requiredObject("operation").toLibraryOperation(),
-    )
-}
-
 internal fun JsonElement.toLibraryOperations(): List<LibraryOperation> =
     objectValue("INVALID_LIBRARY_OPERATIONS").expectKeys("operations").requiredArray("operations").map(JsonElement::toLibraryOperation)
 

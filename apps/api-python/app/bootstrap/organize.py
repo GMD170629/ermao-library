@@ -118,23 +118,6 @@ def set_organize_work_hidden_command(
         )
 
 
-def merge_organize_works_command(
-    db: Session,
-    *,
-    source_work_id: str,
-    target_work_id: str,
-    timestamp: datetime,
-) -> None:
-    prepared = organize_duplicates.prepare_work_merge_write(
-        db,
-        source_work_id=source_work_id,
-        target_work_id=target_work_id,
-        timestamp=timestamp,
-    )
-    with OrganizeWriteTransaction(db):
-        organize_duplicates.execute_duplicate_actions_write(db, prepared)
-
-
 def fail_organize_job_command(db: Session, job_row: dict[str, Any]) -> None:
     prepared_jobs = organize_review.prepare_job_update_rows((job_row,))
     with OrganizeWriteTransaction(db):
@@ -409,7 +392,6 @@ __all__ = [
     "dismiss_organize_job_command",
     "fail_organize_job_command",
     "insert_organize_suggestions_command",
-    "merge_organize_works_command",
     "refresh_duplicate_candidates_command",
     "refresh_organize_job_command",
     "set_organize_work_hidden_command",

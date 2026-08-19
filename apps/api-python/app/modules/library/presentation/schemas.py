@@ -89,11 +89,6 @@ class MergeCategoriesRequest(HttpContractModel):
     target_id: str = Field(alias="targetId")
 
 
-class MergeDuplicatesRequest(HttpContractModel):
-    target_work_id: str = Field(alias="targetWorkId")
-    source_work_ids: list[str] = Field(alias="sourceWorkIds")
-
-
 class MetadataSearchRequest(HttpContractModel):
     provider_id: str | None = Field(default=None, alias="providerId")
     source: str | None = None
@@ -901,78 +896,6 @@ class DuplicatesPayload(HttpContractModel):
     total_pages: int = Field(alias="totalPages")
 
 
-class MergeDuplicatesPayload(HttpContractModel):
-    target_work_id: str = Field(alias="targetWorkId")
-    source_work_ids: list[str] = Field(alias="sourceWorkIds")
-    operation: LibraryOperationSummary
-
-
-class WorkMergeSelectionRequest(HttpContractModel):
-    work_ids: list[str] = Field(alias="workIds", min_length=2, max_length=500)
-
-
-class WorkMergeMetadata(HttpContractModel):
-    title: str = Field(min_length=1)
-    author: str = ""
-    description: str | None = None
-    series_name: str | None = Field(default=None, alias="seriesName")
-    series_index: float | None = Field(
-        default=None, alias="seriesIndex", allow_inf_nan=False
-    )
-    tags: list[str] = Field(default_factory=list)
-
-
-class CreateWorkMergeRequest(WorkMergeSelectionRequest):
-    metadata: WorkMergeMetadata
-    cover_volume_id: str = Field(alias="coverVolumeId", min_length=1)
-
-
-class WorkMergeSource(HttpContractModel):
-    id: str
-    title: str
-    author: str
-
-
-class WorkMergeVolume(HttpContractModel):
-    id: str
-    title: str
-    volume_index: float | None = Field(default=None, alias="volumeIndex")
-    format: str
-    source_work_id: str = Field(alias="sourceWorkId")
-    source_work_title: str = Field(alias="sourceWorkTitle")
-    cover_url: str = Field(alias="coverUrl")
-    has_cover: bool = Field(alias="hasCover")
-
-
-class WorkMergeMediaGroup(HttpContractModel):
-    media_kind: MediaKind = Field(alias="mediaKind")
-    volumes: list[WorkMergeVolume]
-
-
-class WorkMergePreviewPayload(HttpContractModel):
-    works: list[WorkMergeSource]
-    media_groups: list[WorkMergeMediaGroup] = Field(alias="mediaGroups")
-    suggested_metadata: WorkMergeMetadata = Field(alias="suggestedMetadata")
-    default_cover_volume_id: str = Field(alias="defaultCoverVolumeId")
-    write_metadata_to_files: bool = Field(alias="writeMetadataToFiles")
-
-
-class MergedMediaVersion(HttpContractModel):
-    id: str
-    media_kind: MediaKind = Field(alias="mediaKind")
-    volume_count: int = Field(alias="volumeCount")
-
-
-class WorkMergePayload(HttpContractModel):
-    work_id: str = Field(alias="workId")
-    source_work_ids: list[str] = Field(alias="sourceWorkIds")
-    media_versions: list[MergedMediaVersion] = Field(alias="mediaVersions")
-    metadata_writebacks: list[MetadataWritebackOperationContract] = Field(
-        alias="metadataWritebacks"
-    )
-    operation: LibraryOperationSummary
-
-
 class OperationsPayload(HttpContractModel):
     operations: list[LibraryOperationSummary]
 
@@ -1205,9 +1128,6 @@ RenameCategoryResponse = SuccessEnvelope[RenameCategoryPayload]
 MergeCategoriesResponse = SuccessEnvelope[MergeCategoriesPayload]
 DeleteCategoryResponse = SuccessEnvelope[DeleteCategoryPayload]
 DuplicatesResponse = SuccessEnvelope[DuplicatesPayload]
-MergeDuplicatesResponse = SuccessEnvelope[MergeDuplicatesPayload]
-WorkMergePreviewResponse = SuccessEnvelope[WorkMergePreviewPayload]
-WorkMergeResponse = SuccessEnvelope[WorkMergePayload]
 OperationsResponse = SuccessEnvelope[OperationsPayload]
 UndoOperationResponse = SuccessEnvelope[UndoOperationPayload]
 MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]

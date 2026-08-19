@@ -1,15 +1,21 @@
 import json
 
+from datetime import UTC, datetime
+
+import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 
+from app.bootstrap.organize import apply_duplicate_actions_command
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import LibraryMediaVersion, LibraryVersion, LibraryVolume
+from app.models.library import LibraryMediaVersion, LibraryVersion, LibraryVolume, LibraryWork
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.presentation.schemas import MetadataProvider
+from app.modules.organize.application.dto import PreparedDuplicateAction
+from app.modules.organize.application.errors import InvalidDuplicateActionError
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
     get_metadata_provider,
@@ -27,7 +33,6 @@ from app.services.organize_scheduler import (
     recognize_organize_job,
     update_organize_policy,
 )
-from app.services.organize_service import merge_works
 
 
 def _insert_work(
@@ -201,7 +206,7 @@ def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
         engine.dispose()
 
 
-def test_merge_works_coalesces_media_versions_and_appends_volumes(tmp_path) -> None:
+def test_hide_duplicate_hides_source_work_without_reparenting(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
@@ -227,39 +232,75 @@ def test_merge_works_coalesces_media_versions_and_appends_volumes(tmp_path) -> N
                 volume_format="PDF",
                 sort_order=1,
             )
-            _insert_volume(
+
+            apply_duplicate_actions_command(
                 db,
-                work_id="source-work",
-                media_version_id="source-comic",
-                media_kind="COMIC",
-                volume_id="source-comic-volume",
-                volume_format="CBZ",
-                sort_order=3,
+                (
+                    PreparedDuplicateAction(
+                        duplicate_id="",
+                        source_work_id="source-work",
+                        target_work_id="target-work",
+                        action="HIDE_DUPLICATE",
+                        timestamp=datetime.now(UTC),
+                    ),
+                ),
             )
 
-            merge_works(db, "source-work", "target-work")
-
-            versions = db.scalars(
-                select(LibraryMediaVersion)
-                .where(LibraryMediaVersion.work_id == "target-work")
-                .order_by(LibraryMediaVersion.media_kind)
-            ).all()
-            assert [(row.id, row.media_kind) for row in versions] == [
-                ("source-comic", "COMIC"),
-                ("target-ebook", "EBOOK"),
-            ]
-            assert not db.scalars(
-                select(LibraryMediaVersion).where(
-                    LibraryMediaVersion.work_id == "source-work"
-                )
-            ).all()
+            source = db.get(LibraryWork, "source-work")
+            assert source is not None
+            assert source.hidden is True
             source_pdf = db.get(LibraryVolume, "source-pdf")
             assert source_pdf is not None
             assert source_pdf.version_id == "version-source-work"
-            assert source_pdf.sort_order == 1
-            comic_volume = db.get(LibraryVolume, "source-comic-volume")
-            assert comic_volume is not None
-            assert comic_volume.version_id == "version-source-work"
+            target_versions = db.scalars(
+                select(LibraryMediaVersion).where(
+                    LibraryMediaVersion.work_id == "target-work"
+                )
+            ).all()
+            assert [row.id for row in target_versions] == ["target-ebook"]
+    finally:
+        engine.dispose()
+
+
+def test_merge_works_duplicate_action_is_rejected(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "target-work", with_media_version=False)
+            _insert_work(db, "source-work", with_media_version=False)
+            _insert_volume(
+                db,
+                work_id="source-work",
+                media_version_id="source-ebook",
+                media_kind="EBOOK",
+                volume_id="source-pdf",
+                volume_format="PDF",
+                sort_order=1,
+            )
+
+            with pytest.raises(InvalidDuplicateActionError) as raised:
+                apply_duplicate_actions_command(
+                    db,
+                    (
+                        PreparedDuplicateAction(
+                            duplicate_id="",
+                            source_work_id="source-work",
+                            target_work_id="target-work",
+                            action="MERGE_WORKS",
+                            timestamp=datetime.now(UTC),
+                        ),
+                    ),
+                )
+            assert raised.value.code == "INVALID_DUPLICATE_ACTION"
+
+            source = db.get(LibraryWork, "source-work")
+            assert source is not None
+            assert source.hidden is False
+            source_pdf = db.get(LibraryVolume, "source-pdf")
+            assert source_pdf is not None
+            assert source_pdf.version_id == "version-source-work"
     finally:
         engine.dispose()
 

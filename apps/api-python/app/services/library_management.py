@@ -1,4 +1,4 @@
-"""Library management use cases: merge/split works, category edits, undo, smart shelves."""
+"""Library management use cases: category edits, undo, smart shelves."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
 from app.modules.library.application.management_commands import (
     DeleteLibraryCategory,
     MergeLibraryCategories,
-    MergeLibraryWorks,
     RenameLibraryCategory,
     SyncWorkFacets,
     SyncWorksFacets,
@@ -63,11 +62,6 @@ __all__ = ["count_categories", "list_categories", "list_categories_page"]
 class _LibraryManagementGateway:
     def __init__(self, db: Session) -> None:
         self._db = db
-
-    def merge_works(
-        self, target_work_id: str, source_work_ids: list[str], user_id: str | None
-    ) -> dict[str, object]:
-        return _merge_works(self._db, target_work_id, source_work_ids, user_id)
 
     def merge_categories(
         self,
@@ -238,119 +232,6 @@ def duplicate_groups_page(
             }
         )
     return groups, total, clamped_page
-
-
-def _shelf_snapshot(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
-    if not work_ids or not library_operations.has_table(db, "ShelfWork"):
-        return []
-    return library_works.list_shelf_links_for_works(db, work_ids)
-
-
-def _merge_works(
-    db: Session, target_work_id: str, source_work_ids: list[str], user_id: str | None
-) -> dict[str, Any]:
-    sources = [
-        value
-        for value in dict.fromkeys(source_work_ids)
-        if value and value != target_work_id
-    ]
-    work_rows_by_id = {
-        str(row["id"]): row
-        for row in library_works.list_works_by_ids(db, (target_work_id, *sources))
-        if not bool(row.get("hidden"))
-    }
-    target = work_rows_by_id.get(target_work_id)
-    if not target:
-        raise ValueError("主作品不存在")
-    source_rows = [
-        work_rows_by_id[work_id] for work_id in sources if work_id in work_rows_by_id
-    ]
-    if len(source_rows) != len(sources) or not source_rows:
-        raise ValueError("请选择至少一条可合并的作品")
-    library_ids = {str(row.get("libraryId") or "") for row in (target, *source_rows)}
-    if len(library_ids) != 1 or "" in library_ids:
-        raise ValueError("不能跨书库合并作品")
-
-    all_work_ids = [target_work_id, *sources]
-    media_versions = library_works.list_media_versions_for_works(db, all_work_ids)
-    inverse = {
-        "targetWork": target,
-        "sourceWorks": source_rows,
-        "mediaVersions": media_versions,
-        "volumes": library_operations.snapshot_volumes_for_media_versions(
-            db,
-            [str(item["id"]) for item in media_versions],
-        ),
-        "shelfWorks": _shelf_snapshot(db, all_work_ids),
-    }
-
-    target_tags = _work_tags(target.get("tags"))
-    for source in source_rows:
-        target_tags = _unique_names([*target_tags, *_work_tags(source.get("tags"))])
-    now = _now()
-    merged_description = next(
-        (row.get("description") for row in source_rows if row.get("description")),
-        None,
-    )
-    merged_series_name = next(
-        (row.get("seriesName") for row in source_rows if row.get("seriesName")),
-        None,
-    )
-    facet_write = _prepare_record_facet_write(
-        (target,),
-        now=now,
-        overrides={
-            target_work_id: {
-                "tags": _json(target_tags),
-                "seriesName": target.get("seriesName") or merged_series_name,
-            }
-        },
-    )
-    library_works.update_merged_target_work(
-        db,
-        work_id=target_work_id,
-        tags_json=_json(target_tags),
-        description=merged_description,
-        series_name=merged_series_name,
-        now=now,
-    )
-
-    source_id_set = set(sources)
-    for media_version in media_versions:
-        if media_version.get("workId") not in source_id_set:
-            continue
-        library_works.move_media_version_to_work(
-            db,
-            media_version_id=str(media_version["id"]),
-            target_work_id=target_work_id,
-            now=now,
-        )
-
-    for source_id in sources:
-        library_works.transfer_source_work_side_effects(
-            db,
-            source_work_id=source_id,
-            target_work_id=target_work_id,
-            now=now,
-        )
-
-    operation = library_operations.create_operation(
-        db,
-        user_id=user_id,
-        action="MERGE_WORKS",
-        target_type="work",
-        target_id=target_work_id,
-        summary=f"已将 {len(source_rows) + 1} 条作品记录合并为《{target.get('title') or '未命名作品'}》",
-        payload={"targetWorkId": target_work_id, "sourceWorkIds": sources},
-        inverse=inverse,
-        now=now,
-    )
-    execute_work_facet_write(db, facet_write)
-    return {
-        "targetWorkId": target_work_id,
-        "sourceWorkIds": sources,
-        "operation": operation_view(operation),
-    }
 
 
 def _merge_categories(
@@ -735,12 +616,7 @@ def _undo_operation(
     action = str(operation.get("action") or "")
     now = _now()
     restored_work_rows: list[dict[str, Any]] = []
-    if action == "MERGE_WORKS":
-        restored_work_rows = [
-            inverse.get("targetWork") or {},
-            *(inverse.get("sourceWorks") or []),
-        ]
-    elif action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
+    if action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
         source_work = inverse.get("sourceWork")
         if isinstance(source_work, dict):
             restored_work_rows = [source_work]
@@ -749,39 +625,7 @@ def _undo_operation(
             work for work in inverse.get("works") or [] if isinstance(work, dict)
         ]
     facet_write = _prepare_record_facet_write(restored_work_rows, now=now)
-    if action == "MERGE_WORKS":
-        target = inverse.get("targetWork") or {}
-        sources = inverse.get("sourceWorks") or []
-        work_ids = [
-            str(target.get("id") or ""),
-            *(str(item.get("id") or "") for item in sources),
-        ]
-        shelf_ids = list(
-            dict.fromkeys(
-                str(item.get("shelfId")) for item in inverse.get("shelfWorks") or []
-            )
-        )
-        for shelf_id in shelf_ids:
-            for work_id in work_ids:
-                library_operations.delete_shelf_work_link(
-                    db,
-                    shelf_id=shelf_id,
-                    work_id=work_id,
-                )
-        library_operations.insert_snapshot(db, "LibraryWork", target)
-        for source in sources:
-            library_operations.insert_snapshot(db, "LibraryWork", source)
-        for media_version in inverse.get("mediaVersions") or []:
-            library_operations.insert_snapshot(
-                db,
-                "LibraryMediaVersion",
-                media_version,
-            )
-        for volume in inverse.get("volumes") or []:
-            library_operations.insert_snapshot(db, "LibraryVolume", volume)
-        for shelf in inverse.get("shelfWorks") or []:
-            library_operations.insert_snapshot(db, "ShelfWork", shelf)
-    elif action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
+    if action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
         source_work = inverse.get("sourceWork")
         if isinstance(source_work, dict) and source_work:
             library_operations.insert_snapshot(db, "LibraryWork", source_work)
@@ -907,15 +751,6 @@ def operation_view(operation: dict[str, Any]) -> dict[str, Any]:
             or (to_timestamp_ms(operation.get("expiresAt")) or 0) >= now_timestamp_ms()
         ),
     }
-
-
-def merge_works(
-    db: Session, target_work_id: str, source_work_ids: list[str], user_id: str | None
-) -> dict[str, Any]:
-    result = MergeLibraryWorks(_LibraryManagementGateway(db), db).execute(
-        target_work_id, source_work_ids, user_id
-    )
-    return dict(result)
 
 
 def merge_categories(

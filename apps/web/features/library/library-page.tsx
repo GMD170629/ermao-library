@@ -467,12 +467,11 @@ export function LibraryPage() {
     setBatchDialogAction(action);
   }
 
-  function finishBatchAction(nextMessage: string, mergedWorkId?: string) {
+  function finishBatchAction(nextMessage: string) {
     setMessage(nextMessage);
     setBatchDialogAction(null);
     setSelectedWorkIds([]);
     setReloadKey((key) => key + 1);
-    if (mergedWorkId) router.push(`/works/${encodeURIComponent(mergedWorkId)}`);
   }
 
   return (

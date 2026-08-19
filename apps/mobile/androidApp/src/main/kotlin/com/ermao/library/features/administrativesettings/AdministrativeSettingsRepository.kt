@@ -145,11 +145,6 @@ sealed interface AdministrativeCommand {
         override val ownerRoute = AdministrativeSettingsRoute.RecognitionPolicy
     }
 
-    data class MergeDuplicates(val groupId: String, val canonicalWorkId: String) : AdministrativeCommand {
-        override val operation = AdministrativeOperation.MergeDuplicates
-        override val ownerRoute = AdministrativeSettingsRoute.Duplicates
-    }
-
     data class MergeCategories(val kind: CategoryKind, val targetId: String, val sourceIds: Set<String>) : AdministrativeCommand {
         override val operation = AdministrativeOperation.MergeCategories
         override val ownerRoute = AdministrativeSettingsRoute.CategoryGovernance(kind)
@@ -377,7 +372,6 @@ internal fun AdministrativeCommand.requiredCapability(): AdministrativeCapabilit
     is AdministrativeCommand.StartRecognition,
     is AdministrativeCommand.DeleteOrganizeTask,
     is AdministrativeCommand.SaveRecognitionPolicy,
-    is AdministrativeCommand.MergeDuplicates,
     is AdministrativeCommand.MergeCategories,
     is AdministrativeCommand.RenameCategory,
     is AdministrativeCommand.DeleteCategory,

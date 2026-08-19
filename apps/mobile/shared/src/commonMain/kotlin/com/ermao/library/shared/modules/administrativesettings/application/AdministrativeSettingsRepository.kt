@@ -14,7 +14,6 @@ import com.ermao.library.shared.modules.administrativesettings.domain.CreateMana
 import com.ermao.library.shared.modules.administrativesettings.domain.DeletedManagedUser
 import com.ermao.library.shared.modules.administrativesettings.domain.DirectoryNode
 import com.ermao.library.shared.modules.administrativesettings.domain.DuplicateGroupPage
-import com.ermao.library.shared.modules.administrativesettings.domain.DuplicateMergeResult
 import com.ermao.library.shared.modules.administrativesettings.domain.EmailSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.EventStorage
 import com.ermao.library.shared.modules.administrativesettings.domain.HealthRun
@@ -119,7 +118,6 @@ interface AdministrativeSettingsRepository {
     suspend fun loadOpfQueueStatus(context: AdministrativeSettingsContext): AdministrativeSettingsResult<OpfQueueStatus>
 
     suspend fun listDuplicateGroups(context: AdministrativeSettingsContext, page: Int, pageSize: Int): AdministrativeSettingsResult<DuplicateGroupPage>
-    suspend fun mergeDuplicateWorks(context: AdministrativeSettingsContext, targetWorkId: String, sourceWorkIds: List<String>): AdministrativeSettingsResult<DuplicateMergeResult>
     suspend fun listLibraryOperations(context: AdministrativeSettingsContext): AdministrativeSettingsResult<List<LibraryOperation>>
     suspend fun undoLibraryOperation(context: AdministrativeSettingsContext, operationId: String): AdministrativeSettingsResult<LibraryOperation>
     suspend fun listCategories(context: AdministrativeSettingsContext, filter: CategoryFilter): AdministrativeSettingsResult<CategoryPage>

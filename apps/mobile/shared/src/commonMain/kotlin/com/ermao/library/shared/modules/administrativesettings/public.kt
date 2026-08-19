@@ -64,7 +64,6 @@ typealias OpfQueueStatus = com.ermao.library.shared.modules.administrativesettin
 typealias DuplicateWork = com.ermao.library.shared.modules.administrativesettings.domain.DuplicateWork
 typealias DuplicateGroup = com.ermao.library.shared.modules.administrativesettings.domain.DuplicateGroup
 typealias DuplicateGroupPage = com.ermao.library.shared.modules.administrativesettings.domain.DuplicateGroupPage
-typealias DuplicateMergeResult = com.ermao.library.shared.modules.administrativesettings.domain.DuplicateMergeResult
 typealias LibraryOperation = com.ermao.library.shared.modules.administrativesettings.domain.LibraryOperation
 typealias CategoryKind = com.ermao.library.shared.modules.administrativesettings.domain.CategoryKind
 typealias CategoryFilter = com.ermao.library.shared.modules.administrativesettings.domain.CategoryFilter

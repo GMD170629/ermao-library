@@ -26,7 +26,6 @@ from app.modules.library.application.work_deletion import (
     PreparedLibraryWorkDeletion,
 )
 from app.modules.library.application.work_list import WorkListQuery, WorkListResult
-from app.modules.library.application.work_merge import MergeMetadataWritebackPort
 from app.modules.library.infrastructure import dashboard as library_dashboard
 from app.modules.library.infrastructure import deletion as library_deletion
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
@@ -73,10 +72,6 @@ from app.modules.library.infrastructure.structural_operations import (
 )
 from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeStructure
 from app.modules.library.infrastructure.work_list import list_works as _list_works
-from app.modules.library.infrastructure.work_merge import SqlAlchemyWorkMergeGateway
-from app.modules.metadata.infrastructure.writeback_queue import (
-    write_metadata_to_files_enabled,
-)
 from app.modules.system.public import PreparedSystemEvent
 
 __all__ = [
@@ -106,7 +101,6 @@ __all__ = [
     "reorder_volume",
     "smart_shelf_work_ids",
     "volume_structure_commands",
-    "work_merge_gateway",
 ]
 
 
@@ -132,24 +126,6 @@ def delete_prepared_library_works(
 
 def bookshelf_items(db: Session) -> ListBookshelfItems:
     return ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db))
-
-
-class _MetadataWritebackAdapter(MergeMetadataWritebackPort):
-    def __init__(self, db: Session) -> None:
-        self._db = db
-
-    def enabled(self) -> bool:
-        return write_metadata_to_files_enabled(self._db)
-
-    def enqueue(
-        self, *, work_id: str, media_version_id: str
-    ) -> dict[str, object] | None:
-        # Merge persistence commits ORM changes through the global observer.
-        return None
-
-
-def work_merge_gateway(db: Session) -> SqlAlchemyWorkMergeGateway:
-    return SqlAlchemyWorkMergeGateway(db, _MetadataWritebackAdapter(db))
 
 
 def smart_shelf_work_ids(

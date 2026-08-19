@@ -5,12 +5,10 @@ import {
   Braces,
   Check,
   Eye,
-  GitMerge,
   Hash,
   ImagePlus,
   Images,
   LibraryBig,
-  Loader2,
   Minimize2,
   Replace,
   RotateCcw,
@@ -24,7 +22,6 @@ import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui/button';
-import { Cover } from '../../components/book/cover';
 import { cn } from '../../components/ui/cn';
 import { ContextActionMenu } from '../../components/ui/context-action-menu';
 import { useToast } from '../../components/ui/feedback';
@@ -35,12 +32,6 @@ import {
   canUseLibraryBatchAction,
   type LibraryBatchAction
 } from './model/library-batch-action';
-import {
-  createWorkMerge,
-  fetchWorkMergePreview,
-  type WorkMergeMetadata,
-  type WorkMergePreview
-} from './api/work-merge';
 
 export type { LibraryBatchAction } from './model/library-batch-action';
 
@@ -66,7 +57,6 @@ type FindReplacePreview = {
 };
 
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
-  { value: 'merge', label: '合并图书', shortLabel: '合并', description: '汇总媒介版本和全部卷册', icon: GitMerge },
   { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、标签和系列', icon: Tags },
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
   { value: 'shelves', label: '加入或移除书架', shortLabel: '书架', description: '管理普通书架中的批量归属', icon: LibraryBig },
@@ -108,11 +98,8 @@ export function LibraryBatchContextMenu({
     items={actions.filter((item) => canUseLibraryBatchAction(item.value, canManageSystem)).map((item) => ({
       action: item.value,
       label: i18nAttribute(item.label),
-      description: item.value === 'merge' && selectedCount < 2
-        ? i18nAttribute('请至少选择两本图书')
-        : i18nAttribute(item.description),
+      description: i18nAttribute(item.description),
       icon: item.icon,
-      disabled: item.value === 'merge' && selectedCount < 2,
       destructive: item.value === 'delete'
     }))}
     footer={i18nAttribute('拖动经过行可连续选择；按 Shift 点击可选择区间。')}
@@ -167,7 +154,7 @@ export function LibraryBatchDialog({
   canManageSystem: boolean;
   onActionChange: (action: LibraryBatchAction) => void;
   onClose: () => void;
-  onApplied: (message: string, workId?: string) => void;
+  onApplied: (message: string) => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
@@ -198,15 +185,6 @@ export function LibraryBatchDialog({
   const [coverMaxDimension, setCoverMaxDimension] = useState('1600');
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [deleteSource, setDeleteSource] = useState(false);
-  const [mergePreview, setMergePreview] = useState<WorkMergePreview | null>(null);
-  const [mergeLoading, setMergeLoading] = useState(false);
-  const [mergeError, setMergeError] = useState('');
-  const [mergeMetadata, setMergeMetadata] = useState<WorkMergeMetadata>({
-    title: '', author: '', description: null, seriesName: null, seriesIndex: null, tags: []
-  });
-  const [mergeSeriesIndex, setMergeSeriesIndex] = useState('');
-  const [mergeTags, setMergeTags] = useState('');
-  const [mergeCoverVolumeId, setMergeCoverVolumeId] = useState('');
 
   const activeAction = actions.find((item) => item.value === action);
   const findReplaceSignature = useMemo(() => JSON.stringify({ selectedIds, findField, findText, replacement, regex, caseSensitive, startNumber }), [caseSensitive, findField, findText, regex, replacement, selectedIds, startNumber]);
@@ -256,27 +234,6 @@ export function LibraryBatchDialog({
   useEffect(() => {
     if (action !== 'delete') setDeleteSource(false);
   }, [action]);
-
-  useEffect(() => {
-    if (action !== 'merge' || selectedIds.length < 2) return;
-    const controller = new AbortController();
-    setMergeLoading(true);
-    setMergeError('');
-    setMergePreview(null);
-    fetchWorkMergePreview(selectedIds, controller.signal)
-      .then((nextPreview) => {
-        setMergePreview(nextPreview);
-        setMergeMetadata(nextPreview.suggestedMetadata);
-        setMergeSeriesIndex(nextPreview.suggestedMetadata.seriesIndex === null ? '' : String(nextPreview.suggestedMetadata.seriesIndex));
-        setMergeTags(nextPreview.suggestedMetadata.tags.join(', '));
-        setMergeCoverVolumeId(nextPreview.defaultCoverVolumeId);
-      })
-      .catch((reason) => {
-        if (!controller.signal.aborted) setMergeError(reason instanceof Error ? reason.message : '读取合并预览失败');
-      })
-      .finally(() => { if (!controller.signal.aborted) setMergeLoading(false); });
-    return () => controller.abort();
-  }, [action, selectedIds]);
 
   if (!action || typeof document === 'undefined') return null;
 
@@ -376,28 +333,10 @@ export function LibraryBatchDialog({
       : message;
   }
 
-  async function applyMerge() {
-    const result = await createWorkMerge({
-      workIds: selectedIds,
-      coverVolumeId: mergeCoverVolumeId,
-      metadata: {
-        ...mergeMetadata,
-        title: mergeMetadata.title.trim(),
-        author: mergeMetadata.author.trim(),
-        description: mergeMetadata.description?.trim() || null,
-        seriesName: mergeMetadata.seriesName?.trim() || null,
-        seriesIndex: mergeSeriesIndex.trim() ? Number(mergeSeriesIndex) : null,
-        tags: splitValues(mergeTags)
-      }
-    });
-    return { message: result.operation.summary, workId: result.workId };
-  }
-
   async function submit() {
     setSaving(true);
     try {
-      const mergeResult = action === 'merge' ? await applyMerge() : null;
-      const message = mergeResult?.message ?? (action === 'metadata'
+      const message = action === 'metadata'
         ? await applyMetadata()
         : action === 'find_replace'
           ? await applyFindReplace()
@@ -407,9 +346,9 @@ export function LibraryBatchDialog({
               ? await applyReadingStatus()
               : action === 'covers'
                 ? await applyCovers()
-                : await applyDelete());
+                : await applyDelete();
       toast.success(message);
-      onApplied(message, mergeResult?.workId);
+      onApplied(message);
     } catch (reason) {
       toast.error('批量操作失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
@@ -418,7 +357,6 @@ export function LibraryBatchDialog({
   }
 
   const disabled = selectedIds.length === 0
-    || (action === 'merge' && (selectedIds.length < 2 || mergeLoading || !mergePreview || !mergeMetadata.title.trim() || !mergeCoverVolumeId || (mergeSeriesIndex.trim() !== '' && !Number.isFinite(Number(mergeSeriesIndex)))))
     || (action === 'metadata' && !metadataReady)
     || (action === 'find_replace' && (!previewCurrent || (preview?.changedWorks ?? 0) === 0))
     || (action === 'shelves' && !shelfId)
@@ -444,7 +382,7 @@ export function LibraryBatchDialog({
               const Icon = item.icon;
               const destructive = item.value === 'delete';
               return (
-                <button key={item.value} type="button" title={item.value === 'merge' && selectedIds.length < 2 ? i18nAttribute('请至少选择两本图书') : undefined} disabled={saving || (item.value === 'merge' && selectedIds.length < 2)} onClick={() => onActionChange(item.value)} aria-current={action === item.value ? 'page' : undefined} className={cn(
+                <button key={item.value} type="button" disabled={saving} onClick={() => onActionChange(item.value)} aria-current={action === item.value ? 'page' : undefined} className={cn(
                   'inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition',
                   action === item.value
                     ? destructive ? 'bg-red-700 text-white shadow-sm' : 'bg-[#2D2926] text-white shadow-sm'
@@ -459,46 +397,6 @@ export function LibraryBatchDialog({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-6 md:py-6">
-          {action === 'merge' ? (
-            mergeLoading ? <div className="flex min-h-64 items-center justify-center text-sm text-[#817A74]" role="status"><Loader2 size={18} className="mr-2 animate-spin" /><I18nText>正在整理合并预览…</I18nText></div>
-              : mergeError ? <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">{mergeError}</div>
-                : mergePreview ? <div className="space-y-6">
-                  <div className="grid gap-px overflow-hidden rounded-2xl border border-black/[0.08] bg-black/[0.08] md:grid-cols-2">
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>作品标题</I18nText><input value={mergeMetadata.title} onChange={(event) => setMergeMetadata({ ...mergeMetadata, title: event.target.value })} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>作者</I18nText><input value={mergeMetadata.author} onChange={(event) => setMergeMetadata({ ...mergeMetadata, author: event.target.value })} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>系列名</I18nText><input value={mergeMetadata.seriesName ?? ''} onChange={(event) => setMergeMetadata({ ...mergeMetadata, seriesName: event.target.value || null })} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>系列序号</I18nText><input value={mergeSeriesIndex} onChange={(event) => setMergeSeriesIndex(event.target.value)} inputMode="decimal" className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843] md:col-span-2"><I18nText>标签</I18nText><input value={mergeTags} onChange={(event) => setMergeTags(event.target.value)} placeholder={i18nAttribute("标签，用逗号分隔")} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843] md:col-span-2"><I18nText>简介</I18nText><textarea value={mergeMetadata.description ?? ''} onChange={(event) => setMergeMetadata({ ...mergeMetadata, description: event.target.value || null })} rows={4} className={cn(textareaClass, 'mt-2')} /></label>
-                  </div>
-
-                  <div>
-                    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-black/[0.08] pb-3">
-                      <div><h3 className="text-base font-semibold text-[#302C29]"><I18nText>选择作品封面</I18nText></h3><p className="mt-1 text-xs leading-5 text-[#817A74]"><I18nText>卷册按卷号自动排列；选择其中一个卷册的封面作为新作品封面。</I18nText></p></div>
-                      <span className="text-xs tabular-nums text-[#817A74]">{i18nAttribute('{value0} 个卷册', { value0: mergePreview.mediaGroups.reduce((total, group) => total + group.volumes.length, 0) })}</span>
-                    </div>
-                    <div className="mt-4 space-y-5">
-                      {mergePreview.mediaGroups.map((group) => (
-                        <section key={group.mediaKind} aria-label={i18nAttribute(group.mediaKind === 'EBOOK' ? '电子书' : group.mediaKind === 'COMIC' ? '漫画' : '有声书')}>
-                          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#625C56]"><span className="h-px w-5 bg-[#EF4D2F]" />{i18nAttribute(group.mediaKind === 'EBOOK' ? '电子书' : group.mediaKind === 'COMIC' ? '漫画' : '有声书')}<span className="font-normal tabular-nums text-[#97908A]">{group.volumes.length}</span></div>
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            {group.volumes.map((volume) => {
-                              const selected = mergeCoverVolumeId === volume.id;
-                              return <button key={volume.id} type="button" onClick={() => setMergeCoverVolumeId(volume.id)} aria-pressed={selected} className={cn('grid grid-cols-[46px_minmax(0,1fr)_20px] items-center gap-3 rounded-xl border p-2.5 text-left transition', selected ? 'border-[#EF4D2F] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:border-[#E8A18D]')}>
-                                <Cover book={{ id: volume.id, title: volume.title, author: '', coverUrl: volume.coverUrl }} size="small" className="aspect-[2/3] w-[46px] rounded-md" />
-                                <span className="min-w-0"><span data-i18n-skip className="block truncate text-sm font-semibold text-[#35312E]">{volume.title}</span><span className="mt-1 block truncate text-[11px] text-[#817A74]"><span data-i18n-skip>{volume.sourceWorkTitle}</span> · {volume.format}</span></span>
-                                <span className={cn('flex h-5 w-5 items-center justify-center rounded-full border', selected ? 'border-[#EF4D2F] bg-[#EF4D2F] text-white' : 'border-black/[0.18] text-transparent')}><Check size={13} /></span>
-                              </button>;
-                            })}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-                  </div>
-
-                </div> : null
-          ) : null}
-
           {action === 'metadata' ? (
             <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
@@ -673,8 +571,8 @@ export function LibraryBatchDialog({
           <div className="text-xs leading-5 text-[#837C75]"><I18nText>仅处理当前已选择的 </I18nText>{selectedIds.length} <I18nText>本图书；未选择的项目不会变化。</I18nText></div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" disabled={saving} onClick={onClose}><I18nText>取消</I18nText></Button>
-            <Button type="button" variant={action === 'delete' ? 'danger' : 'primary'} icon={action === 'delete' ? Trash2 : action === 'merge' ? GitMerge : undefined} loading={saving} loadingText={action === 'delete' ? i18nAttribute("删除中") : action === 'merge' ? i18nAttribute("合并中") : i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
-              {action === 'merge' ? i18nAttribute("确认合并") : action === 'find_replace' ? i18nAttribute("确认替换") : action === 'delete' ? i18nAttribute("确认删除") : i18nAttribute("应用更改")}
+            <Button type="button" variant={action === 'delete' ? 'danger' : 'primary'} icon={action === 'delete' ? Trash2 : undefined} loading={saving} loadingText={action === 'delete' ? i18nAttribute("删除中") : i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
+              {action === 'find_replace' ? i18nAttribute("确认替换") : action === 'delete' ? i18nAttribute("确认删除") : i18nAttribute("应用更改")}
             </Button>
           </div>
         </footer>

@@ -1231,32 +1231,20 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'asc' });
 
   const managedBookRow = page.locator('[data-work-id="desktop-list-work"]');
-  await page.route('**/api/works/merge/preview', async (route) => {
-    await route.fulfill({ json: { ok: true, data: {
-      works: managementBooks.slice(0, 2).map((item) => ({ id: item.id, title: item.title, author: item.author })),
-      mediaGroups: [{ mediaKind: 'EBOOK', volumes: managementBooks.slice(0, 2).map((item, index) => ({ id: `merge-volume-${index + 1}`, title: `第 ${index + 1} 卷`, volumeIndex: index + 1, format: 'EPUB', sourceWorkId: item.id, sourceWorkTitle: item.title, coverUrl: item.coverUrl, hasCover: true })) }],
-      suggestedMetadata: { title: '桌面列表入口测试', author: '测试作者', description: null, seriesName: '测试系列', seriesIndex: null, tags: [] },
-      defaultCoverVolumeId: 'merge-volume-1',
-      writeMetadataToFiles: false
-    } } });
-  });
   await expect(managedBookRow.getByRole('button', { name: '查看《桌面列表入口测试》', exact: true })).toHaveCount(0);
   await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toBeVisible();
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
   await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toBeVisible();
-  await expect(batchDialog.getByRole('button', { name: '合并', exact: true })).toBeDisabled();
+  await expect(batchDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
   await batchDialog.getByRole('button', { name: '关闭批量操作' }).click();
   await page.locator('[data-work-id="desktop-list-work-2"]').getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
-  await page.getByRole('dialog', { name: '批量更新元数据' }).getByRole('button', { name: '合并', exact: true }).click();
-  const mergeDialog = page.getByRole('dialog', { name: '合并图书' });
-  await expect(mergeDialog.getByRole('heading', { name: '选择作品封面' })).toBeVisible();
-  await expect(mergeDialog.getByRole('button', { name: /第 1 卷/ })).toHaveAttribute('aria-pressed', 'true');
-  await expect(mergeDialog.getByText(/合并会创建新的作品记录|7 天内撤销/)).toHaveCount(0);
-  await expect(mergeDialog.getByRole('button', { name: '确认合并' })).toBeEnabled();
-  await mergeDialog.getByRole('button', { name: '关闭批量操作' }).click();
+  const twoBookDialog = page.getByRole('dialog', { name: '批量更新元数据' });
+  await expect(twoBookDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
+  await expect(twoBookDialog.getByRole('button', { name: '删除', exact: true })).toBeEnabled();
+  await twoBookDialog.getByRole('button', { name: '关闭批量操作' }).click();
   await managedBookRow.click({ button: 'right' });
   await expect(page.getByRole('menuitem', { name: /批量删除图书/ })).toBeVisible();
   await page.keyboard.press('Escape');
