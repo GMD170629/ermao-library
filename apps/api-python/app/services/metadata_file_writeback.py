@@ -26,12 +26,14 @@ def load_metadata_writeback_projection(
     db: Session,
     *,
     work_id: str,
+    version_id: str | None = None,
     media_version_id: str | None = None,
     volume_id: str | None = None,
 ) -> MetadataWritebackProjection:
     return writeback_queue.load_metadata_writeback_projection(
         db,
         work_id=work_id,
+        version_id=version_id,
         media_version_id=media_version_id,
         volume_id=volume_id,
     )

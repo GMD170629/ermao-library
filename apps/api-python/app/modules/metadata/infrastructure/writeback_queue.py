@@ -171,6 +171,7 @@ def _visible_volumes_for_work(
     db: Session,
     *,
     work_id: str,
+    version_id: str | None = None,
     volume_id: str | None = None,
 ) -> tuple[LibraryVolume, ...]:
     query = (
@@ -181,6 +182,8 @@ def _visible_volumes_for_work(
             LibraryVolume.hidden.is_(False),
         )
     )
+    if version_id is not None:
+        query = query.where(LibraryVersion.id == version_id)
     if volume_id is not None:
         query = query.where(LibraryVolume.id == volume_id)
     return tuple(db.scalars(query.order_by(*_work_volume_order())).all())
@@ -190,10 +193,17 @@ def load_metadata_writeback_projection(
     db: Session,
     *,
     work_id: str,
+    version_id: str | None = None,
     media_version_id: str | None = None,
     volume_id: str | None = None,
 ) -> MetadataWritebackProjection:
-    """Load an explicit projection; callers prepare intents before their write UoW."""
+    """Load an explicit projection; callers prepare intents before their write UoW.
+
+    version_id (LibraryVersion.id): structural filter — only volumes belonging to
+    this LibraryVersion are included.  Must NOT be confused with media_version_id.
+
+    media_version_id (LibraryMediaVersion.id): media-kind projection / compat filter.
+    """
 
     work = db.scalar(select(LibraryWork).where(LibraryWork.id == work_id))
     if work is None:
@@ -222,7 +232,9 @@ def load_metadata_writeback_projection(
         selected_kind = None
         media_ids = tuple(str(row.id) for row in media_rows)
     matched_volumes: list[tuple[LibraryVolume, str]] = []
-    for volume in _visible_volumes_for_work(db, work_id=work_id, volume_id=volume_id):
+    for volume in _visible_volumes_for_work(
+        db, work_id=work_id, version_id=version_id, volume_id=volume_id
+    ):
         volume_kind = media_kind_of(volume)
         if selected_kind is not None and volume_kind != selected_kind:
             continue
