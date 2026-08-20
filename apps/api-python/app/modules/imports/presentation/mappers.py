@@ -10,6 +10,7 @@ from time import perf_counter
 from typing import Any
 
 from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.bootstrap.imports import import_http_store
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 def _has_table(db: Session, table: str) -> bool:
     try:
         return table in inspect(db.connection()).get_table_names()
-    except Exception:
+    except SQLAlchemyError:
         return False
 
 
@@ -106,22 +107,12 @@ def friendly_import_error(
         return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
     if code == "IMPORT_WORKER_FAILED":
         return "导入工作进程意外中断，本次任务已经结束，可以稍后重试。"
-    if code == "CONVERTER_UNAVAILABLE":
-        return "遗留文件处理任务无法继续；请使用源文件重新导入。"
     if code == "AUDIO_TRACK_LIMIT_EXCEEDED":
         return "有声书音轨超过 10000 条，请按卷或子目录拆分后重新导入。"
     if code == "DRM_PROTECTED":
         return "文件可能受 DRM 保护，无法打开。原文件已保留。"
     if code == "TEXT_ENCODING_UNCERTAIN":
         return "无法可靠识别 TXT 编码。原文件已保留，可在后续高级模式中手动指定。"
-    if code == "CONVERSION_TIMEOUT":
-        return "遗留文件处理任务超时。原文件已保留，请重新导入。"
-    if code == "INVALID_EPUB_OUTPUT":
-        return "文件处理结果未通过完整性检查。原文件已保留，可以重试。"
-    if code == "EPUB_NORMALIZATION_FAILED":
-        return (
-            "遗留文件处理结果无法保留章节锚点和链接。原文件已保留，请重新导入。"
-        )
     if re.search(r"EACCES|permission|权限", text_value, re.IGNORECASE):
         return "权限不足：请确认容器用户可以读取该目录和文件。"
     if re.search(r"ENOENT|not found|不存在", text_value, re.IGNORECASE):
@@ -153,14 +144,8 @@ def import_task_view(
 ) -> dict[str, Any]:
     page_hydrated = "_pageLogs" in task
     library = task.get("_pageLibrary") if page_hydrated else None
-    if (
-        not page_hydrated
-        and task.get("libraryId")
-        and _has_table(db, "Library")
-    ):
-        library = import_http_store.get_library(
-            db, str(task.get("libraryId"))
-        )
+    if not page_hydrated and task.get("libraryId") and _has_table(db, "Library"):
+        library = import_http_store.get_library(db, str(task.get("libraryId")))
     book = None
     if page_hydrated:
         work = task.get("_pageWork")
@@ -219,7 +204,6 @@ def import_task_view(
     view.pop("_pageLibrary", None)
     view.pop("_pageWork", None)
     view.pop("_pageLogs", None)
-    view.pop("_pageConversion", None)
     return view
 
 

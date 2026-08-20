@@ -390,7 +390,6 @@ def _volume_summary(
         sortOrder=volume.sort_order,
         format=volume.format,
         readerType=reader_type.value,
-        derivedFromVolumeId=volume.derived_from_volume_id,
         pageCount=volume.page_count,
         chapterCount=volume.chapter_count,
         durationMs=volume.duration_ms,
@@ -658,9 +657,7 @@ def get_comic_manifest_v4(
         ReaderValidationError,
     ),
 ]:
-    _user, _scope, bootstrap = _authorized_bootstrap(
-        db, request, settings, volume_id
-    )
+    _user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
     _source, source_format = _comic_source(bootstrap)
     index = media_public.load_persisted_volume_page_index(db, volume_id)
     etag = f'W/"comic-manifest-{volume_id}-{len(index.pages)}"'
@@ -699,9 +696,7 @@ def get_comic_manifest_v4(
             schemaVersion=1,
             kind="comic",
             volumeId=volume_id,
-            sourceFormat=cast(
-                Literal["cbz", "zip", "cbr", "rar"], source_format
-            ),
+            sourceFormat=cast(Literal["cbz", "zip", "cbr", "rar"], source_format),
             pageCount=len(pages),
             readingOrder=pages,
         )
@@ -743,9 +738,7 @@ def get_comic_page_v4(
         media_type=page.media_type,
         resource_id=page.id,
     )
-    page_response.headers["Cache-Control"] = (
-        "private, max-age=31536000, immutable"
-    )
+    page_response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
     page_response.headers["X-Comic-Page-Index"] = str(page_index)
     page_response.headers["X-Comic-Resource-Href"] = f"pages/{page_index}"
     return page_response

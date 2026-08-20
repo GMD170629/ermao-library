@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 
+from sqlalchemy import func, select
+
 from app.bootstrap.imports import (
     clear_import_queue_records,
     persist_import_queue_operation_checkpoint,
 )
 from app.models.auth import User
 from app.models.import_pipeline import (
-    BookConversionTask,
     ImportAsset,
     ImportLog,
     ImportTask,
@@ -17,7 +18,6 @@ from app.modules.imports.application.queue_control import (
     PreparedImportQueueOperationCheckpoint,
 )
 from app.services.system_events import prepare_system_event
-from sqlalchemy import func, select
 
 
 def test_clear_import_queue_deletes_every_status_and_preserves_content(
@@ -78,14 +78,6 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
                 import_task_id="clear-parsing",
                 message="processing",
             ),
-            BookConversionTask(
-                id="clear-conversion",
-                import_task_id="clear-completed",
-                source_volume_id=volume.id,
-                idempotency_key="test:clear-conversion",
-                source_format="MOBI",
-                source_path=str(source_file),
-            ),
         ]
     )
     db_session.commit()
@@ -96,7 +88,6 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
     assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
     assert db_session.scalar(select(func.count()).select_from(ImportAsset)) == 0
     assert db_session.scalar(select(func.count()).select_from(ImportLog)) == 0
-    assert db_session.scalar(select(func.count()).select_from(BookConversionTask)) == 0
     assert db_session.get(LibraryWork, work.id) is not None
     assert source_file.read_bytes() == b"source"
 

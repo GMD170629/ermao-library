@@ -200,26 +200,6 @@ def _delete_source_paths(paths: list[Path]) -> dict[str, Any]:
     }
 
 
-def _conversion_output_paths(
-    conversion: dict[str, Any] | None, settings: Settings
-) -> list[Path]:
-    output_value = (conversion or {}).get("outputPath")
-    if not output_value:
-        return []
-    try:
-        output = Path(str(output_value)).expanduser().resolve()
-        conversion_root = settings.conversion_root.resolve()
-    except OSError:
-        return []
-    if output == conversion_root or conversion_root not in output.parents:
-        return []
-    paths = [output]
-    sidecar = output.with_name("normalization.json")
-    if sidecar.exists() or sidecar.is_symlink():
-        paths.append(sidecar)
-    return paths
-
-
 def _delete_work_records(db: Session, work_id: str) -> dict[str, Any]:
     return library_deletion.delete_work_records(db, work_id)
 
@@ -309,105 +289,6 @@ def _delete_works_and_storage(
         "missingSourceFiles": list(outcome.missing_source_paths),
         "failedFileDeletes": list(outcome.failed_file_deletes),
     }
-
-
-def _delete_import_linked_library_scope(
-    db: Session,
-    task: dict[str, Any],
-    settings: Settings,
-    conversion: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Delete the volume resolved from a completed import task's exact file path."""
-
-    target = _resolve_import_linked_volume_target(db, task, conversion, settings)
-    if target is None:
-        return {
-            "deleted": False,
-            "deletedWorkRecord": False,
-            "deletedDatabaseRecords": 0,
-            "deletedFiles": 0,
-            "failedFileDeletes": [],
-            "workId": None,
-        }
-
-    deleted_records = library_deletion.delete_volume_scope(db, target.volume_id)
-    # The volume deletion adapter removes an empty media version and then an
-    # empty work. Checking the work directly avoids inferring identity from a
-    # repeated or absent volume number.
-    deleted_work = not library_deletion.work_exists(db, target.work_id)
-    return {
-        "deleted": deleted_records == 1,
-        "deletedWorkRecord": deleted_work,
-        "deletedDatabaseRecords": deleted_records,
-        "deletedFiles": 0,
-        "failedFileDeletes": [],
-        "workId": target.work_id,
-    }
-
-
-def _collect_import_linked_library_scope_paths(
-    db: Session,
-    task: dict[str, Any],
-    settings: Settings,
-    conversion: dict[str, Any] | None = None,
-) -> list[Path]:
-    """Collect managed files for the import task's exact volume target."""
-
-    target = _resolve_import_linked_volume_target(db, task, conversion, settings)
-    if target is None:
-        return []
-
-    paths: list[Path] = []
-
-    def add_path(value: object) -> None:
-        path = _storage_managed_path(str(value), settings) if value else None
-        if path:
-            paths.append(path)
-
-    add_path(target.cover_path)
-    for file in library_deletion.list_files_for_volume(db, target.volume_id):
-        add_path(file.get("path"))
-    return list(dict.fromkeys(paths))
-
-
-def _resolve_import_linked_volume_target(
-    db: Session,
-    task: dict[str, Any],
-    conversion: dict[str, Any] | None,
-    settings: Settings,
-) -> library_deletion.VolumeDeletionTarget | None:
-    file_paths: list[str] = []
-    for value in (
-        (conversion or {}).get("outputPath"),
-        task.get("sourcePath"),
-    ):
-        if not value:
-            continue
-        path = Path(str(value)).expanduser()
-        if not path.is_absolute():
-            path = settings.resolved_storage_root / path
-        raw_path = str(path)
-        try:
-            resolved_path = str(path.resolve())
-        except (OSError, RuntimeError):
-            resolved_path = raw_path
-        for candidate in (resolved_path, raw_path):
-            if candidate not in file_paths:
-                file_paths.append(candidate)
-
-    target = library_deletion.find_volume_deletion_target_by_file_paths(db, file_paths)
-    if target is not None:
-        return target
-
-    # Compatibility for older completed tasks whose source was copied or moved
-    # after import. The volume identifier remains precise and does not require a
-    # potentially stale work identifier.
-    volume_id = str(task.get("volumeId") or "").strip()
-    return (
-        library_deletion.find_volume_deletion_target_by_id(db, volume_id)
-        if volume_id
-        else None
-    )
 
 
 def _path_tree(paths: list[str], root_label: str) -> dict[str, Any]:

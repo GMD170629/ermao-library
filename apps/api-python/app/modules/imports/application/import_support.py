@@ -26,7 +26,6 @@ from app.modules.imports.application.identity_policy import (
     normalize_identity_part,
     parse_bracketed_series_identity,
 )
-from app.modules.imports.application.import_policy import REFLOWABLE_SOURCE_EXTS
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
@@ -35,6 +34,9 @@ from app.modules.imports.application.ports import (
 from app.modules.imports.application.query_ports import Record
 from app.modules.imports.application.release_titles import parse_release_title
 from app.modules.imports.domain.content_classification import ContentClassification
+from app.modules.imports.domain.reflowable_formats import (
+    REFLOWABLE_SOURCE_EXTENSIONS,
+)
 
 SUPPORTED_EXTS = {
     ".epub",
@@ -43,7 +45,7 @@ SUPPORTED_EXTS = {
     ".rar",
     ".zip",
     ".pdf",
-    *REFLOWABLE_SOURCE_EXTS,
+    *REFLOWABLE_SOURCE_EXTENSIONS,
 }
 
 
@@ -55,6 +57,8 @@ class BoundTopologyTarget:
     @property
     def version_id(self) -> str:
         return str(self.volume["versionId"])
+
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_EPUB_SIZE_BYTES = 512 * 1024 * 1024
 MAX_TEXT_EBOOK_SIZE_BYTES = 512 * 1024 * 1024
@@ -66,7 +70,7 @@ def import_file_size_limit_bytes_for_ext(ext: str) -> int | None:
     normalized = normalized.lower()
     if normalized == ".epub":
         return MAX_EPUB_SIZE_BYTES
-    if normalized in REFLOWABLE_SOURCE_EXTS:
+    if normalized in REFLOWABLE_SOURCE_EXTENSIONS:
         return MAX_TEXT_EBOOK_SIZE_BYTES
     if normalized in {".cbr", ".cbz", ".rar", ".zip"}:
         return MAX_ARCHIVE_SIZE_BYTES
@@ -99,13 +103,6 @@ def _usable_merge_identifier(identifier: str | None) -> bool:
             r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value
         )
     )
-
-
-def _source_group_key(options: ImportOptions, _fallback_title: str) -> str:
-    source_directory = str(
-        (options.original_source_file_path or options.source_file_path).resolve().parent
-    )
-    return f"{options.origin.lower()}:{_hash_text(source_directory)[:24]}"
 
 
 def _source_filename_title(options: ImportOptions) -> str:
@@ -438,7 +435,6 @@ _TOPOLOGY_VOLUME_COLUMNS = frozenset(
         "volumeIndex",
         "sortOrder",
         "resourceKey",
-        "sourceGroupKey",
         "libraryId",
         "origin",
         "createdAt",
@@ -461,6 +457,7 @@ def _persist_import_volume(
         columns=metadata_columns,
     )
     return {**target.volume, **metadata_columns}
+
 
 def _preferred_work_cover_path(
     queries: ImportLibraryQueries,

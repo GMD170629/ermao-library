@@ -32,7 +32,6 @@ class _ReaderRepository:
             volume_index=1,
             sort_order=0,
             format="MOBI",
-            derived_from_volume_id=None,
             page_count=None,
             chapter_count=None,
             duration_ms=None,

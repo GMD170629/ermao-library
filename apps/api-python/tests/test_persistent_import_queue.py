@@ -73,7 +73,6 @@ def test_queue_clear_waits_for_active_task_and_stops_before_deleting(monkeypatch
     runtime = _BlockingRuntime()
     settings = SimpleNamespace(
         import_queue_interval_seconds=0.01,
-        ebook_conversion_timeout_seconds=1,
     )
     worker = persistent_import_queue.PersistentImportWorker(
         runtime,

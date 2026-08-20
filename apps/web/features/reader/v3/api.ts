@@ -22,7 +22,6 @@ export type ReaderVolume = Readonly<{
   sortOrder: number;
   format: string;
   readerType: VisualReaderType | 'audio';
-  derivedFromVolumeId: string | null;
   pageCount: number | null;
   chapterCount: number | null;
   durationMs: number | null;
@@ -120,7 +119,6 @@ function mapVolume(value: unknown): ReaderVolume | null {
     sortOrder: numberValue(item.sortOrder),
     format: stringValue(item.format),
     readerType,
-    derivedFromVolumeId: nullableString(item.derivedFromVolumeId),
     pageCount: nullableNumber(item.pageCount),
     chapterCount: nullableNumber(item.chapterCount),
     durationMs: nullableNumber(item.durationMs),

@@ -1056,8 +1056,6 @@ def upgrade() -> None:
         ),
         sa.Column("suggestedMediaKind", sa.String(length=32), nullable=True),
         sa.Column("resourceKey", sa.String(length=191), nullable=False),
-        sa.Column("sourceGroupKey", sa.Text(), nullable=True),
-        sa.Column("derivedFromVolumeId", sa.String(length=191), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("language", sa.String(length=191), nullable=True),
         sa.Column("publisher", sa.Text(), nullable=True),
@@ -1093,12 +1091,6 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("updatedAt", sa.BigInteger(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["derivedFromVolumeId"],
-            ["LibraryVolume.id"],
-            onupdate="CASCADE",
-            ondelete="SET NULL",
-        ),
         sa.ForeignKeyConstraint(
             ["versionId"], ["LibraryVersion.id"], onupdate="CASCADE", ondelete="CASCADE"
         ),
@@ -1446,77 +1438,6 @@ def upgrade() -> None:
         batch_op.create_index(
             "ReaderProgressMutation_userId_volumeId_revision_idx",
             ["userId", "volumeId", "revision"],
-            unique=False,
-        )
-
-    op.create_table(
-        "BookConversionTask",
-        sa.Column("id", sa.String(length=191), nullable=False),
-        sa.Column("importTaskId", sa.String(length=191), nullable=False),
-        sa.Column("sourceVolumeId", sa.String(length=191), nullable=False),
-        sa.Column("derivedVolumeId", sa.String(length=191), nullable=True),
-        sa.Column("idempotencyKey", sa.String(length=191), nullable=False),
-        sa.Column("mode", sa.String(length=191), server_default="AUTO", nullable=False),
-        sa.Column("sourceFormat", sa.String(length=191), nullable=False),
-        sa.Column(
-            "targetFormat", sa.String(length=191), server_default="EPUB", nullable=False
-        ),
-        sa.Column("sourcePath", sa.Text(), nullable=False),
-        sa.Column("outputPath", sa.Text(), nullable=True),
-        sa.Column("sourceKey", sa.String(length=191), nullable=True),
-        sa.Column(
-            "converter",
-            sa.String(length=191),
-            server_default="shuku-internal",
-            nullable=False,
-        ),
-        sa.Column("converterVersion", sa.String(length=191), nullable=True),
-        sa.Column("optionsJson", sa.Text(), server_default="{}", nullable=False),
-        sa.Column(
-            "status", sa.String(length=32), server_default="QUEUED", nullable=False
-        ),
-        sa.Column("progress", sa.Integer(), server_default="0", nullable=False),
-        sa.Column("attempts", sa.Integer(), server_default="0", nullable=False),
-        sa.Column("retryable", sa.Boolean(), server_default="0", nullable=False),
-        sa.Column("errorCode", sa.String(length=191), nullable=True),
-        sa.Column("errorSummary", sa.Text(), nullable=True),
-        sa.Column("startedAt", sa.BigInteger(), nullable=True),
-        sa.Column("finishedAt", sa.BigInteger(), nullable=True),
-        sa.Column(
-            "createdAt",
-            sa.BigInteger(),
-            server_default=(sa.func.unixepoch() * 1000),
-            nullable=False,
-        ),
-        sa.Column("updatedAt", sa.BigInteger(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["derivedVolumeId"],
-            ["LibraryVolume.id"],
-            onupdate="CASCADE",
-            ondelete="SET NULL",
-        ),
-        sa.ForeignKeyConstraint(
-            ["importTaskId"], ["ImportTask.id"], onupdate="CASCADE", ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["sourceVolumeId"],
-            ["LibraryVolume.id"],
-            onupdate="CASCADE",
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "idempotencyKey", name="BookConversionTask_idempotencyKey_key"
-        ),
-        sa.UniqueConstraint("importTaskId"),
-    )
-    with op.batch_alter_table("BookConversionTask", schema=None) as batch_op:
-        batch_op.create_index(
-            "BookConversionTask_sourceKey_idx", ["sourceKey"], unique=False
-        )
-        batch_op.create_index(
-            "BookConversionTask_status_createdAt_idx",
-            ["status", "createdAt"],
             unique=False,
         )
 

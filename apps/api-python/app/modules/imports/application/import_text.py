@@ -1,4 +1,4 @@
-"""Original reflowable-source import and deferred-conversion completion."""
+"""Import original reflowable source files for parser-backed reading."""
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ from app.modules.imports.application.identity_resolution import (
     resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
+    _bound_topology_target,
     _classification_columns,
     _classification_result_type,
-    _bound_topology_target,
     _finalize_work_cover,
     _hash_text,
     _id,
@@ -29,7 +29,6 @@ from app.modules.imports.application.import_support import (
     _now,
     _persist_import_volume,
     _prepared_default_cover,
-    _source_group_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -159,7 +158,6 @@ def _import_reflowable_source(
     version = _import_version(store, work["id"], topology_target)
     volume_title = resolved_local.metadata.volume_title or identity.title
     volume_index = identity.volume_index
-    source_group_key = _source_group_key(options, identity.title)
     store.update_import_task(
         task_id, columns={"message": f"正在建立 {source_format} 原始文件卷册"}
     )
@@ -174,7 +172,6 @@ def _import_reflowable_source(
             "sortOrder": 0,
             "format": source_format,
             "resourceKey": _hash_text(str(source_path)),
-            "sourceGroupKey": source_group_key,
             "libraryId": options.library_id,
             "origin": options.origin,
             "description": metadata.description,

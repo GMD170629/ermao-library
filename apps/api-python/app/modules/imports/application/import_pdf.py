@@ -18,20 +18,19 @@ from app.modules.imports.application.identity_resolution import (
     resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
+    _bound_topology_target,
     _classification_columns,
     _classification_result_type,
-    _bound_topology_target,
     _file_resource_key,
     _finalize_work_cover,
     _hash_text,
     _id,
-    _insert_identity_metadata,
     _import_version,
     _import_work,
+    _insert_identity_metadata,
     _now,
     _persist_import_volume,
     _prepared_default_cover,
-    _source_group_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -105,11 +104,9 @@ def _import_pdf(
         normalize_media_kind_policy(options.media_kind_policy),
         ContentEvidence(volume_format="PDF", image_only=is_image_only),
     )
-    media_kind = classification.media_kind
     result_type = _classification_result_type(classification)
     topology_target = _bound_topology_target(queries, options)
     tags = ["pdf"]
-    source_group_key = _source_group_key(options, identity.title)
     work, _created = _import_work(
         store,
         queries,
@@ -158,7 +155,6 @@ def _import_pdf(
                 ),
                 "format": "PDF",
                 "resourceKey": _file_resource_key("pdf", source_path),
-                "sourceGroupKey": source_group_key,
                 "libraryId": options.library_id,
                 "origin": options.origin,
                 "description": inspection.description,

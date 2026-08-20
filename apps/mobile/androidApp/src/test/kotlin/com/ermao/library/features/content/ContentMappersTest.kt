@@ -64,7 +64,6 @@ class ContentMappersTest {
             classification = VolumeClassification("AUTO", "epub", MediaKind.Ebook),
             readable = true,
             kindleSendAvailable = true,
-            derivedFromVolumeId = null,
             publisher = null,
             publishedAt = "2010-11-01",
             language = "zh-CN",

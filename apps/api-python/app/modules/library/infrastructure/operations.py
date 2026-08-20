@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models.auth import ReaderBookmark
 from app.models.import_pipeline import (
-    BookConversionTask,
     ImportAsset,
     ImportTask,
     KindleSendTask,
@@ -60,7 +59,6 @@ _SNAPSHOT_MODELS: dict[str, type] = {
         KindleSendTask,
         OrganizeJob,
         MetadataLookupTask,
-        BookConversionTask,
     )
 }
 
@@ -83,7 +81,6 @@ _RESTORE_ORDER = (
     "KindleSendTask",
     "OrganizeJob",
     "MetadataLookupTask",
-    "BookConversionTask",
 )
 
 
@@ -389,22 +386,10 @@ def capture_volume_delete_snapshot(
                 else MetadataLookupTask.volume_id == volume_id
             ),
         ),
-        "BookConversionTask": _rows(
-            db,
-            BookConversionTask,
-            (BookConversionTask.source_volume_id == volume_id)
-            | (BookConversionTask.derived_volume_id == volume_id),
-        ),
         "ImportAsset": (
             _rows(db, ImportAsset, ImportAsset.file_id.in_(file_ids))
             if file_ids
             else []
-        ),
-        # Derived resources survive source deletion but their link is set NULL.
-        "dependentVolumes": _rows(
-            db,
-            LibraryVolume,
-            LibraryVolume.derived_from_volume_id == volume_id,
         ),
     }
     if deletes_version:

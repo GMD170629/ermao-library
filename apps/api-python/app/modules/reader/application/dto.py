@@ -41,7 +41,6 @@ class ReaderVolumeDto:
     volume_index: float | None
     sort_order: int
     format: str
-    derived_from_volume_id: str | None
     page_count: int | None
     chapter_count: int | None
     duration_ms: int | None

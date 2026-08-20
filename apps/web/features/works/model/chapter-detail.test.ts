@@ -6,7 +6,7 @@ import { detailReaderHref, singleVolumeEbook, syntheticPdfPageUnits } from './ch
 function volume(overrides: Partial<VolumeResource> = {}): VolumeResource {
   return {
     id: 'volume-1', versionId: 'version-1', title: '第一卷', volumeIndex: 1, sortOrder: 0,
-    format: 'EPUB', readerType: 'reflowable', classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null }, derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null,
+    format: 'EPUB', readerType: 'reflowable', classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null }, publisher: null, publishedAt: null, language: null,
     isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null,
     coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: 3, durationMs: null, trackCount: null, progress: 0,
     lastReadAt: null, hidden: false, readable: true, kindleSendAvailable: true, files: [], ...overrides

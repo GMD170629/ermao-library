@@ -40,7 +40,7 @@ ENV NODE_ENV=production \
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates libmobi-tools libstdc++6 unar \
+  && apt-get install -y --no-install-recommends openssl ca-certificates libstdc++6 unar \
   && rm -rf /var/lib/apt/lists/* \
   && node --version \
   && python --version
@@ -61,7 +61,7 @@ RUN python -m venv /opt/shuku-python \
   && /opt/shuku-python/bin/python -m compileall -q ./apps/api-python/app \
   && rm -rf ./apps/api-python/build ./apps/api-python/*.egg-info \
   && chmod +x ./scripts/start-unified-app.sh \
-  && mkdir -p /app/apps/web/.next/cache /app/storage/database /app/storage/covers /app/storage/indexes /app/storage/conversions /app/storage/temp/conversions /app/storage/logs /books \
+  && mkdir -p /app/apps/web/.next/cache /app/storage/database /app/storage/covers /app/storage/indexes /app/storage/logs /books \
   && chmod 1777 /app/apps/web/.next/cache
 
 EXPOSE 3000

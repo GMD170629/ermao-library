@@ -24,7 +24,6 @@ from sqlalchemy.orm import Session
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import TimestampMilliseconds
 from app.models import (
-    BookConversionTask,
     BookIdentityCache,
     ExternalMetadataCache,
     ImportAsset,
@@ -90,7 +89,6 @@ TABLE_MODELS: dict[str, type] = {
     "WorkDetailPreference": WorkDetailPreference,
     "ImportTask": ImportTask,
     "ImportAsset": ImportAsset,
-    "BookConversionTask": BookConversionTask,
     "ImportLog": ImportLog,
     "OrganizeJob": OrganizeJob,
     "MetadataSuggestion": MetadataSuggestion,

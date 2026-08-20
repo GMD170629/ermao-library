@@ -18,7 +18,6 @@ function volume(id: string, versionId: string, sortOrder: number, progress = 0):
     format: 'EPUB',
     readerType: 'reflowable',
     classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null },
-    derivedFromVolumeId: null,
     publisher: null,
     publishedAt: null,
     language: null,

@@ -133,7 +133,6 @@ test('work detail volume covers support selection, keyboard-accessible context m
     volumeIndex: sortOrder + 1,
     sortOrder,
     format: 'CBZ',
-    derivedFromVolumeId: null,
     publisher: null,
     publishedAt: null,
     language: null,
@@ -891,7 +890,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
       sourceKey: '__implicit__',
       sourceName: null,
       completed: false,
-      volumes: [{ id: 'mobile-volume', versionId: 'mobile-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, files: [] }]
+      volumes: [{ id: 'mobile-volume', versionId: 'mobile-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, files: [] }]
     }]
   };
 

@@ -296,15 +296,6 @@ class LibraryVolume(Base):
     resource_key: Mapped[str] = mapped_column(
         "resourceKey", String(191), nullable=False
     )
-    source_group_key: Mapped[str | None] = mapped_column(
-        "sourceGroupKey", Text, nullable=True
-    )
-    derived_from_volume_id: Mapped[str | None] = mapped_column(
-        "derivedFromVolumeId",
-        String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str | None] = mapped_column(String(191), nullable=True)
     publisher: Mapped[str | None] = mapped_column(Text, nullable=True)

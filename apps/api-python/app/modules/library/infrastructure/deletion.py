@@ -15,7 +15,6 @@ from app.contracts.import_deletion import (
 )
 from app.models.auth import ReaderBookmark
 from app.models.import_pipeline import (
-    BookConversionTask,
     ImportAsset,
     ImportTask,
     KindleSendTask,
@@ -245,9 +244,7 @@ def delete_work_records(db: Session, work_id: str) -> dict[str, Any]:
 def delete_work_records_bulk(db: Session, work_ids: tuple[str, ...]) -> int:
     if not work_ids:
         return 0
-    version_ids = select(LibraryVersion.id).where(
-        LibraryVersion.work_id.in_(work_ids)
-    )
+    version_ids = select(LibraryVersion.id).where(LibraryVersion.work_id.in_(work_ids))
     volume_ids = select(LibraryVolume.id).where(
         LibraryVolume.version_id.in_(version_ids)
     )
@@ -270,10 +267,6 @@ def delete_work_records_bulk(db: Session, work_ids: tuple[str, ...]) -> int:
             | KindleSendTask.volume_id.in_(volume_ids)
         )
         .values(work_id=None, volume_id=None, file_id=None),
-        delete(BookConversionTask).where(
-            (BookConversionTask.source_volume_id.in_(volume_ids))
-            | (BookConversionTask.derived_volume_id.in_(volume_ids))
-        ),
         delete(ReaderBookmark).where(ReaderBookmark.volume_id.in_(volume_ids)),
         delete(LibraryReadingProgress).where(
             LibraryReadingProgress.volume_id.in_(volume_ids)
@@ -374,15 +367,6 @@ def prepare_delete_volume_scope(
             update(OrganizeJob)
             .where(OrganizeJob.volume_id == volume_id)
             .values(volume_id=None),
-            update(LibraryVolume)
-            .where(LibraryVolume.derived_from_volume_id == volume_id)
-            .values(derived_from_volume_id=None),
-            delete(BookConversionTask).where(
-                BookConversionTask.source_volume_id == volume_id
-            ),
-            update(BookConversionTask)
-            .where(BookConversionTask.derived_volume_id == volume_id)
-            .values(derived_volume_id=None),
             delete(ReaderBookmark).where(ReaderBookmark.volume_id == volume_id),
             delete(LibraryReadingProgress).where(
                 LibraryReadingProgress.volume_id == volume_id
@@ -397,9 +381,7 @@ def prepare_delete_volume_scope(
     volume_delete_statement = delete(LibraryVolume).where(LibraryVolume.id == volume_id)
     statements = []
     if delete_version:
-        statements.append(
-            delete(LibraryVersion).where(LibraryVersion.id == version_id)
-        )
+        statements.append(delete(LibraryVersion).where(LibraryVersion.id == version_id))
     if delete_work:
         statements.extend(
             (
@@ -467,15 +449,6 @@ def _prepare_import_volume_deletion_statements(
             update(OrganizeJob)
             .where(OrganizeJob.volume_id == prepared.volume_id)
             .values(volume_id=None),
-            update(LibraryVolume)
-            .where(LibraryVolume.derived_from_volume_id == prepared.volume_id)
-            .values(derived_from_volume_id=None),
-            delete(BookConversionTask).where(
-                BookConversionTask.source_volume_id == prepared.volume_id
-            ),
-            update(BookConversionTask)
-            .where(BookConversionTask.derived_volume_id == prepared.volume_id)
-            .values(derived_volume_id=None),
             delete(ReaderBookmark).where(
                 ReaderBookmark.volume_id == prepared.volume_id
             ),

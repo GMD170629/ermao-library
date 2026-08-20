@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.import_pipeline import (
-    BookConversionTask,
     ImportAsset,
     ImportTask,
     ImportWorkItem,
@@ -31,14 +30,7 @@ class SqlAlchemyImportMaintenanceWriteStore:
             parameters_per_row=1,
         ):
             ids = tuple(task_ids)
-            self._db.execute(
-                delete(BookConversionTask).where(
-                    BookConversionTask.import_task_id.in_(ids)
-                )
-            )
-            result = self._db.execute(
-                delete(ImportTask).where(ImportTask.id.in_(ids))
-            )
+            result = self._db.execute(delete(ImportTask).where(ImportTask.id.in_(ids)))
             deleted += int(result.rowcount or 0)
         write_prepared_system_events(self._db, prepared.events)
         return deleted
@@ -70,20 +62,6 @@ class SqlAlchemyImportMaintenanceWriteStore:
                 file_id=None,
                 error_code=None,
                 error_summary=None,
-                updated_at=prepared.updated_at,
-            )
-        )
-        self._db.execute(
-            update(BookConversionTask)
-            .where(BookConversionTask.import_task_id == prepared.task_id)
-            .values(
-                status="QUEUED",
-                progress=0,
-                retryable=False,
-                error_code=None,
-                error_summary=None,
-                started_at=None,
-                finished_at=None,
                 updated_at=prepared.updated_at,
             )
         )

@@ -48,12 +48,6 @@ from app.modules.imports.application.events import persist_prepared_import_event
 from app.modules.imports.application.fail import (
     fail_claimed_import_task as fail_claimed_import_task_command,
 )
-from app.modules.imports.application.maintenance_commands import (
-    PreparedImportRetry,
-    PreparedTerminalImportClear,
-    persist_import_retry,
-    persist_terminal_import_clear,
-)
 from app.modules.imports.application.library_commands import (
     PreparedLibraryCreate,
     PreparedLibraryDelete,
@@ -61,6 +55,12 @@ from app.modules.imports.application.library_commands import (
     persist_library_create,
     persist_library_delete,
     persist_library_update,
+)
+from app.modules.imports.application.maintenance_commands import (
+    PreparedImportRetry,
+    PreparedTerminalImportClear,
+    persist_import_retry,
+    persist_terminal_import_clear,
 )
 from app.modules.imports.application.ports import ImportMetadataObserver
 from app.modules.imports.application.process import (
@@ -110,13 +110,13 @@ from app.modules.imports.infrastructure.directory_scan import (
     should_ignore_file,
     should_ignore_path,
 )
+from app.modules.imports.infrastructure.library_write import (
+    SqlAlchemyLibraryWriteStore,
+)
 from app.modules.imports.infrastructure.maintenance_write import (
     SqlAlchemyImportMaintenanceWriteStore,
 )
 from app.modules.imports.infrastructure.managed_pipeline import SessionImportPipeline
-from app.modules.imports.infrastructure.library_write import (
-    SqlAlchemyLibraryWriteStore,
-)
 from app.modules.imports.infrastructure.queue_maintenance import (
     SqlAlchemyImportQueueMaintenanceStore,
 )
@@ -482,7 +482,7 @@ def recover_interrupted_import_deletions(
     ]
     files = LocalImportDeletionFiles(
         settings.resolved_storage_root,
-        [settings.conversion_root, *monitor_roots],
+        monitor_roots,
     )
     return files.recover_pending(
         database_record_exists=lambda task_id: (
@@ -497,12 +497,10 @@ def _recover_interrupted_import_deletions_without_open_session(
 ) -> tuple[int, int]:
     with db_factory() as db:
         monitor_roots = tuple(import_http_store.list_library_root_paths(db))
-    allowed_roots = [
-        Path(root).expanduser() for root in monitor_roots if root.strip()
-    ]
+    allowed_roots = [Path(root).expanduser() for root in monitor_roots if root.strip()]
     files = LocalImportDeletionFiles(
         settings.resolved_storage_root,
-        [settings.conversion_root, *allowed_roots],
+        allowed_roots,
     )
 
     def database_record_exists(task_id: str) -> bool:
@@ -559,7 +557,7 @@ def execute_recoverable_import_deletion(
 ) -> tuple[ImportDeletionDatabaseResult, FileCleanupResult]:
     files = LocalImportDeletionFiles(
         settings.resolved_storage_root,
-        [settings.conversion_root, *monitor_roots],
+        monitor_roots,
     )
     return execute_import_deletion(
         SqlAlchemyImportUnitOfWork(db),
@@ -755,9 +753,7 @@ class ImportWorkerRuntime:
                             Library.organization_mode.label("organizationMode"),
                             Library.ignore_hidden.label("ignoreHidden"),
                             Library.ignore_patterns.label("ignorePatterns"),
-                            Library.min_file_size_bytes.label(
-                                "minFileSizeBytes"
-                            ),
+                            Library.min_file_size_bytes.label("minFileSizeBytes"),
                             Library.enabled.label("enabled"),
                         ).where(Library.id == library_id)
                     )
@@ -822,8 +818,7 @@ class ImportWorkerRuntime:
             return False
 
         remaining_capacity = (
-            persistent_work_queue.IMPORT_WORK_HIGH_WATERMARK
-            - projection.active_imports
+            persistent_work_queue.IMPORT_WORK_HIGH_WATERMARK - projection.active_imports
         )
         if remaining_capacity <= 0:
             available_at = db_timestamp()
@@ -887,7 +882,9 @@ class ImportWorkerRuntime:
         events: list[PreparedSystemEvent] = []
         restarted = scanner is None and work_item.attempts > 1
         counters = {
-            "directoriesScanned": 0 if restarted else int(job.get("directoriesScanned") or 0),
+            "directoriesScanned": 0
+            if restarted
+            else int(job.get("directoriesScanned") or 0),
             "filesScanned": 0 if restarted else int(job.get("filesScanned") or 0),
             "candidatesFound": 0 if restarted else int(job.get("candidatesFound") or 0),
             "queuedCount": 0 if restarted else int(job.get("queuedCount") or 0),
@@ -949,9 +946,7 @@ class ImportWorkerRuntime:
         counters["candidatesFound"] += scan_slice.candidates_found
         counters["queuedCount"] += batch.queued_count
         counters["skippedCount"] += (
-            scan_slice.skipped_count
-            + batch.cached_count
-            + batch.rejected_count
+            scan_slice.skipped_count + batch.cached_count + batch.rejected_count
         )
         counters["errorCount"] += len(scan_slice.errors) + len(batch.errors)
         for reason, count in scan_slice.ignored_reason_counts.items():
@@ -961,8 +956,7 @@ class ImportWorkerRuntime:
             for error in scan_slice.errors[: max(0, 100 - len(samples))]
         )
         samples.extend(
-            error.to_storage()
-            for error in batch.errors[: max(0, 100 - len(samples))]
+            error.to_storage() for error in batch.errors[: max(0, 100 - len(samples))]
         )
         samples = samples[:100]
 
@@ -1123,12 +1117,12 @@ __all__ = [
     "import_managed_book",
     "import_source_meets_minimum_size",
     "is_proven_audio_bundle_directory",
+    "library_config",
     "library_repository",
     "list_import_scan_jobs",
-    "load_persisted_scan_requests",
-    "library_config",
-    "monitor_repository",
     "load_import_volume_deletion",
+    "load_persisted_scan_requests",
+    "monitor_repository",
     "persist_import_events",
     "persist_import_library_create",
     "persist_import_library_delete",

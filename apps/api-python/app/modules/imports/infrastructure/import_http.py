@@ -13,13 +13,11 @@ from app.core.authorization import (
 )
 from app.models.auth import User, UserLibraryAccess
 from app.models.import_pipeline import (
-    BookConversionTask,
     ImportAsset,
     ImportLog,
     ImportTask,
 )
-from app.models.library import LibraryWork
-from app.models.library import Library
+from app.models.library import Library, LibraryWork
 from app.modules.imports.infrastructure.monitor import upsert_system_setting
 
 
@@ -41,9 +39,7 @@ def list_import_tasks_page(
     status: str | None = None,
     keyword: str | None = None,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
-    filters: list[Any] = [
-        library_visibility_predicate(context, ImportTask.library_id)
-    ]
+    filters: list[Any] = [library_visibility_predicate(context, ImportTask.library_id)]
     normalized_status = str(status or "").strip().upper()
     if normalized_status and normalized_status != "ALL":
         filters.append(ImportTask.status == normalized_status)
@@ -126,17 +122,13 @@ def hydrate_import_task_page(
     if not tasks:
         return []
     task_ids = [str(task["id"]) for task in tasks]
-    library_ids = {
-        str(task["libraryId"]) for task in tasks if task.get("libraryId")
-    }
+    library_ids = {str(task["libraryId"]) for task in tasks if task.get("libraryId")}
     work_ids = {str(task["workId"]) for task in tasks if task.get("workId")}
 
     libraries = {
         str(row["id"]): dict(row)
         for row in db.execute(
-            select(Library.__table__).where(
-                Library.id.in_(library_ids)
-            )
+            select(Library.__table__).where(Library.id.in_(library_ids))
         )
         .mappings()
         .all()
@@ -182,26 +174,12 @@ def hydrate_import_task_page(
             log.pop("page_rank", None)
             logs_by_task_id[str(row["importTaskId"])].append(log)
 
-    conversions = {
-        str(row["importTaskId"]): dict(row)
-        for row in db.execute(
-            select(BookConversionTask.__table__).where(
-                BookConversionTask.import_task_id.in_(task_ids)
-            )
-        )
-        .mappings()
-        .all()
-    }
-
     return [
         {
             **task,
-            "_pageLibrary": libraries.get(
-                str(task.get("libraryId") or "")
-            ),
+            "_pageLibrary": libraries.get(str(task.get("libraryId") or "")),
             "_pageWork": works.get(str(task.get("workId") or "")),
             "_pageLogs": logs_by_task_id[str(task["id"])],
-            "_pageConversion": conversions.get(str(task["id"])),
         }
         for task in tasks
     ]
@@ -209,15 +187,6 @@ def hydrate_import_task_page(
 
 def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> int:
     scope = library_visibility_predicate(context, ImportTask.library_id)
-    terminal = select(ImportTask.id).where(
-        ImportTask.status.in_(("COMPLETED", "FAILED")),
-        scope,
-    )
-    db.execute(
-        delete(BookConversionTask).where(
-            BookConversionTask.import_task_id.in_(terminal)
-        )
-    )
     result = db.execute(
         delete(ImportTask).where(
             ImportTask.status.in_(("COMPLETED", "FAILED")),
@@ -244,24 +213,8 @@ def list_terminal_import_task_ids(
 
 
 def delete_import_task_row(db: Session, task_id: str) -> bool:
-    db.execute(
-        delete(BookConversionTask).where(BookConversionTask.import_task_id == task_id)
-    )
     result = db.execute(delete(ImportTask).where(ImportTask.id == task_id))
     return bool(result.rowcount)
-
-
-def get_conversion_for_import(db: Session, task_id: str) -> dict[str, Any] | None:
-    row = (
-        db.execute(
-            select(BookConversionTask.__table__)
-            .where(BookConversionTask.import_task_id == task_id)
-            .limit(1)
-        )
-        .mappings()
-        .first()
-    )
-    return dict(row) if row else None
 
 
 def reset_import_assets_for_retry(
@@ -316,9 +269,7 @@ def request_monitor_rescan(db: Session, requested_value: str) -> None:
 
 def list_libraries(db: Session) -> list[dict[str, Any]]:
     rows = (
-        db.execute(
-            select(Library.__table__).order_by(Library.created_at.desc())
-        )
+        db.execute(select(Library.__table__).order_by(Library.created_at.desc()))
         .mappings()
         .all()
     )
@@ -396,11 +347,7 @@ def import_status_snapshot(
 
 def get_library(db: Session, folder_id: str) -> dict[str, Any] | None:
     row = (
-        db.execute(
-            select(Library.__table__)
-            .where(Library.id == folder_id)
-            .limit(1)
-        )
+        db.execute(select(Library.__table__).where(Library.id == folder_id).limit(1))
         .mappings()
         .first()
     )
@@ -473,9 +420,7 @@ def update_library(
             prepared_values[attribute] = value
     if prepared_values:
         db.execute(
-            update(Library)
-            .where(Library.id == library_id)
-            .values(**prepared_values)
+            update(Library).where(Library.id == library_id).values(**prepared_values)
         )
     return get_library(db, library_id)
 
@@ -507,29 +452,6 @@ def reset_import_task_for_retry(
         )
     )
     return get_import_task(db, task_id)
-
-
-def reset_conversion_for_retry(
-    db: Session,
-    task_id: str,
-    *,
-    updated_at: Any,
-) -> dict[str, Any] | None:
-    conversion = db.scalar(
-        select(BookConversionTask).where(BookConversionTask.import_task_id == task_id)
-    )
-    if conversion is None:
-        return None
-    previous = get_conversion_for_import(db, task_id)
-    conversion.status = "QUEUED"
-    conversion.progress = 0
-    conversion.retryable = False
-    conversion.error_code = None
-    conversion.error_summary = None
-    conversion.started_at = None
-    conversion.finished_at = None
-    conversion.updated_at = updated_at
-    return previous
 
 
 def delete_library(

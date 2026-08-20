@@ -128,7 +128,7 @@ expectNotIncludes('scripts/dev-test.sh', 'pnpm --filter @shuku/scan-worker dev')
 expectIncludes('apps/web/Dockerfile.prod', 'scripts/start-unified-app.sh');
 expectIncludes('apps/web/Dockerfile.prod', 'pip install --no-cache-dir ./apps/api-python');
 expectIncludes('apps/web/Dockerfile.prod', 'apps/api-python/app');
-expectIncludes('apps/web/Dockerfile.prod', 'libmobi-tools');
+expectNotIncludes('apps/web/Dockerfile.prod', 'libmobi-tools');
 expectNotIncludes('apps/web/Dockerfile.prod', 'calibre');
 expectNotIncludes('apps/web/Dockerfile.prod', 'AS migrator');
 expectIncludes('apps/api-python/Dockerfile', 'python -m app.bootstrap.prestart && exec uvicorn');

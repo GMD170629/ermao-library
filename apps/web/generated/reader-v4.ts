@@ -298,7 +298,6 @@ export type ReaderVolumeSummary = {
   sortOrder: number;
   format: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
-  derivedFromVolumeId?: string | null;
   pageCount?: number | null;
   chapterCount?: number | null;
   durationMs?: number | null;

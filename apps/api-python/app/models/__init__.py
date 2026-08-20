@@ -11,7 +11,6 @@ from app.models.auth import (
     UserPreference,
 )
 from app.models.import_pipeline import (
-    BookConversionTask,
     DownloadTask,
     ImportAsset,
     ImportLog,
@@ -70,7 +69,6 @@ from app.modules.publications.infrastructure.models import (
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
-    "BookConversionTask",
     "BookIdentityCache",
     "DownloadTask",
     "ExternalMetadataCache",

@@ -14,8 +14,6 @@ from app.modules.imports.application.audio_types import (
 from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
-    ConversionArtifactDTO,
-    ConversionProgressTaskDTO,
     DirectorySiblingSnapshotDTO,
     ImportOptions,
     ImportPreferencesDTO,
@@ -53,46 +51,6 @@ class ImportMetadataObserver(Protocol):
     """Schedules side effects for the final metadata snapshot of an import."""
 
     def schedule(self, result: ImportResult) -> None: ...
-
-
-class TextConversionProgressStore(Protocol):
-    """Short-transaction checkpoints used by transaction-free file conversion."""
-
-    def ensure_task(
-        self,
-        import_task_id: str,
-        *,
-        task_id: str,
-        source_path: Path,
-        source_format: str,
-        converter: str,
-        source_key: str,
-        options_json: str,
-        now: int,
-    ) -> ConversionProgressTaskDTO: ...
-
-    def update_stage(
-        self,
-        import_task_id: str,
-        conversion_task_id: str,
-        *,
-        status: str,
-        progress: int,
-        message: str,
-        conversion_values: Mapping[str, object] | None,
-        now: int,
-    ) -> None: ...
-
-    def record_failure(
-        self,
-        import_task_id: str,
-        conversion_task_id: str,
-        *,
-        retryable: bool,
-        error_code: str,
-        summary: str,
-        now: int,
-    ) -> None: ...
 
 
 class ImportTaskStore(Protocol):
@@ -208,6 +166,7 @@ class LibraryImportStore(Protocol):
         columns: dict[str, object],
     ) -> None: ...
 
+
 class ImportPipeline(Protocol):
     """Media import orchestrator used after a task is claimed."""
 
@@ -224,14 +183,6 @@ class ImportOrchestrationServices(Protocol):
     def load_preferences(self) -> ImportPreferencesDTO: ...
 
     def load_local_metadata_priority(self) -> tuple[LocalMetadataSource, ...]: ...
-
-    def convert_text(
-        self, import_task_id: str, source_path: Path
-    ) -> ConversionArtifactDTO: ...
-
-    def bind_conversion_result(
-        self, idempotency_key: str, derived_volume_id: str
-    ) -> None: ...
 
     def recognize_identity(
         self, path: Path, original_name: str | None

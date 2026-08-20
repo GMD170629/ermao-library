@@ -11,7 +11,6 @@ data class Volume(
     val classification: VolumeClassification,
     val readable: Boolean,
     val kindleSendAvailable: Boolean,
-    val derivedFromVolumeId: String?,
     val publisher: String?,
     val publishedAt: String?,
     val language: String?,

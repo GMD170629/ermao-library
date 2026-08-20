@@ -433,7 +433,6 @@ def _library_volume_view(
         },
         "readable": reader_type is not None,
         "kindleSendAvailable": kindle_send_available_for_format(volume.format),
-        "derivedFromVolumeId": volume.derived_from_volume_id,
         "publisher": volume.publisher,
         "publishedAt": _dt(volume.published_at),
         "language": volume.language,
@@ -498,7 +497,6 @@ def _work_detail_volume_view(
         "classification": volume["classification"],
         "readable": volume["readable"],
         "kindleSendAvailable": volume["kindleSendAvailable"],
-        "derivedFromVolumeId": volume.get("derivedFromVolumeId"),
         "publisher": volume.get("publisher"),
         "publishedAt": volume.get("publishedAt"),
         "language": volume.get("language"),
@@ -1049,9 +1047,7 @@ def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _metadata_context_for_work(
-    db: Session, work_id: str
-) -> dict[str, Any] | None:
+def _metadata_context_for_work(db: Session, work_id: str) -> dict[str, Any] | None:
     return metadata_context_for_work(db, work_id)
 
 

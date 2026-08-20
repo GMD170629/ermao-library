@@ -5,6 +5,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User
@@ -17,10 +22,6 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from fastapi.testclient import TestClient
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
 
 
 def _login(client: TestClient, db_session: Session) -> User:
@@ -1125,7 +1126,7 @@ def test_work_cover_fallback_returns_an_available_volume_cover(
     assert response.content == b"ebook-cover"
 
 
-def test_source_and_derived_volumes_keep_independent_progress_and_completion(
+def test_sibling_volumes_keep_independent_progress_and_version_completion(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -1133,31 +1134,30 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     _login(client, db_session)
     source = _ebook_volume(db_session)
     source_file = db_session.query(LibraryFile).filter_by(volume_id=source.id).one()
-    derived_path = tmp_path / "reader-v3-derived.epub"
-    derived_path.write_bytes(Path(source_file.path).read_bytes())
-    with zipfile.ZipFile(derived_path, "a") as archive:
-        archive.writestr("META-INF/derived-volume", "derived")
-    derived = LibraryVolume(
-        id="volume-reader-v3-derived",
+    sibling_path = tmp_path / "reader-v3-sibling.epub"
+    sibling_path.write_bytes(Path(source_file.path).read_bytes())
+    with zipfile.ZipFile(sibling_path, "a") as archive:
+        archive.writestr("META-INF/sibling-volume", "sibling")
+    sibling = LibraryVolume(
+        id="volume-reader-v3-sibling",
         version_id=source.version_id,
-        title="EPUB 副本",
+        title="EPUB 第二卷",
         sort_order=1,
         format="EPUB",
-        resource_key="derived:reader-v3",
-        derived_from_volume_id=source.id,
+        resource_key="directory:reader-v3-sibling",
         import_status="COMPLETED",
     )
-    db_session.add(derived)
+    db_session.add(sibling)
     db_session.flush()
     db_session.add(
         LibraryFile(
-            id="file-reader-v3-derived",
-            volume_id=derived.id,
-            path=str(derived_path),
+            id="file-reader-v3-sibling",
+            volume_id=sibling.id,
+            path=str(sibling_path),
             mtime_ms=2,
             kind="EPUB",
             mime_type="application/epub+zip",
-            size_bytes=derived_path.stat().st_size,
+            size_bytes=sibling_path.stat().st_size,
             sort_order=0,
         )
     )
@@ -1183,22 +1183,22 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
         is False
     )
 
-    derived_bootstrap = client.get(
-        f"/api/reader/v4/volumes/{derived.id}/bootstrap"
+    sibling_bootstrap = client.get(
+        f"/api/reader/v4/volumes/{sibling.id}/bootstrap"
     ).json()["data"]
-    derived_save = client.put(
-        f"/api/reader/v4/volumes/{derived.id}/progress",
+    sibling_save = client.put(
+        f"/api/reader/v4/volumes/{sibling.id}/progress",
         json=_progress_payload(
-            derived_bootstrap,
+            sibling_bootstrap,
             locator=_exact_locator(
-                derived_bootstrap,
+                sibling_bootstrap,
                 href="OEBPS/chapter1.xhtml",
                 progression=1,
                 total_progression=1,
             ),
         ),
     )
-    assert derived_save.status_code == 200, derived_save.json()
+    assert sibling_save.status_code == 200, sibling_save.json()
     assert (
         client.get(f"/api/reader/v4/volumes/{source.id}/bootstrap").json()["data"][
             "versionCompleted"
@@ -1208,7 +1208,7 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     progresses = db_session.query(LibraryReadingProgress).all()
     assert {progress.volume_id for progress in progresses} == {
         source.id,
-        derived.id,
+        sibling.id,
     }
 
 

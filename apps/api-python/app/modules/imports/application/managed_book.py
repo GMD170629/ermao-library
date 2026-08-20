@@ -23,8 +23,8 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
     ImportSystemEvent,
 )
-from app.modules.imports.application.identity import _record_identity_system_events
 from app.modules.imports.application.errors import ImportExecutionError
+from app.modules.imports.application.identity import _record_identity_system_events
 from app.modules.imports.application.identity_resolution import (
     apply_requested_identity,
     resolve_import_metadata,
@@ -38,7 +38,6 @@ from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
 from app.modules.imports.application.import_pdf import _import_pdf
 from app.modules.imports.application.import_policy import (
-    REFLOWABLE_SOURCE_EXTS,
     extension_is_allowed,
     matches_ignore_patterns,
 )
@@ -61,6 +60,9 @@ from app.modules.imports.application.ports import (
 )
 from app.modules.imports.application.work_grouping import (
     resolve_non_audio_work_identity,
+)
+from app.modules.imports.domain.reflowable_formats import (
+    REFLOWABLE_SOURCE_EXTENSIONS,
 )
 
 
@@ -417,7 +419,7 @@ def import_managed_book(
                 identity,
                 unit_of_work,
             )
-        elif ext in REFLOWABLE_SOURCE_EXTS:
+        elif ext in REFLOWABLE_SOURCE_EXTENSIONS:
             result = _import_reflowable_source(
                 store,
                 queries,

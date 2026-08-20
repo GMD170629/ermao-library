@@ -241,7 +241,7 @@ storage_validation_root="$BUILD_ROOT/storage-validation"
 TRIM_PKGVAR="$storage_validation_root" \
   bash "$PACKAGE_DIR/app/docker/prepare-storage.sh"
 for storage_subdirectory in \
-  database covers indexes conversions temp/conversions logs secrets; do
+  database covers indexes logs secrets; do
   if [ ! -d "$storage_validation_root/storage/$storage_subdirectory" ]; then
     echo "fnOS storage preparation did not create $storage_subdirectory" >&2
     exit 1

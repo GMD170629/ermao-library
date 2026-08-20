@@ -19,7 +19,10 @@ from app.modules.imports.application.reflowable_types import (
     ReflowableBookMetadata,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
-from app.services.text_conversion import ConversionFailure, detect_txt_encoding
+from app.modules.imports.infrastructure.text_encoding import (
+    TextEncodingError,
+    detect_txt_encoding,
+)
 
 _KINDLE_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
 _MAX_COVER_BYTES = 20 * 1024 * 1024
@@ -59,7 +62,7 @@ def _inspect_txt(path: Path) -> ReflowableBookMetadata:
     try:
         encoding = detect_txt_encoding(path)
         text = path.read_text(encoding=encoding, errors="strict")
-    except (OSError, UnicodeError, ConversionFailure) as exc:
+    except (OSError, UnicodeError, TextEncodingError) as exc:
         raise ReflowableMetadataError("Unable to inspect TXT metadata") from exc
     return ReflowableBookMetadata(
         title=None,

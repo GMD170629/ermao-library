@@ -82,15 +82,6 @@ from app.modules.library.presentation.views import (
     bookshelf_item_views,
 )
 from app.modules.library.presentation.work_ops import (
-    _collect_import_linked_library_scope_paths as collect_import_linked_library_scope_paths,
-)
-from app.modules.library.presentation.work_ops import (
-    _conversion_output_paths as conversion_output_paths,
-)
-from app.modules.library.presentation.work_ops import (
-    _delete_import_linked_library_scope as delete_import_linked_library_scope,
-)
-from app.modules.library.presentation.work_ops import (
     _delete_source_paths as delete_source_paths,
 )
 from app.modules.library.presentation.work_ops import (
@@ -147,9 +138,6 @@ __all__ = [
     "WorkView",
     "bookshelf_item_view",
     "bookshelf_item_views",
-    "collect_import_linked_library_scope_paths",
-    "conversion_output_paths",
-    "delete_import_linked_library_scope",
     "delete_source_paths",
     "get_work",
     "parse_filter_expression",

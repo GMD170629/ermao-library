@@ -10,10 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFile,
-    LibraryMetadata,
-    LibraryReadingProgress,
     LibraryReadingUnit,
-    LibraryVolume,
     WorkDetailPreference,
 )
 from app.models.organize import MetadataLookupTask
@@ -93,23 +90,6 @@ def list_files_for_volume(db: Session, volume_id: str) -> list[dict[str, object]
         .order_by(LibraryFile.sort_order.asc(), LibraryFile.id.asc())
     ).all()
     return [entity_as_legacy_dict(file) for file in files]
-
-
-
-
-def latest_conversion_metadata(db: Session, volume_id: str) -> dict[str, object] | None:
-    metadata = db.scalar(
-        select(LibraryMetadata)
-        .where(
-            LibraryMetadata.volume_id == volume_id,
-            LibraryMetadata.source == "conversion",
-        )
-        .order_by(LibraryMetadata.created_at.desc(), LibraryMetadata.id.desc())
-        .limit(1)
-    )
-    return entity_as_legacy_dict(metadata) if metadata is not None else None
-
-
 
 
 def list_reading_units(db: Session, *, volume_id: str) -> list[dict[str, object]]:

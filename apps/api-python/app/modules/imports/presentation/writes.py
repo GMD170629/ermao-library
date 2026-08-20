@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
@@ -147,9 +148,7 @@ def _visible_import_task_or_none(
     db: Session, user: User, task_id: str
 ) -> dict[str, Any] | None:
     task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_library(
-        db, user, task.get("libraryId")
-    ):
+    if task is None or not can_access_library(db, user, task.get("libraryId")):
         return None
     return task
 
@@ -161,7 +160,7 @@ def _scan_job_contract(job: ImportScanJobDTO) -> ImportScanJobContract:
 def _has_table(db: Session, table: str) -> bool:
     try:
         return table in inspect(db.connection()).get_table_names()
-    except Exception:
+    except SQLAlchemyError:
         return False
 
 
@@ -188,13 +187,9 @@ def _resolved_deletion_path(value: object, root: Path) -> Path | None:
 
 def _library_deletion_candidate_paths(
     task: dict[str, Any],
-    conversion: dict[str, Any] | None,
     settings: Settings,
 ) -> tuple[str, ...]:
     candidates = (
-        _resolved_deletion_path(
-            (conversion or {}).get("outputPath"), settings.resolved_storage_root
-        ),
         _resolved_deletion_path(task.get("sourcePath"), settings.resolved_storage_root),
     )
     return tuple(dict.fromkeys(str(path) for path in candidates if path is not None))
@@ -401,9 +396,7 @@ def scan_import_directory(
         )
     _folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
     if not can_access_library(db, user, str(folder.get("id"))):
-        _raise_import_error(
-            "目录不可用", status_code=404, code="LIBRARY_NOT_FOUND"
-        )
+        _raise_import_error("目录不可用", status_code=404, code="LIBRARY_NOT_FOUND")
     db.close()
     checkpoint_at = _now()
     prepared_job = prepare_import_scan_job(
@@ -548,7 +541,6 @@ def delete_import_task(
     )
     work_id = str(task.get("workId") or "").strip()
 
-    conversion = import_http_store.get_conversion_for_import(db, task_id)
     monitor_root_values = import_http_store.list_library_root_paths(db)
     db.close()
     selected_paths: list[Path] = []
@@ -564,7 +556,7 @@ def delete_import_task(
 
     library_deletion = None
     if delete_library_record:
-        candidate_paths = _library_deletion_candidate_paths(task, conversion, settings)
+        candidate_paths = _library_deletion_candidate_paths(task, settings)
         library_deletion = load_import_volume_deletion(
             db,
             candidate_paths,
@@ -747,9 +739,7 @@ def list_import_scan_jobs(
     context = authorization_context(db, user)
     jobs = list_import_scan_jobs_query(
         db,
-        library_ids=None
-        if context.is_admin
-        else tuple(context.library_ids),
+        library_ids=None if context.is_admin else tuple(context.library_ids),
         status=status,
     )
     return ImportScanJobsResponse(
@@ -818,7 +808,6 @@ def retry_import_task(
         _raise_import_error("只有失败的任务可以重试", status_code=400)
     if not bool(task.get("retryable")):
         _raise_import_error("该错误无法通过自动重试解决，原文件已保留", status_code=400)
-    conversion = import_http_store.get_conversion_for_import(db, task_id)
     db.close()
     source_path = Path(str(task.get("sourcePath") or ""))
     try:
@@ -839,7 +828,7 @@ def retry_import_task(
         target_type="importTask",
         target_id=task_id,
         message=f"重新排队导入任务：{task.get('originalName') or task.get('sourcePath')}",
-        metadata={"errorCode": conversion.get("errorCode") if conversion else None},
+        metadata={"errorCode": task.get("errorCode")},
     )
     prepared_retry = prepare_import_retry(
         task_id=task_id,

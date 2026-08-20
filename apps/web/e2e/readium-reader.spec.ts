@@ -28,7 +28,7 @@ function exactLocator(cssSelector: string, highlight: string, progression = 0, h
 }
 
 function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legacyPercent = 0) {
-  const volume = { id: 'epub-volume', versionId: 'epub-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', derivedFromVolumeId: null, pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
+  const volume = { id: 'epub-volume', versionId: 'epub-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
   return { ok: true, data: {
     schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
     publication: { manifestUrl: '/api/reader/v4/volumes/epub-volume/publication/manifest.json', positionsUrl: '/api/reader/v4/volumes/epub-volume/publication/positions.json' },

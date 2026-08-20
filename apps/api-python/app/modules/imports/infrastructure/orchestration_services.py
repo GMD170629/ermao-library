@@ -6,11 +6,10 @@ import os
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.contracts.local_metadata import LocalMetadataSource
 from app.core.config import Settings
-from app.core.time import now_timestamp_ms
 from app.infrastructure.comic_archives import (
     extract_comic_cover,
     inspect_comic_archive,
@@ -28,7 +27,6 @@ from app.modules.imports.application.audio_types import (
 from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
-    ConversionArtifactDTO,
     DirectorySiblingSnapshotDTO,
     ImportPreferencesDTO,
     ImportSystemEvent,
@@ -43,21 +41,10 @@ from app.modules.imports.application.pdf_types import (
     PdfCoverPublication,
     PdfInspection,
 )
-from app.modules.imports.application.ports import (
-    ImportUnitOfWork,
-    TextConversionProgressStore,
-)
+from app.modules.imports.application.ports import ImportUnitOfWork
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.application.transactions import PreparedImportWriteBuffer
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
-from app.modules.imports.infrastructure.conversion import (
-    load_derived_volume_binding_projection,
-    prepare_derived_volume_binding,
-    write_derived_volume_binding,
-)
-from app.modules.imports.infrastructure.conversion_progress import (
-    SqlAlchemyTextConversionProgress,
-)
 from app.modules.imports.infrastructure.pdf_inspection import (
     inspect_pdf,
     publish_pdf_cover,
@@ -95,7 +82,6 @@ from app.services.import_preferences import (
 from app.services.system_events import (
     prepare_system_event,
 )
-from app.services.text_conversion import ConversionFailure, convert_to_epub
 
 
 class SessionImportOrchestrationServices:
@@ -104,25 +90,12 @@ class SessionImportOrchestrationServices:
         db: Session,
         settings: Settings,
         unit_of_work: ImportUnitOfWork | None = None,
-        conversion_progress: TextConversionProgressStore | None = None,
         write_buffer: PreparedImportWriteBuffer | None = None,
     ) -> None:
         self._db = db
         self._settings = settings
         self._unit_of_work = unit_of_work or SqlAlchemyImportUnitOfWork(db)
-        self._conversion_progress = conversion_progress
         self._write_buffer = write_buffer or PreparedImportWriteBuffer()
-
-    def _text_conversion_progress(self) -> TextConversionProgressStore:
-        if self._conversion_progress is None:
-            self._conversion_progress = SqlAlchemyTextConversionProgress(
-                sessionmaker(
-                    bind=self._db.get_bind(),
-                    autoflush=False,
-                    expire_on_commit=False,
-                )
-            )
-        return self._conversion_progress
 
     def _require_released_transaction(self, operation: str) -> None:
         if self._db.in_transaction():
@@ -135,9 +108,7 @@ class SessionImportOrchestrationServices:
         self._unit_of_work.release()
         preferences = prepare_import_preferences(
             projection,
-            legacy_stable_delay_ms=os.environ.get(
-                "MONITOR_FILE_STABLE_DELAY_MS"
-            ),
+            legacy_stable_delay_ms=os.environ.get("MONITOR_FILE_STABLE_DELAY_MS"),
         )
         return ImportPreferencesDTO(
             allowed_extensions=preferences.allowed_extensions,
@@ -148,50 +119,6 @@ class SessionImportOrchestrationServices:
         projection = load_raw_local_metadata_priority_projection(self._db)
         self._unit_of_work.release()
         return prepare_local_metadata_priority(projection)
-
-    def convert_text(
-        self, import_task_id: str, source_path: Path
-    ) -> ConversionArtifactDTO:
-        self._require_released_transaction("convert_text")
-        try:
-            artifact = convert_to_epub(
-                self._text_conversion_progress(),
-                self._settings,
-                import_task_id,
-                source_path,
-            )
-        except ConversionFailure as exc:
-            raise ImportExecutionError(
-                exc.code,
-                str(exc),
-                retryable=exc.retryable,
-            ) from exc
-        return ConversionArtifactDTO(
-            source_path=artifact.source_path,
-            output_path=artifact.output_path,
-            source_format=artifact.source_format,
-            source_key=artifact.source_key,
-            converter=artifact.converter,
-            converter_version=artifact.converter_version,
-            cached=artifact.cached,
-            idempotency_key=artifact.idempotency_key,
-        )
-
-    def bind_conversion_result(
-        self, idempotency_key: str, derived_volume_id: str
-    ) -> None:
-        projection = load_derived_volume_binding_projection(
-            self._db,
-            idempotency_key=idempotency_key,
-        )
-        self._unit_of_work.release()
-        prepared = prepare_derived_volume_binding(
-            projection,
-            derived_volume_id=derived_volume_id,
-            now=now_timestamp_ms(),
-        )
-        write_derived_volume_binding(self._db, prepared)
-        self._unit_of_work.release()
 
     def recognize_identity(
         self, path: Path, original_name: str | None

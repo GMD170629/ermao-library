@@ -57,7 +57,6 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("workDetailPreferences", "WorkDetailPreference"),
     ("importTasks", "ImportTask"),
     ("importAssets", "ImportAsset"),
-    ("bookConversionTasks", "BookConversionTask"),
     ("importLogs", "ImportLog"),
     ("organizeJobs", "OrganizeJob"),
     ("metadataSuggestions", "MetadataSuggestion"),
@@ -90,7 +89,6 @@ RESTORE_ORDER = [
     "ReaderPreference",
     "WorkDetailPreference",
     "ImportLog",
-    "BookConversionTask",
     "ImportTask",
     "ImportAsset",
     "LibraryReadingProgress",
@@ -178,7 +176,6 @@ def counts_for_export(
         "workDetailPreferences": len(database_export.get("workDetailPreferences", [])),
         "importTasks": len(database_export.get("importTasks", [])),
         "importAssets": len(database_export.get("importAssets", [])),
-        "bookConversionTasks": len(database_export.get("bookConversionTasks", [])),
         "importLogs": len(database_export.get("importLogs", [])),
         "readerPreferences": len(database_export.get("readerPreferences", [])),
         "readerBookPreferences": len(database_export.get("readerBookPreferences", [])),
@@ -367,8 +364,6 @@ def _calibrate_runtime_rows(
                 leaseExpiresAt=None,
                 startedAt=None,
             )
-        elif table_name == "BookConversionTask" and status == "RUNNING":
-            record.update(status="QUEUED", startedAt=None)
         elif table_name == "OrganizeJob" and status == "RUNNING":
             record.update(status="PENDING", startedAt=None)
         result.append(record)

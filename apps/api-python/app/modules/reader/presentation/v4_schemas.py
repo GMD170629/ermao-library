@@ -75,6 +75,8 @@ class ReadiumExtensionModel(BaseModel):
 
 _MAX_UTC_EPOCH_MILLIS = 253_402_300_799_999
 _MAX_LOCATOR_ENVELOPE_BYTES = 65_536
+
+
 class ReadiumLocatorText(ReaderWireModel):
     before: str | None = Field(
         default=None, max_length=256, exclude_if=lambda value: value is None
@@ -380,9 +382,6 @@ class ReaderVolumeSummary(ReaderWireModel):
     sort_order: int = Field(alias="sortOrder")
     format: str
     reader_type: ReaderFormat = Field(alias="readerType")
-    derived_from_volume_id: str | None = Field(
-        default=None, alias="derivedFromVolumeId"
-    )
     page_count: int | None = Field(default=None, alias="pageCount")
     chapter_count: int | None = Field(default=None, alias="chapterCount")
     duration_ms: int | None = Field(default=None, alias="durationMs")
@@ -431,9 +430,7 @@ class ReaderCapabilities(ReaderWireModel):
 
 class ReaderComicDownloadArtifact(ReaderWireModel):
     url: str
-    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(
-        alias="sourceFormat"
-    )
+    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(alias="sourceFormat")
     mime_type: str = Field(alias="mimeType", min_length=1, max_length=191)
     size_bytes: int = Field(alias="sizeBytes", gt=0)
 
@@ -451,6 +448,7 @@ class ReaderPublicationAccess(ReaderWireModel):
         default=None,
         alias="downloadArtifact",
     )
+
     @model_validator(mode="after")
     def validate_kind(self) -> ReaderPublicationAccess:
         if self.kind == "reflowable":
@@ -482,9 +480,7 @@ class ReaderComicManifestData(ReaderWireModel):
     schema_version: Literal[1] = Field(1, alias="schemaVersion")
     kind: Literal["comic"] = "comic"
     volume_id: str = Field(alias="volumeId", min_length=1)
-    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(
-        alias="sourceFormat"
-    )
+    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(alias="sourceFormat")
     page_count: int = Field(alias="pageCount", gt=0)
     reading_order: list[ReaderComicManifestPage] = Field(alias="readingOrder")
 

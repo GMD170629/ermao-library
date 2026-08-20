@@ -212,10 +212,6 @@ class LibraryVolume(HttpContractModel):
     classification: VolumeClassification
     readable: bool
     kindle_send_available: bool = Field(alias="kindleSendAvailable")
-    derived_from_volume_id: str | None = Field(
-        default=None,
-        alias="derivedFromVolumeId",
-    )
     publisher: str | None = None
     published_at: datetime | None = Field(default=None, alias="publishedAt")
     language: str | None = None
@@ -252,9 +248,6 @@ class WorkDetailVolume(HttpContractModel):
     classification: VolumeClassification
     readable: bool
     kindle_send_available: bool = Field(alias="kindleSendAvailable")
-    derived_from_volume_id: str | None = Field(
-        default=None, alias="derivedFromVolumeId"
-    )
     publisher: str | None = None
     published_at: datetime | None = Field(default=None, alias="publishedAt")
     language: str | None = None

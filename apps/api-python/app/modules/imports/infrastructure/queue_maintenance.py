@@ -6,7 +6,6 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import (
-    BookConversionTask,
     ImportAsset,
     ImportLog,
     ImportTask,
@@ -18,7 +17,6 @@ class SqlAlchemyImportQueueMaintenanceStore:
         self._db = db
 
     def delete_all_tasks(self) -> int:
-        self._db.execute(delete(BookConversionTask))
         self._db.execute(delete(ImportAsset))
         self._db.execute(delete(ImportLog))
         result = self._db.execute(delete(ImportTask))

@@ -49,7 +49,6 @@ def _volume_dto(volume: LibraryVolume) -> ReaderVolumeDto:
         volume_index=volume.volume_index,
         sort_order=volume.sort_order,
         format=volume.format,
-        derived_from_volume_id=volume.derived_from_volume_id,
         page_count=volume.page_count,
         chapter_count=volume.chapter_count,
         duration_ms=volume.duration_ms,

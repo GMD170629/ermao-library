@@ -38,7 +38,6 @@ from app.modules.imports.application.import_support import (
     _now,
     _persist_import_volume,
     _prepared_default_cover,
-    _source_group_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -173,7 +172,6 @@ def _import_comic(
     )
     title = identity.title
     author = identity.author
-    source_key = _source_group_key(options, title)
     volume_index = (volume_info or {}).get("seriesIndex")
     volume_title = resolved_local.metadata.volume_title or identity.title
     topology_target = _bound_topology_target(queries, options)
@@ -209,7 +207,6 @@ def _import_comic(
                 ),
                 "libraryId": options.library_id,
                 "origin": options.origin,
-                "sourceGroupKey": source_key,
                 "description": parsed.get("description"),
                 "sizeBytes": file_size,
                 "pageCount": parsed["pageCount"],

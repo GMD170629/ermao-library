@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -114,30 +113,6 @@ class NonAudioPathResolutionDTO:
 class DirectorySiblingSnapshotDTO:
     paths: tuple[Path, ...]
     complete: bool
-
-
-@dataclass(frozen=True)
-class ConversionArtifactDTO:
-    source_path: Path
-    output_path: Path
-    source_format: str
-    source_key: str
-    converter: str
-    converter_version: str
-    cached: bool
-    idempotency_key: str
-
-
-@dataclass(frozen=True, slots=True)
-class ConversionProgressTaskDTO:
-    """Conversion checkpoint state returned without exposing an ORM entity."""
-
-    id: str
-    import_task_id: str
-    idempotency_key: str
-    status: str
-    attempts: int
-    started_at: datetime | None
 
 
 @dataclass(frozen=True)

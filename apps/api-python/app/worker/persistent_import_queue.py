@@ -64,7 +64,7 @@ class PersistentImportWorker:
         return self._thread.is_alive()
 
     def process_once(self) -> bool:
-        lease_seconds = max(900, self.settings.ebook_conversion_timeout_seconds + 300)
+        lease_seconds = 900
         work_item = self.runtime.claim_work(self.worker_id, lease_seconds)
         if work_item is None:
             return self.runtime.run_bounded_maintenance() > 0

@@ -138,11 +138,3 @@ def classify_content(
         source=ClassificationSource.AUTO,
         reason="FORMAT_DEFAULT",
     )
-
-
-def inherited_classification(media_kind: str) -> ContentClassification:
-    return ContentClassification(
-        media_kind=media_kind,
-        source=ClassificationSource.INHERITED,
-        reason="DERIVED_FROM_VOLUME",
-    )

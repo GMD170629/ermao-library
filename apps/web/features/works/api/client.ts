@@ -90,7 +90,6 @@ function mapVolume(value: unknown): VolumeResource | null {
       reason: stringValue(classification.reason, 'LEGACY'),
       suggestedMediaKind: mediaKind(classification.suggestedMediaKind)
     },
-    derivedFromVolumeId: nullableString(item.derivedFromVolumeId),
     publisher: nullableString(item.publisher),
     publishedAt: nullableString(item.publishedAt),
     language: nullableString(item.language),

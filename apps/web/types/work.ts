@@ -40,7 +40,6 @@ export type VolumeResource = Readonly<{
     reason: string;
     suggestedMediaKind: MediaKind | null;
   }>;
-  derivedFromVolumeId: string | null;
   publisher: string | null;
   publishedAt: string | null;
   language: string | null;
