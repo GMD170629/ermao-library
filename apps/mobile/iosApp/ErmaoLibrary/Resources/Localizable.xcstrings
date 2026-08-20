@@ -155,7 +155,7 @@
     "work.description.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Description" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无简介" } } } },
     "work.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and reload this work." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络连接并重新加载这部作品。" } } } },
     "work.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load details" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载作品详情" } } } },
-    "work.media.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Versions" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本" } } } },
+    "work.media.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media types" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒体类型" } } } },
     "work.mediaVolumeCount.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$lld volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · 共 %2$lld 卷" } } } },
     "work.progress.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld%% read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读进度 %lld%%" } } } },
     "work.reader.continue.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Continue Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续阅读" } } } },
@@ -164,7 +164,7 @@
     "work.reader.unavailable.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reader handoff is not available in this build." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本尚未接入阅读器。" } } } },
     "work.series.accessibility.hint" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows other works in this series." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看该系列中的其他作品。" } } } },
     "work.section.about" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "About" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简介" } } } },
-    "work.section.media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Versions" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本" } } } },
+    "work.section.media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media types" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒体类型" } } } },
     "work.status.accessibility.label" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading status" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态" } } } },
     "work.status.finished" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Finished" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已读完" } } } },
     "work.status.reading" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在阅读" } } } },
@@ -187,7 +187,7 @@
     "work.volume.accessibility.label" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volume %1$@, %2$@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "第 %1$@ 卷，%2$@" } } } },
     "work.volume.progress.notStarted" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not started" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未开始" } } } },
     "work.volumeCount.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "共 %lld 卷" } } } },
-    "work.volumes.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This version has no readable volumes." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本没有可阅读的卷册。" } } } },
+    "work.volumes.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This media type has no readable volumes." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前媒体类型没有可阅读的卷册。" } } } },
     "work.volumes.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无卷册" } } } },
     "auth.accountDisabled.message" : {
       "localizations" : {
