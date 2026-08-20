@@ -28,8 +28,6 @@ The menu shows a compact work/selected-volume context header and these operation
 7. **Upload Cover** — opens the platform image picker for the work cover.
 8. **Regenerate Cover** — requires confirmation before replacing the work cover.
 9. **Send to Kindle** — sends an eligible EPUB/PDF file belonging to the currently selected volume.
-10. **Delete** — deletes the work record after destructive confirmation and preserves source files.
-
 `Mark as Unread`, `Download`, and `Send to Kindle` are disabled with a truthful reason when no volume is selected. Kindle is hidden when the selected volume has no eligible file. Administrative operations are hidden for actors without `canManageSystem`; shelf, reading-status, and download actions continue to follow their existing user permissions.
 
 ## Volume control menu
@@ -39,13 +37,10 @@ The menu is keyed by the long-pressed cover's `volumeId`, even when another volu
 1. **Mark as Unread**.
 2. **Download** — state-aware as above.
 3. **Edit** — opens the volume-information editor.
-4. **Change Media Type**.
-5. **Split** into a new work.
-6. **Move** to another existing work.
-7. **Send to Kindle** for an eligible file in this volume.
-8. **Delete** the volume after confirmation.
+4. **Change Media Type** — corrects content classification metadata without changing directory ownership.
+5. **Send to Kindle** for an eligible file in this volume.
 
-Delete is visually separated at the bottom. Active downloads continue to block change-media-type, split, move, and delete operations.
+Active downloads continue to block change-media-type while the local artifact is being prepared.
 
 ## Book operation sheets
 
@@ -54,28 +49,23 @@ Delete is visually separated at the bottom. Active downloads continue to block c
 - Upload JPEG, PNG, or WebP covers, with a 10 MiB client boundary, or regenerate a cover.
 - Choose an eligible EPUB/PDF file and enqueue Send to Kindle after validating Kindle/SMTP readiness.
 - Set reading status.
-- Delete the database record while always preserving source files (`deleteSource=false`).
 
 ## Per-volume operation sheets
 
-- Edit title, volume index, sort order, publisher, language, ISBN, identifier, and narrator.
-- Reclassify one volume as e-book, comic, or audiobook.
-- Split one volume into a new work.
-- Search works and transfer one volume to the chosen work.
+- Edit publisher, language, ISBN, identifier, and narrator metadata.
+- Correct one volume's content classification as e-book, comic, or audiobook without changing its directory-derived identity.
 - Send an eligible EPUB/PDF file to Kindle.
-- Delete one volume.
 - Start, pause, retry, or inspect its managed offline download.
 
 Batch selection is intentionally Web-only in this phase.
 
 ## Mutation and offline invariants
 
-1. Active (`queued` or `downloading`) transfers block reclassify, split, transfer, and delete. The user must pause or cancel first.
+1. Active (`queued` or `downloading`) transfers block content-classification correction. The user must pause or cancel first.
 2. The server mutation completes before local state changes.
-3. Reclassify, split, and transfer rewrite the completed artifact’s work/media-version ownership without copying or deleting its verified file.
-4. Work or volume deletion removes the corresponding managed local artifact only after server success.
-5. A failed server mutation leaves local manifests and files unchanged.
-6. Every successful non-terminal mutation returns to Work Detail and triggers a fresh detail/volume request. Deleting a work exits its detail page.
+3. Content-classification correction changes metadata only; it never changes Work, Version, Volume, file ownership, or the local manifest.
+4. A failed server mutation leaves local manifests and files unchanged.
+5. Every successful mutation returns to Work Detail and triggers a fresh detail/volume request.
 
 ## Shared boundary
 
@@ -84,8 +74,7 @@ Batch selection is intentionally Web-only in this phase.
 The following existing endpoints are used without contract changes:
 
 - `/api/works/{workId}` and cover/metadata children
-- `/api/works/{workId}/volumes/{volumeId}` and `reclassify`, `split`, `move-to` children
-- `/api/works` for bounded transfer-target search
+- `/api/works/{workId}/volumes/{volumeId}` and its metadata-only `reclassify` child
 - `/api/kindle-settings` and `/api/kindle-send-tasks`
 - `/api/reader/v4/volumes/{volumeId}/reading-status`
 
@@ -96,7 +85,6 @@ All user-visible copy is maintained in both `zh-CN`/Simplified Chinese and `en-U
 - An authorized user can complete every operation above from Work Detail on Android and iOS.
 - A non-authorized user sees no mutation controls.
 - An incompatible server causes no mutation call and shows an unsupported message.
-- Volume structural mutations cannot race an active transfer.
-- Completed offline artifacts remain readable after transfer, split, or reclassification.
-- Delete confirmations state source-file and local-download consequences.
+- Work Detail exposes no Work, Version, or Volume merge, split, move, create, or delete control.
+- Content-classification corrections preserve directory-derived identities and completed offline artifacts.
 - Android and KMP compile/test gates pass; final runtime acceptance is performed on physical Android and iOS devices according to `AGENTS.md`.

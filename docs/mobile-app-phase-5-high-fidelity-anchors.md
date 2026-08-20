@@ -80,7 +80,7 @@
 - 下载状态与阅读进度严格分离：云朵直接开始下载，环形控件可暂停/取消，勾选圆圈表示完成；详情行不显示“下载中 68%”一类文字；
 - 格式访问优先级沿用 Phase 1：可重排格式未完成下载时，主动作表达“下载后阅读”且不得进入 Reader；PDF/漫画在线主动作仍是流式阅读，云朵只表示另存完整离线工件。本构图规则不得覆盖这一功能差异；
 - 编辑、识别、封面和其他管理能力由详情页控制菜单进入聚焦 Sheet；下载、阅读状态、加入书架和更多保持详情页快捷入口。能力与权限不足时隐藏对应操作或给出真实原因，不使用伪成功状态；
-- 图书控制菜单与卷册控制菜单使用触点锚定的紧凑半透明悬浮卡：卷册长按取真实按压坐标，`更多`取触发控件位置，卡片在安全区内自动翻转/夹取，不固定在右上角。宽度、紧凑标题、行密度和任务 Sheet 合同以 [`mobile-app-work-detail-management-interaction-design-v2.md`](mobile-app-work-detail-management-interaction-design-v2.md) v2 为准；[`work-detail-book-control-menu-floating-card-v1.png`](assets/mobile-app-hifi-v1/work-detail-book-control-menu-floating-card-v1.png) 仅继续约束半透明材质、层级和危险项分区，不再约束固定右侧位置或旧宽度。菜单不是底部 Sheet 或独立页面；其内容按需独立滚动，背景详情保持可辨认且不可交互，删除项固定为末尾独立危险区；
+- 图书控制菜单与卷册控制菜单使用触点锚定的紧凑半透明悬浮卡：卷册长按取真实按压坐标，`更多`取触发控件位置，卡片在安全区内自动翻转/夹取，不固定在右上角。宽度、紧凑标题、行密度和任务 Sheet 合同以 [`mobile-app-work-detail-management-interaction-design-v2.md`](mobile-app-work-detail-management-interaction-design-v2.md) v2 为准；[`work-detail-book-control-menu-floating-card-v1.png`](assets/mobile-app-hifi-v1/work-detail-book-control-menu-floating-card-v1.png) 仅继续约束半透明材质、层级和分组，不再约束固定右侧位置、旧宽度或图中已退役的结构操作。菜单不是底部 Sheet 或独立页面；其内容按需独立滚动，背景详情保持可辨认且不可交互；
 
 ## 6. Reader Paper
 

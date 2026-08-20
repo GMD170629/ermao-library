@@ -8,7 +8,7 @@
 
 > v1.0.0 会话与内容回退修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发不提供独立离线模式、30 天授权宽限或服务器 GET 页面持久缓存回退。匹配的已验证会话可先恢复正常 App Shell，再后台验证；暂时网络失败保留 Shell，明确 401、账户停用或服务器身份变化才结束会话。完成下载、Reader、本地进度、书签和偏好继续保留，但不构成单独的离线产品模式。
 
-> 图书详情管理修订（2026-08-16）：经产品确认，具有 `canManageSystem` 权限的用户可在原生 Work Detail 完成与 Web 详情页等价的单册图书/卷册管理；批量选择与全局治理仍为 Web-only。入口、操作清单、兼容门槛及下载归属不变量以 [`mobile-app-work-detail-management.md`](mobile-app-work-detail-management.md) 为准，该限定修订优先于本文“元数据维护全部留在 Web”的旧概括。
+> 图书详情管理修订（2026-08-16，目录拓扑边界于 2026-08-20 收敛）：经产品确认，具有 `canManageSystem` 权限的用户可在原生 Work Detail 完成单册图书/卷册的元数据、封面、内容分类、Kindle 与阅读辅助操作；批量选择、全局治理以及 Work / Version / Volume 的创建、删除、拆分、移动、合并仍为 Web/扫描拓扑边界之外。入口、操作清单、兼容门槛及下载归属不变量以 [`mobile-app-work-detail-management.md`](mobile-app-work-detail-management.md) 为准，该限定修订优先于本文“元数据维护全部留在 Web”的旧概括。
 
 ## 1. 基线目的
 
@@ -130,7 +130,7 @@ P0 必须形成以下连续闭环：
 | Kindle | `/settings/email` 与作品详情；kindle settings/task API | 个人任务按用户隔离；SMTP 是系统配置 | P1 | 作品动作 Sheet + 个人发送队列；SMTP 配置 Web-only |
 | 用户管理 | `/settings/users`；`/api/admin/users*` | 只有 `isAdmin`；创建、停用、授权、重置密码、删除 | Web-only | 不进入首阶段 App；`canManageSystem` 不能代替 admin |
 | 书库根目录 | `/settings/library`；library root 与设置 API | 服务器路径、NAS、`FLAT / VOLUMES / AUDIOBOOK` 组织方式、扫描策略；系统管理权限和资源范围 | Web-only | App 不复制服务器目录树；最多跳转 Web 管理后台 |
-| 整理与元数据治理 | `/settings/organize`；organize、duplicates、categories、provider API | 批量、长任务、可破坏写操作、失败与回滚 | Web-only；以后可 P2 只读 | P0/P1 不出现合并、拆分、移动、重分类、元数据源配置 |
+| 整理与元数据治理 | `/settings/organize`；organize、duplicates、categories、provider API | 批量、长任务、可破坏写操作、失败与回滚 | Web-only；以后可 P2 只读 | P0/P1 不出现 Work / Version / Volume 的合并、拆分、移动、创建或删除，也不提供元数据源配置；详情页只允许不改变目录身份的内容分类修正 |
 | OPDS 配置 | `/settings/opds`；system settings | 系统管理；OPDS 是第三方客户端协议 | Web-only | 官方 App 内部数据层禁止改用 OPDS |
 | 备份、健康、队列、日志 | settings 对应入口和 system/management API | 系统管理；含高风险与运维状态 | Web-only；以后可 P2 健康摘要 | 不复制桌面日志、备份恢复、队列操作台；高风险动作继续在 Web 完成 |
 

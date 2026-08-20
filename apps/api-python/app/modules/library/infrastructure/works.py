@@ -1,16 +1,14 @@
-"""ORM persistence for work and media-version structure commands."""
+"""ORM persistence for work projections and metadata updates."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, update
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models.library import (
-    LibraryWork,
-)
+from app.models.library import LibraryWork
 
 STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
 
