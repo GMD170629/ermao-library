@@ -141,7 +141,11 @@ def import_managed_book(
 
     requested_source = options.source_file_path.resolve()
     original_source = (options.original_source_file_path or requested_source).resolve()
-    source, audio_structure = _resolve_audio_import_source(services, requested_source)
+    source, audio_structure = (
+        (requested_source, None)
+        if options.topology_volume_id is not None
+        else _resolve_audio_import_source(services, requested_source)
+    )
     effective_options = (
         replace(options, source_file_path=source, original_name=source.name)
         if source != requested_source
@@ -171,6 +175,7 @@ def import_managed_book(
         if (
             source.is_dir()
             and audio_structure is not None
+            and effective_options.topology_volume_id is None
             and not _audio_bundle_is_proven(source, audio_structure)
         ):
             raise ValueError(

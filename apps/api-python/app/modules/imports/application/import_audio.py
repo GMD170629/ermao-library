@@ -30,14 +30,18 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.identity_policy import UNKNOWN_AUTHOR
 from app.modules.imports.application.import_support import (
+    BoundTopologyTarget,
+    _bound_topology_target,
     _classification_columns,
     _ensure_implicit_version,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
     _id,
+    _import_media_context,
     _normalize_key,
     _now,
+    _persist_import_volume,
     _prepared_default_cover,
     _title_from_file,
     _work_merge_key,
@@ -50,6 +54,7 @@ from app.modules.imports.application.ports import (
     LibraryImportStore,
 )
 from app.modules.imports.domain.content_classification import (
+    ContentClassification,
     ContentEvidence,
     classify_content,
     normalize_media_kind_policy,
@@ -129,6 +134,27 @@ def _import_audio(
         strict=not directory_bundle,
     )
     narrator = narrator_values[0] if narrator_values else None
+    topology_target = _bound_topology_target(queries, options)
+    if topology_target is not None:
+        if unit_of_work is None:
+            raise RuntimeError("有声书导入缺少事务协调器")
+        return _import_bound_audio(
+            store,
+            queries,
+            services,
+            settings,
+            options,
+            task_id,
+            identity,
+            metadata_items,
+            effective_track_numbers,
+            display_titles,
+            narrator,
+            classification,
+            topology_target,
+            resolved_local,
+            unit_of_work,
+        )
     merge_key = _work_merge_key(identity.title)
     # A directory identifies one split-track bundle. An explicitly structured
     # Emby flat filename joins its sibling chapters; every other single file
@@ -533,6 +559,258 @@ def _import_audio(
         else "new-audio-work"
         if created
         else "new-audio-volume",
+        resolved_metadata=resolved_local.metadata if resolved_local else None,
+        metadata_field_sources=resolved_local.field_sources if resolved_local else (),
+        metadata_source_order=resolved_local.source_order if resolved_local else (),
+    )
+
+
+def _import_bound_audio(
+    store: LibraryImportStore,
+    queries: ImportLibraryQueries,
+    services: ImportOrchestrationServices,
+    settings: ImportRuntimeConfig,
+    options: ImportOptions,
+    task_id: str,
+    identity: BookIdentityDTO,
+    metadata_items: list[AudioFileMetadata],
+    effective_track_numbers: dict[Path, int | None],
+    display_titles: dict[Path, str],
+    narrator: str | None,
+    classification: ContentClassification,
+    target: BoundTopologyTarget,
+    resolved_local: ResolvedLocalMetadata | None,
+    unit_of_work: ImportUnitOfWork,
+) -> ImportResult:
+    """Enrich one scanner-owned audiobook Volume without structural inference."""
+
+    media_context = _import_media_context(
+        store,
+        work_id=target.work["id"],
+        media_kind=classification.media_kind,
+        format_name="AUDIO",
+        library_id=options.library_id,
+        origin=options.origin,
+        target=target,
+    )
+    volume = _persist_import_volume(
+        store,
+        {
+            "id": target.volume["id"],
+            "versionId": target.version_id,
+            "title": target.volume["title"],
+            "format": "AUDIO",
+            "resourceKey": target.volume["resourceKey"],
+            "origin": options.origin,
+            "importStatus": "PARSING",
+            "narrator": narrator,
+            **_classification_columns(classification),
+            "updatedAt": _now(),
+        },
+        target,
+    )
+    release_import_transaction(unit_of_work)
+    cover_path = services.publish_audio_cover(
+        settings.resolved_storage_root,
+        str(target.work["id"]),
+        str(media_context["id"]),
+        tuple(metadata_items),
+        bundle_root=(
+            options.source_file_path.resolve()
+            if options.source_file_path.is_dir()
+            else None
+        ),
+    ) or _prepared_default_cover(options)
+    manifest_tracks: list[dict[str, object]] = []
+    manifest_chapters: list[dict[str, object]] = []
+    chapter_sort_order = 0
+    total_size = 0
+    total_duration = 0
+    for index, item in enumerate(metadata_items):
+        stat = item.path.stat()
+        total_size += stat.st_size
+        total_duration += item.duration_ms
+        file_row = store.insert_library_file(
+            columns={
+                "id": _id(),
+                "volumeId": volume["id"],
+                "path": str(item.path),
+                "filePathHash": _hash_text(str(item.path)),
+                "mtimeMs": int(stat.st_mtime * 1000),
+                "kind": "AUDIO",
+                "mimeType": audio_mime_type(item.path),
+                "sizeBytes": stat.st_size,
+                "durationMs": item.duration_ms,
+                "codec": item.codec,
+                "bitrate": item.bitrate,
+                "sampleRate": item.sample_rate,
+                "channels": item.channels,
+                "discNumber": (
+                    item.disc_number
+                    if item.disc_number is not None
+                    else _audio_disc_number(item.path)
+                ),
+                "trackNumber": effective_track_numbers.get(item.path),
+                "sortOrder": index,
+                "createdAt": _now(),
+                "updatedAt": _now(),
+            }
+        )
+        asset = queries.get_import_asset_by_task_and_path(task_id, str(item.path))
+        asset_values: dict[str, object] = {
+            "status": "COMPLETED",
+            "sortOrder": index,
+            "fileId": file_row["id"],
+            "errorCode": None,
+            "errorSummary": None,
+            "updatedAt": _now(),
+        }
+        if asset is not None:
+            store.update_import_asset(str(asset["id"]), columns=asset_values)
+        else:
+            store.insert_import_asset(
+                columns={
+                    "id": _id(),
+                    "importTaskId": task_id,
+                    "sourcePath": str(item.path),
+                    "createdAt": _now(),
+                    **asset_values,
+                }
+            )
+        source_chapters = list(item.chapters) or [
+            AudioChapterMetadata(
+                title=display_titles[item.path],
+                start_ms=0,
+                end_ms=item.duration_ms,
+            )
+        ]
+        for chapter in source_chapters:
+            start_ms = max(0, int(chapter.start_ms))
+            end_ms = min(item.duration_ms, int(chapter.end_ms))
+            if end_ms <= start_ms:
+                continue
+            chapter_sort_order += 1
+            unit = store.insert_library_reading_unit(
+                columns={
+                    "id": _id(),
+                    "volumeId": volume["id"],
+                    "fileId": file_row["id"],
+                    "unitType": "audio_chapter",
+                    "title": chapter.title
+                    or display_titles[item.path]
+                    or f"第 {chapter_sort_order} 章",
+                    "href": (
+                        f"audio:{file_row['id']}#t="
+                        f"{start_ms / 1000:g},{end_ms / 1000:g}"
+                    ),
+                    "mediaType": audio_mime_type(item.path),
+                    "sortOrder": chapter_sort_order,
+                    "startMs": start_ms,
+                    "endMs": end_ms,
+                    "durationMs": end_ms - start_ms,
+                    "metadataJson": json.dumps(
+                        {"trackIndex": index, "sourceFileName": item.path.name},
+                        ensure_ascii=False,
+                    ),
+                    "createdAt": _now(),
+                    "updatedAt": _now(),
+                }
+            )
+            manifest_chapters.append(
+                {
+                    "id": unit["id"],
+                    "volumeId": volume["id"],
+                    "title": unit["title"],
+                    "fileId": file_row["id"],
+                    "startMs": start_ms,
+                    "endMs": end_ms,
+                    "sortOrder": chapter_sort_order,
+                }
+            )
+        manifest_tracks.append(
+            {
+                "fileId": file_row["id"],
+                "title": display_titles[item.path],
+                "sourceFileName": item.path.name,
+                "mimeType": file_row["mimeType"],
+                "durationMs": item.duration_ms,
+                "discNumber": file_row.get("discNumber"),
+                "trackNumber": file_row.get("trackNumber"),
+                "sortOrder": index,
+            }
+        )
+        store.update_import_task(
+            task_id,
+            columns={
+                "processedAssetCount": index + 1,
+                "progress": 30 + round(((index + 1) / len(metadata_items)) * 55),
+                "message": f"已建立音轨 {index + 1}/{len(metadata_items)}",
+            },
+        )
+    raw_tags = [
+        {"sourcePath": str(item.path), "tags": item.raw_tags}
+        for item in metadata_items
+    ]
+    for source, payload in (
+        ("audio_tags", raw_tags),
+        (
+            "audiobook_manifest",
+            {
+                "durationMs": total_duration,
+                "narrator": narrator,
+                "tracks": manifest_tracks,
+                "chapters": manifest_chapters,
+            },
+        ),
+        (f"identity_{identity.source}", identity.raw_metadata()),
+    ):
+        store.insert_library_metadata(
+            columns={
+                "id": _id(),
+                "volumeId": volume["id"],
+                "source": source,
+                "rawJson": json.dumps(payload, ensure_ascii=False),
+                "createdAt": _now(),
+                "updatedAt": _now(),
+            }
+        )
+    actual_chapters = max(chapter_sort_order, len(metadata_items))
+    store.update_library_volume(
+        str(volume["id"]),
+        columns={
+            "coverPath": cover_path,
+            "coverStatus": services.cover_status(cover_path),
+            "sizeBytes": total_size,
+            "chapterCount": actual_chapters,
+            "trackCount": len(metadata_items),
+            "durationMs": total_duration,
+            "narrator": narrator,
+            "importStatus": "COMPLETED",
+            "updatedAt": _now(),
+        },
+    )
+    _finalize_work_cover(
+        store,
+        queries,
+        services,
+        str(target.work["id"]),
+        str(media_context["id"]),
+        cover_path,
+        _prepared_default_cover(options),
+    )
+    return ImportResult(
+        str(target.work["id"]),
+        str(target.work["id"]),
+        str(media_context["id"]),
+        str(volume["id"]),
+        str(target.work["title"]),
+        classification.media_kind.lower(),
+        "audio",
+        actual_chapters,
+        "completed",
+        False,
+        False,
+        "topology-bound",
         resolved_metadata=resolved_local.metadata if resolved_local else None,
         metadata_field_sources=resolved_local.field_sources if resolved_local else (),
         metadata_source_order=resolved_local.source_order if resolved_local else (),

@@ -789,6 +789,89 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     )
 
 
+def test_scanned_audio_volume_enriches_only_prebound_topology(
+    db_session,
+    test_settings,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _initialize_schema(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True, exist_ok=True)
+    audio_dir = tmp_path / "Book" / "Vol.1"
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "01.mp3").write_bytes(b"first-track")
+    (audio_dir / "02.mp3").write_bytes(b"second-track")
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
+    work = LibraryWork(
+        id="audio-topology-work",
+        library_id="test-library",
+        origin="WATCH",
+        source_key="work:Book",
+        title="Book",
+        normalized_title="book",
+        tags="[]",
+        organized=True,
+        organize_status="APPLIED",
+    )
+    version = LibraryVersion(
+        id="audio-topology-version",
+        work_id=work.id,
+        source_key="version:Book",
+    )
+    volume = LibraryVolume(
+        id="audio-topology-volume",
+        version_id=version.id,
+        origin="WATCH",
+        title="Vol.1",
+        format="AUDIO",
+        resource_key="volume:Book/Vol.1",
+        import_status="PENDING",
+    )
+    db_session.add(work)
+    db_session.commit()
+    db_session.add(version)
+    db_session.commit()
+    db_session.add(volume)
+    db_session.commit()
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        _options(
+            source_file_path=audio_dir,
+            origin="WATCH",
+            original_name=audio_dir.name,
+            topology_work_id=work.id,
+            topology_volume_id=volume.id,
+        ),
+    )
+
+    db_session.expire_all()
+    stored_work = db_session.get(LibraryWork, work.id)
+    stored_volume = db_session.get(LibraryVolume, volume.id)
+    assert result.work_id == work.id
+    assert result.media_version_id == version.id
+    assert result.volume_id == volume.id
+    assert result.merge_reason == "topology-bound"
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 1
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM LibraryVersion")).scalar() == 1
+    )
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryVolume")).scalar() == 1
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM LibraryMediaVersion")).scalar()
+        == 0
+    )
+    assert stored_work is not None and stored_work.title == "Book"
+    assert stored_volume is not None and stored_volume.title == "Vol.1"
+    assert stored_volume.import_status == "COMPLETED"
+    assert stored_volume.track_count == 2
+
+
 def test_audio_bundle_groups_with_same_title_works_across_media(
     db_session, test_settings, monkeypatch, tmp_path
 ) -> None:
