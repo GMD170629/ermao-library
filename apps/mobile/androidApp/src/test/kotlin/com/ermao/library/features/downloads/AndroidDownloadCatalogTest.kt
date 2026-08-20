@@ -30,8 +30,8 @@ class AndroidDownloadCatalogTest {
     }
 
     @Test
-    fun legacyHashCatalogAndArtifactsAreRemovedWithoutRehashing() = runTest {
-        val root = Files.createTempDirectory("download-catalog-legacy-hash-test").toFile()
+    fun unsupportedSchemaCatalogAndArtifactsAreRemoved() = runTest {
+        val root = Files.createTempDirectory("download-catalog-unsupported-schema-test").toFile()
         val namespace = AndroidDownloadNamespace("server", "user", 3)
         try {
             val namespaceKey = sha256("server|user|3")
@@ -40,7 +40,7 @@ class AndroidDownloadCatalogTest {
             artifacts.resolve("legacy.bin").writeBytes(byteArrayOf(1, 2, 3))
             artifacts.resolve("legacy.bin.sha256").writeText("legacy")
             directory.resolve("catalog.json").writeText(
-                """{"schemaVersion":1,"records":[{"taskId":"legacy","namespace":{"serverIdentity":"server","userId":"user","authorizationVersion":3},"workId":"work","workTitle":"Book","author":"Author","coverUrl":"/api/works/work/cover","volumeId":"volume","volumeTitle":"Volume","format":"EPUB","readerType":"reflowable","mediaVersionId":"media","mediaKind":"EBOOK","mediaVersionCompleted":false,"contentFingerprint":"sha256:legacy","sourceApiPath":"/api/volumes/volume/file","sourceMimeType":"application/epub+zip","expectedBytes":3,"transferredBytes":3,"status":"Completed","localReference":"$namespaceKey/artifacts/legacy.bin","verified":true,"createdAtEpochMillis":1,"updatedAtEpochMillis":2}]}""",
+                """{"schemaVersion":1,"records":[]}""",
             )
 
             assertEquals(emptyList(), AndroidDownloadCatalog(root).records(namespace))

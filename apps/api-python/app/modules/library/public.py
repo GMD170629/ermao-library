@@ -20,7 +20,6 @@ from app.modules.library.application.catalog import (
     ListCatalogFacets,
     ListCatalogWorks,
 )
-from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.application.facet_references import (
     LibraryFacetReference,
     LibraryFacetReferenceQueryPort,
@@ -120,7 +119,6 @@ __all__ = [
     "ListCatalogFacets",
     "ListCatalogWorks",
     "ListLibraryGroupings",
-    "MoveVolumeResult",
     "PreparedWorkFacet",
     "SearchLibraryFilterOptions",
     "SmartShelfCriteria",

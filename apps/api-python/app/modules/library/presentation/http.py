@@ -2599,7 +2599,7 @@ def reclassify_work_volume(
         )
     return ReclassifyVolumeResponse(
         data={
-            "movedVolumeIds": list(outcome.moved_volume_ids),
+            "affectedVolumeIds": list(outcome.affected_volume_ids),
             "operation": _operation_payload(outcome.operation),
         }
     )

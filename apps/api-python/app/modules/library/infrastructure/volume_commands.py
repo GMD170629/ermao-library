@@ -226,6 +226,6 @@ class SqlAlchemyVolumeMetadata:
             selected_volume.updated_at = now
         operation_store.write_prepared_operation(self._db, operation)
         return VolumeReclassifyOutcome(
-            moved_volume_ids=tuple(row.id for row in selected),
+            affected_volume_ids=tuple(row.id for row in selected),
             operation=operation_store.operation_summary(operation.record),
         )

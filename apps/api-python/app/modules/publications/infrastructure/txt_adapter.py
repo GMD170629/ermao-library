@@ -1,4 +1,4 @@
-"""Deterministic plain-text to EPUB-profile Readium Publication adapter."""
+"""Deterministic plain-text to in-memory Readium Publication adapter."""
 
 from __future__ import annotations
 

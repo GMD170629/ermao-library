@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
 
 def _login_admin(client, db: Session) -> None:
@@ -163,7 +164,9 @@ def test_media_kind_undo_does_not_restore_stale_directory_topology(
     )
 
     assert response.status_code == 200, response.text
-    operation_id = response.json()["data"]["operation"]["id"]
+    payload = response.json()["data"]
+    assert payload["affectedVolumeIds"] == [volumes[0].id]
+    operation_id = payload["operation"]["id"]
     scanner_version = LibraryVersion(
         id="scanner-authoritative-version",
         work_id=work.id,

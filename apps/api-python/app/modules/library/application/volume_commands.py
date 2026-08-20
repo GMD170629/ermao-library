@@ -48,7 +48,7 @@ class OperationSummary:
 
 @dataclass(frozen=True, slots=True)
 class VolumeReclassifyOutcome:
-    moved_volume_ids: tuple[str, ...]
+    affected_volume_ids: tuple[str, ...]
     operation: OperationSummary
 
 

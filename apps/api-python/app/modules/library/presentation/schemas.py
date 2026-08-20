@@ -910,7 +910,7 @@ class VolumeMetadataMutationPayload(HttpContractModel):
 
 
 class ReclassifyVolumePayload(HttpContractModel):
-    moved_volume_ids: list[str] = Field(alias="movedVolumeIds")
+    affected_volume_ids: list[str] = Field(alias="affectedVolumeIds")
     operation: LibraryOperationSummary
 
 

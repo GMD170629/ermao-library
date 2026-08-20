@@ -77,7 +77,7 @@ class KtorWorkManagementRepositoryTest {
     fun reclassifyReturnsOnlyOperationMetadata() = runBlocking {
         val repository = repository {
             respond(
-                """{"ok":true,"data":{"movedVolumeIds":["volume"],"operation":{"id":"op"}}}""",
+                """{"ok":true,"data":{"affectedVolumeIds":["volume"],"operation":{"id":"op"}}}""",
                 HttpStatusCode.OK,
                 jsonHeaders,
             )
