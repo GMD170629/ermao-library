@@ -1045,13 +1045,13 @@ def upgrade() -> None:
         sa.Column(
             "classificationSource",
             sa.String(length=32),
-            server_default="LEGACY",
+            server_default="AUTO",
             nullable=False,
         ),
         sa.Column(
             "classificationReason",
             sa.String(length=64),
-            server_default="LEGACY",
+            server_default="FORMAT_DEFAULT",
             nullable=False,
         ),
         sa.Column("suggestedMediaKind", sa.String(length=32), nullable=True),
@@ -1685,9 +1685,7 @@ def upgrade() -> None:
         sa.Column("volumeId", sa.String(length=191), nullable=True),
         sa.Column("versionId", sa.String(length=191), nullable=True),
         sa.Column("importTaskId", sa.String(length=191), nullable=True),
-        sa.Column(
-            "trigger", sa.String(length=191), server_default="LEGACY", nullable=False
-        ),
+        sa.Column("trigger", sa.String(length=191), nullable=False),
         sa.Column(
             "status", sa.String(length=32), server_default="REVIEWING", nullable=False
         ),

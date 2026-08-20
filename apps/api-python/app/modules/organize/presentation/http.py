@@ -160,7 +160,7 @@ def _organize_job_view(
         "runId": job.get("runId"),
         "volumeId": job.get("volumeId"),
         "versionId": job.get("versionId"),
-        "trigger": job.get("trigger") or "LEGACY",
+        "trigger": job.get("trigger") or "SCHEDULE",
         "status": raw_status,
         "statusCategory": status_category,
         "issueCodes": _parse_json(job.get("issueCodes"), []),

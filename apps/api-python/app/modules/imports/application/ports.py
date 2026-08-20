@@ -14,7 +14,6 @@ from app.modules.imports.application.audio_types import (
 from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
-    DirectorySiblingSnapshotDTO,
     ImportOptions,
     ImportPreferencesDTO,
     ImportResult,
@@ -189,12 +188,6 @@ class ImportOrchestrationServices(Protocol):
     ) -> BookIdentityDTO: ...
 
     def recognize_filename_identity(self, filename: str) -> BookIdentityDTO: ...
-
-    def parse_filename_identity(self, filename: str) -> BookIdentityDTO: ...
-
-    def monitor_root_path(self, library_id: str | None) -> Path | None: ...
-
-    def list_sibling_files(self, path: Path) -> DirectorySiblingSnapshotDTO: ...
 
     def read_sidecar_metadata(
         self, path: Path, *, directory_fallback: bool

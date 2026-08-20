@@ -89,6 +89,7 @@ class OrganizePolicy(Base):
         onupdate=db_timestamp,
     )
 
+
 class OrganizeRun(Base):
     __tablename__ = "OrganizeRun"
     __table_args__ = (Index("OrganizeRun_status_createdAt_idx", "status", "createdAt"),)
@@ -196,9 +197,7 @@ class OrganizeJob(Base):
         ForeignKey("ImportTask.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    trigger: Mapped[str] = mapped_column(
-        String(191), nullable=False, default="LEGACY", server_default="LEGACY"
-    )
+    trigger: Mapped[str] = mapped_column(String(191), nullable=False)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="REVIEWING", server_default="REVIEWING"
     )

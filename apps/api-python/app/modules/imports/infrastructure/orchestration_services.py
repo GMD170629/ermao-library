@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.local_metadata import LocalMetadataSource
@@ -19,7 +18,6 @@ from app.infrastructure.local_metadata_policy import (
     prepare_local_metadata_priority,
 )
 from app.models.common import db_timestamp
-from app.models.library import Library
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
@@ -27,7 +25,6 @@ from app.modules.imports.application.audio_types import (
 from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
-    DirectorySiblingSnapshotDTO,
     ImportPreferencesDTO,
     ImportSystemEvent,
     SidecarMetadataDTO,
@@ -66,10 +63,7 @@ from app.modules.library.infrastructure.facet_sync import (
     prepare_work_facet_write,
 )
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
-from app.services.book_identity import (
-    recognize_book_identity,
-    recognize_book_identity_with_regex,
-)
+from app.services.book_identity import recognize_book_identity
 from app.services.default_cover import (
     cover_status,
     ensure_default_cover,
@@ -161,47 +155,6 @@ class SessionImportOrchestrationServices:
             fallback_code=identity.fallback_code,
             cache_hit=identity.cache_hit,
         )
-
-    def parse_filename_identity(self, filename: str) -> BookIdentityDTO:
-        safe_filename = Path(filename).name
-        identity = recognize_book_identity_with_regex(safe_filename)
-        return BookIdentityDTO(
-            title=identity.title,
-            author=identity.author,
-            volume_index=identity.volume_index,
-            source=identity.source,
-            confidence=identity.confidence,
-            logical_path=identity.logical_path,
-            fallback_reason=identity.fallback_reason,
-            fallback_code=identity.fallback_code,
-            cache_hit=identity.cache_hit,
-        )
-
-    def monitor_root_path(self, library_id: str | None) -> Path | None:
-        if library_id is None:
-            return None
-        root_path = self._db.scalar(
-            select(Library.root_path).where(Library.id == library_id)
-        )
-        self._unit_of_work.release()
-        if root_path is None:
-            return None
-        return Path(root_path).expanduser().resolve()
-
-    def list_sibling_files(self, path: Path) -> DirectorySiblingSnapshotDTO:
-        self._require_released_transaction("list_sibling_files")
-        resolved = path.resolve()
-        try:
-            siblings = tuple(
-                candidate.resolve()
-                for candidate in resolved.parent.iterdir()
-                if candidate.is_file()
-                and not candidate.is_symlink()
-                and candidate.resolve() != resolved
-            )
-        except OSError:
-            return DirectorySiblingSnapshotDTO(paths=(), complete=False)
-        return DirectorySiblingSnapshotDTO(paths=siblings, complete=True)
 
     def read_sidecar_metadata(
         self, path: Path, *, directory_fallback: bool

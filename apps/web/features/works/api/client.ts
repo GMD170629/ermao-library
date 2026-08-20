@@ -44,7 +44,7 @@ function readerType(value: unknown, format: VolumeFormat): ReaderType {
 }
 
 function classificationSource(value: unknown): ClassificationSource {
-  return value === 'AUTO' || value === 'MONITOR_FOLDER' || value === 'USER' || value === 'INHERITED' || value === 'LEGACY' ? value : 'LEGACY';
+  return value === 'AUTO' || value === 'MONITOR_FOLDER' || value === 'USER' ? value : 'AUTO';
 }
 
 function mapVolume(value: unknown): VolumeResource | null {
@@ -87,7 +87,7 @@ function mapVolume(value: unknown): VolumeResource | null {
     readerType: readerType(item.readerType, format),
     classification: {
       source: classificationSource(classification.source),
-      reason: stringValue(classification.reason, 'LEGACY'),
+      reason: stringValue(classification.reason, 'FORMAT_DEFAULT'),
       suggestedMediaKind: mediaKind(classification.suggestedMediaKind)
     },
     publisher: nullableString(item.publisher),

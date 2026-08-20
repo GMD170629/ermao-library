@@ -17,8 +17,6 @@ class ClassificationSource(StrEnum):
     AUTO = "AUTO"
     MONITOR_FOLDER = "MONITOR_FOLDER"
     USER = "USER"
-    INHERITED = "INHERITED"
-    LEGACY = "LEGACY"
 
 
 @dataclass(frozen=True, slots=True)

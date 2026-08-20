@@ -379,7 +379,7 @@ def list_filtered_job_rows(
     return [
         OrganizeJobListItem(
             id=str(row.id),
-            trigger=str(row.trigger or "LEGACY"),
+            trigger=str(row.trigger),
             status_category=cast(
                 OrganizeStatusCategory,
                 str(row.status_category),

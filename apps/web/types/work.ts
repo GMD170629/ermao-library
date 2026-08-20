@@ -2,7 +2,7 @@ export type VolumeFormat = 'COMIC' | 'CBZ' | 'CBR' | 'RAR' | 'ZIP' | 'EPUB' | 'P
 export type ReadingFormat = VolumeFormat;
 export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 export type ReaderType = 'reflowable' | 'comic' | 'pdf' | 'audio';
-export type ClassificationSource = 'AUTO' | 'MONITOR_FOLDER' | 'USER' | 'INHERITED' | 'LEGACY';
+export type ClassificationSource = 'AUTO' | 'MONITOR_FOLDER' | 'USER';
 export type PublicationStatus = 'UNKNOWN' | 'ONGOING' | 'COMPLETED' | 'HIATUS' | 'CANCELLED';
 export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
 

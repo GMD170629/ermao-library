@@ -280,15 +280,15 @@ class LibraryVolume(Base):
         "classificationSource",
         String(32),
         nullable=False,
-        default="LEGACY",
-        server_default="LEGACY",
+        default="AUTO",
+        server_default="AUTO",
     )
     classification_reason: Mapped[str] = mapped_column(
         "classificationReason",
         String(64),
         nullable=False,
-        default="LEGACY",
-        server_default="LEGACY",
+        default="FORMAT_DEFAULT",
+        server_default="FORMAT_DEFAULT",
     )
     suggested_media_kind: Mapped[str | None] = mapped_column(
         "suggestedMediaKind", String(32), nullable=True

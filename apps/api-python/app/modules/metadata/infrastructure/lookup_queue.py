@@ -110,13 +110,13 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
 
 
 def automatic_rate_limit_applies(db: Session, task: dict[str, Any]) -> bool:
-    """Manual recognition is explicit; legacy and background triggers stay safe."""
+    """Manual recognition is explicit; every background trigger stays safe."""
 
     job_id = str(task.get("organizeJobId") or "").strip()
     if not job_id or not _has_table(db, "OrganizeJob"):
         return True
     trigger = db.scalar(select(OrganizeJob.trigger).where(OrganizeJob.id == job_id))
-    return str(trigger or "LEGACY").upper() != "MANUAL"
+    return str(trigger or "SCHEDULE").upper() != "MANUAL"
 
 
 def work_row_to_dict(row: Any) -> dict[str, Any]:
@@ -234,11 +234,7 @@ def update_lookup_task(
         if mapped.get("status") != "RUNNING":
             mapped["lease_owner_id"] = None
             mapped["lease_expires_at"] = None
-    result = db.execute(
-        update(MetadataLookupTask)
-        .where(*clauses)
-        .values(**mapped)
-    )
+    result = db.execute(update(MetadataLookupTask).where(*clauses).values(**mapped))
     return bool(result.rowcount)
 
 

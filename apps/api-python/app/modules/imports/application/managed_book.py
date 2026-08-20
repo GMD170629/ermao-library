@@ -52,14 +52,14 @@ from app.modules.imports.application.import_support import (
     import_file_size_limit_bytes_for_ext,
 )
 from app.modules.imports.application.import_text import _import_reflowable_source
+from app.modules.imports.application.path_metadata import (
+    resolve_non_audio_path_metadata,
+)
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     ImportUnitOfWork,
     LibraryImportStore,
-)
-from app.modules.imports.application.work_grouping import (
-    resolve_non_audio_work_identity,
 )
 from app.modules.imports.domain.reflowable_formats import (
     REFLOWABLE_SOURCE_EXTENSIONS,
@@ -319,10 +319,9 @@ def import_managed_book(
             )
         else:
             audio_resolved_local = None
-            path_resolution = resolve_non_audio_work_identity(
+            path_resolution = resolve_non_audio_path_metadata(
                 services,
                 effective_options,
-                import_preferences,
             )
             identity = path_resolution.identity
             effective_options = replace(

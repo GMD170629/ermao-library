@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import replace
-from pathlib import Path
 
 from app.contracts.local_metadata import LocalMetadataSource
 from app.contracts.publication_metadata import PublicationMetadata
@@ -48,7 +47,7 @@ def resolve_import_metadata(
 ) -> tuple[BookIdentityDTO, ResolvedLocalMetadata]:
     """Resolve one complete local snapshot before database identity decisions."""
 
-    resolved_path_metadata = path_metadata or _legacy_path_metadata(
+    resolved_path_metadata = path_metadata or _path_metadata_from_identity(
         path_identity,
         path_publication_title=path_publication_title,
     )
@@ -89,7 +88,6 @@ def resolve_import_metadata(
         "REQUESTED": "requested",
     }
     identity_source = source_mapping[selected_source]
-    path_owned_identity = selected_source == "PATH"
     identity = replace(
         path_identity,
         title=title,
@@ -100,64 +98,29 @@ def resolve_import_metadata(
         if selected_source in {"SIDECAR_OPF", "REQUESTED"}
         else path_identity.confidence,
         selection_reason="resolved_local_metadata",
-        grouping_key=path_identity.grouping_key if path_owned_identity else None,
-        grouping_kind=(
-            path_identity.grouping_kind if path_owned_identity else "standalone"
-        ),
     )
     return identity, resolved
 
 
-def _legacy_path_metadata(
+def _path_metadata_from_identity(
     path_identity: BookIdentityDTO,
     *,
     path_publication_title: str | None,
 ) -> PublicationMetadata:
-    """Keep the unchanged audio/direct-call PATH behavior outside this refactor."""
+    """Build filename metadata without inferring structural ownership."""
 
-    uses_ai_fallback = (
-        path_identity.source == "ai"
-        and path_identity.volume_index is None
-        and path_identity.grouping_kind != "folder"
-    )
-    resolved_path_title = (
-        path_identity.title
-        if uses_ai_fallback
-        else path_publication_title
-        if path_publication_title is not None
-        else path_identity.title
-    )
-    path_series_name: str | None = None
-    if path_identity.grouping_kind == "folder":
-        if path_publication_title is not None:
-            resolved_path_title = path_publication_title
-        else:
-            logical_name = Path(path_identity.logical_path.replace("\\", "/")).name
-            resolved_path_title = Path(logical_name).stem or path_identity.title
-        path_series_name = _valid_title(path_identity.title)
-    path_author = (
-        _valid_author(path_identity.author)
-        if path_identity.source != "ai"
-        or path_identity.grouping_kind == "folder"
-        or uses_ai_fallback
-        else None
-    )
-    if (
-        path_identity.grouping_kind != "folder"
-        and path_identity.volume_index is not None
-        and _looks_like_volume_label(path_author)
-    ):
+    resolved_path_title = path_publication_title or path_identity.title
+    path_author = _valid_author(path_identity.author)
+    if path_identity.volume_index is not None and _looks_like_volume_label(path_author):
         path_author = None
     path_titles = titles_from_local_source(
         resolved_path_title,
-        series_name=path_series_name,
         volume_index=path_identity.volume_index,
     )
     return PublicationMetadata(
         title=path_titles.work_title,
         volume_title=path_titles.volume_title,
         authors=(path_author,) if path_author else (),
-        series_name=path_series_name,
         volume_index=path_titles.volume_index,
     )
 

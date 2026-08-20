@@ -62,10 +62,6 @@ class BookIdentityDTO:
     cache_hit: bool = False
     selection_reason: str | None = None
     evidence: tuple[IdentityEvidenceDTO, ...] = ()
-    grouping_kind: Literal[
-        "folder", "standalone", "monitor_root_file", "explicit", "legacy"
-    ] = "legacy"
-    grouping_key: str | None = None
 
     def raw_metadata(self) -> dict[str, object]:
         return {
@@ -87,8 +83,6 @@ class BookIdentityDTO:
             "fallbackCode": self.fallback_code,
             "cacheHit": self.cache_hit,
             "selectionReason": self.selection_reason,
-            "groupingKind": self.grouping_kind,
-            "groupingKey": self.grouping_key,
             "evidence": [
                 {
                     "source": item.source,
@@ -102,17 +96,11 @@ class BookIdentityDTO:
 
 
 @dataclass(frozen=True, slots=True)
-class NonAudioPathResolutionDTO:
-    """Complete PATH candidate plus the identity used for grouping."""
+class PathMetadataResolutionDTO:
+    """Filename metadata candidate for a scanner-bound source."""
 
     identity: BookIdentityDTO
     metadata: PublicationMetadata
-
-
-@dataclass(frozen=True)
-class DirectorySiblingSnapshotDTO:
-    paths: tuple[Path, ...]
-    complete: bool
 
 
 @dataclass(frozen=True)
