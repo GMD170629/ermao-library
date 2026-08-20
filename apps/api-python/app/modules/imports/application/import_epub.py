@@ -26,16 +26,19 @@ from app.modules.imports.application.import_support import (
     _attrs,
     _classification_columns,
     _classification_result_type,
-    _ensure_implicit_version,
-    _ensure_work,
+    _bound_topology_target,
     _extract_isbn,
     _file_resource_key,
     _finalize_work_cover,
     _hash_text,
     _id,
     _insert_identity_metadata,
+    _import_media_context,
+    _import_version,
+    _import_work,
     _now,
     _preferred_identifier,
+    _persist_import_volume,
     _prepared_default_cover,
     _sanitize_description,
     _select_volume_media_version,
@@ -110,6 +113,7 @@ def _import_epub(
             fixed_layout=bool(metadata.get("fixedLayout")),
         ),
     )
+    topology_target = _bound_topology_target(queries, options)
     volume_info = (
         SeriesVolumeInfo(
             identity.title,
@@ -117,7 +121,7 @@ def _import_epub(
             resolved_local.metadata.volume_title or _source_filename_title(options),
             identity.author,
         )
-        if identity.volume_index is not None
+        if identity.volume_index is not None and topology_target is None
         else None
     )
     if volume_info:
@@ -133,9 +137,10 @@ def _import_epub(
         if volume_info.author:
             metadata["author"] = volume_info.author
     merge_key = _work_merge_key(identity.title)
-    work, created = _ensure_work(
+    work, created = _import_work(
         store,
         queries,
+        options,
         {
             "title": identity.title,
             "author": identity.author,
@@ -152,12 +157,13 @@ def _import_epub(
             "origin": options.origin,
             "libraryId": options.library_id,
         },
+        topology_target,
     )
     work_updates = _missing_epub_work_metadata(work, metadata)
     if work_updates:
         store.update_library_work(work["id"], columns=work_updates)
         work = queries.get_work_by_id(str(work["id"])) or {**work, **work_updates}
-    version = _ensure_implicit_version(store, work["id"])
+    version = _import_version(store, work["id"], topology_target)
     if volume_info:
         source_key = _source_group_key(options, metadata["title"])
         media_version = _select_volume_media_version(
@@ -311,19 +317,20 @@ def _import_epub(
     cover_path = None
     try:
         store.update_import_task(task_id, columns={"message": "正在建立 EPUB 记录"})
-        media_version = store.ensure_library_media_version(
-            columns={
-                "id": _id(),
-                "workId": work["id"],
-                "libraryId": options.library_id,
-                "origin": options.origin,
-                "mediaKind": classification.media_kind,
-                "format": "EPUB",
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            },
+        media_version = _import_media_context(
+            store,
+            work_id=work["id"],
+            media_kind=classification.media_kind,
+            format_name="EPUB",
+            library_id=options.library_id,
+            origin=options.origin,
+            target=topology_target,
         )
-        volume_id = _id()
+        volume_id = (
+            str(topology_target.volume["id"])
+            if topology_target is not None
+            else _id()
+        )
         if metadata.get("coverPath"):
             release_import_transaction(unit_of_work)
             cover_path = _extract_epub_cover(
@@ -335,8 +342,9 @@ def _import_epub(
                 volume_id,
             )
         stored_cover_path = cover_path or _prepared_default_cover(options)
-        volume = store.insert_library_volume(
-            columns={
+        volume = _persist_import_volume(
+            store,
+            {
                 "id": volume_id,
                 "versionId": version["id"],
                 "title": resolved_local.metadata.volume_title or identity.title,
@@ -359,7 +367,8 @@ def _import_epub(
                 **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
-            }
+            },
+            topology_target,
         )
         store.insert_library_file(
             columns={
@@ -416,8 +425,12 @@ def _import_epub(
             0,
             "completed",
             False,
-            not created,
-            "new-work" if created else "same-epub-work",
+            topology_target is None and not created,
+            "topology-bound"
+            if topology_target is not None
+            else "new-work"
+            if created
+            else "same-epub-work",
             resolved_metadata=resolved_local.metadata,
             metadata_field_sources=resolved_local.field_sources,
             metadata_source_order=resolved_local.source_order,

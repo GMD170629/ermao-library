@@ -544,6 +544,75 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     assert identity_metadata["author"] == "未知作者"
 
 
+def test_scanned_epub_enriches_prebound_topology_without_creating_structure(
+    db_session,
+    test_settings,
+    tmp_path: Path,
+) -> None:
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    epub = tmp_path / "directory-title.epub"
+    write_epub_metadata_fixture(epub, "Embedded title", "Embedded author")
+    work = LibraryWork(
+        id="topology-work",
+        library_id="test-library",
+        origin="WATCH",
+        source_key="work:directory-title.epub",
+        title="Directory work",
+        normalized_title="directory work",
+        tags="[]",
+        organized=True,
+        organize_status="APPLIED",
+    )
+    version = LibraryVersion(
+        id="topology-version",
+        work_id=work.id,
+        source_key="version:directory-title.epub",
+    )
+    volume = LibraryVolume(
+        id="topology-volume",
+        version_id=version.id,
+        origin="WATCH",
+        title="Directory volume",
+        format="EPUB",
+        resource_key="volume:directory-title.epub",
+        import_status="PENDING",
+    )
+    db_session.add(work)
+    db_session.commit()
+    db_session.add(version)
+    db_session.commit()
+    db_session.add(volume)
+    db_session.commit()
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        _options(
+            source_file_path=epub,
+            origin="WATCH",
+            original_name=epub.name,
+            topology_work_id=work.id,
+            topology_volume_id=volume.id,
+        ),
+    )
+
+    db_session.expire_all()
+    stored_work = db_session.get(LibraryWork, work.id)
+    stored_volume = db_session.get(LibraryVolume, volume.id)
+    assert result.work_id == work.id
+    assert result.media_version_id == version.id
+    assert result.volume_id == volume.id
+    assert result.merge_reason == "topology-bound"
+    assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryVersion") == 1
+    assert _count(db_session, "LibraryVolume") == 1
+    assert _count(db_session, "LibraryMediaVersion") == 0
+    assert stored_work is not None and stored_work.title == "Directory work"
+    assert stored_volume is not None and stored_volume.title == "Directory volume"
+    assert stored_volume.import_status == "COMPLETED"
+
+
 def test_import_retry_reuses_hidden_partial_volume_and_file(
     db_session, test_settings, tmp_path
 ):

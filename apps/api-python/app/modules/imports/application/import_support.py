@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 from xml.etree import ElementTree
@@ -47,6 +48,16 @@ SUPPORTED_EXTS = {
     ".pdf",
     *REFLOWABLE_SOURCE_EXTS,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class BoundTopologyTarget:
+    work: Record
+    volume: Record
+
+    @property
+    def version_id(self) -> str:
+        return str(self.volume["versionId"])
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_EPUB_SIZE_BYTES = 512 * 1024 * 1024
 MAX_TEXT_EBOOK_SIZE_BYTES = 512 * 1024 * 1024
@@ -385,7 +396,7 @@ def _ensure_implicit_version(
 def _bound_topology_target(
     queries: ImportLibraryQueries,
     options: ImportOptions,
-) -> tuple[Record, Record] | None:
+) -> BoundTopologyTarget | None:
     """Load and validate the structure selected by the library-root scanner."""
 
     if options.topology_work_id is None and options.topology_volume_id is None:
@@ -418,7 +429,99 @@ def _bound_topology_target(
             "扫描任务的目录拓扑不属于目标书库",
             retryable=False,
         )
-    return work, volume
+    return BoundTopologyTarget(work=work, volume=volume)
+
+
+def _import_work(
+    store: LibraryImportStore,
+    queries: ImportLibraryQueries,
+    options: ImportOptions,
+    data: dict[str, object],
+    target: BoundTopologyTarget | None,
+) -> tuple[Record, bool]:
+    if target is not None:
+        return target.work, False
+    return _ensure_work(store, queries, data)
+
+
+def _import_version(
+    store: LibraryImportStore,
+    work_id: object,
+    target: BoundTopologyTarget | None,
+) -> Record:
+    if target is not None:
+        return {
+            "id": target.version_id,
+            "workId": target.work["id"],
+            "sourceKey": target.volume.get("sourceKey"),
+        }
+    return _ensure_implicit_version(store, work_id)
+
+
+def _import_media_context(
+    store: LibraryImportStore,
+    *,
+    work_id: object,
+    media_kind: str,
+    format_name: str,
+    library_id: str | None,
+    origin: str,
+    target: BoundTopologyTarget | None,
+) -> Record:
+    if target is not None:
+        return {
+            "id": target.version_id,
+            "workId": target.work["id"],
+            "mediaKind": media_kind,
+            "format": format_name,
+        }
+    return store.ensure_library_media_version(
+        columns={
+            "id": _id(),
+            "workId": work_id,
+            "libraryId": library_id,
+            "origin": origin,
+            "mediaKind": media_kind,
+            "format": format_name,
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        }
+    )
+
+
+_TOPOLOGY_VOLUME_COLUMNS = frozenset(
+    {
+        "id",
+        "versionId",
+        "title",
+        "volumeIndex",
+        "sortOrder",
+        "resourceKey",
+        "sourceGroupKey",
+        "libraryId",
+        "origin",
+        "createdAt",
+    }
+)
+
+
+def _persist_import_volume(
+    store: LibraryImportStore,
+    columns: dict[str, object],
+    target: BoundTopologyTarget | None,
+) -> Record:
+    if target is None:
+        return store.insert_library_volume(columns=columns)
+    metadata_columns = {
+        key: value
+        for key, value in columns.items()
+        if key not in _TOPOLOGY_VOLUME_COLUMNS
+    }
+    store.update_library_volume(
+        str(target.volume["id"]),
+        columns=metadata_columns,
+    )
+    return {**target.volume, **metadata_columns}
 
 
 def _ensure_work(

@@ -566,10 +566,15 @@ def import_managed_book(
                 work_values["seriesName"] = publication.series_name
             if publication.series_index is not None:
                 work_values["seriesIndex"] = publication.series_index
-            if publication.volume_index is not None:
+            topology_bound = effective_options.topology_volume_id is not None
+            if publication.volume_index is not None and not topology_bound:
                 volume_values["volumeIndex"] = publication.volume_index
-            if publication.volume_title and not (
-                audio_metadata and (source.is_dir() or len(audio_metadata) > 1)
+            if (
+                publication.volume_title
+                and not topology_bound
+                and not (
+                    audio_metadata and (source.is_dir() or len(audio_metadata) > 1)
+                )
             ):
                 volume_values["title"] = publication.volume_title
             for column, value in (
@@ -600,11 +605,12 @@ def import_managed_book(
             store.update_library_work(result.work_id, columns=work_values)
             if result.volume_id:
                 store.update_library_volume(result.volume_id, columns=volume_values)
-        normalize_media_version_volume_order(
-            store,
-            queries,
-            result.media_version_id,
-        )
+        if effective_options.topology_volume_id is None:
+            normalize_media_version_volume_order(
+                store,
+                queries,
+                result.media_version_id,
+            )
         services.sync_work_facets(result.work_id)
         if sidecar is not None and result.volume_id:
             store.insert_library_metadata(
