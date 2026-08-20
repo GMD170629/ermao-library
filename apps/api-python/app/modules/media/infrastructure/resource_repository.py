@@ -133,6 +133,29 @@ class SqlAlchemyMediaResourceRepository:
         )
         return str(cover_path) if cover_path else None
 
+    def version_cover_path(self, version_id: str) -> str | None:
+        explicit_cover = self._session.scalar(
+            select(LibraryVersion.cover_path).where(LibraryVersion.id == version_id)
+        )
+        if explicit_cover:
+            return str(explicit_cover)
+        fallback = self._session.scalar(
+            select(LibraryVolume.cover_path)
+            .where(
+                LibraryVolume.version_id == version_id,
+                LibraryVolume.hidden.is_(False),
+                LibraryVolume.cover_path.is_not(None),
+                LibraryVolume.cover_path != "",
+            )
+            .order_by(
+                LibraryVolume.sort_order,
+                LibraryVolume.created_at,
+                LibraryVolume.id,
+            )
+            .limit(1)
+        )
+        return str(fallback) if fallback else None
+
     @staticmethod
     def _file_resource(file: LibraryFile | None) -> MediaFileResource | None:
         if file is None:

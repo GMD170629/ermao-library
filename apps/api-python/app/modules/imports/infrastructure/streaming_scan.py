@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections import Counter, deque
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
 
@@ -32,6 +32,7 @@ class _Frame:
     entries: Iterator[os.DirEntry[str]]
     depth: int
     audio_track_count: int = 0
+    audio_paths: list[Path] = field(default_factory=list)
     read_failed: bool = False
 
 
@@ -167,6 +168,8 @@ class StreamingDirectoryScanner:
             self._queue_candidate(path)
             return
         frame.audio_track_count += 1
+        if len(frame.audio_paths) <= MAX_AUDIO_BUNDLE_TRACKS:
+            frame.audio_paths.append(path)
 
     def _queue_candidate(self, path: Path) -> None:
         self._candidate_backlog.append(path)
@@ -187,6 +190,11 @@ class StreamingDirectoryScanner:
             close()
         if self._stack:
             self._stack[-1].audio_track_count += frame.audio_track_count
+            remaining_capacity = (
+                MAX_AUDIO_BUNDLE_TRACKS + 1 - len(self._stack[-1].audio_paths)
+            )
+            if remaining_capacity > 0:
+                self._stack[-1].audio_paths.extend(frame.audio_paths[:remaining_capacity])
             self._stack[-1].read_failed = (
                 self._stack[-1].read_failed or frame.read_failed
             )
@@ -218,7 +226,8 @@ class StreamingDirectoryScanner:
                     )
                 )
             return
-        self._queue_candidate(frame.path)
+        for path in frame.audio_paths:
+            self._queue_candidate(path)
 
     def _reset_delta(self) -> None:
         self._pending_candidates = []

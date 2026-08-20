@@ -214,6 +214,10 @@ class LibraryVersion(Base):
     )
     source_key: Mapped[str] = mapped_column("sourceKey", String(191), nullable=False)
     source_name: Mapped[str | None] = mapped_column("sourceName", Text, nullable=True)
+    cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
+    cover_status: Mapped[str] = mapped_column(
+        "coverStatus", String(32), nullable=False, default="PENDING", server_default="PENDING"
+    )
     work: Mapped[LibraryWork] = relationship()
     volumes: Mapped[list[LibraryVolume]] = relationship(back_populates="version")
     created_at: Mapped[datetime] = mapped_column(

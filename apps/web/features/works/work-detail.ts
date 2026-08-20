@@ -13,9 +13,15 @@ export function workDetailReturnHref(value: unknown): string {
   }
 }
 
-export function workDetailHref(workId: string, volumeId?: string | null, returnTo?: string | null): string {
+export function workDetailHref(
+  workId: string,
+  volumeId?: string | null,
+  returnTo?: string | null,
+  versionId?: string | null
+): string {
   const query = new URLSearchParams();
   if (volumeId) query.set('volumeId', volumeId);
+  if (versionId) query.set('versionId', versionId);
   if (returnTo) query.set('returnTo', workDetailReturnHref(returnTo));
   const suffix = query.size > 0 ? `?${query}` : '';
   return `/works/${encodeURIComponent(workId)}${suffix}`;
@@ -53,6 +59,20 @@ export function shouldShowVersionHeadings(work: WorkView): boolean {
 
 export function selectedVolumeForWork(work: WorkView, requestedVolumeId?: string | null): VolumeResource | null {
   const volumes = allVisibleVolumes(work);
+  return volumes.find((volume) => volume.id === requestedVolumeId)
+    ?? volumes.find((volume) => volume.id === work.continueVolumeId)
+    ?? volumes.find((volume) => volume.progress < 100)
+    ?? volumes[0]
+    ?? null;
+}
+
+export function selectedVolumeForVersion(
+  work: WorkView,
+  version: VersionResource | null,
+  requestedVolumeId?: string | null
+): VolumeResource | null {
+  if (!version) return null;
+  const volumes = version.volumes.filter((volume) => !volume.hidden);
   return volumes.find((volume) => volume.id === requestedVolumeId)
     ?? volumes.find((volume) => volume.id === work.continueVolumeId)
     ?? volumes.find((volume) => volume.progress < 100)

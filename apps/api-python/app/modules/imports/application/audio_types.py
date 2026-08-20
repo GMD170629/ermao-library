@@ -97,10 +97,6 @@ _AUDIO_MIME_TYPES = {
 }
 MAX_AUDIO_CHAPTERS = 10_000
 MAX_AUDIO_BUNDLE_TRACKS = 10_000
-DISC_DIRECTORY_PATTERN = re.compile(
-    r"^(?:cd|disc|disk|碟|盘)\s*[-_. ]*\d+(?:\s*(?:of|/|[-–—])\s*\d+)?$",
-    re.IGNORECASE,
-)
 _EXPLICIT_EPISODE_PATTERN = re.compile(
     r"第\s*0*(\d{1,6})\s*[集章回节]",
     re.IGNORECASE,

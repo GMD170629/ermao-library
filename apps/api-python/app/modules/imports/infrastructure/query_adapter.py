@@ -31,6 +31,12 @@ class SqlAlchemyImportLibraryQueries:
         self.list_file_volumes_by_paths = partial(
             library_queries.list_file_volumes_by_paths, db
         )
+        self.list_audio_volume_files = partial(
+            library_queries.list_audio_volume_files, db
+        )
+        self.list_audio_volume_units = partial(
+            library_queries.list_audio_volume_units, db
+        )
         self.list_volume_cover_paths_for_version = partial(
             library_queries.list_volume_cover_paths_for_version, db
         )

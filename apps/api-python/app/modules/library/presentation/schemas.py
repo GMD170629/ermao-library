@@ -270,6 +270,8 @@ class WorkDetailVersion(HttpContractModel):
     completed: bool
     volume_count: int = Field(alias="volumeCount")
     size_bytes: int = Field(alias="sizeBytes")
+    cover_status: str = Field(alias="coverStatus")
+    cover_url: str = Field(alias="coverUrl")
     volumes: list[WorkDetailVolume]
 
 
@@ -280,6 +282,8 @@ class WorkVersion(HttpContractModel):
     completed: bool
     volume_count: int = Field(alias="volumeCount")
     size_bytes: int = Field(alias="sizeBytes")
+    cover_status: str = Field(alias="coverStatus")
+    cover_url: str = Field(alias="coverUrl")
     volumes: list[LibraryVolume]
 
 
@@ -306,7 +310,12 @@ class WorkDetailBook(HttpContractModel):
     cover_status: str = Field(alias="coverStatus")
     cover_url: str = Field(alias="coverUrl")
     continue_volume_id: str | None = Field(alias="continueVolumeId")
+    continue_version_id: str | None = Field(alias="continueVersionId")
+    continue_volume_title: str | None = Field(alias="continueVolumeTitle")
     continue_volume_progress: float = Field(alias="continueVolumeProgress")
+    continue_reader_type: Literal["reflowable", "comic", "pdf", "audio"] | None = Field(
+        alias="continueReaderType"
+    )
     completed: bool
     versions: list[WorkDetailVersion]
 
@@ -880,6 +889,24 @@ class UpdateVolumeRequest(HttpContractModel):
     isbn: str | None = None
     narrator: str | None = None
     abridged: bool | None = None
+
+
+class UpdateVersionMetadataRequest(UpdateVolumeRequest):
+    """Metadata applied uniformly to every visible volume in a version."""
+
+
+class SourceActionResponsePayload(HttpContractModel):
+    operation_id: str = Field(alias="operationId")
+    target_id: str = Field(alias="targetId")
+    affected_volume_ids: list[str] = Field(alias="affectedVolumeIds")
+    affected_file_count: int = Field(alias="affectedFileCount")
+
+
+SourceActionResponse = SuccessEnvelope[SourceActionResponsePayload]
+
+
+class DeleteSourceRequest(HttpContractModel):
+    confirmation: str = Field(min_length=1)
 
 
 class ReclassifyVolumeRequest(HttpContractModel):

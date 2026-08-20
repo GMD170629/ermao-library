@@ -14,6 +14,7 @@ from urllib.request import Request as UrlRequest
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
@@ -39,6 +40,7 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
+from app.models.library import LibraryVersion
 from app.modules.media.application.cover_proxy import (
     UnsafeCoverUrl,
     configured_cover_origins,
@@ -236,12 +238,14 @@ def download_volume_archive(
 
 
 @router.get("/works/{work_id}/cover", response_class=MediaImageResponse)
+@router.get("/versions/{version_id}/cover", response_class=MediaImageResponse)
 @router.get("/volumes/{volume_id}/cover", response_class=MediaImageResponse)
 def get_cover(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
     work_id: str | None = None,
+    version_id: str | None = None,
     volume_id: str | None = None,
 ) -> Annotated[
     Response,
@@ -254,12 +258,19 @@ def get_cover(
         return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     if volume_id and not can_access_volume(db, user, volume_id):
         return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
+    if version_id:
+        version_work_id = db.scalar(
+            select(LibraryVersion.work_id).where(LibraryVersion.id == version_id)
+        )
+        if not version_work_id or not can_access_work(db, user, str(version_work_id)):
+            return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     cover_path_value = media_resource_query(db).cover_path(
         work_id=work_id,
+        version_id=version_id,
         volume_id=volume_id,
     )
-    cover_id = work_id or volume_id or "cover"
-    if not work_id and not volume_id:
+    cover_id = work_id or version_id or volume_id or "cover"
+    if not work_id and not version_id and not volume_id:
         return fail("条目不存在", status_code=404)
     cover_path = media_streaming.stored_path(
         cover_path_value, settings, database_backed=True

@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, delete, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
-from app.models.import_pipeline import ImportScanJob
+from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
 from app.models.library import Library
 from app.models.settings import QueueControlOperation, SystemSetting
 from app.modules.imports.application.claim import (
@@ -137,6 +137,42 @@ from app.services.system_events import (
     prepare_system_event,
     write_prepared_system_events,
 )
+
+
+def requeue_library_volumes(db: Session, volume_ids: tuple[str, ...]) -> tuple[str, ...]:
+    """Requeue the latest known source task for each selected volume."""
+    if not volume_ids:
+        return ()
+    tasks = db.scalars(
+        select(ImportTask)
+        .where(ImportTask.volume_id.in_(volume_ids))
+        .order_by(ImportTask.updated_at.desc(), ImportTask.id.desc())
+    ).all()
+    selected: dict[str, ImportTask] = {}
+    for task in tasks:
+        if task.volume_id and task.volume_id not in selected:
+            selected[task.volume_id] = task
+    if any(task.status in {"PENDING", "PARSING"} for task in selected.values()):
+        raise RuntimeError("SOURCE_RESCAN_IN_PROGRESS")
+    now = db_timestamp()
+    for task in selected.values():
+        db.execute(
+            delete(ImportWorkItem).where(ImportWorkItem.import_task_id == task.id)
+        )
+        task.status = "PENDING"
+        task.progress = 0
+        task.error_summary = None
+        task.error_code = None
+        task.retryable = False
+        task.attempts = 0
+        task.lease_owner = None
+        task.lease_expires_at = None
+        task.started_at = None
+        task.finished_at = None
+        task.message = "已加入定向重新扫描队列"
+        task.updated_at = now
+        persistent_work_queue.ensure_import_work_item(db, task, priority=100)
+    return tuple(task.id for task in selected.values())
 
 
 @dataclass(frozen=True, slots=True)

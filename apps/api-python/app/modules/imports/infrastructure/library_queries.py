@@ -9,7 +9,13 @@ from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import DownloadTask, ImportAsset, ImportTask
-from app.models.library import LibraryFile, LibraryVersion, LibraryVolume, LibraryWork
+from app.models.library import (
+    LibraryFile,
+    LibraryReadingUnit,
+    LibraryVersion,
+    LibraryVolume,
+    LibraryWork,
+)
 from app.modules.library.infrastructure.media_kind_sql import (
     volume_effective_media_kind,
 )
@@ -212,6 +218,32 @@ def list_file_volumes_by_paths(db: Session, paths: list[str]) -> list[dict[str, 
         )
     ).all()
     return [{"path": row.path, "volumeId": row.volume_id} for row in rows]
+
+
+def list_audio_volume_files(db: Session, volume_id: str) -> list[dict[str, Any]]:
+    rows = db.execute(
+        select(
+            LibraryFile.id,
+            LibraryFile.path,
+            LibraryFile.size_bytes.label("sizeBytes"),
+            LibraryFile.duration_ms.label("durationMs"),
+        ).where(
+            LibraryFile.volume_id == volume_id,
+            LibraryFile.kind == "AUDIO",
+        )
+    ).mappings()
+    return [dict(row) for row in rows]
+
+
+def list_audio_volume_units(db: Session, volume_id: str) -> list[dict[str, Any]]:
+    rows = db.execute(
+        select(
+            LibraryReadingUnit.id,
+            LibraryReadingUnit.file_id.label("fileId"),
+            LibraryReadingUnit.start_ms.label("startMs"),
+        ).where(LibraryReadingUnit.volume_id == volume_id)
+    ).mappings()
+    return [dict(row) for row in rows]
 
 
 def audio_bundle_fully_imported(db: Session, paths: list[str]) -> bool:

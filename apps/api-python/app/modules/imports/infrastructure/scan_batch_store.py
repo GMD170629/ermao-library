@@ -254,7 +254,6 @@ def prepare_scan_candidate_batch(
             topology_source.volume_resource_key,
         )
         volume_id = volume_ids.get(volume_identity)
-        volume_existed = volume_id is not None
         if volume_id is None:
             volume_id = f"topology_volume_{id_seed}_{len(volume_ids)}"
             volume_ids[volume_identity] = volume_id
@@ -282,7 +281,6 @@ def prepare_scan_candidate_batch(
             key in unique_batch_keys
             or key in library_keys
             or bool(statuses)
-            or volume_existed
         )
         if already_known:
             continue

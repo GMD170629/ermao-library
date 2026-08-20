@@ -238,7 +238,11 @@ def test_streaming_scan_uses_audiobook_root_topology_without_name_heuristics(
     finally:
         scanner.close()
 
-    assert set(candidates) == {standalone, root / "Book"}
+    assert set(candidates) == {
+        standalone,
+        opening / "alpha.mp3",
+        finale / "omega.mp3",
+    }
     assert skipped == 1
 
 
@@ -546,7 +550,7 @@ def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
     assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 500
 
 
-def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
+def test_completed_audio_files_are_not_requeued_by_repeated_scan(
     db_session,
     tmp_path: Path,
 ) -> None:
@@ -564,21 +568,61 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session.add(folder)
     db_session.flush()
 
-    first = _stage_scan_candidate_batch(db_session, (bundle,), library_id=folder.id)
-    task = db_session.scalar(select(ImportTask))
-    assert task is not None
-    task.status = "COMPLETED"
+    candidates = (bundle / "01.mp3", bundle / "02.mp3")
+    first = _stage_scan_candidate_batch(db_session, candidates, library_id=folder.id)
+    tasks = list(db_session.scalars(select(ImportTask)).all())
+    assert len(tasks) == 2
+    for task in tasks:
+        task.status = "COMPLETED"
     db_session.execute(delete(ImportWorkItem))
     db_session.flush()
 
-    second = _stage_scan_candidate_batch(db_session, (bundle,), library_id=folder.id)
+    second = _stage_scan_candidate_batch(db_session, candidates, library_id=folder.id)
     db_session.commit()
 
-    assert first.queued_count == 1
+    assert first.queued_count == 2
     assert second.queued_count == 0
-    assert second.cached_count == 1
-    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 1
+    assert second.cached_count == 2
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 2
     assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 0
+
+
+def test_audio_files_in_different_scan_batches_share_one_volume(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = Library(
+        organization_mode="AUDIOBOOK",
+        id="folder-audio-split-batches",
+        name="Audio split batches",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    first = tmp_path / "Book" / "V1" / "Vol1" / "CD1" / "01.mp3"
+    second = tmp_path / "Book" / "V1" / "Vol1" / "CD2" / "02.mp3"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    db_session.add(folder)
+    db_session.flush()
+
+    first_result = _stage_scan_candidate_batch(
+        db_session, (first,), library_id=folder.id
+    )
+    second_result = _stage_scan_candidate_batch(
+        db_session, (second,), library_id=folder.id
+    )
+    db_session.flush()
+
+    volume = db_session.scalar(select(LibraryVolume))
+    tasks = list(db_session.scalars(select(ImportTask)).all())
+    assert first_result.queued_count == 1
+    assert second_result.queued_count == 1
+    assert volume is not None
+    assert volume.resource_key == "volume:Book/V1/Vol1"
+    assert len(tasks) == 2
+    assert {task.volume_id for task in tasks} == {volume.id}
 
 
 def test_volume_layout_scan_materializes_and_binds_directory_topology(
@@ -628,7 +672,7 @@ def test_volume_layout_scan_materializes_and_binds_directory_topology(
     assert context["versionId"] == version.id
 
 
-def test_invalid_volume_layout_is_rejected_before_import_enqueue(
+def test_root_volume_file_is_imported_as_a_standalone_work(
     db_session,
     tmp_path: Path,
 ) -> None:
@@ -654,21 +698,29 @@ def test_invalid_volume_layout_is_rejected_before_import_enqueue(
     )
     db_session.flush()
 
-    assert result.queued_count == 0
-    assert result.rejected_count == 1
-    assert result.errors[0].code == "LIBRARY_LAYOUT_VERSION_DIRECTORY_REQUIRED"
-    assert db_session.scalar(select(func.count()).select_from(LibraryWork)) == 0
-    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
+    work = db_session.scalar(select(LibraryWork))
+    version = db_session.scalar(select(LibraryVersion))
+    volume = db_session.scalar(select(LibraryVolume))
+    assert result.queued_count == 1
+    assert result.rejected_count == 0
+    assert work is not None and work.source_key == "work:missing-version.epub"
+    assert version is not None and version.source_key == (
+        "version:missing-version.epub"
+    )
+    assert volume is not None and volume.resource_key == (
+        "volume:missing-version.epub"
+    )
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 1
 
 
-def test_audiobook_layout_creates_one_task_for_each_volume_directory(
+def test_audiobook_paths_create_one_task_per_file_and_share_path_topology(
     db_session,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "audio-library"
     book = root / "Book"
-    first_volume = book / "Opening"
-    second_volume = book / "Finale"
+    first_volume = book / "V1" / "Opening"
+    second_volume = book / "V1" / "Finale"
     first_volume.mkdir(parents=True)
     second_volume.mkdir()
     (first_volume / "01.mp3").write_bytes(b"first")
@@ -686,7 +738,7 @@ def test_audiobook_layout_creates_one_task_for_each_volume_directory(
 
     result = _stage_scan_candidate_batch(
         db_session,
-        (book,),
+        (first_volume / "01.mp3", second_volume / "01.mp3"),
         library_id=library.id,
     )
     db_session.flush()
@@ -703,12 +755,12 @@ def test_audiobook_layout_creates_one_task_for_each_volume_directory(
     assert result.queued_count == 2
     assert work is not None and work.source_key == "work:Book"
     assert [volume.resource_key for volume in volumes] == [
-        "volume:Book/Finale",
-        "volume:Book/Opening",
+        "volume:Book/V1/Finale",
+        "volume:Book/V1/Opening",
     ]
     assert {task.source_path for task in tasks} == {
-        str(first_volume),
-        str(second_volume),
+        str(first_volume / "01.mp3"),
+        str(second_volume / "01.mp3"),
     }
     assert {task.volume_id for task in tasks} == {volume.id for volume in volumes}
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { IMPLICIT_VERSION_SOURCE_KEY, type VersionResource, type VolumeResource, type WorkView } from '../../types/work';
 import {
+  selectedVolumeForVersion,
   selectedVolumeForWork,
   shouldShowVersionHeadings,
   versionDisplayTitle,
@@ -85,6 +86,10 @@ test('deep links use volumeId without detailTab', () => {
     '/works/work-1?returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle'
   );
   assert.equal(workDetailHref('work-1').includes('detailTab'), false);
+  assert.equal(
+    workDetailHref('work-1', null, null, 'version/2'),
+    '/works/work-1?versionId=version%2F2'
+  );
 });
 
 test('single implicit version hides the version heading', () => {
@@ -128,4 +133,6 @@ test('volume selection prefers URL, continue, first unfinished, then first volum
   assert.equal(selectedVolumeForWork(value, 'unfinished')?.id, 'unfinished');
   assert.equal(selectedVolumeForWork(value)?.id, 'continue');
   assert.equal(selectedVolumeForWork({ ...value, continueVolumeId: null })?.id, 'continue');
+  assert.equal(selectedVolumeForVersion(value, value.versions[0]!, 'unfinished')?.id, 'first');
+  assert.equal(selectedVolumeForVersion(value, value.versions[1]!)?.id, 'continue');
 });

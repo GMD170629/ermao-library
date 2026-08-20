@@ -23,6 +23,8 @@ class MediaResourceRepository(Protocol):
 
     def work_cover_path(self, work_id: str) -> str | None: ...
 
+    def version_cover_path(self, version_id: str) -> str | None: ...
+
     def volume_cover_path(self, volume_id: str) -> str | None: ...
 
     def get_volume_archive_selection(
@@ -45,10 +47,16 @@ class MediaResourceQuery:
         return self._repository.first_volume_file(volume_id)
 
     def cover_path(
-        self, *, work_id: str | None = None, volume_id: str | None = None
+        self,
+        *,
+        work_id: str | None = None,
+        version_id: str | None = None,
+        volume_id: str | None = None,
     ) -> str | None:
         if work_id is not None:
             return self._repository.work_cover_path(work_id)
         if volume_id is not None:
             return self._repository.volume_cover_path(volume_id)
+        if version_id is not None:
+            return self._repository.version_cover_path(version_id)
         return None

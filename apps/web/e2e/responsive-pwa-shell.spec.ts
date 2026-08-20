@@ -179,7 +179,7 @@ test('work detail volume covers support selection, keyboard-accessible context m
     completed: false,
     versions: [{ id: 'context-version', sourceKey: '__implicit__', sourceName: null, completed: false, volumeCount: 2, sizeBytes: 1024, volumes }]
   };
-  await page.route('**/api/works/context-work', async (route) => {
+  await page.route('**/api/works/context-work*', async (route) => {
     await route.fulfill({ json: { ok: true, data: work } });
   });
 
@@ -199,6 +199,27 @@ test('work detail volume covers support selection, keyboard-accessible context m
   expect(progressRatio).toBeCloseTo(0.8, 2);
   await expect(first).toHaveAccessibleName('第 1 卷，阅读进度 80%');
   await expect(second).toHaveAccessibleName('第 2 卷，阅读进度 100%');
+
+  const firstActions = page.getByRole('button', { name: '管理 第一卷', exact: true });
+  await firstActions.click();
+  const cardMenu = page.getByRole('menu', { name: '管理卷册' });
+  await expect(cardMenu.getByRole('menuitem')).toHaveCount(5);
+  await expect(cardMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: /^识别/ })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: /^重新扫描/ })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: /^删除/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(firstActions).toBeFocused();
+  await firstActions.click({ button: 'right' });
+  await expect(cardMenu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await firstActions.press('Shift+F10');
+  await expect(cardMenu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/\/works\/context-work\?/);
+
+  await page.getByRole('button', { name: '管理卷册信息', exact: true }).click();
   await first.click();
   await expect(first).toHaveAttribute('aria-pressed', 'true');
   await expect(second).toHaveAttribute('aria-pressed', 'false');
@@ -228,10 +249,107 @@ test('work detail volume covers support selection, keyboard-accessible context m
   await expect(menu).toBeHidden();
   await page.getByRole('button', { name: '返回全部图书', exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === '/library' && url.searchParams.get('status') === 'READING' && url.searchParams.get('sort') === 'title');
-  await page.goBack();
+  await page.goto('/works/context-work?volumeId=context-volume-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   await expect(page.getByRole('button', { name: '返回全部图书', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '管理卷册信息', exact: true }).click();
   await second.dblclick();
   await expect(page).toHaveURL(/\/reader\/context-volume-2$/);
+});
+
+test('multi-version work loads summaries first and only the selected version volumes', async ({ page }) => {
+  const selectedVolume = {
+    id: 'edition-volume-2',
+    versionId: 'edition-version-2',
+    title: '剧场版第一卷',
+    volumeIndex: 1,
+    sortOrder: 0,
+    format: 'PDF',
+    publisher: null,
+    publishedAt: null,
+    language: null,
+    isbn: null,
+    identifier: null,
+    narrator: null,
+    abridged: null,
+    importStatus: 'READY',
+    importError: null,
+    coverUrl: '',
+    pageCount: 128,
+    chapterCount: null,
+    durationMs: null,
+    trackCount: null,
+    progress: 0,
+    lastReadAt: null,
+    hidden: false,
+    readable: true,
+    readerType: 'pdf',
+    kindleSendAvailable: false,
+    classification: { mediaKind: 'COMIC', suggestedMediaKind: null, source: 'USER', reason: null },
+    files: []
+  };
+  const version = (id: string, sourceName: string, volumes: typeof selectedVolume[]) => ({
+    id,
+    sourceKey: id,
+    sourceName,
+    completed: false,
+    coverUrl: '',
+    coverStatus: 'MISSING',
+    volumeCount: 1,
+    sizeBytes: 1024,
+    volumes
+  });
+  const baseWork = {
+    id: 'edition-work',
+    title: '多版本交互测试',
+    author: '测试作者',
+    description: '',
+    tags: [],
+    coverUrl: '',
+    coverStatus: 'MISSING',
+    gradient: 'from-orange-100 to-stone-200',
+    seriesName: null,
+    seriesIndex: null,
+    publicationStatus: 'UNKNOWN',
+    trackingStatus: 'NOT_TRACKING',
+    ignored: false,
+    organized: true,
+    addedAt: '2026-08-03T08:00:00.000Z',
+    updatedAt: '2026-08-03T08:00:00.000Z',
+    recentMediaKind: 'COMIC',
+    continueVolumeId: null,
+    completed: false
+  };
+  const requestedVersions: Array<string | null> = [];
+  await page.route('**/api/works/edition-work*', async (route) => {
+    const requestedVersion = new URL(route.request().url()).searchParams.get('versionId');
+    requestedVersions.push(requestedVersion);
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          ...baseWork,
+          versions: [
+            version('edition-version-1', '典藏版', []),
+            version('edition-version-2', '剧场版', requestedVersion === 'edition-version-2' ? [selectedVolume] : [])
+          ]
+        }
+      }
+    });
+  });
+
+  await page.goto('/works/edition-work');
+  await expect(page.getByRole('heading', { name: '版本与内容' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '打开版本 典藏版' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '打开版本 剧场版' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '第 1 卷' })).toHaveCount(0);
+  expect(requestedVersions[0]).toBeNull();
+
+  await page.getByRole('button', { name: '打开版本 剧场版' }).click();
+  await expect(page).toHaveURL((url) => url.searchParams.get('versionId') === 'edition-version-2');
+  await expect(page.getByRole('button', { name: '第 1 卷' })).toBeVisible();
+  expect(requestedVersions).toContain('edition-version-2');
+  await page.getByRole('button', { name: '返回《多版本交互测试》' }).click();
+  await expect(page.getByRole('heading', { name: '版本与内容' })).toBeVisible();
 });
 
 test('mobile PWA shell and drawer consume safe-area insets without reserving bottom-nav space', async ({ page }) => {

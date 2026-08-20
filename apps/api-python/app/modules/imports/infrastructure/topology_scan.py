@@ -2,31 +2,20 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from app.contracts.library_layout import (
-    LayoutEntry,
-    LayoutEntryType,
-    LayoutSourceType,
     LayoutWork,
     LibraryOrganizationMode,
-    interpret_library_layout,
+    parse_library_file_path,
 )
-from app.modules.imports.application.audio_types import (
-    MAX_AUDIO_BUNDLE_TRACKS,
-    is_supported_audio_file,
-)
-from app.modules.imports.application.errors import AudioTrackLimitExceededError
+from app.modules.imports.application.audio_types import is_supported_audio_file
 from app.modules.imports.application.work_queue_dto import (
     PreparedScanSources,
     PreparedTopologySource,
     ScanErrorDTO,
 )
 from app.modules.imports.infrastructure.source_keys import source_key
-
-_VOLUME_KEY_PREFIX = "volume:"
-
 
 def prepare_topology_sources(
     candidates: tuple[Path, ...],
@@ -45,8 +34,31 @@ def prepare_topology_sources(
     rejected_count = 0
     for candidate in candidates:
         canonical = candidate.expanduser().resolve()
-        entries = _layout_entries(canonical, root)
-        result = interpret_library_layout(entries, mode)
+        if canonical.is_dir() or (
+            mode is LibraryOrganizationMode.AUDIOBOOK
+        ) != is_supported_audio_file(canonical):
+            rejected_count += 1
+            errors.append(
+                ScanErrorDTO(
+                    path=str(canonical),
+                    error="文件类型不属于当前书库的组织模式",
+                    code="LIBRARY_LAYOUT_SOURCE_NOT_ALLOWED",
+                )
+            )
+            continue
+        try:
+            relative_path = canonical.relative_to(root).as_posix()
+        except ValueError:
+            rejected_count += 1
+            errors.append(
+                ScanErrorDTO(
+                    path=str(canonical),
+                    error="文件路径不在书库根目录中",
+                    code="LIBRARY_LAYOUT_INVALID_RELATIVE_PATH",
+                )
+            )
+            continue
+        result = parse_library_file_path(relative_path, mode)
         if result.violations:
             rejected_count += 1
             errors.extend(
@@ -58,7 +70,11 @@ def prepare_topology_sources(
                 for violation in result.violations
             )
             continue
-        candidate_sources = _sources_from_layout(root, result.works)
+        candidate_sources = (
+            _sources_from_work(root, canonical, result.work)
+            if result.work is not None
+            else []
+        )
         if not candidate_sources:
             rejected_count += 1
             errors.append(
@@ -84,98 +100,34 @@ def prepare_topology_sources(
     )
 
 
-def _layout_entries(candidate: Path, root: Path) -> tuple[LayoutEntry, ...]:
-    if candidate.is_dir():
-        paths = _topology_audio_files(candidate)
-    else:
-        paths = (candidate,)
-    entries: list[LayoutEntry] = []
-    for path in paths:
-        relative_path = path.resolve().relative_to(root).as_posix()
-        source_type = (
-            LayoutSourceType.AUDIO
-            if is_supported_audio_file(path)
-            else LayoutSourceType.PUBLICATION
-        )
-        entries.append(
-            LayoutEntry(
-                relative_path=relative_path,
-                entry_type=LayoutEntryType.FILE,
-                source_type=source_type,
-            )
-        )
-    return tuple(entries)
-
-
-def _topology_audio_files(directory: Path) -> tuple[Path, ...]:
-    """Collect audio assets without inferring book or volume identity from names."""
-
-    paths: list[Path] = []
-    pending = [directory]
-    while pending:
-        current = pending.pop()
-        iterator = os.scandir(current)
-        try:
-            for entry in iterator:
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(Path(entry.path))
-                    continue
-                if not entry.is_file(follow_symlinks=False):
-                    continue
-                path = Path(entry.path)
-                if not is_supported_audio_file(path):
-                    continue
-                paths.append(path.resolve())
-                if len(paths) > MAX_AUDIO_BUNDLE_TRACKS:
-                    raise AudioTrackLimitExceededError(
-                        path=str(directory),
-                        limit=MAX_AUDIO_BUNDLE_TRACKS,
-                        observed_count=len(paths),
-                    )
-        finally:
-            close = getattr(iterator, "close", None)
-            if callable(close):
-                close()
-    return tuple(paths)
-
-
-def _sources_from_layout(
+def _sources_from_work(
     root: Path,
-    works: tuple[LayoutWork, ...],
+    candidate: Path,
+    work: LayoutWork,
 ) -> list[PreparedTopologySource]:
     sources: list[PreparedTopologySource] = []
-    for work in works:
-        for version in work.versions:
-            for volume_order, volume in enumerate(version.volumes):
-                assets = tuple(
-                    root / asset.relative_path
-                    for asset in sorted(volume.assets, key=lambda item: item.order)
+    for version in work.versions:
+        for volume_order, volume in enumerate(version.volumes):
+            assets = tuple(
+                root / asset.relative_path
+                for asset in sorted(volume.assets, key=lambda item: item.order)
+            )
+            sources.append(
+                PreparedTopologySource(
+                    source_path=candidate,
+                    source_key=source_key(candidate),
+                    work_source_key=work.source_key,
+                    work_title=work.source_name,
+                    version_source_key=version.source_key,
+                    version_name=version.source_name,
+                    volume_resource_key=volume.source_key,
+                    volume_title=volume.source_name,
+                    volume_sort_order=volume_order,
+                    volume_format=_volume_format(assets),
+                    asset_paths=assets,
                 )
-                source_path = _volume_source_path(root, volume.source_key)
-                sources.append(
-                    PreparedTopologySource(
-                        source_path=source_path,
-                        source_key=source_key(source_path),
-                        work_source_key=work.source_key,
-                        work_title=work.source_name,
-                        version_source_key=version.source_key,
-                        version_name=version.source_name,
-                        volume_resource_key=volume.source_key,
-                        volume_title=volume.source_name,
-                        volume_sort_order=volume_order,
-                        volume_format=_volume_format(assets),
-                        asset_paths=assets,
-                    )
-                )
+            )
     return sources
-
-
-def _volume_source_path(
-    root: Path,
-    volume_source_key: str,
-) -> Path:
-    relative_path = volume_source_key.removeprefix(_VOLUME_KEY_PREFIX)
-    return root / relative_path
 
 
 def _volume_format(assets: tuple[Path, ...]) -> str:

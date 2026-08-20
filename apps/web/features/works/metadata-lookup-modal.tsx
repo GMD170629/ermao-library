@@ -35,6 +35,8 @@ type MetadataCandidate = {
 type MetadataLookupModalProps = {
   book: WorkView;
   currentVersionId?: string | null;
+  currentVolumeId?: string | null;
+  fixedScope?: 'versions' | 'volumes' | null;
   open: boolean;
   onClose: () => void;
   onApplied: () => void | Promise<void>;
@@ -98,9 +100,9 @@ function previewCoverUrl(value: string) {
   return withBasePath(`/api/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
 }
 
-function defaultFields(book: WorkView, candidate: MetadataCandidate | null, targetVolume?: VolumeResource) {
+function defaultFields(book: WorkView, candidate: MetadataCandidate | null, availableFields: MetadataField[], targetVolume?: VolumeResource) {
   if (!candidate) return [];
-  return fields.filter((field) => {
+  return availableFields.filter((field) => {
     const next = candidateValue(candidate, field);
     if (!hasCandidateValue(next)) return false;
     if (isCoverField(field)) return book.coverStatus !== 'READY';
@@ -118,7 +120,7 @@ function selectedMediaKind(volume: VolumeResource | undefined): MediaKind {
   return volume ? mediaKindOfVolume(volume) : 'EBOOK';
 }
 
-export function MetadataLookupModal({ book, currentVersionId, open, onClose, onApplied }: MetadataLookupModalProps) {
+export function MetadataLookupModal({ book, currentVersionId, currentVolumeId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
   const { t: i18nAttribute, formatDate } = useAttributeI18n();
   const targetVersion = useMemo(() => {
     const continuationVolume = book.versions
@@ -127,6 +129,7 @@ export function MetadataLookupModal({ book, currentVersionId, open, onClose, onA
     const fallbackVersionId = continuationVolume?.versionId ?? book.versions[0]?.id;
     return book.versions.find((version) => version.id === (currentVersionId ?? fallbackVersionId)) ?? book.versions[0] ?? null;
   }, [book.continueVolumeId, book.versions, currentVersionId]);
+  const availableFields = useMemo(() => fixedScope ? fields.filter((field) => volumeFields.has(field)) : fields, [fixedScope]);
   const [source, setSource] = useState<MetadataSource>(() => initialSource(targetVersion?.volumes[0]));
   const [query, setQuery] = useState(book.title);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
@@ -139,14 +142,16 @@ export function MetadataLookupModal({ book, currentVersionId, open, onClose, onA
     : targetVolumes.find((volume) => volume.id === volumeTarget);
   const kindVolume = selectedTargetVolume ?? targetVersion?.volumes[0];
   const targetVolumeId = selectedTargetVolume?.id ?? null;
-  const volumeTargetOptions = useMemo(() => [
+  const volumeTargetOptions = useMemo(() => fixedScope === 'volumes'
+    ? targetVolumes.filter((volume) => volume.id === currentVolumeId).map((volume) => ({ value: volume.id, label: volume.title, translate: false }))
+    : [
     {
       value: ALL_VOLUMES,
       label: i18nAttribute('当前版本的全部 {value0} 个卷册', { value0: targetVersion?.volumeCount ?? targetVolumes.length }),
       translate: false
     },
     ...targetVolumes.map((volume) => ({ value: volume.id, label: volume.title, translate: false }))
-  ], [i18nAttribute, targetVersion?.volumeCount, targetVolumes]);
+  ], [currentVolumeId, fixedScope, i18nAttribute, targetVersion?.volumeCount, targetVolumes]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -191,7 +196,7 @@ export function MetadataLookupModal({ book, currentVersionId, open, onClose, onA
   useEffect(() => {
     if (!open || !targetVersion) return;
     const controller = new AbortController();
-    setVolumeTarget(ALL_VOLUMES);
+    setVolumeTarget(fixedScope === 'volumes' && currentVolumeId ? currentVolumeId : ALL_VOLUMES);
     setTargetVolumes(targetVersion.volumes);
     void fetchAllVersionVolumes(book.id, targetVersion.id, controller.signal)
       .then(setTargetVolumes)
@@ -201,11 +206,11 @@ export function MetadataLookupModal({ book, currentVersionId, open, onClose, onA
         }
       });
     return () => controller.abort();
-  }, [book.id, i18nAttribute, open, targetVersion]);
+  }, [book.id, currentVolumeId, fixedScope, i18nAttribute, open, targetVersion]);
 
   useEffect(() => {
-    setSelectedFields(defaultFields(book, selected, targetVolumes[0]));
-  }, [book, selected, targetVolumes]);
+    setSelectedFields(defaultFields(book, selected, availableFields, targetVolumes[0]));
+  }, [availableFields, book, selected, targetVolumes]);
 
   async function searchCandidates() {
     setBusy(true);
@@ -243,6 +248,7 @@ export function MetadataLookupModal({ book, currentVersionId, open, onClose, onA
           source,
           candidate: selected,
           fields: selectedFields,
+          versionId: fixedScope === 'versions' ? targetVersion?.id ?? null : null,
           volumeId: selectedFields.some((field) => volumeFields.has(field)) ? targetVolumeId : null
         })
       });
@@ -370,7 +376,7 @@ export function MetadataLookupModal({ book, currentVersionId, open, onClose, onA
               <div><I18nText>候选值</I18nText></div>
             </div>
             <div className="divide-y divide-slate-100">
-              {fields.map((field) => {
+              {availableFields.map((field) => {
                 const currentValue = bookValue(book, field, selectedTargetVolume);
                 const nextValue = candidateValue(selected, field);
                 const available = hasCandidateValue(nextValue);

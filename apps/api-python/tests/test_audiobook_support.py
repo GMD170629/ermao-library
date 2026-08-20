@@ -23,7 +23,9 @@ from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
+    LibraryFile,
     LibraryReadingProgress,
+    LibraryReadingUnit,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -801,6 +803,109 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
     assert stored_volume is not None and stored_volume.title == "Vol.1"
     assert stored_volume.import_status == "COMPLETED"
     assert stored_volume.track_count == 2
+
+
+def test_path_owned_audio_tracks_imported_separately_rebuild_volume_aggregates(
+    db_session,
+    test_settings,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _initialize_schema(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True, exist_ok=True)
+    audio_dir = tmp_path / "Book" / "V1" / "Vol1"
+    audio_dir.mkdir(parents=True)
+    later = audio_dir / "10.mp3"
+    earlier = audio_dir / "02.mp3"
+    later.write_bytes(b"later-track")
+    earlier.write_bytes(b"earlier-track")
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
+    work = LibraryWork(
+        id="audio-path-work",
+        library_id="test-library",
+        origin="SCAN",
+        source_key="work:Book",
+        title="Book",
+        normalized_title="book",
+        tags="[]",
+        organized=True,
+        organize_status="APPLIED",
+    )
+    version = LibraryVersion(
+        id="audio-path-version",
+        work_id=work.id,
+        source_key="version:Book/V1",
+        source_name="V1",
+    )
+    volume = LibraryVolume(
+        id="audio-path-volume",
+        version_id=version.id,
+        origin="SCAN",
+        title="Vol1",
+        format="AUDIO",
+        resource_key="volume:Book/V1/Vol1",
+        import_status="PENDING",
+    )
+    db_session.add(work)
+    db_session.commit()
+    db_session.add(version)
+    db_session.commit()
+    db_session.add(volume)
+    db_session.commit()
+
+    for index, source in enumerate((later, earlier), start=1):
+        task = ImportTask(
+            id=f"audio-path-task-{index}",
+            library_id="test-library",
+            work_id=work.id,
+            volume_id=volume.id,
+            origin="SCAN",
+            status="PROCESSING",
+            original_name=source.name,
+            source_path=str(source),
+        )
+        db_session.add(task)
+        db_session.commit()
+        import_managed_book(
+            db_session,
+            test_settings,
+            _options(
+                source_file_path=source,
+                origin="SCAN",
+                original_name=source.name,
+                topology_work_id=work.id,
+                topology_volume_id=volume.id,
+                import_task_id=task.id,
+            ),
+        )
+
+    db_session.expire_all()
+    stored_volume = db_session.get(LibraryVolume, volume.id)
+    files = list(
+        db_session.scalars(
+            select(LibraryFile)
+            .where(LibraryFile.volume_id == volume.id)
+            .order_by(LibraryFile.sort_order)
+        ).all()
+    )
+    units = list(
+        db_session.scalars(
+            select(LibraryReadingUnit)
+            .where(LibraryReadingUnit.volume_id == volume.id)
+            .order_by(LibraryReadingUnit.sort_order)
+        ).all()
+    )
+    assert stored_volume is not None
+    assert stored_volume.track_count == 2
+    assert stored_volume.chapter_count == 2
+    assert stored_volume.duration_ms == 1_200_000
+    assert stored_volume.size_bytes == len(b"later-track") + len(b"earlier-track")
+    assert [Path(item.path).name for item in files] == ["02.mp3", "10.mp3"]
+    assert [item.sort_order for item in units] == [1, 2]
 
 
 def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(

@@ -217,7 +217,10 @@ def test_default_work_detail_is_bounded_and_includes_file_paths(client, db_sessi
         "coverStatus",
         "coverUrl",
         "continueVolumeId",
+        "continueVersionId",
+        "continueVolumeTitle",
         "continueVolumeProgress",
+        "continueReaderType",
         "completed",
         "versions",
     }
@@ -228,6 +231,8 @@ def test_default_work_detail_is_bounded_and_includes_file_paths(client, db_sessi
     assert version["sourceName"] is None
     assert version["volumeCount"] == 12
     assert version["sizeBytes"] == sum(number * 100 for number in range(1, 13))
+    assert version["coverStatus"] == "PENDING"
+    assert version["coverUrl"].startswith("/api/volumes/detail-volume-01/cover")
     assert [volume["id"] for volume in version["volumes"]] == [
         f"detail-volume-{number:02d}" for number in range(1, 11)
     ]
@@ -269,6 +274,89 @@ def test_work_volume_query_pages_deterministically_and_includes_file_summaries(
         "sizeBytes",
         "size",
     }
+
+
+def test_work_detail_returns_volume_data_for_only_the_selected_version(
+    client, db_session
+):
+    _login(client, db_session)
+    work = _add_work(db_session, work_id="selected-version-work")
+    _add_version(
+        db_session,
+        work_id=work.id,
+        version_id="version-one",
+        source_key="one",
+        source_name="版本一",
+    )
+    _add_version(
+        db_session,
+        work_id=work.id,
+        version_id="version-two",
+        source_key="two",
+        source_name="版本二",
+    )
+    _add_volume(
+        db_session,
+        version_id="version-one",
+        volume_id="version-one-volume",
+        title="第一版图书",
+        fmt="EPUB",
+        sort_order=0,
+    )
+    _add_volume(
+        db_session,
+        version_id="version-two",
+        volume_id="version-two-volume",
+        title="第二版图书",
+        fmt="PDF",
+        sort_order=0,
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/api/works/selected-version-work",
+        params={"versionId": "version-two"},
+    )
+
+    assert response.status_code == 200
+    versions = response.json()["data"]["book"]["versions"]
+    assert [version["id"] for version in versions] == ["version-one", "version-two"]
+    assert versions[0]["volumeCount"] == 1
+    assert versions[0]["volumes"] == []
+    assert [volume["id"] for volume in versions[1]["volumes"]] == [
+        "version-two-volume"
+    ]
+
+
+def test_multi_version_root_returns_only_version_summaries(client, db_session):
+    _login(client, db_session)
+    work = _add_work(db_session, work_id="version-gallery-work")
+    for index in range(2):
+        version_id = f"gallery-version-{index}"
+        _add_version(
+            db_session,
+            work_id=work.id,
+            version_id=version_id,
+            source_key=f"source-{index}",
+            source_name=f"版本 {index + 1}",
+        )
+        _add_volume(
+            db_session,
+            version_id=version_id,
+            volume_id=f"gallery-volume-{index}",
+            title=f"卷 {index + 1}",
+            fmt="PDF",
+            sort_order=0,
+        )
+    db_session.commit()
+
+    response = client.get("/api/works/version-gallery-work")
+
+    assert response.status_code == 200
+    versions = response.json()["data"]["book"]["versions"]
+    assert [version["sourceName"] for version in versions] == ["版本 1", "版本 2"]
+    assert [version["volumes"] for version in versions] == [[], []]
+    assert all(version["coverUrl"].startswith("/api/volumes/") for version in versions)
 
 
 def test_work_reading_units_query_returns_only_requested_navigation(client, db_session):
@@ -643,8 +731,9 @@ def test_work_detail_openapi_exposes_versions_instead_of_media_tabs() -> None:
     assert "/api/works/{work_id}/detail-preference" not in paths
     get_work = paths["/api/works/{work_id}"]["get"]
     parameter_names = {item["name"] for item in get_work.get("parameters", [])}
+    assert {"versionId", "volumeId"}.issubset(parameter_names)
     assert parameter_names.isdisjoint(
-        {"detailTab", "unitPage", "chapterPage", "chapterPageSize", "volumeId"}
+        {"detailTab", "unitPage", "chapterPage", "chapterPageSize"}
     )
     for name in (
         "WorkDetailTab",

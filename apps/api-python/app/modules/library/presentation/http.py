@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
 import re
 import shutil
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,7 +17,7 @@ from typing import Annotated, Any, Never, cast
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import inspect, select
+from sqlalchemy import delete, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import require_system_manager, require_user
@@ -34,6 +36,7 @@ from app.bootstrap.library import (
     prepare_work_facet_write,
     volume_metadata_commands,
 )
+from app.bootstrap.imports import requeue_library_volumes
 from app.bootstrap.library import (
     bookshelf_items as get_bookshelf_items,
 )
@@ -71,8 +74,12 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
 from app.models.library import (
+    Library,
+    LibraryFile,
+    LibraryOperation,
     LibraryVersion,
     LibraryVolume,
+    LibraryWork,
 )
 from app.modules.library.application.filter_options import LibraryFilterOptionSource
 from app.modules.library.application.request_mutations import (
@@ -120,6 +127,7 @@ from app.modules.library.presentation.schemas import (
     CategoriesResponse,
     ContinueReadingResponse,
     CoverMutationResponse,
+    DeleteSourceRequest,
     DashboardSummaryResponse,
     DeleteCategoryResponse,
     FacetsResponse,
@@ -147,7 +155,9 @@ from app.modules.library.presentation.schemas import (
     RenameCategoryRequest,
     RenameCategoryResponse,
     SeriesResponse,
+    SourceActionResponse,
     UndoOperationResponse,
+    UpdateVersionMetadataRequest,
     UpdateVolumeRequest,
     UpdateWorkRequest,
     VolumeMetadataMutationResponse,
@@ -157,6 +167,11 @@ from app.modules.library.presentation.schemas import (
     WorksResponse,
     WorkSummariesResponse,
     WorkVolumePageResponse,
+)
+from app.modules.library.application.transactions import (
+    commit_library_changes,
+    flush_library_changes,
+    rollback_library_changes,
 )
 from app.modules.library.presentation.views import (
     _coerce_int,
@@ -969,6 +984,8 @@ def list_works(
 def get_work(
     work_id: str,
     request: Request,
+    versionId: Annotated[str | None, Query()] = None,
+    volumeId: Annotated[str | None, Query()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -987,6 +1004,9 @@ def get_work(
         work,
         user.id,
         volume_limit_per_version=10,
+        selected_version_id=versionId,
+        selected_volume_id=volumeId,
+        current_version_only=True,
         include_files=True,
     )
     book["seriesFacet"] = (
@@ -2410,6 +2430,334 @@ async def metadata_search(
             "message": result.get("message"),
         }
     )
+
+
+def _target_volume_ids(
+    db: Session,
+    *,
+    work_id: str,
+    target_kind: str,
+    target_id: str,
+) -> tuple[str, ...]:
+    filters = [LibraryVersion.work_id == work_id, LibraryVolume.hidden.is_(False)]
+    if target_kind == "versions":
+        filters.append(LibraryVersion.id == target_id)
+    else:
+        filters.append(LibraryVolume.id == target_id)
+    return tuple(
+        db.scalars(
+            select(LibraryVolume.id)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .where(*filters)
+            .order_by(LibraryVolume.sort_order, LibraryVolume.id)
+        ).all()
+    )
+
+
+def _source_action_response(
+    *, operation_id: str, target_id: str, volume_ids: tuple[str, ...], file_count: int
+) -> SourceActionResponse:
+    return SourceActionResponse(
+        data={
+            "operationId": operation_id,
+            "targetId": target_id,
+            "affectedVolumeIds": list(volume_ids),
+            "affectedFileCount": file_count,
+        }
+    )
+
+
+@router.patch("/works/{work_id}/versions/{version_id}")
+def update_version_metadata(
+    work_id: str,
+    version_id: str,
+    payload: UpdateVersionMetadataRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> SourceActionResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    volume_ids = _target_volume_ids(
+        db, work_id=work_id, target_kind="versions", target_id=version_id
+    )
+    if not volume_ids:
+        _raise_library_error("版本不存在", status_code=404, code="VERSION_NOT_FOUND")
+    changes = payload.model_dump(exclude_unset=True)
+    if changes:
+        db.execute(
+            update(LibraryVolume)
+            .where(LibraryVolume.id.in_(volume_ids))
+            .values(**changes)
+        )
+    commit_library_changes(db)
+    return _source_action_response(
+        operation_id=f"metadata-{uuid.uuid4().hex}",
+        target_id=version_id,
+        volume_ids=volume_ids,
+        file_count=0,
+    )
+
+
+def _regenerate_item_cover(
+    db: Session,
+    settings: Settings,
+    *,
+    target_kind: str,
+    target_id: str,
+    volume_ids: tuple[str, ...],
+) -> None:
+    source_cover = db.scalar(
+        select(LibraryVolume.cover_path)
+        .where(
+            LibraryVolume.id.in_(volume_ids),
+            LibraryVolume.cover_path.is_not(None),
+            LibraryVolume.cover_path != "",
+        )
+        .order_by(LibraryVolume.sort_order, LibraryVolume.id)
+        .limit(1)
+    )
+    source_path = _stored_path(str(source_cover or ""), settings)
+    if source_path is None or not source_path.is_file():
+        source_path = _stored_path(ensure_default_cover(settings), settings)
+    if source_path is None or not source_path.is_file():
+        raise FileNotFoundError("COVER_SOURCE_NOT_FOUND")
+    target_dir = settings.resolved_storage_root / "covers" / target_kind
+    target_dir.mkdir(parents=True, exist_ok=True)
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", target_id)[:100] or "cover"
+    suffix = source_path.suffix.lower() if source_path.suffix else ".jpg"
+    target_path = target_dir / f"{safe_id}{suffix}"
+    temporary = target_dir / f".{safe_id}-{uuid.uuid4().hex}.tmp"
+    try:
+        shutil.copyfile(source_path, temporary)
+        temporary.replace(target_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    relative = str(target_path.relative_to(settings.resolved_storage_root))
+    if target_kind == "versions":
+        db.execute(
+            update(LibraryVersion)
+            .where(LibraryVersion.id == target_id)
+            .values(cover_path=relative, cover_status="READY", updated_at=_now())
+        )
+    else:
+        db.execute(
+            update(LibraryVolume)
+            .where(LibraryVolume.id == target_id)
+            .values(cover_path=relative, cover_status="READY", updated_at=_now())
+        )
+
+
+@router.post("/works/{work_id}/{target_kind}/{target_id}/cover/regenerate")
+def regenerate_item_cover(
+    work_id: str,
+    target_kind: str,
+    target_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> SourceActionResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    if target_kind not in {"versions", "volumes"}:
+        _raise_library_error("操作目标无效", status_code=400, code="TARGET_KIND_INVALID")
+    volume_ids = _target_volume_ids(
+        db, work_id=work_id, target_kind=target_kind, target_id=target_id
+    )
+    if not volume_ids:
+        _raise_library_error("条目不存在", status_code=404, code="TARGET_NOT_FOUND")
+    try:
+        _regenerate_item_cover(
+            db,
+            settings,
+            target_kind=target_kind,
+            target_id=target_id,
+            volume_ids=volume_ids,
+        )
+        commit_library_changes(db)
+    except FileNotFoundError:
+        rollback_library_changes(db)
+        _raise_library_error("找不到可用封面源", status_code=404, code="COVER_SOURCE_NOT_FOUND")
+    return _source_action_response(
+        operation_id=f"cover-{uuid.uuid4().hex}",
+        target_id=target_id,
+        volume_ids=volume_ids,
+        file_count=0,
+    )
+
+
+@router.post("/works/{work_id}/{target_kind}/{target_id}/rescan")
+def rescan_item_source(
+    work_id: str,
+    target_kind: str,
+    target_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> SourceActionResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    if target_kind not in {"versions", "volumes"}:
+        _raise_library_error("操作目标无效", status_code=400, code="TARGET_KIND_INVALID")
+    volume_ids = _target_volume_ids(
+        db, work_id=work_id, target_kind=target_kind, target_id=target_id
+    )
+    if not volume_ids:
+        _raise_library_error("条目不存在", status_code=404, code="TARGET_NOT_FOUND")
+    try:
+        task_ids = requeue_library_volumes(db, volume_ids)
+    except RuntimeError as exc:
+        if str(exc) == "SOURCE_RESCAN_IN_PROGRESS":
+            _raise_library_error(
+                "所选条目正在处理中", status_code=409, code="SOURCE_RESCAN_IN_PROGRESS"
+            )
+        raise
+    if not task_ids:
+        _raise_library_error("找不到可重新扫描的源任务", status_code=404, code="SOURCE_TASK_NOT_FOUND")
+    commit_library_changes(db)
+    return _source_action_response(
+        operation_id=f"rescan-{uuid.uuid4().hex}",
+        target_id=target_id,
+        volume_ids=volume_ids,
+        file_count=len(task_ids),
+    )
+
+
+@router.delete("/works/{work_id}/{target_kind}/{target_id}/source")
+def delete_item_source(
+    work_id: str,
+    target_kind: str,
+    target_id: str,
+    payload: DeleteSourceRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> SourceActionResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+    if not idempotency_key:
+        _raise_library_error(
+            "缺少幂等键", status_code=400, code="IDEMPOTENCY_KEY_REQUIRED"
+        )
+    receipt_id = f"source-delete-{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:40]}"
+    existing_receipt = db.get(LibraryOperation, receipt_id)
+    if existing_receipt is not None:
+        if (
+            existing_receipt.user_id != user.id
+            or existing_receipt.action != "DELETE_LIBRARY_SOURCE"
+            or existing_receipt.target_id != target_id
+        ):
+            _raise_library_error(
+                "幂等键已被其他操作使用",
+                status_code=409,
+                code="IDEMPOTENCY_KEY_CONFLICT",
+            )
+        return SourceActionResponse.model_validate_json(existing_receipt.payload_json)
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    if target_kind not in {"versions", "volumes"}:
+        _raise_library_error("操作目标无效", status_code=400, code="TARGET_KIND_INVALID")
+    volume_ids = _target_volume_ids(
+        db, work_id=work_id, target_kind=target_kind, target_id=target_id
+    )
+    if not volume_ids:
+        _raise_library_error("条目不存在", status_code=404, code="TARGET_NOT_FOUND")
+    if target_kind == "versions":
+        version = db.get(LibraryVersion, target_id)
+        expected = str(version.source_name or version.source_key) if version else ""
+        if payload.confirmation != expected:
+            _raise_library_error("版本名称确认不匹配", status_code=400, code="DELETE_CONFIRMATION_MISMATCH")
+    root_path_value = db.scalar(
+        select(Library.root_path)
+        .join(LibraryWork, LibraryWork.library_id == Library.id)
+        .where(LibraryWork.id == work_id)
+    )
+    root = Path(str(root_path_value or "")).expanduser().resolve()
+    file_rows = db.execute(
+        select(LibraryFile.id, LibraryFile.path)
+        .where(LibraryFile.volume_id.in_(volume_ids))
+        .order_by(LibraryFile.path)
+    ).all()
+    if not file_rows:
+        _raise_library_error("找不到真实源文件", status_code=404, code="SOURCE_FILE_NOT_FOUND")
+    operation_id = idempotency_key
+    staging = root / ".ermao-delete-staging" / re.sub(r"[^A-Za-z0-9_-]", "_", operation_id)
+    staged: list[tuple[Path, Path]] = []
+    try:
+        staging.mkdir(parents=True, exist_ok=False)
+        for index, (_file_id, raw_path) in enumerate(file_rows):
+            source = Path(str(raw_path)).expanduser().resolve(strict=True)
+            try:
+                source.relative_to(root)
+            except ValueError:
+                raise PermissionError("SOURCE_PATH_OUTSIDE_LIBRARY") from None
+            destination = staging / f"{index:06d}{source.suffix}"
+            source.replace(destination)
+            staged.append((source, destination))
+        db.execute(delete(LibraryVolume).where(LibraryVolume.id.in_(volume_ids)))
+        flush_library_changes(db)
+        empty_version_ids = db.scalars(
+            select(LibraryVersion.id)
+            .where(LibraryVersion.work_id == work_id)
+            .where(~LibraryVersion.volumes.any())
+        ).all()
+        if empty_version_ids:
+            db.execute(delete(LibraryVersion).where(LibraryVersion.id.in_(empty_version_ids)))
+        flush_library_changes(db)
+        remaining_versions = db.scalar(
+            select(LibraryVersion.id).where(LibraryVersion.work_id == work_id).limit(1)
+        )
+        if remaining_versions is None:
+            db.execute(delete(LibraryWork).where(LibraryWork.id == work_id))
+        response = _source_action_response(
+            operation_id=operation_id,
+            target_id=target_id,
+            volume_ids=volume_ids,
+            file_count=len(file_rows),
+        )
+        db.add(
+            LibraryOperation(
+                id=receipt_id,
+                user_id=user.id,
+                action="DELETE_LIBRARY_SOURCE",
+                status="COMPLETED",
+                target_type=target_kind,
+                target_id=target_id,
+                summary="Permanent library source deletion",
+                payload_json=response.model_dump_json(by_alias=True),
+                inverse_json="{}",
+            )
+        )
+        commit_library_changes(db)
+    except FileExistsError:
+        rollback_library_changes(db)
+        _raise_library_error("删除操作正在处理中", status_code=409, code="DELETE_IN_PROGRESS")
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        rollback_library_changes(db)
+        for source, destination in reversed(staged):
+            if destination.exists() and not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                destination.replace(source)
+        shutil.rmtree(staging, ignore_errors=True)
+        code = str(exc) if isinstance(exc, PermissionError) else "SOURCE_DELETE_FAILED"
+        _raise_library_error("无法安全删除源文件", status_code=400, code=code)
+    shutil.rmtree(staging, ignore_errors=True)
+    return response
 
 
 @router.patch("/works/{work_id}/volumes/{volume_id}")

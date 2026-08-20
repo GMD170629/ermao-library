@@ -534,7 +534,10 @@ def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
         "coverStatus": book["coverStatus"],
         "coverUrl": book["coverUrl"],
         "continueVolumeId": book.get("continueVolumeId"),
+        "continueVersionId": book.get("continueVersionId"),
+        "continueVolumeTitle": book.get("continueVolumeTitle"),
         "continueVolumeProgress": book.get("continueVolumeProgress", 0.0),
+        "continueReaderType": book.get("continueReaderType"),
         "completed": book["completed"],
         "versions": [
             {
@@ -544,6 +547,8 @@ def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
                 "completed": version["completed"],
                 "volumeCount": version["volumeCount"],
                 "sizeBytes": version["sizeBytes"],
+                "coverStatus": version["coverStatus"],
+                "coverUrl": version["coverUrl"],
                 "volumes": [
                     _work_detail_volume_view(volume) for volume in version["volumes"]
                 ],
@@ -713,6 +718,9 @@ def _work_view(
     user_id: str | None = None,
     *,
     volume_limit_per_version: int | None = None,
+    selected_version_id: str | None = None,
+    selected_volume_id: str | None = None,
+    current_version_only: bool = False,
     include_files: bool = True,
     batch: _WorkViewBatch | None = None,
 ) -> dict[str, Any]:
@@ -779,16 +787,46 @@ def _work_view(
             < 100
         ]
     continue_volume = _continue_volume_from_progress(all_volumes, progresses)
+    requested_volume = next(
+        (volume for volume in all_volumes if volume.id == selected_volume_id),
+        None,
+    )
+    available_version_ids = {version.id for version, _volumes in ordered}
+    current_version_id = (
+        selected_version_id
+        if selected_version_id in available_version_ids
+        else requested_volume.version_id
+        if requested_volume is not None
+        else continue_volume.version_id
+        if continue_volume is not None
+        else ordered[0][0].id
+        if ordered
+        else None
+    )
+    loaded_version_id = (
+        selected_version_id
+        if selected_version_id in available_version_ids
+        else requested_volume.version_id
+        if requested_volume is not None
+        else ordered[0][0].id
+        if current_version_only and len(ordered) == 1
+        else current_version_id
+        if not current_version_only
+        else None
+    )
     response_volumes: dict[str, list[LibraryVolume]] = {}
     for version, volumes in ordered:
-        selected = (
-            list(volumes)
-            if volume_limit_per_version is None
-            else list(volumes[:volume_limit_per_version])
-        )
+        selected = []
+        if not current_version_only or version.id == loaded_version_id:
+            selected = (
+                list(volumes)
+                if volume_limit_per_version is None
+                else list(volumes[:volume_limit_per_version])
+            )
         if (
             continue_volume is not None
             and continue_volume.version_id == version.id
+            and (not current_version_only or version.id == loaded_version_id)
             and all(volume.id != continue_volume.id for volume in selected)
         ):
             selected.append(continue_volume)
@@ -808,14 +846,44 @@ def _work_view(
             .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
         ).all():
             files[file.volume_id].append(file)
-    version_views = [
-        {
+    version_views = []
+    for version, volumes in ordered:
+        representative = next((volume for volume in volumes if volume.cover_path), None)
+        if representative is None and volumes:
+            representative = volumes[0]
+        version_cover_url = (
+            _cover_url(
+                "versions",
+                version.id,
+                {"coverPath": version.cover_path, "updatedAt": version.updated_at},
+            )
+            if version.cover_path
+            else _cover_url(
+                "volumes",
+                representative.id,
+                {
+                    "coverPath": representative.cover_path,
+                    "updatedAt": representative.updated_at,
+                },
+            )
+            if representative is not None
+            else _cover_url("versions", version.id)
+        )
+        version_views.append({
             "id": version.id,
             "sourceKey": version.source_key,
             "sourceName": version.source_name,
             "completed": bool(volumes) and not incomplete[version.id],
             "volumeCount": len(volumes),
             "sizeBytes": sum(volume.size_bytes for volume in volumes),
+            "coverStatus": (
+                version.cover_status
+                if version.cover_path
+                else representative.cover_status
+                if representative is not None
+                else "MISSING"
+            ),
+            "coverUrl": version_cover_url,
             "volumes": [
                 _library_volume_view(
                     volume,
@@ -825,9 +893,7 @@ def _work_view(
                 )
                 for volume in response_volumes[version.id]
             ],
-        }
-        for version, volumes in ordered
-    ]
+        })
     media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
     kinds = sorted(
         dict.fromkeys(media_kind_of(volume) for volume in all_volumes),
@@ -855,10 +921,16 @@ def _work_view(
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work_id, work, size="medium"),
         "continueVolumeId": continue_volume.id if continue_volume else None,
+        "continueVersionId": continue_volume.version_id if continue_volume else None,
         "continueVolumeTitle": continue_volume.title if continue_volume else None,
         "continueVolumeProgress": float(progresses[continue_volume.id].percent)
         if continue_volume and continue_volume.id in progresses
         else 0.0,
+        "continueReaderType": (
+            reader_type_for_format(continue_volume.format)
+            if continue_volume is not None
+            else None
+        ),
         "completed": bool(all_volumes)
         and all(
             float(progresses[volume.id].percent if volume.id in progresses else 0)

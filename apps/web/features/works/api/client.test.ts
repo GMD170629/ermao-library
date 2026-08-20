@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapWorkView, volumeFileDownloadUrl } from './client';
+import { fetchWork, mapWorkView, volumeFileDownloadUrl } from './client';
 
 test('builds an explicit attachment URL for a single-volume download', () => {
   assert.equal(
@@ -42,4 +42,27 @@ test('keeps server totals when the lean work detail contains only the first volu
   assert.equal(work.versions[0]?.volumes.length, 1);
   assert.equal(work.versions[0]?.volumes[0]?.readable, true);
   assert.equal(work.versions[0]?.volumes[0]?.versionId, 'version-1');
+});
+
+test('requests work detail for only the selected version and volume', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    return new Response(JSON.stringify({ ok: true, data: { book: { id: 'work-1', versions: [] } } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+
+  try {
+    await fetchWork('work/1', undefined, 'version/2', 'volume/3');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(
+    requestedUrl,
+    '/api/works/work%2F1?versionId=version%2F2&volumeId=volume%2F3'
+  );
 });

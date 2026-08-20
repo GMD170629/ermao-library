@@ -70,6 +70,8 @@ export type VersionResource = Readonly<{
   completed: boolean;
   volumeCount: number;
   sizeBytes: number;
+  coverUrl?: string;
+  coverStatus?: string;
   volumes: VolumeResource[];
 }>;
 
@@ -92,6 +94,10 @@ export type WorkView = Readonly<{
   coverStatus: string;
   gradient: string;
   continueVolumeId: string | null;
+  continueVersionId?: string | null;
+  continueVolumeTitle?: string | null;
+  continueVolumeProgress?: number;
+  continueReaderType?: ReaderType | null;
   completed: boolean;
   versions: VersionResource[];
 }>;

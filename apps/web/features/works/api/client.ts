@@ -126,8 +126,43 @@ function mapVersion(value: unknown): VersionResource | null {
     completed: item.completed === true,
     volumeCount: Math.max(0, finiteNumber(item.volumeCount, Array.isArray(item.volumes) ? item.volumes.length : 0)),
     sizeBytes: Math.max(0, finiteNumber(item.sizeBytes)),
+    coverUrl: stringValue(item.coverUrl),
+    coverStatus: stringValue(item.coverStatus, 'MISSING'),
     volumes: (Array.isArray(item.volumes) ? item.volumes : []).map(mapVolume).filter((volume): volume is VolumeResource => volume !== null)
   };
+}
+
+export type ItemActionTarget = Readonly<{ kind: 'versions' | 'volumes'; id: string }>;
+
+async function runItemAction(workId: string, target: ItemActionTarget, action: string, init?: RequestInit): Promise<void> {
+  await apiJson(`/api/works/${encodeURIComponent(workId)}/${target.kind}/${encodeURIComponent(target.id)}/${action}`, {
+    method: 'POST',
+    ...init
+  });
+}
+
+export async function updateVersionMetadata(workId: string, versionId: string, body: Record<string, unknown>): Promise<void> {
+  await apiJson(`/api/works/${encodeURIComponent(workId)}/versions/${encodeURIComponent(versionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function regenerateItemCover(workId: string, target: ItemActionTarget): Promise<void> {
+  await runItemAction(workId, target, 'cover/regenerate');
+}
+
+export async function rescanItemSource(workId: string, target: ItemActionTarget): Promise<void> {
+  await runItemAction(workId, target, 'rescan');
+}
+
+export async function deleteItemSource(workId: string, target: ItemActionTarget, confirmation: string): Promise<void> {
+  await apiJson(`/api/works/${encodeURIComponent(workId)}/${target.kind}/${encodeURIComponent(target.id)}/source`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({ confirmation })
+  });
 }
 
 export type VersionVolumePage = Readonly<{
@@ -167,6 +202,10 @@ export function mapWorkView(value: unknown): WorkView {
     coverStatus: stringValue(root.coverStatus),
     gradient: stringValue(root.gradient),
     continueVolumeId: nullableString(root.continueVolumeId),
+    continueVersionId: nullableString(root.continueVersionId),
+    continueVolumeTitle: nullableString(root.continueVolumeTitle),
+    continueVolumeProgress: Math.max(0, Math.min(100, finiteNumber(root.continueVolumeProgress))),
+    continueReaderType: root.continueReaderType === 'audio' || root.continueReaderType === 'comic' || root.continueReaderType === 'pdf' || root.continueReaderType === 'reflowable' ? root.continueReaderType : null,
     completed: root.completed === true,
     versions
   };
@@ -184,8 +223,17 @@ async function apiJson(path: string, init?: RequestInit): Promise<unknown> {
   return envelope.ok === true && 'data' in envelope ? envelope.data : payload;
 }
 
-export async function fetchWork(workId: string, signal?: AbortSignal): Promise<WorkView> {
-  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}`, { signal }));
+export async function fetchWork(
+  workId: string,
+  signal?: AbortSignal,
+  versionId?: string | null,
+  volumeId?: string | null
+): Promise<WorkView> {
+  const query = new URLSearchParams();
+  if (versionId) query.set('versionId', versionId);
+  if (volumeId) query.set('volumeId', volumeId);
+  const suffix = query.size > 0 ? `?${query}` : '';
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}${suffix}`, { signal }));
   return mapWorkView(data.book ?? data.work ?? data);
 }
 

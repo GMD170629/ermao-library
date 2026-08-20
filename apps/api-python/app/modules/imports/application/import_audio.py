@@ -10,8 +10,8 @@ from typing import Any
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
+from app.contracts.library_layout import is_audiobook_disc_directory
 from app.modules.imports.application.audio_types import (
-    DISC_DIRECTORY_PATTERN,
     MAX_AUDIO_CHAPTERS,
     AudioBundleStructure,
     AudioChapterMetadata,
@@ -55,6 +55,7 @@ from app.modules.imports.domain.content_classification import (
     classify_content,
     normalize_media_kind_policy,
 )
+from app.modules.library.domain.layout_ordering import natural_sort_key
 
 _FLAT_AUDIO_FILENAME_PATTERN = re.compile(
     r"^\s*0*\d{1,6}\s*[-–—_.]+\s*(?P<title>.+?)\s*[-–—_]+\s*"
@@ -179,7 +180,7 @@ def _import_bound_audio(
     ) or _prepared_default_cover(options)
     manifest_tracks: list[dict[str, object]] = []
     manifest_chapters: list[dict[str, object]] = []
-    chapter_sort_order = 0
+    chapter_sort_order = int(target.volume.get("chapterCount") or 0)
     total_size = 0
     total_duration = 0
     for index, item in enumerate(metadata_items):
@@ -329,16 +330,18 @@ def _import_bound_audio(
                 "updatedAt": _now(),
             }
         )
-    actual_chapters = max(chapter_sort_order, len(metadata_items))
+    track_count, actual_chapters, aggregate_size, aggregate_duration = (
+        _refresh_audio_volume_aggregates(store, queries, str(volume["id"]))
+    )
     store.update_library_volume(
         str(volume["id"]),
         columns={
             "coverPath": cover_path,
             "coverStatus": services.cover_status(cover_path),
-            "sizeBytes": total_size,
+            "sizeBytes": aggregate_size,
             "chapterCount": actual_chapters,
-            "trackCount": len(metadata_items),
-            "durationMs": total_duration,
+            "trackCount": track_count,
+            "durationMs": aggregate_duration,
             "narrator": narrator,
             "importStatus": "COMPLETED",
             "updatedAt": _now(),
@@ -370,6 +373,51 @@ def _import_bound_audio(
         metadata_field_sources=resolved_local.field_sources if resolved_local else (),
         metadata_source_order=resolved_local.source_order if resolved_local else (),
     )
+
+
+def _refresh_audio_volume_aggregates(
+    store: LibraryImportStore,
+    queries: ImportLibraryQueries,
+    volume_id: str,
+) -> tuple[int, int, int, int]:
+    """Recompute stable ordering and totals after one path-owned track import."""
+
+    files = sorted(
+        queries.list_audio_volume_files(volume_id),
+        key=lambda item: (
+            natural_sort_key(str(item.get("path") or "")),
+            str(item.get("path") or ""),
+        ),
+    )
+    file_order: dict[str, int] = {}
+    total_size = 0
+    total_duration = 0
+    for sort_order, item in enumerate(files):
+        file_id = str(item["id"])
+        file_order[file_id] = sort_order
+        total_size += int(item.get("sizeBytes") or 0)
+        total_duration += int(item.get("durationMs") or 0)
+        store.update_library_file(file_id, columns={"sortOrder": sort_order})
+
+    units = sorted(
+        queries.list_audio_volume_units(volume_id),
+        key=lambda item: (
+            file_order.get(str(item.get("fileId") or ""), len(file_order)),
+            int(item.get("startMs") or 0),
+            str(item.get("id") or ""),
+        ),
+    )
+    for temporary_order, item in enumerate(units, start=1):
+        store.update_library_reading_unit(
+            str(item["id"]), columns={"sortOrder": -temporary_order}
+        )
+    if units:
+        queries.list_audio_volume_units(volume_id)
+    for sort_order, item in enumerate(units, start=1):
+        store.update_library_reading_unit(
+            str(item["id"]), columns={"sortOrder": sort_order}
+        )
+    return len(files), len(units), total_size, total_duration
 
 
 def audio_embedded_metadata(
@@ -615,7 +663,7 @@ def _audio_episode_number(path: Path) -> int | None:
 
 def _audio_disc_number(path: Path) -> int | None:
     parent_name = path.parent.name.strip()
-    if not DISC_DIRECTORY_PATTERN.match(parent_name):
+    if not is_audiobook_disc_directory(parent_name):
         return None
     matched = re.search(r"\d{1,6}", parent_name)
     return int(matched.group()) if matched else None

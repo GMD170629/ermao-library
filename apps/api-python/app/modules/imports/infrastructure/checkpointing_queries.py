@@ -54,6 +54,14 @@ class CheckpointingImportLibraryQueries:
         with self._projection:
             return self._queries.list_file_volumes_by_paths(paths)
 
+    def list_audio_volume_files(self, volume_id: str) -> list[Record]:
+        with self._projection:
+            return self._queries.list_audio_volume_files(volume_id)
+
+    def list_audio_volume_units(self, volume_id: str) -> list[Record]:
+        with self._projection:
+            return self._queries.list_audio_volume_units(volume_id)
+
     def list_volume_cover_paths_for_version(
         self, version_id: str
     ) -> list[Record]:
