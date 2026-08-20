@@ -556,42 +556,12 @@ def _undo_operation(
     action = str(operation.get("action") or "")
     now = _now()
     restored_work_rows: list[dict[str, Any]] = []
-    if action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
-        source_work = inverse.get("sourceWork")
-        if isinstance(source_work, dict):
-            restored_work_rows = [source_work]
-    elif action in {"MERGE_FACETS", "RENAME_FACET", "DELETE_FACET"}:
+    if action in {"MERGE_FACETS", "RENAME_FACET", "DELETE_FACET"}:
         restored_work_rows = [
             work for work in inverse.get("works") or [] if isinstance(work, dict)
         ]
     facet_write = _prepare_record_facet_write(restored_work_rows, now=now)
-    if action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
-        source_work = inverse.get("sourceWork")
-        if isinstance(source_work, dict) and source_work:
-            library_operations.insert_snapshot(db, "LibraryWork", source_work)
-            source_dependents = inverse.get("sourceWorkDependents") or {}
-            if isinstance(source_dependents, dict):
-                library_operations.restore_rows(db, source_dependents)
-        source_version = inverse.get("sourceVersion") or {}
-        volume = inverse.get("volume") or {}
-        if not source_version or not volume:
-            raise ValueError("撤销数据不完整")
-        library_operations.insert_snapshot(
-            db,
-            "LibraryVersion",
-            source_version,
-        )
-        library_operations.insert_snapshot(db, "LibraryVolume", volume)
-        target_version_id = str(inverse.get("targetVersionId") or "")
-        if inverse.get("targetVersionCreated") and target_version_id:
-            library_operations.delete_version_if_empty(
-                db,
-                target_version_id,
-            )
-        new_work_id = str(inverse.get("newWorkId") or "")
-        if new_work_id:
-            library_operations.delete_work_if_empty(db, new_work_id)
-    elif action == "RECLASSIFY_VOLUME":
+    if action == "RECLASSIFY_VOLUME":
         volumes = inverse.get("volumes") or []
         volume = inverse.get("volume")
         if not volumes and isinstance(volume, dict) and volume:
@@ -600,11 +570,6 @@ def _undo_operation(
             raise ValueError("撤销数据不完整")
         for row in volumes:
             library_operations.insert_snapshot(db, "LibraryVolume", row)
-    elif action == "DELETE_VOLUME":
-        snapshot = inverse.get("snapshot")
-        if not isinstance(snapshot, dict):
-            raise ValueError("撤销数据不完整")
-        library_operations.restore_volume_delete_snapshot(db, snapshot)
     elif action == "MERGE_FACETS":
         for work in inverse.get("works") or []:
             library_operations.restore_work_row(db, str(work["id"]), work)

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from fastapi.responses import Response
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -24,6 +25,14 @@ from app.contracts.http_errors import HttpContractError
 
 class ReaderWireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class ReaderComicPageResponse(Response):
+    media_type = "application/octet-stream"
+
+
+class ReaderComicArchiveResponse(Response):
+    media_type = "application/octet-stream"
 
 
 ReaderFormat = Literal["reflowable", "comic", "pdf", "audio"]

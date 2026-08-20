@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.media import media_page_index, media_streaming
 from app.bootstrap.publications import (
     ensure_publication_navigation,
 )
@@ -22,7 +23,6 @@ from app.core.authorization import authorization_context, can_access_volume
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.media import public as media_public
 from app.modules.publications.application.ensure_navigation import (
     PublicationNavigationSourceChangedError,
 )
@@ -78,10 +78,12 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderBootstrapData,
     ReaderBootstrapResponse,
     ReaderCapabilities,
+    ReaderComicArchiveResponse,
     ReaderComicDownloadArtifact,
     ReaderComicManifestData,
     ReaderComicManifestPage,
     ReaderComicManifestResponse,
+    ReaderComicPageResponse,
     ReaderConflictError,
     ReaderErrorBody,
     ReaderFileSummary,
@@ -659,7 +661,9 @@ def get_comic_manifest_v4(
 ]:
     _user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
     _source, source_format = _comic_source(bootstrap)
-    index = media_public.load_persisted_volume_page_index(db, volume_id)
+    index = media_page_index.resolve_read_only(
+        media_page_index.load_read_only(db, volume_id)
+    )
     etag = f'W/"comic-manifest-{volume_id}-{len(index.pages)}"'
     cache_headers = {
         "Cache-Control": "private, no-cache",
@@ -703,7 +707,10 @@ def get_comic_manifest_v4(
     )
 
 
-@router.get("/volumes/{volume_id}/comic/pages/{page_index}")
+@router.get(
+    "/volumes/{volume_id}/comic/pages/{page_index}",
+    response_class=ReaderComicPageResponse,
+)
 def get_comic_page_v4(
     volume_id: str,
     page_index: int,
@@ -716,7 +723,9 @@ def get_comic_page_v4(
     ] = "original",
 ) -> Response:
     user, _scope, _bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
-    index = media_public.load_persisted_volume_page_index(db, volume_id)
+    index = media_page_index.resolve_read_only(
+        media_page_index.load_read_only(db, volume_id)
+    )
     if page_index < 0 or page_index >= len(index.pages):
         raise ReaderNotFoundError(
             ReaderErrorBody(
@@ -729,14 +738,15 @@ def get_comic_page_v4(
     if source is None or source.kind != "COMIC":
         raise _not_found()
     _ = image_variant
-    page_response = media_public.send_comic_page(
-        archive_path=media_public.stored_media_path(source.path, settings),
-        entry_name=page.href,
-        request=request,
-        actor_id=user.id,
-        settings=settings,
-        media_type=page.media_type,
-        resource_id=page.id,
+    page_response = media_streaming.send_comic_page_zip_entry(
+        media_streaming.stored_path(source.path, settings, database_backed=True),
+        page.href,
+        request,
+        user.id,
+        settings,
+        page.media_type,
+        route="reader-v4-comic-page",
+        file_id=page.id,
     )
     page_response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
     page_response.headers["X-Comic-Page-Index"] = str(page_index)
@@ -744,7 +754,10 @@ def get_comic_page_v4(
     return page_response
 
 
-@router.get("/volumes/{volume_id}/comic/archive")
+@router.get(
+    "/volumes/{volume_id}/comic/archive",
+    response_class=ReaderComicArchiveResponse,
+)
 def download_comic_archive_v4(
     volume_id: str,
     request: Request,
@@ -753,17 +766,23 @@ def download_comic_archive_v4(
 ) -> Response:
     user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
     source, source_format = _comic_source(bootstrap)
-    indexed_source = media_public.load_persisted_volume_page_index(
-        db, volume_id
+    indexed_source = media_page_index.resolve_read_only(
+        media_page_index.load_read_only(db, volume_id)
     ).source_for(source.id)
     if indexed_source is None:
         raise _not_found()
-    return media_public.send_comic_archive(
-        archive_path=media_public.stored_media_path(indexed_source.path, settings),
-        request=request,
-        actor_id=user.id,
+    return media_streaming.send_file(
+        media_streaming.stored_path(
+            indexed_source.path,
+            settings,
+            database_backed=True,
+        ),
+        request,
+        user.id,
         media_type=source.mime_type or _COMIC_ARCHIVE_MIME_TYPES[source_format],
-        resource_id=source.id,
+        route="reader-v4-comic-archive",
+        file_id=source.id,
+        as_attachment=True,
     )
 
 

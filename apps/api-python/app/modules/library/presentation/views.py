@@ -18,6 +18,7 @@ from app.bootstrap.library import (
     library_projections,
     library_storage,
     library_works,
+    volume_effective_media_kind,
 )
 from app.bootstrap.organize import organize_jobs
 from app.contracts.media_capabilities import (
@@ -42,9 +43,6 @@ from app.models.library import (
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
-)
 from app.modules.reader.public import (
     progress_navigation as _progress_navigation,
 )

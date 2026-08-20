@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,10 +12,6 @@ from time import monotonic
 from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
-from app.contracts.import_deletion import (
-    LibraryVolumeDeletionResult,
-    PreparedLibraryVolumeDeletion,
-)
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
@@ -31,12 +27,6 @@ from app.modules.imports.application.clear_queue import (
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
     reset_failed_import_checkpoint,
-)
-from app.modules.imports.application.deletion import (
-    FileCleanupResult,
-    ImportDeletionDatabaseResult,
-    PreparedImportDeletion,
-    execute_import_deletion,
 )
 from app.modules.imports.application.dto import (
     ImportOptions,
@@ -96,10 +86,6 @@ from app.modules.imports.infrastructure import library_queries as library_reposi
 from app.modules.imports.infrastructure import monitor as monitor_repository
 from app.modules.imports.infrastructure import tasks as task_repository
 from app.modules.imports.infrastructure import work_queue as persistent_work_queue
-from app.modules.imports.infrastructure.deletion_files import LocalImportDeletionFiles
-from app.modules.imports.infrastructure.deletion_write import (
-    SqlAlchemyImportTaskDeletionStore,
-)
 from app.modules.imports.infrastructure.directory_scan import (
     ImportIgnoreReason,
     LibraryConfig,
@@ -139,10 +125,6 @@ from app.modules.imports.infrastructure.task_store import SqlAlchemyImportTaskSt
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
 from app.modules.imports.infrastructure.uploaded_file_publication import (
     AtomicUploadedFilePublisher,
-)
-from app.modules.library.infrastructure.deletion import (
-    execute_prepared_import_volume_deletion,
-    load_prepared_import_volume_deletion,
 )
 from app.modules.system.domain.queue import TERMINAL_OPERATION_STATUSES
 from app.modules.system.public import PreparedSystemEvent
@@ -471,102 +453,6 @@ def recover_stale_import_tasks(db: Session) -> int:
     )
 
 
-def recover_interrupted_import_deletions(
-    db: Session,
-    settings: Settings,
-) -> tuple[int, int]:
-    monitor_roots = [
-        Path(root).expanduser()
-        for root in import_http_store.list_library_root_paths(db)
-        if root.strip()
-    ]
-    files = LocalImportDeletionFiles(
-        settings.resolved_storage_root,
-        monitor_roots,
-    )
-    return files.recover_pending(
-        database_record_exists=lambda task_id: (
-            import_http_store.get_import_task(db, task_id) is not None
-        )
-    )
-
-
-def _recover_interrupted_import_deletions_without_open_session(
-    db_factory: Callable[[], Session],
-    settings: Settings,
-) -> tuple[int, int]:
-    with db_factory() as db:
-        monitor_roots = tuple(import_http_store.list_library_root_paths(db))
-    allowed_roots = [Path(root).expanduser() for root in monitor_roots if root.strip()]
-    files = LocalImportDeletionFiles(
-        settings.resolved_storage_root,
-        allowed_roots,
-    )
-
-    def database_record_exists(task_id: str) -> bool:
-        with db_factory() as db:
-            return import_http_store.get_import_task(db, task_id) is not None
-
-    return files.recover_pending(database_record_exists=database_record_exists)
-
-
-def load_import_volume_deletion(
-    db: Session,
-    file_paths: tuple[str, ...],
-    fallback_volume_id: str | None,
-) -> PreparedLibraryVolumeDeletion | None:
-    return load_prepared_import_volume_deletion(
-        db,
-        file_paths,
-        fallback_volume_id,
-    )
-
-
-class _SqlAlchemyPreparedImportDeletionStore:
-    def __init__(self, db: Session) -> None:
-        self._db = db
-        self._task_store = SqlAlchemyImportTaskDeletionStore(db)
-
-    def write(self, prepared: PreparedImportDeletion) -> ImportDeletionDatabaseResult:
-        library_result = LibraryVolumeDeletionResult(False, False, "")
-        if prepared.library_deletion is not None:
-            library_result = execute_prepared_import_volume_deletion(
-                self._db,
-                prepared.library_deletion,
-            )
-            if not library_result.deleted:
-                raise RuntimeError("prepared library volume deletion became stale")
-        deleted = self._task_store.delete_task(prepared)
-        if not deleted:
-            raise RuntimeError("prepared import task deletion became stale")
-        return ImportDeletionDatabaseResult(
-            deleted=deleted,
-            deleted_library_record=library_result.deleted,
-            deleted_work_record=library_result.deleted_work,
-            deleted_library_database_records=int(library_result.deleted),
-            library_work_id=library_result.work_id or None,
-        )
-
-
-def execute_recoverable_import_deletion(
-    db: Session,
-    settings: Settings,
-    *,
-    prepared: PreparedImportDeletion,
-    monitor_roots: Sequence[Path],
-) -> tuple[ImportDeletionDatabaseResult, FileCleanupResult]:
-    files = LocalImportDeletionFiles(
-        settings.resolved_storage_root,
-        monitor_roots,
-    )
-    return execute_import_deletion(
-        SqlAlchemyImportUnitOfWork(db),
-        files,
-        _SqlAlchemyPreparedImportDeletionStore(db),
-        prepared,
-    )
-
-
 def claim_next_import_task(
     db: Session, worker_id: str, lease_seconds: int
 ) -> ImportTaskDTO | None:
@@ -641,10 +527,6 @@ class ImportWorkerRuntime:
             yield db
 
     def recover(self) -> int:
-        _recover_interrupted_import_deletions_without_open_session(
-            self._db_factory,
-            self._settings,
-        )
         with self._session() as db:
             recovered = recover_stale_import_tasks(db)
         with self._session() as db:
@@ -1109,7 +991,6 @@ __all__ = [
     "cancel_import_scan_job",
     "claim_next_import_task",
     "clear_import_queue_records",
-    "execute_recoverable_import_deletion",
     "fail_claimed_import_task",
     "get_import_scan_job",
     "import_file_ignore_reason",
@@ -1120,7 +1001,6 @@ __all__ = [
     "library_config",
     "library_repository",
     "list_import_scan_jobs",
-    "load_import_volume_deletion",
     "load_persisted_scan_requests",
     "monitor_repository",
     "persist_import_events",
@@ -1133,7 +1013,6 @@ __all__ = [
     "persist_import_task_retry",
     "persist_terminal_import_tasks_clear",
     "process_import_task",
-    "recover_interrupted_import_deletions",
     "recover_stale_import_tasks",
     "save_uploaded_files",
     "should_ignore_file",

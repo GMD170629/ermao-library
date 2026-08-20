@@ -104,7 +104,7 @@ def friendly_import_error(
     if code == "LIBRARY_NOT_FOUND":
         return "书库已被删除，本次导入任务已结束。"
     if code == "SOURCE_NOT_FOUND":
-        return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
+        return "源文件当前无法读取，本次导入任务已结束。"
     if code == "IMPORT_WORKER_FAILED":
         return "导入工作进程意外中断，本次任务已经结束，可以稍后重试。"
     if code == "AUDIO_TRACK_LIMIT_EXCEEDED":
@@ -116,7 +116,7 @@ def friendly_import_error(
     if re.search(r"EACCES|permission|权限", text_value, re.IGNORECASE):
         return "权限不足：请确认容器用户可以读取该目录和文件。"
     if re.search(r"ENOENT|not found|不存在", text_value, re.IGNORECASE):
-        return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
+        return "源文件当前无法读取，本次导入任务已结束。"
     if re.search(r"unsupported|format|格式", text_value, re.IGNORECASE):
         return "格式暂不支持：请确认文件属于当前支持的图书格式。"
     if re.search(r"zip|archive|corrupt|invalid|损坏", text_value, re.IGNORECASE):

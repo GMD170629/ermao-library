@@ -58,13 +58,6 @@ class ScanImportDirectoryRequest(HttpContractModel):
     path: str = ""
 
 
-class DeleteImportTaskRequest(HttpContractModel):
-    delete_mode: Literal["record", "source"] = Field(
-        default="record", alias="deleteMode"
-    )
-    delete_library_record: bool = Field(default=False, alias="deleteLibraryRecord")
-
-
 class LibrariesPayload(HttpContractModel):
     libraries: list[Library]
     last_upload_target_path: str | None = Field(alias="lastUploadTargetPath")
@@ -301,23 +294,9 @@ class ImportUploadPayload(HttpContractModel):
     auto_import: bool = Field(alias="autoImport")
 
 
-class ImportDeleteFailure(HttpContractModel):
-    path: str
-    message: str
-
-
 class ImportDeletionPayload(HttpContractModel):
     deleted: bool
     id: str
-    delete_mode: Literal["record", "source"] = Field(alias="deleteMode")
-    delete_library_record: bool = Field(alias="deleteLibraryRecord")
-    deleted_library_record: bool = Field(alias="deletedLibraryRecord")
-    deleted_work_record: bool = Field(alias="deletedWorkRecord")
-    deleted_library_database_records: int = Field(alias="deletedLibraryDatabaseRecords")
-    library_record_id: str | None = Field(alias="libraryRecordId")
-    deleted_files: int = Field(alias="deletedFiles")
-    missing_files: list[str] = Field(alias="missingFiles")
-    failed_file_deletes: list[ImportDeleteFailure] = Field(alias="failedFileDeletes")
 
 
 ImportUploadResponse = SuccessEnvelope[ImportUploadPayload]
@@ -328,14 +307,10 @@ class ImportFileListDetails(HttpContractModel):
     files: list[str]
 
 
-class ImportDeletionFailureDetails(HttpContractModel):
-    failed_file_deletes: list[ImportDeleteFailure] = Field(alias="failedFileDeletes")
-
-
 class ImportErrorBody(HttpContractModel):
     message: str
     code: str | None = None
-    details: ImportFileListDetails | ImportDeletionFailureDetails | None = None
+    details: ImportFileListDetails | None = None
 
 
 class ImportBadRequestError(HttpContractError[ImportErrorBody]):

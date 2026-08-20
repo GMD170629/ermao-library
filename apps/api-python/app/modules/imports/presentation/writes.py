@@ -20,17 +20,15 @@ from app.bootstrap.imports import (
     cancel_import_scan_job as cancel_import_scan_job_command,
 )
 from app.bootstrap.imports import (
-    execute_recoverable_import_deletion,
+    get_import_scan_job as get_import_scan_job_query,
+)
+from app.bootstrap.imports import (
     import_http_store,
-    load_import_volume_deletion,
     load_persisted_scan_requests,
     persist_import_scan_requests,
     persist_import_task_retry,
     persist_terminal_import_tasks_clear,
     save_uploaded_files,
-)
-from app.bootstrap.imports import (
-    get_import_scan_job as get_import_scan_job_query,
 )
 from app.bootstrap.imports import (
     list_import_scan_jobs as list_import_scan_jobs_query,
@@ -43,12 +41,10 @@ from app.bootstrap.system import (
     queue_runtime_view,
 )
 from app.contracts.http_errors import ErrorResponses
-from app.contracts.import_deletion import PreparedLibraryVolumeDeletion
 from app.core.authorization import authorization_context, can_access_library
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.imports.application.deletion import PreparedImportDeletion
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.maintenance_commands import (
     PreparedTerminalImportClear,
@@ -70,10 +66,8 @@ from app.modules.imports.presentation.path_helpers import (
 )
 from app.modules.imports.presentation.schemas import (
     DeletedImportTasksResponse,
-    DeleteImportTaskRequest,
     ImportBadRequestError,
     ImportConflictError,
-    ImportDeletionFailureDetails,
     ImportDeletionResponse,
     ImportDirectoryScanResponse,
     ImportErrorBody,
@@ -94,7 +88,6 @@ from app.modules.imports.presentation.schemas import (
     ImportScanJob as ImportScanJobContract,
 )
 from app.modules.imports.public import (
-    ImportFileQuarantineError,
     SaveUploadedFilesCommand,
     UploadFileTooLargeError,
     UploadPublicationError,
@@ -127,7 +120,7 @@ logger = logging.getLogger(__name__)
 def _raise_import_error(
     message: str,
     status_code: int = 400,
-    details: ImportFileListDetails | ImportDeletionFailureDetails | None = None,
+    details: ImportFileListDetails | None = None,
     *,
     code: str | None = None,
 ) -> Never:
@@ -171,50 +164,6 @@ def _auth(
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _resolved_deletion_path(value: object, root: Path) -> Path | None:
-    if not value:
-        return None
-    try:
-        path = Path(str(value)).expanduser()
-        resolved = (path if path.is_absolute() else root / path).resolve()
-    except (OSError, RuntimeError):
-        return None
-    return resolved
-
-
-def _library_deletion_candidate_paths(
-    task: dict[str, Any],
-    settings: Settings,
-) -> tuple[str, ...]:
-    candidates = (
-        _resolved_deletion_path(task.get("sourcePath"), settings.resolved_storage_root),
-    )
-    return tuple(dict.fromkeys(str(path) for path in candidates if path is not None))
-
-
-def _managed_library_deletion_paths(
-    library_deletion: PreparedLibraryVolumeDeletion | None,
-    settings: Settings,
-) -> list[Path]:
-    if library_deletion is None:
-        return []
-    storage_root = settings.resolved_storage_root.resolve()
-    values = (
-        library_deletion.cover_path,
-        *library_deletion.file_paths,
-    )
-    result: list[Path] = []
-    for value in values:
-        resolved = _resolved_deletion_path(value, storage_root)
-        if (
-            resolved is not None
-            and resolved != storage_root
-            and storage_root in resolved.parents
-        ):
-            result.append(resolved)
-    return list(dict.fromkeys(result))
 
 
 @router.post("/works/import")
@@ -507,13 +456,11 @@ def request_clear_import_queue(
 def delete_import_task(
     task_id: str,
     request: Request,
-    payload: Annotated[DeleteImportTaskRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
     ImportDeletionResponse,
     ErrorResponses(
-        ImportBadRequestError,
         ImportNotFoundError,
         ImportConflictError,
         ImportInternalError,
@@ -530,110 +477,27 @@ def delete_import_task(
             "导入任务仍在处理中，完成或失败后才能删除记录", status_code=409
         )
 
-    db.close()
-    delete_mode = payload.delete_mode if payload is not None else "record"
-    delete_library_record = (
-        payload.delete_library_record if payload is not None else False
-    )
-    work_id = str(task.get("workId") or "").strip()
-
-    monitor_root_values = import_http_store.list_library_root_paths(db)
-    db.close()
-    selected_paths: list[Path] = []
-    if delete_mode == "source":
-        source_path = _resolved_deletion_path(
-            task.get("sourcePath"), settings.resolved_storage_root
-        )
-        if not source_path:
-            _raise_import_error(
-                "源文件路径不在允许删除的书库或监控目录中", status_code=400
-            )
-        selected_paths = [source_path]
-
-    library_deletion = None
-    if delete_library_record:
-        candidate_paths = _library_deletion_candidate_paths(task, settings)
-        library_deletion = load_import_volume_deletion(
-            db,
-            candidate_paths,
-            str(task.get("volumeId") or "").strip() or None,
-        )
-        db.close()
-    library_paths = _managed_library_deletion_paths(library_deletion, settings)
-    deletion_paths = list(dict.fromkeys([*selected_paths, *library_paths]))
-    monitor_roots = [
-        Path(root).expanduser() for root in monitor_root_values if root.strip()
-    ]
-    source_path_value = str(task.get("sourcePath") or "").strip()
-    if source_path_value:
-        try:
-            source_parent = Path(source_path_value).expanduser().resolve().parent
-            monitor_roots.append(source_parent)
-        except (OSError, RuntimeError):
-            pass
     prepared_deletion_event = prepare_system_event(
-        level=(
-            "warning" if delete_mode != "record" or delete_library_record else "info"
-        ),
+        level="info",
         source="import",
         actor_type="admin",
         actor_id=user.id,
         action="task.deleted",
         target_type="importTask",
         target_id=task_id,
-        message=f"删除导入记录{'及关联书库图书' if delete_library_record else ''}：{task.get('originalName') or task.get('sourcePath')}",
-        metadata={
-            "deleteMode": delete_mode,
-            "deleteLibraryRecord": delete_library_record,
-            "libraryRecordId": work_id or None,
-            "plannedFileDeletes": len(deletion_paths),
-        },
+        message=f"删除导入记录：{task.get('originalName') or task.get('sourcePath')}",
+        metadata={},
     )
-    prepared_deletion = PreparedImportDeletion(
-        task_id=task_id,
-        quarantine_paths=tuple(str(path) for path in deletion_paths),
-        library_deletion=library_deletion,
-        events=(prepared_deletion_event,),
+    deleted = persist_terminal_import_tasks_clear(
+        db,
+        PreparedTerminalImportClear(
+            task_ids=(task_id,),
+            events=(prepared_deletion_event,),
+        ),
     )
-
-    try:
-        database_result, file_cleanup = execute_recoverable_import_deletion(
-            db,
-            settings,
-            prepared=prepared_deletion,
-            monitor_roots=monitor_roots,
-        )
-    except ImportFileQuarantineError as exc:
-        _raise_import_error(
-            "文件删除失败，导入记录已保留，请检查文件权限后重试",
-            status_code=500,
-            details=ImportDeletionFailureDetails(
-                failedFileDeletes=[
-                    {"path": item.path, "message": item.message}
-                    for item in exc.failures
-                ],
-            ),
-        )
-    failed_file_deletes = [
-        {"path": item.path, "message": item.message} for item in file_cleanup.failures
-    ]
-    return ImportDeletionResponse(
-        data={
-            "deleted": database_result.deleted,
-            "id": task_id,
-            "deleteMode": delete_mode,
-            "deleteLibraryRecord": delete_library_record,
-            "deletedLibraryRecord": database_result.deleted_library_record,
-            "deletedWorkRecord": database_result.deleted_work_record,
-            "deletedLibraryDatabaseRecords": (
-                database_result.deleted_library_database_records
-            ),
-            "libraryRecordId": database_result.library_work_id or work_id or None,
-            "deletedFiles": file_cleanup.deleted_files,
-            "missingFiles": list(file_cleanup.missing_paths),
-            "failedFileDeletes": failed_file_deletes,
-        }
-    )
+    if deleted != 1:
+        _raise_import_error("导入记录不存在", status_code=404)
+    return ImportDeletionResponse(data={"deleted": True, "id": task_id})
 
 
 @router.post("/import-tasks/rescan", status_code=202)

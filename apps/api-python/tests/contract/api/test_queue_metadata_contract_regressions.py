@@ -147,7 +147,6 @@ def test_consumed_request_bodies_are_documented_in_openapi(
         ("put", "/api/organize/policy"),
         ("post", "/api/works/import"),
         ("post", "/api/import-tasks/scan-directory"),
-        ("delete", "/api/import-tasks/{task_id}"),
         ("post", "/api/tracking/release-title-parser"),
         ("post", "/api/download-tasks"),
         ("put", "/api/download-tasks/{task_id}"),
@@ -174,10 +173,6 @@ def test_consumed_request_bodies_are_documented_in_openapi(
         if "requestBody" not in schema["paths"][path][method]
     }
     assert missing == set()
-    delete_body = schema["paths"]["/api/import-tasks/{task_id}"]["delete"][
-        "requestBody"
-    ]
-    assert delete_body.get("required") is not True
 
 
 def test_empty_bodies_never_escape_as_internal_errors(

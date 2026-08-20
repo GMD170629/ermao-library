@@ -81,12 +81,6 @@ from app.modules.library.presentation.views import (
     bookshelf_item_view,
     bookshelf_item_views,
 )
-from app.modules.library.presentation.work_ops import (
-    _delete_source_paths as delete_source_paths,
-)
-from app.modules.library.presentation.work_ops import (
-    _source_delete_path as source_delete_path,
-)
 
 __all__ = [
     "CATALOG_FACET_KINDS",
@@ -138,12 +132,10 @@ __all__ = [
     "WorkView",
     "bookshelf_item_view",
     "bookshelf_item_views",
-    "delete_source_paths",
     "get_work",
     "parse_filter_expression",
     "parse_media_kinds",
     "preferred_work_cover_path",
     "prepare_work_facet",
-    "source_delete_path",
     "work_view",
 ]
