@@ -307,16 +307,15 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         str(job.get("versionId") or "") or None,
     )
     if selection is None:
-        raise ValueError("作品没有可整理的媒介版本")
+        raise ValueError("作品没有可整理的版本")
     version_id, media_kind, volume_id = selection
     providers = enabled_metadata_provider_ids(db, media_kind)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
     new_task_id = _id("metadata_lookup")
     run_id = str(job.get("runId") or "") or None
 
-    # A new recognition pass owns a clean set of provider executions. Keep the
-    # legacy review tables readable for old backups, but never carry their rows
-    # into a new automatic run.
+    # A new recognition pass owns a clean set of provider executions and does
+    # not carry previous provider rows into the new automatic run.
     persist_recognize_organize_job(
         db,
         job_id=job_id,

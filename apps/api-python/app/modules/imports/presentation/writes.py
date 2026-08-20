@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Never
@@ -251,10 +250,7 @@ def import_work(
         )
     preference_projection = load_raw_import_preferences_projection(db)
     db.close()
-    import_preferences = prepare_import_preferences(
-        preference_projection,
-        legacy_stable_delay_ms=os.environ.get("MONITOR_FILE_STABLE_DELAY_MS"),
-    )
+    import_preferences = prepare_import_preferences(preference_projection)
     disabled_extensions = [
         name
         for name in upload_file_names

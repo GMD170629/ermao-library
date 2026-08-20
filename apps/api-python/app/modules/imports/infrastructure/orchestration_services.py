@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -100,10 +99,7 @@ class SessionImportOrchestrationServices:
     def load_preferences(self) -> ImportPreferencesDTO:
         projection = load_raw_import_preferences_projection(self._db)
         self._unit_of_work.release()
-        preferences = prepare_import_preferences(
-            projection,
-            legacy_stable_delay_ms=os.environ.get("MONITOR_FILE_STABLE_DELAY_MS"),
-        )
+        preferences = prepare_import_preferences(projection)
         return ImportPreferencesDTO(
             allowed_extensions=preferences.allowed_extensions,
             ignore_patterns=preferences.ignore_patterns,

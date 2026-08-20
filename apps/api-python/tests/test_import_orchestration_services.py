@@ -51,12 +51,9 @@ def test_import_preferences_are_prepared_after_read_transaction_release(
     observed_transaction_states: list[bool] = []
     prepare = services_module.prepare_import_preferences
 
-    def observe_prepare(projection, *, legacy_stable_delay_ms):
+    def observe_prepare(projection):
         observed_transaction_states.append(db_session.in_transaction())
-        return prepare(
-            projection,
-            legacy_stable_delay_ms=legacy_stable_delay_ms,
-        )
+        return prepare(projection)
 
     monkeypatch.setattr(services_module, "prepare_import_preferences", observe_prepare)
 
