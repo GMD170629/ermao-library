@@ -54,7 +54,9 @@ def load_scan_candidate_projection(
     if not sources.source_pairs:
         return ScanCandidateProjection((), (), (), (), (), "MIXED")
     task_rows: list[tuple[str | None, str, str]] = []
-    for pair_chunk in sqlite_parameter_chunks(sources.source_pairs, parameters_per_row=2):
+    for pair_chunk in sqlite_parameter_chunks(
+        sources.source_pairs, parameters_per_row=2
+    ):
         chunk_keys = tuple(key for key, _path in pair_chunk)
         chunk_paths = tuple(path for _key, path in pair_chunk)
         task_rows.extend(
@@ -73,7 +75,9 @@ def load_scan_candidate_projection(
             ).all()
         )
     library_rows: list[tuple[str | None, str]] = []
-    for pair_chunk in sqlite_parameter_chunks(sources.source_pairs, parameters_per_row=2):
+    for pair_chunk in sqlite_parameter_chunks(
+        sources.source_pairs, parameters_per_row=2
+    ):
         chunk_keys = tuple(key for key, _path in pair_chunk)
         chunk_paths = tuple(path for _key, path in pair_chunk)
         library_rows.extend(
@@ -262,7 +266,7 @@ def prepare_scan_candidate_batch(
                     "title": topology_source.volume_title,
                     "sortOrder": topology_source.volume_sort_order,
                     "format": topology_source.volume_format,
-                    "classificationSource": "MONITOR_FOLDER",
+                    "classificationSource": "LIBRARY_RULE",
                     "classificationReason": "DIRECTORY_LAYOUT",
                     "resourceKey": topology_source.volume_resource_key,
                     "importStatus": "PENDING",

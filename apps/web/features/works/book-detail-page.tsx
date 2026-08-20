@@ -212,7 +212,7 @@ function visibleVersionVolumes(version: VersionResource): VolumeResource[] {
 }
 
 function classificationLabel(volume: VolumeResource): string {
-  if (volume.classification.source === 'MONITOR_FOLDER') return '来自书库规则';
+  if (volume.classification.source === 'LIBRARY_RULE') return '来自书库规则';
   if (volume.classification.source === 'USER') return '手动设置';
   if (volume.classification.reason === 'COMIC_SUBJECT') return '自动识别 · 包含漫画主题';
   if (volume.classification.source === 'AUTO') return '自动识别 · 默认按电子书处理';

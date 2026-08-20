@@ -44,7 +44,7 @@ function readerType(value: unknown, format: VolumeFormat): ReaderType {
 }
 
 function classificationSource(value: unknown): ClassificationSource {
-  return value === 'AUTO' || value === 'MONITOR_FOLDER' || value === 'USER' ? value : 'AUTO';
+  return value === 'AUTO' || value === 'LIBRARY_RULE' || value === 'USER' ? value : 'AUTO';
 }
 
 function mapVolume(value: unknown): VolumeResource | null {

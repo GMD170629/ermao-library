@@ -6,13 +6,14 @@ from app.modules.imports.domain.content_classification import (
 )
 
 
-def test_folder_policy_forces_category_without_format_validation() -> None:
+def test_library_policy_forces_category_without_format_validation() -> None:
     result = classify_content(
         MediaKindPolicy.AUDIOBOOK,
         ContentEvidence(volume_format="EPUB"),
     )
     assert result.media_kind == "AUDIOBOOK"
-    assert result.source is ClassificationSource.MONITOR_FOLDER
+    assert result.source is ClassificationSource.LIBRARY_RULE
+    assert result.reason == "LIBRARY_POLICY"
 
 
 def test_explicit_comic_subject_is_high_confidence() -> None:

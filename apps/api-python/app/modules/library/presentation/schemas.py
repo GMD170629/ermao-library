@@ -192,7 +192,7 @@ class LibraryFileSummary(HttpContractModel):
 
 
 class VolumeClassification(HttpContractModel):
-    source: Literal["AUTO", "MONITOR_FOLDER", "USER"]
+    source: Literal["AUTO", "LIBRARY_RULE", "USER"]
     reason: str
     suggested_media_kind: MediaKind | None = Field(
         default=None, alias="suggestedMediaKind"

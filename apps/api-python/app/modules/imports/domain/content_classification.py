@@ -15,7 +15,7 @@ class MediaKindPolicy(StrEnum):
 
 class ClassificationSource(StrEnum):
     AUTO = "AUTO"
-    MONITOR_FOLDER = "MONITOR_FOLDER"
+    LIBRARY_RULE = "LIBRARY_RULE"
     USER = "USER"
 
 
@@ -81,8 +81,8 @@ def classify_content(
     if policy is not MediaKindPolicy.MIXED:
         return ContentClassification(
             media_kind=policy.value,
-            source=ClassificationSource.MONITOR_FOLDER,
-            reason="FOLDER_POLICY",
+            source=ClassificationSource.LIBRARY_RULE,
+            reason="LIBRARY_POLICY",
         )
 
     normalized_format = evidence.volume_format.strip().upper()
