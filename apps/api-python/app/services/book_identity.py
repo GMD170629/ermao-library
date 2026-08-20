@@ -67,10 +67,6 @@ def normalize_identity_part(value: Any) -> str:
     ).strip()
 
 
-def identity_merge_key(title: str, author: str | None) -> str:
-    return f"{normalize_identity_part(title)}:{normalize_identity_part(author or UNKNOWN_AUTHOR)}"
-
-
 def logical_import_path(
     db: Session, settings: Settings, path: Path, original_name: str | None = None
 ) -> str:

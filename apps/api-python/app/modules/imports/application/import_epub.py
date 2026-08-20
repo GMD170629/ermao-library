@@ -41,7 +41,6 @@ from app.modules.imports.application.import_support import (
     _sanitize_description,
     _texts,
     _title_from_file,
-    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -109,7 +108,6 @@ def _import_epub(
         ),
     )
     topology_target = _bound_topology_target(queries, options)
-    merge_key = _work_merge_key(identity.title)
     work, _created = _import_work(
         store,
         queries,
@@ -126,7 +124,6 @@ def _import_epub(
                     )
                 )
             ),
-            "mergeKey": merge_key,
             "origin": options.origin,
             "libraryId": options.library_id,
         },

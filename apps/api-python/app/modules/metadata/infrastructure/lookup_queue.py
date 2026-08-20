@@ -49,7 +49,6 @@ _WORK_CAMEL_TO_SNAKE: dict[str, str] = {
     "coverStatus": "cover_status",
     "normalizedTitle": "normalized_title",
     "normalizedAuthor": "normalized_author",
-    "mergeKey": "merge_key",
     "metadataQuality": "metadata_quality",
     "organized": "organized",
     "organizeStatus": "organize_status",
@@ -143,7 +142,6 @@ def work_row_to_dict(row: Any) -> dict[str, Any]:
         "organizeStatus": data.get("organize_status", data.get("organizeStatus")),
         "normalizedTitle": data.get("normalized_title", data.get("normalizedTitle")),
         "normalizedAuthor": data.get("normalized_author", data.get("normalizedAuthor")),
-        "mergeKey": data.get("merge_key", data.get("mergeKey")),
     }
 
 
@@ -411,7 +409,6 @@ def get_work(db: Session, work_id: str | None) -> dict[str, Any] | None:
             LibraryWork.organize_status,
             LibraryWork.normalized_title,
             LibraryWork.normalized_author,
-            LibraryWork.merge_key,
         ).where(LibraryWork.id == work_id)
     ).one_or_none()
     return work_row_to_dict(row) if row else None

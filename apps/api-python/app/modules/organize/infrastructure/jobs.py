@@ -14,7 +14,6 @@ from sqlalchemy.sql.base import Executable
 
 from app.models.library import LibraryWork
 from app.models.organize import (
-    DuplicateCandidate,
     MetadataLookupTask,
     MetadataProviderExecution,
     MetadataSuggestion,
@@ -289,7 +288,6 @@ def clear_job_recognition_artifacts(
         for name in (
             "MetadataProviderExecution",
             "MetadataSuggestion",
-            "DuplicateCandidate",
             "MetadataLookupTask",
         )
         if _has_table(db, name)
@@ -309,10 +307,6 @@ def clear_job_recognition_artifacts(
     if "MetadataSuggestion" in present:
         db.execute(
             delete(MetadataSuggestion).where(MetadataSuggestion.job_id == job_id)
-        )
-    if "DuplicateCandidate" in present:
-        db.execute(
-            delete(DuplicateCandidate).where(DuplicateCandidate.job_id == job_id)
         )
     if "MetadataLookupTask" in present:
         db.execute(

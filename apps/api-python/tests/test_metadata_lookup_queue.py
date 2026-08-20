@@ -5,10 +5,12 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 
+from app import models as _models  # noqa: F401
 from app.bootstrap.metadata import (
     prepare_metadata_source_seed_rows,
     write_metadata_source_seed_rows,
 )
+from app.db.base import Base
 from app.models.import_pipeline import Source
 from app.models.organize import MetadataProviderPipeline, OrganizePolicy
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
@@ -24,7 +26,11 @@ from app.services.organize_service import (
     metadata_candidate_title_exact_match,
     metadata_search_candidates,
 )
-from tests.test_worker_importer import create_worker_tables
+
+
+def create_worker_tables(db) -> None:
+    Base.metadata.create_all(bind=db.get_bind())
+    db.commit()
 
 
 def _disable_all_metadata_providers(db) -> None:
@@ -62,18 +68,17 @@ def _insert_lookup_fixture(
             INSERT INTO LibraryWork (
                 id, libraryId, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverPath,
-                coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
+                coverStatus, hidden, organized, createdAt, updatedAt
             ) VALUES (
                 'work-lookup', 'test-library', 'MANUAL', :title, :title, :author, :author,
                 'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
-                :cover_path, :cover_status, 0, 0, :merge_key, 'now', 'now'
+                :cover_path, :cover_status, 0, 0, 'now', 'now'
             )
             """
         ),
         {
             "title": title,
             "author": author,
-            "merge_key": f"{title}:{author}",
             "cover_path": local_cover,
             "cover_status": "READY" if local_cover else "PENDING",
         },

@@ -233,13 +233,6 @@ def directory_merge_titles_match(left: object, right: object) -> bool:
     )
 
 
-def identity_merge_key(title: str, author: str | None) -> str:
-    return (
-        f"{normalize_identity_part(title)}:"
-        f"{normalize_identity_part(author or UNKNOWN_AUTHOR)}"
-    )
-
-
 def parse_bracketed_series_identity(
     folder_name: str, filename: str | None = None
 ) -> tuple[str, str] | None:

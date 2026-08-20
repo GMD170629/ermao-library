@@ -34,7 +34,6 @@ from app.modules.imports.application.ports import (
 )
 from app.modules.imports.application.query_ports import Record
 from app.modules.imports.application.release_titles import parse_release_title
-from app.modules.imports.application.work_resolution import resolve_work_identity
 from app.modules.imports.domain.content_classification import ContentClassification
 
 SUPPORTED_EXTS = {
@@ -88,10 +87,6 @@ def _hash_text(value: str) -> str:
 
 def _normalize_key(value: Any) -> str:
     return normalize_identity_part(value)
-
-
-def _work_merge_key(title: str) -> str:
-    return resolve_work_identity(title=title).merge_key
 
 
 def _usable_merge_identifier(identifier: str | None) -> bool:

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 
 from fastapi import UploadFile
-from pydantic import ConfigDict, Field
+from pydantic import Field
 from typing_extensions import TypeAliasType
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
@@ -849,21 +849,6 @@ class DeleteCategoryPayload(HttpContractModel):
     operation: LibraryOperationSummary
 
 
-class DuplicateGroup(HttpContractModel):
-    id: str
-    confidence: float
-    reasons: list[str]
-    works: list[WorkView]
-
-
-class DuplicatesPayload(HttpContractModel):
-    groups: list[DuplicateGroup]
-    total: int
-    page: int
-    page_size: int = Field(alias="pageSize")
-    total_pages: int = Field(alias="totalPages")
-
-
 class OperationsPayload(HttpContractModel):
     operations: list[LibraryOperationSummary]
 
@@ -1034,7 +1019,6 @@ CategoriesResponse = SuccessEnvelope[CategoriesPayload]
 RenameCategoryResponse = SuccessEnvelope[RenameCategoryPayload]
 MergeCategoriesResponse = SuccessEnvelope[MergeCategoriesPayload]
 DeleteCategoryResponse = SuccessEnvelope[DeleteCategoryPayload]
-DuplicatesResponse = SuccessEnvelope[DuplicatesPayload]
 OperationsResponse = SuccessEnvelope[OperationsPayload]
 UndoOperationResponse = SuccessEnvelope[UndoOperationPayload]
 MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]

@@ -6,7 +6,6 @@ import json
 import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from hashlib import sha1
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -52,7 +51,6 @@ from app.modules.library.infrastructure.facets import (
 from app.modules.library.public import WorkFacetProjection, prepare_work_facet
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
-    identity_merge_key,
 )
 
 STATUS_RANK = library_works.STATUS_RANK
@@ -185,55 +183,6 @@ def _prepare_record_facet_write(
     return prepare_work_facet_write(tuple(prepared), now=now)
 
 
-def duplicate_groups(db: Session) -> list[dict[str, Any]]:
-    groups = library_works.list_duplicate_identity_groups(db)
-    result: list[dict[str, Any]] = []
-    for index, group in enumerate(groups):
-        group_key = f"{group['normalizedTitle']}:{group['normalizedAuthor']}"
-        works = library_works.list_works_for_normalized_identity(
-            db,
-            normalized_title=str(group["normalizedTitle"]),
-            normalized_author=str(group["normalizedAuthor"]),
-        )
-        result.append(
-            {
-                "id": f"duplicate_{index}_{sha1(group_key.encode()).hexdigest()[:12]}",
-                "confidence": 0.98,
-                "reasons": ["标题与作者规范化后相同"],
-                "works": works,
-            }
-        )
-    return result
-
-
-def duplicate_groups_page(
-    db: Session,
-    *,
-    page: int,
-    page_size: int,
-) -> tuple[list[dict[str, Any]], int, int]:
-    identity_groups, total, clamped_page = library_works.list_duplicate_identity_page(
-        db,
-        page=page,
-        page_size=page_size,
-    )
-    groups: list[dict[str, Any]] = []
-    start = (clamped_page - 1) * page_size
-    for index, group in enumerate(identity_groups, start=start):
-        group_key = f"{group['normalizedTitle']}:{group['normalizedAuthor']}"
-        groups.append(
-            {
-                "id": (
-                    f"duplicate_{index}_{sha1(group_key.encode()).hexdigest()[:12]}"
-                ),
-                "confidence": 0.98,
-                "reasons": ["标题与作者规范化后相同"],
-                "works": group["works"],
-            }
-        )
-    return groups, total, clamped_page
-
-
 def _merge_categories(
     db: Session,
     kind: str,
@@ -305,9 +254,6 @@ def _merge_categories(
                     {
                         "author": author_text,
                         "normalizedAuthor": _normalized_name(author_text),
-                        "mergeKey": identity_merge_key(
-                            str(work.get("title") or ""), author_text
-                        ),
                         "updatedAt": now,
                     },
                 )
@@ -439,9 +385,6 @@ def _rename_category(
                         {
                             "author": author_text,
                             "normalizedAuthor": _normalized_name(author_text),
-                            "mergeKey": identity_merge_key(
-                                str(work.get("title") or ""), author_text
-                            ),
                             "updatedAt": now,
                         },
                     )
@@ -534,9 +477,6 @@ def _delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[st
                     {
                         "author": author_text,
                         "normalizedAuthor": _normalized_name(author_text),
-                        "mergeKey": identity_merge_key(
-                            str(work.get("title") or ""), author_text
-                        ),
                         "updatedAt": now,
                     },
                 )

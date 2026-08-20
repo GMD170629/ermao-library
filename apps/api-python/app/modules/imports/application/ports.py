@@ -208,23 +208,6 @@ class LibraryImportStore(Protocol):
         columns: dict[str, object],
     ) -> None: ...
 
-    def insert_organize_job(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
-
-    def update_organize_job(
-        self, job_id: str, *, columns: dict[str, object]
-    ) -> None: ...
-
-    def insert_metadata_lookup_task(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
-
-    def update_metadata_lookup_task(
-        self, task_id: str, *, columns: dict[str, object]
-    ) -> None: ...
-
-
 class ImportPipeline(Protocol):
     """Media import orchestrator used after a task is claimed."""
 

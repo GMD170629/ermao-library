@@ -89,7 +89,6 @@ class LibraryWork(Base):
         Index("LibraryWork_organized_idx", "organized"),
         Index("LibraryWork_libraryId_idx", "libraryId"),
         Index("LibraryWork_sourceKey_idx", "sourceKey"),
-        Index("LibraryWork_mergeKey_idx", "mergeKey"),
         Index("LibraryWork_facetIndexVersion_id_idx", "facetIndexVersion", "id"),
         Index("LibraryWork_createdAt_id_idx", "createdAt", "id"),
         Index("LibraryWork_hidden_createdAt_id_idx", "hidden", "createdAt", "id"),
@@ -179,7 +178,6 @@ class LibraryWork(Base):
     organized: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
-    merge_key: Mapped[str | None] = mapped_column("mergeKey", Text, nullable=True)
     facet_index_version: Mapped[int] = mapped_column(
         "facetIndexVersion", Integer, nullable=False, default=0, server_default="0"
     )

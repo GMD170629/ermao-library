@@ -50,7 +50,7 @@ from app.modules.reader.public import (
 )
 from app.schemas.responses import fail
 from app.services.book_identity import normalize_identity_part
-from app.services.organize_service import context_for_job, ensure_organize_job_for_work
+from app.services.organize_service import metadata_context_for_work
 
 
 def _now() -> datetime:
@@ -1051,11 +1051,8 @@ def _json_text(value: Any) -> str:
 
 def _metadata_context_for_work(
     db: Session, work_id: str
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    job = ensure_organize_job_for_work(db, work_id)
-    if not job:
-        return None, None
-    return job, context_for_job(db, job)
+) -> dict[str, Any] | None:
+    return metadata_context_for_work(db, work_id)
 
 
 def _metadata_field_patch(

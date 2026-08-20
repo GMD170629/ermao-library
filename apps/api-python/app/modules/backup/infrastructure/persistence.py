@@ -26,7 +26,6 @@ from app.core.time import TimestampMilliseconds
 from app.models import (
     BookConversionTask,
     BookIdentityCache,
-    DuplicateCandidate,
     ExternalMetadataCache,
     ImportAsset,
     ImportLog,
@@ -95,7 +94,6 @@ TABLE_MODELS: dict[str, type] = {
     "ImportLog": ImportLog,
     "OrganizeJob": OrganizeJob,
     "MetadataSuggestion": MetadataSuggestion,
-    "DuplicateCandidate": DuplicateCandidate,
     "MetadataLookupTask": MetadataLookupTask,
     "ExternalMetadataCache": ExternalMetadataCache,
     "BookIdentityCache": BookIdentityCache,

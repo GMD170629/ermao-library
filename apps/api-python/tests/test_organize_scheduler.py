@@ -1,11 +1,9 @@
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 
-import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 
-from app.bootstrap.organize import apply_duplicate_actions_command
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
@@ -13,8 +11,6 @@ from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWo
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.presentation.schemas import MetadataProvider
-from app.modules.organize.application.dto import PreparedDuplicateAction
-from app.modules.organize.application.errors import InvalidDuplicateActionError
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
     get_metadata_provider,
@@ -191,97 +187,6 @@ def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
             ).one()
             assert job.volume_id == "first-volume"
             assert lookup.volume_id == "first-volume"
-    finally:
-        engine.dispose()
-
-
-def test_hide_duplicate_hides_source_work_without_reparenting(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "target-work", with_volume=False)
-            _insert_work(db, "source-work", with_volume=False)
-            _insert_volume(
-                db,
-                work_id="target-work",
-                volume_id="target-epub",
-                volume_format="EPUB",
-                sort_order=7,
-            )
-            _insert_volume(
-                db,
-                work_id="source-work",
-                volume_id="source-pdf",
-                volume_format="PDF",
-                sort_order=1,
-            )
-
-            apply_duplicate_actions_command(
-                db,
-                (
-                    PreparedDuplicateAction(
-                        duplicate_id="",
-                        source_work_id="source-work",
-                        target_work_id="target-work",
-                        action="HIDE_DUPLICATE",
-                        timestamp=datetime.now(UTC),
-                    ),
-                ),
-            )
-
-            source = db.get(LibraryWork, "source-work")
-            assert source is not None
-            assert source.hidden is True
-            source_pdf = db.get(LibraryVolume, "source-pdf")
-            assert source_pdf is not None
-            assert source_pdf.version_id == "version-source-work"
-            target_versions = db.scalars(
-                select(LibraryVersion).where(LibraryVersion.work_id == "target-work")
-            ).all()
-            assert [row.id for row in target_versions] == ["version-target-work"]
-    finally:
-        engine.dispose()
-
-
-def test_merge_works_duplicate_action_is_rejected(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "target-work", with_volume=False)
-            _insert_work(db, "source-work", with_volume=False)
-            _insert_volume(
-                db,
-                work_id="source-work",
-                volume_id="source-pdf",
-                volume_format="PDF",
-                sort_order=1,
-            )
-
-            with pytest.raises(InvalidDuplicateActionError) as raised:
-                apply_duplicate_actions_command(
-                    db,
-                    (
-                        PreparedDuplicateAction(
-                            duplicate_id="",
-                            source_work_id="source-work",
-                            target_work_id="target-work",
-                            action="MERGE_WORKS",
-                            timestamp=datetime.now(UTC),
-                        ),
-                    ),
-                )
-            assert raised.value.code == "INVALID_DUPLICATE_ACTION"
-
-            source = db.get(LibraryWork, "source-work")
-            assert source is not None
-            assert source.hidden is False
-            source_pdf = db.get(LibraryVolume, "source-pdf")
-            assert source_pdf is not None
-            assert source_pdf.version_id == "version-source-work"
     finally:
         engine.dispose()
 
@@ -736,14 +641,6 @@ def test_queue_record_can_be_rerecognized_from_any_state_and_deleted_without_del
                 ),
                 {"job_id": job["id"]},
             )
-            db.execute(
-                text(
-                    "INSERT INTO `DuplicateCandidate` "
-                    "(`id`, `jobId`, `targetWorkId`, `reasons`, `suggestedAction`, `createdAt`, `updatedAt`) "
-                    "VALUES ('legacy-duplicate', :job_id, 'queue-work', '[\"title\"]', 'KEEP_SEPARATE', 'now', 'now')"
-                ),
-                {"job_id": job["id"]},
-            )
             db.commit()
 
             recognized = recognize_organize_job(db, str(job["id"]))
@@ -782,16 +679,6 @@ def test_queue_record_can_be_rerecognized_from_any_state_and_deleted_without_del
                 ).scalar()
                 == 0
             )
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `DuplicateCandidate` WHERE `jobId` = :job_id"
-                    ),
-                    {"job_id": job["id"]},
-                ).scalar()
-                == 0
-            )
-
             deleted = delete_organize_job(db, str(job["id"]))
 
             assert deleted == {"id": job["id"], "workId": "queue-work", "deleted": True}

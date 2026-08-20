@@ -32,7 +32,6 @@ from app.modules.imports.application.import_support import (
     _persist_import_volume,
     _prepared_default_cover,
     _source_group_key,
-    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -110,7 +109,6 @@ def _import_pdf(
     result_type = _classification_result_type(classification)
     topology_target = _bound_topology_target(queries, options)
     tags = ["pdf"]
-    merge_key = _work_merge_key(identity.title)
     source_group_key = _source_group_key(options, identity.title)
     work, _created = _import_work(
         store,
@@ -121,7 +119,6 @@ def _import_pdf(
             "author": identity.author,
             "description": None,
             "tags": tags,
-            "mergeKey": merge_key,
             "origin": options.origin,
             "libraryId": options.library_id,
         },

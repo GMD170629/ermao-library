@@ -40,7 +40,6 @@ from app.models.library import (
     WorkDetailPreference,
 )
 from app.models.organize import (
-    DuplicateCandidate,
     MetadataLookupTask,
     MetadataOpfQueueState,
     MetadataProviderExecution,
@@ -74,7 +73,6 @@ __all__ = [
     "BookConversionTask",
     "BookIdentityCache",
     "DownloadTask",
-    "DuplicateCandidate",
     "ExternalMetadataCache",
     "ImportAsset",
     "ImportLog",

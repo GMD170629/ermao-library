@@ -167,27 +167,6 @@ def update_work_tags(
     )
 
 
-def update_work_author(
-    db: Session,
-    *,
-    work_id: str,
-    author: str,
-    normalized_author: str,
-    merge_key: str,
-    now: datetime,
-) -> None:
-    db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
-        .values(
-            author=author,
-            normalized_author=normalized_author,
-            merge_key=merge_key,
-            updated_at=now,
-        )
-    )
-
-
 def update_work_series_name(
     db: Session, *, work_id: str, series_name: str, now: datetime
 ) -> None:

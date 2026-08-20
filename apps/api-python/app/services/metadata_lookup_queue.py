@@ -36,7 +36,6 @@ from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
-    identity_merge_key,
     normalize_identity_part,
 )
 from app.services.metadata_file_writeback import (
@@ -48,7 +47,7 @@ from app.services.metadata_provider_registry import (
     search_with_metadata_provider,
 )
 from app.services.organize_service import (
-    context_for_job,
+    metadata_context_for_work,
     metadata_candidate_title_exact_match,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
@@ -440,7 +439,6 @@ def _prepare_candidate_application(
             {
                 "normalizedTitle": normalize_identity_part(title),
                 "normalizedAuthor": normalize_identity_part(author),
-                "mergeKey": identity_merge_key(title, author),
             }
         )
 
@@ -741,7 +739,7 @@ def process_metadata_lookup_task(
     if not work:
         _finish_without_match(db, task, "FAILED", [], "作品已不存在")
         return "FAILED"
-    context = context_for_job(db, {"workId": work["id"]})
+    context = metadata_context_for_work(db, str(work["id"]))
     if not context:
         _finish_without_match(
             db,

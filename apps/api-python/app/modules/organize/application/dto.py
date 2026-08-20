@@ -31,15 +31,6 @@ class OrganizeJobListItem:
 
 
 @dataclass(frozen=True)
-class PreparedDuplicateAction:
-    duplicate_id: str
-    source_work_id: str
-    target_work_id: str
-    action: str
-    timestamp: datetime
-
-
-@dataclass(frozen=True)
 class PreparedOrganizeJobEnqueue:
     job_id: str
     task_id: str

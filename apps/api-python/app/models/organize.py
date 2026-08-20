@@ -89,7 +89,6 @@ class OrganizePolicy(Base):
         onupdate=db_timestamp,
     )
 
-
 class OrganizeRun(Base):
     __tablename__ = "OrganizeRun"
     __table_args__ = (Index("OrganizeRun_status_createdAt_idx", "status", "createdAt"),)
@@ -740,53 +739,6 @@ class MetadataSuggestion(Base):
         Float, nullable=False, default=0, server_default="0"
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="PENDING", server_default="PENDING"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
-class DuplicateCandidate(Base):
-    __tablename__ = "DuplicateCandidate"
-    __table_args__ = (
-        Index("DuplicateCandidate_jobId_status_idx", "jobId", "status"),
-        Index("DuplicateCandidate_targetWorkId_idx", "targetWorkId"),
-        Index("DuplicateCandidate_suggestedAction_idx", "suggestedAction"),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    job_id: Mapped[str] = mapped_column(
-        "jobId",
-        String(191),
-        ForeignKey("OrganizeJob.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    target_work_id: Mapped[str] = mapped_column(
-        "targetWorkId",
-        String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    reasons: Mapped[str] = mapped_column(Text, nullable=False)
-    confidence: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0, server_default="0"
-    )
-    suggested_action: Mapped[str] = mapped_column(
-        "suggestedAction", String(191), nullable=False
-    )
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="PENDING", server_default="PENDING"
     )

@@ -27,8 +27,6 @@ class ImportWriteTarget(StrEnum):
     LIBRARY_READING_UNIT = "library_reading_unit"
     LIBRARY_METADATA = "library_metadata"
     LIBRARY_READING_PROGRESS = "library_reading_progress"
-    ORGANIZE_JOB = "organize_job"
-    METADATA_LOOKUP_TASK = "metadata_lookup_task"
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,19 +560,3 @@ class BoundedLibraryImportStore:
         columns: dict[str, object],
     ) -> None:
         self._update(ImportWriteTarget.LIBRARY_READING_PROGRESS, progress_id, columns)
-
-    def insert_organize_job(self, *, columns: dict[str, object]) -> dict[str, object]:
-        return self._insert(ImportWriteTarget.ORGANIZE_JOB, columns)
-
-    def update_organize_job(self, job_id: str, *, columns: dict[str, object]) -> None:
-        self._update(ImportWriteTarget.ORGANIZE_JOB, job_id, columns)
-
-    def insert_metadata_lookup_task(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]:
-        return self._insert(ImportWriteTarget.METADATA_LOOKUP_TASK, columns)
-
-    def update_metadata_lookup_task(
-        self, task_id: str, *, columns: dict[str, object]
-    ) -> None:
-        self._update(ImportWriteTarget.METADATA_LOOKUP_TASK, task_id, columns)

@@ -27,7 +27,6 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.modules.imports.application.transactions import (
     ImportWriteTarget,
     PreparedImportInsert,
@@ -62,8 +61,6 @@ class SqlAlchemyLibraryImportStore:
             ImportWriteTarget.LIBRARY_READING_PROGRESS: (
                 LibraryReadingProgress.__table__
             ),
-            ImportWriteTarget.ORGANIZE_JOB: OrganizeJob.__table__,
-            ImportWriteTarget.METADATA_LOOKUP_TASK: MetadataLookupTask.__table__,
         }
         return tables[target]
 
@@ -216,8 +213,6 @@ class SqlAlchemyLibraryImportStore:
             ImportWriteTarget.IMPORT_ASSET,
             ImportWriteTarget.IMPORT_LOG,
             ImportWriteTarget.LIBRARY_READING_PROGRESS,
-            ImportWriteTarget.ORGANIZE_JOB,
-            ImportWriteTarget.METADATA_LOOKUP_TASK,
         )
         for target in remaining_targets:
             executions.extend(self._prepare_target_inserts(prepared, target))

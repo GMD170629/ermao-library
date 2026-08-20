@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, func, insert, inspect, select, update
+from sqlalchemy import case, func, inspect, select, update
 from sqlalchemy.orm import Session
 
 from app.models.library import (
@@ -16,11 +16,7 @@ from app.models.library import (
 )
 from app.models.organize import OrganizeJob
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.modules.organize.infrastructure.duplicates import volume_entity_as_dict
-from app.modules.organize.infrastructure.eligibility import (
-    UNRESOLVED_JOB_STATUSES,
-    work_entity_as_legacy_dict,
-)
+from app.modules.organize.infrastructure.eligibility import work_entity_as_legacy_dict
 from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
 
 JOB_UPDATE_FIELD_MAP = {
@@ -44,7 +40,6 @@ WORK_UPDATE_FIELD_MAP = {
     "tags": "tags",
     "seriesName": "series_name",
     "seriesIndex": "series_index",
-    "mergeKey": "merge_key",
     "organized": "organized",
     "organizeStatus": "organize_status",
     "metadataQuality": "metadata_quality",
@@ -53,6 +48,25 @@ WORK_UPDATE_FIELD_MAP = {
     "coverStatus": "cover_status",
     "updatedAt": "updated_at",
 }
+
+
+def volume_entity_as_dict(entity: LibraryVolume) -> dict[str, Any]:
+    return {
+        "id": entity.id,
+        "versionId": entity.version_id,
+        "title": entity.title,
+        "volumeIndex": entity.volume_index,
+        "sortOrder": entity.sort_order,
+        "format": entity.format,
+        "resourceKey": entity.resource_key,
+        "importStatus": entity.import_status,
+        "importError": entity.import_error,
+        "isbn": entity.isbn,
+        "identifier": entity.identifier,
+        "hidden": entity.hidden,
+        "createdAt": entity.created_at,
+        "updatedAt": entity.updated_at,
+    }
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -75,33 +89,6 @@ def get_work(db: Session, work_id: str) -> dict[str, Any] | None:
         return None
     entity = db.get(LibraryWork, work_id)
     return work_entity_as_legacy_dict(entity) if entity is not None else None
-
-
-def get_visible_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "LibraryWork"):
-        return None
-    entity = db.scalar(
-        select(LibraryWork).where(
-            LibraryWork.id == work_id,
-            func.coalesce(LibraryWork.hidden, False).is_(False),
-        )
-    )
-    return work_entity_as_legacy_dict(entity) if entity is not None else None
-
-
-def get_unresolved_job_for_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "OrganizeJob"):
-        return None
-    entity = db.scalars(
-        select(OrganizeJob)
-        .where(
-            OrganizeJob.work_id == work_id,
-            OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
-        )
-        .order_by(OrganizeJob.updated_at.desc())
-        .limit(1)
-    ).first()
-    return job_entity_as_legacy_dict(entity) if entity is not None else None
 
 
 def _volumes_belonging_to_work(
@@ -137,51 +124,6 @@ def _volumes_belonging_to_work(
 def earliest_volume_id(db: Session, work_id: str) -> str | None:
     volumes = _volumes_belonging_to_work(db, work_id, visible_only=True)
     return volumes[0].id if volumes else None
-
-
-def insert_organize_job(
-    db: Session,
-    *,
-    job_id: str,
-    work_id: str,
-    volume_id: str | None,
-    status: str,
-    issue_codes_json: str,
-    summary: str,
-    now: Any,
-) -> dict[str, Any]:
-    db.execute(
-        insert(OrganizeJob).values(
-            id=job_id,
-            work_id=work_id,
-            volume_id=volume_id,
-            trigger="LEGACY",
-            status=status,
-            issue_codes=issue_codes_json,
-            reason_codes="[]",
-            summary=summary,
-            created_at=now,
-            updated_at=now,
-        )
-    )
-    return {
-        "id": job_id,
-        "runId": None,
-        "workId": work_id,
-        "volumeId": volume_id,
-        "versionId": None,
-        "importTaskId": None,
-        "trigger": "LEGACY",
-        "status": status,
-        "issueCodes": issue_codes_json,
-        "reasonCodes": "[]",
-        "summary": summary,
-        "errorSummary": None,
-        "startedAt": None,
-        "finishedAt": None,
-        "createdAt": now,
-        "updatedAt": now,
-    }
 
 
 def update_job(
@@ -246,7 +188,6 @@ def update_work(
         "tags": "tags",
         "seriesName": "series_name",
         "seriesIndex": "series_index",
-        "mergeKey": "merge_key",
         "organized": "organized",
         "organizeStatus": "organize_status",
         "metadataQuality": "metadata_quality",
@@ -344,11 +285,8 @@ def list_metadata_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]
     ]
 
 
-def load_job_context(db: Session, job: dict[str, Any]) -> dict[str, Any] | None:
-    work_id = job.get("workId")
-    if not work_id:
-        return None
-    work = get_work(db, str(work_id))
+def load_work_context(db: Session, work_id: str) -> dict[str, Any] | None:
+    work = get_work(db, work_id)
     if not work:
         return None
     volumes = list_volumes_for_work(db, str(work["id"]))

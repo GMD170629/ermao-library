@@ -56,7 +56,6 @@ def work_entity_as_legacy_dict(entity: LibraryWork) -> dict[str, Any]:
         "coverStatus": entity.cover_status,
         "hidden": entity.hidden,
         "organized": entity.organized,
-        "mergeKey": entity.merge_key,
         "createdAt": entity.created_at,
         "updatedAt": entity.updated_at,
     }

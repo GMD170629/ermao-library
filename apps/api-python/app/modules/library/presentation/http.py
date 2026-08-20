@@ -124,7 +124,6 @@ from app.modules.library.presentation.schemas import (
     CoverMutationResponse,
     DashboardSummaryResponse,
     DeleteCategoryResponse,
-    DuplicatesResponse,
     FacetsResponse,
     FilterOptionsResponse,
     FilterSchemaResponse,
@@ -175,7 +174,6 @@ from app.modules.library.presentation.views import (
     _work_detail_summary_view,
     _work_reading_units_view,
     _work_view,
-    _work_views,
     _work_volume_page_view,
     bookshelf_item_views,
 )
@@ -211,7 +209,6 @@ from app.modules.system.presentation.mappers import (
 )
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
-    identity_merge_key,
     normalize_identity_part,
 )
 from app.services.default_cover import (
@@ -221,7 +218,6 @@ from app.services.default_cover import (
 from app.services.health import run_system_health_checks
 from app.services.library_management import (
     delete_category,
-    duplicate_groups_page,
     list_categories,
     list_categories_page,
     merge_categories,
@@ -1321,14 +1317,12 @@ async def update_work(
         )
         if not title:
             _raise_library_error("标题不能为空", status_code=400)
-        merge_key = identity_merge_key(title, author)
         values.update(
             {
                 "title": title,
                 "author": author,
                 "normalizedTitle": normalize_identity_part(title),
                 "normalizedAuthor": normalize_identity_part(author),
-                "mergeKey": merge_key,
             }
         )
     if not values:
@@ -1781,9 +1775,6 @@ async def bulk_works(
                                 "normalizedAuthor": normalize_identity_part(
                                     author_value
                                 ),
-                                "mergeKey": identity_merge_key(
-                                    title_value, author_value
-                                ),
                                 "updatedAt": now,
                             },
                         )
@@ -1915,9 +1906,6 @@ async def bulk_works(
                         {
                             "author": author,
                             "normalizedAuthor": normalize_identity_part(author),
-                            "mergeKey": identity_merge_key(
-                                str(work.get("title") or ""), author
-                            ),
                         }
                     )
                 if "seriesName" in metadata_fields:
@@ -2497,44 +2485,6 @@ async def merge_library_categories(
     return MergeCategoriesResponse(data=result)
 
 
-@router.get("/library/duplicates")
-def library_duplicates(
-    request: Request,
-    page: int = 1,
-    pageSize: int = 20,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> DuplicatesResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    page = max(1, page)
-    page_size = min(100, max(1, pageSize))
-    groups, total, page = duplicate_groups_page(
-        db,
-        page=page,
-        page_size=page_size,
-    )
-    works = [work for group in groups for work in group.get("works") or []]
-    work_views = {
-        str(work["id"]): view
-        for work, view in zip(works, _work_views(db, works, user.id), strict=True)
-    }
-    for group in groups:
-        group["works"] = [
-            work_views[str(work["id"])] for work in group.get("works") or []
-        ]
-    return DuplicatesResponse(
-        data={
-            "groups": groups,
-            "total": total,
-            "page": page,
-            "pageSize": page_size,
-            "totalPages": max(1, (total + page_size - 1) // page_size),
-        }
-    )
-
-
 @router.get("/library/operations")
 def library_operations(
     request: Request,
@@ -2586,8 +2536,8 @@ async def metadata_search(
     source = payload.provider_id or payload.source or "bangumi"
     if source not in metadata_provider_registry().ids():
         _raise_library_error("不支持的元数据来源", status_code=400)
-    job, context = _metadata_context_for_work(db, work_id)
-    if not job or not context:
+    context = _metadata_context_for_work(db, work_id)
+    if not context:
         _raise_library_error("读物不存在或无权访问", status_code=404)
     query = str(payload.query or "").strip() or None
     try:
@@ -2939,7 +2889,6 @@ async def apply_work_metadata(
                 "author": author,
                 "normalizedTitle": normalize_identity_part(title),
                 "normalizedAuthor": normalize_identity_part(author),
-                "mergeKey": identity_merge_key(title, author),
             }
         )
     nested_volume_metadata = candidate.get("volumeMetadata")
