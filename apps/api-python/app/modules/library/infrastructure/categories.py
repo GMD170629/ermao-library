@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryVolumeFacet,
@@ -106,9 +105,9 @@ def get_volume(db: Session, volume_id: str) -> dict[str, Any] | None:
     ).first()
     if row is None:
         return None
-    volume, media_version = row
+    volume, version = row
     result = entity_as_legacy_dict(volume)
-    result["workId"] = media_version.work_id
+    result["workId"] = version.work_id
     return result
 
 
@@ -124,9 +123,9 @@ def list_volumes_by_ids(db: Session, volume_ids: list[str]) -> list[dict[str, An
         .where(LibraryVolume.id.in_(volume_ids))
     ).all()
     by_id: dict[str, dict[str, Any]] = {}
-    for volume, media_version in rows:
+    for volume, version in rows:
         result = entity_as_legacy_dict(volume)
-        result["workId"] = media_version.work_id
+        result["workId"] = version.work_id
         by_id[volume.id] = result
     return [by_id[volume_id] for volume_id in volume_ids if volume_id in by_id]
 

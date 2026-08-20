@@ -18,7 +18,6 @@ from app.models.import_pipeline import DownloadTask, ImportTask
 from app.models.library import (
     Library,
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
@@ -46,17 +45,23 @@ def dashboard_summary(
     )
 
     def media_kind_work_count(media_kind: MediaKind) -> int:
+        volume_media_kind = volume_effective_media_kind(LibraryVolume)
         return int(
             db.scalar(
                 select(func.count(func.distinct(LibraryWork.id)))
                 .select_from(LibraryWork)
                 .join(
-                    LibraryMediaVersion,
-                    LibraryMediaVersion.work_id == LibraryWork.id,
+                    LibraryVersion,
+                    LibraryVersion.work_id == LibraryWork.id,
+                )
+                .join(
+                    LibraryVolume,
+                    LibraryVolume.version_id == LibraryVersion.id,
                 )
                 .where(
                     LibraryWork.hidden.is_(False),
-                    LibraryMediaVersion.media_kind == media_kind.value,
+                    LibraryVolume.hidden.is_(False),
+                    volume_media_kind == media_kind.value,
                     work_visible,
                 )
             )
@@ -340,12 +345,21 @@ def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, An
     work_ids = [str(row.id) for row in rows]
     kinds_by_work: dict[str, list[str]] = {work_id: [] for work_id in work_ids}
     if work_ids:
+        media_kind = volume_effective_media_kind(LibraryVolume)
         media_rows = db.execute(
-            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
-            .where(LibraryMediaVersion.work_id.in_(work_ids))
+            select(
+                LibraryVersion.work_id,
+                media_kind.label("media_kind"),
+            )
+            .select_from(LibraryVolume)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .where(
+                LibraryVersion.work_id.in_(work_ids),
+                LibraryVolume.hidden.is_(False),
+            )
+            .group_by(LibraryVersion.work_id, media_kind)
             .order_by(
-                LibraryMediaVersion.work_id.asc(),
-                LibraryMediaVersion.id.asc(),
+                LibraryVersion.work_id.asc(),
             )
         ).all()
         priority = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}

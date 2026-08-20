@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
@@ -79,11 +78,6 @@ def save_detail_preference(
         preference.updated_at = now
     db.flush()
     return entity_as_legacy_dict(preference)
-
-
-def get_media_version(db: Session, media_version_id: str) -> dict[str, object] | None:
-    media_version = db.get(LibraryMediaVersion, media_version_id)
-    return entity_as_legacy_dict(media_version) if media_version is not None else None
 
 
 def get_reading_unit_title(db: Session, unit_id: str) -> str | None:

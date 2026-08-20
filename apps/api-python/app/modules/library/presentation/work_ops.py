@@ -67,9 +67,7 @@ def _collect_work_storage_paths(
         if path:
             paths.append(path)
 
-    work_cover, _media_versions, volumes, files = (
-        library_storage.collect_storage_values(db, work_id)
-    )
+    work_cover, volumes, files = library_storage.collect_storage_values(db, work_id)
     add(work_cover)
     for volume in volumes:
         add(volume.get("coverPath"))

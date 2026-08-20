@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -128,22 +127,10 @@ def collect_storage_values(
     str | None,
     list[dict[str, object]],
     list[dict[str, object]],
-    list[dict[str, object]],
 ]:
     work_cover = db.scalar(
         select(LibraryWork.cover_path).where(LibraryWork.id == work_id)
     )
-    media_versions = db.scalars(
-        select(LibraryMediaVersion)
-        .where(LibraryMediaVersion.work_id == work_id)
-        .order_by(
-            LibraryMediaVersion.created_at.asc(),
-            LibraryMediaVersion.id.asc(),
-        )
-    ).all()
-    media_version_rows = [
-        entity_as_legacy_dict(media_version) for media_version in media_versions
-    ]
     volumes = db.scalars(
         select(LibraryVolume)
         .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
@@ -164,7 +151,6 @@ def collect_storage_values(
     )
     return (
         work_cover,
-        media_version_rows,
         [entity_as_legacy_dict(volume) for volume in volumes],
         [entity_as_legacy_dict(file) for file in files],
     )

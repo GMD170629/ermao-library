@@ -2,13 +2,16 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import authorization_context
 from app.models.auth import User
-from app.models.library import LibraryMediaVersion, LibraryWork
-from app.modules.library.infrastructure.dashboard import dashboard_summary
+from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
+from app.modules.library.infrastructure.dashboard import (
+    dashboard_summary,
+    list_management_works,
+)
 
 
 def _work(work_id: str, *, hidden: bool = False) -> LibraryWork:
     return LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id=work_id,
         title=work_id,
         normalized_title=work_id,
@@ -39,10 +42,46 @@ def test_dashboard_counts_mixed_media_works_once_per_media_kind(
     db_session.flush()
     db_session.add_all(
         [
-            LibraryMediaVersion(id="mixed-ebook", work_id="mixed", media_kind="EBOOK"),
-            LibraryMediaVersion(id="mixed-comic", work_id="mixed", media_kind="COMIC"),
-            LibraryMediaVersion(id="ebook-only-media", work_id="ebook-only", media_kind="EBOOK"),
-            LibraryMediaVersion(id="hidden-audio", work_id="hidden", media_kind="AUDIOBOOK"),
+            LibraryVersion(id="mixed-version", work_id="mixed", source_key="mixed"),
+            LibraryVersion(
+                id="ebook-only-version",
+                work_id="ebook-only",
+                source_key="ebook-only",
+            ),
+            LibraryVersion(id="hidden-version", work_id="hidden", source_key="hidden"),
+        ]
+    )
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryVolume(
+                id="mixed-ebook",
+                version_id="mixed-version",
+                title="Mixed EPUB",
+                format="EPUB",
+                resource_key="mixed:epub",
+            ),
+            LibraryVolume(
+                id="mixed-comic",
+                version_id="mixed-version",
+                title="Mixed comic",
+                format="CBZ",
+                resource_key="mixed:comic",
+            ),
+            LibraryVolume(
+                id="ebook-only-volume",
+                version_id="ebook-only-version",
+                title="EPUB only",
+                format="EPUB",
+                resource_key="ebook-only:epub",
+            ),
+            LibraryVolume(
+                id="hidden-audio",
+                version_id="hidden-version",
+                title="Hidden audio",
+                format="M4B",
+                resource_key="hidden:audio",
+            ),
         ]
     )
     db_session.commit()
@@ -58,3 +97,7 @@ def test_dashboard_counts_mixed_media_works_once_per_media_kind(
     assert summary["comicBooks"] == 1
     assert summary["audiobookBooks"] == 0
     assert "novelBooks" not in summary
+
+    works = {work["id"]: work for work in list_management_works(db_session)}
+    assert works["mixed"]["availableMediaKinds"] == ["EBOOK", "COMIC"]
+    assert works["ebook-only"]["availableMediaKinds"] == ["EBOOK"]

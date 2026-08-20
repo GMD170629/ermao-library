@@ -160,13 +160,14 @@ def _seed_mismatched_ebook_work(db_session) -> None:
 
 def test_storage_collects_complete_graph_when_version_ids_differ(db_session) -> None:
     _seed_mismatched_ebook_work(db_session)
+    media = db_session.get(LibraryMediaVersion, "media-ebook")
+    assert media is not None
+    db_session.delete(media)
+    db_session.commit()
 
-    work_cover, media_rows, volumes, files = collect_storage_values(
-        db_session, "work-1"
-    )
+    work_cover, volumes, files = collect_storage_values(db_session, "work-1")
 
     assert work_cover is None
-    assert [row["id"] for row in media_rows] == ["media-ebook"]
     assert [row["id"] for row in volumes] == ["volume-1"]
     assert [row["versionId"] for row in volumes] == ["version-default"]
     assert [row["id"] for row in files] == ["file-1"]

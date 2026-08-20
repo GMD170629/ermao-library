@@ -8,10 +8,9 @@ from sqlalchemy import event, insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext
-from app.models.auth import User
+from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
@@ -71,19 +70,6 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
             ],
         )
         db.execute(
-            insert(LibraryMediaVersion),
-            [
-                {
-                    "id": f"scale-media-{index:06d}",
-                    "work_id": f"scale-work-{index:06d}",
-                    "media_kind": "EBOOK",
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for index in range(start, stop)
-            ],
-        )
-        db.execute(
             insert(LibraryVolume),
             [
                 {
@@ -135,7 +121,12 @@ def test_member_recent_import_listing_has_bounded_query_work(
         role="member",
         can_view_manual_imports=True,
     )
-    db_session.add(user)
+    db_session.add_all(
+        [
+            user,
+            UserLibraryAccess(user_id=user.id, library_id="test-library"),
+        ]
+    )
     _seed_manual_library(db_session, work_count=2_000)
 
     result, vm_steps = _sqlite_vm_steps(
@@ -162,7 +153,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
         is_admin=False,
         can_manage_system=False,
         can_view_manual_imports=True,
-        library_ids=(),
+        library_ids=("test-library",),
         authz_version=1,
     )
     recent, recent_vm_steps = _sqlite_vm_steps(
