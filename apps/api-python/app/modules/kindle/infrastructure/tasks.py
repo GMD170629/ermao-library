@@ -15,7 +15,7 @@ from app.core.time import timestamp_ms_to_datetime
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -353,14 +353,11 @@ def get_library_file_for_kindle(db: Session, file_id: str) -> dict[str, Any] | N
     row = db.execute(
         select(
             LibraryFile,
-            LibraryMediaVersion.work_id.label("workId"),
+            LibraryVersion.work_id.label("workId"),
             LibraryVolume.format.label("volumeFormat"),
         )
         .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
         .where(LibraryFile.id == file_id)
     ).first()
     if row is None:
@@ -379,17 +376,14 @@ def get_library_file_details_for_kindle(
     row = db.execute(
         select(
             LibraryFile,
-            LibraryMediaVersion.work_id.label("workId"),
+            LibraryVersion.work_id.label("workId"),
             LibraryVolume.format.label("volumeFormat"),
             LibraryWork.title.label("bookTitle"),
             LibraryVolume.title.label("volumeTitle"),
         )
         .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
         .where(LibraryFile.id == file_id)
     ).first()
     if row is None:

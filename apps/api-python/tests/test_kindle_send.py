@@ -8,14 +8,15 @@ from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
 from tests.conftest import recreate_application_schema
-from app.models.auth import User
+from app.models.auth import User, UserLibraryAccess
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.services import email_settings, kindle_queue
 from app.services.kindle_queue import (
     process_next_kindle_send_task,
@@ -79,7 +80,7 @@ def _prepare(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"epub fixture")
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="work-kindle",
         title="Kindle Test Book",
         normalized_title="kindle test book",
@@ -87,14 +88,14 @@ def _prepare(
         normalized_author="author",
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id="media-kindle",
+    version = LibraryVersion(
+        id="version-kindle",
         work_id=work.id,
-        media_kind="EBOOK",
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
     )
     volume = LibraryVolume(
         id="volume-kindle",
-        media_version_id=media_version.id,
+        version_id=version.id,
         title="EPUB",
         sort_order=0,
         format="EPUB",
@@ -106,14 +107,19 @@ def _prepare(
         id="file-kindle",
         volume_id=volume.id,
         path=str(path.relative_to(test_settings.resolved_storage_root)),
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
         size_bytes=path.stat().st_size,
         sort_order=0,
     )
-    db_session.add_all([work, media_version, volume, file])
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(volume)
+    db_session.flush()
+    db_session.add(file)
     db_session.commit()
     return path
 
@@ -282,7 +288,6 @@ def test_enqueue_deduplicates_and_rejects_unsupported_files(
             id="file-comic",
             volume_id="volume-kindle",
             path=str(comic_path.relative_to(test_settings.resolved_storage_root)),
-            hash_status="COMPLETED",
             mtime_ms=1,
             kind="COMIC",
             mime_type="application/zip",
@@ -312,6 +317,10 @@ def test_kindle_email_and_send_queue_are_personal_while_smtp_remains_system_mana
         can_view_manual_imports=True,
     )
     db_session.add(member)
+    db_session.flush()
+    db_session.add(
+        UserLibraryAccess(user_id=member.id, library_id="test-library")
+    )
     db_session.commit()
     assert client.post("/api/auth/logout").status_code == 200
     assert (
