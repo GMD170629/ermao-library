@@ -4,9 +4,8 @@ data class Library(
     val id: String,
     val name: String,
     val rootPath: String,
-    val shelfId: String?,
+    val organizationMode: LibraryOrganizationMode,
     val enabled: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
     val ignorePatterns: String?,
     val ignoreHidden: Boolean,
     val minimumFileSizeBytes: Long,
@@ -16,18 +15,22 @@ data class Library(
 )
 
 data class Libraries(
-    val folders: List<Library>,
-    val monitorRoot: String?,
+    val libraries: List<Library>,
     val lastUploadTargetPath: String?,
     val lastDownloadTargetPath: String?,
 )
 
+enum class LibraryOrganizationMode(val wireValue: String) {
+    Flat("FLAT"),
+    Volumes("VOLUMES"),
+    Audiobook("AUDIOBOOK"),
+}
+
 data class LibraryDraft(
     val rootPath: String,
     val name: String?,
-    val shelfId: String?,
+    val organizationMode: LibraryOrganizationMode,
     val enabled: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
     val ignorePatterns: String?,
     val ignoreHidden: Boolean,
     val minimumFileSizeBytes: Long,

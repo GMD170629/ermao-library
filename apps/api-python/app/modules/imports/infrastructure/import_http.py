@@ -345,13 +345,17 @@ def import_status_snapshot(
     )
 
 
-def get_library(db: Session, folder_id: str) -> dict[str, Any] | None:
+def get_library(db: Session, library_id: str) -> dict[str, Any] | None:
     row = (
-        db.execute(select(Library.__table__).where(Library.id == folder_id).limit(1))
+        db.execute(select(Library.__table__).where(Library.id == library_id).limit(1))
         .mappings()
         .first()
     )
     return dict(row) if row else None
+
+
+def library_has_topology(db: Session, library_id: str) -> bool:
+    return bool(db.scalar(select(exists().where(LibraryWork.library_id == library_id))))
 
 
 def get_library_by_root_path(

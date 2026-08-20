@@ -233,12 +233,18 @@ enum MediaKind: String, CaseIterable, Hashable, Sendable {
     case audiobook
 }
 
+enum LibraryOrganizationMode: String, CaseIterable, Hashable, Sendable {
+    case flat
+    case volumes
+    case audiobook
+}
+
 struct LibrarySource: Identifiable, Equatable, Sendable {
     let id: String
     var displayName: String
     var serverPath: String
     var enabled: Bool
-    var mediaKindPolicy: MediaKind?
+    var organizationMode: LibraryOrganizationMode
     var ignorePatterns: String
     var ignoreHidden: Bool
     var minimumFileSizeBytes: Int64

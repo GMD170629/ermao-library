@@ -48,9 +48,9 @@ from app.modules.imports.presentation.schemas import (
     ImportLogsResponse,
     ImportTaskResponse,
     ImportTasksResponse,
+    LibrariesResponse,
     LibraryDirectoryResponse,
     LibraryResponse,
-    LibrariesResponse,
     ParsedReleaseTitleResponse,
     ParseReleaseTitleRequest,
     UpdateLibraryRequest,
@@ -215,7 +215,6 @@ async def create_library(
     return ok({"library": library}, status_code=201)
 
 
-@router.put("/libraries/{library_id}")
 @router.patch("/libraries/{library_id}")
 async def update_library(
     library_id: str,
@@ -235,6 +234,18 @@ async def update_library(
     existing = import_http_store.get_library(db, library_id)
     if not existing:
         return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
+    structural_change = (
+        "rootPath" in values and values["rootPath"] != existing.get("rootPath")
+    ) or (
+        "organizationMode" in values
+        and values["organizationMode"] != existing.get("organizationMode")
+    )
+    if structural_change and import_http_store.library_has_topology(db, library_id):
+        return fail(
+            "书库已有目录拓扑，不能修改根路径或组织方式",
+            status_code=409,
+            code="LIBRARY_TOPOLOGY_LOCKED",
+        )
     if "rootPath" in values:
         try:
             root_path = str(resolve_library_root_path(values["rootPath"]))

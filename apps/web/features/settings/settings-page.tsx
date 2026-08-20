@@ -163,7 +163,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   async function togglePath(path: Library) {
     setPathBusy(`toggle:${path.id}`);
     await fetch(`/api/libraries/${path.id}`, {
-      method: 'PUT',
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !path.enabled })
     });
@@ -192,7 +192,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setMessage('');
     setRuleBusy(path.id);
     const response = await fetch(`/api/libraries/${path.id}`, {
-      method: 'PUT',
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates)
     });
@@ -205,7 +205,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       return;
     }
     setMessage('书库设置已保存');
-    toast.success('书库设置已保存', '新组织方式仅用于之后导入的文件，已有内容不会改变。');
+    toast.success('书库设置已保存');
     await loadPaths();
     setRuleBusy('');
   }

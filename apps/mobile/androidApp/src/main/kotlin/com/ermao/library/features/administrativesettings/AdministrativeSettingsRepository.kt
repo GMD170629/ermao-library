@@ -275,7 +275,7 @@ data class LibrarySourceDraft(
     val displayName: String,
     val directory: NativeDirectorySelection,
     val monitoring: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
+    val organizationMode: LibraryOrganizationMode,
     val ignorePatterns: String,
     val ignoreHidden: Boolean,
     val minimumFileSizeBytes: Long,

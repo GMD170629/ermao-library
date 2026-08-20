@@ -259,6 +259,7 @@ const exactOverrides = {
   '按规范化后的标题与作者识别候选。这里只展示重复组，不再合并作品结构。': 'Candidates are identified by normalized title and author. This view lists duplicate groups only and no longer merges work structure.',
   '不支持的重复项操作': 'Unsupported duplicate action',
   '导入必须指定所属版本': 'Import must specify a version',
+  '书库已有目录拓扑，不能修改根路径或组织方式': 'The library already has directory topology, so its root path and organization mode cannot be changed',
   '已看完': 'Finished viewing',
   '作品响应缺少版本结构': 'Work response is missing version structure'
 };

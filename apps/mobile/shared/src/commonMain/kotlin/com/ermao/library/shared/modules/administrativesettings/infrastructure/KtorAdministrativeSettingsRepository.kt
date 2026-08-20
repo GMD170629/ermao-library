@@ -143,18 +143,18 @@ internal class KtorAdministrativeSettingsRepository(
     override suspend fun loadLibraries(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/libraries", transform = JsonElement::toLibraries)
 
-    override suspend fun createLibrary(context: AdministrativeSettingsContext, folder: LibraryDraft): AdministrativeSettingsResult<Library> {
-        validateFolder(folder)?.let { return it }
-        return call(context, ApiMethod.Post, "/api/libraries", body = folder.toRequest(), transform = JsonElement::toLibraryPayload)
+    override suspend fun createLibrary(context: AdministrativeSettingsContext, library: LibraryDraft): AdministrativeSettingsResult<Library> {
+        validateLibrary(library)?.let { return it }
+        return call(context, ApiMethod.Post, "/api/libraries", body = library.toRequest(), transform = JsonElement::toLibraryPayload)
     }
 
-    override suspend fun updateLibrary(context: AdministrativeSettingsContext, folderId: String, folder: LibraryDraft): AdministrativeSettingsResult<Library> {
-        validateFolder(folder)?.let { return it }
-        return idCall(context, ApiMethod.Put, "/api/libraries", folderId, body = folder.toRequest(), transform = JsonElement::toLibraryPayload)
+    override suspend fun updateLibrary(context: AdministrativeSettingsContext, libraryId: String, library: LibraryDraft): AdministrativeSettingsResult<Library> {
+        validateLibrary(library)?.let { return it }
+        return idCall(context, ApiMethod.Patch, "/api/libraries", libraryId, body = library.toRequest(), transform = JsonElement::toLibraryPayload)
     }
 
-    override suspend fun deleteLibrary(context: AdministrativeSettingsContext, folderId: String) =
-        idCall(context, ApiMethod.Delete, "/api/libraries", folderId, transform = { it.toDeletedFlag(folderId) })
+    override suspend fun deleteLibrary(context: AdministrativeSettingsContext, libraryId: String) =
+        idCall(context, ApiMethod.Delete, "/api/libraries", libraryId, transform = { it.toDeletedFlag(libraryId) })
 
     override suspend fun loadDirectory(context: AdministrativeSettingsContext, path: String?) =
         call(
@@ -744,9 +744,9 @@ internal class KtorAdministrativeSettingsRepository(
         else -> null
     }
 
-    private fun validateFolder(folder: LibraryDraft): AdministrativeSettingsResult.Failure? = when {
-        folder.rootPath.isBlank() -> invalid("INVALID_ROOT_PATH", "rootPath")
-        folder.minimumFileSizeBytes < 0 -> invalid("INVALID_MIN_FILE_SIZE", "minimumFileSizeBytes")
+    private fun validateLibrary(library: LibraryDraft): AdministrativeSettingsResult.Failure? = when {
+        library.rootPath.isBlank() -> invalid("INVALID_ROOT_PATH", "rootPath")
+        library.minimumFileSizeBytes < 0 -> invalid("INVALID_MIN_FILE_SIZE", "minimumFileSizeBytes")
         else -> null
     }
 

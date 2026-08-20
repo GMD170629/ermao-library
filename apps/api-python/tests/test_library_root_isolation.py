@@ -154,6 +154,24 @@ def test_patch_library_organization_mode_persists_enum_value(
     assert stored.organization_mode == "VOLUMES"
     assert stored.organization_mode != "LibraryOrganizationMode.VOLUMES"
 
+    db_session.add(
+        LibraryWork(
+            id="mode-library-work",
+            library_id=library_id,
+            source_key="work:mode-library-work",
+            title="Mode Work",
+            normalized_title="modework",
+            tags="[]",
+        )
+    )
+    db_session.commit()
+    locked = client.patch(
+        f"/api/libraries/{library_id}",
+        json={"organizationMode": "AUDIOBOOK"},
+    )
+    assert locked.status_code == 409
+    assert locked.json()["error"]["code"] == "LIBRARY_TOPOLOGY_LOCKED"
+
 
 def test_download_outside_enabled_library_does_not_enqueue_import(
     db_session: Session,

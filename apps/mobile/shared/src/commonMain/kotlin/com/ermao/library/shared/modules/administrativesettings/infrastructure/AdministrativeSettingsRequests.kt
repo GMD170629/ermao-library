@@ -49,9 +49,8 @@ internal fun UpdateManagedUser.toRequest(): JsonObject = buildJsonObject {
 internal fun LibraryDraft.toRequest(): JsonObject = buildJsonObject {
     put("rootPath", rootPath.trim())
     put("name", name?.trim()?.let(::JsonPrimitive) ?: JsonNull)
-    put("shelfId", shelfId?.let(::JsonPrimitive) ?: JsonNull)
+    put("organizationMode", organizationMode.wireValue)
     put("enabled", enabled)
-    put("mediaKindPolicy", mediaKindPolicy.wireValue)
     put("ignorePatterns", ignorePatterns?.let(::JsonPrimitive) ?: JsonNull)
     put("ignoreHidden", ignoreHidden)
     put("minFileSizeBytes", minimumFileSizeBytes)

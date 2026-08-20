@@ -276,7 +276,6 @@ data class AccessSource(
 )
 
 data class LibrarySourcesSnapshot(
-    val monitorRoot: String?,
     val sources: List<LibrarySource>,
 ) : AdministrativePageSnapshot
 
@@ -285,11 +284,11 @@ data class LibrarySource(
     val name: String,
     val path: String,
     val monitoring: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
+    val organizationMode: LibraryOrganizationMode,
     val description: String?,
 )
 
-enum class MediaKindPolicy { Mixed, Ebook, Comic, Audiobook }
+enum class LibraryOrganizationMode { Flat, Volumes, Audiobook }
 
 data class LibrarySourceEditorSnapshot(
     val source: LibrarySource?,

@@ -27,11 +27,11 @@ import com.ermao.library.shared.modules.administrativesettings.ManagedUserRole a
 import com.ermao.library.shared.modules.administrativesettings.ManagedUserStatus as SharedUserStatus
 import com.ermao.library.shared.modules.administrativesettings.ManagementEventFilter as SharedEventFilter
 import com.ermao.library.shared.modules.administrativesettings.MediaKind as SharedMediaKind
-import com.ermao.library.shared.modules.administrativesettings.MediaKindPolicy as SharedMediaKindPolicy
+import com.ermao.library.shared.modules.administrativesettings.LibraryOrganizationMode as SharedLibraryOrganizationMode
 import com.ermao.library.shared.modules.administrativesettings.MetadataPipelineEntry as SharedPipelineEntry
 import com.ermao.library.shared.modules.administrativesettings.MetadataProvider as SharedProvider
 import com.ermao.library.shared.modules.administrativesettings.MetadataProviderUpdate as SharedProviderUpdate
-import com.ermao.library.shared.modules.administrativesettings.LibraryDraft as SharedFolderDraft
+import com.ermao.library.shared.modules.administrativesettings.LibraryDraft as SharedLibraryDraft
 import com.ermao.library.shared.modules.administrativesettings.OrganizeJobFilter as SharedOrganizeFilter
 import com.ermao.library.shared.modules.administrativesettings.OrganizePolicy as SharedOrganizePolicy
 import com.ermao.library.shared.modules.administrativesettings.OrganizeRules as SharedOrganizeRules
@@ -68,7 +68,7 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeSettingsRoute.UserEdit -> loadUserEditor(route)
         is AdministrativeSettingsRoute.UserAccess -> loadUserAccess(route.userId)
         AdministrativeSettingsRoute.LibrarySources -> sharedRepository.loadLibraries(sharedContext).map { result ->
-            LibrarySourcesSnapshot(result.monitorRoot, result.folders.map { it.toLocal() })
+            LibrarySourcesSnapshot(result.libraries.map { it.toLocal() })
         }
         is AdministrativeSettingsRoute.LibrarySourceEdit -> loadLibrarySourceEditor(route.sourceId)
         is AdministrativeSettingsRoute.ServerDirectory -> sharedRepository.loadDirectory(sharedContext, route.path).map { node ->
@@ -253,14 +253,14 @@ class SharedAdministrativeSettingsAdapter(
         return sharedRepository.loadLibraries(sharedContext).map { folders ->
             UserAccessSnapshot(
                 user.toLocal(), user.role == SharedUserRole.Admin, user.canViewManualImports,
-                folders.folders.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.libraryIds) },
+                folders.libraries.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.libraryIds) },
             )
         }
     }
 
     private suspend fun loadLibrarySourceEditor(sourceId: String?): AdministrativeResult<AdministrativePageSnapshot> =
         sharedRepository.loadLibraries(sharedContext).map { result ->
-            val source = sourceId?.let { id -> result.folders.firstOrNull { it.id == id } }
+            val source = sourceId?.let { id -> result.libraries.firstOrNull { it.id == id } }
             LibrarySourceEditorSnapshot(source?.toLocal(), source?.ignorePatterns.orEmpty(), source?.ignoreHidden ?: true, source?.minimumFileSizeBytes ?: 0L)
         }
 
@@ -390,7 +390,7 @@ class SharedAdministrativeSettingsAdapter(
             is SharedContent -> result.value
             is SharedFailure -> return result.toLocalFailure()
         }
-        val path = folders.folders.firstOrNull { it.id == command.sourceId }?.rootPath ?: return notFound("LIBRARY_NOT_FOUND")
+        val path = folders.libraries.firstOrNull { it.id == command.sourceId }?.rootPath ?: return notFound("LIBRARY_NOT_FOUND")
         return sharedRepository.scanDirectory(sharedContext, path).receipt(command)
     }
 
@@ -561,25 +561,23 @@ private fun UserDraft.toSharedUpdate() = SharedUpdateUser(
 )
 
 private fun com.ermao.library.shared.modules.administrativesettings.Library.toLocal() = LibrarySource(
-    id, name, rootPath, enabled, mediaKindPolicy.toLocal(), description,
+    id, name, rootPath, enabled, organizationMode.toLocal(), description,
 )
 
-private fun SharedMediaKindPolicy.toLocal() = when (this) {
-    SharedMediaKindPolicy.Mixed -> MediaKindPolicy.Mixed
-    SharedMediaKindPolicy.Ebook -> MediaKindPolicy.Ebook
-    SharedMediaKindPolicy.Comic -> MediaKindPolicy.Comic
-    SharedMediaKindPolicy.Audiobook -> MediaKindPolicy.Audiobook
+private fun SharedLibraryOrganizationMode.toLocal() = when (this) {
+    SharedLibraryOrganizationMode.Flat -> LibraryOrganizationMode.Flat
+    SharedLibraryOrganizationMode.Volumes -> LibraryOrganizationMode.Volumes
+    SharedLibraryOrganizationMode.Audiobook -> LibraryOrganizationMode.Audiobook
 }
 
-private fun MediaKindPolicy.toShared() = when (this) {
-    MediaKindPolicy.Mixed -> SharedMediaKindPolicy.Mixed
-    MediaKindPolicy.Ebook -> SharedMediaKindPolicy.Ebook
-    MediaKindPolicy.Comic -> SharedMediaKindPolicy.Comic
-    MediaKindPolicy.Audiobook -> SharedMediaKindPolicy.Audiobook
+private fun LibraryOrganizationMode.toShared() = when (this) {
+    LibraryOrganizationMode.Flat -> SharedLibraryOrganizationMode.Flat
+    LibraryOrganizationMode.Volumes -> SharedLibraryOrganizationMode.Volumes
+    LibraryOrganizationMode.Audiobook -> SharedLibraryOrganizationMode.Audiobook
 }
 
-private fun LibrarySourceDraft.toShared() = SharedFolderDraft(
-    directory.uri, displayName.ifBlank { null }, null, monitoring, mediaKindPolicy.toShared(), ignorePatterns.ifBlank { null },
+private fun LibrarySourceDraft.toShared() = SharedLibraryDraft(
+    directory.uri, displayName.ifBlank { null }, organizationMode.toShared(), monitoring, ignorePatterns.ifBlank { null },
     ignoreHidden, minimumFileSizeBytes, description,
 )
 

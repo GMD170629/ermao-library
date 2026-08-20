@@ -67,7 +67,7 @@ struct LibrarySourcesView: View {
 struct LibrarySourceEditorView: View {
     @ObservedObject var store: AdministrativeSettingsStore
     let sourceID: String?
-    @State private var source = LibrarySource(id: "", displayName: "", serverPath: "", enabled: true, mediaKindPolicy: nil, ignorePatterns: "", ignoreHidden: true, minimumFileSizeBytes: 0, description: "")
+    @State private var source = LibrarySource(id: "", displayName: "", serverPath: "", enabled: true, organizationMode: .flat, ignorePatterns: "", ignoreHidden: true, minimumFileSizeBytes: 0, description: "")
     @State private var deleteShown = false
     @State private var loading = false
     @Environment(\.dismiss) private var dismiss
@@ -88,10 +88,11 @@ struct LibrarySourceEditorView: View {
                 TextField(copy[.minimumFileSize], value: $source.minimumFileSizeBytes, format: .number).keyboardType(.numberPad)
                 TextField(copy[.sourceDescription], text: $source.description, axis: .vertical)
             }
-            Section(copy[.mediaTypes]) {
-                Picker(copy[.mediaTypes], selection: $source.mediaKindPolicy) {
-                    Text(copy[.all]).tag(Optional<MediaKind>.none)
-                    ForEach(MediaKind.allCases, id: \.self) { kind in Text(mediaTitle(kind)).tag(Optional(kind)) }
+            Section(copy[.organizationMode]) {
+                Picker(copy[.organizationMode], selection: $source.organizationMode) {
+                    ForEach(LibraryOrganizationMode.allCases, id: \.self) { mode in
+                        Text(organizationModeTitle(mode)).tag(mode)
+                    }
                 }
             }
             if sourceID != nil { Section { Button(copy[.rescan]) { rescan() } } }
@@ -110,7 +111,7 @@ struct LibrarySourceEditorView: View {
     private func save() { Task { let result = sourceID == nil ? await store.performValue(id: "create-source", operation: { try await store.client.createLibrarySource(source) }) : await store.performValue(id: "update-source", operation: { try await store.client.updateLibrarySource(source) }); if case .success = result { dismiss() } } }
     private func delete() { guard let sourceID else { return }; Task { if await store.perform(id: "delete-source", operation: { try await store.client.deleteLibrarySource(id: sourceID) }) { dismiss() } } }
     private func rescan() { guard let sourceID else { return }; Task { _ = await store.perform(id: "rescan-source") { try await store.client.rescanLibrarySource(id: sourceID) } } }
-    private func mediaTitle(_ kind: MediaKind) -> String { switch kind { case .ebook: copy[.ebook]; case .comic: copy[.comic]; case .audiobook: copy[.audiobook] } }
+    private func organizationModeTitle(_ mode: LibraryOrganizationMode) -> String { switch mode { case .flat: copy[.flatLayout]; case .volumes: copy[.volumesLayout]; case .audiobook: copy[.audiobookLayout] } }
 }
 
 struct ServerDirectoryPickerView: View {

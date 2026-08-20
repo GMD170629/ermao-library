@@ -76,8 +76,8 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
         let loadedKindle = try await kindle
         let loadedOPDS = try await opds
         return AdministrativeManagementSummary(
-            librarySourceCount: loadedFolders.folders.count,
-            monitoredSourceCount: loadedFolders.folders.filter(\.enabled).count,
+            librarySourceCount: loadedFolders.libraries.count,
+            monitoredSourceCount: loadedFolders.libraries.filter(\.enabled).count,
             activeImportCount: Int(loadedImports.summary.failed) + loadedImports.tasks.filter { $0.status == .pending || $0.status == .parsing }.count,
             automaticImportEnabled: loadedPreferences.stabilityCheckEnabled,
             pendingOrganizeCount: Int(loadedOrganize.pageInfo.total),
@@ -165,15 +165,15 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
 
     func loadLibrarySources() async throws -> LibrarySourcesSnapshot {
         let wire: ErmaoShared.Libraries = try value(try await repository.loadLibraries(context: context))
-        let mapped = wire.folders.map(map); cachedSources = Dictionary(uniqueKeysWithValues: mapped.map { ($0.id, $0) })
+        let mapped = wire.libraries.map(map); cachedSources = Dictionary(uniqueKeysWithValues: mapped.map { ($0.id, $0) })
         var scan: DirectoryScanProgress?
         if let lastScanJobID, let job: ErmaoShared.ImportScanJob = try? value(try await repository.loadImportScanJob(context: context, jobId: lastScanJobID)) { scan = map(job) }
-        return LibrarySourcesSnapshot(storage: wire.monitorRoot.map { StorageSummary(label: $0, path: $0, freeBytes: nil, totalBytes: nil) }, sources: mapped, activeScan: scan)
+        return LibrarySourcesSnapshot(storage: nil, sources: mapped, activeScan: scan)
     }
     func loadLibrarySource(id: String) async throws -> LibrarySource { if let cached = cachedSources[id] { return cached }; _ = try await loadLibrarySources(); guard let result = cachedSources[id] else { throw AdministrativeFailure(kind: .notFound, code: "SOURCE_NOT_FOUND") }; return result }
-    func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.Library = try value(try await repository.createLibrary(context: context, folder: sourceDraft(source))); return map(wire) }
-    func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.Library = try value(try await repository.updateLibrary(context: context, folderId: source.id, folder: sourceDraft(source))); return map(wire) }
-    func deleteLibrarySource(id: String) async throws { let deleted: KotlinBoolean = try value(try await repository.deleteLibrary(context: context, folderId: id)); guard deleted.boolValue else { throw protocolFailure() } }
+    func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.Library = try value(try await repository.createLibrary(context: context, library: sourceDraft(source))); return map(wire) }
+    func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { let wire: ErmaoShared.Library = try value(try await repository.updateLibrary(context: context, libraryId: source.id, library: sourceDraft(source))); return map(wire) }
+    func deleteLibrarySource(id: String) async throws { let deleted: KotlinBoolean = try value(try await repository.deleteLibrary(context: context, libraryId: id)); guard deleted.boolValue else { throw protocolFailure() } }
     func rescanLibrarySource(id: String) async throws { let source = try await loadLibrarySource(id: id); try await scanDirectory(path: source.serverPath) }
     func loadServerDirectories(path: String?) async throws -> ServerDirectoryPage { let wire: ErmaoShared.DirectoryNode = try value(try await repository.loadDirectory(context: context, path: path)); return map(wire) }
     func scanDirectory(path: String) async throws { let job: ErmaoShared.ImportScanJob = try value(try await repository.scanDirectory(context: context, path: path)); lastScanJobID = job.id }

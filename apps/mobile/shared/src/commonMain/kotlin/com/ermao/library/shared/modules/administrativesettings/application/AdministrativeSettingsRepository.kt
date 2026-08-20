@@ -84,9 +84,9 @@ interface AdministrativeSettingsRepository {
     suspend fun deleteUser(context: AdministrativeSettingsContext, userId: String, confirmation: String): AdministrativeSettingsResult<DeletedManagedUser>
 
     suspend fun loadLibraries(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Libraries>
-    suspend fun createLibrary(context: AdministrativeSettingsContext, folder: LibraryDraft): AdministrativeSettingsResult<Library>
-    suspend fun updateLibrary(context: AdministrativeSettingsContext, folderId: String, folder: LibraryDraft): AdministrativeSettingsResult<Library>
-    suspend fun deleteLibrary(context: AdministrativeSettingsContext, folderId: String): AdministrativeSettingsResult<Boolean>
+    suspend fun createLibrary(context: AdministrativeSettingsContext, library: LibraryDraft): AdministrativeSettingsResult<Library>
+    suspend fun updateLibrary(context: AdministrativeSettingsContext, libraryId: String, library: LibraryDraft): AdministrativeSettingsResult<Library>
+    suspend fun deleteLibrary(context: AdministrativeSettingsContext, libraryId: String): AdministrativeSettingsResult<Boolean>
     suspend fun loadDirectory(context: AdministrativeSettingsContext, path: String?): AdministrativeSettingsResult<DirectoryNode>
 
     suspend fun listImportTasks(context: AdministrativeSettingsContext, filter: ImportTaskFilter): AdministrativeSettingsResult<ImportTaskPage>

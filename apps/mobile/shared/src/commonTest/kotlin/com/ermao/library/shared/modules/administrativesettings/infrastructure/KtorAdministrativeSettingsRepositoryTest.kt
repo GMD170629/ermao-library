@@ -99,7 +99,7 @@ class KtorAdministrativeSettingsRepositoryTest {
     @Test
     fun nativeSystemOperationsDoNotExposeOrUseWebPages() = runBlocking {
         val harness = Harness(
-            Response(200, MONITOR_FOLDERS),
+            Response(200, LIBRARIES),
             Response(200, DIRECTORY),
             Response(200, IMPORT_TASKS),
             Response(200, ORGANIZE_POLICY),
@@ -175,7 +175,7 @@ class KtorAdministrativeSettingsRepositoryTest {
     @Test
     fun updateAndDeleteBodiesMatchTheWebContracts() = runBlocking {
         val harness = Harness(
-            Response(200, MONITOR_FOLDER_PAYLOAD),
+            Response(200, LIBRARY_PAYLOAD),
             Response(200, IMPORT_TASK_DELETED),
             Response(200, BACKUP_DELETED),
         )
@@ -187,9 +187,8 @@ class KtorAdministrativeSettingsRepositoryTest {
                 LibraryDraft(
                     rootPath = "/books",
                     name = "Books",
-                    shelfId = null,
+                    organizationMode = LibraryOrganizationMode.Volumes,
                     enabled = true,
-                    mediaKindPolicy = MediaKindPolicy.Mixed,
                     ignorePatterns = "*.tmp",
                     ignoreHidden = true,
                     minimumFileSizeBytes = 10240,
@@ -202,8 +201,9 @@ class KtorAdministrativeSettingsRepositoryTest {
         )
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.deleteBackup(context(), "backup-1"))
 
-        assertEquals(HttpMethod.Put, harness.requests[0].method)
+        assertEquals(HttpMethod.Patch, harness.requests[0].method)
         assertEquals("/base/api/libraries/folder-1", harness.requests[0].path)
+        assertTrue(harness.requests[0].body.contains("\"organizationMode\":\"VOLUMES\""))
         assertEquals("", harness.requests[1].body)
         assertEquals("", harness.requests[2].body)
     }
@@ -470,8 +470,8 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val USER_PAYLOAD = """{"ok":true,"data":{"user":$USER}}"""
         const val PASSWORD_CHANGED = """{"ok":true,"data":{"passwordChanged":true,"sessionsRevoked":true}}"""
         const val DELETED_USER = """{"ok":true,"data":{"deleted":true,"userId":"user-1"}}"""
-        const val MONITOR_FOLDERS = """{"ok":true,"data":{"folders":[],"monitorRoot":"/books","lastUploadTargetPath":null,"lastDownloadTargetPath":null}}"""
-        const val MONITOR_FOLDER_PAYLOAD = """{"ok":true,"data":{"folder":{"id":"folder-1","name":"Books","rootPath":"/books","shelfId":null,"enabled":true,"mediaKindPolicy":"MIXED","ignorePatterns":"*.tmp","ignoreHidden":true,"minFileSizeBytes":10240,"description":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}}}"""
+        const val LIBRARIES = """{"ok":true,"data":{"libraries":[],"lastUploadTargetPath":null,"lastDownloadTargetPath":null}}"""
+        const val LIBRARY_PAYLOAD = """{"ok":true,"data":{"library":{"id":"folder-1","name":"Books","rootPath":"/books","organizationMode":"VOLUMES","enabled":true,"ignorePatterns":"*.tmp","ignoreHidden":true,"minFileSizeBytes":10240,"description":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val DIRECTORY = """{"ok":true,"data":{"node":{"name":"books","path":"/books","readable":true,"error":null,"children":[]}}}"""
         const val IMPORT_TASKS = """{"ok":true,"data":{"tasks":[],"summary":{"completed":0,"failed":0},"page":1,"pageSize":20,"total":0,"totalPages":1}}"""
         const val IMPORT_LOGS = """{"ok":true,"data":{"logs":[{"id":"log-1","level":"info","message":"display only","createdAt":"2026-08-12T00:00:00Z"}],"page":2,"pageSize":25,"total":1,"totalPages":1}}"""

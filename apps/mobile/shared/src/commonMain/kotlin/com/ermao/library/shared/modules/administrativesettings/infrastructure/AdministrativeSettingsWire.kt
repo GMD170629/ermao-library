@@ -253,36 +253,34 @@ internal fun JsonElement.toDeletedFlag(expectedId: String): Boolean {
 }
 
 internal fun JsonElement.toLibrary(): Library {
-    val folder = objectValue("INVALID_MONITOR_FOLDER").expectKeys(
-        "id", "name", "rootPath", "shelfId", "enabled", "mediaKindPolicy", "ignorePatterns", "ignoreHidden",
+    val library = objectValue("INVALID_LIBRARY").expectKeys(
+        "id", "name", "rootPath", "organizationMode", "enabled", "ignorePatterns", "ignoreHidden",
         "minFileSizeBytes", "description", "createdAt", "updatedAt",
     )
     return Library(
-        id = folder.requiredString("id"),
-        name = folder.requiredString("name"),
-        rootPath = folder.requiredString("rootPath"),
-        shelfId = folder.optionalString("shelfId"),
-        enabled = folder.requiredBoolean("enabled"),
-        mediaKindPolicy = enumValue(folder.requiredString("mediaKindPolicy"), MediaKindPolicy.entries, MediaKindPolicy::wireValue, "UNSUPPORTED_MEDIA_POLICY"),
-        ignorePatterns = folder.optionalString("ignorePatterns"),
-        ignoreHidden = folder.requiredBoolean("ignoreHidden"),
-        minimumFileSizeBytes = folder.requiredLong("minFileSizeBytes"),
-        description = folder.requiredNullableString("description"),
-        createdAt = folder.requiredString("createdAt"),
-        updatedAt = folder.requiredString("updatedAt"),
+        id = library.requiredString("id"),
+        name = library.requiredString("name"),
+        rootPath = library.requiredString("rootPath"),
+        organizationMode = enumValue(library.requiredString("organizationMode"), LibraryOrganizationMode.entries, LibraryOrganizationMode::wireValue, "UNSUPPORTED_ORGANIZATION_MODE"),
+        enabled = library.requiredBoolean("enabled"),
+        ignorePatterns = library.optionalString("ignorePatterns"),
+        ignoreHidden = library.requiredBoolean("ignoreHidden"),
+        minimumFileSizeBytes = library.requiredLong("minFileSizeBytes"),
+        description = library.requiredNullableString("description"),
+        createdAt = library.requiredString("createdAt"),
+        updatedAt = library.requiredString("updatedAt"),
     )
 }
 
 internal fun JsonElement.toLibraryPayload(): Library =
-    objectValue("INVALID_LIBRARY_PAYLOAD").expectKeys("folder").requiredObject("folder").toLibrary()
+    objectValue("INVALID_LIBRARY_PAYLOAD").expectKeys("library").requiredObject("library").toLibrary()
 
 internal fun JsonElement.toLibraries(): Libraries {
-    val root = objectValue("INVALID_MONITOR_FOLDERS").expectKeys(
-        "folders", "monitorRoot", "lastUploadTargetPath", "lastDownloadTargetPath",
+    val root = objectValue("INVALID_LIBRARIES").expectKeys(
+        "libraries", "lastUploadTargetPath", "lastDownloadTargetPath",
     )
     return Libraries(
-        folders = root.requiredArray("folders").map(JsonElement::toLibrary),
-        monitorRoot = root.requiredNullableString("monitorRoot"),
+        libraries = root.requiredArray("libraries").map(JsonElement::toLibrary),
         lastUploadTargetPath = root.requiredNullableString("lastUploadTargetPath"),
         lastDownloadTargetPath = root.requiredNullableString("lastDownloadTargetPath"),
     )
