@@ -113,12 +113,6 @@ _PREFIXED_EPISODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _FALLBACK_EPISODE_PATTERN = re.compile(r"(?<!\d)0*(\d{1,6})(?!\d)")
-_TRACK_FILE_PATTERN = re.compile(
-    r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?"
-    r"(?:(?:track|chapter|chap|ch)\s*)?"
-    r"[\[(]?\d{1,6}[\])]?(?:[ ._-]+|$)",
-    re.IGNORECASE,
-)
 _STRICT_FLAT_AUDIO_PATTERN = re.compile(
     r"^\s*0*\d{1,6}\s*[-\u2013\u2014_.]+\s*(?P<title>.+?)\s*"
     r"[-\u2013\u2014]+\s*"
@@ -214,17 +208,6 @@ def audio_episode_number(path: str | Path) -> int | None:
     return int(fallback.group(1)) if fallback else None
 
 
-def audio_track_name_proves_membership(path: str | Path) -> bool:
-    """Return whether a filename explicitly looks like one track of a bundle."""
-
-    candidate = Path(path)
-    return bool(
-        _TRACK_FILE_PATTERN.match(candidate.name)
-        or _EXPLICIT_EPISODE_PATTERN.search(candidate.stem)
-        or audio_episode_number(candidate) is not None
-    )
-
-
 def strict_flat_audio_title(path: str | Path) -> str | None:
     """Extract the book title from the documented library-root flat layout."""
 
@@ -236,23 +219,3 @@ def strict_flat_audio_title(path: str | Path) -> str | None:
         return None
     title = re.sub(r"\s+", " ", match.group("title")).strip(" ._-\u2013\u2014")
     return title or None
-
-
-def audio_bundle_membership_is_proven(
-    paths: tuple[Path, ...] | list[Path],
-    *,
-    has_sibling_book: bool,
-) -> bool:
-    """Reject ambiguous containers that mix standalone books with audio tracks."""
-
-    if len(paths) < 2:
-        return False
-    if not has_sibling_book:
-        return True
-    flat_titles = [strict_flat_audio_title(path) for path in paths]
-    if any(flat_titles):
-        return (
-            all(flat_titles)
-            and len({title.casefold() for title in flat_titles if title}) == 1
-        )
-    return all(audio_track_name_proves_membership(path) for path in paths)

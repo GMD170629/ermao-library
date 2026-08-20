@@ -5,28 +5,20 @@ from __future__ import annotations
 import os
 from collections import Counter, deque
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
 
-from app.modules.imports.application.audio_types import (
-    DISC_DIRECTORY_PATTERN,
-    MAX_AUDIO_BUNDLE_TRACKS,
-    is_supported_audio_file,
-)
+from app.contracts.library_layout import LibraryOrganizationMode
+from app.modules.imports.application.audio_types import MAX_AUDIO_BUNDLE_TRACKS
 from app.modules.imports.application.work_queue_dto import ScanErrorDTO
 from app.modules.imports.infrastructure.directory_scan import (
     ImportIgnoreReason,
     LibraryConfig,
-    audio_track_name_proves_membership,
     import_source_ignore_reason,
-    is_supported_import_filename,
     should_ignore_path,
 )
-from app.services.book_identity import (
-    normalize_identity_part,
-    recognize_book_identity_with_regex,
-)
+from app.services.audio_metadata import is_supported_audio_file
 
 SCAN_ENTRY_LIMIT = 5_000
 SCAN_CANDIDATE_LIMIT = 500
@@ -35,43 +27,12 @@ SCAN_ERROR_SAMPLE_LIMIT = 100
 
 
 @dataclass
-class _AudioGroup:
-    root: Path
-    title_key: str
-    paths: list[Path] = field(default_factory=list)
-    track_count: int = 0
-    overflowed: bool = False
-    all_tracks_named: bool = True
-    has_sibling_book: bool = False
-    has_root_tracks: bool = False
-    has_volume_tracks: bool = False
-    read_failed: bool = False
-
-    def add(self, path: Path, *, from_volume: bool) -> None:
-        self.track_count += 1
-        self.all_tracks_named = (
-            self.all_tracks_named and audio_track_name_proves_membership(path)
-        )
-        if from_volume:
-            self.has_volume_tracks = True
-        else:
-            self.has_root_tracks = True
-        if self.track_count <= MAX_AUDIO_BUNDLE_TRACKS:
-            self.paths.append(path)
-            return
-        if not self.overflowed:
-            self.paths.clear()
-            self.overflowed = True
-
-
-@dataclass
 class _Frame:
     path: Path
     entries: Iterator[os.DirEntry[str]]
-    audio_group: _AudioGroup
-    owns_audio_group: bool
-    audio_volume_path: Path
-    is_group_root: bool
+    depth: int
+    audio_track_count: int = 0
+    read_failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -92,6 +53,7 @@ class StreamingDirectoryScanner:
     def __init__(self, root_path: Path, folder: LibraryConfig) -> None:
         self._root_path = root_path.expanduser().resolve()
         self._folder = folder
+        self._organization_mode = LibraryOrganizationMode(folder.organization_mode)
         self._stack: list[_Frame] = []
         self._pending_candidates: list[Path] = []
         self._candidate_backlog: deque[Path] = deque()
@@ -140,7 +102,7 @@ class StreamingDirectoryScanner:
                 continue
             except OSError as exc:
                 self._record_error(frame.path, exc)
-                frame.audio_group.read_failed = True
+                frame.read_failed = True
                 self._close_top_frame()
                 continue
             entries_seen += 1
@@ -155,23 +117,16 @@ class StreamingDirectoryScanner:
                 if not entry.is_file(follow_symlinks=False):
                     continue
                 self._files_delta += 1
-                if is_supported_audio_file(path):
-                    reason = import_source_ignore_reason(path, self._folder)
-                    if reason is not None:
-                        self._record_ignored(reason)
-                        continue
-                    frame.audio_group.add(
-                        path.resolve(),
-                        from_volume=frame.audio_volume_path != frame.audio_group.root,
-                    )
-                    continue
                 reason = import_source_ignore_reason(path, self._folder)
                 if reason is not None:
                     self._record_ignored(reason)
                     continue
-                if frame.is_group_root and is_supported_import_filename(path):
-                    frame.audio_group.has_sibling_book = True
-                self._queue_candidate(path)
+                if is_supported_audio_file(path):
+                    self._accept_audio_file(path, frame)
+                elif self._organization_mode is LibraryOrganizationMode.AUDIOBOOK:
+                    self._record_ignored("unsupported_file_type")
+                else:
+                    self._queue_candidate(path)
             except (OSError, ValueError) as exc:
                 self._record_error(path, exc)
         if not self._stack and not self._candidate_backlog:
@@ -189,13 +144,6 @@ class StreamingDirectoryScanner:
         self._pending_candidates = []
         return result
 
-    @property
-    def buffered_audio_path_count(self) -> int:
-        return sum(len(frame.audio_group.paths) for frame in self._owned_frames())
-
-    def _owned_frames(self) -> Iterator[_Frame]:
-        return (frame for frame in self._stack if frame.owns_audio_group)
-
     def _enter_directory(self, path: Path, *, parent: _Frame | None = None) -> None:
         self._directories_delta += 1
         try:
@@ -203,36 +151,22 @@ class StreamingDirectoryScanner:
         except (OSError, ValueError) as exc:
             self._record_error(path, exc)
             return
-        if parent is None:
-            group = _new_audio_group(path)
-            owns_group = True
-            volume_path = path
-            is_group_root = True
-        elif DISC_DIRECTORY_PATTERN.match(path.name.strip()):
-            group = parent.audio_group
-            owns_group = False
-            volume_path = parent.audio_volume_path
-            is_group_root = False
-        elif parent.is_group_root and _is_audio_volume_child(parent.audio_group, path):
-            group = parent.audio_group
-            owns_group = False
-            volume_path = path
-            is_group_root = False
-        else:
-            group = _new_audio_group(path)
-            owns_group = True
-            volume_path = path
-            is_group_root = True
         self._stack.append(
             _Frame(
                 path=path,
                 entries=entries,
-                audio_group=group,
-                owns_audio_group=owns_group,
-                audio_volume_path=volume_path,
-                is_group_root=is_group_root,
+                depth=0 if parent is None else parent.depth + 1,
             )
         )
+
+    def _accept_audio_file(self, path: Path, frame: _Frame) -> None:
+        if self._organization_mode is not LibraryOrganizationMode.AUDIOBOOK:
+            self._record_ignored("unsupported_file_type")
+            return
+        if frame.depth == 0:
+            self._queue_candidate(path)
+            return
+        frame.audio_track_count += 1
 
     def _queue_candidate(self, path: Path) -> None:
         self._candidate_backlog.append(path)
@@ -251,50 +185,40 @@ class StreamingDirectoryScanner:
         close = getattr(frame.entries, "close", None)
         if callable(close):
             close()
-        if frame.owns_audio_group:
-            self._finalize_audio_group(frame.audio_group)
+        if self._stack:
+            self._stack[-1].audio_track_count += frame.audio_track_count
+            self._stack[-1].read_failed = (
+                self._stack[-1].read_failed or frame.read_failed
+            )
+        if (
+            self._organization_mode is LibraryOrganizationMode.AUDIOBOOK
+            and frame.depth == 1
+            and frame.audio_track_count
+        ):
+            self._finalize_audiobook_work(frame)
 
-    def _finalize_audio_group(self, group: _AudioGroup) -> None:
-        if not group.track_count:
+    def _finalize_audiobook_work(self, frame: _Frame) -> None:
+        if frame.read_failed:
+            self._skipped_delta += frame.audio_track_count
             return
-        if group.read_failed:
-            self._skipped_delta += group.track_count
-            return
-        if group.overflowed:
-            self._skipped_delta += group.track_count
-            self._reasons["audio_track_limit_exceeded"] += group.track_count
+        if frame.audio_track_count > MAX_AUDIO_BUNDLE_TRACKS:
+            self._skipped_delta += frame.audio_track_count
+            self._reasons["audio_track_limit_exceeded"] += frame.audio_track_count
             if len(self._errors) < SCAN_ERROR_SAMPLE_LIMIT:
                 self._errors.append(
                     ScanErrorDTO(
-                        path=str(group.root),
+                        path=str(frame.path),
                         error=(
                             f"有声书音轨超过 {MAX_AUDIO_BUNDLE_TRACKS} 条，"
                             "请拆分目录后重新导入"
                         ),
                         code="AUDIO_TRACK_LIMIT_EXCEEDED",
                         limit=MAX_AUDIO_BUNDLE_TRACKS,
-                        observed_count=group.track_count,
+                        observed_count=frame.audio_track_count,
                     )
                 )
             return
-        if group.has_root_tracks and group.has_volume_tracks:
-            self._skipped_delta += group.track_count
-            self._record_error(
-                group.root,
-                ValueError(
-                    "有声书书名目录不能同时包含直属音轨和卷目录，"
-                    "请整理为单卷或多卷结构后重试"
-                ),
-            )
-            return
-        proven_bundle = group.track_count >= 2 and (
-            not group.has_sibling_book or group.all_tracks_named
-        )
-        if proven_bundle:
-            self._queue_candidate(group.root)
-            return
-        for path in group.paths:
-            self._queue_candidate(path)
+        self._queue_candidate(frame.path)
 
     def _reset_delta(self) -> None:
         self._pending_candidates = []
@@ -304,22 +228,3 @@ class StreamingDirectoryScanner:
         self._skipped_delta = 0
         self._reasons = Counter()
         self._errors = []
-
-
-def _new_audio_group(path: Path) -> _AudioGroup:
-    identity = recognize_book_identity_with_regex(f"{path.name}.epub")
-    return _AudioGroup(
-        root=path,
-        title_key=normalize_identity_part(identity.title.strip() or path.name),
-    )
-
-
-def _is_audio_volume_child(group: _AudioGroup, child: Path) -> bool:
-    identity = recognize_book_identity_with_regex(f"{child.name}.epub")
-    child_key = normalize_identity_part(identity.title.strip() or child.name)
-    return identity.volume_index is not None or bool(
-        group.title_key
-        and child_key
-        and child_key != group.title_key
-        and group.title_key in child_key
-    )

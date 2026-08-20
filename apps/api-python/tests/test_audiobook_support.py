@@ -8,10 +8,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+from PIL import Image
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
-import pytest
 from app.bootstrap.imports import (
     import_managed_book,
 )
@@ -51,9 +55,6 @@ from app.services.audio_metadata import (
     AudioFileMetadata,
     parse_audio_metadata,
 )
-from PIL import Image
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
 from tests.conftest import recreate_application_schema
 
 
@@ -1220,7 +1221,7 @@ def test_failed_audio_upload_removes_staging_files_and_never_creates_task(
     assert db_session.execute(text("SELECT COUNT(*) FROM `ImportTask`")).scalar() == 0
 
 
-def test_audio_directory_structure_rejects_mixed_tracks_and_keeps_unmatched_children_independent(
+def test_audio_directory_structure_rejects_mixed_tracks_and_uses_direct_children(
     tmp_path,
 ) -> None:
     mixed = tmp_path / "Mixed Book"
@@ -1235,7 +1236,11 @@ def test_audio_directory_structure_rejects_mixed_tracks_and_keeps_unmatched_chil
     independent_book = collection / "Independent Book"
     independent_book.mkdir(parents=True)
     (independent_book / "01.mp3").write_bytes(b"independent")
-    assert audio_metadata_module.inspect_audio_bundle(collection) is None
+    collection_structure = audio_metadata_module.inspect_audio_bundle(collection)
+    assert collection_structure is not None
+    assert [volume.title for volume in collection_structure.volumes] == [
+        "Independent Book"
+    ]
     independent = audio_metadata_module.inspect_audio_bundle(independent_book)
     assert independent is not None
     assert independent.title == "Independent Book"

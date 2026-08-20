@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from app.modules.imports.application.audio_types import (
-    DISC_DIRECTORY_PATTERN,
     LEGACY_AUDIO_EXTS,
     MAX_AUDIO_BUNDLE_TRACKS,
     MAX_AUDIO_CHAPTERS,
@@ -27,11 +26,6 @@ from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
-from app.services.book_identity import (
-    UNKNOWN_AUTHOR,
-    normalize_identity_part,
-    recognize_book_identity_with_regex,
-)
 
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
@@ -50,12 +44,6 @@ MUTAGEN_TEXT_ENCODINGS = {
     2: "utf-16-be",
     3: "utf-8",
 }
-
-
-def _directory_identity(path: Path) -> tuple[str, str | None, float | None]:
-    identity = recognize_book_identity_with_regex(f"{path.name}.epub")
-    author = identity.author if identity.author != UNKNOWN_AUTHOR else None
-    return identity.title.strip() or path.name, author, identity.volume_index
 
 
 class _AudioTrackCounter:
@@ -96,23 +84,11 @@ def _directory_audio_files(
     path: Path,
     counter: _AudioTrackCounter,
 ) -> list[Path]:
-    files = _direct_audio_files(path, counter)
-    for entry in _iter_directory_entries(path):
-        if not entry.is_dir(follow_symlinks=False) or not DISC_DIRECTORY_PATTERN.match(
-            entry.name.strip()
-        ):
-            continue
-        files.extend(_direct_audio_files(Path(entry.path), counter))
-    return sorted(dict.fromkeys(files), key=_natural_audio_key)
+    return sorted(_direct_audio_files(path, counter), key=_natural_audio_key)
 
 
 def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
-    """Resolve a single- or multi-volume audiobook directory.
-
-    Disc/CD directories are physical track groupings. Other child directories
-    become volumes only when the shared identity parser finds a volume number,
-    or when their normalized title contains the parent book title.
-    """
+    """Resolve direct audio files and child-volume directories without inference."""
 
     root = Path(path).expanduser().resolve()
     if root.is_file():
@@ -128,51 +104,32 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
         return None
 
     counter = _AudioTrackCounter(root)
-    root_title, root_author, _root_volume_index = _directory_identity(root)
     direct_files = _directory_audio_files(root, counter)
-    root_key = normalize_identity_part(root_title)
-    matched_volumes: list[AudioVolumeDirectory] = []
+    child_volumes: list[AudioVolumeDirectory] = []
     for entry in _iter_directory_entries(root):
         if not entry.is_dir(follow_symlinks=False):
             continue
         child = Path(entry.path)
-        if DISC_DIRECTORY_PATTERN.match(entry.name.strip()):
-            continue
-        child_title, child_author, volume_index = _directory_identity(child)
-        child_key = normalize_identity_part(child_title)
-        title_contains_parent = bool(
-            root_key and child_key and root_key != child_key and root_key in child_key
-        )
-        if volume_index is None and not title_contains_parent:
-            continue
         child_files = _directory_audio_files(child, counter)
         if not child_files:
             continue
-        matched_volumes.append(
+        child_volumes.append(
             AudioVolumeDirectory(
                 path=child.resolve(),
                 title=child.name,
-                volume_index=volume_index,
-                author=child_author,
+                volume_index=None,
+                author=None,
                 files=tuple(child_files),
             )
         )
 
-    if direct_files and matched_volumes:
+    if direct_files and child_volumes:
         raise ValueError(
             "有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试"
         )
-    if matched_volumes:
-        matched_volumes.sort(
-            key=lambda volume: (
-                volume.volume_index is None,
-                volume.volume_index
-                if volume.volume_index is not None
-                else float("inf"),
-                _natural_audio_key(volume.path),
-            )
-        )
-        volumes = tuple(matched_volumes)
+    if child_volumes:
+        child_volumes.sort(key=lambda volume: _natural_audio_key(volume.path))
+        volumes = tuple(child_volumes)
     elif direct_files:
         volumes = (
             AudioVolumeDirectory(
@@ -188,8 +145,8 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
 
     return AudioBundleStructure(
         root=root,
-        title=root_title,
-        author=root_author,
+        title=root.name,
+        author=None,
         volumes=volumes,
     )
 

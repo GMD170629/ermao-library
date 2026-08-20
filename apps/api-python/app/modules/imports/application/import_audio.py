@@ -129,6 +129,7 @@ def _import_audio(
         unit_of_work,
     )
 
+
 def _import_bound_audio(
     store: LibraryImportStore,
     queries: ImportLibraryQueries,
@@ -303,8 +304,7 @@ def _import_bound_audio(
             },
         )
     raw_tags = [
-        {"sourcePath": str(item.path), "tags": item.raw_tags}
-        for item in metadata_items
+        {"sourcePath": str(item.path), "tags": item.raw_tags} for item in metadata_items
     ]
     for source, payload in (
         ("audio_tags", raw_tags),
@@ -536,11 +536,6 @@ def _flat_audio_filename_title(path: Path) -> str | None:
         return None
     title = strict_flat_audio_title(path)
     return _clean_audio_work_title(title) if title else None
-
-
-def _flat_audio_bundle_key(path: Path, title: str) -> str:
-    source_group = f"{path.parent.resolve()}\0{_normalize_key(title)}"
-    return _hash_text(source_group)[:24]
 
 
 def _consistent_audio_values(

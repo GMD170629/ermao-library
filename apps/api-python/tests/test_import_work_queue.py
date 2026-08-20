@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from datetime import timedelta
-from itertools import chain
 from pathlib import Path
 
 import pytest
+from sqlalchemy import delete, func, select
+
 from app.bootstrap.imports import (
     ImportWorkerRuntime,
     persist_import_task_retry,
@@ -36,7 +37,6 @@ from app.modules.imports.infrastructure.work_queue import (
 )
 from app.modules.imports.presentation.schemas import ScanError
 from app.services.system_events import prepare_system_event
-from sqlalchemy import delete, func, select
 
 
 def _stage_scan_candidate_batch(db_session, candidates, *, library_id: str):
@@ -204,61 +204,42 @@ def test_streaming_scan_keeps_million_scale_candidate_buffer_bounded(
     assert largest_batch <= 500
 
 
-def test_streaming_scan_blocks_overflowing_audio_bundle_without_hiding_non_audio(
-    monkeypatch: pytest.MonkeyPatch,
+def test_streaming_scan_uses_audiobook_root_topology_without_name_heuristics(
+    tmp_path: Path,
 ) -> None:
-    entries = (_NamedFakeFileEntry(f"{index:07d}.mp3") for index in range(1_800_000))
-    mixed_entries = chain(entries, (_NamedFakeFileEntry("appendix.epub"),))
-    monkeypatch.setattr(Path, "resolve", lambda self: self)
-    monkeypatch.setattr(streaming_scan, "monotonic", lambda: 0.0)
-    monkeypatch.setattr(
-        streaming_scan.os,
-        "scandir",
-        lambda _path: iter(mixed_entries),
-    )
-    monkeypatch.setattr(
-        streaming_scan, "import_source_ignore_reason", lambda _path, _folder: None
-    )
+    root = tmp_path / "library"
+    opening = root / "Book" / "Opening"
+    finale = root / "Book" / "Finale"
+    opening.mkdir(parents=True)
+    finale.mkdir()
+    (opening / "alpha.mp3").write_bytes(b"first")
+    (finale / "omega.mp3").write_bytes(b"second")
+    standalone = root / "standalone.m4b"
+    standalone.write_bytes(b"standalone")
+    (root / "appendix.epub").write_bytes(b"publication")
     scanner = StreamingDirectoryScanner(
-        Path("/virtual/library"),
+        root,
         LibraryConfig(
-            id="folder-audio-overflow",
-            root_path="/virtual/library",
+            id="library-audio-topology",
+            root_path=str(root),
+            organization_mode="AUDIOBOOK",
             min_file_size_bytes=0,
         ),
     )
     candidates: list[Path] = []
-    errors: list[object] = []
-    files_scanned = 0
     skipped = 0
-    largest_audio_buffer = 0
-    largest_file_slice = 0
     try:
         while True:
             scan_slice = scanner.next_slice()
             candidates.extend(scan_slice.candidates)
-            errors.extend(scan_slice.errors)
-            files_scanned += scan_slice.files_scanned
             skipped += scan_slice.skipped_count
-            largest_audio_buffer = max(
-                largest_audio_buffer,
-                scanner.buffered_audio_path_count,
-            )
-            largest_file_slice = max(largest_file_slice, scan_slice.files_scanned)
             if scan_slice.completed:
                 break
     finally:
         scanner.close()
 
-    assert candidates == [Path("/virtual/library/appendix.epub")]
-    assert files_scanned == 1_800_001
-    assert skipped == 1_800_000
-    assert largest_audio_buffer <= 10_000
-    assert largest_file_slice <= 5_000
-    assert len(errors) == 1
-    assert errors[0].code == "AUDIO_TRACK_LIMIT_EXCEEDED"
-    assert errors[0].limit == 10_000
-    assert errors[0].observed_count == 1_800_000
+    assert set(candidates) == {standalone, root / "Book"}
+    assert skipped == 1
 
 
 def test_audio_overflow_scan_persists_typed_error_without_import_work(
@@ -267,10 +248,11 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = tmp_path / "overflow"
+    root = tmp_path / "audio-library"
     root.mkdir()
+    book = root / "Book"
     folder = Library(
-        organization_mode="FLAT",
+        organization_mode="AUDIOBOOK",
         id="folder-audio-overflow-persistence",
         name="Audio overflow persistence",
         root_path=str(root),
@@ -293,8 +275,10 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
     monkeypatch.setattr(
         streaming_scan.os,
         "scandir",
-        lambda _path: (
-            _NamedFakeFileEntry(f"{index:05d}.mp3") for index in range(10_001)
+        lambda path: (
+            iter((_NamedFakeDirectoryEntry(str(book)),))
+            if path == root
+            else (_NamedFakeFileEntry(f"{index:05d}.mp3") for index in range(10_001))
         ),
     )
     monkeypatch.setattr(
@@ -324,7 +308,7 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
     assert ScanError.model_validate(error, from_attributes=True).model_dump(
         by_alias=True
     ) == {
-        "path": str(root),
+        "path": str(book),
         "error": "有声书音轨超过 10000 条，请拆分目录后重新导入",
         "code": "AUDIO_TRACK_LIMIT_EXCEEDED",
         "limit": 10_000,
@@ -335,12 +319,15 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
 def test_multivolume_audio_limit_is_aggregated_across_the_whole_book(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path("/virtual/library/Book")
-    first_volume = root / "Vol.1"
-    second_volume = root / "Vol.2"
+    root = Path("/virtual/library")
+    book = root / "Book"
+    first_volume = book / "Opening"
+    second_volume = book / "Finale"
 
     def entries(path: Path):
         if path == root:
+            return iter((_NamedFakeDirectoryEntry(str(book)),))
+        if path == book:
             return iter(
                 (
                     _NamedFakeDirectoryEntry(str(first_volume)),
@@ -349,11 +336,12 @@ def test_multivolume_audio_limit_is_aggregated_across_the_whole_book(
             )
         if path == first_volume:
             return (
-                _NamedFakeFileEntry(f"Vol.1/{index:05d}.mp3") for index in range(6_000)
+                _NamedFakeFileEntry(f"Opening/{index:05d}.mp3")
+                for index in range(6_000)
             )
         if path == second_volume:
             return (
-                _NamedFakeFileEntry(f"Vol.2/{index:05d}.mp3") for index in range(6_000)
+                _NamedFakeFileEntry(f"Finale/{index:05d}.mp3") for index in range(6_000)
             )
         raise AssertionError(f"unexpected directory: {path}")
 
@@ -368,6 +356,7 @@ def test_multivolume_audio_limit_is_aggregated_across_the_whole_book(
         LibraryConfig(
             id="folder-multivolume-overflow",
             root_path=str(root),
+            organization_mode="AUDIOBOOK",
             min_file_size_bytes=0,
         ),
     )
@@ -380,7 +369,6 @@ def test_multivolume_audio_limit_is_aggregated_across_the_whole_book(
             candidates.extend(scan_slice.candidates)
             errors.extend(scan_slice.errors)
             skipped += scan_slice.skipped_count
-            assert scanner.buffered_audio_path_count <= 10_000
             if scan_slice.completed:
                 break
     finally:
@@ -679,8 +667,8 @@ def test_audiobook_layout_creates_one_task_for_each_volume_directory(
 ) -> None:
     root = tmp_path / "audio-library"
     book = root / "Book"
-    first_volume = book / "Vol.1"
-    second_volume = book / "Vol.2"
+    first_volume = book / "Opening"
+    second_volume = book / "Finale"
     first_volume.mkdir(parents=True)
     second_volume.mkdir()
     (first_volume / "01.mp3").write_bytes(b"first")
@@ -715,8 +703,8 @@ def test_audiobook_layout_creates_one_task_for_each_volume_directory(
     assert result.queued_count == 2
     assert work is not None and work.source_key == "work:Book"
     assert [volume.resource_key for volume in volumes] == [
-        "volume:Book/Vol.1",
-        "volume:Book/Vol.2",
+        "volume:Book/Finale",
+        "volume:Book/Opening",
     ]
     assert {task.source_path for task in tasks} == {
         str(first_volume),

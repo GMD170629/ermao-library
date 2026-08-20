@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from app.modules.imports.application.audio_types import (
-    audio_bundle_membership_is_proven,
-    audio_episode_number,
-)
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.file_types import is_supported_import_filename
-from app.services.audio_metadata import (
-    collect_audio_bundle_files,
-    is_supported_audio_file,
-)
+from app.services.audio_metadata import collect_audio_bundle_files
 from app.services.import_preferences import (
     DEFAULT_STABILITY_CHECK_ENABLED,
     SUPPORTED_IMPORT_EXTENSIONS,
@@ -144,49 +136,3 @@ def import_source_ignore_reason(
     if not import_source_meets_minimum_size(path, folder.min_file_size_bytes):
         return "below_minimum_size"
     return None
-
-
-_TRACK_FILE_PATTERN = re.compile(
-    r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?(?:(?:track|chapter|chap|ch|第)\s*)?[\[(]?\d{1,6}[\])]?(?:\s*[章回集节])?(?:[ ._-]+|$)",
-    re.IGNORECASE,
-)
-_EPISODE_FILE_PATTERN = re.compile(
-    r"第\s*\d{1,6}\s*[章回集节]",
-    re.IGNORECASE,
-)
-
-
-def is_proven_audio_bundle_directory(
-    path: Path,
-    files: list[Path] | None = None,
-    *,
-    folder: LibraryConfig | None = None,
-) -> bool:
-    try:
-        candidates = files if files is not None else collect_audio_bundle_files(path)
-    except (AudioTrackLimitExceededError, OSError, ValueError):
-        return False
-    if len(candidates) < 2:
-        return False
-    try:
-        has_sibling_book = any(
-            child.is_file()
-            and not is_supported_audio_file(child)
-            and is_supported_import_filename(child)
-            and (folder is None or not should_ignore_import_source(child, folder))
-            for child in path.iterdir()
-        )
-    except OSError:
-        return False
-    return audio_bundle_membership_is_proven(
-        candidates,
-        has_sibling_book=has_sibling_book,
-    )
-
-
-def audio_track_name_proves_membership(path: Path) -> bool:
-    return bool(
-        _TRACK_FILE_PATTERN.match(path.name)
-        or _EPISODE_FILE_PATTERN.search(path.stem)
-        or audio_episode_number(path) is not None
-    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from app.contracts.library_layout import (
@@ -12,14 +13,17 @@ from app.contracts.library_layout import (
     LibraryOrganizationMode,
     interpret_library_layout,
 )
-from app.modules.imports.application.audio_types import is_supported_audio_file
+from app.modules.imports.application.audio_types import (
+    MAX_AUDIO_BUNDLE_TRACKS,
+    is_supported_audio_file,
+)
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.work_queue_dto import (
     PreparedScanSources,
     PreparedTopologySource,
     ScanErrorDTO,
 )
 from app.modules.imports.infrastructure.source_keys import source_key
-from app.services.audio_metadata import collect_audio_bundle_files
 
 _VOLUME_KEY_PREFIX = "volume:"
 
@@ -67,10 +71,7 @@ def prepare_topology_sources(
             continue
         prepared.extend(candidate_sources)
 
-    unique_sources = {
-        item.source_key: item
-        for item in prepared
-    }
+    unique_sources = {item.source_key: item for item in prepared}
     topology_sources = tuple(unique_sources.values())
     return PreparedScanSources(
         topology_sources=topology_sources,
@@ -85,7 +86,7 @@ def prepare_topology_sources(
 
 def _layout_entries(candidate: Path, root: Path) -> tuple[LayoutEntry, ...]:
     if candidate.is_dir():
-        paths = tuple(collect_audio_bundle_files(candidate))
+        paths = _topology_audio_files(candidate)
     else:
         paths = (candidate,)
     entries: list[LayoutEntry] = []
@@ -104,6 +105,38 @@ def _layout_entries(candidate: Path, root: Path) -> tuple[LayoutEntry, ...]:
             )
         )
     return tuple(entries)
+
+
+def _topology_audio_files(directory: Path) -> tuple[Path, ...]:
+    """Collect audio assets without inferring book or volume identity from names."""
+
+    paths: list[Path] = []
+    pending = [directory]
+    while pending:
+        current = pending.pop()
+        iterator = os.scandir(current)
+        try:
+            for entry in iterator:
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(Path(entry.path))
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                path = Path(entry.path)
+                if not is_supported_audio_file(path):
+                    continue
+                paths.append(path.resolve())
+                if len(paths) > MAX_AUDIO_BUNDLE_TRACKS:
+                    raise AudioTrackLimitExceededError(
+                        path=str(directory),
+                        limit=MAX_AUDIO_BUNDLE_TRACKS,
+                        observed_count=len(paths),
+                    )
+        finally:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
+    return tuple(paths)
 
 
 def _sources_from_layout(
