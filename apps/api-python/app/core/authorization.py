@@ -12,7 +12,6 @@ from sqlalchemy.sql.dml import Insert
 from app.models.auth import User, UserLibraryAccess, UserPreference
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -131,24 +130,6 @@ def can_access_work(db: Session, user: User, work_id: str) -> bool:
         db.scalar(
             select(LibraryWork.id).where(
                 LibraryWork.id == work_id,
-                work_visibility_predicate(context),
-            )
-        )
-        is not None
-    )
-
-
-def can_access_media_version(db: Session, user: User, media_version_id: str) -> bool:
-    context = authorization_context(db, user)
-    return (
-        db.scalar(
-            select(LibraryMediaVersion.id)
-            .join(
-                LibraryWork,
-                LibraryWork.id == LibraryMediaVersion.work_id,
-            )
-            .where(
-                LibraryMediaVersion.id == media_version_id,
                 work_visibility_predicate(context),
             )
         )

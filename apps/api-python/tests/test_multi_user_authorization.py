@@ -343,8 +343,12 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
     merged = client.get("/api/works/work-merged")
     assert merged.status_code == 200
     merged_payload = merged.json()["data"]["book"]
-    assert {item["mediaKind"] for item in merged_payload["mediaVersions"]} == {"EBOOK"}
-    merged_volumes = merged_payload["mediaVersions"][0]["volumes"]
+    merged_volumes = [
+        volume
+        for version in merged_payload["versions"]
+        for volume in version["volumes"]
+    ]
+    assert {volume["format"] for volume in merged_volumes} == {"EPUB"}
     assert {volume["id"] for volume in merged_volumes} == {
         "volume-merged-a",
         "volume-merged-b",
