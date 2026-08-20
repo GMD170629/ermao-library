@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.imports import import_http_store
 from app.bootstrap.library import (
     PreparedWorkFacetWrite,
     library_cover_publication,
@@ -135,7 +134,6 @@ from app.modules.library.presentation.schemas import (
     LibraryNotFoundError,
     LibraryUnavailableError,
     LibraryUnprocessableError,
-    ManagementFoldersResponse,
     ManagementOverviewResponse,
     MergeCategoriesRequest,
     MergeCategoriesResponse,
@@ -175,10 +173,6 @@ from app.modules.library.presentation.views import (
     _work_view,
     _work_volume_page_view,
     bookshelf_item_views,
-)
-from app.modules.library.presentation.work_ops import (
-    _path_tree,
-    _source_folder_preview,
 )
 from app.modules.library.public import (
     InvalidFilterExpression,
@@ -660,18 +654,6 @@ def management_overview(
     failed_imports = cards["failedImports"]
     failed_downloads = cards["failedDownloads"]
     pending_organize = cards["pendingOrganize"]
-    file_paths = library_dashboard.list_library_file_paths(db)
-    orphan_count = 0
-    library_root = settings.resolved_storage_root / "library"
-    if library_root.exists():
-        try:
-            for path in library_root.rglob("*"):
-                if path.is_file() and str(path) not in file_paths:
-                    orphan_count += 1
-                    if orphan_count > 1000:
-                        break
-        except OSError:
-            orphan_count = 0
     checks = {item["name"]: item for item in health["checks"]}
     recent_events = library_dashboard.recent_system_events(db, limit=8)
     storage = cards["managedStorageBytes"]
@@ -680,7 +662,6 @@ def management_overview(
             "cards": {
                 "failedImports": failed_imports,
                 "failedDownloads": failed_downloads,
-                "orphanFiles": orphan_count,
                 "pendingOrganize": pending_organize,
                 "managedStorageBytes": int(storage or 0),
                 "eventLogSizeBytes": event_storage["sizeBytes"],
@@ -698,153 +679,6 @@ def management_overview(
                 ),
             },
             "recentEvents": [_serialize_system_event(event) for event in recent_events],
-        }
-    )
-
-
-@router.get("/management/folders")
-def management_folders(
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> ManagementFoldersResponse:
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    libraries = import_http_store.list_libraries(db)
-    source_nodes = [
-        {**folder, **_source_folder_preview(str(folder.get("rootPath") or ""))}
-        for folder in libraries
-    ]
-    works = library_dashboard.list_management_works(db, limit=300)
-    from sqlalchemy import func
-
-    volumes = [
-        {
-            "workId": row.workId,
-            "sizeBytes": int(row.sizeBytes or 0),
-            "volumeCount": int(row.volumeCount or 0),
-        }
-        for row in db.execute(
-            select(
-                LibraryVersion.work_id.label("workId"),
-                func.coalesce(func.sum(LibraryVolume.size_bytes), 0).label("sizeBytes"),
-                func.count().label("volumeCount"),
-            )
-            .select_from(LibraryVolume)
-            .join(
-                LibraryVersion,
-                LibraryVersion.id == LibraryVolume.version_id,
-            )
-            .where(LibraryVolume.hidden.is_(False))
-            .group_by(LibraryVersion.work_id)
-        ).all()
-    ]
-    size_by_work = {row.get("workId"): row for row in volumes}
-    work_items = [
-        {
-            **work,
-            "sizeBytes": int(
-                (size_by_work.get(work.get("id")) or {}).get("sizeBytes") or 0
-            ),
-            "volumeCount": int(
-                (size_by_work.get(work.get("id")) or {}).get("volumeCount") or 0
-            ),
-        }
-        for work in works
-    ]
-
-    def grouped(key: str, fallback: str) -> list[dict[str, Any]]:
-        buckets: dict[str, list[dict[str, Any]]] = {}
-        for work in work_items:
-            value = str(work.get(key) or fallback).strip() or fallback
-            buckets.setdefault(value, []).append(work)
-        return [
-            {
-                "name": name,
-                "count": len(items),
-                "sizeBytes": sum(int(item.get("sizeBytes") or 0) for item in items),
-                "items": items[:20],
-            }
-            for name, items in sorted(buckets.items(), key=lambda item: item[0])
-        ]
-
-    def grouped_series() -> list[dict[str, Any]]:
-        buckets: dict[str, list[dict[str, Any]]] = {}
-        for work in work_items:
-            value = str(work.get("seriesName") or "").strip()
-            if not value:
-                continue
-            buckets.setdefault(value, []).append(work)
-        return [
-            {
-                "name": name,
-                "count": len(items),
-                "sizeBytes": sum(int(item.get("sizeBytes") or 0) for item in items),
-                "items": items[:20],
-            }
-            for name, items in sorted(buckets.items(), key=lambda item: item[0])
-            if len(items) >= 2
-        ]
-
-    def grouped_media_kinds() -> list[dict[str, Any]]:
-        buckets: dict[str, list[dict[str, Any]]] = {}
-        for work in work_items:
-            for media_kind in work.get("availableMediaKinds") or []:
-                buckets.setdefault(str(media_kind), []).append(work)
-        return [
-            {
-                "name": name,
-                "count": len(items),
-                "sizeBytes": sum(int(item.get("sizeBytes") or 0) for item in items),
-                "items": items[:20],
-            }
-            for name, items in sorted(buckets.items(), key=lambda item: item[0])
-        ]
-
-    source_names = {folder.get("id"): folder.get("name") for folder in libraries}
-    by_source: dict[str, list[dict[str, Any]]] = {}
-    for work in work_items:
-        name = source_names.get(work.get("libraryId")) or "手动导入"
-        by_source.setdefault(str(name), []).append(work)
-    file_rows = library_dashboard.list_management_file_rows(db, limit=2000)
-    managed_paths = []
-    storage_root = settings.resolved_storage_root
-    for file in file_rows:
-        path_value = str(file.get("path") or "")
-        try:
-            resolved = Path(path_value).resolve()
-            managed_paths.append(str(resolved.relative_to(storage_root.resolve())))
-        except Exception:
-            managed_paths.append(path_value)
-    return ManagementFoldersResponse(
-        data={
-            "logical": {
-                "series": grouped_series(),
-                "authors": grouped("author", "未知作者"),
-                "formats": grouped_media_kinds(),
-                "sources": [
-                    {
-                        "name": name,
-                        "count": len(items),
-                        "sizeBytes": sum(
-                            int(item.get("sizeBytes") or 0) for item in items
-                        ),
-                        "items": items[:20],
-                    }
-                    for name, items in sorted(
-                        by_source.items(), key=lambda item: item[0]
-                    )
-                ],
-            },
-            "disk": {
-                "sources": source_nodes,
-                "managed": {
-                    "rootPath": str(storage_root / "library"),
-                    "tree": _path_tree(managed_paths, "library"),
-                },
-            },
-            "works": work_items,
         }
     )
 

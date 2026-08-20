@@ -316,16 +316,6 @@ def management_card_counts(db: Session) -> dict[str, int]:
     }
 
 
-def list_library_file_paths(db: Session) -> set[str]:
-    return {
-        str(path)
-        for path in db.scalars(
-            select(LibraryFile.path).where(LibraryFile.path.is_not(None))
-        ).all()
-        if path
-    }
-
-
 def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
@@ -381,19 +371,6 @@ def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, An
         }
         for row in rows
     ]
-
-
-def list_management_file_rows(
-    db: Session,
-    *,
-    limit: int = 2000,
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(LibraryFile.path, LibraryFile.size_bytes)
-        .order_by(LibraryFile.path.asc(), LibraryFile.id.asc())
-        .limit(limit)
-    ).all()
-    return [{"path": row.path, "sizeBytes": int(row.size_bytes or 0)} for row in rows]
 
 
 def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]:

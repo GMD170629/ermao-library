@@ -11,7 +11,6 @@ from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 from app.contracts.system_events import SystemEvent
-from app.modules.library.domain.layout import LibraryOrganizationMode
 
 MediaKind = Literal["EBOOK", "COMIC", "AUDIOBOOK"]
 ReadingStatus = Literal["UNREAD", "READING", "FINISHED"]
@@ -435,7 +434,6 @@ class ContinueReadingPayload(HttpContractModel):
 class ManagementCards(HttpContractModel):
     failed_imports: int = Field(alias="failedImports")
     failed_downloads: int = Field(alias="failedDownloads")
-    orphan_files: int = Field(alias="orphanFiles")
     pending_organize: int = Field(alias="pendingOrganize")
     managed_storage_bytes: int = Field(alias="managedStorageBytes")
     event_log_size_bytes: int = Field(alias="eventLogSizeBytes")
@@ -458,71 +456,6 @@ class ManagementOverviewPayload(HttpContractModel):
     cards: ManagementCards
     checks: ManagementChecks
     recent_events: list[SystemEvent] = Field(alias="recentEvents")
-
-
-class SourceFolderChild(HttpContractModel):
-    name: str
-    path: str
-    type: Literal["folder", "file", "unknown"]
-    size_bytes: int = Field(alias="sizeBytes")
-    mtime_ms: int | None = Field(default=None, alias="mtimeMs")
-    error: str | None = None
-
-
-class SourceFolderNode(HttpContractModel):
-    id: str
-    name: str
-    root_path: str = Field(alias="rootPath")
-    organization_mode: LibraryOrganizationMode = Field(alias="organizationMode")
-    enabled: bool
-    ignore_patterns: str | None = Field(alias="ignorePatterns")
-    ignore_hidden: bool = Field(alias="ignoreHidden")
-    min_file_size_bytes: int = Field(alias="minFileSizeBytes")
-    description: str | None
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    readable: bool
-    writable: bool
-    children: list[SourceFolderChild]
-
-
-class LogicalFolderGroup(HttpContractModel):
-    name: str
-    count: int
-    size_bytes: int = Field(alias="sizeBytes")
-    items: list[ManagementWorkSummary]
-
-
-class LogicalFolders(HttpContractModel):
-    series: list[LogicalFolderGroup]
-    authors: list[LogicalFolderGroup]
-    formats: list[LogicalFolderGroup]
-    sources: list[LogicalFolderGroup]
-
-
-class PathTreeNode(HttpContractModel):
-    name: str
-    type: Literal["folder", "file"]
-    path: str
-    children: list[PathTreeNode] = Field(default_factory=list)
-    file_count: int = Field(alias="fileCount")
-    size_bytes: int = Field(alias="sizeBytes")
-
-
-class ManagedDiskTree(HttpContractModel):
-    root_path: str = Field(alias="rootPath")
-    tree: PathTreeNode
-
-
-class DiskFolders(HttpContractModel):
-    sources: list[SourceFolderNode]
-    managed: ManagedDiskTree
-
-
-class ManagementFoldersPayload(HttpContractModel):
-    logical: LogicalFolders
-    disk: DiskFolders
-    works: list[ManagementWorkSummary]
 
 
 class SeriesSummary(HttpContractModel):
@@ -994,7 +927,6 @@ DashboardSummaryResponse = SuccessEnvelope[DashboardSummaryPayload]
 WorkSummariesResponse = SuccessEnvelope[WorkSummariesPayload]
 ContinueReadingResponse = SuccessEnvelope[ContinueReadingPayload]
 ManagementOverviewResponse = SuccessEnvelope[ManagementOverviewPayload]
-ManagementFoldersResponse = SuccessEnvelope[ManagementFoldersPayload]
 SeriesResponse = SuccessEnvelope[SeriesPayload]
 LibraryGroupingsResponse = SuccessEnvelope[LibraryGroupingsPayload]
 WorksResponse = SuccessEnvelope[WorksPayload]
