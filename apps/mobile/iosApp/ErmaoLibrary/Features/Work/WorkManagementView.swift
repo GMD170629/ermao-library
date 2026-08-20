@@ -2,8 +2,7 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 enum WorkManagementTask: String, Identifiable {
-    case addSeries, editWork, recognize, cover, editVolume, mediaKind, split, kindle
-    case deleteWork, deleteVolume
+    case addSeries, editWork, recognize, cover, editVolume, mediaKind, kindle
 
     var id: String { rawValue }
 }
@@ -15,12 +14,9 @@ struct WorkManagementView: View {
     let task: WorkManagementTask
     let detail: WorkDetailContent
     let volume: WorkVolume?
-    let downloadAction: (WorkVolume) -> Void
-    let removeDownload: (WorkVolume) -> Void
     let chooseCover: () -> Void
     let workCover: AnyView
     let downloadForVolume: (String) -> ManagedDownloadRecord?
-    let onManagedVolumeChange: (String?) -> Void
 
     @State private var page: Page = .editWork
     @State private var title = ""
@@ -29,8 +25,6 @@ struct WorkManagementView: View {
     @State private var series = ""
     @State private var seriesIndex = ""
     @State private var tags = ""
-    @State private var volumeIndex = ""
-    @State private var sortOrder = "0"
     @State private var publisher = ""
     @State private var language = ""
     @State private var isbn = ""
@@ -45,11 +39,9 @@ struct WorkManagementView: View {
     @State private var selectedKind: ErmaoShared.ManagedMediaKind = .ebook
     @State private var selectedReadingStatus: ErmaoShared.ManagedReadingStatus = .unread
     @State private var selectedKindleFileID: String?
-    @State private var confirmsDeletion = false
-    @State private var confirmsDownloadRemoval = false
     @State private var confirmsCoverRegeneration = false
 
-    private enum Page { case addSeries, editWork, editVolume, metadata, cover, readingStatus, mediaKind, split, kindle }
+    private enum Page { case addSeries, editWork, editVolume, metadata, cover, readingStatus, mediaKind, kindle }
 
     private var activeVolume: WorkVolume? {
         managedVolumeID.flatMap { id in detail.volumes.first { $0.id == id } }
@@ -67,9 +59,7 @@ struct WorkManagementView: View {
         case .cover: .cover
         case .editVolume: .editVolume
         case .mediaKind: .mediaKind
-        case .split: .split
         case .kindle: .kindle
-        case .deleteWork, .deleteVolume: volume == nil ? .editWork : .editVolume
         }
     }
 
@@ -81,10 +71,7 @@ struct WorkManagementView: View {
         case .cover: "management.cover"
         case .editVolume: "management.editVolume"
         case .mediaKind: "management.mediaKind"
-        case .split: "management.split"
         case .kindle: "management.kindle"
-        case .deleteWork: "management.deleteWork"
-        case .deleteVolume: "management.deleteVolume"
         }
     }
 
@@ -101,7 +88,6 @@ struct WorkManagementView: View {
             case .cover: coverManagement
             case .readingStatus: readingStatus
             case .mediaKind: mediaKind
-            case .split: split
             case .kindle: kindle
             }
         }
@@ -118,43 +104,9 @@ struct WorkManagementView: View {
             managedVolumeID = volume?.id
             page = initialPage
             prepareFields()
-            if task == .deleteWork || task == .deleteVolume { confirmsDeletion = true }
         }
         .onChange(of: store.metadataProviders.map(\.id)) { ids in
             if providerID.isEmpty { providerID = ids.first ?? "" }
-        }
-        .onChange(of: store.completedAction) { action in
-            guard let action else { return }
-            switch action {
-            case .volumeReclassified, .volumeSplit, .volumeDeleted:
-                managedVolumeID = nil
-                onManagedVolumeChange(nil)
-            default: break
-            }
-        }
-        .confirmationDialog(
-            LocalizedStringKey(activeVolume == nil ? "management.deleteWork" : "management.deleteVolume"),
-            isPresented: $confirmsDeletion,
-            titleVisibility: .visible
-        ) {
-            Button(LocalizedStringKey(activeVolume == nil ? "management.deleteWork" : "management.deleteVolume"), role: .destructive) {
-                if let activeVolume { store.deleteVolume(activeVolume) } else { store.deleteWork() }
-            }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text(LocalizedStringKey(activeVolume == nil ? "management.confirmDeleteWork" : "management.confirmDeleteVolume"))
-        }
-        .confirmationDialog(
-            "downloads.remove.confirm.title",
-            isPresented: $confirmsDownloadRemoval,
-            titleVisibility: .visible
-        ) {
-            Button("downloads.remove.action", role: .destructive) {
-                if let activeVolume { removeDownload(activeVolume) }
-            }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text("downloads.remove.confirm.message")
         }
         .confirmationDialog(
             "management.regenerateCoverConfirmTitle",
@@ -246,11 +198,6 @@ struct WorkManagementView: View {
     @ViewBuilder private var editVolume: some View {
         if let volume = activeVolume {
             Section {
-                TextField("management.title", text: $title)
-                TextField("management.volumeIndex", text: $volumeIndex)
-                    .keyboardType(.decimalPad)
-                TextField("management.sortOrder", text: $sortOrder)
-                    .keyboardType(.numberPad)
                 TextField("management.publisher", text: $publisher)
                 TextField("management.language", text: $language)
                 TextField("management.isbn", text: $isbn)
@@ -259,9 +206,6 @@ struct WorkManagementView: View {
                 Button("management.save") {
                     store.updateVolume(
                         volume,
-                        title: title,
-                        index: Double(volumeIndex),
-                        sortOrder: Int32(sortOrder) ?? 0,
                         publisher: publisher.nilIfBlank,
                         language: language.nilIfBlank,
                         isbn: isbn.nilIfBlank,
@@ -269,7 +213,6 @@ struct WorkManagementView: View {
                         narrator: narrator.nilIfBlank
                     )
                 }
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || Int32(sortOrder) == nil)
             }
         }
     }
@@ -327,26 +270,11 @@ struct WorkManagementView: View {
                 Button("management.mediaKind") {
                     store.reclassify(
                         volume,
-                        kind: selectedKind,
-                        work: detail.work,
-                        localKind: localKind(selectedKind)
+                        kind: selectedKind
                     )
                 }
                 .disabled(hasActiveDownload || selectedKind == sharedKind(activeVolume?.libraryMediaKind ?? .ebook))
                 if hasActiveDownload { Text("management.activeDownloadBlocked") }
-            }
-        }
-    }
-
-    @ViewBuilder private var split: some View {
-        if let volume = activeVolume {
-            Section {
-                TextField("management.title", text: $title)
-                TextField("management.author", text: $author)
-                Button("management.split") {
-                    store.split(volume, title: title, author: author.nilIfBlank, mediaKind: volume.libraryMediaKind)
-                }
-                .disabled(title.isEmpty)
             }
         }
     }
@@ -400,8 +328,6 @@ struct WorkManagementView: View {
         series = detail.seriesFacet?.name ?? ""
         seriesIndex = detail.seriesIndex.map(String.init) ?? ""
         tags = detail.tags.joined(separator: ", ")
-        volumeIndex = activeVolume?.volumeIndex.map(String.init) ?? ""
-        sortOrder = activeVolume.map { String($0.sortOrder) } ?? "0"
         publisher = activeVolume?.publisher ?? ""
         language = activeVolume?.language ?? ""
         isbn = activeVolume?.isbn ?? ""
@@ -411,51 +337,8 @@ struct WorkManagementView: View {
         providerID = store.metadataProviders.first?.id ?? ""
     }
 
-    private func downloadButton(download: ManagedDownloadRecord?, action: @escaping () -> Void) -> some View {
-        let title: LocalizedStringKey
-        let image: String
-        switch download?.state {
-        case .queued, .downloading:
-            title = "work.volume.download.pause"
-            image = "pause.circle"
-        case .paused, .failedRetryable, .failedTerminal:
-            title = "work.volume.download.retry"
-            image = "arrow.clockwise.circle"
-        case .completed:
-            title = "work.volume.download.completed"
-            image = "checkmark.circle"
-        case nil:
-            title = "work.volume.download.action"
-            image = "icloud.and.arrow.down"
-        }
-        return Button(title, systemImage: image, action: action)
-    }
-
     private func sharedKind(_ kind: LibraryMediaKind) -> ErmaoShared.ManagedMediaKind {
         switch kind { case .ebook: .ebook; case .comic: .comic; case .audiobook: .audiobook }
-    }
-
-    private func localKind(_ kind: ErmaoShared.ManagedMediaKind) -> LibraryMediaKind {
-        switch kind {
-        case .ebook: .ebook
-        case .comic: .comic
-        case .audiobook: .audiobook
-        default: activeVolume?.libraryMediaKind ?? .ebook
-        }
-    }
-
-    private func volumeSummary(_ volume: WorkVolume) -> String {
-        let state: String
-        switch downloadForVolume(volume.id)?.state {
-        case .queued, .downloading: state = String(localized: "management.downloadActive")
-        case .paused: state = String(localized: "management.downloadPaused")
-        case .completed: state = String(localized: "work.volume.download.completed")
-        case .failedRetryable, .failedTerminal: state = String(localized: "downloads.failed")
-        case nil: state = String(localized: "management.notDownloaded")
-        }
-        return [volume.files.first?.path.split(separator: ".").last.map { String($0).uppercased() }, state]
-            .compactMap { $0 }
-            .joined(separator: " · ")
     }
 
     private func kindleFile(_ file: WorkVolumeFile) -> Bool {

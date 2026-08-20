@@ -193,34 +193,6 @@ final class DownloadCenterStore: ObservableObject {
         remove(record)
     }
 
-    /// Rewrites catalog ownership after the server moves the same volume. The verified file
-    /// stays at its existing managed path and is never copied or removed.
-    func rehomeCompleted(
-        volumeID: String,
-        targetWorkID: String,
-        targetWorkTitle: String,
-        targetWorkAuthor: String,
-        targetVersionID: String,
-        targetVersionSourceKey: String,
-        targetVersionSourceName: String?,
-        targetVersionCompleted: Bool?
-    ) {
-        guard var record = record(for: volumeID), record.isVerifiedOfflineCopy else { return }
-        record.workID = targetWorkID
-        record.workTitle = targetWorkTitle
-        record.workAuthor = targetWorkAuthor
-        record.versionID = targetVersionID
-        record.versionSourceKey = targetVersionSourceKey
-        record.versionSourceName = targetVersionSourceName
-        record.versionCompleted = targetVersionCompleted
-        record.updatedAt = Date()
-        replace(record)
-        Task {
-            do { try await repository.update(record) }
-            catch { storageErrorCode = "DOWNLOAD_MANIFEST_WRITE_FAILED" }
-        }
-    }
-
     func localFileURL(for record: ManagedDownloadRecord) async -> URL? {
         await repository.fileURL(for: record)
     }

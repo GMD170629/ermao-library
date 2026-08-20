@@ -3,16 +3,9 @@ import Foundation
 
 @MainActor
 final class WorkManagementStore: ObservableObject {
-    struct PendingOwnership {
-        let volumeID: String
-        let workID: String?
-        let workTitle: String
-        let workAuthor: String
-        let mediaKind: LibraryMediaKind
-    }
     enum Action: Equatable {
-        case workUpdated, coverUpdated, workDeleted
-        case volumeUpdated, volumeReclassified, volumeSplit, volumeDeleted
+        case workUpdated, coverUpdated
+        case volumeUpdated, volumeReclassified
         case metadataApplied, kindleQueued, readingStatusUpdated
     }
 
@@ -21,8 +14,6 @@ final class WorkManagementStore: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var errorCode: String?
     @Published private(set) var completedAction: Action?
-    @Published private(set) var lastOutcome: ErmaoShared.WorkMutationOutcome?
-    @Published private(set) var pendingOwnership: PendingOwnership?
     @Published private(set) var metadataProviders: [ErmaoShared.MetadataProvider] = []
     @Published private(set) var metadataCandidates: [ErmaoShared.MetadataCandidate] = []
     @Published private(set) var kindleSettings: ErmaoShared.KindleSettings?
@@ -52,8 +43,6 @@ final class WorkManagementStore: ObservableObject {
 
     func consumeCompletion() {
         completedAction = nil
-        lastOutcome = nil
-        pendingOwnership = nil
         errorCode = nil
     }
 
@@ -99,17 +88,8 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func deleteWork() {
-        runMutation(.workDeleted) { [repository, context, workID] in
-            try await repository.deleteWork(context: context, workId: workID)
-        }
-    }
-
     func updateVolume(
         _ volume: WorkVolume,
-        title: String,
-        index: Double?,
-        sortOrder: Int32,
         publisher: String?,
         language: String?,
         isbn: String?,
@@ -122,9 +102,6 @@ final class WorkManagementStore: ObservableObject {
                 workId: workID,
                 volumeId: volume.id,
                 draft: ErmaoShared.VolumeMetadataDraft(
-                    title: title,
-                    volumeIndex: index.map(KotlinDouble.init(double:)),
-                    sortOrder: sortOrder,
                     publisher: publisher,
                     language: language,
                     isbn: isbn,
@@ -137,36 +114,12 @@ final class WorkManagementStore: ObservableObject {
 
     func reclassify(
         _ volume: WorkVolume,
-        kind: ErmaoShared.ManagedMediaKind,
-        work: WorkCard,
-        localKind: LibraryMediaKind
+        kind: ErmaoShared.ManagedMediaKind
     ) {
-        pendingOwnership = PendingOwnership(
-            volumeID: volume.id, workID: work.id, workTitle: work.title,
-            workAuthor: work.author, mediaKind: localKind
-        )
         runMutation(.volumeReclassified) { [repository, context, workID] in
             try await repository.reclassifyVolume(
                 context: context, workId: workID, volumeId: volume.id, mediaKind: kind
             )
-        }
-    }
-
-    func split(_ volume: WorkVolume, title: String, author: String?, mediaKind: LibraryMediaKind) {
-        pendingOwnership = PendingOwnership(
-            volumeID: volume.id, workID: nil, workTitle: title,
-            workAuthor: author ?? "", mediaKind: mediaKind
-        )
-        runMutation(.volumeSplit) { [repository, context, workID] in
-            try await repository.splitVolume(
-                context: context, workId: workID, volumeId: volume.id, title: title, author: author
-            )
-        }
-    }
-
-    func deleteVolume(_ volume: WorkVolume) {
-        runMutation(.volumeDeleted) { [repository, context, workID] in
-            try await repository.deleteVolume(context: context, workId: workID, volumeId: volume.id)
         }
     }
 
@@ -259,8 +212,7 @@ final class WorkManagementStore: ObservableObject {
     ) {
         runValue {
             let result = try await operation()
-            let outcome: ErmaoShared.WorkMutationOutcome = try Self.value(result)
-            self.lastOutcome = outcome
+            let _: ErmaoShared.WorkMutationOutcome = try Self.value(result)
             self.completedAction = action
         }
     }

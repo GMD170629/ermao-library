@@ -114,20 +114,9 @@ data class ImportTaskLogPage(
     val pageInfo: PageInfo,
 )
 
-enum class ImportDeleteMode(val wireValue: String) {
-    Record("record"),
-    Source("source"),
-}
-
 data class ImportTaskDeletion(
     val id: String,
     val deleted: Boolean,
-    val deleteMode: ImportDeleteMode,
-    val deletedLibraryRecord: Boolean,
-    val deletedWorkRecord: Boolean,
-    val deletedFiles: Int,
-    val missingFiles: List<String>,
-    val failedFileDeleteCount: Int,
 )
 
 enum class ImportScanStatus(val wireValue: String) {

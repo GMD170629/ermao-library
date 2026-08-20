@@ -145,7 +145,7 @@ export function ImportPreferencesPanel() {
       setSaved(next);
       setHasUserEdits(false);
       window.dispatchEvent(new Event('shuku:settings-changed'));
-      toast.success('导入偏好已保存', '新的规则会用于后续上传、监控扫描和后台导入。');
+      toast.success('导入偏好已保存', '新的规则会用于后续上传、书库扫描和后台导入。');
     } catch (reason) {
       toast.error('保存导入偏好失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
@@ -159,7 +159,7 @@ export function ImportPreferencesPanel() {
         <div className="flex items-start justify-between gap-5">
           <div>
             <h3 id="stability-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>文件稳定性检查</I18nText></h3>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>监控目录发现文件后，确认文件大小与修改时间不再变化，再加入导入队列。</I18nText></p>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>书库扫描发现文件后，确认文件大小与修改时间不再变化，再加入导入队列。</I18nText></p>
           </div>
           <Switch
             checked={preferences.stabilityEnabled}

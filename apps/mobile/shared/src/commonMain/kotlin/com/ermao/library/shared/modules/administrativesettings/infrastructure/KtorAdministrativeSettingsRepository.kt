@@ -207,17 +207,11 @@ internal class KtorAdministrativeSettingsRepository(
     override suspend fun deleteImportTask(
         context: AdministrativeSettingsContext,
         taskId: String,
-        mode: ImportDeleteMode,
-        deleteLibraryRecord: Boolean,
     ) = idCall(
         context,
         ApiMethod.Delete,
         "/api/import-tasks",
         taskId,
-        body = buildJsonObject {
-            put("deleteMode", mode.wireValue)
-            put("deleteLibraryRecord", deleteLibraryRecord)
-        },
         transform = JsonElement::toImportTaskDeletion,
     )
 

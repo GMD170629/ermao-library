@@ -880,9 +880,6 @@ struct WorkDetailView: View {
                 if kindleEligible {
                     actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume?.id) })
                 }
-                actions.append(action("delete", "work.control.delete", "trash", destructive: true) {
-                    openManagement(.deleteWork, volumeID: nil)
-                })
             }
         } else if let volume {
             actions.append(action("unread", "work.control.markUnread", "bookmark") { markUnread(volume) })
@@ -892,11 +889,9 @@ struct WorkDetailView: View {
             if canManageSystem {
                 actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editVolume, volumeID: volume.id) })
                 actions.append(action("mediaKind", "work.control.changeMediaType", "square.stack.3d.up", enabled: !activeDownload) { openManagement(.mediaKind, volumeID: volume.id) })
-                actions.append(action("split", "work.control.split", "arrow.triangle.branch", enabled: !activeDownload) { openManagement(.split, volumeID: volume.id) })
                 if kindleEligible {
                     actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume.id) })
                 }
-                actions.append(action("delete", "work.control.delete", "trash", enabled: !activeDownload, destructive: true) { openManagement(.deleteVolume, volumeID: volume.id) })
             }
         }
         return actions
@@ -943,73 +938,18 @@ struct WorkDetailView: View {
                 task: task,
                 detail: detail,
                 volume: volume,
-                downloadAction: { selectedVolume in
-                    handleDownload(selectedVolume, detail: detail)
-                    managementTask = nil
-                },
-                removeDownload: { selectedVolume in
-                    if let record = downloads.record(for: selectedVolume.id) {
-                        downloads.remove(record)
-                    }
-                    managementTask = nil
-                },
                 chooseCover: { importsCover = true },
                 workCover: AnyView(cover(detail)),
-                downloadForVolume: { downloads.record(for: $0) },
-                onManagedVolumeChange: { managedVolumeID = $0 }
+                downloadForVolume: { downloads.record(for: $0) }
             )
         }
     }
 
     private func handleManagementCompletion(_ action: WorkManagementStore.Action?) {
         guard let action, let managementStore else { return }
-        let detail = currentDetail
-        switch action {
-        case .workDeleted:
-            detail?.volumes.forEach { downloads.remove(volumeID: $0.id) }
-            onWorkDeleted()
-        case .volumeDeleted:
-            if let managedVolumeID { downloads.remove(volumeID: managedVolumeID) }
-        case .volumeSplit:
-            rewriteCompletedDownload(move: .split, store: managementStore)
-        case .volumeReclassified:
-            break
-        default: break
-        }
         managementTask = nil
-        if [.volumeReclassified, .volumeSplit, .volumeDeleted].contains(action) {
-            managedVolumeID = nil
-        }
         managementStore.consumeCompletion()
-        if action != .workDeleted { store.load() }
-    }
-
-    private func rewriteCompletedDownload(
-        move: DownloadStructuralMove,
-        store: WorkManagementStore
-    ) {
-        guard let pending = store.pendingOwnership,
-              let outcome = store.lastOutcome,
-              let record = downloads.record(for: pending.volumeID),
-              record.isVerifiedOfflineCopy,
-              let rewrite = DownloadOwnershipRewrite.forMove(
-                  move,
-                  targetWorkID: outcome.targetWorkId,
-                  targetVersionID: outcome.targetVersionId,
-                  targetWorkTitle: pending.workTitle,
-                  targetWorkAuthor: pending.workAuthor
-              )
-        else { return }
-        downloads.rehomeCompleted(
-            volumeID: pending.volumeID,
-            targetWorkID: rewrite.targetWorkID,
-            targetWorkTitle: rewrite.targetWorkTitle,
-            targetWorkAuthor: rewrite.targetWorkAuthor,
-            targetVersionID: rewrite.targetVersionID,
-            targetVersionSourceKey: rewrite.targetVersionSourceKey,
-            targetVersionSourceName: rewrite.targetVersionSourceName,
-            targetVersionCompleted: rewrite.targetVersionCompleted
-        )
+        store.load()
     }
 
     private func openShelfPicker() {

@@ -384,18 +384,11 @@ internal fun JsonElement.toImportTaskLogPage(): ImportTaskLogPage {
 
 internal fun JsonElement.toImportTaskDeletion(): ImportTaskDeletion {
     val deletion = objectValue("INVALID_IMPORT_DELETION").expectKeys(
-        "deleted", "id", "deleteMode", "deleteLibraryRecord", "deletedLibraryRecord", "deletedWorkRecord",
-        "deletedLibraryDatabaseRecords", "libraryRecordId", "deletedFiles", "missingFiles", "failedFileDeletes",
+        "deleted", "id",
     )
     return ImportTaskDeletion(
         id = deletion.requiredString("id"),
         deleted = deletion.requiredBoolean("deleted"),
-        deleteMode = enumValue(deletion.requiredString("deleteMode"), ImportDeleteMode.entries, ImportDeleteMode::wireValue, "UNSUPPORTED_DELETE_MODE"),
-        deletedLibraryRecord = deletion.requiredBoolean("deletedLibraryRecord"),
-        deletedWorkRecord = deletion.requiredBoolean("deletedWorkRecord"),
-        deletedFiles = deletion.requiredInt("deletedFiles"),
-        missingFiles = deletion.requiredStringList("missingFiles"),
-        failedFileDeleteCount = deletion.requiredArray("failedFileDeletes").size,
     )
 }
 

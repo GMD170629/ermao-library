@@ -179,9 +179,7 @@
     <string name="work_control_upload_cover">上传封面</string>
     <string name="work_control_regenerate_cover">重新生成封面</string>
     <string name="work_control_send_kindle">发送到 Kindle</string>
-    <string name="work_control_delete">删除</string>
     <string name="work_control_change_media_type">修改媒体类型</string>
-    <string name="work_control_split">拆分</string>
     <string name="work_control_selected_volume_format">%1$s · %2$s</string>
     <string name="work_quick_download">下载</string>
     <string name="work_quick_downloading">下载中</string>
@@ -514,19 +512,14 @@
     <string name="management_upload_cover">上传封面</string>
     <string name="management_regenerate_cover">重新生成封面</string>
     <string name="management_kindle">发送到 Kindle</string>
-    <string name="management_delete_work">删除图书记录</string>
     <string name="management_edit_volume">编辑卷册信息</string>
     <string name="management_media_kind">修改媒体类型</string>
-    <string name="management_split">拆分为新图书</string>
-    <string name="management_delete_volume">删除卷册</string>
     <string name="management_title">标题</string>
     <string name="management_author">作者</string>
     <string name="management_description">简介</string>
     <string name="management_series">系列</string>
     <string name="management_series_index">系列序号</string>
     <string name="management_tags">标签（用逗号分隔）</string>
-    <string name="management_volume_index">卷册序号</string>
-    <string name="management_sort_order">排序值</string>
     <string name="management_publisher">出版社</string>
     <string name="management_language">语言</string>
     <string name="management_isbn">ISBN</string>
@@ -535,8 +528,6 @@
     <string name="management_search">搜索</string>
     <string name="management_query">书名、系列名或关键词</string>
     <string name="management_apply">应用所选元数据</string>
-    <string name="management_confirm_delete_work">确定删除此图书记录吗？源文件会保留，本机离线下载会移除。</string>
-    <string name="management_confirm_delete_volume">确定删除此卷册吗？本机离线下载也会一并移除。</string>
     <string name="management_save">保存</string>
     <string name="management_failed">操作未完成（%1$s）。</string>
     <string name="management_active_download_blocked">请先暂停或取消下载，再修改卷册结构。</string>
@@ -548,7 +539,7 @@
     <string name="management_cover">封面</string>
     <string name="management_tags_label">标签</string>
     <string name="management_published_at">出版时间</string>
-    <string name="management_apply_all_volumes">将卷册字段应用到当前媒体版本全部卷册</string>
+    <string name="management_apply_all_volumes">将卷册字段应用到当前版本全部卷册</string>
     <string name="management_updated">更改已保存。</string>
     <string name="management_upload_cover_description">选择不超过 10 MB 的 JPEG、PNG 或 WebP 图片。</string>
     <string name="management_regenerate_cover_description">根据当前源文件重新生成封面。</string>

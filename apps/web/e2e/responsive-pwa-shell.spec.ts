@@ -1234,17 +1234,17 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
-  await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toBeVisible();
+  await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(0);
   await expect(batchDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
   await batchDialog.getByRole('button', { name: '关闭批量操作' }).click();
   await page.locator('[data-work-id="desktop-list-work-2"]').getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const twoBookDialog = page.getByRole('dialog', { name: '批量更新元数据' });
   await expect(twoBookDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
-  await expect(twoBookDialog.getByRole('button', { name: '删除', exact: true })).toBeEnabled();
+  await expect(twoBookDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(0);
   await twoBookDialog.getByRole('button', { name: '关闭批量操作' }).click();
   await managedBookRow.click({ button: 'right' });
-  await expect(page.getByRole('menuitem', { name: /批量删除图书/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /批量删除图书/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '清空', exact: true }).click();
 

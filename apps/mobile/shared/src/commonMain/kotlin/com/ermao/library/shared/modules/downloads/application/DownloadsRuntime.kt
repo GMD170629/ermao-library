@@ -1,7 +1,6 @@
 package com.ermao.library.shared.modules.downloads.application
 
 import com.ermao.library.shared.modules.downloads.domain.CompletedDownloadArtifact
-import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 import com.ermao.library.shared.modules.downloads.domain.DownloadTask
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
@@ -45,45 +44,6 @@ class DownloadsRuntime(
     suspend fun removeArtifact(namespace: DownloadNamespace, volumeId: String) {
         require(volumeId.isNotBlank())
         catalog.deleteArtifact(namespace, volumeId)
-    }
-
-    /**
-     * Keeps a verified local file available when a server-side management operation moves
-     * the same volume into another work or version. The byte reference is unchanged;
-     * only its catalog ownership is rewritten after the remote mutation succeeds.
-     */
-    suspend fun rehomeCompletedArtifact(
-        namespace: DownloadNamespace,
-        volumeId: String,
-        targetWorkId: String,
-        targetVersionId: String,
-        targetVersionSourceKey: String,
-        targetVersionSourceName: String?,
-        targetWorkTitle: String,
-        targetWorkAuthor: String?,
-        targetCoverApiPath: String?,
-        targetVersionCompleted: Boolean? = null,
-    ): CompletedDownloadArtifact? {
-        require(volumeId.isNotBlank())
-        require(targetWorkId.isNotBlank())
-        require(targetVersionId.isNotBlank())
-        require(targetVersionSourceKey.isNotBlank())
-        require(targetWorkTitle.isNotBlank())
-        val current = artifact(namespace, volumeId) ?: return null
-        val moved = current.copy(
-            descriptor = current.descriptor.copy(
-                identity = DownloadIdentity(namespace, targetWorkId, volumeId),
-                workTitle = targetWorkTitle,
-                workAuthor = targetWorkAuthor,
-                coverApiPath = targetCoverApiPath,
-                versionId = targetVersionId,
-                versionSourceKey = targetVersionSourceKey,
-                versionSourceName = targetVersionSourceName,
-                versionCompleted = targetVersionCompleted,
-            ),
-        )
-        catalog.saveArtifact(moved)
-        return moved
     }
 
     suspend fun readerAccess(request: ReaderAccessRequest): ReaderAccessDecision =

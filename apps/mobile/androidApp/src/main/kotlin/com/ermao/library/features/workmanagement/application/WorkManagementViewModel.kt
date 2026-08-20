@@ -5,8 +5,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.ermao.library.shared.modules.downloads.DownloadNamespace
-import com.ermao.library.shared.modules.downloads.DownloadsRuntime
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
@@ -35,7 +33,6 @@ data class WorkManagementUiState(
     val errorCode: String? = null,
     val fieldErrors: Map<String, List<String>> = emptyMap(),
     val completedMutation: WorkManagementCompletion? = null,
-    val deletedWork: Boolean = false,
     val metadataProviders: List<MetadataProvider> = emptyList(),
     val metadataCandidates: List<MetadataCandidate> = emptyList(),
     val metadataMessage: String? = null,
@@ -46,11 +43,8 @@ data class WorkManagementUiState(
 enum class WorkManagementCompletion {
     WorkUpdated,
     CoverUpdated,
-    WorkDeleted,
     VolumeUpdated,
     VolumeReclassified,
-    VolumeSplit,
-    VolumeDeleted,
     MetadataApplied,
     KindleQueued,
     ReadingStatusUpdated,
@@ -60,8 +54,6 @@ class WorkManagementViewModel(
     private val repository: WorkManagementRepository,
     private val context: WorkManagementContext,
     private val workId: String,
-    private val downloadsRuntime: DownloadsRuntime,
-    private val downloadNamespace: DownloadNamespace,
     private val onUnauthorized: () -> Unit,
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(WorkManagementUiState())
@@ -90,15 +82,6 @@ class WorkManagementViewModel(
         repository.regenerateCover(context, workId)
     }
 
-    fun deleteWork(volumeIds: List<String>) = mutate(
-        completion = WorkManagementCompletion.WorkDeleted,
-        block = { repository.deleteWork(context, workId) },
-        onSuccess = {
-            volumeIds.forEach { volumeId -> downloadsRuntime.removeArtifact(downloadNamespace, volumeId) }
-            mutableUiState.update { state -> state.copy(deletedWork = true) }
-        }
-    )
-
     fun updateVolume(volumeId: String, draft: VolumeMetadataDraft) = mutate(WorkManagementCompletion.VolumeUpdated) {
         repository.updateVolume(context, workId, volumeId, draft)
     }
@@ -107,32 +90,6 @@ class WorkManagementViewModel(
         mutate(WorkManagementCompletion.VolumeReclassified) {
             repository.reclassifyVolume(context, workId, volumeId, mediaKind)
         }
-    }
-
-    fun splitVolume(volumeId: String, title: String, author: String?) {
-        mutate(
-            completion = WorkManagementCompletion.VolumeSplit,
-            block = { repository.splitVolume(context, workId, volumeId, title, author) },
-            onSuccess = success@{ outcome ->
-                val artifact = downloadsRuntime.artifact(downloadNamespace, volumeId) ?: return@success
-                rehomeCompletedDownload(
-                    volumeId = volumeId,
-                    targetWorkId = outcome.targetWorkId,
-                    targetVersionId = outcome.targetVersionId,
-                    targetWorkTitle = title,
-                    targetWorkAuthor = author,
-                    targetCoverApiPath = artifact.descriptor.coverApiPath,
-                )
-            },
-        )
-    }
-
-    fun deleteVolume(volumeId: String) {
-        mutate(
-            completion = WorkManagementCompletion.VolumeDeleted,
-            block = { repository.deleteVolume(context, workId, volumeId) },
-            onSuccess = { downloadsRuntime.removeArtifact(downloadNamespace, volumeId) },
-        )
     }
 
     fun loadMetadataProviders(mediaKind: ManagedMediaKind) = query(
@@ -177,35 +134,6 @@ class WorkManagementViewModel(
         mutate(WorkManagementCompletion.ReadingStatusUpdated) {
             repository.setReadingStatus(context, volumeId, status)
         }
-
-    private suspend fun rehomeCompletedDownload(
-        volumeId: String,
-        targetWorkId: String?,
-        targetVersionId: String?,
-        targetWorkTitle: String,
-        targetWorkAuthor: String?,
-        targetCoverApiPath: String?,
-    ) {
-        val rewrite = downloadOwnershipRewriteForStructuralMove(
-            targetWorkId = targetWorkId,
-            targetVersionId = targetVersionId,
-            targetWorkTitle = targetWorkTitle,
-            targetWorkAuthor = targetWorkAuthor,
-            targetCoverApiPath = targetCoverApiPath,
-        ) ?: return
-        downloadsRuntime.rehomeCompletedArtifact(
-            namespace = downloadNamespace,
-            volumeId = volumeId,
-            targetWorkId = rewrite.targetWorkId,
-            targetVersionId = rewrite.targetVersionId,
-            targetVersionSourceKey = rewrite.targetVersionSourceKey,
-            targetVersionSourceName = rewrite.targetVersionSourceName,
-            targetWorkTitle = rewrite.targetWorkTitle,
-            targetWorkAuthor = rewrite.targetWorkAuthor,
-            targetCoverApiPath = rewrite.targetCoverApiPath,
-            targetVersionCompleted = rewrite.targetVersionCompleted,
-        )
-    }
 
     private fun checkCapability() {
         viewModelScope.launch {
@@ -281,13 +209,11 @@ class WorkManagementViewModel(
             repository: WorkManagementRepository,
             context: WorkManagementContext,
             workId: String,
-            downloadsRuntime: DownloadsRuntime,
-            downloadNamespace: DownloadNamespace,
             onUnauthorized: () -> Unit,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 WorkManagementViewModel(
-                    repository, context, workId, downloadsRuntime, downloadNamespace, onUnauthorized,
+                    repository, context, workId, onUnauthorized,
                 )
             }
         }

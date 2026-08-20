@@ -4,9 +4,7 @@ export type VolumeActionId =
   | 'set-media-kind'
   | 'set-ebook'
   | 'set-comic'
-  | 'set-audiobook'
-  | 'split'
-  | 'delete';
+  | 'set-audiobook';
 
 export type VolumeActionAvailability = Readonly<{
   action: VolumeActionId;
@@ -33,9 +31,5 @@ export function volumeActionAvailability({
   if (mediaKind !== 'EBOOK') actions.push({ action: 'set-ebook', disabled: false });
   if (mediaKind !== 'COMIC') actions.push({ action: 'set-comic', disabled: false });
   if (mediaKind !== 'AUDIOBOOK') actions.push({ action: 'set-audiobook', disabled: false });
-  actions.push(
-    { action: 'split', disabled: false },
-    { action: 'delete', disabled: false }
-  );
   return actions;
 }

@@ -279,14 +279,6 @@ export async function updateVolume(workId: string, volumeId: string, body: Recor
   });
 }
 
-export async function runVolumeAction(workId: string, volumeId: string, action: 'convert' | 'split' | 'move', body?: Record<string, unknown>): Promise<void> {
-  await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}/${action}`, {
-    method: 'POST',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  });
-}
-
 export async function reclassifyVolume(
   workId: string,
   volumeId: string,
@@ -305,20 +297,15 @@ export async function undoLibraryOperation(operationId: string): Promise<void> {
   await apiJson(`/api/library/operations/${encodeURIComponent(operationId)}/undo`, { method: 'POST' });
 }
 
-export async function deleteVolume(workId: string, volumeId: string): Promise<void> {
-  await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}`, { method: 'DELETE' });
-}
-
-export type VolumeBatchRequest =
-  | Readonly<{ action: 'SET_MEDIA_KIND'; volumeIds: string[]; targetMediaKind: MediaKind }>
-  | Readonly<{ action: 'SPLIT'; volumeIds: string[] }>
-  | Readonly<{ action: 'DELETE'; volumeIds: string[] }>;
+export type VolumeBatchRequest = Readonly<{
+  action: 'SET_MEDIA_KIND';
+  volumeIds: string[];
+  targetMediaKind: MediaKind;
+}>;
 
 export type VolumeBatchResult = Readonly<{
   affectedVolumeIds: string[];
-  targetWorkIds: string[];
   operationIds: string[];
-  deletedWork: boolean;
 }>;
 
 export async function runVolumeBatchAction(workId: string, request: VolumeBatchRequest): Promise<VolumeBatchResult> {
@@ -329,9 +316,7 @@ export async function runVolumeBatchAction(workId: string, request: VolumeBatchR
   }));
   return {
     affectedVolumeIds: Array.isArray(data.affectedVolumeIds) ? data.affectedVolumeIds.filter((value): value is string => typeof value === 'string') : [],
-    targetWorkIds: Array.isArray(data.targetWorkIds) ? data.targetWorkIds.filter((value): value is string => typeof value === 'string') : [],
-    operationIds: Array.isArray(data.operationIds) ? data.operationIds.filter((value): value is string => typeof value === 'string') : [],
-    deletedWork: data.deletedWork === true
+    operationIds: Array.isArray(data.operationIds) ? data.operationIds.filter((value): value is string => typeof value === 'string') : []
   };
 }
 
@@ -395,26 +380,4 @@ export async function uploadWorkCover(workId: string, file: File): Promise<void>
 
 export async function regenerateWorkCover(workId: string): Promise<void> {
   await apiJson(`/api/works/${encodeURIComponent(workId)}/cover/regenerate`, { method: 'POST' });
-}
-
-export type DeletedWorkResult = Readonly<{
-  deletedSourceFiles: number;
-  failedFileDeletes: ReadonlyArray<Readonly<{ path: string; message: string }>>;
-}>;
-
-export async function deleteWorkRecord(workId: string): Promise<DeletedWorkResult> {
-  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ deleteSource: false })
-  }));
-  return {
-    deletedSourceFiles: Math.max(0, finiteNumber(data.deletedSourceFiles)),
-    failedFileDeletes: (Array.isArray(data.failedFileDeletes) ? data.failedFileDeletes : []).flatMap((entry) => {
-      const item = record(entry);
-      const path = nullableString(item.path);
-      const message = nullableString(item.message);
-      return path && message ? [{ path, message }] : [];
-    })
-  };
 }

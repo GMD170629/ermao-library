@@ -96,16 +96,6 @@ class KtorWorkManagementRepository(
         workId: String,
     ): WorkManagementResult<Unit> = callUnit(context, ApiMethod.Post, "${workPath(workId)}/cover/regenerate")
 
-    override suspend fun deleteWork(
-        context: WorkManagementContext,
-        workId: String,
-    ): WorkManagementResult<WorkMutationOutcome> = call(
-        context,
-        ApiMethod.Delete,
-        workPath(workId),
-        encoder.encodeToString(DeleteWorkRequest()),
-    ) { WorkManagementResult.Content(WorkMutationOutcome(workId = workId, deletedWork = true)) }
-
     override suspend fun updateVolume(
         context: WorkManagementContext,
         workId: String,
@@ -118,9 +108,6 @@ class KtorWorkManagementRepository(
         workId,
         encoder.encodeToString(
             VolumeMetadataRequest(
-                title = draft.title.trim(),
-                volumeIndex = draft.volumeIndex,
-                sortOrder = draft.sortOrder,
                 publisher = draft.publisher.normalized(),
                 language = draft.language.normalized(),
                 isbn = draft.isbn.normalized(),
@@ -141,31 +128,6 @@ class KtorWorkManagementRepository(
         "${volumePath(workId, volumeId)}/reclassify",
         workId,
         encoder.encodeToString(ReclassifyRequest(mediaKind.wireValue)),
-    )
-
-    override suspend fun splitVolume(
-        context: WorkManagementContext,
-        workId: String,
-        volumeId: String,
-        title: String,
-        author: String?,
-    ): WorkManagementResult<WorkMutationOutcome> = mutationCall(
-        context,
-        ApiMethod.Post,
-        "${volumePath(workId, volumeId)}/split",
-        workId,
-        encoder.encodeToString(SplitRequest(title.trim(), author.normalized())),
-    )
-
-    override suspend fun deleteVolume(
-        context: WorkManagementContext,
-        workId: String,
-        volumeId: String,
-    ): WorkManagementResult<WorkMutationOutcome> = mutationCall(
-        context,
-        ApiMethod.Delete,
-        volumePath(workId, volumeId),
-        workId,
     )
 
     override suspend fun loadMetadataProviders(
@@ -297,9 +259,6 @@ class KtorWorkManagementRepository(
         WorkManagementResult.Content(
             WorkMutationOutcome(
                 workId = data.string("workId") ?: workId,
-                deletedWork = data.boolean("deletedWork") == true,
-                targetWorkId = data.string("targetWorkId"),
-                targetVersionId = data.string("targetVersionId"),
                 operationId = data.objectValue("operation")?.string("id"),
             ),
         )
@@ -355,13 +314,7 @@ private data class WorkMetadataRequest(
 )
 
 @Serializable
-private data class DeleteWorkRequest(val deleteSource: Boolean = false)
-
-@Serializable
 private data class VolumeMetadataRequest(
-    val title: String,
-    val volumeIndex: Double?,
-    val sortOrder: Int,
     val publisher: String?,
     val language: String?,
     val isbn: String?,
@@ -371,9 +324,6 @@ private data class VolumeMetadataRequest(
 
 @Serializable
 private data class ReclassifyRequest(val targetMediaKind: String, val applyTo: String = "VOLUME")
-
-@Serializable
-private data class SplitRequest(val title: String, val author: String?)
 
 @Serializable
 private data class MetadataSearchRequest(val source: String, val query: String)

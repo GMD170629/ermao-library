@@ -28,7 +28,3 @@ export type {
   ManagementWorkSummary
 } from './api/works';
 export { mediaKindsLabel, orderedMediaKinds } from './model/media-kind-label';
-export {
-  type MobileDeleteSwipeController,
-  useMobileDeleteSwipe
-} from './ui/use-mobile-delete-swipe';

@@ -56,7 +56,6 @@ type ImportScanJob = {
   restartCount: number;
 };
 
-type DeleteMode = 'record' | 'source';
 type StatusFilter = 'ALL' | ImportTask['status'];
 type PageSize = '10' | '20' | '50';
 
@@ -124,10 +123,6 @@ function originLabel(origin: ImportTask['origin']) {
   return '手动上传';
 }
 
-function sourceFileAvailable(task: ImportTask) {
-  return task.sourceFileExists !== false;
-}
-
 export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
@@ -148,8 +143,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [deleteTarget, setDeleteTarget] = useState<ImportTask | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [deleteMode, setDeleteMode] = useState<DeleteMode>('record');
-  const [deleteLibraryRecord, setDeleteLibraryRecord] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
@@ -286,8 +279,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   function openDeleteTask(task: ImportTask) {
-    setDeleteMode('record');
-    setDeleteLibraryRecord(false);
     setDeleteTarget(task);
   }
 
@@ -296,31 +287,22 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     if (targets.length === 0) return;
     setDeletingTaskId(bulkDeleteOpen ? 'bulk' : targets[0].id);
     try {
-      let deletedLibraryRecords = 0;
-      let failedFileDeletes = 0;
       for (const task of targets) {
         const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deleteMode, deleteLibraryRecord })
+          method: 'DELETE'
         });
         const text = await response.text();
-        const payload = text ? JSON.parse(text) as { ok: boolean; data?: { deletedFiles?: number; deletedLibraryRecord?: boolean; failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } } : null;
+        const payload = text ? JSON.parse(text) as { ok: boolean; error?: { message: string } } : null;
         if (!response.ok) throw new Error(payload?.error?.message ?? `删除失败：HTTP ${response.status}`);
         if (!payload?.ok) throw new Error(payload?.error?.message ?? '删除失败');
-        if (payload.data?.deletedLibraryRecord) deletedLibraryRecords += 1;
-        failedFileDeletes += payload.data?.failedFileDeletes?.length ?? 0;
       }
-      const fileMessage = deleteMode === 'source'
-        ? `已删除 ${targets.length} 条导入记录和对应源文件`
-        : `已删除 ${targets.length} 条导入记录`;
-      const successMessage = deletedLibraryRecords > 0 ? `${fileMessage}，并清理 ${deletedLibraryRecords} 个关联卷册` : fileMessage;
+      const successMessage = i18nAttribute('已删除 {value0} 条导入记录', { value0: targets.length });
       setDeleteTarget(null);
       setBulkDeleteOpen(false);
       setSelectedIds(new Set());
       setMessage(successMessage);
       setError('');
-      toast.success(successMessage, failedFileDeletes > 0 ? `有 ${failedFileDeletes} 个系统文件未能删除，请检查系统日志` : undefined);
+      toast.success(successMessage);
       await loadTasks(page);
     } catch (reason) {
       const nextError = reason instanceof Error ? reason.message : '删除失败';
@@ -355,7 +337,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const selectedTasks = useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [selectedIds, tasks]);
   const allPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedIds.has(task.id));
   const dialogTargets = bulkDeleteOpen ? selectedTasks : deleteTarget ? [deleteTarget] : [];
-  const canDeleteSources = dialogTargets.length > 0 && dialogTargets.every(sourceFileAvailable);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -373,8 +354,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   function openBulkDelete() {
-    setDeleteMode('record');
-    setDeleteLibraryRecord(false);
     setBulkDeleteOpen(true);
   }
 
@@ -544,43 +523,13 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">{bulkDeleteOpen ? i18nAttribute("批量删除 {value0} 条导入记录", { value0: dialogTargets.length }) : i18nAttribute("删除导入记录")}</h2>
-                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? i18nAttribute("选择对所有已选记录执行的删除行为。") : i18nAttribute("选择“{value0}”的删除范围。", { value0: dialogTargets[0].originalName ?? dialogTargets[0].sourcePath })}</p>
+                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? i18nAttribute("只删除所选扫描记录，源文件和书库结构保持不变。") : i18nAttribute("只删除“{value0}”的扫描记录，源文件和书库结构保持不变。", { value0: dialogTargets[0].originalName ?? dialogTargets[0].sourcePath })}</p>
               </div>
               <button type="button" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
             </div>
-            <div className="mt-5 space-y-2" role="radiogroup" aria-label={i18nAttribute("删除范围")}>
-              {([
-                { value: 'record' as const, label: '仅删除导入记录', description: '保留源文件。', available: true },
-                { value: 'source' as const, label: '同步删除源文件', description: '直接使用这些源文件的卷册将无法继续阅读。', available: canDeleteSources }
-              ]).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={deleteMode === option.value}
-                  disabled={!option.available || Boolean(deletingTaskId)}
-                  onClick={() => setDeleteMode(option.value)}
-                  className={`w-full rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${deleteMode === option.value ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-                >
-                  <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-                    {i18nAttribute(option.label)}
-                    {!option.available ? <span className="text-xs font-normal text-slate-400"><I18nText>文件不存在</I18nText></span> : null}
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
-                </button>
-              ))}
-            </div>
-            <label className={`mt-4 flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${deleteLibraryRecord ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
-              <input type="checkbox" checked={deleteLibraryRecord} onChange={(event) => setDeleteLibraryRecord(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-              <span>
-                <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册</I18nText></span>
-                <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册及其阅读进度和系统生成文件；同一本书的其他卷册会保留，最后一个卷册删除后才移除作品。源文件是否删除由上方选项决定。</I18nText></span>
-              </span>
-            </label>
-            {deleteMode !== 'record' || deleteLibraryRecord ? <div className="mt-4 flex gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><I18nText>已选择的文件和书库数据删除后无法恢复。</I18nText></div> : null}
             <div className="mt-6 flex justify-end gap-2">
               <Button type="button" variant="secondary" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }}><I18nText>取消</I18nText></Button>
-              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText={i18nAttribute("删除中")} onClick={() => void deleteTasks()}>{deleteMode === 'record' && !deleteLibraryRecord ? i18nAttribute("删除记录") : i18nAttribute("确认删除")}</Button>
+              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText={i18nAttribute("删除中")} onClick={() => void deleteTasks()}>{i18nAttribute("删除记录")}</Button>
             </div>
           </div>
         </div>

@@ -14,7 +14,6 @@ import com.ermao.library.shared.modules.administrativesettings.CreateManagedUser
 import com.ermao.library.shared.modules.administrativesettings.HealthCheckStatus as SharedHealthCheckStatus
 import com.ermao.library.shared.modules.administrativesettings.HealthRun as SharedHealthRun
 import com.ermao.library.shared.modules.administrativesettings.HealthRunStatus as SharedHealthRunStatus
-import com.ermao.library.shared.modules.administrativesettings.ImportDeleteMode as SharedImportDeleteMode
 import com.ermao.library.shared.modules.administrativesettings.ImportPreferences as SharedImportPreferences
 import com.ermao.library.shared.modules.administrativesettings.ImportTaskFilter as SharedImportTaskFilter
 import com.ermao.library.shared.modules.administrativesettings.ImportTaskStatus as SharedImportTaskStatus
@@ -168,7 +167,7 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.RescanLibrarySource -> rescanLibrarySource(command)
         is AdministrativeCommand.ScanDirectory -> sharedRepository.scanDirectory(sharedContext, command.directory.uri).receipt(command)
         is AdministrativeCommand.RetryImportTask -> sharedRepository.retryImportTask(sharedContext, command.taskId).receipt(command)
-        is AdministrativeCommand.DeleteImportTask -> sharedRepository.deleteImportTask(sharedContext, command.taskId, SharedImportDeleteMode.Record, false).receipt(command)
+        is AdministrativeCommand.DeleteImportTask -> sharedRepository.deleteImportTask(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.CancelImportScan -> sharedRepository.cancelImportScanJob(sharedContext, command.jobId).receipt(command)
         AdministrativeCommand.RescanAllSources -> sharedRepository.rescanImportFolders(sharedContext).receipt(command)
         AdministrativeCommand.ClearCompletedImports -> sharedRepository.clearCompletedImportTasks(sharedContext).receipt(command)

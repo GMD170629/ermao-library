@@ -185,9 +185,7 @@
     <string name="work_control_upload_cover">Upload cover</string>
     <string name="work_control_regenerate_cover">Regenerate cover</string>
     <string name="work_control_send_kindle">Send to Kindle</string>
-    <string name="work_control_delete">Delete</string>
     <string name="work_control_change_media_type">Change media type</string>
-    <string name="work_control_split">Split</string>
     <string name="work_control_selected_volume_format">%1$s · %2$s</string>
     <string name="work_quick_download">Download</string>
     <string name="work_quick_downloading">Downloading</string>
@@ -522,19 +520,14 @@
     <string name="management_upload_cover">Upload cover</string>
     <string name="management_regenerate_cover">Regenerate cover</string>
     <string name="management_kindle">Send to Kindle</string>
-    <string name="management_delete_work">Delete book record</string>
     <string name="management_edit_volume">Edit volume information</string>
     <string name="management_media_kind">Change media type</string>
-    <string name="management_split">Split into a new book</string>
-    <string name="management_delete_volume">Delete volume</string>
     <string name="management_title">Title</string>
     <string name="management_author">Author</string>
     <string name="management_description">Description</string>
     <string name="management_series">Series</string>
     <string name="management_series_index">Series index</string>
     <string name="management_tags">Tags, separated by commas</string>
-    <string name="management_volume_index">Volume index</string>
-    <string name="management_sort_order">Sort order</string>
     <string name="management_publisher">Publisher</string>
     <string name="management_language">Language</string>
     <string name="management_isbn">ISBN</string>
@@ -543,8 +536,6 @@
     <string name="management_search">Search</string>
     <string name="management_query">Book title, series, or keyword</string>
     <string name="management_apply">Apply selected metadata</string>
-    <string name="management_confirm_delete_work">Delete this book record? Source files will be kept, while its local offline downloads will be removed.</string>
-    <string name="management_confirm_delete_volume">Delete this volume? Its local offline download will also be removed.</string>
     <string name="management_save">Save</string>
     <string name="management_failed">Couldn’t complete the operation (%1$s).</string>
     <string name="management_active_download_blocked">Pause or cancel this download before changing the volume structure.</string>
@@ -556,7 +547,7 @@
     <string name="management_cover">Cover</string>
     <string name="management_tags_label">Tags</string>
     <string name="management_published_at">Publication date</string>
-    <string name="management_apply_all_volumes">Apply volume fields to all volumes in this media version</string>
+    <string name="management_apply_all_volumes">Apply volume fields to all volumes in this version</string>
     <string name="management_updated">Changes saved.</string>
     <string name="management_upload_cover_description">Choose a JPEG, PNG, or WebP image up to 10 MB.</string>
     <string name="management_regenerate_cover_description">Rebuild the cover from the current source.</string>

@@ -54,8 +54,10 @@ class KtorWorkManagementRepositoryTest {
             assertEquals("PATCH", request.method.value)
             assertTrue(request.url.encodedPath.endsWith("/api/works/work/volumes/volume"))
             val body = assertIs<TextContent>(request.body).text
-            assertTrue(body.contains("\"title\":\"Volume 2\""))
-            assertTrue(body.contains("\"sortOrder\":3"))
+            assertTrue(body.contains("\"publisher\":\"Publisher\""))
+            assertTrue(body.contains("\"language\":\"zh-CN\""))
+            assertFalse(body.contains("\"title\""))
+            assertFalse(body.contains("\"sortOrder\""))
             respond("""{"ok":true,"data":{"workId":"work"}}""", HttpStatusCode.OK, jsonHeaders)
         }
 
@@ -63,7 +65,7 @@ class KtorWorkManagementRepositoryTest {
             context,
             "work",
             "volume",
-            VolumeMetadataDraft("Volume 2", 2.0, 3, "Publisher", "zh-CN", "isbn", null, null),
+            VolumeMetadataDraft("Publisher", "zh-CN", "isbn", null, null),
         )
 
         assertEquals("work", assertIs<WorkManagementResult.Content<*>>(result).value.let {
@@ -72,7 +74,7 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun reclassifyDoesNotReturnAVersionId() = runBlocking {
+    fun reclassifyReturnsOnlyOperationMetadata() = runBlocking {
         val repository = repository {
             respond(
                 """{"ok":true,"data":{"movedVolumeIds":["volume"],"operation":{"id":"op"}}}""",
@@ -85,42 +87,17 @@ class KtorWorkManagementRepositoryTest {
             repository.reclassifyVolume(context, "work", "volume", ManagedMediaKind.Comic),
         ).value as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
 
-        assertEquals(null, result.targetVersionId)
+        assertEquals("work", result.workId)
+        assertEquals("op", result.operationId)
     }
 
     @Test
-    fun splitReadsServerTargetVersionId() = runBlocking {
-        val repository = repository {
-            respond(
-                """{"ok":true,"data":{"workId":"work","targetWorkId":"work-split","sourceVersionId":"version-source","targetVersionId":"version-split","transferMode":"CREATED_VERSION"}}""",
-                HttpStatusCode.OK,
-                jsonHeaders,
-            )
-        }
-
-        val split = assertIs<WorkManagementResult.Content<*>>(
-            repository.splitVolume(context, "work", "volume", "Split", null),
-        ).value as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
-        assertEquals("work-split", split.targetWorkId)
-        assertEquals("version-split", split.targetVersionId)
-    }
-
-    @Test
-    fun workEditAndDeleteUseSourcePreservingContracts() = runBlocking {
-        var requestIndex = 0
+    fun workEditUsesMetadataOnlyContract() = runBlocking {
         val repository = repository { request ->
             val body = assertIs<TextContent>(request.body).text
-            when (requestIndex++) {
-                0 -> {
-                    assertEquals("PATCH", request.method.value)
-                    assertTrue(body.contains("\"title\":\"Updated\""))
-                    assertTrue(body.contains("\"organized\":true"))
-                }
-                else -> {
-                    assertEquals("DELETE", request.method.value)
-                    assertTrue(body.contains("\"deleteSource\":false"))
-                }
-            }
+            assertEquals("PATCH", request.method.value)
+            assertTrue(body.contains("\"title\":\"Updated\""))
+            assertTrue(body.contains("\"organized\":true"))
             respond("""{"ok":true,"data":{"workId":"work"}}""", HttpStatusCode.OK, jsonHeaders)
         }
 
@@ -131,12 +108,7 @@ class KtorWorkManagementRepositoryTest {
                 WorkMetadataDraft("Updated", "Author", "Description", null, null, listOf("tag")),
             ),
         )
-        assertTrue(
-            assertIs<WorkManagementResult.Content<*>>(repository.deleteWork(context, "work"))
-                .value
-                .let { it as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome }
-                .deletedWork,
-        )
+        Unit
     }
 
     @Test

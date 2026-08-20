@@ -3,8 +3,7 @@ export type LibraryBatchAction =
   | 'find_replace'
   | 'shelves'
   | 'reading_status'
-  | 'covers'
-  | 'delete';
+  | 'covers';
 
 const personalLibraryBatchActions = new Set<LibraryBatchAction>([
   'shelves',

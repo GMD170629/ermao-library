@@ -1,6 +1,5 @@
 package com.ermao.library.features.workmanagement.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -23,16 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.Book
-import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Source
-import androidx.compose.material.icons.outlined.Splitscreen
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -101,10 +94,7 @@ enum class WorkManagementTask {
     Cover,
     EditVolume,
     MediaKind,
-    Split,
     Kindle,
-    DeleteWork,
-    DeleteVolume,
 }
 
 @Composable
@@ -125,14 +115,6 @@ fun WorkManagementTaskSheet(
         AndroidDownloadStatus.Downloading,
         AndroidDownloadStatus.Verifying,
     )
-    if (task == WorkManagementTask.DeleteWork) {
-        DeleteWorkForm(content, viewModel, onDismiss)
-        return
-    }
-    if (task == WorkManagementTask.DeleteVolume) {
-        volume?.let { DeleteVolumeForm(it, activeDownload, viewModel, onDismiss) }
-        return
-    }
     val theme = WarmPageThemeValues
     val androidContext = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -226,11 +208,7 @@ fun WorkManagementTaskSheet(
                     WorkManagementTask.MediaKind -> volume?.let {
                         MediaKindForm(it, content, activeDownload, viewModel)
                     }
-                    WorkManagementTask.Split -> volume?.let { SplitForm(it, activeDownload, viewModel) }
                     WorkManagementTask.Kindle -> KindleForm(content, volume, state, viewModel)
-                    WorkManagementTask.DeleteWork,
-                    WorkManagementTask.DeleteVolume,
-                    -> Unit
                 }
             }
         }
@@ -262,10 +240,7 @@ private fun WorkManagementTask.titleResource(): Int = when (this) {
     WorkManagementTask.Cover -> R.string.management_cover
     WorkManagementTask.EditVolume -> R.string.management_edit_volume
     WorkManagementTask.MediaKind -> R.string.management_media_kind
-    WorkManagementTask.Split -> R.string.management_split
     WorkManagementTask.Kindle -> R.string.management_kindle
-    WorkManagementTask.DeleteWork -> R.string.management_delete_work
-    WorkManagementTask.DeleteVolume -> R.string.management_delete_volume
 }
 
 @Composable
@@ -442,17 +417,11 @@ private fun ReadingStatusForm(
 
 @Composable
 private fun EditVolumeForm(volume: VolumeContent, viewModel: WorkManagementViewModel) {
-    var title by remember { mutableStateOf(volume.title) }
-    var index by remember { mutableStateOf(volume.volumeIndex?.toString().orEmpty()) }
-    var sortOrder by remember { mutableStateOf(volume.sortOrder.toString()) }
     var publisher by remember { mutableStateOf(volume.publisher.orEmpty()) }
     var language by remember { mutableStateOf(volume.language.orEmpty()) }
     var isbn by remember { mutableStateOf(volume.isbn.orEmpty()) }
     var identifier by remember { mutableStateOf(volume.identifier.orEmpty()) }
     var narrator by remember { mutableStateOf(volume.narrator.orEmpty()) }
-    Field(title, { title = it }, R.string.management_title)
-    Field(index, { index = it }, R.string.management_volume_index)
-    Field(sortOrder, { sortOrder = it }, R.string.management_sort_order)
     Field(publisher, { publisher = it }, R.string.management_publisher)
     Field(language, { language = it }, R.string.management_language)
     Field(isbn, { isbn = it }, R.string.management_isbn)
@@ -461,13 +430,10 @@ private fun EditVolumeForm(volume: VolumeContent, viewModel: WorkManagementViewM
     WarmPagePrimaryAction(
         label = stringResource(R.string.management_save),
         modifier = Modifier.fillMaxWidth(),
-        enabled = title.isNotBlank() && sortOrder.toIntOrNull()?.let { it >= 0 } == true &&
-            (index.isBlank() || index.toDoubleOrNull() != null),
         onClick = {
             viewModel.updateVolume(
                 volume.id,
                 VolumeMetadataDraft(
-                    title, index.toDoubleOrNull(), checkNotNull(sortOrder.toIntOrNull()),
                     publisher, language, isbn, identifier, narrator,
                 ),
             )
@@ -599,20 +565,6 @@ private fun MediaKindForm(
 }
 
 @Composable
-private fun SplitForm(volume: VolumeContent, blocked: Boolean, viewModel: WorkManagementViewModel) {
-    var title by remember { mutableStateOf(volume.title) }
-    var author by remember { mutableStateOf("") }
-    Field(title, { title = it }, R.string.management_title)
-    Field(author, { author = it }, R.string.management_author)
-    WarmPagePrimaryAction(
-        label = stringResource(R.string.management_split),
-        enabled = !blocked && title.isNotBlank(),
-        onClick = { viewModel.splitVolume(volume.id, title, author.ifBlank { null }) },
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
 private fun KindleForm(
     content: WorkDetailContent,
     selectedVolume: VolumeContent?,
@@ -693,56 +645,6 @@ private fun KindleForm(
         enabled = settings?.ready == true && selectedFileId != null,
         onClick = { selectedFileId?.let(viewModel::sendToKindle) },
         modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun DeleteWorkForm(
-    content: WorkDetailContent,
-    viewModel: WorkManagementViewModel,
-    onCancel: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text(stringResource(R.string.management_delete_work)) },
-        text = { Text(stringResource(R.string.management_confirm_delete_work)) },
-        confirmButton = {
-            TextButton(
-                onClick = { viewModel.deleteWork(content.allVolumes.map { it.id }) },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = androidx.compose.material3.MaterialTheme.colorScheme.error,
-                ),
-            ) { Text(stringResource(R.string.management_delete_work)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel_action)) }
-        },
-    )
-}
-
-@Composable
-private fun DeleteVolumeForm(
-    volume: VolumeContent,
-    blocked: Boolean,
-    viewModel: WorkManagementViewModel,
-    onCancel: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text(stringResource(R.string.management_delete_volume)) },
-        text = { Text(stringResource(R.string.management_confirm_delete_volume)) },
-        confirmButton = {
-            TextButton(
-                enabled = !blocked,
-                onClick = { viewModel.deleteVolume(volume.id) },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = androidx.compose.material3.MaterialTheme.colorScheme.error,
-                ),
-            ) { Text(stringResource(R.string.management_delete_volume)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel_action)) }
-        },
     )
 }
 

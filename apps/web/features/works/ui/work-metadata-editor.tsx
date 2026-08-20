@@ -82,7 +82,7 @@ export function WorkMetadataEditor({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-stone-950"><I18nText>编辑元数据</I18nText></h2>
-          <p className="mt-1 text-sm text-stone-500"><I18nText>作品信息会应用到这本图书的全部媒介版本。</I18nText></p>
+          <p className="mt-1 text-sm text-stone-500"><I18nText>作品信息会应用到这本图书的全部版本和卷册。</I18nText></p>
         </div>
         <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label={t('关闭编辑')}><X size={18} /></button>
       </div>

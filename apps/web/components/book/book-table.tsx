@@ -1,14 +1,13 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ArrowUpDown, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
-import { mediaKindsLabel, type ManagementWorkSummary, useMobileDeleteSwipe } from '../../features/library/public';
+import { mediaKindsLabel, type ManagementWorkSummary } from '../../features/library/public';
 import { useI18n } from '../../i18n/provider';
 import { Badge } from '../ui/badge';
 import type { BadgeTone } from '../ui/badge';
-import { Button } from '../ui/button';
 import { Cover } from './cover';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -24,7 +23,6 @@ function localDateLabel(value: string | null | undefined, fallback: string, loca
 export function BookTable({
   books,
   onOpen,
-  onDelete,
   selectable = false,
   selectedIds = [],
   onSelect,
@@ -37,7 +35,6 @@ export function BookTable({
 }: {
   books: ManagementWorkSummary[];
   onOpen?: (book: ManagementWorkSummary) => void;
-  onDelete?: (book: ManagementWorkSummary) => void;
   selectable?: boolean;
   selectedIds?: string[];
   onSelect?: (book: ManagementWorkSummary) => void;
@@ -55,7 +52,6 @@ export function BookTable({
   const selectedRef = useRef(new Set(selectedIds));
   const anchorIndexRef = useRef<number | null>(null);
   const dragRef = useRef<{ active: boolean; mode: 'select' | 'deselect'; visited: Set<string> }>({ active: false, mode: 'select', visited: new Set() });
-  const mobileDeleteSwipe = useMobileDeleteSwipe(Boolean(onDelete));
 
   function openBook(book: ManagementWorkSummary) {
     if (onOpen) onOpen(book);
@@ -126,7 +122,7 @@ export function BookTable({
 
   function openMobileBookDetails(event: ReactMouseEvent<HTMLButtonElement>, book: ManagementWorkSummary) {
     event.stopPropagation();
-    if (mobileDeleteSwipe.consumeClick(book.id)) openBook(book);
+    openBook(book);
   }
 
   function mediaLabel(book: ManagementWorkSummary) {
@@ -173,35 +169,12 @@ export function BookTable({
           const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
 
           return (
-            <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`relative overflow-hidden rounded-2xl border bg-red-50 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
-              {onDelete ? (
-                <button
-                  type="button"
-                  className={mobileDeleteSwipe.isActionVisible(book.id)
-                    ? 'absolute inset-y-0 right-0 flex flex-col items-center justify-center gap-1.5 bg-red-50 text-sm font-medium text-red-700 outline-none transition-colors hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-300'
-                    : 'sr-only'}
-                  style={mobileDeleteSwipe.isActionVisible(book.id) ? { width: mobileDeleteSwipe.actionWidth } : undefined}
-                  aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })}
-                  onFocus={() => mobileDeleteSwipe.reveal(book.id)}
-                  onClick={() => {
-                    mobileDeleteSwipe.close();
-                    onDelete(book);
-                  }}
-                >
-                  <Trash2 size={18} aria-hidden="true" />
-                  <I18nText>删除</I18nText>
-                </button>
-              ) : null}
+            <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`relative overflow-hidden rounded-2xl border bg-white/70 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
               <div
                 data-testid="book-list-mobile-swipe-surface"
-                className={`relative z-10 touch-pan-y rounded-2xl p-4 transition-colors ${selectedIds.includes(book.id) ? 'bg-[#FFF8F5] shadow-[inset_1px_0_0_#EF4D2F]' : 'bg-white/70'} ${mobileDeleteSwipe.isDragging(book.id) ? '' : 'transition-transform duration-200 motion-reduce:transition-none'}`}
-                style={{ transform: `translate3d(${mobileDeleteSwipe.offsetFor(book.id)}px, 0, 0)` }}
-                onPointerDown={(event) => mobileDeleteSwipe.begin(event, book.id)}
-                onPointerMove={mobileDeleteSwipe.move}
-                onPointerUp={mobileDeleteSwipe.finish}
-                onPointerCancel={mobileDeleteSwipe.cancel}
+                className={`relative z-10 rounded-2xl p-4 transition-colors ${selectedIds.includes(book.id) ? 'bg-[#FFF8F5] shadow-[inset_1px_0_0_#EF4D2F]' : 'bg-white/70'}`}
                 onClick={() => {
-                  if (mobileDeleteSwipe.consumeClick(book.id) && selectable) onSelect?.(book);
+                  if (selectable) onSelect?.(book);
                 }}
               >
                 <div className="flex w-full min-w-0 items-start gap-3">
@@ -238,7 +211,6 @@ export function BookTable({
             <th className="w-[70px]"><I18nText>状态</I18nText></th>
             <th className="w-[104px]">{sortableHeader('最近阅读', 'recent_read', 'desc')}</th>
             <th className="w-[104px]">{sortableHeader('加入时间', 'recent_import', 'desc')}</th>
-            <th className="w-[84px] pr-3 text-right"><I18nText>操作</I18nText></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-black/[0.05]">
@@ -281,11 +253,6 @@ export function BookTable({
                 </td>
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.lastReadAt, '', locale)}</td>
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.importedAt, '', locale)}</td>
-                <td className="pr-3 text-right">
-                  <div className="flex justify-end gap-1">
-                    {onDelete ? <Button variant="danger" icon={Trash2} className="h-9 min-h-9 px-2 py-1.5" aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })} onClick={() => onDelete(book)}><span className="hidden 2xl:inline"><I18nText>删除</I18nText></span></Button> : null}
-                  </div>
-                </td>
               </tr>
             );
           })}

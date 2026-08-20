@@ -36,7 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
@@ -49,7 +48,6 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Source
-import androidx.compose.material.icons.outlined.Splitscreen
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
@@ -168,11 +166,11 @@ private data class WorkManagementSheetState(
 
 private enum class BookControlAction {
     AddSeries, AddShelf, MarkUnread, Download, Edit, Recognize, UploadCover,
-    RegenerateCover, SendToKindle, Delete,
+    RegenerateCover, SendToKindle,
 }
 
 private enum class VolumeControlAction {
-    MarkUnread, Download, Edit, ChangeMediaType, Split, SendToKindle, Delete,
+    MarkUnread, Download, Edit, ChangeMediaType, SendToKindle,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -388,7 +386,6 @@ fun WorkDetailScreen(
                     BookControlAction.RegenerateCover,
                     -> WorkManagementTask.Cover
                     BookControlAction.SendToKindle -> WorkManagementTask.Kindle
-                    BookControlAction.Delete -> WorkManagementTask.DeleteWork
                     BookControlAction.AddShelf,
                     BookControlAction.MarkUnread,
                     BookControlAction.Download,
@@ -406,9 +403,7 @@ fun WorkDetailScreen(
                 val task = when (action) {
                     VolumeControlAction.Edit -> WorkManagementTask.EditVolume
                     VolumeControlAction.ChangeMediaType -> WorkManagementTask.MediaKind
-                    VolumeControlAction.Split -> WorkManagementTask.Split
                     VolumeControlAction.SendToKindle -> WorkManagementTask.Kindle
-                    VolumeControlAction.Delete -> WorkManagementTask.DeleteVolume
                     VolumeControlAction.MarkUnread,
                     VolumeControlAction.Download,
                     -> return@volumeTask
@@ -439,9 +434,9 @@ fun WorkDetailScreen(
         )
     }
     LaunchedEffect(managementState?.completedMutation) {
-        val completion = managementState?.completedMutation ?: return@LaunchedEffect
+        if (managementState?.completedMutation == null) return@LaunchedEffect
         managementSheetState = null
-        if (completion == WorkManagementCompletion.WorkDeleted) onBack() else onRefresh()
+        onRefresh()
         snackbarHostState.currentSnackbarData?.dismiss()
         snackbarHostState.showSnackbar(managementUpdatedMessage)
         managementViewModel?.consumeFeedback()
@@ -1865,14 +1860,6 @@ private fun WorkDetailControlMenu(
                             Icons.AutoMirrored.Outlined.Send,
                         ),
                     )
-                    add(
-                        WarmPageFloatingMenuAction(
-                            BookControlAction.Delete,
-                            stringResource(R.string.work_control_delete),
-                            Icons.Outlined.DeleteOutline,
-                            destructive = true,
-                        ),
-                    )
                 }
             }
             WarmPageFloatingActionMenu(
@@ -1889,7 +1876,6 @@ private fun WorkDetailControlMenu(
                         BookControlAction.UploadCover,
                         BookControlAction.RegenerateCover,
                         BookControlAction.SendToKindle,
-                        BookControlAction.Delete,
                         -> onBookTask(action)
                     }
                 },
@@ -1927,9 +1913,7 @@ private fun WorkDetailControlMenu(
                 if (canManageSystem) {
                     add(WarmPageFloatingMenuAction(VolumeControlAction.Edit, stringResource(R.string.work_control_edit), Icons.Outlined.Edit))
                     add(WarmPageFloatingMenuAction(VolumeControlAction.ChangeMediaType, stringResource(R.string.work_control_change_media_type), Icons.Outlined.Layers, enabled = !activeDownload))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.Split, stringResource(R.string.work_control_split), Icons.Outlined.Splitscreen, enabled = !activeDownload))
                     if (kindleEligible) add(WarmPageFloatingMenuAction(VolumeControlAction.SendToKindle, stringResource(R.string.work_control_send_kindle), Icons.AutoMirrored.Outlined.Send))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.Delete, stringResource(R.string.work_control_delete), Icons.Outlined.DeleteOutline, enabled = !activeDownload, destructive = true))
                 }
             }
             WarmPageFloatingActionMenu(
@@ -1941,9 +1925,7 @@ private fun WorkDetailControlMenu(
                         VolumeControlAction.Download -> onDownload(volume)
                         VolumeControlAction.Edit,
                         VolumeControlAction.ChangeMediaType,
-                        VolumeControlAction.Split,
                         VolumeControlAction.SendToKindle,
-                        VolumeControlAction.Delete,
                         -> onVolumeTask(action, volume)
                     }
                 },

@@ -448,8 +448,6 @@ fun MainShell(
                                                 workManagementRepository,
                                                 workManagementContext,
                                                 workId,
-                                                sharedDownloadsRuntime,
-                                                sharedDownloadNamespace,
                                                 onSessionUnauthorized,
                                             ),
                                         )
@@ -715,8 +713,6 @@ fun MainShell(
                             workManagementRepository,
                             workManagementContext,
                             route.workId,
-                            sharedDownloadsRuntime,
-                            sharedDownloadNamespace,
                             onSessionUnauthorized,
                         ),
                     )

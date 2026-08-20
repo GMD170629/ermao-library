@@ -40,7 +40,6 @@ typealias ImportTaskPage = com.ermao.library.shared.modules.administrativesettin
 typealias ImportTaskLog = com.ermao.library.shared.modules.administrativesettings.domain.ImportTaskLog
 typealias ImportTaskLogPage = com.ermao.library.shared.modules.administrativesettings.domain.ImportTaskLogPage
 typealias ImportTaskSummary = com.ermao.library.shared.modules.administrativesettings.domain.ImportTaskSummary
-typealias ImportDeleteMode = com.ermao.library.shared.modules.administrativesettings.domain.ImportDeleteMode
 typealias ImportTaskDeletion = com.ermao.library.shared.modules.administrativesettings.domain.ImportTaskDeletion
 typealias ImportScanJob = com.ermao.library.shared.modules.administrativesettings.domain.ImportScanJob
 typealias ImportScanStatus = com.ermao.library.shared.modules.administrativesettings.domain.ImportScanStatus

@@ -14,7 +14,6 @@ import {
   RotateCcw,
   Scissors,
   Tags,
-  Trash2,
   UserRound,
   X
 } from 'lucide-react';
@@ -41,10 +40,6 @@ type BulkResponse = {
   ok: boolean;
   data?: {
     updated?: number;
-    deleted?: number;
-    deletedFiles?: number;
-    deletedSourceFiles?: number;
-    failedFileDeletes?: Array<{ path: string; message: string }>;
     changedValues?: number;
     skipped?: Array<{ workId: string; reason: string }>;
   };
@@ -61,8 +56,7 @@ const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: str
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
   { value: 'shelves', label: '加入或移除书架', shortLabel: '书架', description: '管理普通书架中的批量归属', icon: LibraryBig },
   { value: 'reading_status', label: '设置阅读状态', shortLabel: '阅读状态', description: '清空进度或统一设为 100%', icon: BookCheck },
-  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images },
-  { value: 'delete', label: '批量删除图书', shortLabel: '删除', description: '删除书库记录，可选择同步删除源文件', icon: Trash2 }
+  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images }
 ];
 
 const inputClass = 'h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3.5 text-sm text-[#312D2A] outline-none transition placeholder:text-[#AAA49E] focus:border-[#E8A18D] focus:ring-4 focus:ring-[#FFE9E2]';
@@ -100,7 +94,7 @@ export function LibraryBatchContextMenu({
       label: i18nAttribute(item.label),
       description: i18nAttribute(item.description),
       icon: item.icon,
-      destructive: item.value === 'delete'
+      destructive: false
     }))}
     footer={i18nAttribute('拖动经过行可连续选择；按 Shift 点击可选择区间。')}
     onClose={onClose}
@@ -184,7 +178,6 @@ export function LibraryBatchDialog({
   const [coverQuality, setCoverQuality] = useState('82');
   const [coverMaxDimension, setCoverMaxDimension] = useState('1600');
   const [coverFile, setCoverFile] = useState<File | null>(null);
-  const [deleteSource, setDeleteSource] = useState(false);
 
   const activeAction = actions.find((item) => item.value === action);
   const findReplaceSignature = useMemo(() => JSON.stringify({ selectedIds, findField, findText, replacement, regex, caseSensitive, startNumber }), [caseSensitive, findField, findText, regex, replacement, selectedIds, startNumber]);
@@ -230,10 +223,6 @@ export function LibraryBatchDialog({
       .finally(() => active && setShelvesLoading(false));
     return () => { active = false; };
   }, [action, shelves.length, toast]);
-
-  useEffect(() => {
-    if (action !== 'delete') setDeleteSource(false);
-  }, [action]);
 
   if (!action || typeof document === 'undefined') return null;
 
@@ -323,16 +312,6 @@ export function LibraryBatchDialog({
     return `已处理 ${payload.data?.updated ?? selectedIds.length} 本图书的封面${skipped ? `，跳过 ${skipped} 本` : ''}`;
   }
 
-  async function applyDelete() {
-    const payload = await postJson({ action: 'delete_records', deleteSource });
-    const deleted = payload.data?.deleted ?? payload.data?.updated ?? 0;
-    const failed = payload.data?.failedFileDeletes?.length ?? 0;
-    const message = i18nAttribute('已删除 {value0} 本图书', { value0: deleted });
-    return failed > 0
-      ? `${message}，${i18nAttribute('有 {value0} 个文件未能删除，请检查系统日志', { value0: failed })}`
-      : message;
-  }
-
   async function submit() {
     setSaving(true);
     try {
@@ -346,7 +325,7 @@ export function LibraryBatchDialog({
               ? await applyReadingStatus()
               : action === 'covers'
                 ? await applyCovers()
-                : await applyDelete();
+                : '';
       toast.success(message);
       onApplied(message);
     } catch (reason) {
@@ -380,13 +359,12 @@ export function LibraryBatchDialog({
           <nav className="mt-4 flex gap-1.5 overflow-x-auto pb-1" aria-label={i18nAttribute("批量操作类型")}>
             {actions.filter((item) => canUseLibraryBatchAction(item.value, canManageSystem)).map((item) => {
               const Icon = item.icon;
-              const destructive = item.value === 'delete';
               return (
                 <button key={item.value} type="button" disabled={saving} onClick={() => onActionChange(item.value)} aria-current={action === item.value ? 'page' : undefined} className={cn(
                   'inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition',
                   action === item.value
-                    ? destructive ? 'bg-red-700 text-white shadow-sm' : 'bg-[#2D2926] text-white shadow-sm'
-                    : destructive ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-black/[0.035] text-[#716A64] hover:bg-[#FFF0EA] hover:text-[#D7462B]',
+                    ? 'bg-[#2D2926] text-white shadow-sm'
+                    : 'bg-black/[0.035] text-[#716A64] hover:bg-[#FFF0EA] hover:text-[#D7462B]',
                   'disabled:cursor-not-allowed disabled:opacity-50'
                 )}>
                   <Icon size={15} />{item.shortLabel}
@@ -544,35 +522,14 @@ export function LibraryBatchDialog({
             </div>
           ) : null}
 
-          {action === 'delete' ? (
-            <div className="space-y-5">
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-900">
-                <div className="flex items-start gap-3">
-                  <Trash2 size={20} className="mt-0.5 shrink-0 text-red-600" />
-                  <div>
-                    <div className="font-semibold"><I18nText>删除所选图书</I18nText></div>
-                    <p className="mt-1 text-sm leading-6 text-red-800"><I18nText>删除后，所选图书的书库记录、阅读进度、书签和系统生成文件将无法恢复。</I18nText></p>
-                  </div>
-                </div>
-              </div>
-              <label className={cn('flex cursor-pointer gap-3 rounded-2xl border p-4 transition', deleteSource ? 'border-red-200 bg-red-50' : 'border-black/[0.08] bg-black/[0.02] hover:bg-black/[0.04]')}>
-                <input type="checkbox" checked={deleteSource} disabled={saving} onChange={(event) => setDeleteSource(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-                <span>
-                  <span className="block text-sm font-semibold text-[#302C29]"><I18nText>同步删除源文件</I18nText></span>
-                  <span className="mt-1 block text-xs leading-5 text-[#77716B]"><I18nText>源文件将从监控或上传目录中永久删除；该操作无法恢复。</I18nText></span>
-                </span>
-              </label>
-              {!deleteSource ? <p className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm text-[#706963]"><I18nText>来源文件将保留，只删除书库记录和系统生成文件。</I18nText></p> : null}
-            </div>
-          ) : null}
         </div>
 
         <footer className="flex shrink-0 flex-col gap-3 border-t border-black/[0.07] bg-[#FFFEFC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
           <div className="text-xs leading-5 text-[#837C75]"><I18nText>仅处理当前已选择的 </I18nText>{selectedIds.length} <I18nText>本图书；未选择的项目不会变化。</I18nText></div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" disabled={saving} onClick={onClose}><I18nText>取消</I18nText></Button>
-            <Button type="button" variant={action === 'delete' ? 'danger' : 'primary'} icon={action === 'delete' ? Trash2 : undefined} loading={saving} loadingText={action === 'delete' ? i18nAttribute("删除中") : i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
-              {action === 'find_replace' ? i18nAttribute("确认替换") : action === 'delete' ? i18nAttribute("确认删除") : i18nAttribute("应用更改")}
+            <Button type="button" variant="primary" loading={saving} loadingText={i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
+              {action === 'find_replace' ? i18nAttribute("确认替换") : i18nAttribute("应用更改")}
             </Button>
           </div>
         </footer>

@@ -1,7 +1,7 @@
 'use client';
 
-import { Check, Trash2 } from 'lucide-react';
-import type { KeyboardEvent, MouseEvent } from 'react';
+import { Check } from 'lucide-react';
+import type { KeyboardEvent } from 'react';
 import { Progress } from '../ui/progress';
 import { Cover } from './cover';
 import type { CoverBook } from './cover';
@@ -28,7 +28,6 @@ export function BookCard({
   book,
   compact = false,
   priority = false,
-  onDelete,
   onClick,
   selectable = false,
   selected = false,
@@ -37,7 +36,6 @@ export function BookCard({
   book: WorkView & CoverBook;
   compact?: boolean;
   priority?: boolean;
-  onDelete?: () => void;
   onClick?: () => void;
   selectable?: boolean;
   selected?: boolean;
@@ -49,11 +47,6 @@ export function BookCard({
   const mediaKinds = (book.availableMediaKinds ?? []) as CardMediaKind[];
   const hasProgress = Boolean(continueVolume && continueVolume.progress > 0 && continueVolume.progress < 100);
   const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allWorkVolumes(book).some((volume) => volume.progress > 0) ? 'READING' : 'UNREAD', mediaKinds);
-
-  function deleteBook(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    onDelete?.();
-  }
 
   function openBook(event: KeyboardEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget || !onClick || (event.key !== 'Enter' && event.key !== ' ')) return;
@@ -81,17 +74,6 @@ export function BookCard({
           />
           <Check size={15} aria-hidden="true" />
         </label>
-      ) : null}
-      {onDelete ? (
-        <button
-          type="button"
-          onClick={deleteBook}
-          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-black/[0.06] bg-white/95 text-red-600 opacity-0 shadow-sm transition hover:bg-red-50 focus:opacity-100 group-hover:opacity-100"
-          title={i18nAttribute("删除记录")}
-          aria-label={i18nAttribute("删除 {value0}", { value0: book.title })}
-        >
-          <Trash2 size={15} />
-        </button>
       ) : null}
       <Cover
         book={book}

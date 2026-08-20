@@ -4,8 +4,7 @@ export type BookActionId =
   | 'upload-cover'
   | 'regenerate-cover'
   | 'download'
-  | 'kindle'
-  | 'delete';
+  | 'kindle';
 
 export function bookActionIds({
   canManage,
@@ -20,6 +19,5 @@ export function bookActionIds({
   if (canManage) actions.push('edit', 'metadata', 'upload-cover', 'regenerate-cover');
   if (hasDownload) actions.push('download');
   if (kindleSendAvailable) actions.push('kindle');
-  if (canManage) actions.push('delete');
   return actions;
 }

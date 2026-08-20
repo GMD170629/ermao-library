@@ -20,11 +20,8 @@ interface WorkManagementRepository {
     suspend fun updateWork(context: WorkManagementContext, workId: String, draft: WorkMetadataDraft): WorkManagementResult<Unit>
     suspend fun uploadCover(context: WorkManagementContext, workId: String, upload: CoverUpload): WorkManagementResult<Unit>
     suspend fun regenerateCover(context: WorkManagementContext, workId: String): WorkManagementResult<Unit>
-    suspend fun deleteWork(context: WorkManagementContext, workId: String): WorkManagementResult<WorkMutationOutcome>
     suspend fun updateVolume(context: WorkManagementContext, workId: String, volumeId: String, draft: VolumeMetadataDraft): WorkManagementResult<WorkMutationOutcome>
     suspend fun reclassifyVolume(context: WorkManagementContext, workId: String, volumeId: String, mediaKind: ManagedMediaKind): WorkManagementResult<WorkMutationOutcome>
-    suspend fun splitVolume(context: WorkManagementContext, workId: String, volumeId: String, title: String, author: String?): WorkManagementResult<WorkMutationOutcome>
-    suspend fun deleteVolume(context: WorkManagementContext, workId: String, volumeId: String): WorkManagementResult<WorkMutationOutcome>
     suspend fun loadMetadataProviders(context: WorkManagementContext, mediaKind: ManagedMediaKind): WorkManagementResult<List<MetadataProvider>>
     suspend fun searchMetadata(context: WorkManagementContext, workId: String, providerId: String, query: String): WorkManagementResult<MetadataSearchResult>
     suspend fun applyMetadata(

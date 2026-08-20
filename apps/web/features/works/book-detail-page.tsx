@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, Download, Edit3, Ellipsis, Headphones, ImageUp, Images, LoaderCircle, RefreshCw, RotateCcw, Scissors, Send, Settings2, Trash2, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Database, Download, Edit3, Ellipsis, Headphones, ImageUp, Images, LoaderCircle, RefreshCw, RotateCcw, Send, Settings2, X, type LucideIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Cover } from '../../components/book/cover';
@@ -14,7 +14,7 @@ import { Select } from '../../components/ui/select';
 import type { MediaKind, ReaderType, VersionResource, VolumeResource, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n } from '@/i18n/provider';
-import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl } from './api/client';
+import { downloadVolumeArchive, fetchAllVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeBatchAction, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl } from './api/client';
 import { useVolumeWallSelection } from './application/use-volume-wall-selection';
 import { displayVolumeNumber, formatDuration, mediaKindOfVolume, selectedVolumeForWork, shouldShowVersionHeadings, versionDisplayTitle, workDetailHref, workDetailReturnHref } from './work-detail';
 import { smallVolumeCoverUrl } from './volume-cover-url';
@@ -30,9 +30,6 @@ import { SingleVolumeChapterList } from './ui/single-volume-chapter-list';
 import { WorkMetadataEditor } from './ui/work-metadata-editor';
 
 type VolumeForm = Readonly<{
-  title: string;
-  volumeIndex: string;
-  sortOrder: string;
   publisher: string;
   language: string;
   isbn: string;
@@ -46,26 +43,20 @@ const BOOK_ACTION_DETAILS: Record<BookActionId, { label: string; icon: LucideIco
   'upload-cover': { label: '上传自定义封面', icon: ImageUp },
   'regenerate-cover': { label: '重新生成封面', icon: RefreshCw },
   download: { label: '下载当前版本', icon: Download },
-  kindle: { label: '发送到 Kindle', icon: Send },
-  delete: { label: '删除记录', icon: Trash2 }
+  kindle: { label: '发送到 Kindle', icon: Send }
 };
 
 const VOLUME_ACTION_DETAILS: Record<VolumeActionId, { label: string; description: string; icon: LucideIcon }> = {
   download: { label: '下载', description: '下载所选卷册的源文件', icon: Download },
-  edit: { label: '编辑', description: '修改名称、排序和卷册信息', icon: Edit3 },
+  edit: { label: '编辑', description: '修改卷册元数据', icon: Edit3 },
   'set-media-kind': { label: '设置媒体类型', description: '将卷册归类为其他媒体类型', icon: Settings2 },
   'set-ebook': { label: '设置为电子书', description: '使用电子书方式管理和阅读', icon: BookOpen },
   'set-comic': { label: '设置为漫画', description: '使用漫画方式管理和阅读', icon: Images },
-  'set-audiobook': { label: '设置为有声书', description: '使用有声书方式管理和收听', icon: Headphones },
-  split: { label: '拆分为作品', description: '将卷册拆分为独立图书', icon: Scissors },
-  delete: { label: '删除', description: '删除卷册及其阅读数据', icon: Trash2 }
+  'set-audiobook': { label: '设置为有声书', description: '使用有声书方式管理和收听', icon: Headphones }
 };
 
 function formForVolume(volume: VolumeResource): VolumeForm {
   return {
-    title: volume.title,
-    volumeIndex: volume.volumeIndex === null ? '' : String(volume.volumeIndex),
-    sortOrder: String(volume.sortOrder),
     publisher: volume.publisher ?? '',
     language: volume.language ?? '',
     isbn: volume.isbn ?? '',
@@ -183,9 +174,6 @@ function VolumeContextEditDialog({
     setSaving(true);
     try {
       await updateVolume(work.id, volume.id, {
-        title: form.title.trim(),
-        volumeIndex: form.volumeIndex.trim() ? Number(form.volumeIndex) : null,
-        sortOrder: Number(form.sortOrder),
         publisher: form.publisher.trim() || null,
         language: form.language.trim() || null,
         isbn: form.isbn.trim() || null,
@@ -206,9 +194,6 @@ function VolumeContextEditDialog({
     <div className="w-full max-w-xl rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
       <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑卷册</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>卷册名称</I18nText><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
-        <label className="text-sm text-stone-600"><I18nText>卷号（可选且可重复）</I18nText><input inputMode="decimal" value={form.volumeIndex} onChange={(event) => setForm({ ...form, volumeIndex: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
-        <label className="text-sm text-stone-600"><I18nText>排序</I18nText><input inputMode="numeric" value={form.sortOrder} onChange={(event) => setForm({ ...form, sortOrder: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         <label className="text-sm text-stone-600"><I18nText>出版社</I18nText><input value={form.publisher} onChange={(event) => setForm({ ...form, publisher: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         <label className="text-sm text-stone-600"><I18nText>语言</I18nText><input value={form.language} onChange={(event) => setForm({ ...form, language: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         <label className="text-sm text-stone-600"><I18nText>ISBN</I18nText><input value={form.isbn} onChange={(event) => setForm({ ...form, isbn: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -262,7 +247,6 @@ function StructureVersionCard({
   const feedback = useToast();
   const { formatNumber, t } = useI18n();
   const [managedVolumeId, setManagedVolumeId] = useState<string | null>(null);
-  const [busyMoveId, setBusyMoveId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
   const volumeListId = useId();
@@ -289,19 +273,6 @@ function StructureVersionCard({
       feedback.error(reason instanceof Error ? reason.message : t('卷册加载失败'));
     } finally {
       setLoadingAll(false);
-    }
-  };
-
-  const moveVolume = async (volume: VolumeResource, direction: 'up' | 'down') => {
-    setBusyMoveId(volume.id);
-    try {
-      await runVolumeAction(work.id, volume.id, 'move', { direction });
-      await onRefresh();
-      feedback.success(t('卷册顺序已更新'));
-    } catch (reason) {
-      feedback.error(reason instanceof Error ? reason.message : t('卷册顺序更新失败'));
-    } finally {
-      setBusyMoveId(null);
     }
   };
 
@@ -335,8 +306,6 @@ function StructureVersionCard({
               </div>
               <span className="text-xs text-stone-400">{volumeUnitLabel(volume, t)}</span>
               {managementMode ? <div className="flex items-center gap-1">
-                <button type="button" disabled={busyMoveId !== null || index === 0} onClick={() => void moveVolume(volume, 'up')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('上移 {value0}', { value0: volume.title })}><ChevronUp size={16} /></button>
-                <button type="button" disabled={busyMoveId !== null || index === version.volumeCount - 1} onClick={() => void moveVolume(volume, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('下移 {value0}', { value0: volume.title })}><ChevronDown size={16} /></button>
                 <button type="button" aria-expanded={managedVolumeId === volume.id} onClick={() => setManagedVolumeId((current) => current === volume.id ? null : volume.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('编辑 {value0}', { value0: volume.title })}><Edit3 size={15} /></button>
               </div> : <button type="button" disabled={!volume.readable} onClick={() => router.push(readerHref(volume))} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('打开 {value0}', { value0: volume.title })}><ChevronRight size={16} /></button>}
             </div>
@@ -414,9 +383,6 @@ function VolumeCard({
       if (!confirmed) return;
     }
     const saved = await run('save', () => updateVolume(work.id, volume.id, {
-      title: form.title.trim(),
-      volumeIndex: form.volumeIndex.trim() ? Number(form.volumeIndex) : null,
-      sortOrder: Number(form.sortOrder),
       publisher: form.publisher.trim() || null,
       language: form.language.trim() || null,
       isbn: form.isbn.trim() || null,
@@ -428,17 +394,6 @@ function VolumeCard({
       setUndoOperationId(operationId);
     }), '卷册信息已保存');
     if (saved) setEditing(false);
-  };
-
-  const remove = async () => {
-    const confirmed = await feedback.confirm({
-      title: '删除卷册',
-      description: '将删除该卷册及其阅读进度、书签和任务。其他卷册会保留。',
-      confirmLabel: '删除',
-      tone: 'danger'
-    });
-    if (!confirmed) return;
-    await run('delete', () => deleteVolume(work.id, volume.id), '卷册已删除');
   };
 
   return (
@@ -467,9 +422,7 @@ function VolumeCard({
           {canManage ? <><Button variant="secondary" icon={Download} onClick={() => { window.location.href = volumeFileDownloadUrl(volume.id); }}>
             下载
           </Button>
-          <Button variant="ghost" icon={Edit3} onClick={() => setEditing(true)}>编辑卷册</Button>
-          <Button variant="ghost" icon={Scissors} loading={busy === 'split'} onClick={() => void run('split', () => runVolumeAction(work.id, volume.id, 'split', { title: `${work.title}（${volume.title}）`, author: work.author, copyShelves: true }), '卷册已拆分为新作品')}>拆分为作品</Button>
-          <Button variant="danger" icon={Trash2} loading={busy === 'delete'} onClick={() => void remove()}>删除卷册</Button></> : null}
+          <Button variant="ghost" icon={Edit3} onClick={() => setEditing(true)}>编辑卷册</Button></> : null}
       </div>
 
       {editing ? (
@@ -479,9 +432,6 @@ function VolumeCard({
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>当前内容分类</I18nText><Select value={targetMediaKind} onChange={setTargetMediaKind} ariaLabel="当前内容分类" className="mt-1.5 w-full" options={[{ value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} /><span className="mt-1.5 block text-xs text-stone-500">{t(classificationLabel(volume))}</span>{volume.classification.suggestedMediaKind === 'COMIC' ? <button type="button" className="mt-2 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs font-medium text-orange-700" onClick={() => setTargetMediaKind('COMIC')}>{t('可能是漫画 · 改为漫画')}</button> : null}</label>
               <label className="flex items-center gap-2 text-sm text-stone-600 sm:col-span-2"><input type="checkbox" checked={applyToVersion} onChange={(event) => setApplyToVersion(event.target.checked)} />{t('同时应用到此版本全部 {value0} 个卷册', { value0: work.versions.find((version) => version.id === volume.versionId)?.volumeCount ?? 1 })}</label>
-              <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>卷册名称</I18nText><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
-              <label className="text-sm text-stone-600"><I18nText>卷号（可选且可重复）</I18nText><input inputMode="decimal" value={form.volumeIndex} onChange={(event) => setForm({ ...form, volumeIndex: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
-              <label className="text-sm text-stone-600"><I18nText>排序</I18nText><input inputMode="numeric" value={form.sortOrder} onChange={(event) => setForm({ ...form, sortOrder: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>出版社</I18nText><input value={form.publisher} onChange={(event) => setForm({ ...form, publisher: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>语言</I18nText><input value={form.language} onChange={(event) => setForm({ ...form, language: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>ISBN</I18nText><input value={form.isbn} onChange={(event) => setForm({ ...form, isbn: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -693,26 +643,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }, '封面已重新生成');
   };
 
-  const removeWork = async () => {
-    if (!work) return;
-    const confirmed = await feedback.confirm({
-      title: t('删除图书记录'),
-      description: t('将删除这本图书的书库记录、阅读进度、书签和系统生成文件；源文件会保留。'),
-      confirmLabel: t('删除记录'),
-      tone: 'danger'
-    });
-    if (!confirmed) return;
-    setWorkActionBusy('delete');
-    try {
-      await deleteWorkRecord(work.id);
-      feedback.success(t('已删除图书记录'));
-      router.push(returnHref);
-    } catch (reason) {
-      feedback.error(reason instanceof Error ? reason.message : t('删除失败'));
-      setWorkActionBusy(null);
-    }
-  };
-
   const invokeBookAction = (action: BookActionId) => {
     setTopActionsOpen(false);
     if (action === 'edit') {
@@ -723,7 +653,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     else if (action === 'regenerate-cover') void regenerateCover();
     else if (action === 'download') void downloadCurrentVersion();
     else if (action === 'kindle') void openKindleSend();
-    else if (action === 'delete') void removeWork();
   };
 
   const openKindleSend = async () => {
@@ -807,30 +736,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       return;
     }
     if (action === 'set-media-kind') return;
-    if (action === 'delete') {
-      const confirmed = await feedback.confirm({
-        title: t('删除 {value0} 个卷册', { value0: selectedWallVolumes.length }),
-        description: t('将删除所选卷册及其阅读进度、书签和任务。未选择的卷册会保留。'),
-        confirmLabel: t('删除'),
-        tone: 'danger'
-      });
-      if (!confirmed) return;
-    }
     setVolumeActionBusy(action);
     try {
       const targetMediaKind = action === 'set-ebook' ? 'EBOOK' : action === 'set-comic' ? 'COMIC' : action === 'set-audiobook' ? 'AUDIOBOOK' : null;
-      const result = targetMediaKind
-        ? await runVolumeBatchAction(work.id, { action: 'SET_MEDIA_KIND', volumeIds, targetMediaKind })
-        : action === 'split'
-          ? await runVolumeBatchAction(work.id, { action: 'SPLIT', volumeIds })
-          : await runVolumeBatchAction(work.id, { action: 'DELETE', volumeIds });
+      if (!targetMediaKind) return;
+      await runVolumeBatchAction(work.id, { action: 'SET_MEDIA_KIND', volumeIds, targetMediaKind });
       wallSelection.clear();
-      if (result.deletedWork) router.push(returnHref);
-      else await refreshWallVolumes();
-      feedback.success(t(
-        targetMediaKind ? '已更新 {value0} 个卷册的媒体类型' : action === 'split' ? '已拆分 {value0} 个卷册为独立作品' : '已删除 {value0} 个卷册',
-        { value0: selectedWallVolumes.length }
-      ));
+      await refreshWallVolumes();
+      feedback.success(t('已更新 {value0} 个卷册的媒体类型', { value0: selectedWallVolumes.length }));
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
     } finally {
@@ -902,8 +815,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     const item = BOOK_ACTION_DETAILS[action];
                     const Icon = item.icon;
                     return <div key={action}>
-                    {action === 'delete' ? <div className="my-1.5 h-px bg-stone-100" /> : null}
-                    <button type="button" role="menuitem" disabled={workActionBusy !== null} onClick={() => invokeBookAction(action)} className={cn('flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm text-stone-700 transition hover:bg-stone-50 hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-not-allowed disabled:opacity-50', action === 'delete' && 'hover:bg-red-50 hover:text-red-700')}>
+                    <button type="button" role="menuitem" disabled={workActionBusy !== null} onClick={() => invokeBookAction(action)} className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm text-stone-700 transition hover:bg-stone-50 hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-not-allowed disabled:opacity-50">
                       <Icon size={18} /><span>{t(item.label)}</span>
                       </button>
                     </div>;
@@ -923,10 +835,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-stone-950"><I18nText>版本与内容</I18nText></h2>
-            <p className="mt-1 text-sm text-stone-500">{t('{value0} 个版本。管理模式下可调整卷册信息和位置。', { value0: work.versions.length })}</p>
+            <p className="mt-1 text-sm text-stone-500">{t('{value0} 个版本。目录决定卷册名称与顺序，管理模式只编辑元数据。', { value0: work.versions.length })}</p>
           </div>
           {canManage ? <Button variant={managementMode ? 'secondary' : 'primary'} icon={Settings2} onClick={() => setManagementMode((current) => !current)} className={cn('!rounded-xl', !managementMode && '!bg-[#ff4f26] !text-white hover:!bg-[#e84420]')}>
-            {managementMode ? t('完成管理') : t('管理内容结构')}
+            {managementMode ? t('完成管理') : t('管理卷册信息')}
           </Button> : null}
         </div>
         {showVersionHeadings ? (
@@ -1013,8 +925,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
             description: t(details.description),
             icon: details.icon,
             disabled: disabled || volumeActionBusy !== null,
-            destructive: action === 'delete',
-            separatorBefore: action === 'delete',
             submenu: action === 'set-media-kind' ? wallVolumeActions.filter((candidate) => candidate.action === 'set-ebook' || candidate.action === 'set-comic' || candidate.action === 'set-audiobook').map((candidate) => {
               const submenuDetails = VOLUME_ACTION_DETAILS[candidate.action];
               return {

@@ -198,16 +198,13 @@ class KtorAdministrativeSettingsRepositoryTest {
             ),
         )
         assertIs<AdministrativeSettingsContent<*>>(
-            harness.repository.deleteImportTask(context(), "task-1", ImportDeleteMode.Source, deleteLibraryRecord = true),
+            harness.repository.deleteImportTask(context(), "task-1"),
         )
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.deleteBackup(context(), "backup-1"))
 
         assertEquals(HttpMethod.Put, harness.requests[0].method)
         assertEquals("/base/api/libraries/folder-1", harness.requests[0].path)
-        assertEquals(
-            """{"deleteMode":"source","deleteLibraryRecord":true}""",
-            harness.requests[1].body,
-        )
+        assertEquals("", harness.requests[1].body)
         assertEquals("", harness.requests[2].body)
     }
 
@@ -478,7 +475,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val DIRECTORY = """{"ok":true,"data":{"node":{"name":"books","path":"/books","readable":true,"error":null,"children":[]}}}"""
         const val IMPORT_TASKS = """{"ok":true,"data":{"tasks":[],"summary":{"completed":0,"failed":0},"page":1,"pageSize":20,"total":0,"totalPages":1}}"""
         const val IMPORT_LOGS = """{"ok":true,"data":{"logs":[{"id":"log-1","level":"info","message":"display only","createdAt":"2026-08-12T00:00:00Z"}],"page":2,"pageSize":25,"total":1,"totalPages":1}}"""
-        const val IMPORT_TASK_DELETED = """{"ok":true,"data":{"deleted":true,"id":"task-1","deleteMode":"source","deleteLibraryRecord":true,"deletedLibraryRecord":true,"deletedWorkRecord":true,"deletedLibraryDatabaseRecords":1,"libraryRecordId":"work-1","deletedFiles":1,"missingFiles":[],"failedFileDeletes":[]}}"""
+        const val IMPORT_TASK_DELETED = """{"ok":true,"data":{"deleted":true,"id":"task-1"}}"""
         const val ORGANIZE_POLICY = """{"ok":true,"data":{"policy":{"id":"default","enabled":false,"scheduleMode":"MANUAL","intervalMinutes":60,"autoRunOnNew":false,"autoRunOnNewSince":null,"rules":{"unrecognized":true,"missingMetadata":true},"writeMetadataToFiles":false,"preferLocalMetadata":true,"localMetadataPriority":["SIDECAR_OPF","EMBEDDED","PATH"],"lastScheduledAt":null,"nextRunAt":null,"updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val PENDING_ORGANIZE = """{"ok":true,"data":{"jobs":[],"books":[],"total":0}}"""
         const val ORGANIZE_RUNS = """{"ok":true,"data":{"runs":[{"id":"run-1","trigger":"MANUAL","scope":{"workIds":[],"rules":{"unrecognized":true,"missingMetadata":true}},"status":"COMPLETED","queuedCount":1,"completedCount":1,"reviewCount":0,"failedCount":0,"startedAt":"2026-08-12T00:00:00Z","finishedAt":"2026-08-12T00:01:00Z","createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z"}]}}"""

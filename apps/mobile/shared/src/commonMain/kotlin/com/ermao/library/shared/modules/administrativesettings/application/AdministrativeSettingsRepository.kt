@@ -16,7 +16,6 @@ import com.ermao.library.shared.modules.administrativesettings.domain.DirectoryN
 import com.ermao.library.shared.modules.administrativesettings.domain.EmailSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.EventStorage
 import com.ermao.library.shared.modules.administrativesettings.domain.HealthRun
-import com.ermao.library.shared.modules.administrativesettings.domain.ImportDeleteMode
 import com.ermao.library.shared.modules.administrativesettings.domain.ImportPreferences
 import com.ermao.library.shared.modules.administrativesettings.domain.ImportRescanRequest
 import com.ermao.library.shared.modules.administrativesettings.domain.ImportScanJob
@@ -94,7 +93,7 @@ interface AdministrativeSettingsRepository {
     suspend fun loadImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTask>
     suspend fun listImportTaskLogs(context: AdministrativeSettingsContext, taskId: String, page: Int = 1, pageSize: Int = 50): AdministrativeSettingsResult<ImportTaskLogPage>
     suspend fun retryImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTask>
-    suspend fun deleteImportTask(context: AdministrativeSettingsContext, taskId: String, mode: ImportDeleteMode, deleteLibraryRecord: Boolean): AdministrativeSettingsResult<ImportTaskDeletion>
+    suspend fun deleteImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTaskDeletion>
     suspend fun clearCompletedImportTasks(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Int>
     suspend fun clearImportQueue(context: AdministrativeSettingsContext): AdministrativeSettingsResult<QueueOperation>
     suspend fun rescanImportFolders(context: AdministrativeSettingsContext): AdministrativeSettingsResult<ImportRescanRequest>

@@ -97,49 +97,6 @@ struct ManagedDownloadWorkGroup: Identifiable, Equatable, Sendable {
     var totalBytes: Int64 { versions.reduce(0) { $0 + $1.totalBytes } }
 }
 
-enum DownloadStructuralMove {
-    case split
-    case reclassify
-}
-
-struct DownloadOwnershipRewrite: Equatable, Sendable {
-    let targetWorkID: String
-    let targetWorkTitle: String
-    let targetWorkAuthor: String
-    let targetVersionID: String
-    let targetVersionSourceKey: String
-    let targetVersionSourceName: String?
-    let targetVersionCompleted: Bool?
-
-    /// Split rewrite catalog ownership onto the server target Work and Version.
-    /// Reclassify does not change Version and therefore never rewrites ownership.
-    static func forMove(
-        _ move: DownloadStructuralMove,
-        targetWorkID: String?,
-        targetVersionID: String?,
-        targetWorkTitle: String,
-        targetWorkAuthor: String
-    ) -> DownloadOwnershipRewrite? {
-        switch move {
-        case .reclassify:
-            return nil
-        case .split:
-            let workID = targetWorkID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let versionID = targetVersionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !workID.isEmpty, !versionID.isEmpty, !targetWorkTitle.isEmpty else { return nil }
-            return DownloadOwnershipRewrite(
-                targetWorkID: workID,
-                targetWorkTitle: targetWorkTitle,
-                targetWorkAuthor: targetWorkAuthor,
-                targetVersionID: versionID,
-                targetVersionSourceKey: ManagedDownloadGrouping.implicitSourceKey,
-                targetVersionSourceName: nil,
-                targetVersionCompleted: nil
-            )
-        }
-    }
-}
-
 enum ManagedDownloadGrouping {
     static let implicitSourceKey = "__implicit__"
 

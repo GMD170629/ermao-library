@@ -1,14 +1,6 @@
 package com.ermao.library.features.workmanagement.application
 
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
-import com.ermao.library.shared.modules.downloads.CompletedDownloadArtifact
-import com.ermao.library.shared.modules.downloads.DownloadDescriptor
-import com.ermao.library.shared.modules.downloads.DownloadIdentity
-import com.ermao.library.shared.modules.downloads.DownloadNamespace
-import com.ermao.library.shared.modules.downloads.DownloadReaderType
-import com.ermao.library.shared.modules.downloads.DownloadSource
-import com.ermao.library.shared.modules.downloads.DownloadsRuntime
-import com.ermao.library.shared.modules.downloads.InMemoryDownloadCatalogRepository
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -29,7 +21,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResu
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -52,160 +43,38 @@ class WorkManagementViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     @Test
-    fun splitMovesCompletedDownloadToServerTargetWorkAndVersion() = runTest(dispatcher) {
-        val catalog = InMemoryDownloadCatalogRepository()
-        val runtime = DownloadsRuntime(catalog)
-        catalog.saveArtifact(artifact(volumeId = "volume-keep"))
-        catalog.saveArtifact(artifact(volumeId = "volume-split"))
-        val viewModel = viewModel(
-            runtime,
-            FakeWorkManagementRepository(
-                splitOutcome = WorkMutationOutcome(
-                    workId = SOURCE_WORK_ID,
-                    targetWorkId = "work-target",
-                    targetVersionId = "version-target",
-                ),
-            ),
+    fun reclassifyReportsCompletionWithoutChangingDirectoryOwnership() = runTest(dispatcher) {
+        val repository = FakeWorkManagementRepository()
+        val viewModel = WorkManagementViewModel(
+            repository = repository,
+            context = context,
+            workId = WORK_ID,
+            onUnauthorized = {},
         )
         advanceUntilIdle()
 
-        viewModel.splitVolume("volume-split", "Split Work", "New Author")
+        viewModel.reclassifyVolume(VOLUME_ID, ManagedMediaKind.Comic)
         advanceUntilIdle()
 
-        val moved = requireNotNull(runtime.artifact(namespace, "volume-split"))
-        assertEquals("work-target", moved.identity.workId)
-        assertEquals("version-target", moved.descriptor.versionId)
-        assertEquals(STRUCTURAL_MOVE_VERSION_SOURCE_KEY, moved.descriptor.versionSourceKey)
-        assertNull(moved.descriptor.versionSourceName)
-        assertNull(moved.descriptor.versionCompleted)
-        assertEquals("local://volume-split", moved.localReference)
-        assertEquals(10, moved.verifiedBytes)
-
-        val kept = requireNotNull(runtime.artifact(namespace, "volume-keep"))
-        assertEquals(SOURCE_WORK_ID, kept.identity.workId)
-        assertEquals(SOURCE_VERSION_ID, kept.descriptor.versionId)
-
-        val works = runtime.downloadedWorks(namespace)
-        assertEquals(setOf(SOURCE_WORK_ID, "work-target"), works.map { it.workId }.toSet())
-        val target = works.single { it.workId == "work-target" }
-        assertEquals(listOf("version-target"), target.versions.map { it.versionId })
-        assertEquals(listOf("volume-split"), target.versions.single().artifacts.map { it.identity.volumeId })
-        assertEquals(WorkManagementCompletion.VolumeSplit, viewModel.uiState.value.completedMutation)
-    }
-
-    @Test
-    fun reclassifyLeavesDownloadVersionOwnershipUnchanged() = runTest(dispatcher) {
-        val catalog = InMemoryDownloadCatalogRepository()
-        val runtime = DownloadsRuntime(catalog)
-        val original = artifact()
-        catalog.saveArtifact(original)
-        val viewModel = viewModel(
-            runtime,
-            FakeWorkManagementRepository(
-                reclassifyOutcome = WorkMutationOutcome(
-                    workId = SOURCE_WORK_ID,
-                    targetWorkId = SOURCE_WORK_ID,
-                    targetVersionId = "ignored-version",
-                ),
-            ),
-        )
-        advanceUntilIdle()
-
-        viewModel.reclassifyVolume("volume", ManagedMediaKind.Comic)
-        advanceUntilIdle()
-
-        val current = requireNotNull(runtime.artifact(namespace, "volume"))
-        assertEquals(original.identity.workId, current.identity.workId)
-        assertEquals(original.descriptor.versionId, current.descriptor.versionId)
-        assertEquals(original.descriptor.versionSourceKey, current.descriptor.versionSourceKey)
-        assertEquals(original.descriptor.versionSourceName, current.descriptor.versionSourceName)
-        assertEquals(original.localReference, current.localReference)
-        assertEquals(original.verifiedBytes, current.verifiedBytes)
+        assertEquals(Triple(WORK_ID, VOLUME_ID, ManagedMediaKind.Comic), repository.reclassified)
         assertEquals(WorkManagementCompletion.VolumeReclassified, viewModel.uiState.value.completedMutation)
     }
 
-    @Test
-    fun missingTargetVersionIdLeavesLocalDownloadUnchanged() = runTest(dispatcher) {
-        val catalog = InMemoryDownloadCatalogRepository()
-        val runtime = DownloadsRuntime(catalog)
-        val original = artifact()
-        catalog.saveArtifact(original)
-        val viewModel = viewModel(
-            runtime,
-            FakeWorkManagementRepository(
-                splitOutcome = WorkMutationOutcome(
-                    workId = SOURCE_WORK_ID,
-                    targetWorkId = "work-target",
-                    targetVersionId = null,
-                ),
-            ),
-        )
-        advanceUntilIdle()
+    private class FakeWorkManagementRepository : WorkManagementRepository {
+        var reclassified: Triple<String, String, ManagedMediaKind>? = null
 
-        viewModel.splitVolume("volume", "Split Work", null)
-        advanceUntilIdle()
-
-        assertEquals(original, runtime.artifact(namespace, "volume"))
-        assertEquals(WorkManagementCompletion.VolumeSplit, viewModel.uiState.value.completedMutation)
-    }
-
-    private fun viewModel(
-        runtime: DownloadsRuntime,
-        repository: WorkManagementRepository,
-    ) = WorkManagementViewModel(
-        repository = repository,
-        context = context,
-        workId = SOURCE_WORK_ID,
-        downloadsRuntime = runtime,
-        downloadNamespace = namespace,
-        onUnauthorized = {},
-    )
-
-    private fun artifact(
-        volumeId: String = "volume",
-        workId: String = SOURCE_WORK_ID,
-        versionId: String = SOURCE_VERSION_ID,
-    ) = CompletedDownloadArtifact(
-        descriptor = DownloadDescriptor(
-            identity = DownloadIdentity(namespace, workId, volumeId),
-            workTitle = "Source Work",
-            workAuthor = "Source Author",
-            coverApiPath = "/api/works/$workId/cover",
-            volumeTitle = "Volume",
-            format = "EPUB",
-            readerType = DownloadReaderType.Reflowable,
-            source = DownloadSource("/api/volumes/$volumeId/file", "application/epub+zip", 10),
-            versionId = versionId,
-            versionSourceKey = "kindle",
-            versionSourceName = "Kindle",
-            versionCompleted = true,
-        ),
-        localReference = "local://$volumeId",
-        verifiedBytes = 10,
-        completedAtEpochMillis = 1,
-    )
-
-    private class FakeWorkManagementRepository(
-        private val splitOutcome: WorkMutationOutcome? = null,
-        private val reclassifyOutcome: WorkMutationOutcome? = null,
-    ) : WorkManagementRepository {
         override suspend fun supportsNativeManagement(context: WorkManagementContext) =
             WorkManagementResult.Content(true)
-
-        override suspend fun splitVolume(
-            context: WorkManagementContext,
-            workId: String,
-            volumeId: String,
-            title: String,
-            author: String?,
-        ) = WorkManagementResult.Content(requireNotNull(splitOutcome))
 
         override suspend fun reclassifyVolume(
             context: WorkManagementContext,
             workId: String,
             volumeId: String,
             mediaKind: ManagedMediaKind,
-        ) = WorkManagementResult.Content(requireNotNull(reclassifyOutcome))
+        ): WorkManagementResult<WorkMutationOutcome> {
+            reclassified = Triple(workId, volumeId, mediaKind)
+            return WorkManagementResult.Content(WorkMutationOutcome(workId, "operation"))
+        }
 
         override suspend fun updateWork(
             context: WorkManagementContext,
@@ -221,8 +90,6 @@ class WorkManagementViewModelTest {
 
         override suspend fun regenerateCover(context: WorkManagementContext, workId: String) = unused()
 
-        override suspend fun deleteWork(context: WorkManagementContext, workId: String) = unused()
-
         override suspend fun updateVolume(
             context: WorkManagementContext,
             workId: String,
@@ -230,23 +97,17 @@ class WorkManagementViewModelTest {
             draft: VolumeMetadataDraft,
         ) = unused()
 
-        override suspend fun deleteVolume(
-            context: WorkManagementContext,
-            workId: String,
-            volumeId: String,
-        ) = unused()
-
         override suspend fun loadMetadataProviders(
             context: WorkManagementContext,
             mediaKind: ManagedMediaKind,
-        ) = unused()
+        ): WorkManagementResult<List<MetadataProvider>> = unused()
 
         override suspend fun searchMetadata(
             context: WorkManagementContext,
             workId: String,
             providerId: String,
             query: String,
-        ) = unused()
+        ): WorkManagementResult<MetadataSearchResult> = unused()
 
         override suspend fun applyMetadata(
             context: WorkManagementContext,
@@ -258,13 +119,15 @@ class WorkManagementViewModelTest {
             applyToAllVolumes: Boolean,
         ) = unused()
 
-        override suspend fun loadKindleSettings(context: WorkManagementContext) = unused()
+        override suspend fun loadKindleSettings(
+            context: WorkManagementContext,
+        ): WorkManagementResult<KindleSettings> = unused()
 
         override suspend fun sendToKindle(
             context: WorkManagementContext,
             workId: String,
             fileId: String,
-        ) = unused()
+        ): WorkManagementResult<KindleSendOutcome> = unused()
 
         override suspend fun setReadingStatus(
             context: WorkManagementContext,
@@ -276,15 +139,18 @@ class WorkManagementViewModelTest {
     }
 
     private companion object {
-        const val SOURCE_WORK_ID = "work-source"
-        const val SOURCE_VERSION_ID = "version-source"
-        val namespace = DownloadNamespace("server", "user", 1)
+        const val WORK_ID = "work"
+        const val VOLUME_ID = "volume"
         val context = WorkManagementContext(
-            run {
-                val parsed = ServerBaseUrl.parse("https://library.example") as ServerBaseUrlParseResult.Valid
-                ServerProfile("profile", "Library", parsed.baseUrl, "server", true, TlsMode.SystemTrust)
-            },
-            PrivateDataNamespace("server", "user", 1),
+            profile = ServerProfile(
+                id = "profile",
+                displayName = "Library",
+                baseUrl = (ServerBaseUrl.parse("https://library.example") as ServerBaseUrlParseResult.Valid).baseUrl,
+                serverIdentity = "server",
+                isActive = true,
+                tlsMode = TlsMode.SystemTrust,
+            ),
+            namespace = PrivateDataNamespace("server", "user", 1),
         )
     }
 }

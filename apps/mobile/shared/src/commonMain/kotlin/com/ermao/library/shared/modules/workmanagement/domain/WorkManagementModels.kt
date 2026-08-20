@@ -50,21 +50,12 @@ data class WorkMetadataDraft(
 }
 
 data class VolumeMetadataDraft(
-    val title: String,
-    val volumeIndex: Double?,
-    val sortOrder: Int,
     val publisher: String?,
     val language: String?,
     val isbn: String?,
     val identifier: String?,
     val narrator: String?,
-) {
-    init {
-        require(title.isNotBlank())
-        require(volumeIndex == null || volumeIndex.isFinite())
-        require(sortOrder >= 0)
-    }
-}
+)
 
 enum class ManagedMediaKind(val wireValue: String) {
     Ebook("EBOOK"),
@@ -79,9 +70,6 @@ enum class ManagedReadingStatus(val wireValue: String) {
 
 data class WorkMutationOutcome(
     val workId: String,
-    val deletedWork: Boolean = false,
-    val targetWorkId: String? = null,
-    val targetVersionId: String? = null,
     val operationId: String? = null,
 )
 

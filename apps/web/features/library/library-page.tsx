@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, UploadCloud, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookshelfCollection } from '../../components/book/bookshelf';
@@ -115,9 +115,6 @@ export function LibraryPage() {
   const [canManageSystem, setCanManageSystem] = useState(false);
   const [authorizationLoaded, setAuthorizationLoaded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<LibraryWorkSummary | null>(null);
-  const [deleteSource, setDeleteSource] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [selectedWorkIds, setSelectedWorkIds] = useState<string[]>([]);
   const [batchDialogAction, setBatchDialogAction] = useState<LibraryBatchAction | null>(null);
   const [batchContextPosition, setBatchContextPosition] = useState<{ x: number; y: number } | null>(null);
@@ -407,39 +404,6 @@ export function LibraryPage() {
     clearUploadRoute();
   }
 
-  function openDeleteBook(book: LibraryWorkSummary) {
-    setDeleteSource(false);
-    setDeleteTarget(book);
-  }
-
-  async function deleteBook() {
-    const book = deleteTarget;
-    if (!book) return;
-    setDeleting(true);
-    setError('');
-    setMessage('');
-    try {
-      const response = await fetch(`/api/works/${book.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deleteSource })
-      });
-      const payload = (await response.json()) as { ok: boolean; data?: { failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '删除失败');
-      setDeleteTarget(null);
-      setMessage('已删除书库记录');
-      const failedCount = payload.data?.failedFileDeletes?.length ?? 0;
-      toast.success('已删除书库记录', failedCount > 0 ? `有 ${failedCount} 个文件未能删除，请检查系统日志` : deleteSource ? '关联的源文件已同步删除' : '来源文件已保留');
-      setReloadKey((key) => key + 1);
-    } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '删除失败';
-      setError(nextError);
-      toast.error('删除失败', nextError);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
   function clearAdvancedFilters() {
     setStatusFilter('全部');
     setSmartFilterRules({ combinator: 'ALL', conditions: [] });
@@ -515,31 +479,6 @@ export function LibraryPage() {
         }}
         onError={setError}
       /> : null}
-
-      {deleteTarget ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除图书记录")}>
-          <div className="w-full max-w-lg rounded-t-3xl border border-black/[0.08] bg-[#FFFEFC] p-5 shadow-[0_28px_80px_rgba(47,37,31,0.22)] md:rounded-3xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-[#25221F]"><I18nText>删除图书记录</I18nText></h2>
-                <p className="mt-2 text-sm leading-6 text-[#6F6963]">{i18nAttribute('删除《{value0}》的书库记录和系统生成文件。你可以选择是否同时删除源文件。', { value0: deleteTarget.title })}</p>
-              </div>
-              <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#77716B] hover:bg-black/[0.05] disabled:opacity-50" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
-            </div>
-            <label className={cn('mt-5 flex cursor-pointer gap-3 rounded-2xl border p-4 transition', deleteSource ? 'border-red-200 bg-red-50' : 'border-black/[0.08] bg-black/[0.02] hover:bg-black/[0.04]')}>
-              <input type="checkbox" checked={deleteSource} disabled={deleting} onChange={(event) => setDeleteSource(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-              <span>
-                <span className="block text-sm font-semibold text-[#302C29]"><I18nText>同步删除源文件</I18nText></span>
-                <span className="mt-1 block text-xs leading-5 text-[#77716B]"><I18nText>源文件将从监控或上传目录中永久删除；该操作无法恢复。</I18nText></span>
-              </span>
-            </label>
-            <div className="mt-6 flex justify-end gap-2">
-              <Button type="button" variant="secondary" disabled={deleting} onClick={() => setDeleteTarget(null)}><I18nText>取消</I18nText></Button>
-              <Button type="button" variant="danger" icon={Trash2} loading={deleting} loadingText={i18nAttribute("删除中")} onClick={() => void deleteBook()}>{deleteSource ? i18nAttribute("删除记录和源文件") : i18nAttribute("删除记录")}</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {view === 'list' ? <div className="mt-8 flex min-w-0 items-center gap-2">
         <label className="flex h-12 min-w-0 flex-1 items-center gap-3 rounded-xl border border-black/[0.1] bg-white/65 px-4">
@@ -646,7 +585,7 @@ export function LibraryPage() {
           ) : (
             <div data-testid="library-management-viewport" className={cn('mt-8 lg:flex lg:min-h-[26rem] lg:flex-col', !filtersOpen && 'lg:h-[calc(100dvh-15.75rem)] lg:overflow-hidden')}>
               <div className="lg:min-h-0 lg:flex-1">
-                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onOpen={(book) => router.push(workDetailHref(book.id))} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
+                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onOpen={(book) => router.push(workDetailHref(book.id))} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
               </div>
               <Pagination page={page} total={meta.total} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
             </div>
