@@ -7,6 +7,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
+from sqlalchemy import String, create_engine, event, func, insert, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+
 from app.models.import_pipeline import ImportTask
 from app.modules.imports.application.dto import ImportResult
 from app.modules.imports.application.ports import LibraryImportStore
@@ -25,8 +29,6 @@ from app.modules.imports.infrastructure.library_import_store import (
     SqlAlchemyLibraryImportStore,
 )
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
-from sqlalchemy import String, create_engine, event, func, insert, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
 class ProbeBase(DeclarativeBase):
@@ -481,6 +483,17 @@ def test_import_persistence_exposes_no_directory_topology_creation_writes() -> N
     assert forbidden_methods.isdisjoint(BoundedLibraryImportStore.__dict__)
     assert "library_version" not in {target.value for target in ImportWriteTarget}
     assert "library_media_version" not in {target.value for target in ImportWriteTarget}
+
+
+@pytest.mark.parametrize(
+    "target",
+    [ImportWriteTarget.LIBRARY_WORK, ImportWriteTarget.LIBRARY_VOLUME],
+)
+def test_import_write_buffer_rejects_directory_topology_inserts(
+    target: ImportWriteTarget,
+) -> None:
+    with pytest.raises(ValueError, match="directory topology owns library structure"):
+        PreparedImportWriteBuffer().insert(target, {"id": "structural-row"})
 
 
 def test_import_completion_does_not_reference_volume_version_id() -> None:

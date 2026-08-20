@@ -178,14 +178,17 @@ class SqlAlchemyLibraryImportStore:
                 )
             )
 
-        parent_targets = (
+        insertable_parent_targets = (
             ImportWriteTarget.IMPORT_TASK,
-            ImportWriteTarget.LIBRARY_WORK,
-            ImportWriteTarget.LIBRARY_VOLUME,
             ImportWriteTarget.LIBRARY_FILE,
         )
-        for target in parent_targets:
+        for target in insertable_parent_targets:
             executions.extend(self._prepare_target_inserts(prepared, target))
+            executions.extend(self._prepare_target_updates(prepared, target))
+        for target in (
+            ImportWriteTarget.LIBRARY_WORK,
+            ImportWriteTarget.LIBRARY_VOLUME,
+        ):
             executions.extend(self._prepare_target_updates(prepared, target))
 
         executions.extend(

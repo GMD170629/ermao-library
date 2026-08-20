@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType, TracebackType
-from typing import Protocol, TypeVar
+from typing import Protocol, Self, TypeVar
 
 from app.modules.imports.application.dto import ImportResult
 from app.modules.imports.application.ports import ImportUnitOfWork
@@ -27,6 +27,19 @@ class ImportWriteTarget(StrEnum):
     LIBRARY_READING_UNIT = "library_reading_unit"
     LIBRARY_METADATA = "library_metadata"
     LIBRARY_READING_PROGRESS = "library_reading_progress"
+
+
+_IMPORT_INSERT_TARGETS = frozenset(
+    {
+        ImportWriteTarget.IMPORT_TASK,
+        ImportWriteTarget.IMPORT_ASSET,
+        ImportWriteTarget.IMPORT_LOG,
+        ImportWriteTarget.LIBRARY_FILE,
+        ImportWriteTarget.LIBRARY_READING_UNIT,
+        ImportWriteTarget.LIBRARY_METADATA,
+        ImportWriteTarget.LIBRARY_READING_PROGRESS,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +110,7 @@ class ImportCompletionWriter(Protocol):
 
     def get_library_volume_import_status(self, volume_id: str) -> str | None: ...
 
+
 @dataclass
 class PreparedImportWriteBuffer:
     """Application-side import write set with read-your-writes overlays."""
@@ -118,6 +132,11 @@ class PreparedImportWriteBuffer:
     def insert(
         self, target: ImportWriteTarget, columns: Mapping[str, object]
     ) -> dict[str, object]:
+        if target not in _IMPORT_INSERT_TARGETS:
+            raise ValueError(
+                f"import cannot create {target.value}; directory topology owns "
+                "library structure"
+            )
         values = dict(columns)
         target_id = str(values["id"])
         key = (target, target_id)
@@ -319,7 +338,7 @@ class ImportDependencyProjection:
     def __init__(self, transactions: ImportTransactionController) -> None:
         self._transactions = transactions
 
-    def __enter__(self) -> ImportDependencyProjection:
+    def __enter__(self) -> Self:
         self._transactions.prepare_for_dependency_read()
         return self
 
