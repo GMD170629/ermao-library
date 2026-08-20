@@ -171,7 +171,7 @@ export function BookTable({
           return (
             <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`relative overflow-hidden rounded-2xl border bg-white/70 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
               <div
-                data-testid="book-list-mobile-swipe-surface"
+                data-testid="book-list-mobile-selection-surface"
                 className={`relative z-10 rounded-2xl p-4 transition-colors ${selectedIds.includes(book.id) ? 'bg-[#FFF8F5] shadow-[inset_1px_0_0_#EF4D2F]' : 'bg-white/70'}`}
                 onClick={() => {
                   if (selectable) onSelect?.(book);

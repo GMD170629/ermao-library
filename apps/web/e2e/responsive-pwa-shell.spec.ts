@@ -945,48 +945,12 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await expect(page.getByRole('button', { name: `查看《${mobileBook.title}》`, exact: true })).toHaveCount(0);
   await mobileMetadata.click();
   await expect(mobileSelection).toBeChecked();
-  await expect(page.getByTestId('book-list-mobile-swipe-surface')).toHaveCSS('background-color', 'rgb(255, 248, 245)');
-  expect(await page.getByTestId('book-list-mobile-swipe-surface').evaluate((element) => getComputedStyle(element).boxShadow)).toContain('rgb(239, 77, 47) 1px 0px 0px 0px inset');
+  const mobileSelectionSurface = page.getByTestId('book-list-mobile-selection-surface');
+  await expect(mobileSelectionSurface).toHaveCSS('background-color', 'rgb(255, 248, 245)');
+  expect(await mobileSelectionSurface.evaluate((element) => getComputedStyle(element).boxShadow)).toContain('rgb(239, 77, 47) 1px 0px 0px 0px inset');
   await mobileMetadata.click();
   await expect(mobileSelection).not.toBeChecked();
-  const mobileDeleteButton = page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true });
-  await expect(mobileDeleteButton).toHaveClass('sr-only');
-
-  const swipeSurface = page.getByTestId('book-list-mobile-swipe-surface');
-  const dispatchTouchPointer = (type: string, pointerId: number, clientX: number, clientY: number, buttons: number) => swipeSurface.evaluate((element, pointerState) => {
-    const view = element.ownerDocument.defaultView;
-    if (!view) throw new Error('mobile swipe test requires a window');
-    element.dispatchEvent(new view.PointerEvent(pointerState.type, {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-      buttons: pointerState.buttons,
-      clientX: pointerState.clientX,
-      clientY: pointerState.clientY,
-      isPrimary: true,
-      pointerId: pointerState.pointerId,
-      pointerType: 'touch'
-    }));
-  }, { type, pointerId, clientX, clientY, buttons });
-  const dispatchTouchSwipe = async (pointerId: number, startX: number, endX: number, endY = 304) => {
-    await dispatchTouchPointer('pointerdown', pointerId, startX, 300, 1);
-    await dispatchTouchPointer('pointermove', pointerId, endX, endY, 1);
-    await dispatchTouchPointer('pointerup', pointerId, endX, endY, 0);
-  };
-
-  await dispatchTouchPointer('pointerdown', 4, 260, 300, 1);
-  await expect(mobileDeleteButton).toHaveClass('sr-only');
-  await dispatchTouchPointer('pointerup', 4, 260, 300, 0);
-
-  await dispatchTouchSwipe(1, 260, 160);
-  await expect(mobileDeleteButton).not.toHaveClass('sr-only');
-  await expect(mobileDeleteButton).toHaveCSS('width', '80px');
-  await expect(swipeSurface).toHaveCSS('transform', 'matrix(1, 0, 0, 1, -80, 0)');
-
-  await dispatchTouchSwipe(2, 160, 260);
-  await expect(mobileDeleteButton).toHaveClass('sr-only');
-  await dispatchTouchSwipe(3, 260, 254, 390);
-  await expect(mobileDeleteButton).toHaveClass('sr-only');
+  await expect(page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '更多筛选', exact: true })).toHaveCSS('width', '48px');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.waitForTimeout(550);
@@ -1230,7 +1194,7 @@ test('desktop book list opens details from both the cover and title', async ({ p
 
   const managedBookRow = page.locator('[data-work-id="desktop-list-work"]');
   await expect(managedBookRow.getByRole('button', { name: '查看《桌面列表入口测试》', exact: true })).toHaveCount(0);
-  await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toBeVisible();
+  await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toHaveCount(0);
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
