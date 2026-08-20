@@ -11,7 +11,7 @@ from app.modules.imports.application.reflowable_types import EmbeddedBookCover
 def publish_reflowable_cover(
     storage_root: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     volume_id: str,
     cover: EmbeddedBookCover | None,
 ) -> str | None:
@@ -21,7 +21,7 @@ def publish_reflowable_cover(
         storage_root
         / "books"
         / work_id
-        / media_version_id
+        / version_id
         / volume_id
         / f"cover{cover.extension}"
     )

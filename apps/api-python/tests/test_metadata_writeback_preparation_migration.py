@@ -52,7 +52,7 @@ def test_writeback_preparation_upgrade_is_reversible_and_restart_safe(
             "id",
             "operationId",
             "workId",
-            "mediaVersionId",
+            "versionId",
             "volumeId",
             "lookupTaskId",
             "source",

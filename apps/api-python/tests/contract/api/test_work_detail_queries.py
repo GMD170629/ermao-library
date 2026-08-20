@@ -20,7 +20,7 @@ from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_
 
 FORBIDDEN_WORK_DETAIL_FIELDS = {
     "mediaVersions",
-    "mediaVersionId",
+    "versionId",
     "availableMediaKinds",
     "detailTabs",
     "selectedDetailTab",
@@ -265,7 +265,7 @@ def test_work_volume_query_pages_deterministically_and_includes_file_summaries(
     assert data["total"] == 12
     assert data["totalPages"] == 3
     assert "mediaKind" not in data
-    assert "mediaVersionId" not in data
+    assert "versionId" not in data
     assert [volume["id"] for volume in data["volumes"]] == [
         f"detail-volume-{number:02d}" for number in range(6, 11)
     ]
@@ -648,7 +648,7 @@ def test_work_detail_openapi_exposes_versions_instead_of_media_tabs() -> None:
     paths = schema["paths"]
     components = schema["components"]["schemas"]
     assert "/api/works/{work_id}/versions/{version_id}/volumes" in paths
-    assert "/api/works/{work_id}/media-versions/{media_version_id}/volumes" not in paths
+    assert "/api/works/{work_id}/media-versions/{version_id}/volumes" not in paths
     assert "/api/works/{work_id}/detail-preference" not in paths
     get_work = paths["/api/works/{work_id}"]["get"]
     parameter_names = {item["name"] for item in get_work.get("parameters", [])}
@@ -672,4 +672,4 @@ def test_work_detail_openapi_exposes_versions_instead_of_media_tabs() -> None:
     assert "versionId" in version_page
     assert "sourceKey" in version_page
     assert "mediaKind" not in version_page
-    assert "mediaVersionId" not in version_page
+    assert "versionId" not in version_page

@@ -198,7 +198,7 @@ def test_grouping_representative_works_are_limited_to_authorized_scope(
         )
         volume = LibraryVolume(
             id=f"volume-{work_id}",
-            media_version_id=media.id,
+            version_id=media.id,
             title=work_id,
             format="EPUB",
             resource_key=f"resource-{work_id}",

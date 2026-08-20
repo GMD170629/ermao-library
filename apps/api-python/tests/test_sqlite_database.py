@@ -334,7 +334,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             column["name"] for column in inspector.get_columns("LibraryVolume")
         }
         assert "versionId" in volume_columns
-        assert "mediaVersionId" not in volume_columns
+        assert "versionId" not in volume_columns
         assert "monitorFolderId" not in volume_columns
         volume_foreign_keys = {
             (tuple(foreign_key["constrained_columns"]), foreign_key["referred_table"])

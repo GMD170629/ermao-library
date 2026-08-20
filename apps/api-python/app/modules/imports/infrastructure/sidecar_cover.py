@@ -11,7 +11,7 @@ def publish_sidecar_cover(
     storage_root: Path,
     source: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     volume_id: str,
 ) -> str:
     allowed_suffixes = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -19,7 +19,7 @@ def publish_sidecar_cover(
     if suffix not in allowed_suffixes:
         suffix = ".jpg"
     root = storage_root.resolve()
-    target = root / "books" / work_id / media_version_id / volume_id / f"cover{suffix}"
+    target = root / "books" / work_id / version_id / volume_id / f"cover{suffix}"
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f"{target.suffix}.part")
     try:

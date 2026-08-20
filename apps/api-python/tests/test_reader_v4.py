@@ -265,7 +265,7 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert bootstrap["versionCompleted"] is False
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
-    assert "mediaVersionId" not in bootstrap["volume"]
+    assert "versionId" not in bootstrap["volume"]
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
     assert "publicationFingerprint" not in bootstrap
@@ -652,7 +652,7 @@ def test_reader_v4_bootstrap_does_not_expose_file_hashes(
     assert all("contentHash" not in item for item in bootstrap["files"])
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
-    assert all("mediaVersionId" not in item for item in bootstrap["availableVolumes"])
+    assert all("versionId" not in item for item in bootstrap["availableVolumes"])
 
 
 @pytest.mark.parametrize(
@@ -1342,7 +1342,7 @@ def test_reader_v4_version_completed_ignores_other_versions(
         current.version_id,
         other_version.id,
     }
-    assert "mediaVersionId" not in current_bootstrap["availableVolumes"][0]
+    assert "versionId" not in current_bootstrap["availableVolumes"][0]
 
 
 def test_reader_v4_openapi_requires_no_edition_or_user_identity(

@@ -238,46 +238,6 @@ class LibraryVersion(Base):
     )
 
 
-class LibraryMediaVersion(Base):
-    __tablename__ = "LibraryMediaVersion"
-    __table_args__ = (
-        UniqueConstraint(
-            "workId", "mediaKind", name="LibraryMediaVersion_workId_mediaKind_key"
-        ),
-        Index("LibraryMediaVersion_workId_idx", "workId"),
-        Index("LibraryMediaVersion_mediaKind_idx", "mediaKind"),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    work_id: Mapped[str] = mapped_column(
-        "workId",
-        String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    media_kind: Mapped[str] = mapped_column(
-        "mediaKind",
-        String(191),
-        nullable=False,
-        default="EBOOK",
-        server_default="EBOOK",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
 class LibraryVolume(Base):
     __tablename__ = "LibraryVolume"
     __table_args__ = (
@@ -615,34 +575,6 @@ class LibraryOperation(Base):
         nullable=False,
         default=db_timestamp,
         onupdate=db_timestamp,
-    )
-
-
-class MediaVersionMigrationEvent(Base):
-    """Durable audit record for ambiguous legacy resource attribution."""
-
-    __tablename__ = "MediaVersionMigrationEvent"
-    __table_args__ = (
-        UniqueConstraint(
-            "recordType",
-            "recordId",
-            "code",
-            name="MediaVersionMigrationEvent_record_code_key",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    work_id: Mapped[str] = mapped_column("workId", String(191), nullable=False)
-    record_type: Mapped[str] = mapped_column("recordType", String(64), nullable=False)
-    record_id: Mapped[str] = mapped_column("recordId", String(191), nullable=False)
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
-    details_json: Mapped[str] = mapped_column("detailsJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
     )
 
 

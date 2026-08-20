@@ -67,7 +67,7 @@ def _add_work(
     )
     volume = LibraryVolume(
         id=f"volume-{work_id}",
-        media_version_id=media_version.id,
+        version_id=media_version.id,
         title=title,
         format="EPUB",
         resource_key=f"resource-{work_id}",
@@ -173,7 +173,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     alpha_volumes = [
         LibraryVolume(
             id="volume-alpha-1",
-            media_version_id=alpha_media.id,
+            version_id=alpha_media.id,
             origin="WATCH",
             title="星海列车 旗舰卷",
             volume_index=1,
@@ -193,7 +193,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         ),
         LibraryVolume(
             id="volume-alpha-2",
-            media_version_id=alpha_media.id,
+            version_id=alpha_media.id,
             origin="WATCH",
             title="星海列车 第二卷",
             volume_index=2,
@@ -210,7 +210,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     ]
     beta_volume = LibraryVolume(
         id="volume-beta",
-        media_version_id=beta_media.id,
+        version_id=beta_media.id,
         origin="MANUAL",
         title="平凡日记 第一卷",
         format="PDF",
@@ -226,7 +226,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     )
     empty_volume = LibraryVolume(
         id="volume-empty",
-        media_version_id=empty_media.id,
+        version_id=empty_media.id,
         title="空白样本",
         format="AUDIO",
         resource_key="resource-empty",

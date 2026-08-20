@@ -25,7 +25,6 @@ from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
@@ -231,7 +230,7 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
 def _insert_media_volume(
     db_session,
     *,
-    media_version_id: str,
+    version_id: str,
     volume_id: str,
     work_id: str,
     media_kind: str,
@@ -245,7 +244,7 @@ def _insert_media_volume(
             "VALUES (:id, :work_id, :media_kind, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         ),
         {
-            "id": media_version_id,
+            "id": version_id,
             "work_id": work_id,
             "media_kind": media_kind,
         },
@@ -832,7 +831,7 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
     stored_work = db_session.get(LibraryWork, work.id)
     stored_volume = db_session.get(LibraryVolume, volume.id)
     assert result.work_id == work.id
-    assert result.media_version_id == version.id
+    assert result.version_id == version.id
     assert result.volume_id == volume.id
     assert result.merge_reason == "topology-bound"
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 1
@@ -840,10 +839,6 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
         db_session.execute(text("SELECT COUNT(*) FROM LibraryVersion")).scalar() == 1
     )
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryVolume")).scalar() == 1
-    assert (
-        db_session.execute(text("SELECT COUNT(*) FROM LibraryMediaVersion")).scalar()
-        == 0
-    )
     assert stored_work is not None and stored_work.title == "Book"
     assert stored_volume is not None and stored_volume.title == "Vol.1"
     assert stored_volume.import_status == "COMPLETED"
@@ -907,7 +902,7 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
         ),
     )
     assert same_path.duplicate is True
-    assert same_path.media_version_id == first.media_version_id
+    assert same_path.version_id == first.version_id
     assert same_path.volume_id == first.volume_id
 
     moved_dir = test_settings.resolved_monitor_root / "moved-copy"
@@ -937,7 +932,7 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     )
     assert moved.duplicate is False
     assert moved.work_id == first.work_id
-    assert moved.media_version_id == first.media_version_id
+    assert moved.version_id == first.version_id
     assert moved.volume_id != first.volume_id
     assert moved.merge_reason == "new-audio-volume"
     assert (
@@ -988,7 +983,7 @@ def test_audio_partial_content_overlap_runs_normal_import(
     )
     assert result.duplicate is False
     assert result.work_id == first.work_id
-    assert result.media_version_id == first.media_version_id
+    assert result.version_id == first.version_id
     assert result.volume_id != first.volume_id
     files = (
         db_session.execute(
@@ -1138,7 +1133,7 @@ def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
         ),
     )
     assert first.work_id == second.work_id
-    assert first.media_version_id == second.media_version_id
+    assert first.version_id == second.version_id
     assert first.volume_id == second.volume_id
     assert second.duplicate is True
     volumes = (
@@ -1311,14 +1306,14 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
         )
     )
     db_session.commit()
-    for media_version_id, volume_id, media_kind, fmt in (
+    for version_id, volume_id, media_kind, fmt in (
         ("mixed-ebook", "mixed-ebook-volume", "EBOOK", "EPUB"),
         ("mixed-comic", "mixed-comic-volume", "COMIC", "COMIC"),
         ("mixed-audio", "mixed-audio-volume", "AUDIOBOOK", "AUDIO"),
     ):
         _insert_media_volume(
             db_session,
-            media_version_id=media_version_id,
+            version_id=version_id,
             volume_id=volume_id,
             work_id="mixed-work",
             media_kind=media_kind,

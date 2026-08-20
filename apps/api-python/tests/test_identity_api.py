@@ -117,7 +117,7 @@ def test_metadata_recognition_applies_publisher_to_selected_volume(client, db_se
         text(
             """
             INSERT INTO LibraryVolume (
-                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                id, versionId, origin, title, sortOrder, format, resourceKey,
                 importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
             ) VALUES (
                 'volume-publisher', 'media-publisher', 'MANUAL', 'EPUB', 0, 'EPUB',
@@ -306,7 +306,7 @@ def test_manual_metadata_uses_representative_volume_to_update_entire_media_versi
     volumes = [
         LibraryVolume(
             id=f"volume-version-{index}",
-            media_version_id=media_version.id,
+            version_id=media_version.id,
             title=f"第 {index} 卷",
             sort_order=index,
             format="CBZ",
@@ -339,7 +339,7 @@ def test_manual_metadata_uses_representative_volume_to_update_entire_media_versi
     refreshed_volumes = list(
         db_session.scalars(
             select(LibraryVolume)
-            .where(LibraryVolume.media_version_id == media_version.id)
+            .where(LibraryVolume.version_id == media_version.id)
             .order_by(LibraryVolume.sort_order.asc())
         ).all()
     )

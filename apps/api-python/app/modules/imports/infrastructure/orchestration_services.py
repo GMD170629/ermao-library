@@ -335,7 +335,7 @@ class SessionImportOrchestrationServices:
         storage_root: Path,
         source_path: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
         entry_name: str,
     ) -> str:
@@ -344,7 +344,7 @@ class SessionImportOrchestrationServices:
             storage_root,
             source_path,
             work_id,
-            media_version_id,
+            version_id,
             volume_id,
             entry_name,
         )
@@ -355,7 +355,7 @@ class SessionImportOrchestrationServices:
         storage_root: Path,
         source_path: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
     ) -> str:
         self._require_released_transaction("publish_sidecar_cover")
@@ -363,7 +363,7 @@ class SessionImportOrchestrationServices:
             storage_root,
             source_path,
             work_id,
-            media_version_id,
+            version_id,
             volume_id,
         )
         return published
@@ -394,7 +394,7 @@ class SessionImportOrchestrationServices:
         self,
         storage_root: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         metadata_items: tuple[AudioFileMetadata, ...],
         *,
         bundle_root: Path | None = None,
@@ -403,7 +403,7 @@ class SessionImportOrchestrationServices:
         published = publish_audio_cover(
             storage_root,
             work_id,
-            media_version_id,
+            version_id,
             metadata_items,
             bundle_root=bundle_root,
         )
@@ -437,7 +437,7 @@ class SessionImportOrchestrationServices:
         self,
         storage_root: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None:
@@ -445,7 +445,7 @@ class SessionImportOrchestrationServices:
         published = publish_reflowable_cover(
             storage_root,
             work_id,
-            media_version_id,
+            version_id,
             volume_id,
             metadata.cover,
         )
@@ -460,7 +460,7 @@ class SessionImportOrchestrationServices:
         storage_root: Path,
         source_path: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
     ) -> PdfCoverPublication:
         self._require_released_transaction("publish_pdf_cover")
@@ -468,7 +468,7 @@ class SessionImportOrchestrationServices:
             storage_root,
             source_path,
             work_id,
-            media_version_id,
+            version_id,
             volume_id,
         )
         return publication

@@ -41,7 +41,7 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
     )
     volume = LibraryVolume(
         id="preserved-volume",
-        media_version_id=media_version.id,
+        version_id=media_version.id,
         title="Preserved source",
         sort_order=0,
         format="MOBI",

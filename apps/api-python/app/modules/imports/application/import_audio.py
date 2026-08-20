@@ -36,7 +36,6 @@ from app.modules.imports.application.import_support import (
     _finalize_work_cover,
     _hash_text,
     _id,
-    _import_media_context,
     _normalize_key,
     _now,
     _persist_import_volume,
@@ -149,15 +148,6 @@ def _import_bound_audio(
 ) -> ImportResult:
     """Enrich one scanner-owned audiobook Volume without structural inference."""
 
-    media_context = _import_media_context(
-        store,
-        work_id=target.work["id"],
-        media_kind=classification.media_kind,
-        format_name="AUDIO",
-        library_id=options.library_id,
-        origin=options.origin,
-        target=target,
-    )
     volume = _persist_import_volume(
         store,
         {
@@ -178,7 +168,7 @@ def _import_bound_audio(
     cover_path = services.publish_audio_cover(
         settings.resolved_storage_root,
         str(target.work["id"]),
-        str(media_context["id"]),
+        target.version_id,
         tuple(metadata_items),
         bundle_root=(
             options.source_file_path.resolve()
@@ -359,14 +349,14 @@ def _import_bound_audio(
         queries,
         services,
         str(target.work["id"]),
-        str(media_context["id"]),
+        target.version_id,
         cover_path,
         _prepared_default_cover(options),
     )
     return ImportResult(
         str(target.work["id"]),
         str(target.work["id"]),
-        str(media_context["id"]),
+        target.version_id,
         str(volume["id"]),
         str(target.work["title"]),
         classification.media_kind.lower(),

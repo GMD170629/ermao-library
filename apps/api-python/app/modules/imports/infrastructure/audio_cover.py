@@ -42,7 +42,7 @@ def validated_audio_cover(data: bytes) -> tuple[bytes, str] | None:
 def publish_audio_cover(
     storage_root: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     metadata_items: tuple[AudioFileMetadata, ...],
     *,
     bundle_root: Path | None = None,
@@ -52,7 +52,7 @@ def publish_audio_cover(
         validated = validated_audio_cover(selected.cover_data)
         if validated:
             return _write_cover(
-                storage_root, work_id, media_version_id, validated[0], validated[1]
+                storage_root, work_id, version_id, validated[0], validated[1]
             )
 
     source_root = bundle_root or metadata_items[0].path.parent
@@ -83,7 +83,7 @@ def publish_audio_cover(
             continue
         if validated:
             return _write_cover(
-                storage_root, work_id, media_version_id, validated[0], validated[1]
+                storage_root, work_id, version_id, validated[0], validated[1]
             )
     return None
 
@@ -91,11 +91,11 @@ def publish_audio_cover(
 def _write_cover(
     storage_root: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     data: bytes,
     extension: str,
 ) -> str:
-    target = storage_root / "books" / work_id / media_version_id / f"cover{extension}"
+    target = storage_root / "books" / work_id / version_id / f"cover{extension}"
     temporary = target.with_suffix(f"{target.suffix}.part")
     target.parent.mkdir(parents=True, exist_ok=True)
     try:

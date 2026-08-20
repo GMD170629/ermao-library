@@ -401,7 +401,7 @@ class _ImportMetadataOpfObserver(ImportMetadataObserver):
         schedule_work_metadata_writebacks(
             self._db,
             work_id=result.work_id,
-            media_version_id=result.media_version_id,
+            version_id=result.version_id,
             volume_id=result.volume_id,
             source="IMPORT_METADATA",
             settings=self._settings,

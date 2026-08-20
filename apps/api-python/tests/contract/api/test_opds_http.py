@@ -52,7 +52,7 @@ def _seed_opds_publication(db: Session) -> User:
     )
     volume = LibraryVolume(
         id="opds-volume",
-        media_version_id=media.id,
+        version_id=media.id,
         title="Volume 1",
         format="CBZ",
         resource_key="opds:volume",

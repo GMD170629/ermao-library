@@ -225,7 +225,7 @@ def _comic_page_jpeg_bytes() -> bytes:
 
 def _add_comic_volume(db_session, volume_id: str) -> None:
     work_id = f"{volume_id}-work"
-    media_version_id = f"{volume_id}-media"
+    version_id = f"{volume_id}-media"
     work = LibraryWork(
         library_id="test-library",
         id=work_id,
@@ -239,7 +239,7 @@ def _add_comic_volume(db_session, volume_id: str) -> None:
     db_session.add(work)
     db_session.flush()
     media = LibraryMediaVersion(
-        id=media_version_id,
+        id=version_id,
         work_id=work_id,
         media_kind="COMIC",
     )
@@ -247,7 +247,7 @@ def _add_comic_volume(db_session, volume_id: str) -> None:
     db_session.flush()
     db_session.add(
         LibraryVersion(
-            id=media_version_id,
+            id=version_id,
             work_id=work_id,
             source_key="__implicit__",
         )
@@ -256,7 +256,7 @@ def _add_comic_volume(db_session, volume_id: str) -> None:
     db_session.add(
         LibraryVolume(
             id=volume_id,
-            version_id=media_version_id,
+            version_id=version_id,
             title="Comic volume",
             sort_order=0,
             format="COMIC",

@@ -33,7 +33,6 @@ from app.modules.imports.application.import_support import (
     _hash_text,
     _id,
     _insert_identity_metadata,
-    _import_media_context,
     _import_version,
     _import_work,
     _log_import,
@@ -197,15 +196,6 @@ def _import_comic(
         topology_target,
     )
     version = _import_version(store, work["id"], topology_target)
-    media_version = _import_media_context(
-        store,
-        work_id=work["id"],
-        media_kind=classification.media_kind,
-        format_name=archive_format,
-        library_id=options.library_id,
-        origin=options.origin,
-        target=topology_target,
-    )
     cover_path = None
     try:
         sort_order = 0
@@ -267,7 +257,7 @@ def _import_comic(
                 settings.resolved_storage_root,
                 source_path,
                 work["id"],
-                media_version["id"],
+                version["id"],
                 volume["id"],
                 parsed["coverEntryPath"],
             )
@@ -300,9 +290,7 @@ def _import_comic(
         )
         _insert_identity_metadata(store, volume["id"], identity)
         stored_cover_path = cover_path or _prepared_default_cover(options)
-        media_version_cover_path = (
-            cover_path or media_version.get("coverPath") or stored_cover_path
-        )
+        version_cover_path = cover_path or stored_cover_path
         store.update_library_volume(
             volume["id"],
             columns={
@@ -316,8 +304,8 @@ def _import_comic(
             columns={
                 "sizeBytes": file_size,
                 "pageCount": parsed["pageCount"],
-                "coverPath": media_version_cover_path,
-                "coverStatus": services.cover_status(media_version_cover_path),
+                "coverPath": version_cover_path,
+                "coverStatus": services.cover_status(version_cover_path),
                 "importStatus": "COMPLETED",
                 "updatedAt": _now(),
             },
@@ -328,15 +316,15 @@ def _import_comic(
             queries,
             services,
             work["id"],
-            media_version["id"],
-            media_version_cover_path,
+            version["id"],
+            version_cover_path,
             _prepared_default_cover(options),
         )
         release_import_transaction(unit_of_work)
         return ImportResult(
             work["id"],
             work["id"],
-            media_version["id"],
+            version["id"],
             volume["id"],
             work["title"],
             _classification_result_type(classification),

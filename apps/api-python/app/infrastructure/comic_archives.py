@@ -316,7 +316,7 @@ def extract_comic_cover(
     storage_root: Path,
     source_path: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     volume_id: str,
     entry_name: str,
 ) -> str:
@@ -325,7 +325,7 @@ def extract_comic_cover(
         storage_root
         / "books"
         / work_id
-        / media_version_id
+        / version_id
         / volume_id
         / f"cover{extension}"
     )

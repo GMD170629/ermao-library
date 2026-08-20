@@ -89,7 +89,7 @@ def insert_import_task(
     )
     if volume_id is None:
         work_id = f"work-{source_key}"
-        media_version_id = f"media-{source_key}"
+        version_id = f"media-{source_key}"
         volume_id = f"volume-{source_key}"
         db.add(
             LibraryWork(
@@ -102,7 +102,7 @@ def insert_import_task(
         )
         db.add(
             LibraryMediaVersion(
-                id=media_version_id,
+                id=version_id,
                 work_id=work_id,
                 media_kind="EBOOK",
             )
@@ -110,7 +110,7 @@ def insert_import_task(
         db.add(
             LibraryVolume(
                 id=volume_id,
-                media_version_id=media_version_id,
+                version_id=version_id,
                 title=source.stem,
                 format=source.suffix.removeprefix(".").upper() or "TXT",
                 resource_key=f"source:{source_key}",

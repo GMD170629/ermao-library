@@ -24,7 +24,6 @@ from app.modules.imports.application.import_support import (
     _finalize_work_cover,
     _hash_text,
     _id,
-    _import_media_context,
     _import_version,
     _import_work,
     _now,
@@ -167,15 +166,6 @@ def _import_reflowable_source(
     store.update_import_task(
         task_id, columns={"message": f"正在建立 {source_format} 原始文件卷册"}
     )
-    media_version = _import_media_context(
-        store,
-        work_id=work["id"],
-        media_kind=classification.media_kind,
-        format_name=source_format,
-        library_id=options.library_id,
-        origin=options.origin,
-        target=topology_target,
-    )
     mime_type = REFLOWABLE_MIME_TYPES[source_format]
     volume = _persist_import_volume(
         store,
@@ -245,7 +235,7 @@ def _import_reflowable_source(
     cover_path = services.publish_reflowable_cover(
         settings.resolved_storage_root,
         str(work["id"]),
-        str(media_version["id"]),
+        str(version["id"]),
         str(volume["id"]),
         metadata,
     )
@@ -259,14 +249,14 @@ def _import_reflowable_source(
         queries,
         services,
         str(work["id"]),
-        str(media_version["id"]),
+        str(version["id"]),
         stored_cover_path,
         _prepared_default_cover(options),
     )
     return ImportResult(
         str(work["id"]),
         str(work["id"]),
-        str(media_version["id"]),
+        str(version["id"]),
         str(volume["id"]),
         str(work["title"]),
         _classification_result_type(classification),

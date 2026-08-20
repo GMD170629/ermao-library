@@ -161,7 +161,7 @@ class OrganizeJob(Base):
         ),
         Index("OrganizeJob_runId_status_idx", "runId", "status"),
         Index("OrganizeJob_volumeId_idx", "volumeId"),
-        Index("OrganizeJob_mediaVersionId_idx", "mediaVersionId"),
+        Index("OrganizeJob_versionId_idx", "versionId"),
         Index("OrganizeJob_importTaskId_idx", "importTaskId"),
         Index("OrganizeJob_status_updatedAt_idx", "status", "updatedAt"),
     )
@@ -186,7 +186,7 @@ class OrganizeJob(Base):
         nullable=True,
     )
     version_id: Mapped[str | None] = mapped_column(
-        "mediaVersionId",
+        "versionId",
         String(191),
         ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
@@ -245,7 +245,7 @@ class MetadataLookupTask(Base):
         ),
         Index("MetadataLookupTask_workId_createdAt_idx", "workId", "createdAt"),
         Index("MetadataLookupTask_volumeId_idx", "volumeId"),
-        Index("MetadataLookupTask_mediaVersionId_idx", "mediaVersionId"),
+        Index("MetadataLookupTask_versionId_idx", "versionId"),
         UniqueConstraint("importTaskId", name="MetadataLookupTask_importTaskId_key"),
     )
 
@@ -263,7 +263,7 @@ class MetadataLookupTask(Base):
         nullable=True,
     )
     version_id: Mapped[str | None] = mapped_column(
-        "mediaVersionId",
+        "versionId",
         String(191),
         ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
@@ -345,7 +345,7 @@ class MetadataWritebackOperation(Base):
         nullable=False,
     )
     version_id: Mapped[str] = mapped_column(
-        "mediaVersionId",
+        "versionId",
         String(191),
         ForeignKey("LibraryVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
@@ -432,7 +432,7 @@ class MetadataWritebackPreparation(Base):
         nullable=False,
     )
     version_id: Mapped[str | None] = mapped_column(
-        "mediaVersionId",
+        "versionId",
         String(191),
         ForeignKey(
             "LibraryVersion.id",

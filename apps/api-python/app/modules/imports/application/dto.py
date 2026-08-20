@@ -218,7 +218,7 @@ class SidecarMetadataDTO:
 class ImportResult:
     book_id: str
     work_id: str
-    media_version_id: str
+    version_id: str
     volume_id: str | None
     title: str
     type: str

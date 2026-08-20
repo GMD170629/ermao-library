@@ -88,7 +88,7 @@ class RecordingPipeline:
         return ImportResult(
             book_id="work-1",
             work_id="work-1",
-            media_version_id="media-version-1",
+            version_id="media-version-1",
             volume_id="volume-1",
             title="测试书",
             type="EPUB",

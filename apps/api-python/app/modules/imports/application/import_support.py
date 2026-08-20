@@ -435,24 +435,6 @@ def _import_version(
     }
 
 
-def _import_media_context(
-    _store: LibraryImportStore,
-    *,
-    work_id: object,
-    media_kind: str,
-    format_name: str,
-    library_id: str | None,
-    origin: str,
-    target: BoundTopologyTarget,
-) -> Record:
-    return {
-        "id": target.version_id,
-        "workId": target.work["id"],
-        "mediaKind": media_kind,
-        "format": format_name,
-    }
-
-
 _TOPOLOGY_VOLUME_COLUMNS = frozenset(
     {
         "id",
@@ -488,13 +470,11 @@ def _persist_import_volume(
 def _preferred_work_cover_path(
     queries: ImportLibraryQueries,
     work_id: str,
-    media_version_id: str | None,
+    version_id: str | None,
     services: ImportOrchestrationServices,
 ) -> str | None:
-    if media_version_id:
-        volumes = queries.list_volume_cover_paths_for_media_version(
-            str(media_version_id)
-        )
+    if version_id:
+        volumes = queries.list_volume_cover_paths_for_version(str(version_id))
         volume = next(
             (
                 item
@@ -505,13 +485,10 @@ def _preferred_work_cover_path(
         )
         if volume and volume.get("coverPath"):
             return str(volume["coverPath"])
-        media_version = queries.get_media_version_cover_path(str(media_version_id))
-        if media_version and media_version.get("coverPath"):
-            return str(media_version["coverPath"])
-    media_version = queries.find_work_cover_media_version(work_id)
+    cover_volume = queries.find_work_cover_volume(work_id)
     return (
-        str(media_version["coverPath"])
-        if media_version and media_version.get("coverPath")
+        str(cover_volume["coverPath"])
+        if cover_volume and cover_volume.get("coverPath")
         else None
     )
 
@@ -527,7 +504,7 @@ def _finalize_work_cover(
     queries: ImportLibraryQueries,
     services: ImportOrchestrationServices,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     cover_path: str | None,
     default_cover_path: str,
 ) -> None:
@@ -535,7 +512,7 @@ def _finalize_work_cover(
     if not work:
         return
     preferred_cover_path = (
-        _preferred_work_cover_path(queries, work_id, media_version_id, services)
+        _preferred_work_cover_path(queries, work_id, version_id, services)
         or cover_path
         or default_cover_path
     )
@@ -609,7 +586,7 @@ def _existing_file_result(
     return ImportResult(
         str(existing["workId"]),
         str(existing["workId"]),
-        str(existing["mediaVersionId"]),
+        str(existing["versionId"]),
         str(existing["volumeId"]) if existing.get("volumeId") else None,
         str(existing.get("title") or "未命名作品"),
         result_type,

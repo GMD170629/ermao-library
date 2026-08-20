@@ -44,7 +44,6 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("libraries", "Library"),
     ("userLibraryAccess", "UserLibraryAccess"),
     ("works", "LibraryWork"),
-    ("mediaVersions", "LibraryMediaVersion"),
     ("versions", "LibraryVersion"),
     ("volumes", "LibraryVolume"),
     ("files", "LibraryFile"),
@@ -70,7 +69,6 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerBookPreferences", "ReaderBookPreference"),
     ("readerProgressCursors", "ReaderProgressCursor"),
     ("readerBookmarks", "ReaderBookmark"),
-    ("mediaVersionMigrationEvents", "MediaVersionMigrationEvent"),
     ("sources", "Source"),
     ("metadataProviderPipelines", "MetadataProviderPipeline"),
     ("systemSettings", "SystemSetting"),
@@ -80,7 +78,6 @@ RESTORE_ORDER = [
     "MetadataProviderPipeline",
     "Source",
     "ReaderBookmark",
-    "MediaVersionMigrationEvent",
     "UserLibraryAccess",
     "UserPreference",
     "BookIdentityCache",
@@ -109,7 +106,6 @@ RESTORE_ORDER = [
     "LibraryFacet",
     "LibraryVolume",
     "LibraryVersion",
-    "LibraryMediaVersion",
     "LibraryWork",
     "Library",
 ]
@@ -170,7 +166,6 @@ def counts_for_export(
         "libraries": len(database_export.get("libraries", [])),
         "userLibraryAccess": len(database_export.get("userLibraryAccess", [])),
         "works": len(database_export.get("works", [])),
-        "mediaVersions": len(database_export.get("mediaVersions", [])),
         "versions": len(database_export.get("versions", [])),
         "volumes": len(database_export.get("volumes", [])),
         "files": len(database_export.get("files", [])),
@@ -191,9 +186,6 @@ def counts_for_export(
         "readerBookPreferences": len(database_export.get("readerBookPreferences", [])),
         "readerProgressCursors": len(database_export.get("readerProgressCursors", [])),
         "readerBookmarks": len(database_export.get("readerBookmarks", [])),
-        "mediaVersionMigrationEvents": len(
-            database_export.get("mediaVersionMigrationEvents", [])
-        ),
         "sources": len(database_export.get("sources", [])),
         "metadataProviderPipelines": len(
             database_export.get("metadataProviderPipelines", [])

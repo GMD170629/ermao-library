@@ -51,7 +51,7 @@ def _add_volume(
     )
     volume = LibraryVolume(
         id=volume_id,
-        media_version_id=media.id,
+        version_id=media.id,
         title=f"Volume {volume_id}",
         format="CBZ" if media_kind == "COMIC" else "EPUB",
         resource_key=f"catalog:{volume_id}",

@@ -20,7 +20,6 @@ from app.models.import_pipeline import BookConversionTask, ImportTask
 from app.models.library import (
     Library,
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingUnit,
     LibraryVersion,
@@ -624,13 +623,12 @@ def test_scanned_epub_enriches_prebound_topology_without_creating_structure(
     stored_work = db_session.get(LibraryWork, work.id)
     stored_volume = db_session.get(LibraryVolume, volume.id)
     assert result.work_id == work.id
-    assert result.media_version_id == version.id
+    assert result.version_id == version.id
     assert result.volume_id == volume.id
     assert result.merge_reason == "topology-bound"
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryVersion") == 1
     assert _count(db_session, "LibraryVolume") == 1
-    assert _count(db_session, "LibraryMediaVersion") == 0
     assert stored_work is not None and stored_work.title == "Directory work"
     assert stored_volume is not None and stored_volume.title == "Directory volume"
     assert stored_volume.import_status == "COMPLETED"
@@ -678,13 +676,12 @@ def test_scanned_fixed_layout_source_enriches_prebound_topology(
     stored_work = db_session.get(LibraryWork, work.id)
     stored_volume = db_session.get(LibraryVolume, volume.id)
     assert result.work_id == work.id
-    assert result.media_version_id == version.id
+    assert result.version_id == version.id
     assert result.volume_id == volume.id
     assert result.merge_reason == "topology-bound"
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryVersion") == 1
     assert _count(db_session, "LibraryVolume") == 1
-    assert _count(db_session, "LibraryMediaVersion") == 0
     assert stored_work is not None and stored_work.title == "Directory work"
     assert stored_volume is not None and stored_volume.title == "Directory volume"
     assert stored_volume.import_status == "COMPLETED"
@@ -722,10 +719,9 @@ def test_scanned_text_source_enriches_prebound_topology(
     stored_work = db_session.get(LibraryWork, work.id)
     stored_volume = db_session.get(LibraryVolume, volume.id)
     assert result.work_id == work.id
-    assert result.media_version_id == version.id
+    assert result.version_id == version.id
     assert result.volume_id == volume.id
     assert result.merge_reason == "topology-bound"
-    assert _count(db_session, "LibraryMediaVersion") == 0
     assert stored_work is not None and stored_work.title == "Directory work"
     assert stored_volume is not None and stored_volume.title == "Directory volume"
     assert stored_volume.import_status == "COMPLETED"
@@ -755,7 +751,7 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
         "work",
         f"{normalized_source}|primary",
     )
-    media_version_id = stable_import_resource_id(
+    version_id = stable_import_resource_id(
         task_id,
         "media-version",
         f"{normalized_source}|{work_id}|EBOOK",
@@ -801,7 +797,7 @@ def test_import_retry_reuses_hidden_partial_volume_and_file(
     )
     db_session.add(
         LibraryMediaVersion(
-            id=media_version_id,
+            id=version_id,
             work_id=work_id,
             media_kind="EBOOK",
         )
@@ -1563,8 +1559,8 @@ def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
     )
 
     assert first_result.work_id == tenth_result.work_id == duplicate_result.work_id
-    assert first_result.media_version_id == tenth_result.media_version_id
-    assert duplicate_result.media_version_id == first_result.media_version_id
+    assert first_result.version_id == tenth_result.version_id
+    assert duplicate_result.version_id == first_result.version_id
     assert first_result.volume_id != tenth_result.volume_id
     assert duplicate_result.volume_id != tenth_result.volume_id
     assert duplicate_result.duplicate is False
@@ -1687,7 +1683,7 @@ def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
         (first_comic_result, second_comic_result),
     ):
         assert first_result.work_id == second_result.work_id
-        assert first_result.media_version_id == second_result.media_version_id
+        assert first_result.version_id == second_result.version_id
         assert first_result.volume_id != second_result.volume_id
         volumes = list(
             db_session.scalars(
@@ -1732,7 +1728,7 @@ def test_explicit_series_directory_groups_all_volumes_by_folder(
     )
 
     assert first.work_id == second.work_id
-    assert first.media_version_id == second.media_version_id
+    assert first.version_id == second.version_id
     first_volume = db_session.get(LibraryVolume, first.volume_id)
     second_volume = db_session.get(LibraryVolume, second.volume_id)
     assert first_volume is not None
@@ -1786,7 +1782,7 @@ def test_numeric_comic_fallback_groups_parenthesized_volumes(
     )
 
     assert first_result.work_id == second_result.work_id
-    assert first_result.media_version_id == second_result.media_version_id
+    assert first_result.version_id == second_result.version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [1, 2]
@@ -1825,7 +1821,7 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume(
     )
 
     assert first.work_id == second.work_id
-    assert first.media_version_id == second.media_version_id
+    assert first.version_id == second.version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [5, 8]
@@ -1860,7 +1856,7 @@ def test_filename_alias_groups_later_volume_by_same_directory(
     )
 
     assert first.work_id == second.work_id
-    assert first.media_version_id == second.media_version_id
+    assert first.version_id == second.version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [14, 16]
@@ -1923,7 +1919,7 @@ def test_identical_embedded_metadata_groups_files_despite_different_paths(
     )
 
     assert first.work_id == second.work_id
-    assert first.media_version_id == second.media_version_id
+    assert first.version_id == second.version_id
     first_volume = db_session.get(LibraryVolume, first.volume_id)
     second_volume = db_session.get(LibraryVolume, second.volume_id)
     assert first_volume is not None
@@ -2059,9 +2055,9 @@ def test_embedded_metadata_prevents_directory_from_forcing_cross_format_grouping
     assert (
         len(
             {
-                epub_result.media_version_id,
-                pdf_result.media_version_id,
-                comic_result.media_version_id,
+                epub_result.version_id,
+                pdf_result.version_id,
+                comic_result.version_id,
             }
         )
         == 3
@@ -2178,7 +2174,7 @@ def test_watched_pdf_volumes_recognize_short_numbers_inside_titles(
     )
 
     assert first_result.work_id == second_result.work_id
-    assert first_result.media_version_id == second_result.media_version_id
+    assert first_result.version_id == second_result.version_id
     assert sorted(db_session.scalars(select(LibraryVolume.volume_index)).all()) == [
         1,
         2,
@@ -2946,7 +2942,7 @@ def test_existing_pdf_rescan_repairs_legacy_shared_cover_path(
         test_settings.resolved_storage_root
         / "books"
         / imported.work_id
-        / imported.media_version_id
+        / imported.version_id
         / "cover.jpg"
     )
     legacy_cover.parent.mkdir(parents=True, exist_ok=True)

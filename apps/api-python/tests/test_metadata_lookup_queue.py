@@ -81,17 +81,6 @@ def _insert_lookup_fixture(
     db.execute(
         text(
             """
-            INSERT INTO LibraryMediaVersion (
-                id, workId, mediaKind, createdAt, updatedAt
-            ) VALUES (
-                'media-lookup', 'work-lookup', 'EBOOK', 'now', 'now'
-            )
-            """
-        )
-    )
-    db.execute(
-        text(
-            """
             INSERT INTO LibraryVersion (
                 id, workId, sourceKey, createdAt, updatedAt
             ) VALUES (

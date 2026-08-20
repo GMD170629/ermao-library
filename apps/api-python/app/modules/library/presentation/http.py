@@ -386,14 +386,14 @@ def _prepare_work_writebacks(
     work_id: str,
     source: str,
     values: dict[str, Any] | None = None,
-    media_version_id: str | None = None,
+    version_id: str | None = None,
     volume_id: str | None = None,
     volume_values_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[PreparedWritebackIntent, ...]:
     projection = load_metadata_writeback_projection(
         db,
         work_id=work_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         volume_id=volume_id,
     )
     projection = _updated_metadata_projection(projection, values or {})
@@ -3026,7 +3026,7 @@ async def apply_work_metadata(
             work_id=work_id,
             source="MANUAL_METADATA_APPLY",
             values=patch,
-            media_version_id=target_version_id,
+            version_id=target_version_id,
             volume_id=target_volume_id,
             volume_values_by_id=volume_values_by_id,
         )

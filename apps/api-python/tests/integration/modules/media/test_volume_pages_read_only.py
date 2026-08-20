@@ -63,7 +63,7 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
         )
         volume = LibraryVolume(
             id="comic-lock-volume",
-            media_version_id=media.id,
+            version_id=media.id,
             title="第一卷",
             format="CBZ",
             resource_key="manual:comic-lock",

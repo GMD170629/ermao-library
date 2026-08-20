@@ -46,12 +46,14 @@ def test_prepare_table_records_rejects_invalid_scalar_type() -> None:
 def test_validate_restore_relationships_rejects_dangling_foreign_key() -> None:
     records_by_table = {
         "LibraryWork": ({"id": "work-a"},),
-        "LibraryMediaVersion": ({"id": "media-a", "workId": "missing-work"},),
+        "LibraryVersion": (
+            {"id": "version-a", "workId": "missing-work", "sourceKey": "version:a"},
+        ),
     }
 
     with pytest.raises(
         ValueError,
-        match="BACKUP_FOREIGN_KEY_INVALID:LibraryMediaVersion.workId",
+        match="BACKUP_FOREIGN_KEY_INVALID:LibraryVersion.workId",
     ):
         validate_restore_relationships(records_by_table)
 

@@ -487,12 +487,12 @@ def test_import_persistence_exposes_no_directory_topology_creation_writes() -> N
     }
 
 
-def test_import_completion_does_not_reference_volume_media_version_id() -> None:
+def test_import_completion_does_not_reference_volume_version_id() -> None:
     completion_source = inspect.getsource(
         SqlAlchemyLibraryImportStore.apply_import_completion
     )
     persist_source = inspect.getsource(persist_import_completion)
-    assert "media_version_id" not in completion_source
-    assert "mediaVersionId" not in completion_source
+    assert "version_id" not in completion_source
+    assert "versionId" not in completion_source
     assert "media_versions_to_prune" not in completion_source
     assert "media_versions_to_prune" not in persist_source

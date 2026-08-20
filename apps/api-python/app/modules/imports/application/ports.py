@@ -285,7 +285,7 @@ class ImportOrchestrationServices(Protocol):
         storage_root: Path,
         source_path: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
         entry_name: str,
     ) -> str: ...
@@ -295,7 +295,7 @@ class ImportOrchestrationServices(Protocol):
         storage_root: Path,
         source_path: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
     ) -> str: ...
 
@@ -307,7 +307,7 @@ class ImportOrchestrationServices(Protocol):
         self,
         storage_root: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         metadata_items: tuple[AudioFileMetadata, ...],
         *,
         bundle_root: Path | None = None,
@@ -321,7 +321,7 @@ class ImportOrchestrationServices(Protocol):
         self,
         storage_root: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None: ...
@@ -333,7 +333,7 @@ class ImportOrchestrationServices(Protocol):
         storage_root: Path,
         source_path: Path,
         work_id: str,
-        media_version_id: str,
+        version_id: str,
         volume_id: str,
     ) -> PdfCoverPublication: ...
 

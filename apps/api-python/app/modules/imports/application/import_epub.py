@@ -32,7 +32,6 @@ from app.modules.imports.application.import_support import (
     _hash_text,
     _id,
     _insert_identity_metadata,
-    _import_media_context,
     _import_version,
     _import_work,
     _now,
@@ -141,15 +140,6 @@ def _import_epub(
     cover_path = None
     try:
         store.update_import_task(task_id, columns={"message": "正在建立 EPUB 记录"})
-        media_version = _import_media_context(
-            store,
-            work_id=work["id"],
-            media_kind=classification.media_kind,
-            format_name="EPUB",
-            library_id=options.library_id,
-            origin=options.origin,
-            target=topology_target,
-        )
         volume_id = str(topology_target.volume["id"])
         if metadata.get("coverPath"):
             release_import_transaction(unit_of_work)
@@ -157,7 +147,7 @@ def _import_epub(
                 settings,
                 source_path,
                 work["id"],
-                media_version["id"],
+                version["id"],
                 metadata,
                 volume_id,
             )
@@ -230,14 +220,14 @@ def _import_epub(
             queries,
             services,
             work["id"],
-            media_version["id"],
+            version["id"],
             stored_cover_path,
             _prepared_default_cover(options),
         )
         return ImportResult(
             work["id"],
             work["id"],
-            media_version["id"],
+            version["id"],
             volume["id"],
             work["title"],
             _classification_result_type(classification),
@@ -444,7 +434,7 @@ def _extract_epub_cover(
     settings: ImportRuntimeConfig,
     staged: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     metadata: dict[str, Any],
     volume_id: str | None = None,
 ) -> str | None:
@@ -461,7 +451,7 @@ def _extract_epub_cover(
         settings.resolved_storage_root
         / "books"
         / work_id
-        / media_version_id
+        / version_id
         / (volume_id or "")
         / f"cover{ext}"
     )

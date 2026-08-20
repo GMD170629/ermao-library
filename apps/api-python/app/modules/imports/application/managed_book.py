@@ -261,7 +261,7 @@ def import_managed_book(
                         if metadata_refreshed
                         else "existing_path",
                         "workId": existing_file.work_id,
-                        "mediaVersionId": existing_file.media_version_id,
+                        "versionId": existing_file.version_id,
                         "volumeId": existing_file.volume_id,
                     },
                 )
@@ -514,7 +514,7 @@ def import_managed_book(
                     settings.resolved_storage_root,
                     sidecar.cover_path,
                     result.work_id,
-                    result.media_version_id,
+                    result.version_id,
                     result.volume_id,
                 )
                 work_values.update({"coverPath": cover_path, "coverStatus": "READY"})
@@ -644,7 +644,7 @@ def import_managed_book(
                 metadata={
                     "sourcePath": str(original_source),
                     "workId": result.work_id,
-                    "mediaVersionId": result.media_version_id,
+                    "versionId": result.version_id,
                     "volumeId": result.volume_id,
                     "title": result.title,
                     "format": result.format,

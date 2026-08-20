@@ -33,7 +33,7 @@ def _volume(
     )
     volume = LibraryVolume(
         id=volume_id,
-        media_version_id=media.id,
+        version_id=media.id,
         title=source_format,
         sort_order=0,
         format=source_format,

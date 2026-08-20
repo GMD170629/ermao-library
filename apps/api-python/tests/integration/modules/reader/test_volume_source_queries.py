@@ -134,7 +134,7 @@ def test_reader_production_code_does_not_use_media_version_contract() -> None:
     forbidden = (
         "LibraryMediaVersion",
         "ReaderMediaVersionDto",
-        "mediaVersionId",
+        "versionId",
         "mediaVersion",
         "mediaCompleted",
     )
@@ -147,11 +147,11 @@ def test_reader_production_code_does_not_use_media_version_contract() -> None:
     assert violations == []
 
 
-def test_reader_production_queries_do_not_use_volume_media_version_id() -> None:
+def test_reader_production_queries_do_not_use_volume_version_id() -> None:
     violations = [
         str(path.relative_to(_API_ROOT))
         for path in _production_python_sources()
-        if "LibraryVolume.media_version_id" in path.read_text(encoding="utf-8")
+        if "LibraryVolume.version_id" in path.read_text(encoding="utf-8")
     ]
     assert violations == []
 
@@ -162,7 +162,7 @@ def test_reader_source_lookup_does_not_query_library_media_version() -> None:
     context_source = inspect.getsource(SqlAlchemyReaderVolumeRepository.get_context)
     assert "LibraryVersion.id == LibraryVolume.version_id" in context_source
     assert "LibraryWork.id == LibraryVersion.work_id" in context_source
-    assert "LibraryVolume.media_version_id" not in context_source
+    assert "LibraryVolume.version_id" not in context_source
 
 
 def test_audiobook_support_tests_do_not_reference_removed_file_hashes() -> None:

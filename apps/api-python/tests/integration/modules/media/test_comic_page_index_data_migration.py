@@ -73,7 +73,7 @@ def _seed_pending_comics(
             )
             volume = LibraryVolume(
                 id=f"comic-volume-{index:03}",
-                media_version_id=media.id,
+                version_id=media.id,
                 title=f"第 {index + 1} 卷",
                 format="CBZ",
                 resource_key=f"migration:comic:{index}",

@@ -26,7 +26,6 @@ from app.modules.imports.application.import_support import (
     _hash_text,
     _id,
     _insert_identity_metadata,
-    _import_media_context,
     _import_version,
     _import_work,
     _now,
@@ -132,22 +131,13 @@ def _import_pdf(
     cover_path = None
     try:
         store.update_import_task(task_id, columns={"message": "正在建立 PDF 记录"})
-        media_version = _import_media_context(
-            store,
-            work_id=work["id"],
-            media_kind=media_kind,
-            format_name="PDF",
-            library_id=options.library_id,
-            origin=options.origin,
-            target=topology_target,
-        )
         volume_id = str(topology_target.volume["id"])
         release_import_transaction(unit_of_work)
         cover = services.publish_pdf_cover(
             settings.resolved_storage_root,
             source_path,
             str(work["id"]),
-            str(media_version["id"]),
+            str(version["id"]),
             volume_id,
         )
         cover_path = cover.path
@@ -250,14 +240,14 @@ def _import_pdf(
             queries,
             services,
             work["id"],
-            media_version["id"],
+            version["id"],
             stored_cover_path,
             _prepared_default_cover(options),
         )
         return ImportResult(
             str(work["id"]),
             str(work["id"]),
-            str(media_version["id"]),
+            str(version["id"]),
             str(volume["id"]),
             str(work["title"]),
             result_type,

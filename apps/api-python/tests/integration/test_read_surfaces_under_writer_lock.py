@@ -56,7 +56,7 @@ def _seed_read_surfaces(engine: Engine) -> None:
         )
         volume = LibraryVolume(
             id="writer-lock-volume",
-            media_version_id=media.id,
+            version_id=media.id,
             title="电子书",
             format="EPUB",
             resource_key="manual:writer-lock",

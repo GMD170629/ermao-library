@@ -160,11 +160,11 @@ def publish_pdf_cover(
     storage_root: Path,
     source_path: Path,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     volume_id: str,
 ) -> PdfCoverPublication:
     target = (
-        storage_root / "books" / work_id / media_version_id / volume_id / "cover.jpg"
+        storage_root / "books" / work_id / version_id / volume_id / "cover.jpg"
     )
     temporary = target.with_suffix(f"{target.suffix}.part")
     try:

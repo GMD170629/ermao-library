@@ -70,7 +70,7 @@ def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) ->
     )
     volume = LibraryVolume(
         id="shelf-volume",
-        media_version_id=media.id,
+        version_id=media.id,
         title="Shelf Volume",
         format="EPUB",
         resource_key="shelf:volume",
