@@ -13,7 +13,6 @@ from app.core.authorization import (
     work_visibility_predicate,
 )
 from app.models.library import (
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
@@ -31,6 +30,8 @@ from app.modules.reader.public import (
     VolumeReadingState,
     choose_continue_volume_id,
 )
+
+_MEDIA_KIND_ORDER = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
 
 
 class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
@@ -87,25 +88,13 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 LibraryVolume.id.asc(),
             )
         ).all()
-        media_kind_rows = self._db.execute(
-            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
-            .where(LibraryMediaVersion.work_id.in_(visible_work_ids))
-            .order_by(
-                LibraryMediaVersion.work_id.asc(),
-                LibraryMediaVersion.id.asc(),
-            )
-        ).all()
-        media_kinds_by_work: dict[str, list[str]] = defaultdict(list)
-        for work_id, kind in media_kind_rows:
-            kind_value = str(kind)
-            if kind_value not in media_kinds_by_work[str(work_id)]:
-                media_kinds_by_work[str(work_id)].append(kind_value)
-
+        media_kinds_by_work: dict[str, set[str]] = defaultdict(set)
         states_by_work: dict[str, list[VolumeReadingState]] = defaultdict(list)
         percent_by_volume: dict[str, float] = {}
         for row in rows:
             work_id = str(row.work_id)
             media_kind = MediaKind(str(row.media_kind))
+            media_kinds_by_work[work_id].add(media_kind.value)
             percent = min(100.0, max(0.0, float(row.percent or 0)))
             volume_id = str(row.volume_id)
             percent_by_volume[volume_id] = percent
@@ -130,7 +119,12 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                     author=work.author or "未知作者",
                     cover_path=work.cover_path,
                     updated_at=work.updated_at,
-                    available_media_kinds=tuple(media_kinds_by_work[work_id]),
+                    available_media_kinds=tuple(
+                        sorted(
+                            media_kinds_by_work[work_id],
+                            key=lambda kind: _MEDIA_KIND_ORDER.get(kind, 99),
+                        )
+                    ),
                     progress=(
                         percent_by_volume.get(continue_volume_id, 0.0)
                         if continue_volume_id is not None

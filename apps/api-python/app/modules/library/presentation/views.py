@@ -34,7 +34,6 @@ from app.core.time import timestamp_ms_to_iso
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVersion,
@@ -43,6 +42,9 @@ from app.models.library import (
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 from app.modules.reader.public import (
     progress_navigation as _progress_navigation,
 )
@@ -203,21 +205,28 @@ def _reading_status(value: Any) -> str:
 
 
 def _available_media_kinds(db: Session, work_id: str) -> list[str]:
-    return list(
-        db.scalars(
-            select(LibraryMediaVersion.media_kind)
-            .where(LibraryMediaVersion.work_id == work_id)
+    media_kind = volume_effective_media_kind(LibraryVolume)
+    return [
+        str(kind)
+        for kind in db.scalars(
+            select(media_kind.label("media_kind"))
+            .select_from(LibraryVolume)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .where(
+                LibraryVersion.work_id == work_id,
+                LibraryVolume.hidden.is_(False),
+            )
+            .distinct()
             .order_by(
                 case(
-                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                    (LibraryMediaVersion.media_kind == "COMIC", 1),
-                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                    (media_kind == "EBOOK", 0),
+                    (media_kind == "COMIC", 1),
+                    (media_kind == "AUDIOBOOK", 2),
                     else_=3,
-                ),
-                LibraryMediaVersion.id.asc(),
+                )
             )
         ).all()
-    )
+    ]
 
 
 def _available_media_kinds_by_work(
@@ -225,18 +234,27 @@ def _available_media_kinds_by_work(
 ) -> dict[str, list[str]]:
     if not work_ids:
         return {}
+    media_kind = volume_effective_media_kind(LibraryVolume)
     rows = db.execute(
-        select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
-        .where(LibraryMediaVersion.work_id.in_(work_ids))
+        select(
+            LibraryVersion.work_id,
+            media_kind.label("media_kind"),
+        )
+        .select_from(LibraryVolume)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        .where(
+            LibraryVersion.work_id.in_(work_ids),
+            LibraryVolume.hidden.is_(False),
+        )
+        .group_by(LibraryVersion.work_id, media_kind)
         .order_by(
-            LibraryMediaVersion.work_id.asc(),
+            LibraryVersion.work_id.asc(),
             case(
-                (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                (LibraryMediaVersion.media_kind == "COMIC", 1),
-                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                (media_kind == "EBOOK", 0),
+                (media_kind == "COMIC", 1),
+                (media_kind == "AUDIOBOOK", 2),
                 else_=3,
             ),
-            LibraryMediaVersion.id.asc(),
         )
     ).all()
     media_kinds = {work_id: [] for work_id in work_ids}

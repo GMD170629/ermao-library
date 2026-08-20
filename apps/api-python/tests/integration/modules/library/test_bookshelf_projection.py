@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.core.authorization import AuthorizationContext
 from app.models.auth import User
 from app.models.library import (
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
@@ -58,13 +57,6 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
         created_at=now,
         updated_at=now,
     )
-    media_version = LibraryMediaVersion(
-        id="bookshelf-media",
-        work_id=work.id,
-        media_kind="EBOOK",
-        created_at=now,
-        updated_at=now,
-    )
     first_volume = LibraryVolume(
         id="bookshelf-volume-1",
         version_id=version.id,
@@ -91,7 +83,7 @@ def test_bookshelf_projection_uses_current_users_continue_volume_progress(
     )
     db_session.add_all([current_user, other_user, work])
     db_session.flush()
-    db_session.add_all([version, media_version])
+    db_session.add(version)
     db_session.flush()
     db_session.add_all([first_volume, second_volume])
     db_session.flush()
