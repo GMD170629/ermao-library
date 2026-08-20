@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 import time
 from pathlib import Path
 
@@ -13,9 +12,9 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import Settings
-from app.db.timestamp_triggers import ensure_timestamp_triggers
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_LOCK_RETRY_SECONDS = 60.0
@@ -77,19 +76,6 @@ def _schema_state(engine: Engine) -> tuple[str | None, set[str]]:
     return revision, table_names
 
 
-def _enable_wal(engine: Engine) -> None:
-    raw_connection = engine.raw_connection()
-    try:
-        driver_connection: sqlite3.Connection = raw_connection.driver_connection
-        try:
-            driver_connection.execute("PRAGMA journal_mode = WAL")
-        except sqlite3.OperationalError:
-            # :memory: with some pool configs may reject WAL; ignore.
-            pass
-    finally:
-        raw_connection.close()
-
-
 def _upgrade_head(engine: Engine) -> None:
     _run_alembic(engine, lambda config: command.upgrade(config, "head"))
     LOGGER.info("database alembic upgraded to head=%s", head_revision(engine))
@@ -110,7 +96,6 @@ def _unsupported_database_error(
 
 
 def _apply_schema_once(engine: Engine, _settings: Settings | None = None) -> None:
-    _enable_wal(engine)
     current_revision, application_tables = _schema_state(engine)
     head = head_revision(engine)
 
@@ -121,8 +106,7 @@ def _apply_schema_once(engine: Engine, _settings: Settings | None = None) -> Non
     else:
         raise _unsupported_database_error(current_revision, head)
 
-    with engine.begin() as connection:
-        ensure_timestamp_triggers(connection)
+    with engine.connect() as connection:
         stamped = MigrationContext.configure(connection).get_current_revision()
         if stamped is None:
             raise RuntimeError("database migration did not record an alembic_version")
@@ -137,7 +121,7 @@ def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
         try:
             _apply_schema_once(engine, settings)
             return
-        except sqlite3.OperationalError as exc:
+        except OperationalError as exc:
             if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
                 raise
             remaining = max(0.0, deadline - time.monotonic())
