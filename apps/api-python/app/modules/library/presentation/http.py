@@ -100,15 +100,11 @@ from app.modules.library.application.volume_commands import (
     InvalidVolumeChangeError,
     LibraryActor,
     LibraryAuthorizationError,
-    NewWorkInput,
     OperationSummary,
     VolumeNotFoundError,
     WorkNotFoundError,
     batch_volume_resources,
-    delete_volume_resource,
     reclassify_volume_resource,
-    reorder_volume_resource,
-    split_volume_resource,
     update_volume_resource,
 )
 from app.modules.library.presentation.filter_mappers import (
@@ -127,7 +123,6 @@ from app.modules.library.presentation.schemas import (
     CoverMutationResponse,
     DashboardSummaryResponse,
     DeleteCategoryResponse,
-    DeletedWorkResponse,
     DuplicatesResponse,
     FacetsResponse,
     FilterOptionsResponse,
@@ -154,9 +149,7 @@ from app.modules.library.presentation.schemas import (
     ReclassifyVolumeResponse,
     RenameCategoryRequest,
     RenameCategoryResponse,
-    ReorderVolumeRequest,
     SeriesResponse,
-    SplitVolumeRequest,
     UndoOperationResponse,
     UpdateVolumeRequest,
     UpdateWorkRequest,
@@ -186,8 +179,6 @@ from app.modules.library.presentation.views import (
     bookshelf_item_views,
 )
 from app.modules.library.presentation.work_ops import (
-    _delete_work_and_storage,
-    _delete_works_and_storage,
     _path_tree,
     _source_folder_preview,
 )
@@ -1368,46 +1359,6 @@ async def update_work(
     return WorkResponse(data={"book": _work_view(db, work, user.id)})
 
 
-@router.delete("/works/{work_id}")
-async def delete_work(
-    work_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> DeletedWorkResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    permission_error = _require_work_manager(db, user, work_id)
-    if permission_error is not None:
-        return permission_error
-    payload = await _request_json_or_empty(request)
-    delete_source = payload.get("deleteSource") is True
-    work = _get_work(db, work_id)
-    deletion_event = prepare_system_event(
-        level="error",
-        source="library",
-        actor_type="admin",
-        actor_id=user.id,
-        action="deleted",
-        target_type="work",
-        target_id=work_id,
-        message=f"删除书库记录：{(work or {}).get('title') or work_id}",
-        metadata={
-            "workTitle": (work or {}).get("title"),
-            "deleteSource": delete_source,
-        },
-    )
-    result = _delete_work_and_storage(
-        db,
-        work_id,
-        settings,
-        delete_source=delete_source,
-        events=(deletion_event,),
-    )
-    return DeletedWorkResponse(data=result)
-
-
 _BULK_TEXT_FIELDS: dict[str, tuple[str, str]] = {
     "title": ("LibraryWork", "title"),
     "author": ("LibraryWork", "author"),
@@ -1635,8 +1586,6 @@ async def bulk_works(
     updated = 0
     if action is None and "ignored" in payload:
         action = "ignore" if payload.get("ignored") else "restore"
-    if action is None and payload.get("deleteRecords"):
-        action = "delete_records"
     normalized_scope_ids = _bulk_work_ids(ids)
     if normalized_scope_ids:
         inaccessible = [
@@ -1657,44 +1606,11 @@ async def bulk_works(
         _raise_library_error(
             "需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED"
         )
-    if _has_table(db, "LibraryWork") and ids and action in {"delete", "delete_records"}:
-        delete_source = payload.get("deleteSource") is True
-        deletion_event = prepare_system_event(
-            level="error",
-            source="library",
-            actor_type="admin",
-            actor_id=user.id,
-            action="bulk.deleted",
-            target_type="work",
-            message=f"批量删除书库记录 {len(normalized_scope_ids)} 个",
-            metadata={
-                "ids": normalized_scope_ids,
-                "deleteSource": delete_source,
-            },
-        )
-        deletion_result = _delete_works_and_storage(
-            db,
-            tuple(normalized_scope_ids),
-            settings,
-            delete_source=delete_source,
-            events=(deletion_event,),
-        )
-        updated = int(deletion_result["deletedDatabaseRecords"])
-        deleted_files = int(deletion_result["deletedFiles"])
-        deleted_source_files = int(deletion_result["deletedSourceFiles"])
-        missing_source_files = list(deletion_result["missingSourceFiles"])
-        failed_file_deletes = list(deletion_result["failedFileDeletes"])
-        return BulkMutationResponse(
-            data={
-                "updated": updated,
-                "deleted": updated,
-                "deleteSource": delete_source,
-                "deletedFiles": deleted_files,
-                "deletedSourceFiles": deleted_source_files,
-                "missingSourceFiles": missing_source_files,
-                "failedFileDeletes": failed_file_deletes,
-                "ids": normalized_scope_ids,
-            }
+    if action in {"delete", "delete_records"}:
+        _raise_library_error(
+            "书库结构由根目录决定，不能删除数据库中的作品结构",
+            status_code=400,
+            code="LIBRARY_TOPOLOGY_READ_ONLY",
         )
     if (
         _has_table(db, "LibraryWork")
@@ -2916,190 +2832,6 @@ def reclassify_work_volume(
     return ReclassifyVolumeResponse(
         data={
             "movedVolumeIds": list(outcome.moved_volume_ids),
-            "operation": _operation_payload(outcome.operation),
-        }
-    )
-
-
-@router.post("/works/{work_id}/volumes/{volume_id}/move")
-def reorder_work_volume(
-    work_id: str,
-    volume_id: str,
-    payload: ReorderVolumeRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    WorkStructureMutationResponse,
-    ErrorResponses(
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    try:
-        reorder_volume_resource(
-            volume_structure_commands(db),
-            db,
-            actor=_library_actor(db, user),
-            work_id=work_id,
-            volume_id=volume_id,
-            direction=payload.direction,
-            now=_now(),
-        )
-    except WorkNotFoundError:
-        _raise_library_error(
-            "作品不存在或无权访问",
-            status_code=404,
-            code="WORK_NOT_FOUND",
-        )
-    except VolumeNotFoundError:
-        _raise_library_error(
-            "卷册不存在或不属于该作品",
-            status_code=404,
-            code="VOLUME_NOT_FOUND",
-        )
-    except LibraryAuthorizationError:
-        _raise_library_error(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    refreshed_work = _get_work(db, work_id)
-    return WorkStructureMutationResponse(
-        data={
-            "book": (
-                _work_view(db, refreshed_work, user.id) if refreshed_work else None
-            ),
-            "workId": work_id,
-            "volumeId": volume_id,
-        }
-    )
-
-
-@router.post("/works/{work_id}/volumes/{volume_id}/split")
-def split_work_volume(
-    work_id: str,
-    volume_id: str,
-    payload: SplitVolumeRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    WorkStructureMutationResponse,
-    ErrorResponses(
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-        LibraryUnprocessableError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    try:
-        outcome = split_volume_resource(
-            volume_structure_commands(db),
-            db,
-            actor=_library_actor(db, user),
-            source_work_id=work_id,
-            volume_id=volume_id,
-            new_work=NewWorkInput(
-                title=payload.title.strip(),
-                author=payload.author,
-            ),
-            now=_now(),
-        )
-    except WorkNotFoundError:
-        _raise_library_error(
-            "作品不存在或无权访问",
-            status_code=404,
-            code="WORK_NOT_FOUND",
-        )
-    except VolumeNotFoundError:
-        _raise_library_error(
-            "卷册不存在或不属于该作品",
-            status_code=404,
-            code="VOLUME_NOT_FOUND",
-        )
-    except LibraryAuthorizationError:
-        _raise_library_error(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    except InvalidVolumeChangeError as exc:
-        _raise_library_error(str(exc), status_code=422, code="WORK_TITLE_REQUIRED")
-    new_work = _get_work(db, outcome.target_work_id)
-    return WorkStructureMutationResponse(
-        data={
-            "book": _work_view(db, new_work, user.id) if new_work else None,
-            "workId": work_id,
-            "targetWorkId": outcome.target_work_id,
-            "volumeId": volume_id,
-            "sourceVersionId": outcome.move.source_version_id,
-            "targetVersionId": outcome.move.target_version_id,
-            "transferMode": outcome.move.transfer_mode,
-            "operation": _operation_payload(outcome.operation),
-        }
-    )
-
-
-@router.delete("/works/{work_id}/volumes/{volume_id}")
-def delete_work_volume(
-    work_id: str,
-    volume_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    WorkStructureMutationResponse,
-    ErrorResponses(
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    try:
-        outcome = delete_volume_resource(
-            volume_structure_commands(db),
-            db,
-            actor=_library_actor(db, user),
-            work_id=work_id,
-            volume_id=volume_id,
-            now=_now(),
-        )
-    except WorkNotFoundError:
-        _raise_library_error(
-            "作品不存在或无权访问",
-            status_code=404,
-            code="WORK_NOT_FOUND",
-        )
-    except VolumeNotFoundError:
-        _raise_library_error(
-            "卷册不存在或不属于该作品",
-            status_code=404,
-            code="VOLUME_NOT_FOUND",
-        )
-    except LibraryAuthorizationError:
-        _raise_library_error(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    remaining_work = _get_work(db, work_id)
-    return WorkStructureMutationResponse(
-        data={
-            "book": (
-                _work_view(db, remaining_work, user.id) if remaining_work else None
-            ),
-            "workId": work_id,
-            "volumeId": volume_id,
-            "deletedVersion": outcome.deleted_version,
-            "deletedWork": outcome.deleted_work,
             "operation": _operation_payload(outcome.operation),
         }
     )

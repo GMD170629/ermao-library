@@ -59,8 +59,6 @@ class BulkFindReplaceRequest(HttpContractModel):
 class BulkWorkRequest(BulkFindReplaceRequest):
     action: str | None = None
     ignored: bool | None = None
-    delete_records: bool | None = Field(default=None, alias="deleteRecords")
-    delete_source: bool | None = Field(default=None, alias="deleteSource")
     tags: list[RequestScalar] | None = None
     status: str | None = None
     shelf_id: str | None = Field(default=None, alias="shelfId")
@@ -698,41 +696,11 @@ class WorkReadingUnitsPayload(HttpContractModel):
     )
 
 
-class DeletedPathFailure(HttpContractModel):
-    path: str
-    message: str
-
-
-class DeletedWorkPayload(HttpContractModel):
-    deleted: bool
-    id: str
-    delete_source: bool = Field(alias="deleteSource")
-    deleted_database_records: int = Field(alias="deletedDatabaseRecords")
-    deleted_files: int = Field(alias="deletedFiles")
-    deleted_source_files: int = Field(alias="deletedSourceFiles")
-    missing_source_files: list[str] = Field(alias="missingSourceFiles")
-    failed_file_deletes: list[DeletedPathFailure] = Field(
-        default_factory=list,
-        alias="failedFileDeletes",
-    )
-
-
 class BulkUpdatePayload(HttpContractModel):
     updated: int
     ids: list[str]
     changed_values: int | None = Field(default=None, alias="changedValues")
     status: str | None = None
-
-
-class BulkDeletePayload(HttpContractModel):
-    updated: int
-    deleted: int
-    delete_source: bool = Field(alias="deleteSource")
-    deleted_files: int = Field(alias="deletedFiles")
-    deleted_source_files: int = Field(alias="deletedSourceFiles")
-    missing_source_files: list[str] = Field(alias="missingSourceFiles")
-    failed_file_deletes: list[DeletedPathFailure] = Field(alias="failedFileDeletes")
-    ids: list[str]
 
 
 class BulkCoverPayload(HttpContractModel):
@@ -741,7 +709,7 @@ class BulkCoverPayload(HttpContractModel):
     skipped: list[str]
 
 
-BulkMutationPayload = BulkUpdatePayload | BulkDeletePayload | BulkCoverPayload
+BulkMutationPayload = BulkUpdatePayload | BulkCoverPayload
 
 
 class FindReplacePreviewItem(HttpContractModel):
@@ -993,9 +961,6 @@ class MetadataApplyRequest(HttpContractModel):
 
 
 class UpdateVolumeRequest(HttpContractModel):
-    title: str | None = None
-    volume_index: float | None = Field(default=None, alias="volumeIndex")
-    sort_order: int | None = Field(default=None, alias="sortOrder")
     description: str | None = None
     publisher: str | None = None
     published_at: datetime | None = Field(default=None, alias="publishedAt")
@@ -1004,24 +969,11 @@ class UpdateVolumeRequest(HttpContractModel):
     isbn: str | None = None
     narrator: str | None = None
     abridged: bool | None = None
-    hidden: bool | None = None
-
-
-class ReorderVolumeRequest(HttpContractModel):
-    direction: Literal["up", "down"]
 
 
 class ReclassifyVolumeRequest(HttpContractModel):
     target_media_kind: str = Field(alias="targetMediaKind", min_length=1)
     apply_to: Literal["VOLUME", "SAME_MEDIA_KIND"] = Field(alias="applyTo")
-
-
-class SplitVolumeRequest(HttpContractModel):
-    title: str = Field(min_length=1)
-    author: str | None = None
-
-
-BatchVolumeAction = Literal["SET_MEDIA_KIND", "SPLIT", "DELETE"]
 
 
 class BatchSetMediaKindRequest(HttpContractModel):
@@ -1030,20 +982,7 @@ class BatchSetMediaKindRequest(HttpContractModel):
     target_media_kind: MediaKind = Field(alias="targetMediaKind")
 
 
-class BatchSplitVolumesRequest(HttpContractModel):
-    action: Literal["SPLIT"]
-    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
-
-
-class BatchDeleteVolumesRequest(HttpContractModel):
-    action: Literal["DELETE"]
-    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
-
-
-BatchVolumeRequest = Annotated[
-    BatchSetMediaKindRequest | BatchSplitVolumesRequest | BatchDeleteVolumesRequest,
-    Field(discriminator="action"),
-]
+BatchVolumeRequest = BatchSetMediaKindRequest
 
 
 class BatchVolumeMutationPayload(HttpContractModel):
@@ -1106,7 +1045,6 @@ WorkResponse = SuccessEnvelope[WorkPayload]
 WorkDetailSummaryResponse = SuccessEnvelope[WorkDetailSummaryPayload]
 WorkVolumePageResponse = SuccessEnvelope[WorkVolumePagePayload]
 WorkReadingUnitsResponse = SuccessEnvelope[WorkReadingUnitsPayload]
-DeletedWorkResponse = SuccessEnvelope[DeletedWorkPayload]
 BulkMutationResponse = SuccessEnvelope[BulkMutationPayload]
 FindReplacePreviewResponse = SuccessEnvelope[FindReplacePreviewPayload]
 CoverMutationResponse = SuccessEnvelope[CoverMutationPayload]
