@@ -272,8 +272,6 @@ struct ImportPreferencesView: View {
             if let binding = Binding($preferences) {
                 Form {
                     Section(copy[.fileProcessing]) {
-                        Toggle(copy[.stabilityCheck], isOn: binding.stabilityCheckEnabled)
-                        LabeledContent(copy[.stabilitySeconds]) { TextField(copy[.seconds], value: binding.stabilitySeconds, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                         TextField(copy[.allowedExtensions], text: Binding(get: { binding.wrappedValue.allowedExtensions.joined(separator: ", ") }, set: { binding.wrappedValue.allowedExtensions = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
                         TextField(copy[.ignorePatterns], text: binding.ignorePatterns, axis: .vertical)
                     }

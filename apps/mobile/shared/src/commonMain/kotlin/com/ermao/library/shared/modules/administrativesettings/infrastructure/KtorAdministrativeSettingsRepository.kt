@@ -257,9 +257,6 @@ internal class KtorAdministrativeSettingsRepository(
         context: AdministrativeSettingsContext,
         preferences: ImportPreferences,
     ): AdministrativeSettingsResult<ImportPreferences> {
-        if (!preferences.stabilitySeconds.isFinite() || preferences.stabilitySeconds !in 0.5..300.0) {
-            return invalid("INVALID_STABILITY_SECONDS", "stabilitySeconds")
-        }
         val result = call(
             context,
             ApiMethod.Put,
@@ -761,20 +758,12 @@ internal class KtorAdministrativeSettingsRepository(
     }
 
     private fun importPreferencesFrom(settings: Map<String, SettingValue>): AdministrativeSettingsResult<ImportPreferences> {
-        val enabled = (settings[IMPORT_STABILITY_ENABLED] as? SettingValue.Toggle)?.value ?: false
-        val seconds = when (val stored = settings[IMPORT_STABILITY_SECONDS]) {
-            is SettingValue.Integer -> stored.value.toDouble()
-            is SettingValue.Decimal -> stored.value
-            else -> 2.0
-        }
         val extensions = (settings[IMPORT_ALLOWED_EXTENSIONS] as? SettingValue.TextList)?.value ?: emptyList()
         val ignorePatterns = (settings[IMPORT_IGNORE_PATTERNS] as? SettingValue.Text)?.value.orEmpty()
-        return AdministrativeSettingsResult.Content(ImportPreferences(enabled, seconds, extensions, ignorePatterns))
+        return AdministrativeSettingsResult.Content(ImportPreferences(extensions, ignorePatterns))
     }
 
     private fun ImportPreferences.toSettings(): Map<String, SettingValue> = mapOf(
-        IMPORT_STABILITY_ENABLED to SettingValue.Toggle(stabilityCheckEnabled),
-        IMPORT_STABILITY_SECONDS to SettingValue.Decimal(stabilitySeconds),
         IMPORT_ALLOWED_EXTENSIONS to SettingValue.TextList(allowedExtensions),
         IMPORT_IGNORE_PATTERNS to SettingValue.Text(ignorePatterns),
     )
@@ -867,8 +856,6 @@ internal class KtorAdministrativeSettingsRepository(
 
     private companion object {
         val encoder = Json { explicitNulls = false }
-        const val IMPORT_STABILITY_ENABLED = "import.stabilityCheck.enabled"
-        const val IMPORT_STABILITY_SECONDS = "import.stabilityCheck.seconds"
         const val IMPORT_ALLOWED_EXTENSIONS = "import.allowedExtensions"
         const val IMPORT_IGNORE_PATTERNS = "import.ignorePatterns"
         const val WORK_DETAIL_ORDER_KEY = "workDetail.tabOrder"

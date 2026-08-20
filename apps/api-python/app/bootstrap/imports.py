@@ -125,18 +125,12 @@ from app.modules.imports.infrastructure.uploaded_file_publication import (
 from app.modules.system.domain.queue import TERMINAL_OPERATION_STATUSES
 from app.modules.system.public import PreparedSystemEvent
 from app.services.import_preferences import (
-    DEFAULT_STABILITY_CHECK_ENABLED,
     IMPORT_ALLOWED_EXTENSIONS_KEY,
     IMPORT_IGNORE_PATTERNS_KEY,
     IMPORT_PREFERENCE_KEYS,
-    IMPORT_STABILITY_ENABLED_KEY,
-    IMPORT_STABILITY_SECONDS_KEY,
     ImportPreferences,
-    default_stability_seconds,
     normalize_allowed_extensions,
     normalize_ignore_patterns,
-    normalize_import_setting_value,
-    normalize_stability_seconds,
 )
 from app.services.metadata_file_writeback import schedule_work_metadata_writebacks
 from app.services.system_events import (
@@ -157,21 +151,7 @@ def _preferences_from_raw_values(
     raw_values: tuple[tuple[str, str], ...],
 ) -> ImportPreferences:
     values = dict(raw_values)
-    stability_enabled = normalize_import_setting_value(
-        IMPORT_STABILITY_ENABLED_KEY,
-        values.get(IMPORT_STABILITY_ENABLED_KEY),
-    )
     return ImportPreferences(
-        stability_check_enabled=(
-            stability_enabled
-            if isinstance(stability_enabled, bool)
-            else DEFAULT_STABILITY_CHECK_ENABLED
-        ),
-        stability_check_seconds=(
-            normalize_stability_seconds(values[IMPORT_STABILITY_SECONDS_KEY])
-            if IMPORT_STABILITY_SECONDS_KEY in values
-            else default_stability_seconds()
-        ),
         allowed_extensions=normalize_allowed_extensions(
             values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
         ),

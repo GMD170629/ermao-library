@@ -156,8 +156,6 @@ data class ImportRescanRequest(
 )
 
 data class ImportPreferences(
-    val stabilityCheckEnabled: Boolean,
-    val stabilitySeconds: Double,
     val allowedExtensions: List<String>,
     val ignorePatterns: String,
 )

@@ -335,7 +335,7 @@ def scan_import_directory(
             "所选目录不在已启用的书库内，请先添加或启用对应书库",
             status_code=400,
         )
-    _folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
+    folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
     if not can_access_library(db, user, str(folder.get("id"))):
         _raise_import_error("目录不可用", status_code=404, code="LIBRARY_NOT_FOUND")
     db.close()
@@ -345,8 +345,8 @@ def scan_import_directory(
         work_item_id=f"work_{uuid4().hex}",
         library_id=str(folder["id"]),
         actor_user_id=user.id,
-        canonical_root_path=str(target_path),
-        trigger="MANUAL_DIRECTORY",
+        canonical_root_path=str(folder_path),
+        trigger="MANUAL_ROOT_SCAN",
         available_at=None,
         created_at=checkpoint_at,
     )
@@ -358,8 +358,12 @@ def scan_import_directory(
         action="scan.directory.requested",
         target_type="library",
         target_id=str(folder["id"]),
-        message=f"从文件管理识别目录：{target_path}",
-        metadata={"scanJobId": prepared_job.job_id, "path": str(target_path)},
+        message=f"请求扫描书库根目录：{folder_path}",
+        metadata={
+            "scanJobId": prepared_job.job_id,
+            "rootPath": str(folder_path),
+            "requestedPath": str(target_path),
+        },
     )
     created_count = persist_import_scan_requests(
         db,

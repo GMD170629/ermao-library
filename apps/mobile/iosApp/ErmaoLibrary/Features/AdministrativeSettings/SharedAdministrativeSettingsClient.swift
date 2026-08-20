@@ -44,7 +44,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
             let loadedKindle = try await kindle
             return AdministrativeManagementSummary(
                 librarySourceCount: 0, enabledLibraryCount: 0, activeImportCount: 0,
-                automaticImportEnabled: false, pendingOrganizeCount: 0,
+                importFormatCount: 0, pendingOrganizeCount: 0,
                 availableProviderCount: 0, providerCount: 0, userCount: loadedUsers.count,
                 smtpEnabled: false, failedKindleCount: Int(loadedKindle.pageInfo.total), opdsRunning: false,
                 latestBackupAt: nil, healthyComponentCount: 0, componentCount: 0,
@@ -79,7 +79,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
             librarySourceCount: loadedFolders.libraries.count,
             enabledLibraryCount: loadedFolders.libraries.filter(\.enabled).count,
             activeImportCount: Int(loadedImports.summary.failed) + loadedImports.tasks.filter { $0.status == .pending || $0.status == .parsing }.count,
-            automaticImportEnabled: loadedPreferences.stabilityCheckEnabled,
+            importFormatCount: loadedPreferences.allowedExtensions.count,
             pendingOrganizeCount: Int(loadedOrganize.pageInfo.total),
             availableProviderCount: loadedProviders.providers.filter { $0.enabled && $0.lastTestStatus?.lowercased() == "ok" }.count,
             providerCount: loadedProviders.providers.count,

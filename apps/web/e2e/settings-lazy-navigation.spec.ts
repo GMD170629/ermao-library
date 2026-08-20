@@ -305,31 +305,29 @@ test('library import queue clear confirms, polls, and refreshes only after compl
   await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(1);
 });
 
-test('library import preferences save after editing the stability check time', async ({ page }) => {
+test('library import preferences save after editing ignore patterns', async ({ page }) => {
   const counts = await mockSettingsApi(page);
   await page.goto('/settings/library');
   await page.getByRole('tab', { name: '偏好设置' }).click();
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
 
-  const checkTime = page.getByRole('spinbutton', { name: '检查时间' });
-  const stabilitySwitch = page.getByRole('switch', { name: '导入时检查文件稳定性' });
-  await expect(stabilitySwitch).not.toBeChecked();
-  await stabilitySwitch.click();
-  await checkTime.fill('2.0');
+  const ignorePatterns = page.locator('textarea');
+  await ignorePatterns.fill('*.tmp');
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeEnabled();
   await page.getByRole('button', { name: '保存偏好' }).click();
 
   await expect.poll(() => requestCount(counts, 'PUT /api/system-settings')).toBe(1);
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 
-  await checkTime.fill('3.5');
+  await ignorePatterns.fill('*.part');
   await page.getByRole('button', { name: '保存偏好' }).click();
   await expect.poll(() => requestCount(counts, 'PUT /api/system-settings')).toBe(2);
+  await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 
-  await stabilitySwitch.click();
+  await ignorePatterns.fill('*.cache');
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeEnabled();
   await page.getByRole('button', { name: '撤销更改' }).click();
-  await expect(stabilitySwitch).toBeChecked();
+  await expect(ignorePatterns).toHaveValue('*.part');
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 });
 

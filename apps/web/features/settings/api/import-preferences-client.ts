@@ -1,13 +1,9 @@
 export const importPreferenceSettingKeys = {
-  stabilityEnabled: 'import.stabilityCheck.enabled',
-  stabilitySeconds: 'import.stabilityCheck.seconds',
   allowedExtensions: 'import.allowedExtensions',
   ignorePatterns: 'import.ignorePatterns'
 } as const;
 
 export type ImportPreferenceValues = {
-  [importPreferenceSettingKeys.stabilityEnabled]: boolean;
-  [importPreferenceSettingKeys.stabilitySeconds]: number;
   [importPreferenceSettingKeys.allowedExtensions]: string[];
   [importPreferenceSettingKeys.ignorePatterns]: string;
 };

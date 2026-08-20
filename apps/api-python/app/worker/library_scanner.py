@@ -15,18 +15,12 @@ from app.bootstrap.imports import (
 )
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.services.import_preferences import (
-    DEFAULT_STABILITY_CHECK_ENABLED,
     IMPORT_ALLOWED_EXTENSIONS_KEY,
     IMPORT_IGNORE_PATTERNS_KEY,
     IMPORT_PREFERENCE_KEYS,
-    IMPORT_STABILITY_ENABLED_KEY,
-    IMPORT_STABILITY_SECONDS_KEY,
     ImportPreferences,
-    default_stability_seconds,
     normalize_allowed_extensions,
     normalize_ignore_patterns,
-    normalize_import_setting_value,
-    normalize_stability_seconds,
 )
 from app.worker.path_security import PathSecurityError, PathSecurityService
 
@@ -128,21 +122,7 @@ def library_scan_configs(
 ) -> tuple[LibraryConfig, ...]:
     """Map detached SQL projections into root-scanner configuration."""
 
-    stability_enabled = normalize_import_setting_value(
-        IMPORT_STABILITY_ENABLED_KEY,
-        setting_values.get(IMPORT_STABILITY_ENABLED_KEY),
-    )
     preferences = ImportPreferences(
-        stability_check_enabled=(
-            stability_enabled
-            if isinstance(stability_enabled, bool)
-            else DEFAULT_STABILITY_CHECK_ENABLED
-        ),
-        stability_check_seconds=(
-            normalize_stability_seconds(setting_values[IMPORT_STABILITY_SECONDS_KEY])
-            if IMPORT_STABILITY_SECONDS_KEY in setting_values
-            else default_stability_seconds()
-        ),
         allowed_extensions=normalize_allowed_extensions(
             setting_values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
         ),

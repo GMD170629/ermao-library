@@ -26,57 +26,24 @@ function formatGroupLabel(id: FormatGroupId, translate: (message: string) => str
 }
 
 type ImportPreferences = {
-  stabilityEnabled: boolean;
-  stabilitySeconds: number;
   allowedExtensions: string[];
   ignorePatterns: string;
 };
 
 const defaultPreferences: ImportPreferences = {
-  stabilityEnabled: false,
-  stabilitySeconds: 2,
   allowedExtensions: allExtensions,
   ignorePatterns: ''
 };
-
-function booleanSetting(value: unknown, fallback: boolean) {
-  if (typeof value === 'boolean') return value;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return fallback;
-}
 
 function normalizePreferences(settings: Record<string, unknown> | undefined): ImportPreferences {
   const rawExtensions = settings?.[settingKeys.allowedExtensions];
   const extensions = Array.isArray(rawExtensions)
     ? allExtensions.filter((extension) => rawExtensions.includes(extension))
     : allExtensions;
-  const rawSeconds = Number(settings?.[settingKeys.stabilitySeconds] ?? defaultPreferences.stabilitySeconds);
   return {
-    stabilityEnabled: booleanSetting(settings?.[settingKeys.stabilityEnabled], false),
-    stabilitySeconds: Number.isFinite(rawSeconds) ? Math.min(300, Math.max(0.5, rawSeconds)) : 2,
     allowedExtensions: extensions,
     ignorePatterns: typeof settings?.[settingKeys.ignorePatterns] === 'string' ? settings[settingKeys.ignorePatterns] as string : ''
   };
-}
-
-function Switch({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (checked: boolean) => void; label: string; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        'relative h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFC9B9] disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? 'bg-[#FF4F2A]' : 'bg-[#C9C4BE]'
-      )}
-    >
-      <span className={cn('absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform', checked ? 'translate-x-5' : 'translate-x-0')} />
-    </button>
-  );
 }
 
 export function ImportPreferencesPanel() {
@@ -130,14 +97,10 @@ export function ImportPreferencesPanel() {
     setSaving(true);
     try {
       await saveImportPreferenceSettings({
-        [settingKeys.stabilityEnabled]: preferences.stabilityEnabled,
-        [settingKeys.stabilitySeconds]: preferences.stabilitySeconds,
         [settingKeys.allowedExtensions]: preferences.allowedExtensions,
         [settingKeys.ignorePatterns]: preferences.ignorePatterns
       });
       const next = normalizePreferences({
-        [settingKeys.stabilityEnabled]: preferences.stabilityEnabled,
-        [settingKeys.stabilitySeconds]: preferences.stabilitySeconds,
         [settingKeys.allowedExtensions]: preferences.allowedExtensions,
         [settingKeys.ignorePatterns]: preferences.ignorePatterns
       });
@@ -155,38 +118,6 @@ export function ImportPreferencesPanel() {
 
   return (
     <div className="space-y-8" aria-busy={loading || saving || undefined}>
-      <section aria-labelledby="stability-title" className="border-b border-[#E5E0DA] pb-8">
-        <div className="flex items-start justify-between gap-5">
-          <div>
-            <h3 id="stability-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>文件稳定性检查</I18nText></h3>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>书库扫描发现文件后，确认文件大小与修改时间不再变化，再加入导入队列。</I18nText></p>
-          </div>
-          <Switch
-            checked={preferences.stabilityEnabled}
-            onChange={(stabilityEnabled) => editPreferences((current) => ({ ...current, stabilityEnabled }))}
-            label={i18nAttribute("导入时检查文件稳定性")}
-            disabled={loading}
-          />
-        </div>
-        <label className="mt-5 block max-w-sm text-sm font-medium text-[#4F4B47]">
-          <I18nText>检查时间</I18nText><span className="mt-2 flex items-center overflow-hidden rounded-xl border border-[#DED8D1] bg-white focus-within:border-[#F09A83] focus-within:ring-2 focus-within:ring-[#FFE3DA]">
-            <input
-              type="number"
-              min="0.5"
-              max="300"
-              step="0.5"
-              value={preferences.stabilitySeconds}
-              disabled={!preferences.stabilityEnabled || loading}
-              onChange={(event) => editPreferences((current) => ({ ...current, stabilitySeconds: Number(event.target.value) }))}
-              onBlur={() => setPreferences((current) => ({ ...current, stabilitySeconds: Math.min(300, Math.max(0.5, Number(current.stabilitySeconds) || 2)) }))}
-              className="min-h-11 min-w-0 flex-1 bg-transparent px-3.5 text-sm text-[#2A2825] outline-none disabled:bg-[#F7F4F1] disabled:text-[#AAA39C]"
-            />
-            <span className="px-3.5 text-sm text-[#77716A]"><I18nText>秒</I18nText></span>
-          </span>
-          <span className="mt-2 block text-xs font-normal leading-5 text-[#77716A]"><I18nText>最短 0.5 秒，最长 300 秒；时间越长，越适合仍在复制中的大文件。</I18nText></span>
-        </label>
-      </section>
-
       <section aria-labelledby="extensions-title" className="border-b border-[#E5E0DA] pb-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

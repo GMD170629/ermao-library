@@ -30,7 +30,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case deleteImportTitle, deleteImportMessage, rescanAll
     case importPreferencesTitle, fileProcessing, keepSourceFiles, duplicatePolicy
     case ignoreHiddenFiles, ignorePatterns, minimumFileSize, sourceDescription
-    case stabilityCheck, stabilitySeconds, allowedExtensions, seconds
+    case allowedExtensions
     case duplicateSkip, duplicateReplace, duplicateKeepBoth, preferOPF, titleFromFilename
     case metadataSection, metadataLanguage, automatic, targetPathTemplate, autoOrganize
     case resourceLimits, concurrentTasks, retryLimit, futureTasksHint
@@ -140,8 +140,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .rescanAll: "Rescan All Sources", .importPreferencesTitle: "Import Preferences",
         .ignoreHiddenFiles: "Ignore Hidden Files", .ignorePatterns: "Ignore Patterns",
         .minimumFileSize: "Minimum File Size", .sourceDescription: "Description",
-        .stabilityCheck: "Stability Check", .stabilitySeconds: "Stability Seconds",
-        .allowedExtensions: "Allowed Extensions", .seconds: "Seconds",
+        .allowedExtensions: "Allowed Extensions",
         .fileProcessing: "File Processing", .keepSourceFiles: "Keep Source Files",
         .duplicatePolicy: "Duplicate File Policy", .duplicateSkip: "Skip Duplicates",
         .duplicateReplace: "Replace Existing", .duplicateKeepBoth: "Keep Both", .preferOPF: "Prefer OPF Metadata",
@@ -262,8 +261,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .parsing: "解析中", .pending: "待处理", .cancelled: "已取消", .deleteImportTitle: "删除此导入任务？",
         .deleteImportMessage: "任务记录将被移除。", .rescanAll: "重新扫描全部来源", .importPreferencesTitle: "导入偏好",
         .ignoreHiddenFiles: "忽略隐藏文件", .ignorePatterns: "忽略规则", .minimumFileSize: "最小文件大小",
-        .sourceDescription: "说明", .stabilityCheck: "稳定性检查", .stabilitySeconds: "稳定等待秒数",
-        .allowedExtensions: "允许的扩展名", .seconds: "秒",
+        .sourceDescription: "说明", .allowedExtensions: "允许的扩展名",
         .fileProcessing: "文件处理", .keepSourceFiles: "保留源文件", .duplicatePolicy: "重复文件处理策略",
         .duplicateSkip: "跳过重复文件", .duplicateReplace: "替换现有文件", .duplicateKeepBoth: "保留两者",
         .preferOPF: "优先读取 OPF", .titleFromFilename: "使用文件名补全标题", .metadataSection: "元数据",

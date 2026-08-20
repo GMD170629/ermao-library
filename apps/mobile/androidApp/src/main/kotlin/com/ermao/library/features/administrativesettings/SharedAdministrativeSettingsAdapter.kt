@@ -581,8 +581,8 @@ private fun LibrarySourceDraft.toShared() = SharedLibraryDraft(
     ignoreHidden, minimumFileSizeBytes, description,
 )
 
-private fun SharedImportPreferences.toLocal() = ImportPreferencesSnapshot(stabilityCheckEnabled, stabilitySeconds, allowedExtensions, ignorePatterns)
-private fun ImportPreferencesSnapshot.toShared() = SharedImportPreferences(stabilityCheckEnabled, stabilitySeconds, allowedExtensions, ignorePatterns)
+private fun SharedImportPreferences.toLocal() = ImportPreferencesSnapshot(allowedExtensions, ignorePatterns)
+private fun ImportPreferencesSnapshot.toShared() = SharedImportPreferences(allowedExtensions, ignorePatterns)
 
 private fun SharedLocalMetadataSource.toLocal() = when (this) {
     SharedLocalMetadataSource.SidecarOpf -> MetadataSource.Opf

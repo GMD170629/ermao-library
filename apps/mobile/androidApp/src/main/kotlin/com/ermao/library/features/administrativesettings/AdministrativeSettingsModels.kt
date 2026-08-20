@@ -374,8 +374,6 @@ data class ImportScanJobSummary(
 }
 
 data class ImportPreferencesSnapshot(
-    val stabilityCheckEnabled: Boolean,
-    val stabilitySeconds: Double,
     val allowedExtensions: List<String>,
     val ignorePatterns: String,
 ) : AdministrativePageSnapshot

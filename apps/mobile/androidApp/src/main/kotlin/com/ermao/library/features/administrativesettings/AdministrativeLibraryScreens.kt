@@ -366,17 +366,12 @@ fun ImportPreferencesScreen(
 ) {
     AdministrativePage(AdministrativeCopy.ImportPreferences, locale, onBack, modifier) {
         PageStateContent(state, locale, onRetry) { initial ->
-            var stabilityEnabled by remember(initial) { mutableStateOf(initial.stabilityCheckEnabled) }
-            var seconds by remember(initial) { mutableStateOf(initial.stabilitySeconds.toString()) }
             var extensions by remember(initial) { mutableStateOf(initial.allowedExtensions.joinToString(", ")) }
             var ignorePatterns by remember(initial) { mutableStateOf(initial.ignorePatterns) }
-            AdministrativeSwitchRow(AdministrativeCopy.Enabled.text(locale), stabilityEnabled, { stabilityEnabled = it }, supporting = "stabilityCheck")
-            AdministrativeTextField(seconds, { seconds = it }, AdministrativeCopy.Progress, locale)
             AdministrativeTextField(extensions, { extensions = it }, AdministrativeCopy.FileFormat, locale)
             AdministrativeTextField(ignorePatterns, { ignorePatterns = it }, AdministrativeCopy.Filter, locale)
-            val secondsValue = seconds.toDoubleOrNull()
-            PrimaryAction(AdministrativeCopy.SaveImportPreferences, locale, !state.mutationInFlight && secondsValue != null && secondsValue in 0.5..300.0) {
-                onCommand(AdministrativeCommand.SaveImportPreferences(ImportPreferencesSnapshot(stabilityEnabled, requireNotNull(secondsValue), extensions.split(',').map(String::trim).filter(String::isNotBlank), ignorePatterns)))
+            PrimaryAction(AdministrativeCopy.SaveImportPreferences, locale, !state.mutationInFlight) {
+                onCommand(AdministrativeCommand.SaveImportPreferences(ImportPreferencesSnapshot(extensions.split(',').map(String::trim).filter(String::isNotBlank), ignorePatterns)))
             }
         }
     }

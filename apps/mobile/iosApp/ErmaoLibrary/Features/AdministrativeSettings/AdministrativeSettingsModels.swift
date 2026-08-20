@@ -95,7 +95,7 @@ struct AdministrativeManagementSummary: Equatable, Sendable {
     let librarySourceCount: Int
     let enabledLibraryCount: Int
     let activeImportCount: Int
-    let automaticImportEnabled: Bool
+    let importFormatCount: Int
     let pendingOrganizeCount: Int
     let availableProviderCount: Int
     let providerCount: Int
@@ -345,8 +345,6 @@ enum MetadataLanguage: String, CaseIterable, Hashable, Sendable {
 }
 
 struct ImportPreferences: Equatable, Sendable {
-    var stabilityCheckEnabled: Bool
-    var stabilitySeconds: Double
     var allowedExtensions: [String]
     var ignorePatterns: String
 }

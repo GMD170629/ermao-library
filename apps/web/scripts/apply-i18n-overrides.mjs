@@ -50,6 +50,8 @@ const exactOverrides = {
   '保存到书库后会由扫描器自动识别': 'The library scanner will recognize files after they are saved',
   '该目录不属于已启用的书库，文件将只保存不入库': 'This directory is outside enabled libraries, so files will be saved without being imported',
   '扫描导入': 'Scanner import',
+  '请求扫描书库根目录：': 'Requested library root scan: ',
+  '请求扫描书库根目录：{value0}': 'Requested library root scan: {value0}',
   '已保存 {value0} 个文件，等待书库扫描器识别': '{value0} files saved and waiting for the library scanner',
   '回到首页继续上次的阅读、看漫画或听书': 'Return home to continue reading, viewing comics, or listening',
   '未登录': 'Not signed in',

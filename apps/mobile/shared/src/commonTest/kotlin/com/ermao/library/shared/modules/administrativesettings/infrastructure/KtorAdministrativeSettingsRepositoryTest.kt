@@ -337,18 +337,18 @@ class KtorAdministrativeSettingsRepositoryTest {
         val loaded = assertIs<AdministrativeSettingsContent<*>>(
             harness.repository.loadImportPreferences(context()),
         ).value
-        assertEquals(0.5, assertIs<ImportPreferences>(loaded).stabilitySeconds)
+        assertEquals(listOf(".epub"), assertIs<ImportPreferences>(loaded).allowedExtensions)
         assertIs<AdministrativeSettingsContent<*>>(
             harness.repository.updateImportPreferences(
                 context(),
-                ImportPreferences(true, 0.5, listOf(".epub"), "*.tmp"),
+                ImportPreferences(listOf(".epub"), "*.tmp"),
             ),
         )
 
         assertEquals(HttpMethod.Put, harness.requests.last().method)
         assertEquals("/base/api/system-settings", harness.requests.last().path)
         assertEquals(
-            """{"settings":{"import.stabilityCheck.enabled":true,"import.stabilityCheck.seconds":0.5,"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}""",
+            """{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}""",
             harness.requests.last().body,
         )
     }
@@ -484,7 +484,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val BACKUP_PAYLOAD = """{"ok":true,"data":{"backup":{"id":"backup-1","kind":"full","name":"backup.zip","filename":"backup.zip","sizeBytes":42,"createdAt":"2026-08-12T00:00:00Z","counts":{"works":1}}}}"""
         const val BACKUP_RESTORED = """{"ok":true,"data":{"id":"backup-1","restored":true,"restoredAt":"2026-08-12T00:00:00Z","counts":{"works":1},"restoredCounts":{"works":1},"actualCounts":{"works":1}}}"""
         const val BACKUP_DELETED = """{"ok":true,"data":{"deleted":true,"id":"backup-1"}}"""
-        const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.stabilityCheck.enabled":true,"import.stabilityCheck.seconds":0.5,"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
+        const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
         const val HEALTH_RUN = """{"ok":true,"data":{"run":{"runId":"run-1","status":"completed","version":2,"startedAt":1,"finishedAt":2,"groups":[],"items":[],"summary":{"total":0,"completed":0,"ok":0,"warning":0,"error":0,"skipped":0}}}}"""
         const val QUEUE_OPERATION = """{"ok":true,"data":{"operation":{"id":"operation-1","queueName":"import","action":"restart","status":"requested","actorUserId":"user-1","messageCode":"queue.restart.requested","requestedAt":"2026-08-12T00:00:00Z","startedAt":null,"finishedAt":null,"updatedAt":"2026-08-12T00:00:00Z"},"created":true}}"""
         const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"facets":{"sources":[],"levels":[]}}}"""

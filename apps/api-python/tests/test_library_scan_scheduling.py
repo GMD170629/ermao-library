@@ -23,7 +23,6 @@ def test_periodic_refresh_schedules_one_root_scan_per_library(
         root_path=str(root),
         organization_mode="FLAT",
         min_file_size_bytes=0,
-        stability_check_enabled=False,
     )
     persisted = []
 
@@ -54,7 +53,6 @@ def test_paused_scanner_does_not_enqueue_root_scans(tmp_path: Path) -> None:
         root_path=str(root),
         organization_mode="FLAT",
         min_file_size_bytes=0,
-        stability_check_enabled=False,
     )
     manager = WorkerManager(_session_scope)
     manager.pause_import_scheduling()

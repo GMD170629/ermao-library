@@ -64,7 +64,7 @@ final class AdministrativeSettingsTests: XCTestCase {
         client.summaryDelay = 0
         client.summary = AdministrativeManagementSummary(
             librarySourceCount: 2, enabledLibraryCount: 0, activeImportCount: 0,
-            automaticImportEnabled: false, pendingOrganizeCount: 0,
+            importFormatCount: 0, pendingOrganizeCount: 0,
             availableProviderCount: 0, providerCount: 0, userCount: 0, smtpEnabled: false,
             failedKindleCount: 0, opdsRunning: false, latestBackupAt: nil,
             healthyComponentCount: 0, componentCount: 0, logBytes: 0, logLimitBytes: 0
@@ -118,7 +118,7 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     var summaryDelay: UInt64 = 0
     var summary = AdministrativeManagementSummary(
         librarySourceCount: 0, enabledLibraryCount: 0, activeImportCount: 0,
-        automaticImportEnabled: false, pendingOrganizeCount: 0,
+        importFormatCount: 0, pendingOrganizeCount: 0,
         availableProviderCount: 0, providerCount: 0, userCount: 0, smtpEnabled: false,
         failedKindleCount: 0, opdsRunning: false, latestBackupAt: nil,
         healthyComponentCount: 0, componentCount: 0, logBytes: 0, logLimitBytes: 0

@@ -173,6 +173,41 @@ def test_patch_library_organization_mode_persists_enum_value(
     assert locked.json()["error"]["code"] == "LIBRARY_TOPOLOGY_LOCKED"
 
 
+def test_directory_scan_request_always_schedules_the_library_root(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login_admin(client, db_session)
+    root = tmp_path / "root-scan-library"
+    nested = root / "Work" / "Version"
+    nested.mkdir(parents=True)
+    library = Library(
+        id="root-scan-library",
+        name="Root scan library",
+        root_path=str(root),
+        organization_mode="VOLUMES",
+        enabled=True,
+        min_file_size_bytes=0,
+    )
+    db_session.add(library)
+    db_session.commit()
+
+    response = client.post(
+        "/api/import-tasks/scan-directory",
+        json={"path": str(nested)},
+    )
+
+    assert response.status_code == 202, response.text
+    job_payload = response.json()["data"]["job"]
+    assert job_payload["libraryId"] == library.id
+    assert job_payload["rootPath"] == str(root.resolve())
+    assert job_payload["trigger"] == "MANUAL_ROOT_SCAN"
+    stored = db_session.get(ImportScanJob, job_payload["id"])
+    assert stored is not None
+    assert stored.root_path == str(root.resolve())
+
+
 def test_download_outside_enabled_library_does_not_enqueue_import(
     db_session: Session,
     test_settings,

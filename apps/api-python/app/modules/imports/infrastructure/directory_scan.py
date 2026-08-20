@@ -10,7 +10,6 @@ from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.services.audio_metadata import collect_audio_bundle_files
 from app.services.import_preferences import (
-    DEFAULT_STABILITY_CHECK_ENABLED,
     SUPPORTED_IMPORT_EXTENSIONS,
     ImportPreferences,
     matches_ignore_patterns,
@@ -27,8 +26,6 @@ class LibraryConfig:
     min_file_size_bytes: int = 10240
     global_ignore_patterns: str = ""
     allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
-    stability_check_enabled: bool = DEFAULT_STABILITY_CHECK_ENABLED
-    stability_check_seconds: float = 2.0
 
 
 ImportIgnoreReason = Literal[
@@ -61,8 +58,6 @@ def library_config(
         ),
         global_ignore_patterns=preferences.ignore_patterns,
         allowed_extensions=preferences.allowed_extensions,
-        stability_check_enabled=preferences.stability_check_enabled,
-        stability_check_seconds=preferences.stability_check_seconds,
     )
 
 
