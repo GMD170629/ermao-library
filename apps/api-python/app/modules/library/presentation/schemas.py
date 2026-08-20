@@ -989,34 +989,13 @@ class BatchVolumeMutationPayload(HttpContractModel):
     book: WorkView | None
     work_id: str = Field(alias="workId")
     affected_volume_ids: list[str] = Field(alias="affectedVolumeIds")
-    target_work_ids: list[str] = Field(alias="targetWorkIds")
     operation_ids: list[str] = Field(alias="operationIds")
-    deleted_work: bool = Field(alias="deletedWork")
 
 
-class WorkStructureMutationPayload(HttpContractModel):
+class VolumeMetadataMutationPayload(HttpContractModel):
     book: WorkView | None
-    target_book: WorkView | None = Field(default=None, alias="targetBook")
     work_id: str = Field(alias="workId")
-    volume_id: str | None = Field(default=None, alias="volumeId")
-    target_work_id: str | None = Field(default=None, alias="targetWorkId")
-    source_version_id: str | None = Field(default=None, alias="sourceVersionId")
-    target_version_id: str | None = Field(
-        default=None,
-        alias="targetVersionId",
-    )
-    applied_fields: list[str] | None = Field(default=None, alias="appliedFields")
-    finished_organize_job_ids: list[str] | None = Field(
-        default=None,
-        alias="finishedOrganizeJobIds",
-    )
-    transfer_mode: str | None = Field(default=None, alias="transferMode")
-    deleted_version: bool | None = Field(
-        default=None,
-        alias="deletedVersion",
-    )
-    deleted_work: bool | None = Field(default=None, alias="deletedWork")
-    operation: LibraryOperationSummary | None = None
+    volume_id: str = Field(alias="volumeId")
 
 
 class ReclassifyVolumePayload(HttpContractModel):
@@ -1060,7 +1039,7 @@ OperationsResponse = SuccessEnvelope[OperationsPayload]
 UndoOperationResponse = SuccessEnvelope[UndoOperationPayload]
 MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]
 MetadataApplyResponse = SuccessEnvelope[MetadataApplyPayload]
-WorkStructureMutationResponse = SuccessEnvelope[WorkStructureMutationPayload]
+VolumeMetadataMutationResponse = SuccessEnvelope[VolumeMetadataMutationPayload]
 ReclassifyVolumeResponse = SuccessEnvelope[ReclassifyVolumePayload]
 BatchVolumeMutationResponse = SuccessEnvelope[BatchVolumeMutationPayload]
 

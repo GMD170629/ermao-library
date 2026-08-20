@@ -378,11 +378,6 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
     paths = (
         APP_ROOT / "modules" / "library" / "infrastructure" / "projections.py",
         APP_ROOT / "modules" / "library" / "infrastructure" / "storage.py",
-        APP_ROOT
-        / "modules"
-        / "library"
-        / "infrastructure"
-        / "structural_operations.py",
         APP_ROOT / "modules" / "imports" / "infrastructure" / "import_http.py",
         APP_ROOT / "modules" / "download" / "infrastructure" / "download_http.py",
     )

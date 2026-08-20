@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal
-
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
@@ -63,10 +60,7 @@ from app.modules.library.infrastructure.request_mutations import (
 from app.modules.library.infrastructure.request_mutations import (
     load_metadata_apply_job_ids as _load_metadata_apply_job_ids,
 )
-from app.modules.library.infrastructure.structural_operations import (
-    reorder_volume as _reorder_volume,
-)
-from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeStructure
+from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeMetadata
 from app.modules.library.infrastructure.work_list import list_works as _list_works
 from app.modules.system.public import PreparedSystemEvent
 
@@ -93,9 +87,8 @@ __all__ = [
     "load_metadata_apply_job_ids",
     "load_work_facet_projections",
     "prepare_work_facet_write",
-    "reorder_volume",
     "smart_shelf_work_ids",
-    "volume_structure_commands",
+    "volume_metadata_commands",
 ]
 
 
@@ -178,22 +171,5 @@ def list_works(
     return _list_works(db, user, query)
 
 
-def reorder_volume(
-    db: Session,
-    *,
-    volume_id: str,
-    version_id: str,
-    direction: Literal["up", "down"],
-    now: datetime,
-) -> bool:
-    return _reorder_volume(
-        db,
-        volume_id=volume_id,
-        version_id=version_id,
-        direction=direction,
-        now=now,
-    )
-
-
-def volume_structure_commands(db: Session) -> SqlAlchemyVolumeStructure:
-    return SqlAlchemyVolumeStructure(db)
+def volume_metadata_commands(db: Session) -> SqlAlchemyVolumeMetadata:
+    return SqlAlchemyVolumeMetadata(db)

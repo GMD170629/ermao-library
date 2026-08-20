@@ -33,7 +33,7 @@ from app.bootstrap.library import (
     load_metadata_apply_job_ids,
     load_work_facet_projections,
     prepare_work_facet_write,
-    volume_structure_commands,
+    volume_metadata_commands,
 )
 from app.bootstrap.library import (
     bookshelf_items as get_bookshelf_items,
@@ -96,15 +96,16 @@ from app.modules.library.application.request_mutations import (
     WorkRecordMutation,
 )
 from app.modules.library.application.volume_commands import (
-    BatchVolumeCommand,
     InvalidVolumeChangeError,
     LibraryActor,
     LibraryAuthorizationError,
     OperationSummary,
+    SetVolumeMediaKindsCommand,
+    VolumeMetadataChanges,
     VolumeNotFoundError,
     WorkNotFoundError,
-    batch_volume_resources,
     reclassify_volume_resource,
+    set_volume_media_kinds,
     update_volume_resource,
 )
 from app.modules.library.presentation.filter_mappers import (
@@ -157,7 +158,7 @@ from app.modules.library.presentation.schemas import (
     WorkReadingUnitsResponse,
     WorkResponse,
     WorksResponse,
-    WorkStructureMutationResponse,
+    VolumeMetadataMutationResponse,
     WorkSummariesResponse,
     WorkVolumePageResponse,
 )
@@ -2651,7 +2652,7 @@ def update_work_volume(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    WorkStructureMutationResponse,
+    VolumeMetadataMutationResponse,
     ErrorResponses(
         LibraryForbiddenError,
         LibraryNotFoundError,
@@ -2661,12 +2662,13 @@ def update_work_volume(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    changes = payload.model_dump(exclude_unset=True)
-    if "title" in changes and changes["title"] is not None:
-        changes["title"] = str(changes["title"]).strip()
+    changes = cast(
+        VolumeMetadataChanges,
+        payload.model_dump(exclude_unset=True),
+    )
     try:
         update_volume_resource(
-            volume_structure_commands(db),
+            volume_metadata_commands(db),
             db,
             actor=_library_actor(db, user),
             work_id=work_id,
@@ -2695,7 +2697,7 @@ def update_work_volume(
     except InvalidVolumeChangeError as exc:
         _raise_library_error(str(exc), status_code=422, code="VOLUME_TITLE_REQUIRED")
     refreshed_work = _get_work(db, work_id)
-    return WorkStructureMutationResponse(
+    return VolumeMetadataMutationResponse(
         data={
             "book": (
                 _work_view(db, refreshed_work, user.id) if refreshed_work else None
@@ -2725,15 +2727,14 @@ def batch_work_volumes(
     if auth_error:
         return auth_error
     try:
-        outcome = batch_volume_resources(
-            volume_structure_commands(db),
+        outcome = set_volume_media_kinds(
+            volume_metadata_commands(db),
             db,
             actor=_library_actor(db, user),
             work_id=work_id,
-            command=BatchVolumeCommand(
-                action=payload.action,
+            command=SetVolumeMediaKindsCommand(
                 volume_ids=tuple(payload.volume_ids),
-                target_media_kind=getattr(payload, "target_media_kind", None),
+                target_media_kind=payload.target_media_kind,
             ),
             now=_now(),
         )
@@ -2767,9 +2768,7 @@ def batch_work_volumes(
             "book": _work_view(db, refreshed_work, user.id) if refreshed_work else None,
             "workId": work_id,
             "affectedVolumeIds": list(outcome.affected_volume_ids),
-            "targetWorkIds": list(outcome.target_work_ids),
             "operationIds": list(outcome.operation_ids),
-            "deletedWork": outcome.deleted_work,
         }
     )
 
@@ -2795,7 +2794,7 @@ def reclassify_work_volume(
         return auth_error
     try:
         outcome = reclassify_volume_resource(
-            volume_structure_commands(db),
+            volume_metadata_commands(db),
             db,
             actor=_library_actor(db, user),
             work_id=work_id,

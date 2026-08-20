@@ -1,13 +1,10 @@
-"""Application use cases for authorized volume-scoped structure changes."""
+"""Application use cases for volume metadata and content classification."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Literal, Protocol, cast
-
-from app.modules.library.application.dto import MoveVolumeResult
+from typing import Literal, NotRequired, Protocol, TypedDict, cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,19 +22,18 @@ class VolumeContext:
     work_id: str
     version_id: str
     media_kind: str
-    title: str
     sort_order: int
-    format: str
-    library_id: str | None
-    author: str | None
-    work_title: str
-    source_path: Path | None
 
 
-@dataclass(frozen=True, slots=True)
-class NewWorkInput:
-    title: str
-    author: str | None
+class VolumeMetadataChanges(TypedDict):
+    description: NotRequired[str | None]
+    publisher: NotRequired[str | None]
+    published_at: NotRequired[datetime | None]
+    language: NotRequired[str | None]
+    identifier: NotRequired[str | None]
+    isbn: NotRequired[str | None]
+    narrator: NotRequired[str | None]
+    abridged: NotRequired[bool | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,50 +47,25 @@ class OperationSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class VolumeSplitOutcome:
-    target_work_id: str
-    move: MoveVolumeResult
-    operation: OperationSummary
-
-
-@dataclass(frozen=True, slots=True)
-class VolumeDeleteOutcome:
-    work_id: str
-    volume_id: str
-    deleted_version: bool
-    deleted_work: bool
-    operation: OperationSummary
-
-
-@dataclass(frozen=True, slots=True)
 class VolumeReclassifyOutcome:
     moved_volume_ids: tuple[str, ...]
     operation: OperationSummary
 
 
-BatchVolumeAction = Literal["SET_MEDIA_KIND", "SPLIT", "DELETE"]
-
-
 @dataclass(frozen=True, slots=True)
-class BatchVolumeCommand:
-    action: BatchVolumeAction
+class SetVolumeMediaKindsCommand:
     volume_ids: tuple[str, ...]
-    target_media_kind: str | None = None
+    target_media_kind: str
 
 
 @dataclass(frozen=True, slots=True)
-class BatchVolumeOutcome:
-    work_id: str
+class SetVolumeMediaKindsOutcome:
     affected_volume_ids: tuple[str, ...]
-    target_work_ids: tuple[str, ...]
     operation_ids: tuple[str, ...]
-    deleted_work: bool
 
 
-class VolumeStructurePort(Protocol):
+class VolumeMetadataPort(Protocol):
     def can_access_work(self, *, actor: LibraryActor, work_id: str) -> bool: ...
-
-    def work_library_id(self, *, work_id: str) -> str | None: ...
 
     def get_volume_context(
         self, *, actor: LibraryActor, work_id: str, volume_id: str
@@ -109,36 +80,8 @@ class VolumeStructurePort(Protocol):
     ) -> tuple[VolumeContext, ...]: ...
 
     def update_volume(
-        self, *, volume_id: str, changes: dict[str, object], now: datetime
+        self, *, volume_id: str, changes: VolumeMetadataChanges, now: datetime
     ) -> None: ...
-
-    def reorder_volume(
-        self,
-        *,
-        volume_id: str,
-        version_id: str,
-        direction: Literal["up", "down"],
-        now: datetime,
-    ) -> bool: ...
-
-    def split_volume(
-        self,
-        *,
-        actor_id: str,
-        source_work_id: str,
-        volume_id: str,
-        new_work: NewWorkInput,
-        now: datetime,
-    ) -> VolumeSplitOutcome: ...
-
-    def delete_volume(
-        self,
-        *,
-        actor_id: str,
-        work_id: str,
-        volume_id: str,
-        now: datetime,
-    ) -> VolumeDeleteOutcome: ...
 
     def reclassify_volume(
         self,
@@ -151,15 +94,15 @@ class VolumeStructurePort(Protocol):
         now: datetime,
     ) -> VolumeReclassifyOutcome: ...
 
-    def apply_batch(
+    def set_media_kinds(
         self,
         *,
         actor_id: str,
-        source_work_id: str,
+        work_id: str,
         contexts: tuple[VolumeContext, ...],
-        command: BatchVolumeCommand,
+        target_media_kind: str,
         now: datetime,
-    ) -> BatchVolumeOutcome: ...
+    ) -> SetVolumeMediaKindsOutcome: ...
 
 
 class UnitOfWork(Protocol):
@@ -184,16 +127,16 @@ class InvalidVolumeChangeError(Exception):
     pass
 
 
-def batch_volume_resources(
-    port: VolumeStructurePort,
+def set_volume_media_kinds(
+    port: VolumeMetadataPort,
     unit_of_work: UnitOfWork,
     *,
     actor: LibraryActor,
     work_id: str,
-    command: BatchVolumeCommand,
+    command: SetVolumeMediaKindsCommand,
     now: datetime,
-) -> BatchVolumeOutcome:
-    """Apply one volume-management intention atomically to an explicit selection."""
+) -> SetVolumeMediaKindsOutcome:
+    """Apply one content-classification override to explicit directory volumes."""
     _require_work_access(port, actor=actor, work_id=work_id)
     _require_manager(actor)
     if not command.volume_ids:
@@ -212,22 +155,16 @@ def batch_volume_resources(
         raise VolumeNotFoundError
     contexts.sort(key=lambda value: (value.version_id, value.sort_order, value.id))
 
-    target_media_kind = (command.target_media_kind or "").strip().upper()
-    if command.action not in {"SET_MEDIA_KIND", "SPLIT", "DELETE"}:
-        raise InvalidVolumeChangeError("INVALID_BATCH_OPERATION")
-    if command.action == "SET_MEDIA_KIND" and target_media_kind not in {
-        "EBOOK",
-        "COMIC",
-        "AUDIOBOOK",
-    }:
+    target_media_kind = command.target_media_kind.strip().upper()
+    if target_media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
         raise InvalidVolumeChangeError("INVALID_MEDIA_KIND")
 
     try:
-        outcome = port.apply_batch(
+        outcome = port.set_media_kinds(
             actor_id=actor.user_id,
-            source_work_id=work_id,
+            work_id=work_id,
             contexts=tuple(contexts),
-            command=command,
+            target_media_kind=target_media_kind,
             now=now,
         )
         unit_of_work.commit()
@@ -241,7 +178,7 @@ def batch_volume_resources(
 
 
 def reclassify_volume_resource(
-    port: VolumeStructurePort,
+    port: VolumeMetadataPort,
     unit_of_work: UnitOfWork,
     *,
     actor: LibraryActor,
@@ -275,20 +212,41 @@ def reclassify_volume_resource(
         raise
 
 
+def update_volume_resource(
+    port: VolumeMetadataPort,
+    unit_of_work: UnitOfWork,
+    *,
+    actor: LibraryActor,
+    work_id: str,
+    volume_id: str,
+    changes: VolumeMetadataChanges,
+    now: datetime,
+) -> None:
+    _require_work_access(port, actor=actor, work_id=work_id)
+    _require_manager(actor)
+    _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
+    try:
+        port.update_volume(volume_id=volume_id, changes=changes, now=now)
+        unit_of_work.commit()
+    except Exception:
+        unit_of_work.rollback()
+        raise
+
+
 def _require_manager(actor: LibraryActor) -> None:
     if not actor.can_manage_system:
         raise LibraryAuthorizationError
 
 
 def _require_work_access(
-    port: VolumeStructurePort, *, actor: LibraryActor, work_id: str
+    port: VolumeMetadataPort, *, actor: LibraryActor, work_id: str
 ) -> None:
     if not port.can_access_work(actor=actor, work_id=work_id):
         raise WorkNotFoundError
 
 
 def _require_volume(
-    port: VolumeStructurePort,
+    port: VolumeMetadataPort,
     *,
     actor: LibraryActor,
     work_id: str,
@@ -302,119 +260,3 @@ def _require_volume(
     if context is None:
         raise VolumeNotFoundError
     return context
-
-
-def update_volume_resource(
-    port: VolumeStructurePort,
-    unit_of_work: UnitOfWork,
-    *,
-    actor: LibraryActor,
-    work_id: str,
-    volume_id: str,
-    changes: dict[str, object],
-    now: datetime,
-) -> None:
-    _require_work_access(port, actor=actor, work_id=work_id)
-    _require_manager(actor)
-    _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
-    if "title" in changes and not str(changes["title"] or "").strip():
-        raise InvalidVolumeChangeError("Volume title cannot be empty")
-    try:
-        port.update_volume(volume_id=volume_id, changes=changes, now=now)
-        unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def reorder_volume_resource(
-    port: VolumeStructurePort,
-    unit_of_work: UnitOfWork,
-    *,
-    actor: LibraryActor,
-    work_id: str,
-    volume_id: str,
-    direction: Literal["up", "down"],
-    now: datetime,
-) -> bool:
-    _require_work_access(port, actor=actor, work_id=work_id)
-    _require_manager(actor)
-    context = _require_volume(
-        port,
-        actor=actor,
-        work_id=work_id,
-        volume_id=volume_id,
-    )
-    try:
-        changed = port.reorder_volume(
-            volume_id=volume_id,
-            version_id=context.version_id,
-            direction=direction,
-            now=now,
-        )
-        unit_of_work.commit()
-        return changed
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def split_volume_resource(
-    port: VolumeStructurePort,
-    unit_of_work: UnitOfWork,
-    *,
-    actor: LibraryActor,
-    source_work_id: str,
-    volume_id: str,
-    new_work: NewWorkInput,
-    now: datetime,
-) -> VolumeSplitOutcome:
-    _require_work_access(port, actor=actor, work_id=source_work_id)
-    _require_manager(actor)
-    _require_volume(
-        port,
-        actor=actor,
-        work_id=source_work_id,
-        volume_id=volume_id,
-    )
-    if not new_work.title.strip():
-        raise InvalidVolumeChangeError("Work title cannot be empty")
-    try:
-        result = port.split_volume(
-            actor_id=actor.user_id,
-            source_work_id=source_work_id,
-            volume_id=volume_id,
-            new_work=new_work,
-            now=now,
-        )
-        unit_of_work.commit()
-        return result
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def delete_volume_resource(
-    port: VolumeStructurePort,
-    unit_of_work: UnitOfWork,
-    *,
-    actor: LibraryActor,
-    work_id: str,
-    volume_id: str,
-    now: datetime,
-) -> VolumeDeleteOutcome:
-    _require_work_access(port, actor=actor, work_id=work_id)
-    _require_manager(actor)
-    _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
-    try:
-        result = port.delete_volume(
-            actor_id=actor.user_id,
-            work_id=work_id,
-            volume_id=volume_id,
-            now=now,
-        )
-        unit_of_work.commit()
-        return result
-    except Exception:
-        unit_of_work.rollback()
-        raise

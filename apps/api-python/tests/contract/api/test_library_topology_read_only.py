@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.core.auth import hash_password
 from app.main import create_app
 from app.models.auth import User
@@ -12,6 +14,19 @@ def test_structural_library_mutations_are_absent_from_openapi() -> None:
     assert "/api/works/{work_id}/volumes/{volume_id}/move" not in paths
     assert "/api/works/{work_id}/volumes/{volume_id}/split" not in paths
     assert "delete" not in paths["/api/works/{work_id}/volumes/{volume_id}"]
+
+
+def test_structural_volume_implementations_are_removed() -> None:
+    infrastructure = (
+        Path(__file__).parents[3]
+        / "app"
+        / "modules"
+        / "library"
+        / "infrastructure"
+    )
+
+    assert not (infrastructure / "structural_operations.py").exists()
+    assert not (infrastructure / "batch_volume_commands.py").exists()
 
 
 def test_volume_metadata_contract_excludes_directory_owned_fields() -> None:
