@@ -24,7 +24,6 @@ from app.modules.imports.application.dto import (
     ImportSystemEvent,
     ImportTaskDTO,
     SidecarMetadataDTO,
-    StageImportCommand,
 )
 from app.modules.imports.application.pdf_types import (
     PdfCoverPublication,
@@ -98,8 +97,6 @@ class TextConversionProgressStore(Protocol):
 
 class ImportTaskStore(Protocol):
     """Persistence for import-task queue state transitions."""
-
-    def stage(self, command: StageImportCommand) -> tuple[ImportTaskDTO, bool]: ...
 
     def recover_stale(self, *, now: int, message: str) -> int: ...
 

@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.bootstrap.imports import (
-    execute_import_enqueue_write,
-    load_import_enqueue_command_projection,
-    prepare_import_enqueue_command,
-    prepare_import_enqueue_write,
-)
 from app.bootstrap.system import (
     prepare_settings_write,
     write_prepared_settings,
     write_prepared_system_events,
 )
 from app.models.common import db_timestamp
+from app.models.library import Library
 from app.modules.download.application.dto import (
     CreateDownloadTask,
     DownloadTaskDTO,
@@ -42,7 +38,8 @@ from app.modules.download.infrastructure.tasks import (
     prepare_mark_download_task_importing,
 )
 from app.modules.download.public import DownloadWriteTransaction
-from app.modules.imports.application.dto import ImportTaskDTO
+from app.modules.imports.application.work_queue_dto import ImportScanJobDTO
+from app.modules.imports.infrastructure.work_queue import create_or_reuse_scan_job
 from app.modules.system.domain.events import PreparedSystemEvent
 
 
@@ -178,37 +175,32 @@ def finalize_download_task_command(
     return entity_as_legacy_dict(task) if task is not None else None
 
 
-def enqueue_download_import_command(
+def schedule_download_scan_command(
     db: Session,
     *,
     task_id: str,
-    source_path: str,
-    original_name: str,
     library_id: str | None,
-) -> ImportTaskDTO:
-    enqueue_command = prepare_import_enqueue_command(
-        source_path,
-        origin="DOWNLOAD",
-        original_name=original_name,
-        library_id=library_id,
-        message="下载完成，等待后台导入",
-    )
-    projection = load_import_enqueue_command_projection(db, enqueue_command)
-    db.close()
-    prepared_at = db_timestamp()
-    prepared_enqueue = prepare_import_enqueue_write(
-        enqueue_command,
-        projection,
-        available_at=prepared_at,
-    )
+) -> ImportScanJobDTO:
+    if library_id is None:
+        raise ValueError("downloaded file is not owned by a library")
+    library = db.get(Library, library_id)
+    if library is None or not library.enabled:
+        raise ValueError("download target library is unavailable")
+    root_path = Path(library.root_path).expanduser().resolve()
     mark_importing_statement = prepare_mark_download_task_importing(
         task_id,
-        updated_at=prepared_at,
+        updated_at=db_timestamp(),
     )
     with DownloadWriteTransaction(db):
-        execute_import_enqueue_write(db, prepared_enqueue)
+        scan_job, _created = create_or_reuse_scan_job(
+            db,
+            library_id=library_id,
+            actor_user_id=None,
+            root_path=root_path,
+            trigger="download_completed",
+        )
         db.execute(mark_importing_statement)
-    return prepared_enqueue.task
+    return scan_job
 
 
 __all__ = [
@@ -220,7 +212,7 @@ __all__ = [
     "list_download_tasks",
     "claim_download_task_command",
     "finalize_download_task_command",
-    "enqueue_download_import_command",
+    "schedule_download_scan_command",
     "update_download_task",
     "update_download_task_command",
     "write_download_task",

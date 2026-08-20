@@ -108,9 +108,11 @@ def _task() -> ImportTaskDTO:
     return ImportTaskDTO(
         id="task-1",
         source_path="/tmp/book.epub",
-        origin="MANUAL",
+        origin="WATCH",
         status="PARSING",
         library_id="folder-1",
+        work_id="topology-work",
+        volume_id="topology-volume",
     )
 
 
@@ -138,7 +140,7 @@ def test_process_import_commits_final_writes_once_after_post_success_hooks() -> 
     assert pipeline.completed == 1
 
 
-def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
+def test_process_import_rejects_task_without_scanner_topology_target() -> None:
     unit_of_work = RecordingUnitOfWork()
     store = RecordingStore()
     pipeline = RecordingPipeline()
@@ -151,19 +153,22 @@ def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
         work_id="previous-result-work",
     )
 
-    process_import_task(
-        store,
-        unit_of_work,
-        pipeline,
-        ImportRuntimeConfig(storage_root=Path("/tmp"), audiobook_max_file_bytes=1),
-        task,
-        now=123,
-    )
+    with pytest.raises(ImportExecutionError) as error:
+        process_import_task(
+            store,
+            unit_of_work,
+            pipeline,
+            ImportRuntimeConfig(
+                storage_root=Path("/tmp"), audiobook_max_file_bytes=1
+            ),
+            task,
+            now=123,
+        )
 
-    assert pipeline.options is not None
-    assert not hasattr(pipeline.options, "requested_work_id")
-    assert pipeline.options.topology_work_id is None
-    assert pipeline.options.topology_volume_id is None
+    assert error.value.code == "TOPOLOGY_TARGET_REQUIRED"
+    assert error.value.retryable is False
+    assert pipeline.imports == 0
+    assert unit_of_work.rollbacks == 1
 
 
 def test_scanner_task_forwards_its_bound_directory_topology() -> None:

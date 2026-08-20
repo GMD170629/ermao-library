@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import zipfile
-from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -14,10 +13,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.bootstrap.imports import (
     claim_next_import_task,
     import_managed_book,
-    load_import_enqueue_command_projection,
-    persist_import_enqueue_write,
-    prepare_import_enqueue_command,
-    prepare_import_enqueue_write,
     recover_stale_import_tasks,
 )
 from app.core.auth import hash_password
@@ -49,33 +44,6 @@ from tests.test_worker_importer import create_worker_tables
 
 def _options(**kwargs: object) -> ImportOptions:
     kwargs.setdefault("library_id", "test-library")
-    return ImportOptions(**kwargs)  # type: ignore[arg-type]
-
-
-def _persist_import_enqueue(
-    db_session: Session,
-    source_path: Path,
-    *,
-    origin: str,
-    original_name: str | None = None,
-):
-    command = prepare_import_enqueue_command(
-        source_path,
-        origin=origin,
-        original_name=original_name,
-    )
-    projection = load_import_enqueue_command_projection(db_session, command)
-    db_session.close()
-    prepared = prepare_import_enqueue_write(
-        command,
-        projection,
-        available_at=datetime.now(UTC),
-    )
-    return persist_import_enqueue_write(db_session, prepared)
-
-
-def write_valid_epub(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr(
@@ -841,69 +809,3 @@ def test_persistent_queue_claims_by_created_timestamp_then_id(db_session, tmp_pa
         claimed_ids.append(claimed.id)
 
     assert claimed_ids == ["task-a", "task-b", "task-c"]
-
-
-def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
-    client, db_session, test_settings, tmp_path
-):
-    create_worker_tables(db_session)
-    test_settings.resolved_monitor_root.mkdir(parents=True, exist_ok=True)
-    user = User(
-        email="conversion@example.com",
-        name="管理员",
-        password_hash=hash_password("starshipnas"),
-        role="admin",
-    )
-    db_session.add(user)
-    db_session.commit()
-    assert (
-        client.post(
-            "/api/auth/login", json={"email": user.email, "password": "starshipnas"}
-        ).status_code
-        == 200
-    )
-
-    upload_dir = test_settings.resolved_monitor_root / "uploads"
-    upload_dir.mkdir()
-    monitored = client.post(
-        "/api/libraries",
-        json={
-            "name": "Conversion uploads",
-            "rootPath": str(upload_dir),
-            "organizationMode": "FLAT",
-            "enabled": True,
-        },
-    )
-    assert monitored.status_code == 201
-    response = client.post(
-        "/api/works/import",
-        data={"targetPath": str(upload_dir)},
-        files={"file": ("novel.azw3", b"fake azw3 source", "application/octet-stream")},
-    )
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    assert payload["saved"] == 1
-    assert payload["autoImport"] is True
-    assert db_session.execute(text("SELECT COUNT(*) FROM ImportTask")).scalar_one() == 0
-    source_path = Path(payload["results"][0]["sourcePath"])
-    task, created = _persist_import_enqueue(
-        db_session,
-        source_path,
-        origin="WATCH",
-        original_name=source_path.name,
-    )
-    assert created is True
-    db_session.execute(
-        text(
-            "UPDATE ImportTask SET status = 'FAILED', retryable = 1, errorCode = 'CONVERSION_TIMEOUT', errorSummary = 'timeout' WHERE id = :id"
-        ),
-        {"id": task.id},
-    )
-    db_session.commit()
-
-    retried = client.post(f"/api/import-tasks/{task.id}/retry")
-    assert retried.status_code == 200
-    assert retried.json()["data"]["task"]["status"] == "PENDING"
-    assert retried.json()["data"]["task"]["errorCode"] is None
-    rejected = client.post(f"/api/import-tasks/{task.id}/retry")
-    assert rejected.status_code == 400

@@ -9,7 +9,7 @@ from uuid import uuid4
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.bootstrap.download import enqueue_download_import_command
+from app.bootstrap.download import schedule_download_scan_command
 from app.core.config import Settings
 from app.modules.download.infrastructure.tasks import (
     has_table,
@@ -105,15 +105,13 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
                         flush=True,
                     )
                     return True
-                import_task = enqueue_download_import_command(
+                scan_job = schedule_download_scan_command(
                     db,
                     task_id=str(task["id"]),
-                    source_path=str(downloaded_path),
-                    original_name=downloaded_path.name,
                     library_id=library_id,
                 )
                 print(
-                    f"[download-queue] downloaded {task['id']} and queued import {import_task.id}",
+                    f"[download-queue] downloaded {task['id']} and scheduled scan {scan_job.id}",
                     flush=True,
                 )
             except Exception as exc:  # noqa: BLE001 - import handoff containment.

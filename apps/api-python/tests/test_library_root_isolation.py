@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from app.bootstrap.imports import import_managed_book
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.import_pipeline import DownloadTask, ImportTask
+from app.models.import_pipeline import (
+    DownloadTask,
+    ImportScanJob,
+    ImportTask,
+    ImportWorkItem,
+)
 from app.models.library import (
     Library,
     LibraryMediaVersion,
@@ -259,18 +264,77 @@ def test_download_outside_enabled_library_does_not_enqueue_import(
             }
         ),
     )
-    enqueue_calls: list[object] = []
+    scan_calls: list[object] = []
     monkeypatch.setattr(
-        "app.services.download_queue.enqueue_download_import_command",
-        lambda *_args, **kwargs: enqueue_calls.append(kwargs),
+        "app.services.download_queue.schedule_download_scan_command",
+        lambda *_args, **kwargs: scan_calls.append(kwargs),
     )
 
     assert process_next_download_task(db_session, test_settings) is True
-    assert enqueue_calls == []
+    assert scan_calls == []
     assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
     stored = db_session.get(DownloadTask, task.id)
     assert stored is not None
     assert stored.status == "downloaded"
+
+
+def test_download_inside_library_schedules_topology_scan_instead_of_import_task(
+    db_session: Session,
+    test_settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    downloaded = library_root / "book.epub"
+    downloaded.write_bytes(b"ebook")
+    add_library(db_session, library_root, folder_id="download-scan-library")
+    task = DownloadTask(
+        id="download-inside-library",
+        task_type="http",
+        status="downloaded",
+        display_name="book.epub",
+        remote_ref="{}",
+        file_path=str(downloaded),
+        progress=100,
+    )
+    db_session.add(task)
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.download_queue.next_queued_task",
+        lambda _db: {"id": task.id},
+    )
+    monkeypatch.setattr(
+        "app.services.download_queue.execute_download_task",
+        lambda _db, _settings, _task_id: DownloadExecutionResult(
+            {
+                "id": task.id,
+                "status": "downloaded",
+                "filePath": str(downloaded),
+            }
+        ),
+    )
+
+    assert process_next_download_task(db_session, test_settings) is True
+
+    db_session.expire_all()
+    stored = db_session.get(DownloadTask, task.id)
+    assert stored is not None
+    assert stored.status == "importing"
+    scan_job = db_session.scalar(
+        select(ImportScanJob).where(
+            ImportScanJob.library_id == "download-scan-library"
+        )
+    )
+    assert scan_job is not None
+    assert scan_job.root_path == str(library_root.resolve())
+    assert scan_job.trigger == "download_completed"
+    work_item = db_session.scalar(
+        select(ImportWorkItem).where(ImportWorkItem.scan_job_id == scan_job.id)
+    )
+    assert work_item is not None
+    assert work_item.kind == "SCAN_DIRECTORY"
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
 
 
 def test_batch_transfer_is_rejected_without_mutation(

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from app.modules.imports.application.audio_types import (
     audio_bundle_membership_is_proven,
@@ -39,10 +39,6 @@ class LibraryConfig:
     stability_check_seconds: float = 2.0
 
 
-class ImportQueueProtocol(Protocol):
-    def enqueue(self, path: Path, folder: LibraryConfig) -> None: ...
-
-
 ImportIgnoreReason = Literal[
     "temporary_upload",
     "hidden_path",
@@ -53,24 +49,6 @@ ImportIgnoreReason = Literal[
     "below_minimum_size",
     "audio_track_limit_exceeded",
 ]
-
-
-@dataclass(frozen=True)
-class IgnoredImportSource:
-    path: Path
-    reason: ImportIgnoreReason
-    file_count: int = 1
-
-
-@dataclass
-class ScanSummary:
-    directories_scanned: int = 0
-    files_scanned: int = 0
-    candidates_found: int = 0
-    cached_files: int = 0
-    ignored_files: int = 0
-    ignored_sources: list[IgnoredImportSource] = field(default_factory=list)
-    errors: list[dict[str, object]] = field(default_factory=list)
 
 
 def library_config(
@@ -212,108 +190,3 @@ def audio_track_name_proves_membership(path: Path) -> bool:
         or _EPISODE_FILE_PATTERN.search(path.stem)
         or audio_episode_number(path) is not None
     )
-
-
-def scan_directory_for_imports(
-    root_path: Path,
-    folder: LibraryConfig,
-    import_queue: ImportQueueProtocol,
-    *,
-    summary: ScanSummary | None = None,
-    known_paths: set[Path] | None = None,
-    _suppress_audio: bool = False,
-) -> ScanSummary:
-    summary = summary or ScanSummary()
-    summary.directories_scanned += 1
-    bundle_files: list[Path] = []
-    overflowed = _suppress_audio
-    if not _suppress_audio:
-        try:
-            bundle_files = collect_audio_bundle_files(root_path)
-        except AudioTrackLimitExceededError as exc:
-            overflowed = True
-            summary.errors.append(
-                {
-                    "path": str(root_path),
-                    "error": str(exc),
-                    "code": exc.code,
-                    "limit": exc.limit,
-                    "observedCount": exc.observed_count,
-                }
-            )
-        except ValueError as exc:
-            summary.errors.append({"path": str(root_path), "error": str(exc)})
-            return summary
-    is_bundle = bool(bundle_files) and is_proven_audio_bundle_directory(
-        root_path, bundle_files, folder=folder
-    )
-    handled_bundle_files: set[Path] = set()
-    if is_bundle:
-        summary.files_scanned += len(bundle_files)
-        resolved_root = root_path.resolve()
-        handled_bundle_files = {item.resolve() for item in bundle_files}
-        ignore_reason = import_source_ignore_reason(root_path, folder)
-        if ignore_reason is not None:
-            summary.ignored_files += len(bundle_files)
-            summary.ignored_sources.append(
-                IgnoredImportSource(
-                    path=root_path,
-                    reason=ignore_reason,
-                    file_count=len(bundle_files),
-                )
-            )
-        elif (
-            known_paths is not None
-            and resolved_root in known_paths
-            and handled_bundle_files.issubset(known_paths)
-        ):
-            summary.cached_files += len(bundle_files)
-        else:
-            summary.candidates_found += 1
-            import_queue.enqueue(root_path, folder)
-    try:
-        entries = root_path.iterdir()
-    except OSError as exc:
-        summary.errors.append({"path": str(root_path), "error": str(exc)})
-        return summary
-    for entry in entries:
-        try:
-            if entry.is_dir():
-                if is_bundle and any(
-                    entry.resolve() in item.parents for item in handled_bundle_files
-                ):
-                    continue
-                if not should_ignore_path(entry, folder):
-                    scan_directory_for_imports(
-                        entry,
-                        folder,
-                        import_queue,
-                        summary=summary,
-                        known_paths=known_paths,
-                        _suppress_audio=overflowed,
-                    )
-                continue
-            if not entry.is_file():
-                continue
-            if overflowed and is_supported_audio_file(entry):
-                summary.files_scanned += 1
-                summary.ignored_files += 1
-                continue
-            if entry.resolve() in handled_bundle_files:
-                continue
-            summary.files_scanned += 1
-            ignore_reason = import_source_ignore_reason(entry, folder)
-            if ignore_reason is not None:
-                summary.ignored_files += 1
-                summary.ignored_sources.append(
-                    IgnoredImportSource(path=entry, reason=ignore_reason)
-                )
-                continue
-            if known_paths is not None and entry.resolve() in known_paths:
-                summary.cached_files += 1
-                continue
-            summary.candidates_found += 1
-            import_queue.enqueue(entry, folder)
-        except OSError as exc:
-            summary.errors.append({"path": str(entry), "error": str(exc)})
-    return summary

@@ -11,6 +11,7 @@ from app.modules.imports.application.dto import (
     ImportTaskDTO,
 )
 from app.modules.imports.application.errors import (
+    ImportExecutionError,
     LibraryDeletedDuringImportError,
 )
 from app.modules.imports.application.ports import (
@@ -41,12 +42,17 @@ def process_import_task(
 ) -> ImportResult:
     try:
         _ensure_library_exists(store, task.library_id)
+        if (
+            task.origin != "WATCH"
+            or task.work_id is None
+            or task.volume_id is None
+        ):
+            raise ImportExecutionError(
+                "TOPOLOGY_TARGET_REQUIRED",
+                "导入任务必须由书库根目录扫描器绑定 Work 与 Volume",
+                retryable=False,
+            )
         unit_of_work.release()
-        topology_bound = (
-            task.origin == "WATCH"
-            and task.work_id is not None
-            and task.volume_id is not None
-        )
         result = pipeline.import_managed_book(
             settings,
             ImportOptions(
@@ -54,13 +60,13 @@ def process_import_task(
                 original_name=task.original_name,
                 requested_title=task.requested_title,
                 requested_author=task.requested_author,
-                origin=task.origin or "MANUAL",
+                origin="WATCH",
                 library_id=task.library_id,
                 media_kind_policy=task.media_kind_policy,
                 import_task_id=task.id,
                 expected_lease_owner=task.lease_owner,
-                topology_work_id=task.work_id if topology_bound else None,
-                topology_volume_id=task.volume_id if topology_bound else None,
+                topology_work_id=task.work_id,
+                topology_volume_id=task.volume_id,
             ),
         )
         _ensure_library_exists(store, task.library_id)

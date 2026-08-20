@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol
 from uuid import uuid4
 
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -16,34 +15,18 @@ from watchdog.observers import Observer
 
 from app.bootstrap.imports import (
     LibraryConfig,
-    ScanSummary,
     StreamingDirectoryScanner,
     import_file_ignore_reason,
-    import_queue_at_high_watermark,
-    import_source_already_known,
-    import_source_meets_minimum_size,
-    library_repository,
-    load_import_enqueue_command_projection,
     library_config,
     monitor_repository,
-    persist_import_enqueue_write,
     persist_import_events,
     persist_import_rescan_completion,
     persist_import_scan_requests,
-    prepare_import_enqueue_command,
-    prepare_import_enqueue_write,
-    should_ignore_file,
 )
 from app.core.config import Settings
 from app.models.common import db_timestamp
-from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.system.public import PreparedSystemEvent, is_database_busy_error
-from app.services.audio_metadata import (
-    audio_bundle_root,
-    collect_audio_bundle_files,
-    is_supported_audio_file,
-)
 from app.services.import_preferences import (
     DEFAULT_STABILITY_CHECK_ENABLED,
     IMPORT_ALLOWED_EXTENSIONS_KEY,
@@ -64,14 +47,6 @@ from app.services.system_events import (
 from app.worker.path_security import PathSecurityError, PathSecurityService
 
 
-class ImportQueueProtocol(Protocol):
-    """Queue contract owned by the watcher process boundary."""
-
-    def enqueue(self, path: Path, folder: LibraryConfig) -> None: ...
-
-
-audio_bundle_fully_imported = library_repository.audio_bundle_fully_imported
-get_completed_import_task_work_id = monitor_repository.get_completed_import_task_work_id
 get_system_settings = monitor_repository.get_system_settings
 list_enabled_libraries = monitor_repository.list_enabled_libraries
 
@@ -409,20 +384,21 @@ class WorkerManager:
         ignore_reason = import_file_ignore_reason(path, folder)
         if ignore_reason is not None:
             return
-        audio_scan_root = (
-            audio_bundle_root(path, state.root_path)
-            if is_supported_audio_file(path)
+        available_at = (
+            datetime.now(UTC)
+            + timedelta(seconds=max(0, folder.stability_check_seconds))
+            if folder.stability_check_enabled
             else None
         )
         for delay_seconds in (0.0, *WATCHER_DATABASE_RETRY_DELAYS_SECONDS):
             if delay_seconds:
                 time.sleep(delay_seconds)
             try:
-                self._schedule_import_once(
-                    path,
-                    folder,
-                    state,
-                    audio_scan_root=audio_scan_root,
+                self._schedule_scan_request(
+                    library_id=folder.id,
+                    root_path=state.root_path,
+                    trigger="watcher_event",
+                    available_at=available_at,
                 )
             except OperationalError as exc:
                 if not is_database_busy_error(exc):
@@ -436,57 +412,6 @@ class WorkerManager:
             f"scheduled folder recovery scan {folder.id}",
             flush=True,
         )
-
-    def _schedule_import_once(
-        self,
-        candidate: Path,
-        folder: LibraryConfig,
-        state: WatchState,
-        *,
-        audio_scan_root: Path | None,
-    ) -> None:
-        available_at = (
-            datetime.now(UTC)
-            + timedelta(seconds=max(0, folder.stability_check_seconds))
-            if folder.stability_check_enabled
-            else None
-        )
-        candidate_is_directory = candidate.is_dir()
-        candidate_name = candidate.name
-        with self.db_factory() as db:
-            at_high_watermark = import_queue_at_high_watermark(db)
-        if at_high_watermark:
-            self._schedule_scan_request(
-                library_id=folder.id,
-                root_path=state.root_path,
-                trigger="WATCHER_BACKPRESSURE",
-            )
-            return
-        if audio_scan_root is not None:
-            self._schedule_scan_request(
-                library_id=folder.id,
-                root_path=audio_scan_root,
-                trigger="WATCHER_AUDIO_EVENT",
-                available_at=available_at,
-            )
-            return
-        command = prepare_import_enqueue_command(
-            candidate,
-            origin="WATCH",
-            original_name=candidate_name,
-            library_id=folder.id,
-            message="监控文件已进入导入队列",
-            allow_terminal_requeue=candidate_is_directory,
-        )
-        with self.db_factory() as db:
-            projection = load_import_enqueue_command_projection(db, command)
-        prepared = prepare_import_enqueue_write(
-            command,
-            projection,
-            available_at=available_at or datetime.now(UTC),
-        )
-        with self.db_factory() as db:
-            persist_import_enqueue_write(db, prepared)
 
     def _pending_recovery_folders(self) -> set[str]:
         pending = getattr(self, "_pending_scan_recovery_folder_ids", None)
@@ -580,230 +505,3 @@ def config_signature(folder: LibraryConfig) -> str:
             str(folder.stability_check_seconds),
         ]
     )
-
-
-def _audio_bundle_is_fully_imported(db: Session, path: Path) -> bool:
-    try:
-        files = collect_audio_bundle_files(path)
-    except (AudioTrackLimitExceededError, OSError, ValueError):
-        return False
-    if not files:
-        return False
-    try:
-        return audio_bundle_fully_imported(db, [str(item.resolve()) for item in files])
-    except SQLAlchemyError:
-        return False
-
-
-def wait_for_stable_file(
-    path: Path, min_file_size_bytes: int, delay_seconds: float = 2.0
-) -> bool:
-    try:
-        before = path.stat()
-    except OSError:
-        return False
-    if not path.is_file() or before.st_size < min_file_size_bytes:
-        return False
-    time.sleep(delay_seconds)
-    try:
-        after = path.stat()
-    except OSError:
-        return False
-    return after.st_size == before.st_size and after.st_mtime_ns == before.st_mtime_ns
-
-
-def wait_for_stable_import_source(
-    path: Path, min_file_size_bytes: int, delay_seconds: float = 2.0
-) -> bool:
-    if path.is_file():
-        return wait_for_stable_file(path, min_file_size_bytes, delay_seconds)
-    try:
-        files = collect_audio_bundle_files(path)
-    except AudioTrackLimitExceededError:
-        return False
-    if not files:
-        return False
-    before: list[tuple[Path, int, int]] = []
-    try:
-        for item in files:
-            stat = item.stat()
-            if stat.st_size < min_file_size_bytes:
-                return False
-            before.append((item, stat.st_size, stat.st_mtime_ns))
-    except (AudioTrackLimitExceededError, OSError):
-        return False
-    time.sleep(delay_seconds)
-    try:
-        after_files = collect_audio_bundle_files(path)
-        if after_files != files:
-            return False
-        return all(
-            item.stat().st_size == size and item.stat().st_mtime_ns == mtime
-            for item, size, mtime in before
-        )
-    except OSError:
-        return False
-
-
-def import_watched_file(
-    db: Session,
-    settings: Settings,
-    path: Path,
-    folder: LibraryConfig,
-    *,
-    has_changed: Callable[[], bool] | None = None,
-    mark_deferred: Callable[[], None] | None = None,
-) -> bool:
-    if should_ignore_file(path, folder) and path.is_file():
-        return False
-    delay = folder.stability_check_seconds
-    stable = (
-        wait_for_stable_import_source(path, folder.min_file_size_bytes, delay)
-        if folder.stability_check_enabled
-        else import_source_meets_minimum_size(path, folder.min_file_size_bytes)
-    )
-    changed_during_check = has_changed is not None and has_changed()
-    retry_after_stability_check = not stable and import_source_meets_minimum_size(
-        path, folder.min_file_size_bytes
-    )
-    if retry_after_stability_check and mark_deferred is not None:
-        mark_deferred()
-    if not stable or changed_during_check:
-        _record_worker_event(
-            db,
-            source="import",
-            action="scan.file.deferred",
-            level="warning",
-            target_type="library",
-            target_id=folder.id,
-            message=f"扫描到的文件尚未稳定，暂缓导入：{path.name}",
-            metadata={
-                "sourcePath": str(path),
-                "libraryId": folder.id,
-                "minFileSizeBytes": folder.min_file_size_bytes,
-                "stabilityCheckEnabled": folder.stability_check_enabled,
-                "stabilityCheckSeconds": delay,
-                "changedDuringStabilityCheck": changed_during_check,
-                "retryScheduled": retry_after_stability_check or changed_during_check,
-            },
-        )
-        return False
-    existing = get_completed_import_task_work_id(db, str(path))
-    db.close()
-    if existing and (path.is_file() or _audio_bundle_is_fully_imported(db, path)):
-        print(f"[import-worker] skipped already imported file {path}", flush=True)
-        _record_worker_event(
-            db,
-            source="import",
-            action="import.skipped",
-            target_type="importTask",
-            target_id=str(existing["id"]),
-            message=f"扫描文件已导入，跳过处理：{path.name}",
-            metadata={
-                "sourcePath": str(path),
-                "libraryId": folder.id,
-                "reason": "completed_import_task_exists",
-            },
-        )
-        return True
-    command = prepare_import_enqueue_command(
-        path,
-        origin="WATCH",
-        original_name=path.name,
-        library_id=folder.id,
-        message="监控文件已进入导入队列",
-        allow_terminal_requeue=path.is_dir(),
-    )
-    projection = load_import_enqueue_command_projection(db, command)
-    db.close()
-    prepared = prepare_import_enqueue_write(
-        command,
-        projection,
-        available_at=datetime.now(UTC),
-    )
-    persist_import_enqueue_write(db, prepared)
-    return True
-
-
-def scan_directory_with_logging(
-    db: Session,
-    root_path: Path,
-    folder: LibraryConfig,
-    import_queue: ImportQueueProtocol,
-    *,
-    trigger: str,
-    requested_at: str | None = None,
-) -> ScanSummary:
-    base_metadata = {
-        "rootPath": str(root_path),
-        "libraryId": folder.id,
-        "trigger": trigger,
-        "requestedAt": requested_at,
-    }
-    _record_worker_event(
-        db,
-        source="import",
-        action="scan.started",
-        target_type="library",
-        target_id=folder.id,
-        message=f"开始扫描书库：{root_path.name or root_path}",
-        metadata=base_metadata,
-    )
-
-    summary = ScanSummary()
-    ignored_reason_counts: dict[str, int] = {}
-    scanner = StreamingDirectoryScanner(root_path, folder)
-    try:
-        while True:
-            scan_slice = scanner.next_slice()
-            summary.directories_scanned += scan_slice.directories_scanned
-            summary.files_scanned += scan_slice.files_scanned
-            summary.candidates_found += scan_slice.candidates_found
-            summary.ignored_files += scan_slice.skipped_count
-            summary.errors.extend(error.to_storage() for error in scan_slice.errors)
-            for reason, count in scan_slice.ignored_reason_counts.items():
-                ignored_reason_counts[reason] = (
-                    ignored_reason_counts.get(reason, 0) + count
-                )
-            for path in scan_slice.candidates:
-                is_known = path.is_file() and import_source_already_known(db, path)
-                db.close()
-                if is_known:
-                    summary.cached_files += 1
-                    continue
-                import_queue.enqueue(path, folder)
-            if scan_slice.completed:
-                break
-    finally:
-        scanner.close()
-    error_count = len(summary.errors)
-    action = "scan.completed_with_errors" if error_count else "scan.completed"
-    _record_worker_event(
-        db,
-        source="import",
-        action=action,
-        level="warning" if error_count else "info",
-        target_type="library",
-        target_id=folder.id,
-        message=(
-            f"扫描完成：检查 {summary.files_scanned} 个文件，发现 {summary.candidates_found} 个新增待识别文件"
-            + (
-                f"，跳过 {summary.cached_files} 个已有扫描记录"
-                if summary.cached_files
-                else ""
-            )
-            + (f"，{error_count} 个目录或文件读取失败" if error_count else "")
-        ),
-        metadata={
-            **base_metadata,
-            "directoriesScanned": summary.directories_scanned,
-            "filesScanned": summary.files_scanned,
-            "candidatesFound": summary.candidates_found,
-            "cachedFiles": summary.cached_files,
-            "ignoredFiles": summary.ignored_files,
-            "ignoredReasonCounts": ignored_reason_counts,
-            "errors": summary.errors[:20],
-            "errorCount": error_count,
-        },
-    )
-    return summary

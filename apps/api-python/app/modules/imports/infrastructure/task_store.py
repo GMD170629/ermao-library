@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.library import Library
-from app.modules.imports.application.dto import ImportTaskDTO, StageImportCommand
+from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.imports.infrastructure import tasks as task_rows
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.services.system_events import (
@@ -20,22 +20,6 @@ from app.services.system_events import (
 class SqlAlchemyImportTaskStore:
     def __init__(self, db: Session) -> None:
         self._db = db
-
-    def stage(self, command: StageImportCommand) -> tuple[ImportTaskDTO, bool]:
-        media_kind_policy = command.media_kind_policy or "MIXED"
-        row, created = task_rows.stage_import_task(
-            self._db,
-            command.source_path,
-            origin=command.origin,
-            original_name=command.original_name,
-            requested_title=command.requested_title,
-            requested_author=command.requested_author,
-            library_id=command.library_id,
-            media_kind_policy=str(media_kind_policy or "MIXED"),
-            message=command.message,
-            allow_terminal_requeue=command.allow_terminal_requeue,
-        )
-        return import_task_dto_from_row(row), created
 
     def recover_stale(self, *, now: int, message: str) -> int:
         return task_rows.recover_stale_import_tasks(self._db, now=now, message=message)

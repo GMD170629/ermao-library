@@ -8,11 +8,7 @@ from pathlib import Path
 import pytest
 from app.bootstrap.imports import (
     ImportWorkerRuntime,
-    execute_import_enqueue_write,
-    load_import_enqueue_command_projection,
     persist_import_task_retry,
-    prepare_import_enqueue_command,
-    prepare_import_enqueue_write,
 )
 from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
@@ -64,42 +60,6 @@ def _stage_scan_candidate_batch(db_session, candidates, *, library_id: str):
         now=db_timestamp(),
     )
     return write_prepared_scan_candidate_batch(db_session, prepared)
-
-
-def test_import_enqueue_is_prepared_after_its_projection_session_closes(
-    db_session,
-    tmp_path: Path,
-) -> None:
-    folder = Library(
-            organization_mode="FLAT", 
-        id="folder-two-phase-enqueue",
-        name="Two phase enqueue",
-        root_path=str(tmp_path),
-        enabled=True,
-    )
-    source = tmp_path / "prepared.epub"
-    source.write_bytes(b"book")
-    db_session.add(folder)
-    db_session.commit()
-
-    command = prepare_import_enqueue_command(
-        source,
-        origin="WATCH",
-        library_id=folder.id,
-    )
-    projection = load_import_enqueue_command_projection(db_session, command)
-    db_session.close()
-    prepared = prepare_import_enqueue_write(
-        command,
-        projection,
-        available_at=db_timestamp(),
-    )
-    execute_import_enqueue_write(db_session, prepared)
-    db_session.commit()
-
-    assert prepared.created is True
-    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 1
-    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 1
 
 
 def test_import_retry_rolls_back_state_when_event_write_fails(

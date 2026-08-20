@@ -43,12 +43,6 @@ from app.modules.imports.application.dto import (
     ImportResult,
     ImportRuntimeConfig,
     ImportTaskDTO,
-    StageImportCommand,
-)
-from app.modules.imports.application.enqueue import (
-    ImportEnqueueProjection,
-    PreparedImportEnqueue,
-    persist_prepared_import_enqueue,
 )
 from app.modules.imports.application.events import persist_prepared_import_events
 from app.modules.imports.application.fail import (
@@ -107,23 +101,14 @@ from app.modules.imports.infrastructure.deletion_write import (
     SqlAlchemyImportTaskDeletionStore,
 )
 from app.modules.imports.infrastructure.directory_scan import (
-    IgnoredImportSource,
     ImportIgnoreReason,
     LibraryConfig,
-    ScanSummary,
     import_file_ignore_reason,
     import_source_meets_minimum_size,
     is_proven_audio_bundle_directory,
     library_config,
-    scan_directory_for_imports,
     should_ignore_file,
     should_ignore_path,
-)
-from app.modules.imports.infrastructure.enqueue_write import (
-    SqlAlchemyPreparedImportEnqueueStore,
-    execute_prepared_import_enqueue,
-    load_import_enqueue_projection,
-    prepare_import_enqueue,
 )
 from app.modules.imports.infrastructure.maintenance_write import (
     SqlAlchemyImportMaintenanceWriteStore,
@@ -456,85 +441,6 @@ def _runtime_config(settings: Settings) -> ImportRuntimeConfig:
     )
 
 
-def load_known_import_paths(db: Session) -> set[Path]:
-    return monitor_repository.load_known_import_paths(db)
-
-
-def prepare_import_enqueue_command(
-    source_path: str | Path,
-    *,
-    origin: str,
-    original_name: str | None = None,
-    requested_title: str | None = None,
-    requested_author: str | None = None,
-    library_id: str | None = None,
-    message: str = "等待后台处理",
-    allow_terminal_requeue: bool = False,
-) -> StageImportCommand:
-    """Resolve the source path before any enqueue projection Session is opened."""
-
-    return StageImportCommand(
-        source_path=Path(source_path).expanduser().resolve(),
-        origin=origin,
-        original_name=original_name,
-        requested_title=requested_title,
-        requested_author=requested_author,
-        library_id=library_id,
-        message=message,
-        allow_terminal_requeue=allow_terminal_requeue,
-    )
-
-
-def load_import_enqueue_command_projection(
-    db: Session,
-    command: StageImportCommand,
-) -> ImportEnqueueProjection:
-    return load_import_enqueue_projection(
-        db,
-        canonical_source_path=str(command.source_path),
-        library_id=command.library_id,
-        allow_terminal_requeue=command.allow_terminal_requeue,
-    )
-
-
-def prepare_import_enqueue_write(
-    command: StageImportCommand,
-    projection: ImportEnqueueProjection,
-    *,
-    available_at: datetime,
-) -> PreparedImportEnqueue:
-    return prepare_import_enqueue(
-        command,
-        projection,
-        available_at=available_at,
-    )
-
-
-def execute_import_enqueue_write(
-    db: Session,
-    prepared: PreparedImportEnqueue,
-) -> None:
-    execute_prepared_import_enqueue(db, prepared)
-
-
-def persist_import_enqueue_write(
-    db: Session,
-    prepared: PreparedImportEnqueue,
-) -> tuple[ImportTaskDTO, bool]:
-    return persist_prepared_import_enqueue(
-        SqlAlchemyPreparedImportEnqueueStore(db),
-        SqlAlchemyImportUnitOfWork(db),
-        prepared,
-    )
-
-
-def import_queue_at_high_watermark(db: Session) -> bool:
-    return (
-        persistent_work_queue.active_import_work_count(db)
-        >= persistent_work_queue.IMPORT_WORK_HIGH_WATERMARK
-    )
-
-
 def get_import_scan_job(db: Session, job_id: str) -> ImportScanJobDTO | None:
     return persistent_work_queue.get_scan_job(db, job_id)
 
@@ -554,10 +460,6 @@ def cancel_import_scan_job(db: Session, job_id: str) -> bool:
     cancelled = persistent_work_queue.cancel_scan_job(db, job_id)
     commit_import_checkpoint(db)
     return cancelled
-
-
-def import_source_already_known(db: Session, path: Path) -> bool:
-    return persistent_work_queue.source_already_known(db, path)
 
 
 def recover_stale_import_tasks(db: Session) -> int:
@@ -1206,11 +1108,9 @@ class ImportWorkerRuntime:
 
 
 __all__ = [
-    "IgnoredImportSource",
     "ImportIgnoreReason",
     "ImportWorkerRuntime",
     "LibraryConfig",
-    "ScanSummary",
     "StreamingDirectoryScanner",
     "cancel_import_scan_job",
     "claim_next_import_task",
@@ -1221,26 +1121,18 @@ __all__ = [
     "import_file_ignore_reason",
     "import_http_store",
     "import_managed_book",
-    "import_queue_at_high_watermark",
-    "import_source_already_known",
     "import_source_meets_minimum_size",
     "is_proven_audio_bundle_directory",
     "library_repository",
     "list_import_scan_jobs",
     "load_persisted_scan_requests",
-    "load_known_import_paths",
     "library_config",
     "monitor_repository",
-    "execute_import_enqueue_write",
-    "load_import_enqueue_command_projection",
     "load_import_volume_deletion",
-    "prepare_import_enqueue_command",
-    "prepare_import_enqueue_write",
     "persist_import_events",
     "persist_import_library_create",
     "persist_import_library_delete",
     "persist_import_library_update",
-    "persist_import_enqueue_write",
     "persist_import_queue_operation_checkpoint",
     "persist_import_rescan_completion",
     "persist_import_scan_requests",
@@ -1250,7 +1142,6 @@ __all__ = [
     "recover_interrupted_import_deletions",
     "recover_stale_import_tasks",
     "save_uploaded_files",
-    "scan_directory_for_imports",
     "should_ignore_file",
     "should_ignore_path",
     "stage_import_events",

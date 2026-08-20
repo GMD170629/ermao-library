@@ -1,17 +1,14 @@
-"""ORM persistence for import task queue claim/enqueue/recovery."""
+"""ORM persistence for scanner import task claim, failure, and recovery."""
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Integer, cast, insert, select, update
+from sqlalchemy import Integer, cast, select, update
 from sqlalchemy.orm import Session
 
-from app.core.sql_batches import sqlite_parameter_chunks
-from app.core.time import now_timestamp_ms
-from app.models.import_pipeline import ImportAsset, ImportTask
+from app.models.import_pipeline import ImportTask
 from app.modules.imports.infrastructure.library_queries import (
     complete_download_task_for_source,
     fail_import_assets_for_task,
@@ -19,110 +16,6 @@ from app.modules.imports.infrastructure.library_queries import (
 )
 from app.modules.imports.infrastructure.source_keys import source_key
 from app.services.audio_metadata import collect_audio_bundle_files
-
-
-def find_existing_import_task(
-    db: Session,
-    source_path: str,
-    *,
-    allow_terminal_requeue: bool,
-) -> dict[str, Any] | None:
-    statuses = (
-        ("PENDING", "PARSING")
-        if allow_terminal_requeue
-        else ("PENDING", "PARSING", "COMPLETED", "FAILED")
-    )
-    key = source_key(source_path)
-    row = (
-        db.execute(
-            select(ImportTask.__table__)
-            .where(
-                (ImportTask.source_key == key)
-                | (
-                    ImportTask.source_key.is_(None)
-                    & (ImportTask.source_path == source_path)
-                ),
-                ImportTask.status.in_(statuses),
-            )
-            .order_by(cast(ImportTask.created_at, Integer).desc(), ImportTask.id.desc())
-            .limit(1)
-        )
-        .mappings()
-        .first()
-    )
-    return dict(row) if row else None
-
-
-def insert_import_task_with_assets(
-    db: Session,
-    values: dict[str, Any],
-    *,
-    bundle_files: list[Path],
-    now: Any,
-) -> dict[str, Any]:
-    asset_id_seed = time.time_ns()
-    asset_values = [
-        {
-            "id": f"py_{asset_id_seed + index}",
-            "importTaskId": values["id"],
-            "sourcePath": str(asset_path),
-            "status": "PENDING",
-            "sortOrder": index,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-        for index, asset_path in enumerate(bundle_files)
-    ]
-    db.execute(insert(ImportTask.__table__).values(values))
-    task = dict(values)
-    for chunk in sqlite_parameter_chunks(asset_values, parameters_per_row=7):
-        db.execute(insert(ImportAsset.__table__), list(chunk))
-    return get_import_task_by_id(db, str(task["id"])) or task
-
-
-def stage_import_task(
-    db: Session,
-    source_path: str | Path,
-    *,
-    origin: str,
-    original_name: str | None = None,
-    requested_title: str | None = None,
-    requested_author: str | None = None,
-    library_id: str | None = None,
-    media_kind_policy: str = "MIXED",
-    message: str = "等待后台处理",
-    allow_terminal_requeue: bool = False,
-) -> tuple[dict[str, Any], bool]:
-    """Stage one fixed-model import task without owning the transaction."""
-
-    source = Path(source_path).expanduser().resolve()
-    now = now_timestamp_ms()
-    values, bundle_files = build_import_task_values(
-        task_id=f"py_{time.time_ns()}",
-        source=source,
-        origin=origin,
-        original_name=original_name,
-        requested_title=requested_title,
-        requested_author=requested_author,
-        library_id=library_id,
-        media_kind_policy=media_kind_policy,
-        message=message,
-        now=now,
-    )
-    existing = find_existing_import_task(
-        db,
-        str(source),
-        allow_terminal_requeue=allow_terminal_requeue,
-    )
-    if existing:
-        return existing, False
-    task = insert_import_task_with_assets(
-        db,
-        values,
-        bundle_files=bundle_files,
-        now=now,
-    )
-    return get_import_task_by_id(db, str(task["id"])) or task, True
 
 
 def recover_stale_import_tasks(db: Session, *, now: Any, message: str) -> int:

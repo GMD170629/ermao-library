@@ -183,19 +183,6 @@ class ImportTaskDTO:
 
 
 @dataclass(frozen=True)
-class StageImportCommand:
-    source_path: Path
-    origin: str
-    original_name: str | None = None
-    requested_title: str | None = None
-    requested_author: str | None = None
-    library_id: str | None = None
-    media_kind_policy: str | None = None
-    message: str = "等待后台处理"
-    allow_terminal_requeue: bool = False
-
-
-@dataclass(frozen=True)
 class ImportOptions:
     source_file_path: Path
     origin: str
