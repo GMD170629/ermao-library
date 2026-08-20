@@ -22,7 +22,6 @@ from app.models.import_pipeline import (
 )
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
@@ -64,7 +63,7 @@ def load_prepared_import_volume_deletion(
     target_statement = (
         select(
             LibraryVolume.id.label("volume_id"),
-            LibraryVolume.version_id.label("media_version_id"),
+            LibraryVolume.version_id.label("version_id"),
             LibraryVolume.cover_path.label("cover_path"),
             LibraryVersion.work_id.label("work_id"),
         )
@@ -96,7 +95,7 @@ def load_prepared_import_volume_deletion(
     if target_row is None:
         return None
     volume_id = str(target_row.volume_id)
-    media_version_id = str(target_row.media_version_id)
+    version_id = str(target_row.version_id)
     work_id = str(target_row.work_id)
     file_rows = db.execute(
         select(LibraryFile.id, LibraryFile.path).where(
@@ -106,33 +105,33 @@ def load_prepared_import_volume_deletion(
     remaining_volume_count = int(
         db.scalar(
             select(func.count(LibraryVolume.id)).where(
-                LibraryVolume.version_id == media_version_id,
+                LibraryVolume.version_id == version_id,
                 LibraryVolume.id != volume_id,
             )
         )
         or 0
     )
-    delete_media_version = remaining_volume_count == 0
-    remaining_media_count = int(
+    delete_version = remaining_volume_count == 0
+    remaining_version_count = int(
         db.scalar(
             select(func.count(LibraryVersion.id)).where(
                 LibraryVersion.work_id == work_id,
-                LibraryVersion.id != media_version_id,
+                LibraryVersion.id != version_id,
             )
         )
         or 0
     )
     return PreparedLibraryVolumeDeletion(
         volume_id=volume_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         work_id=work_id,
         cover_path=(
             str(target_row.cover_path) if target_row.cover_path is not None else None
         ),
         file_ids=tuple(str(row.id) for row in file_rows),
         file_paths=tuple(str(row.path) for row in file_rows),
-        delete_media_version=delete_media_version,
-        delete_work=delete_media_version and remaining_media_count == 0,
+        delete_version=delete_version,
+        delete_work=delete_version and remaining_version_count == 0,
     )
 
 
@@ -228,7 +227,7 @@ def get_volume_for_work(
         )
         .where(
             LibraryVolume.id == volume_id,
-            LibraryMediaVersion.work_id == work_id,
+            LibraryVersion.work_id == work_id,
         )
     )
     return entity_as_legacy_dict(volume) if volume is not None else None
@@ -246,11 +245,11 @@ def delete_work_records(db: Session, work_id: str) -> dict[str, Any]:
 def delete_work_records_bulk(db: Session, work_ids: tuple[str, ...]) -> int:
     if not work_ids:
         return 0
-    media_version_ids = select(LibraryVersion.id).where(
+    version_ids = select(LibraryVersion.id).where(
         LibraryVersion.work_id.in_(work_ids)
     )
     volume_ids = select(LibraryVolume.id).where(
-        LibraryVolume.version_id.in_(media_version_ids)
+        LibraryVolume.version_id.in_(version_ids)
     )
     file_ids = select(LibraryFile.id).where(LibraryFile.volume_id.in_(volume_ids))
     statements = (
@@ -284,10 +283,7 @@ def delete_work_records_bulk(db: Session, work_ids: tuple[str, ...]) -> int:
         delete(LibraryVolumeFacet).where(LibraryVolumeFacet.volume_id.in_(volume_ids)),
         delete(LibraryFile).where(LibraryFile.volume_id.in_(volume_ids)),
         delete(LibraryVolume).where(LibraryVolume.id.in_(volume_ids)),
-        delete(LibraryMediaVersion).where(
-            LibraryMediaVersion.id.in_(media_version_ids)
-        ),
-        delete(LibraryVersion).where(LibraryVersion.id.in_(media_version_ids)),
+        delete(LibraryVersion).where(LibraryVersion.id.in_(version_ids)),
         delete(MetadataLookupTask).where(MetadataLookupTask.work_id.in_(work_ids)),
         delete(OrganizeJob).where(OrganizeJob.work_id.in_(work_ids)),
         delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id.in_(work_ids)),
@@ -313,7 +309,7 @@ def prepare_delete_volume_scope(
 ) -> PreparedVolumeScopeDeletion | None:
     projection = db.execute(
         select(
-            LibraryVolume.version_id.label("media_version_id"),
+            LibraryVolume.version_id.label("version_id"),
             LibraryVersion.work_id,
         )
         .join(
@@ -324,7 +320,7 @@ def prepare_delete_volume_scope(
     ).one_or_none()
     if projection is None:
         return None
-    media_version_id = str(projection.media_version_id)
+    version_id = str(projection.version_id)
     work_id = str(projection.work_id)
     file_ids = tuple(
         str(file_id)
@@ -335,23 +331,23 @@ def prepare_delete_volume_scope(
     remaining_volume_count = int(
         db.scalar(
             select(func.count(LibraryVolume.id)).where(
-                LibraryVolume.version_id == media_version_id,
+                LibraryVolume.version_id == version_id,
                 LibraryVolume.id != volume_id,
             )
         )
         or 0
     )
-    delete_media_version = remaining_volume_count == 0
-    remaining_media_count = int(
+    delete_version = remaining_volume_count == 0
+    remaining_version_count = int(
         db.scalar(
             select(func.count(LibraryVersion.id)).where(
                 LibraryVersion.work_id == work_id,
-                LibraryVersion.id != media_version_id,
+                LibraryVersion.id != version_id,
             )
         )
         or 0
     )
-    delete_work = delete_media_version and remaining_media_count == 0
+    delete_work = delete_version and remaining_version_count == 0
     statements: list[Executable] = []
     if file_ids:
         statements.extend(
@@ -400,14 +396,9 @@ def prepare_delete_volume_scope(
     before_volume_delete = tuple(statements)
     volume_delete_statement = delete(LibraryVolume).where(LibraryVolume.id == volume_id)
     statements = []
-    if delete_media_version:
-        statements.extend(
-            (
-                delete(LibraryMediaVersion).where(
-                    LibraryMediaVersion.id == media_version_id
-                ),
-                delete(LibraryVersion).where(LibraryVersion.id == media_version_id),
-            )
+    if delete_version:
+        statements.append(
+            delete(LibraryVersion).where(LibraryVersion.id == version_id)
         )
     if delete_work:
         statements.extend(
@@ -504,16 +495,9 @@ def _prepare_import_volume_deletion_statements(
         )
     )
     after: list[Executable] = []
-    if prepared.delete_media_version:
-        after.extend(
-            (
-                delete(LibraryMediaVersion).where(
-                    LibraryMediaVersion.id == prepared.media_version_id
-                ),
-                delete(LibraryVersion).where(
-                    LibraryVersion.id == prepared.media_version_id
-                ),
-            )
+    if prepared.delete_version:
+        after.append(
+            delete(LibraryVersion).where(LibraryVersion.id == prepared.version_id)
         )
     if prepared.delete_work:
         after.extend(

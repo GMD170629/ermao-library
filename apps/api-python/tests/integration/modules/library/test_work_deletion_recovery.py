@@ -1,11 +1,13 @@
 from pathlib import Path
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.bootstrap.library import delete_prepared_library_works
 from app.bootstrap.system import prepare_system_event
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -22,12 +24,11 @@ from app.modules.library.infrastructure.file_quarantine import (
     LocalLibraryFileQuarantine,
 )
 from app.modules.system.public import PreparedSystemEvent
-from sqlalchemy.orm import Session
 
 
 def _work_with_file(db: Session, path: Path, suffix: str) -> LibraryWork:
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id=f"delete-work-{suffix}",
         origin="MANUAL",
         title="Delete me",
@@ -36,14 +37,14 @@ def _work_with_file(db: Session, path: Path, suffix: str) -> LibraryWork:
         normalized_author="author",
         tags="[]",
     )
-    media = LibraryMediaVersion(
-        id=f"delete-media-{suffix}",
+    version = LibraryVersion(
+        id=f"delete-version-{suffix}",
         work_id=work.id,
-        media_kind="EBOOK",
+        source_key=f"delete-source-{suffix}",
     )
     volume = LibraryVolume(
         id=f"delete-volume-{suffix}",
-        media_version_id=media.id,
+        version_id=version.id,
         title="Volume",
         sort_order=0,
         format="EPUB",
@@ -54,14 +55,19 @@ def _work_with_file(db: Session, path: Path, suffix: str) -> LibraryWork:
         id=f"delete-file-{suffix}",
         volume_id=volume.id,
         path=str(path),
-        hash_status="COMPLETED",
         mtime_ms=1,
         kind="EPUB",
         mime_type="application/epub+zip",
         size_bytes=path.stat().st_size,
         sort_order=0,
     )
-    db.add_all([work, media, volume, file])
+    db.add(work)
+    db.flush()
+    db.add(version)
+    db.flush()
+    db.add(volume)
+    db.flush()
+    db.add(file)
     db.commit()
     return work
 

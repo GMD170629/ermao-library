@@ -23,7 +23,6 @@ from app.models.import_pipeline import (
 from app.models.library import (
     LibraryFacet,
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
     LibraryOperation,
     LibraryReadingProgress,
@@ -44,7 +43,6 @@ _SNAPSHOT_MODELS: dict[str, type] = {
     model.__tablename__: model
     for model in (
         LibraryWork,
-        LibraryMediaVersion,
         LibraryVersion,
         LibraryVolume,
         LibraryFile,
@@ -68,7 +66,6 @@ _SNAPSHOT_MODELS: dict[str, type] = {
 
 _RESTORE_ORDER = (
     "LibraryWork",
-    "LibraryMediaVersion",
     "LibraryVersion",
     "LibraryVolume",
     "LibraryFile",
@@ -282,18 +279,6 @@ def restore_rows(db: Session, rows_by_table: dict[str, list[dict[str, Any]]]) ->
             insert_snapshot(db, table, row)
 
 
-def snapshot_volumes_for_media_versions(
-    db: Session, media_version_ids: list[str]
-) -> list[dict[str, Any]]:
-    if not media_version_ids:
-        return []
-    return _rows(
-        db,
-        LibraryVolume,
-        LibraryVolume.version_id.in_(media_version_ids),
-    )
-
-
 def snapshot_work_dependents(
     db: Session, work_id: str
 ) -> dict[str, list[dict[str, Any]]]:
@@ -325,8 +310,8 @@ def capture_volume_delete_snapshot(
     volume = db.get(LibraryVolume, volume_id)
     if volume is None:
         raise ValueError("Volume does not exist")
-    media_version = db.get(LibraryVersion, volume.version_id)
-    if media_version is None or media_version.work_id != work_id:
+    version = db.get(LibraryVersion, volume.version_id)
+    if version is None or version.work_id != work_id:
         raise ValueError("Volume does not belong to work")
     work = db.get(LibraryWork, work_id)
     if work is None:
@@ -336,18 +321,18 @@ def capture_volume_delete_snapshot(
         db.scalars(select(LibraryFile.id).where(LibraryFile.volume_id == volume_id))
     )
     # A parent is snapshotted only if this deletion removes it.
-    media_volume_count = len(
+    version_volume_count = len(
         db.scalars(
-            select(LibraryVolume.id).where(LibraryVolume.version_id == media_version.id)
+            select(LibraryVolume.id).where(LibraryVolume.version_id == version.id)
         ).all()
     )
-    work_media_count = len(
+    work_version_count = len(
         db.scalars(
             select(LibraryVersion.id).where(LibraryVersion.work_id == work_id)
         ).all()
     )
-    deletes_media = media_volume_count == 1
-    deletes_work = deletes_media and work_media_count == 1
+    deletes_version = version_volume_count == 1
+    deletes_work = deletes_version and work_version_count == 1
 
     snapshot: dict[str, list[dict[str, Any]]] = {
         "LibraryVolume": [entity_as_legacy_dict(volume)],
@@ -422,20 +407,10 @@ def capture_volume_delete_snapshot(
             LibraryVolume.derived_from_volume_id == volume_id,
         ),
     }
-    if deletes_media:
-        snapshot["LibraryVersion"] = [entity_as_legacy_dict(media_version)]
+    if deletes_version:
+        snapshot["LibraryVersion"] = [entity_as_legacy_dict(version)]
     if deletes_work:
         snapshot["LibraryWork"] = [entity_as_legacy_dict(work)]
-        media_rows = list(
-            db.scalars(
-                select(LibraryMediaVersion).where(
-                    LibraryMediaVersion.work_id == work_id
-                )
-            ).all()
-        )
-        snapshot["LibraryMediaVersion"] = [
-            entity_as_legacy_dict(row) for row in media_rows
-        ]
         snapshot["LibraryWorkFacet"] = _rows(
             db, LibraryWorkFacet, LibraryWorkFacet.work_id == work_id
         )
@@ -459,10 +434,6 @@ def restore_volume_delete_snapshot(
 def restore_work_row(db: Session, work_id: str, row: dict[str, Any]) -> None:
     del work_id
     insert_snapshot(db, "LibraryWork", row)
-
-
-def restore_media_version_row(db: Session, row: dict[str, Any]) -> None:
-    insert_snapshot(db, "LibraryMediaVersion", row)
 
 
 def restore_volume_row(db: Session, row: dict[str, Any]) -> None:
@@ -496,10 +467,10 @@ def delete_version_if_empty(db: Session, version_id: str) -> None:
 
 
 def delete_work_if_empty(db: Session, work_id: str) -> None:
-    has_media = db.scalar(
+    has_version = db.scalar(
         select(LibraryVersion.id).where(LibraryVersion.work_id == work_id).limit(1)
     )
-    if has_media is None:
+    if has_version is None:
         db.execute(delete(LibraryWork).where(LibraryWork.id == work_id))
 
 

@@ -245,7 +245,7 @@ def test_delete_last_volume_cascades_and_undo_restores_volume_resources(
     db_session.expire_all()
     assert db_session.get(LibraryWork, "delete-volume-work") is not None
     assert db_session.get(LibraryVersion, "delete-volume-media") is not None
-    assert db_session.get(LibraryMediaVersion, "delete-volume-media:kind") is not None
+    assert db_session.get(LibraryMediaVersion, "delete-volume-media:kind") is None
     assert db_session.get(LibraryVolume, "delete-volume-resource") is not None
     assert db_session.get(LibraryFile, "delete-volume-file") is not None
     assert db_session.get(LibraryReadingProgress, "delete-volume-progress") is not None
@@ -1918,5 +1918,4 @@ def test_presentation_layer_does_not_use_library_media_version_as_volume_locator
     assert "target_media_version.id" not in text, (
         "must not use LibraryMediaVersion.id as LibraryVolume.version_id filter"
     )
-
 

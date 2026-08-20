@@ -22,7 +22,6 @@ from app.models.import_pipeline import (
 )
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
     LibraryOperation,
     LibraryReadingProgress,
@@ -524,17 +523,6 @@ def _batch_delete_snapshots(
                 entity_as_legacy_dict(dependent)
             )
 
-    media_rows = (
-        list(
-            db.scalars(
-                select(LibraryMediaVersion).where(
-                    LibraryMediaVersion.work_id == source_work_id
-                )
-            ).all()
-        )
-        if deletes_source_work
-        else []
-    )
     for volume_id, (_volume, media) in selected_by_id.items():
         if media.id in empty_media_ids:
             snapshots[volume_id]["LibraryVersion"] = [entity_as_legacy_dict(media)]
@@ -545,10 +533,8 @@ def _batch_delete_snapshots(
             raise ValueError("Work does not exist")
         dependents = operation_store.snapshot_work_dependents(db, source_work_id)
         work_row = entity_as_legacy_dict(work)
-        media_legacy = [entity_as_legacy_dict(row) for row in media_rows]
         for snapshot in snapshots.values():
             snapshot["LibraryWork"] = [work_row]
-            snapshot["LibraryMediaVersion"] = media_legacy
             snapshot.update(dependents)
     return snapshots
 

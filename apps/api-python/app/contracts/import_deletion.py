@@ -8,12 +8,12 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class PreparedLibraryVolumeDeletion:
     volume_id: str
-    media_version_id: str
+    version_id: str
     work_id: str
     cover_path: str | None
     file_ids: tuple[str, ...]
     file_paths: tuple[str, ...]
-    delete_media_version: bool
+    delete_version: bool
     delete_work: bool
 
 
