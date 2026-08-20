@@ -1,4 +1,4 @@
-"""ORM persistence for volume-only library operation snapshots."""
+"""ORM persistence for library metadata operation snapshots."""
 
 from __future__ import annotations
 
@@ -13,75 +13,25 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.models.auth import ReaderBookmark
-from app.models.import_pipeline import (
-    ImportAsset,
-    ImportTask,
-    KindleSendTask,
-)
 from app.models.library import (
     LibraryFacet,
-    LibraryFile,
-    LibraryMetadata,
     LibraryOperation,
-    LibraryReadingProgress,
-    LibraryReadingUnit,
-    LibraryVersion,
     LibraryVolume,
     LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
-    WorkDetailPreference,
 )
-from app.models.organize import MetadataLookupTask, OrganizeJob
-from app.models.shelf import ShelfWork
 from app.modules.library.application.volume_commands import OperationSummary
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 _SNAPSHOT_MODELS: dict[str, type] = {
     model.__tablename__: model
     for model in (
-        LibraryWork,
-        LibraryVersion,
-        LibraryVolume,
-        LibraryFile,
-        LibraryReadingUnit,
-        LibraryMetadata,
-        LibraryReadingProgress,
-        ReaderBookmark,
         LibraryFacet,
         LibraryWorkFacet,
         LibraryVolumeFacet,
-        ShelfWork,
-        WorkDetailPreference,
-        ImportTask,
-        ImportAsset,
-        KindleSendTask,
-        OrganizeJob,
-        MetadataLookupTask,
     )
 }
-
-_RESTORE_ORDER = (
-    "LibraryWork",
-    "LibraryVersion",
-    "LibraryVolume",
-    "LibraryFile",
-    "LibraryReadingUnit",
-    "LibraryMetadata",
-    "LibraryReadingProgress",
-    "ReaderBookmark",
-    "LibraryFacet",
-    "LibraryWorkFacet",
-    "LibraryVolumeFacet",
-    "ShelfWork",
-    "WorkDetailPreference",
-    "ImportTask",
-    "ImportAsset",
-    "KindleSendTask",
-    "OrganizeJob",
-    "MetadataLookupTask",
-)
 
 
 def has_table(db: Session, table: str) -> bool:
@@ -270,27 +220,60 @@ def insert_snapshot(db: Session, table: str, row: dict[str, Any]) -> None:
     db.execute(statement)
 
 
-def restore_work_row(db: Session, work_id: str, row: dict[str, Any]) -> None:
-    del work_id
-    insert_snapshot(db, "LibraryWork", row)
+def restore_work_metadata(db: Session, row: dict[str, Any]) -> None:
+    """Restore category-owned fields without touching directory topology identity."""
+
+    work_id = str(row.get("id") or "")
+    if not work_id:
+        raise ValueError("Work metadata snapshot is missing its id")
+    field_map = {
+        "author": "author",
+        "normalizedAuthor": "normalized_author",
+        "tags": "tags",
+        "seriesName": "series_name",
+        "seriesIndex": "series_index",
+        "updatedAt": "updated_at",
+    }
+    values = {
+        attribute: row[column]
+        for column, attribute in field_map.items()
+        if column in row
+    }
+    result = db.execute(
+        update(LibraryWork).where(LibraryWork.id == work_id).values(**values)
+    )
+    if result.rowcount != 1:
+        raise ValueError("Work metadata snapshot target does not exist")
 
 
-def restore_volume_row(db: Session, row: dict[str, Any]) -> None:
-    insert_snapshot(db, "LibraryVolume", row)
+def restore_volume_metadata(db: Session, row: dict[str, Any]) -> None:
+    """Restore category/classification fields without touching volume placement."""
+
+    volume_id = str(row.get("id") or "")
+    if not volume_id:
+        raise ValueError("Volume metadata snapshot is missing its id")
+    field_map = {
+        "publisher": "publisher",
+        "classificationSource": "classification_source",
+        "classificationReason": "classification_reason",
+        "suggestedMediaKind": "suggested_media_kind",
+        "updatedAt": "updated_at",
+    }
+    values = {
+        attribute: row[column]
+        for column, attribute in field_map.items()
+        if column in row
+    }
+    result = db.execute(
+        update(LibraryVolume).where(LibraryVolume.id == volume_id).values(**values)
+    )
+    if result.rowcount != 1:
+        raise ValueError("Volume metadata snapshot target does not exist")
 
 
 def restore_facet_row(db: Session, facet_id: str, row: dict[str, Any]) -> None:
     del facet_id
     insert_snapshot(db, "LibraryFacet", row)
-
-
-def delete_shelf_work_link(db: Session, *, shelf_id: str, work_id: str) -> None:
-    db.execute(
-        delete(ShelfWork).where(
-            ShelfWork.shelf_id == shelf_id,
-            ShelfWork.work_id == work_id,
-        )
-    )
 
 
 def delete_work_facets_for_work(db: Session, work_id: str) -> None:

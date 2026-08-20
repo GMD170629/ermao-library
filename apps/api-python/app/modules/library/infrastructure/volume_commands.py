@@ -23,7 +23,16 @@ from app.modules.library.application.volume_commands import (
 )
 from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.infrastructure import operations as operation_store
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+
+
+def _classification_snapshot(volume: LibraryVolume) -> dict[str, object]:
+    return {
+        "id": volume.id,
+        "classificationSource": volume.classification_source,
+        "classificationReason": volume.classification_reason,
+        "suggestedMediaKind": volume.suggested_media_kind,
+        "updatedAt": volume.updated_at,
+    }
 
 
 class SqlAlchemyVolumeMetadata:
@@ -146,7 +155,7 @@ class SqlAlchemyVolumeMetadata:
                     "volumeId": context.id,
                     "targetMediaKind": target_media_kind,
                 },
-                inverse={"volumes": [entity_as_legacy_dict(volume)]},
+                inverse={"volumes": [_classification_snapshot(volume)]},
                 now=now,
             )
             volume.classification_source = "USER"
@@ -207,7 +216,7 @@ class SqlAlchemyVolumeMetadata:
                 "targetMediaKind": target_media_kind,
                 "applyTo": apply_to,
             },
-            inverse={"volumes": [entity_as_legacy_dict(row) for row in selected]},
+            inverse={"volumes": [_classification_snapshot(row) for row in selected]},
             now=now,
         )
         for selected_volume in selected:

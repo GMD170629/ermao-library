@@ -29,7 +29,9 @@ def _login_admin(client, db: Session) -> None:
     assert response.status_code == 200
 
 
-def _directory_topology(db: Session) -> tuple[LibraryWork, LibraryVersion, list[LibraryVolume]]:
+def _directory_topology(
+    db: Session,
+) -> tuple[LibraryWork, LibraryVersion, list[LibraryVolume]]:
     library = Library(
         id="volume-metadata-library",
         name="Volume metadata library",
@@ -147,6 +149,49 @@ def test_batch_media_kind_override_preserves_work_version_volume_topology(
         assert persisted.version_id == version.id
         assert persisted.suggested_media_kind == "COMIC"
         assert persisted.classification_source == "USER"
+
+
+def test_media_kind_undo_does_not_restore_stale_directory_topology(
+    client,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    work, _version, volumes = _directory_topology(db_session)
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/{volumes[0].id}/reclassify",
+        json={"targetMediaKind": "COMIC", "applyTo": "VOLUME"},
+    )
+
+    assert response.status_code == 200, response.text
+    operation_id = response.json()["data"]["operation"]["id"]
+    scanner_version = LibraryVersion(
+        id="scanner-authoritative-version",
+        work_id=work.id,
+        source_key="version:example/scanner-authoritative",
+        source_name="Scanner authoritative",
+    )
+    db_session.add(scanner_version)
+    db_session.flush()
+    persisted = db_session.get(LibraryVolume, volumes[0].id)
+    assert persisted is not None
+    persisted.version_id = scanner_version.id
+    persisted.resource_key = "volume:example/scanner-authoritative/01.epub"
+    persisted.sort_order = 17
+    db_session.commit()
+
+    undo_response = client.post(f"/api/library/operations/{operation_id}/undo")
+
+    assert undo_response.status_code == 200, undo_response.text
+    db_session.expire_all()
+    restored = db_session.get(LibraryVolume, volumes[0].id)
+    assert restored is not None
+    assert restored.classification_source == "AUTO"
+    assert restored.classification_reason == "FORMAT_DEFAULT"
+    assert restored.suggested_media_kind is None
+    assert restored.version_id == scanner_version.id
+    assert restored.resource_key == "volume:example/scanner-authoritative/01.epub"
+    assert restored.sort_order == 17
 
 
 def test_batch_structural_action_is_rejected_by_request_contract(

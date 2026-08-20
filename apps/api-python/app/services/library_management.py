@@ -107,6 +107,25 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def _work_category_snapshot(work: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: work.get(key)
+        for key in (
+            "id",
+            "author",
+            "normalizedAuthor",
+            "tags",
+            "seriesName",
+            "seriesIndex",
+            "updatedAt",
+        )
+    }
+
+
+def _volume_category_snapshot(volume: dict[str, Any]) -> dict[str, Any]:
+    return {key: volume.get(key) for key in ("id", "publisher", "updatedAt")}
+
+
 def smart_shelf_work_ids(
     db: Session, rules: dict[str, Any], user_id: str | None = None
 ) -> list[str]:
@@ -209,8 +228,8 @@ def _merge_categories(
         "facets": [target, *source_rows],
         "workLinks": work_links,
         "volumeLinks": volume_links,
-        "works": affected_works,
-        "volumes": affected_volumes,
+        "works": [_work_category_snapshot(work) for work in affected_works],
+        "volumes": [_volume_category_snapshot(volume) for volume in affected_volumes],
         "kind": normalized_kind,
     }
     source_names = {_normalized_name(row.get("name")) for row in source_rows}
@@ -411,7 +430,11 @@ def _rename_category(
         target_id=facet_id,
         summary=f"已将“{source_name}”重命名为“{next_name}”",
         payload={"facetId": facet_id, "name": next_name},
-        inverse={"facet": facet, "works": linked_works, "volumes": linked_volumes},
+        inverse={
+            "facet": facet,
+            "works": [_work_category_snapshot(work) for work in linked_works],
+            "volumes": [_volume_category_snapshot(volume) for volume in linked_volumes],
+        },
         now=now,
     )
     execute_work_facet_write(db, facet_write)
@@ -513,8 +536,10 @@ def _delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[st
             "facet": facet,
             "workLinks": work_links,
             "volumeLinks": volume_links,
-            "works": affected_works,
-            "volumes": affected_volumes,
+            "works": [_work_category_snapshot(work) for work in affected_works],
+            "volumes": [
+                _volume_category_snapshot(volume) for volume in affected_volumes
+            ],
         },
         now=now,
     )
@@ -569,12 +594,12 @@ def _undo_operation(
         if not volumes:
             raise ValueError("撤销数据不完整")
         for row in volumes:
-            library_operations.insert_snapshot(db, "LibraryVolume", row)
+            library_operations.restore_volume_metadata(db, row)
     elif action == "MERGE_FACETS":
         for work in inverse.get("works") or []:
-            library_operations.restore_work_row(db, str(work["id"]), work)
+            library_operations.restore_work_metadata(db, work)
         for volume in inverse.get("volumes") or []:
-            library_operations.restore_volume_row(db, volume)
+            library_operations.restore_volume_metadata(db, volume)
         for facet in inverse.get("facets") or []:
             library_operations.insert_snapshot(db, "LibraryFacet", facet)
         work_ids = list(
@@ -600,18 +625,18 @@ def _undo_operation(
         if not facet:
             raise ValueError("撤销数据不完整")
         for work in inverse.get("works") or []:
-            library_operations.restore_work_row(db, str(work["id"]), work)
+            library_operations.restore_work_metadata(db, work)
         for volume in inverse.get("volumes") or []:
-            library_operations.restore_volume_row(db, volume)
+            library_operations.restore_volume_metadata(db, volume)
         library_operations.restore_facet_row(db, str(facet["id"]), facet)
     elif action == "DELETE_FACET":
         facet = inverse.get("facet") or {}
         if not facet:
             raise ValueError("撤销数据不完整")
         for work in inverse.get("works") or []:
-            library_operations.restore_work_row(db, str(work["id"]), work)
+            library_operations.restore_work_metadata(db, work)
         for volume in inverse.get("volumes") or []:
-            library_operations.restore_volume_row(db, volume)
+            library_operations.restore_volume_metadata(db, volume)
         library_operations.insert_snapshot(db, "LibraryFacet", facet)
         for link in inverse.get("workLinks") or []:
             library_operations.insert_snapshot(db, "LibraryWorkFacet", link)
