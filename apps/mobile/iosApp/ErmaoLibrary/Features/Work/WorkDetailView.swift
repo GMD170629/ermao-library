@@ -32,7 +32,6 @@ struct WorkDetailView: View {
     let openDownloads: () -> Void
     let openReader: (ReaderHandoff) -> Void
     let prepareReader: (ReaderPreparationRequest) -> Void
-    let onWorkDeleted: () -> Void
     let managementRepository: (any ErmaoShared.WorkManagementRepository)?
     let canManageSystem: Bool
 
@@ -70,8 +69,7 @@ struct WorkDetailView: View {
         openFacet: @escaping (FacetKind, String) -> Void,
         openDownloads: @escaping () -> Void,
         openReader: @escaping (ReaderHandoff) -> Void,
-        prepareReader: @escaping (ReaderPreparationRequest) -> Void,
-        onWorkDeleted: @escaping () -> Void = {}
+        prepareReader: @escaping (ReaderPreparationRequest) -> Void
     ) {
         self.context = context
         self.client = client
@@ -84,7 +82,6 @@ struct WorkDetailView: View {
         self.openDownloads = openDownloads
         self.openReader = openReader
         self.prepareReader = prepareReader
-        self.onWorkDeleted = onWorkDeleted
         _store = StateObject(
             wrappedValue: WorkDetailStore(
                 context: context,

@@ -310,8 +310,7 @@ struct MainTabView: View {
                             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
                             openDownloads: openDownloadsCenter,
                             openReader: { openReader($0, context: context, fallbackTab: .library) },
-                            prepareReader: { readerPreparation = $0 },
-                            onWorkDeleted: { expandedLibraryWorkID = nil }
+                            prepareReader: { readerPreparation = $0 }
                         )
                         .id(workID)
                     } else {
@@ -350,8 +349,7 @@ struct MainTabView: View {
                 openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
                 openDownloads: openDownloadsCenter,
                 openReader: { openReader($0, context: context, fallbackTab: presentation) },
-                prepareReader: { readerPreparation = $0 },
-                onWorkDeleted: { closeCurrentRoute(in: presentation) }
+                prepareReader: { readerPreparation = $0 }
             )
         case .downloads:
             DownloadCenterView(
