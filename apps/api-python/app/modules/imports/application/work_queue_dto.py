@@ -72,23 +72,49 @@ class ImportScanJobDTO:
 class ScanBatchResult:
     queued_count: int
     cached_count: int
+    rejected_count: int = 0
+    errors: tuple[ScanErrorDTO, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTopologySource:
+    source_path: Path
+    source_key: str
+    work_source_key: str
+    work_title: str
+    version_source_key: str
+    version_name: str | None
+    volume_resource_key: str
+    volume_title: str
+    volume_sort_order: int
+    volume_format: str
+    asset_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedScanSources:
-    canonical_paths: tuple[Path, ...]
+    topology_sources: tuple[PreparedTopologySource, ...]
     source_pairs: tuple[tuple[str, str], ...]
+    candidate_count: int
+    rejected_count: int = 0
+    errors: tuple[ScanErrorDTO, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ScanCandidateProjection:
     task_sources: tuple[tuple[str | None, str, str], ...]
     library_sources: tuple[tuple[str | None, str], ...]
+    topology_works: tuple[tuple[str, str], ...]
+    topology_versions: tuple[tuple[str, str, str], ...]
+    topology_volumes: tuple[tuple[str, str, str, str], ...]
     media_kind_policy: str
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedScanCandidateBatch:
+    topology_work_rows: tuple[dict[str, object], ...]
+    topology_version_rows: tuple[dict[str, object], ...]
+    topology_volume_rows: tuple[dict[str, object], ...]
     task_rows: tuple[dict[str, object], ...]
     asset_rows: tuple[dict[str, object], ...]
     work_rows: tuple[dict[str, object], ...]

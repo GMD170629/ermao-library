@@ -850,6 +850,7 @@ class ImportWorkerRuntime:
                         select(
                             Library.id.label("id"),
                             Library.root_path.label("rootPath"),
+                            Library.organization_mode.label("organizationMode"),
                             Library.ignore_hidden.label("ignoreHidden"),
                             Library.ignore_patterns.label("ignorePatterns"),
                             Library.min_file_size_bytes.label(
@@ -1021,7 +1022,11 @@ class ImportWorkerRuntime:
             )
 
         scan_slice = scanner.next_slice(candidate_limit=min(500, remaining_capacity))
-        sources = prepare_scan_sources(scan_slice.candidates)
+        sources = prepare_scan_sources(
+            scan_slice.candidates,
+            library_root=Path(str(folder["rootPath"])),
+            organization_mode=str(folder["organizationMode"]),
+        )
         with self._session() as db:
             candidate_projection = load_scan_candidate_projection(
                 db,
@@ -1041,13 +1046,21 @@ class ImportWorkerRuntime:
         counters["filesScanned"] += scan_slice.files_scanned
         counters["candidatesFound"] += scan_slice.candidates_found
         counters["queuedCount"] += batch.queued_count
-        counters["skippedCount"] += scan_slice.skipped_count + batch.cached_count
-        counters["errorCount"] += len(scan_slice.errors)
+        counters["skippedCount"] += (
+            scan_slice.skipped_count
+            + batch.cached_count
+            + batch.rejected_count
+        )
+        counters["errorCount"] += len(scan_slice.errors) + len(batch.errors)
         for reason, count in scan_slice.ignored_reason_counts.items():
             reasons[reason] = int(reasons.get(reason, 0)) + count
         samples.extend(
             error.to_storage()
             for error in scan_slice.errors[: max(0, 100 - len(samples))]
+        )
+        samples.extend(
+            error.to_storage()
+            for error in batch.errors[: max(0, 100 - len(samples))]
         )
         samples = samples[:100]
 

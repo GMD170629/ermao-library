@@ -17,7 +17,7 @@ from app.bootstrap.imports import (
 from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
-from app.models.library import Library
+from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
 from app.modules.imports.application.maintenance_commands import prepare_import_retry
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.imports.infrastructure import streaming_scan
@@ -43,7 +43,13 @@ from sqlalchemy import delete, func, select
 
 
 def _stage_scan_candidate_batch(db_session, candidates, *, library_id: str):
-    sources = prepare_scan_sources(candidates)
+    library = db_session.get(Library, library_id)
+    assert library is not None
+    sources = prepare_scan_sources(
+        candidates,
+        library_root=Path(library.root_path),
+        organization_mode=library.organization_mode,
+    )
     projection = load_scan_candidate_projection(
         db_session,
         sources,
@@ -303,7 +309,7 @@ def test_audio_overflow_scan_persists_typed_error_without_import_work(
     root = tmp_path / "overflow"
     root.mkdir()
     folder = Library(
-            organization_mode="FLAT", 
+        organization_mode="FLAT",
         id="folder-audio-overflow-persistence",
         name="Audio overflow persistence",
         root_path=str(root),
@@ -437,6 +443,8 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
         root_path=str(tmp_path),
         enabled=True,
     )
+    db_session.add(folder)
+    db_session.flush()
     task = ImportTask(
         id="task-priority",
         library_id=folder.id,
@@ -444,7 +452,7 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
         status="PENDING",
         source_path=str(tmp_path / "book.epub"),
     )
-    db_session.add_all([folder, task])
+    db_session.add(task)
     db_session.flush()
     first_available_at = db_timestamp() + timedelta(seconds=2)
     work = ensure_import_work_item(db_session, task, available_at=first_available_at)
@@ -598,7 +606,7 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     tmp_path: Path,
 ) -> None:
     folder = Library(
-            organization_mode="FLAT", 
+        organization_mode="AUDIOBOOK",
         id="folder-audio-repeat",
         name="Audio repeat",
         root_path=str(tmp_path),
@@ -630,6 +638,179 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     assert second.cached_count == 1
     assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 1
     assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 0
+
+
+def test_volume_layout_scan_materializes_and_binds_directory_topology(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "library"
+    source = root / "三体" / "中文版" / "01 地球往事.epub"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"book")
+    library = Library(
+        id="folder-topology",
+        name="Topology",
+        root_path=str(root),
+        organization_mode="VOLUMES",
+        enabled=True,
+        min_file_size_bytes=0,
+    )
+    db_session.add(library)
+    db_session.flush()
+
+    result = _stage_scan_candidate_batch(
+        db_session,
+        (source,),
+        library_id=library.id,
+    )
+    db_session.flush()
+
+    work = db_session.scalar(
+        select(LibraryWork).where(LibraryWork.library_id == library.id)
+    )
+    version = db_session.scalar(select(LibraryVersion))
+    volume = db_session.scalar(select(LibraryVolume))
+    task = db_session.scalar(select(ImportTask))
+    assert result.queued_count == 1
+    assert result.rejected_count == 0
+    assert work is not None and work.source_key == "work:三体"
+    assert version is not None and version.source_key == "version:三体/中文版"
+    assert volume is not None
+    assert volume.resource_key == "volume:三体/中文版/01 地球往事.epub"
+    assert task is not None
+    assert task.work_id == work.id
+    assert task.volume_id == volume.id
+
+
+def test_invalid_volume_layout_is_rejected_before_import_enqueue(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "invalid-library"
+    source = root / "missing-version.epub"
+    root.mkdir()
+    source.write_bytes(b"book")
+    library = Library(
+        id="folder-invalid-topology",
+        name="Invalid topology",
+        root_path=str(root),
+        organization_mode="VOLUMES",
+        enabled=True,
+        min_file_size_bytes=0,
+    )
+    db_session.add(library)
+    db_session.flush()
+
+    result = _stage_scan_candidate_batch(
+        db_session,
+        (source,),
+        library_id=library.id,
+    )
+    db_session.flush()
+
+    assert result.queued_count == 0
+    assert result.rejected_count == 1
+    assert result.errors[0].code == "LIBRARY_LAYOUT_VERSION_DIRECTORY_REQUIRED"
+    assert db_session.scalar(select(func.count()).select_from(LibraryWork)) == 0
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
+
+
+def test_audiobook_layout_creates_one_task_for_each_volume_directory(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "audio-library"
+    book = root / "Book"
+    first_volume = book / "Vol.1"
+    second_volume = book / "Vol.2"
+    first_volume.mkdir(parents=True)
+    second_volume.mkdir()
+    (first_volume / "01.mp3").write_bytes(b"first")
+    (second_volume / "01.mp3").write_bytes(b"second")
+    library = Library(
+        id="folder-audio-topology",
+        name="Audio topology",
+        root_path=str(root),
+        organization_mode="AUDIOBOOK",
+        enabled=True,
+        min_file_size_bytes=0,
+    )
+    db_session.add(library)
+    db_session.flush()
+
+    result = _stage_scan_candidate_batch(
+        db_session,
+        (book,),
+        library_id=library.id,
+    )
+    db_session.flush()
+
+    work = db_session.scalar(
+        select(LibraryWork).where(LibraryWork.library_id == library.id)
+    )
+    volumes = list(
+        db_session.scalars(
+            select(LibraryVolume).order_by(LibraryVolume.resource_key)
+        ).all()
+    )
+    tasks = list(db_session.scalars(select(ImportTask)).all())
+    assert result.queued_count == 2
+    assert work is not None and work.source_key == "work:Book"
+    assert [volume.resource_key for volume in volumes] == [
+        "volume:Book/Vol.1",
+        "volume:Book/Vol.2",
+    ]
+    assert {task.source_path for task in tasks} == {
+        str(first_volume),
+        str(second_volume),
+    }
+    assert {task.volume_id for task in tasks} == {
+        volume.id for volume in volumes
+    }
+
+
+def test_scan_worker_persists_topology_and_bound_import_in_one_checkpoint(
+    db_session,
+    test_settings,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "worker-library"
+    source = root / "Work" / "Version" / "01.epub"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"book")
+    library = Library(
+        id="folder-worker-topology",
+        name="Worker topology",
+        root_path=str(root),
+        organization_mode="VOLUMES",
+        enabled=True,
+        min_file_size_bytes=0,
+    )
+    db_session.add(library)
+    db_session.flush()
+    job, created = create_or_reuse_scan_job(
+        db_session,
+        library_id=library.id,
+        actor_user_id=None,
+        root_path=root,
+        trigger="TEST",
+    )
+    db_session.commit()
+    assert created is True
+    runtime = ImportWorkerRuntime(lambda: nullcontext(db_session), test_settings)
+
+    work_item = runtime.claim_work("topology-worker", 900)
+    assert work_item is not None and work_item.kind == "SCAN_DIRECTORY"
+    assert runtime.process_scan(work_item) is True
+
+    stored = get_scan_job(db_session, job.id)
+    task = db_session.scalar(select(ImportTask))
+    volume = db_session.scalar(select(LibraryVolume))
+    assert stored is not None and stored.status == "COMPLETED"
+    assert stored.queued_count == 1
+    assert task is not None and volume is not None
+    assert task.volume_id == volume.id
 
 
 def test_scan_recovery_restarts_from_root_and_resets_attempt_counts(

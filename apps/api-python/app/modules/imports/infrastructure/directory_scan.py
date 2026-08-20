@@ -29,6 +29,7 @@ from app.services.import_preferences import (
 class LibraryConfig:
     id: str
     root_path: str
+    organization_mode: str = "FLAT"
     ignore_hidden: bool = True
     ignore_patterns: str | None = None
     min_file_size_bytes: int = 10240
@@ -82,6 +83,7 @@ def library_config(
     return LibraryConfig(
         id=str(row["id"]),
         root_path=str(row["rootPath"]),
+        organization_mode=str(row.get("organizationMode") or "FLAT"),
         ignore_hidden=bool(row.get("ignoreHidden", True)),
         ignore_patterns=row.get("ignorePatterns"),
         min_file_size_bytes=int(
