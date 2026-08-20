@@ -4,12 +4,9 @@ import inspect
 from pathlib import Path
 
 import pytest
-from sqlalchemy.orm import Session
-
 from app.core.config import Settings
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -27,6 +24,7 @@ from app.modules.reader.application.dto import ReaderAccessScope
 from app.modules.reader.infrastructure.volume_repository import (
     SqlAlchemyReaderVolumeRepository,
 )
+from sqlalchemy.orm import Session
 
 _API_ROOT = Path(__file__).resolve().parents[4]
 _READER_ROOT = _API_ROOT / "app" / "modules" / "reader"
@@ -51,20 +49,11 @@ _ADMIN_READER = ReaderAccessScope(
 )
 
 
-def _production_python_sources() -> list[Path]:
-    return [
-        *_READER_ROOT.rglob("*.py"),
-        _SOURCE_REPOSITORY,
-    ]
-
-
 def _seed_catalog(
     db: Session,
     *,
     work_id: str,
     version_id: str,
-    media_id: str | None,
-    media_kind: str,
     volume_id: str,
     title: str,
     fmt: str,
@@ -92,15 +81,6 @@ def _seed_catalog(
             source_key=IMPLICIT_VERSION_SOURCE_KEY,
         )
         db.add(version)
-        db.flush()
-    if media_id is not None and db.get(LibraryMediaVersion, media_id) is None:
-        db.add(
-            LibraryMediaVersion(
-                id=media_id,
-                work_id=work_id,
-                media_kind=media_kind,
-            )
-        )
         db.flush()
     volume = LibraryVolume(
         id=volume_id,
@@ -134,7 +114,6 @@ def test_reader_production_code_does_not_use_media_version_contract() -> None:
     forbidden = (
         "LibraryMediaVersion",
         "ReaderMediaVersionDto",
-        "versionId",
         "mediaVersion",
         "mediaCompleted",
     )
@@ -147,22 +126,12 @@ def test_reader_production_code_does_not_use_media_version_contract() -> None:
     assert violations == []
 
 
-def test_reader_production_queries_do_not_use_volume_version_id() -> None:
-    violations = [
-        str(path.relative_to(_API_ROOT))
-        for path in _production_python_sources()
-        if "LibraryVolume.version_id" in path.read_text(encoding="utf-8")
-    ]
-    assert violations == []
-
-
-def test_reader_source_lookup_does_not_query_library_media_version() -> None:
+def test_reader_source_lookup_joins_directory_version() -> None:
     source = _SOURCE_REPOSITORY.read_text(encoding="utf-8")
     assert "LibraryMediaVersion" not in source
     context_source = inspect.getsource(SqlAlchemyReaderVolumeRepository.get_context)
     assert "LibraryVersion.id == LibraryVolume.version_id" in context_source
     assert "LibraryWork.id == LibraryVersion.work_id" in context_source
-    assert "LibraryVolume.version_id" not in context_source
 
 
 def test_audiobook_support_tests_do_not_reference_removed_file_hashes() -> None:
@@ -176,12 +145,12 @@ def test_audiobook_support_tests_do_not_reference_removed_file_hashes() -> None:
 
 
 @pytest.mark.parametrize(
-    ("fmt", "kind", "mime", "media_kind", "path_name"),
+    ("fmt", "kind", "mime", "path_name"),
     [
-        ("EPUB", "EPUB", "application/epub+zip", "EBOOK", "book.epub"),
-        ("PDF", "PDF", "application/pdf", "EBOOK", "book.pdf"),
-        ("CBZ", "CBZ", "application/vnd.comicbook+zip", "COMIC", "book.cbz"),
-        ("AZW3", "AZW3", "application/x-mobipocket-ebook", "EBOOK", "book.azw3"),
+        ("EPUB", "EPUB", "application/epub+zip", "book.epub"),
+        ("PDF", "PDF", "application/pdf", "book.pdf"),
+        ("CBZ", "CBZ", "application/vnd.comicbook+zip", "book.cbz"),
+        ("AZW3", "AZW3", "application/x-mobipocket-ebook", "book.azw3"),
     ],
 )
 def test_reader_resolves_work_and_source_through_library_version(
@@ -190,7 +159,6 @@ def test_reader_resolves_work_and_source_through_library_version(
     fmt: str,
     kind: str,
     mime: str,
-    media_kind: str,
     path_name: str,
 ) -> None:
     source_path = tmp_path / path_name
@@ -200,8 +168,6 @@ def test_reader_resolves_work_and_source_through_library_version(
         db_session,
         work_id=f"work-{suffix}",
         version_id=f"version-{suffix}",
-        media_id=f"media-{suffix}",
-        media_kind=media_kind,
         volume_id=f"volume-{suffix}",
         title=f"{fmt} 卷册",
         fmt=fmt,
@@ -226,7 +192,7 @@ def test_reader_resolves_work_and_source_through_library_version(
     assert source.source_format == fmt.lower()
 
 
-def test_audiobook_lists_every_track_in_sort_order_without_media_version_per_file(
+def test_audiobook_lists_every_track_in_sort_order(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
@@ -238,8 +204,6 @@ def test_audiobook_lists_every_track_in_sort_order_without_media_version_per_fil
         db_session,
         work_id="work-audio",
         version_id="version-audio",
-        media_id="media-audio",
-        media_kind="AUDIOBOOK",
         volume_id="volume-audio",
         title="有声书",
         fmt="AUDIO",
@@ -266,7 +230,7 @@ def test_audiobook_lists_every_track_in_sort_order_without_media_version_per_fil
     assert source.path == str(first)
 
 
-def test_reader_source_lookup_does_not_require_library_media_version(
+def test_reader_source_lookup_uses_directory_version(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
@@ -276,8 +240,6 @@ def test_reader_source_lookup_does_not_require_library_media_version(
         db_session,
         work_id="work-orphan",
         version_id="version-orphan",
-        media_id=None,
-        media_kind="EBOOK",
         volume_id="volume-orphan",
         title="无媒体版本",
         fmt="EPUB",
@@ -315,8 +277,6 @@ def test_missing_source_file_keeps_unavailable_error(
         db_session,
         work_id="work-missing",
         version_id="version-missing",
-        media_id="media-missing",
-        media_kind="EBOOK",
         volume_id="volume-missing",
         title="缺失源文件",
         fmt="EPUB",

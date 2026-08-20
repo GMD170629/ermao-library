@@ -3,23 +3,22 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from fastapi.testclient import TestClient
-from sqlalchemy import event
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
+    Library,
     LibraryFacet,
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.library import Library
 from app.models.shelf import Shelf, ShelfWork
+from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 
 def _login_admin(client: TestClient, db: Session) -> User:
@@ -52,7 +51,7 @@ def _add_work(
     author: str | None = None,
 ) -> None:
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
@@ -60,14 +59,14 @@ def _add_work(
         normalized_author=author.casefold() if author else None,
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id=f"media-{work_id}",
+    version = LibraryVersion(
+        id=f"version-{work_id}",
         work_id=work.id,
-        media_kind="EBOOK",
+        source_key=f"smart-filter:version:{work_id}",
     )
     volume = LibraryVolume(
         id=f"volume-{work_id}",
-        version_id=media_version.id,
+        version_id=version.id,
         title=title,
         format="EPUB",
         resource_key=f"resource-{work_id}",
@@ -80,7 +79,13 @@ def _add_work(
         kind="BOOK",
         mime_type="application/epub+zip",
     )
-    db.add_all([work, media_version, volume, file])
+    db.add(work)
+    db.flush()
+    db.add(version)
+    db.flush()
+    db.add(volume)
+    db.flush()
+    db.add(file)
 
 
 def _filtered_titles(client: TestClient, rules: dict[str, object]) -> list[str]:
@@ -142,7 +147,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         updated_at=datetime(2025, 1, 2, 8, tzinfo=UTC),
     )
     empty_work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="empty",
         origin="MANUAL",
         title="空白样本",
@@ -155,25 +160,25 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         series_index=None,
         metadata_quality=0,
     )
-    alpha_media = LibraryMediaVersion(
-        id="media-alpha",
+    alpha_version = LibraryVersion(
+        id="version-alpha",
         work_id=alpha_work.id,
-        media_kind="EBOOK",
+        source_key="smart-filter:version:alpha",
     )
-    beta_media = LibraryMediaVersion(
-        id="media-beta",
+    beta_version = LibraryVersion(
+        id="version-beta",
         work_id=beta_work.id,
-        media_kind="COMIC",
+        source_key="smart-filter:version:beta",
     )
-    empty_media = LibraryMediaVersion(
-        id="media-empty",
+    empty_version = LibraryVersion(
+        id="version-empty",
         work_id=empty_work.id,
-        media_kind="AUDIOBOOK",
+        source_key="smart-filter:version:empty",
     )
     alpha_volumes = [
         LibraryVolume(
             id="volume-alpha-1",
-            version_id=alpha_media.id,
+            version_id=alpha_version.id,
             origin="WATCH",
             title="星海列车 旗舰卷",
             volume_index=1,
@@ -193,7 +198,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         ),
         LibraryVolume(
             id="volume-alpha-2",
-            version_id=alpha_media.id,
+            version_id=alpha_version.id,
             origin="WATCH",
             title="星海列车 第二卷",
             volume_index=2,
@@ -210,10 +215,10 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     ]
     beta_volume = LibraryVolume(
         id="volume-beta",
-        version_id=beta_media.id,
+        version_id=beta_version.id,
         origin="MANUAL",
         title="平凡日记 第一卷",
-        format="PDF",
+        format="CBZ",
         resource_key="resource-beta",
         language="en-US",
         publisher="普通出版社",
@@ -226,7 +231,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     )
     empty_volume = LibraryVolume(
         id="volume-empty",
-        version_id=empty_media.id,
+        version_id=empty_version.id,
         title="空白样本",
         format="AUDIO",
         resource_key="resource-empty",
@@ -252,9 +257,9 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryFile(
             id="file-beta",
             volume_id=beta_volume.id,
-            path="/books/beta/鸡皮疙瘩X100Y/第一卷.pdf",
-            kind="PDF",
-            mime_type="application/pdf",
+            path="/books/beta/鸡皮疙瘩X100Y/第一卷.cbz",
+            kind="COMIC",
+            mime_type="application/vnd.comicbook+zip",
             size_bytes=512 * 1024,
         ),
         LibraryFile(
@@ -281,30 +286,31 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     db.add_all(
         [
             Library(
-            organization_mode="FLAT", 
+                organization_mode="FLAT",
                 id="folder-alpha",
                 name="星海目录",
                 root_path="/books/alpha",
             ),
             Library(
-            organization_mode="FLAT", 
+                organization_mode="FLAT",
                 id="folder-beta",
                 name="普通目录",
                 root_path="/books/beta",
             ),
-            alpha_work,
-            beta_work,
-            empty_work,
-            alpha_media,
-            beta_media,
-            empty_media,
-            *alpha_volumes,
-            beta_volume,
-            empty_volume,
-            *files,
-            tag,
+        ]
+    )
+    db.flush()
+    db.add_all([alpha_work, beta_work, empty_work])
+    db.flush()
+    db.add_all([alpha_version, beta_version, empty_version])
+    db.flush()
+    db.add_all([*alpha_volumes, beta_volume, empty_volume])
+    db.flush()
+    db.add_all([*files, tag, shelf])
+    db.flush()
+    db.add_all(
+        [
             LibraryWorkFacet(facet_id=tag.id, work_id=alpha_work.id),
-            shelf,
             ShelfWork(shelf_id=shelf.id, work_id=alpha_work.id),
             LibraryReadingProgress(
                 id="progress-alpha",
@@ -515,8 +521,8 @@ def test_filter_schema_keeps_high_cardinality_options_out_of_payload(
     assert fields["series"]["options"] == []
     assert {option["value"] for option in fields["format"]["options"]} == {
         "AUDIO",
+        "CBZ",
         "EPUB",
-        "PDF",
     }
     assert {option["value"] for option in fields["shelf"]["options"]} == {"shelf-alpha"}
 
@@ -615,7 +621,7 @@ def test_filter_schema_size_and_option_query_stay_bounded_at_high_cardinality(
         db_session.add_all(
             [
                 LibraryWork(
-            library_id="test-library", 
+                    library_id="test-library",
                     id=f"large-filter-{index}",
                     title=f"Large filter {index}",
                     normalized_title=f"large filter {index}",
@@ -661,21 +667,12 @@ def test_filter_schema_size_and_option_query_stay_bounded_at_high_cardinality(
     assert not any("LIBRARYWORK.TAGS" in statement for statement in statements)
 
 
-def test_library_filter_matches_real_volume_file_paths(
+def test_library_filter_uses_work_topology_instead_of_file_paths(
     client: TestClient,
     db_session: Session,
 ) -> None:
     user = _login_admin(client, db_session)
     _add_filter_matrix_fixture(db_session, user)
-    stored_folder_ids = {
-        "volume-alpha-1": "folder-beta",
-        "volume-alpha-2": None,
-        "volume-beta": "folder-alpha",
-    }
-    for volume_id, folder_id in stored_folder_ids.items():
-        volume = db_session.get(LibraryVolume, volume_id)
-        assert volume is not None
-        volume.library_id = folder_id
     real_paths = {
         "file-alpha-1": "/books/alpha/星海列车/第一卷.epub",
         "file-alpha-2": "/outside/星海列车/第二卷.epub",
@@ -724,14 +721,17 @@ def test_library_filter_matches_real_volume_file_paths(
                 "conditions": [{"field": "library", "operator": "is_not_empty"}],
             },
         )
-    ) == {"星海列车", "平凡日记"}
-    assert _filtered_titles(
-        client,
-        {
-            "combinator": "ALL",
-            "conditions": [{"field": "library", "operator": "is_empty"}],
-        },
-    ) == ["空白样本"]
+    ) == {"星海列车", "平凡日记", "空白样本"}
+    assert (
+        _filtered_titles(
+            client,
+            {
+                "combinator": "ALL",
+                "conditions": [{"field": "library", "operator": "is_empty"}],
+            },
+        )
+        == []
+    )
 
 
 def test_work_list_applies_all_operator_families_and_combinators(

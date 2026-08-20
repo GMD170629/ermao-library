@@ -2,11 +2,6 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fastapi.testclient import TestClient
-from PIL import Image
-from sqlalchemy import event, func, select
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -14,9 +9,9 @@ from app.main import create_app
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -26,6 +21,10 @@ from app.modules.opds.public import (
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
 )
 from app.modules.system.infrastructure.settings import upsert_setting
+from fastapi.testclient import TestClient
+from PIL import Image
+from sqlalchemy import event, func, select
+from sqlalchemy.orm import Session
 
 
 def _seed_opds_publication(db: Session) -> User:
@@ -37,7 +36,7 @@ def _seed_opds_publication(db: Session) -> User:
         role="admin",
     )
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="opds-work",
         title="Escaped & Visible",
         normalized_title="escaped & visible",
@@ -45,35 +44,35 @@ def _seed_opds_publication(db: Session) -> User:
         normalized_author="author",
         tags="[]",
     )
-    media = LibraryMediaVersion(
+    version = LibraryVersion(
         id="opds-media",
         work_id=work.id,
-        media_kind="COMIC",
+        source_key="opds:version",
     )
     volume = LibraryVolume(
         id="opds-volume",
-        version_id=media.id,
+        version_id=version.id,
         title="Volume 1",
         format="CBZ",
         resource_key="opds:volume",
         import_status="COMPLETED",
         page_count=10,
     )
-    db.add_all(
-        [
-            user,
-            work,
-            media,
-            volume,
-            LibraryFile(
-                id="opds-file",
-                volume_id=volume.id,
-                path="books/opds.cbz",
-                kind="BOOK",
-                mime_type="application/vnd.comicbook+zip",
-                size_bytes=100,
-            ),
-        ]
+    db.add_all([user, work])
+    db.flush()
+    db.add(version)
+    db.flush()
+    db.add(volume)
+    db.flush()
+    db.add(
+        LibraryFile(
+            id="opds-file",
+            volume_id=volume.id,
+            path="books/opds.cbz",
+            kind="BOOK",
+            mime_type="application/vnd.comicbook+zip",
+            size_bytes=100,
+        )
     )
     db.commit()
     return user

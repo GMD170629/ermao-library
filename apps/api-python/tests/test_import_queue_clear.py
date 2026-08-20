@@ -11,7 +11,7 @@ from app.models.import_pipeline import (
     ImportLog,
     ImportTask,
 )
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
 from app.models.settings import QueueControlOperation, SystemEvent
 from app.modules.imports.application.queue_control import (
     PreparedImportQueueOperationCheckpoint,
@@ -28,27 +28,32 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
     source_file.parent.mkdir(parents=True)
     source_file.write_bytes(b"source")
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="preserved-work",
         title="Preserved",
         normalized_title="preserved",
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id="preserved-media",
+    version = LibraryVersion(
+        id="preserved-version",
         work_id=work.id,
-        media_kind="EBOOK",
+        source_key="preserved:version",
     )
     volume = LibraryVolume(
         id="preserved-volume",
-        version_id=media_version.id,
+        version_id=version.id,
         title="Preserved source",
         sort_order=0,
         format="MOBI",
         resource_key="test:preserved-volume",
         import_status="COMPLETED",
     )
-    db_session.add_all([work, media_version, volume])
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(volume)
+    db_session.flush()
     for status in ("PENDING", "PARSING", "COMPLETED", "FAILED"):
         db_session.add(
             ImportTask(

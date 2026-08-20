@@ -5,11 +5,6 @@ from pathlib import Path
 from time import monotonic
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fastapi.testclient import TestClient
-from sqlalchemy import func, select, update
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
@@ -17,13 +12,18 @@ from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
 from app.models.auth import User
 from app.models.library import (
+    Library,
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingUnit,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.models.settings import SystemSetting
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select, update
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 from tests.support.sqlalchemy import StatementRecorder
 
 
@@ -39,6 +39,14 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
     _write_comic_archive(archive_path)
     preserved_updated_at = datetime(2026, 8, 11, 8, tzinfo=UTC)
     with Session(engine) as db:
+        db.add(
+            Library(
+                id="test-library",
+                name="Test Library",
+                root_path="/test-library",
+                organization_mode="FLAT",
+            )
+        )
         user = User(
             id="comic-lock-admin",
             email="comic-lock@example.com",
@@ -47,7 +55,7 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
             role="admin",
         )
         work = LibraryWork(
-            library_id="test-library", 
+            library_id="test-library",
             id="comic-lock-work",
             origin="MANUAL",
             title="Comic lock",
@@ -56,14 +64,14 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
             normalized_author="作者",
             tags="[]",
         )
-        media = LibraryMediaVersion(
-            id="comic-lock-media",
+        version = LibraryVersion(
+            id="comic-lock-version",
             work_id=work.id,
-            media_kind="COMIC",
+            source_key="comic-lock:version",
         )
         volume = LibraryVolume(
             id="comic-lock-volume",
-            version_id=media.id,
+            version_id=version.id,
             title="第一卷",
             format="CBZ",
             resource_key="manual:comic-lock",
@@ -75,8 +83,6 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
             id="comic-lock-file",
             volume_id=volume.id,
             path=str(archive_path.resolve()),
-            fingerprint="sha256:comic-lock",
-            hash_status="COMPLETED",
             mtime_ms=1,
             kind="COMIC",
             mime_type="application/zip",
@@ -84,7 +90,7 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
         )
         db.add_all([user, work])
         db.flush()
-        db.add(media)
+        db.add(version)
         db.flush()
         db.add(volume)
         db.flush()

@@ -3,8 +3,6 @@ from __future__ import annotations
 import io
 import json
 import sys
-from contextlib import nullcontext
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +13,6 @@ from PIL import Image
 from sqlalchemy import text
 
 import app.modules.imports.application.import_audio as importer_module
-import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
 from app.bootstrap.imports import (
@@ -61,7 +58,6 @@ from app.services.audio_metadata import (
     parse_audio_metadata,
 )
 from tests.conftest import recreate_application_schema
-from tests.test_worker_importer import write_epub_metadata_fixture
 
 
 def _options(**kwargs: object) -> ImportOptions:
@@ -217,11 +213,61 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
         "parse_audio_metadata",
         lambda _services, path: _fake_audio_metadata(path),
     )
+    work = LibraryWork(
+        id="audio-reader-work",
+        library_id="test-library",
+        origin="WATCH",
+        source_key="work:audio-reader",
+        title="三体",
+        normalized_title="三体",
+        author="刘慈欣",
+        normalized_author="刘慈欣",
+        tags="[]",
+        organized=True,
+        organize_status="APPLIED",
+    )
+    version = LibraryVersion(
+        id="audio-reader-version",
+        work_id=work.id,
+        source_key="version:audio-reader",
+    )
+    volume = LibraryVolume(
+        id="audio-reader-volume",
+        version_id=version.id,
+        origin="WATCH",
+        title="三体",
+        format="AUDIO",
+        resource_key="volume:audio-reader",
+        import_status="PENDING",
+    )
+    task = ImportTask(
+        id="audio-reader-task",
+        library_id="test-library",
+        work_id=work.id,
+        volume_id=volume.id,
+        origin="WATCH",
+        status="PROCESSING",
+        original_name=audio_dir.name,
+        source_path=str(audio_dir),
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(volume)
+    db_session.flush()
+    db_session.add(task)
+    db_session.commit()
     result = import_managed_book(
         db_session,
         test_settings,
         _options(
-            source_file_path=audio_dir, origin="MANUAL", original_name=audio_dir.name
+            source_file_path=audio_dir,
+            origin="WATCH",
+            original_name=audio_dir.name,
+            topology_work_id=work.id,
+            topology_volume_id=volume.id,
+            import_task_id=task.id,
         ),
     )
     return result, audio_dir
@@ -230,40 +276,25 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
 def _insert_media_volume(
     db_session,
     *,
-    version_id: str,
     volume_id: str,
     work_id: str,
     media_kind: str,
     fmt: str,
 ) -> None:
     version = get_or_create_implicit_version(db_session, work_id)
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryMediaVersion` "
-            "(`id`, `workId`, `mediaKind`, `createdAt`, `updatedAt`) "
-            "VALUES (:id, :work_id, :media_kind, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-        ),
-        {
-            "id": version_id,
-            "work_id": work_id,
-            "media_kind": media_kind,
-        },
-    )
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryVolume` "
-            "(`id`, `versionId`, `origin`, `title`, `sortOrder`, `format`, `resourceKey`, "
-            "`importStatus`, `sizeBytes`, `coverStatus`, `hidden`, `createdAt`, `updatedAt`) "
-            "VALUES (:id, :version_id, 'MANUAL', :title, 0, :format, :key, "
-            "'COMPLETED', 0, 'PENDING', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-        ),
-        {
-            "id": volume_id,
-            "version_id": version.id,
-            "title": media_kind,
-            "format": fmt,
-            "key": f"test:{volume_id}",
-        },
+    db_session.add(
+        LibraryVolume(
+            id=volume_id,
+            version_id=version.id,
+            origin="MANUAL",
+            title=media_kind,
+            sort_order=0,
+            format=fmt,
+            resource_key=f"test:{volume_id}",
+            import_status="COMPLETED",
+            size_bytes=0,
+            cover_status="PENDING",
+        )
     )
     db_session.commit()
 
@@ -662,97 +693,6 @@ def test_audio_cover_validation_rejects_unknown_oversized_and_high_pixel_images(
     assert audio_cover_module.validated_audio_cover(output.getvalue()) is None
 
 
-def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
-    db_session, test_settings, monkeypatch, tmp_path
-) -> None:
-    _initialize_schema(db_session)
-    test_settings.resolved_storage_root.mkdir(parents=True, exist_ok=True)
-    epub = tmp_path / "[三体][刘慈欣].epub"
-    write_epub_metadata_fixture(epub, "三体", "刘慈欣")
-    epub_result = import_managed_book(
-        db_session,
-        test_settings,
-        _options(source_file_path=epub, origin="MANUAL", original_name=epub.name),
-    )
-    audio_result, _audio_dir = _import_audio_fixture(
-        db_session, test_settings, monkeypatch, tmp_path
-    )
-
-    assert audio_result.work_id == epub_result.work_id
-    assert (
-        db_session.execute(
-            text("SELECT COUNT(*) FROM LibraryVersion WHERE workId = :id"),
-            {"id": audio_result.work_id},
-        ).scalar()
-        == 1
-    )
-    media_volumes = (
-        db_session.execute(
-            text(
-                "SELECT media.mediaKind, volume.format, volume.title "
-                "FROM LibraryMediaVersion AS media "
-                "JOIN LibraryVersion AS version ON version.workId = media.workId "
-                "JOIN LibraryVolume AS volume ON volume.versionId = version.id "
-                "WHERE media.workId = :work_id "
-                "AND ("
-                "(media.mediaKind = 'AUDIOBOOK' AND volume.format = 'AUDIO') "
-                "OR (media.mediaKind = 'EBOOK' AND volume.format = 'EPUB')"
-                ") ORDER BY media.mediaKind"
-            ),
-            {"work_id": audio_result.work_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [
-        (row["mediaKind"], row["format"], row["title"]) for row in media_volumes
-    ] == [
-        ("AUDIOBOOK", "AUDIO", "正文"),
-        ("EBOOK", "EPUB", "[三体][刘慈欣]"),
-    ]
-    tracks = (
-        db_session.execute(
-            text(
-                "SELECT `trackNumber`, `sortOrder`, `durationMs`, `codec` FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": audio_result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [(row["trackNumber"], row["sortOrder"]) for row in tracks] == [
-        (2, 0),
-        (10, 1),
-    ]
-    assert sum(int(row["durationMs"]) for row in tracks) == 1_200_000
-    assert {row["codec"] for row in tracks} == {"mp3"}
-    task = (
-        db_session.execute(
-            text(
-                "SELECT `taskKind`, `assetCount`, `processedAssetCount`, `status` FROM `ImportTask` WHERE `volumeId` = :volume_id"
-            ),
-            {"volume_id": audio_result.volume_id},
-        )
-        .mappings()
-        .one()
-    )
-    assert dict(task) == {
-        "taskKind": "AUDIO_BUNDLE",
-        "assetCount": 2,
-        "processedAssetCount": 2,
-        "status": "COMPLETED",
-    }
-    assert (
-        db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM `ImportAsset` WHERE `importTaskId` = (SELECT `id` FROM `ImportTask` WHERE `volumeId` = :volume_id) AND `status` = 'COMPLETED'"
-            ),
-            {"volume_id": audio_result.volume_id},
-        ).scalar()
-        == 2
-    )
-
-
 def test_scanned_audio_volume_enriches_only_prebound_topology(
     db_session,
     test_settings,
@@ -835,323 +775,12 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
     assert result.volume_id == volume.id
     assert result.merge_reason == "topology-bound"
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 1
-    assert (
-        db_session.execute(text("SELECT COUNT(*) FROM LibraryVersion")).scalar() == 1
-    )
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryVersion")).scalar() == 1
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryVolume")).scalar() == 1
     assert stored_work is not None and stored_work.title == "Book"
     assert stored_volume is not None and stored_volume.title == "Vol.1"
     assert stored_volume.import_status == "COMPLETED"
     assert stored_volume.track_count == 2
-
-
-def test_audio_bundle_groups_with_same_title_works_across_media(
-    db_session, test_settings, monkeypatch, tmp_path
-) -> None:
-    _initialize_schema(db_session)
-    test_settings.resolved_storage_root.mkdir(parents=True, exist_ok=True)
-    first_dir = tmp_path / "edition-a"
-    second_dir = tmp_path / "edition-b"
-    first_dir.mkdir()
-    second_dir.mkdir()
-    first_epub = first_dir / "[三体][刘慈欣].epub"
-    second_epub = second_dir / "[三体][刘慈欣].epub"
-    write_epub_metadata_fixture(first_epub, "三体", "刘慈欣", ["edition-a"])
-    write_epub_metadata_fixture(second_epub, "三体", "刘慈欣", ["edition-b"])
-
-    first = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=first_epub,
-            origin="MANUAL",
-            original_name=first_epub.name,
-        ),
-    )
-    second = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=second_epub,
-            origin="MANUAL",
-            original_name=second_epub.name,
-        ),
-    )
-    audio, _audio_dir = _import_audio_fixture(
-        db_session, test_settings, monkeypatch, tmp_path
-    )
-
-    assert first.work_id == second.work_id == audio.work_id
-    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 1
-
-
-def test_audio_moved_copy_runs_normal_import_without_content_hashing(
-    db_session, test_settings, monkeypatch, tmp_path
-) -> None:
-    _initialize_schema(db_session)
-    first, original_dir = _import_audio_fixture(
-        db_session, test_settings, monkeypatch, tmp_path
-    )
-    same_path = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=original_dir,
-            origin="MANUAL",
-            original_name=original_dir.name,
-        ),
-    )
-    assert same_path.duplicate is True
-    assert same_path.version_id == first.version_id
-    assert same_path.volume_id == first.volume_id
-
-    moved_dir = test_settings.resolved_monitor_root / "moved-copy"
-    moved_dir.mkdir()
-    for source in original_dir.iterdir():
-        (moved_dir / source.name).write_bytes(source.read_bytes())
-
-    real_path_open = Path.open
-
-    def reject_audio_content_reads(path: Path, *args, **kwargs):
-        mode = str(args[0] if args else kwargs.get("mode", "r"))
-        if path.suffix.lower() in {".mp3", ".m4a", ".m4b"} and "r" in mode:
-            raise AssertionError(f"audio content was read for hashing: {path}")
-        return real_path_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", reject_audio_content_reads)
-    moved = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=moved_dir,
-            origin="MANUAL",
-            original_name=moved_dir.name,
-            requested_title="三体",
-            requested_author="刘慈欣",
-        ),
-    )
-    assert moved.duplicate is False
-    assert moved.work_id == first.work_id
-    assert moved.version_id == first.version_id
-    assert moved.volume_id != first.volume_id
-    assert moved.merge_reason == "new-audio-volume"
-    assert (
-        db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM `LibraryMediaVersion` WHERE `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK'"
-            ),
-            {"work_id": first.work_id},
-        ).scalar()
-        == 1
-    )
-    files = (
-        db_session.execute(
-            text(
-                "SELECT `path` FROM `LibraryFile` "
-                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": moved.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert len(files) == 2
-    assert all(str(row["path"]).startswith(str(moved_dir)) for row in files)
-
-
-def test_audio_partial_content_overlap_runs_normal_import(
-    db_session, test_settings, monkeypatch, tmp_path
-) -> None:
-    _initialize_schema(db_session)
-    first, original_dir = _import_audio_fixture(
-        db_session, test_settings, monkeypatch, tmp_path
-    )
-    overlap_dir = test_settings.resolved_monitor_root / "partial-overlap"
-    overlap_dir.mkdir()
-    (overlap_dir / "02.mp3").write_bytes((original_dir / "02.mp3").read_bytes())
-    (overlap_dir / "11.mp3").write_bytes(b"new-track-eleven")
-    result = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=overlap_dir,
-            origin="MANUAL",
-            original_name=overlap_dir.name,
-            requested_title="三体",
-            requested_author="刘慈欣",
-        ),
-    )
-    assert result.duplicate is False
-    assert result.work_id == first.work_id
-    assert result.version_id == first.version_id
-    assert result.volume_id != first.volume_id
-    files = (
-        db_session.execute(
-            text(
-                "SELECT `path`, `sortOrder` FROM `LibraryFile` "
-                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert len(files) == 2
-    assert [row["sortOrder"] for row in files] == [0, 1]
-
-
-def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
-    db_session, test_settings, monkeypatch
-) -> None:
-    _initialize_schema(db_session)
-    folder = test_settings.resolved_monitor_root / "duplicate-tracks"
-    folder.mkdir(parents=True)
-    payload = b"the-same-track-bytes"
-    (folder / "01.mp3").write_bytes(payload)
-    (folder / "02.mp3").write_bytes(payload)
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices,
-        "parse_audio_metadata",
-        lambda _services, path: _fake_audio_metadata(path),
-    )
-
-    result = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=folder,
-            origin="MANUAL",
-            requested_title="重复音轨",
-            requested_author="测试作者",
-        ),
-    )
-
-    files = (
-        db_session.execute(
-            text(
-                "SELECT `id`, `path`, `sortOrder` FROM `LibraryFile` "
-                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    chapters = (
-        db_session.execute(
-            text(
-                "SELECT `fileId`, `title`, `sortOrder` FROM `LibraryReadingUnit` "
-                "WHERE `volumeId` = :volume_id AND `unitType` = 'audio_chapter' ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert len(files) == 2
-    assert len({row["id"] for row in files}) == 2
-    assert len({row["path"] for row in files}) == 2
-    assert [row["sortOrder"] for row in files] == [0, 1]
-    assert [row["fileId"] for row in chapters] == [row["id"] for row in files]
-    assert [row["sortOrder"] for row in chapters] == [1, 2]
-
-
-def test_file_import_does_not_apply_browser_upload_bundle_byte_limit(
-    db_session, test_settings, monkeypatch
-) -> None:
-    _initialize_schema(db_session)
-    folder = test_settings.resolved_monitor_root / "large-local-audiobook"
-    folder.mkdir(parents=True)
-    (folder / "01.mp3").write_bytes(b"first-local-track")
-    (folder / "02.mp3").write_bytes(b"second-local-track")
-    local_settings = test_settings.model_copy(
-        update={
-            "audiobook_max_file_bytes": 1024,
-            "audiobook_max_bundle_bytes": 20,
-        }
-    )
-    assert (
-        sum(path.stat().st_size for path in folder.iterdir())
-        > local_settings.audiobook_max_bundle_bytes
-    )
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices,
-        "parse_audio_metadata",
-        lambda _services, path: _fake_audio_metadata(path),
-    )
-
-    result = import_managed_book(
-        db_session,
-        local_settings,
-        _options(
-            source_file_path=folder, origin="WATCH", requested_title="大型本地有声书"
-        ),
-    )
-
-    assert (
-        db_session.execute(
-            text("SELECT COUNT(*) FROM `LibraryFile` WHERE `volumeId` = :volume_id"),
-            {"volume_id": result.volume_id},
-        ).scalar_one()
-        == 2
-    )
-
-
-def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
-    db_session, test_settings, monkeypatch
-) -> None:
-    _initialize_schema(db_session)
-    folder = test_settings.resolved_monitor_root / "single-files"
-    folder.mkdir(parents=True)
-    first_path = folder / "first.mp3"
-    second_path = folder / "second.mp3"
-    first_path.write_bytes(b"first-distinct-audio")
-    second_path.write_bytes(b"second-distinct-audio")
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices,
-        "parse_audio_metadata",
-        lambda _services, path: _fake_audio_metadata(path),
-    )
-    first = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=first_path,
-            origin="MANUAL",
-            requested_title="同一本书",
-            requested_author="同一作者",
-        ),
-    )
-    second = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=second_path,
-            origin="MANUAL",
-            requested_title="同一本书",
-            requested_author="同一作者",
-        ),
-    )
-    assert first.work_id == second.work_id
-    assert first.version_id == second.version_id
-    assert first.volume_id == second.volume_id
-    assert second.duplicate is True
-    volumes = (
-        db_session.execute(
-            text(
-                "SELECT volume.id, volume.trackCount, volume.chapterCount "
-                "FROM LibraryVolume AS volume "
-                "JOIN LibraryVersion AS version ON version.id = volume.versionId "
-                "WHERE version.workId = :work_id AND volume.hidden = 0"
-            ),
-            {"work_id": first.work_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [dict(row) for row in volumes] == [
-        {"id": first.volume_id, "trackCount": 2, "chapterCount": 2}
-    ]
 
 
 def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
@@ -1306,14 +935,13 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
         )
     )
     db_session.commit()
-    for version_id, volume_id, media_kind, fmt in (
-        ("mixed-ebook", "mixed-ebook-volume", "EBOOK", "EPUB"),
-        ("mixed-comic", "mixed-comic-volume", "COMIC", "COMIC"),
-        ("mixed-audio", "mixed-audio-volume", "AUDIOBOOK", "AUDIO"),
+    for volume_id, media_kind, fmt in (
+        ("mixed-ebook-volume", "EBOOK", "EPUB"),
+        ("mixed-comic-volume", "COMIC", "COMIC"),
+        ("mixed-audio-volume", "AUDIOBOOK", "AUDIO"),
     ):
         _insert_media_volume(
             db_session,
-            version_id=version_id,
             volume_id=volume_id,
             work_id="mixed-work",
             media_kind=media_kind,
@@ -1405,9 +1033,6 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
         normalized_title="two audio volumes",
         tags="[]",
     )
-    media_version = LibraryMediaVersion(
-        id="switch-audio", work_id=work.id, media_kind="AUDIOBOOK"
-    )
     version = LibraryVersion(
         id="switch-version",
         work_id=work.id,
@@ -1428,7 +1053,9 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     ]
     db_session.add(work)
     db_session.flush()
-    db_session.add_all([version, media_version, *volumes])
+    db_session.add(version)
+    db_session.flush()
+    db_session.add_all(volumes)
     db_session.flush()
     db_session.add(
         LibraryReadingProgress(
@@ -1644,216 +1271,16 @@ def test_audio_bundle_stops_buffering_at_track_limit_plus_one(
     assert yielded == 10_001
 
 
-def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
-    client, db_session, test_settings, monkeypatch
-) -> None:
-    _initialize_schema(db_session)
-    _login(client, db_session, email="emby-flat@example.com")
-    root = test_settings.resolved_monitor_root
-    root.mkdir(parents=True, exist_ok=True)
-    paths = [
-        root / "10- Flat Book - Chapter 10.mp3",
-        root / "1- Flat Book - Chapter 1.mp3",
-        root / "2- Flat Book - Chapter 2.mp3",
-    ]
-    for index, path in enumerate(paths, start=1):
-        path.write_bytes((f"flat-track-{index}-" * index).encode())
-    ordinary = root / "01 - Ordinary Standalone.m4b"
-    missing_prefix = root / "Flat Book - Chapter 1.mp3"
-    sibling_epub = root / "Sibling Book.epub"
-    ordinary.write_bytes(b"ordinary")
-    missing_prefix.write_bytes(b"missing-prefix")
-    sibling_epub.write_bytes(b"sibling")
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices,
-        "parse_audio_metadata",
-        lambda _services, path: replace(
-            _emby_audio_metadata(path),
-            album="Flat Book",
-            author="Flat Author",
-            track_number=1,
-        ),
-    )
-
-    results = [
-        import_managed_book(
-            db_session,
-            test_settings,
-            _options(source_file_path=path, origin="WATCH", original_name=path.name),
-        )
-        for path in paths
-    ]
-
-    assert {result.work_id for result in results} == {results[0].work_id}
-    assert {result.volume_id for result in results} == {results[0].volume_id}
-    work = (
-        db_session.execute(
-            text("SELECT `title`, `author` FROM `LibraryWork` WHERE `id` = :id"),
-            {"id": results[0].work_id},
-        )
-        .mappings()
-        .one()
-    )
-    assert dict(work) == {"title": "Flat Book", "author": "Flat Author"}
-    volumes = (
-        db_session.execute(
-            text(
-                "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
-                "FROM `LibraryVolume` volume JOIN `LibraryVersion` version "
-                "ON version.`id` = volume.`versionId` "
-                "WHERE version.`workId` = :work_id AND volume.`hidden` = 0"
-            ),
-            {"work_id": results[0].work_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [dict(row) for row in volumes] == [
-        {"id": results[0].volume_id, "trackCount": 3, "chapterCount": 3}
-    ]
-    tracks = (
-        db_session.execute(
-            text(
-                "SELECT `trackNumber`, `sortOrder` FROM `LibraryFile` "
-                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": results[0].volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [(row["trackNumber"], row["sortOrder"]) for row in tracks] == [
-        (1, 0),
-        (2, 1),
-        (10, 2),
-    ]
-    bootstrap = client.get(f"/api/reader/v4/volumes/{results[0].volume_id}/bootstrap")
-    assert bootstrap.status_code == 200
-    assert [track["trackNumber"] for track in bootstrap.json()["data"]["files"]] == [
-        1,
-        2,
-        10,
-    ]
-
-    assert importer_module._flat_audio_filename_title(ordinary) is None
-    assert importer_module._flat_audio_filename_title(missing_prefix) is None
-
-
+@pytest.mark.parametrize(
+    ("file_name", "expected"),
+    [
+        ("我靠充值当武帝590-没听进去.m4a", 590),
+        ("2020版-我靠充值当武帝第590集-没听进去.m4a", 590),
+        ("001-标题2020.m4a", 1),
+    ],
+)
 def test_audio_episode_number_falls_back_to_digits_anywhere_after_explicit_rules(
     file_name: str,
     expected: int,
 ) -> None:
     assert importer_module._audio_episode_number(Path(file_name)) == expected
-
-
-def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
-    db_session, test_settings, monkeypatch
-) -> None:
-    _initialize_schema(db_session)
-    book_dir = (
-        test_settings.resolved_monitor_root / "我当阴阳先生的那几年（多人有声剧）"
-    )
-    book_dir.mkdir(parents=True)
-    names = [
-        "《我当阴阳先生那几年》 第153集.m4a",
-        "《我当阴阳先生那几年》第12集.m4a",
-        "《我当阴阳先生那几年》第1集.m4a",
-    ]
-    for index, name in enumerate(names, start=1):
-        (book_dir / name).write_bytes((f"episode-{index}-" * index).encode())
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices,
-        "parse_audio_metadata",
-        lambda _services, path: _episode_audio_metadata(path),
-    )
-
-    result = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
-        ),
-    )
-
-    work = (
-        db_session.execute(
-            text("SELECT `title`, `author` FROM `LibraryWork` WHERE `id` = :id"),
-            {"id": result.work_id},
-        )
-        .mappings()
-        .one()
-    )
-    assert work["title"] == book_dir.name
-    assert work["author"] == "未知作者"
-    volumes = (
-        db_session.execute(
-            text(
-                "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
-                "FROM `LibraryVolume` volume JOIN `LibraryVersion` version "
-                "ON version.`id` = volume.`versionId` "
-                "WHERE version.`workId` = :work_id AND volume.`hidden` = 0"
-            ),
-            {"work_id": result.work_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [dict(row) for row in volumes] == [
-        {"id": result.volume_id, "trackCount": 3, "chapterCount": 3}
-    ]
-    tracks = (
-        db_session.execute(
-            text(
-                "SELECT `trackNumber`, `sortOrder`, `path` FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [(row["trackNumber"], row["sortOrder"]) for row in tracks] == [
-        (1, 0),
-        (12, 1),
-        (153, 2),
-    ]
-    units = (
-        db_session.execute(
-            text(
-                "SELECT `title`, `sortOrder` FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [row["sortOrder"] for row in units] == [1, 2, 3]
-    assert [row["title"] for row in units] == [
-        Path(name).stem for name in [names[2], names[1], names[0]]
-    ]
-
-    added = book_dir / "《我当阴阳先生那几年》第2集.m4a"
-    added.write_bytes(b"new-episode-two")
-    updated = import_managed_book(
-        db_session,
-        test_settings,
-        _options(
-            source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
-        ),
-    )
-    assert updated.volume_id == result.volume_id
-    updated_tracks = (
-        db_session.execute(
-            text(
-                "SELECT `trackNumber`, `sortOrder` FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
-            ),
-            {"volume_id": result.volume_id},
-        )
-        .mappings()
-        .all()
-    )
-    assert [(row["trackNumber"], row["sortOrder"]) for row in updated_tracks] == [
-        (1, 0),
-        (2, 1),
-        (12, 2),
-        (153, 3),
-    ]

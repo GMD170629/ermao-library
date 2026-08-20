@@ -1,15 +1,13 @@
-from sqlalchemy import event
-from sqlalchemy.orm import Session
-
 from app.core.authorization import authorization_context
 from app.models.auth import User, UserLibraryAccess
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
-from app.models.library import Library
+from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
 from app.modules.library.application.groupings import ListLibraryGroupings
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
 from app.services.library_management import sync_work_facets
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 
 def _work(
@@ -19,9 +17,10 @@ def _work(
     author: str,
     series: str | None = None,
     hidden: bool = False,
+    library_id: str = "test-library",
 ) -> LibraryWork:
     return LibraryWork(
-            library_id="test-library", 
+        library_id=library_id,
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
@@ -177,41 +176,60 @@ def test_grouping_representative_works_are_limited_to_authorized_scope(
         [
             user,
             Library(
-            organization_mode="FLAT", id="allowed-folder", name="可见", root_path="/allowed"),
+                organization_mode="FLAT",
+                id="allowed-folder",
+                name="可见",
+                root_path="/allowed",
+            ),
             Library(
-            organization_mode="FLAT", id="denied-folder", name="不可见", root_path="/denied"),
-            UserLibraryAccess(
-                user_id=user.id,
-                library_id="allowed-folder",
+                organization_mode="FLAT",
+                id="denied-folder",
+                name="不可见",
+                root_path="/denied",
             ),
         ]
     )
+    db_session.flush()
+    db_session.add(
+        UserLibraryAccess(
+            user_id=user.id,
+            library_id="allowed-folder",
+        )
+    )
+    db_session.flush()
     for work_id, folder_id in (
         ("allowed-work", "allowed-folder"),
         ("denied-work", "denied-folder"),
     ):
-        work = _work(work_id=work_id, title=work_id, author="共同作者")
-        media = LibraryMediaVersion(
-            id=f"media-{work_id}",
+        work = _work(
             work_id=work_id,
-            media_kind="EBOOK",
+            title=work_id,
+            author="共同作者",
+            library_id=folder_id,
+        )
+        version = LibraryVersion(
+            id=f"version-{work_id}",
+            work_id=work_id,
+            source_key=f"grouping:version:{work_id}",
         )
         volume = LibraryVolume(
             id=f"volume-{work_id}",
-            version_id=media.id,
+            version_id=version.id,
             title=work_id,
             format="EPUB",
             resource_key=f"resource-{work_id}",
             import_status="COMPLETED",
         )
-        db_session.add_all([work, media, volume])
+        db_session.add(work)
+        db_session.flush()
+        db_session.add(version)
+        db_session.flush()
+        db_session.add(volume)
     db_session.commit()
     sync_work_facets(db_session, "allowed-work")
     sync_work_facets(db_session, "denied-work")
 
-    result = ListLibraryGroupings(
-        SqlAlchemyLibraryGroupingQueries(db_session)
-    ).execute(
+    result = ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db_session)).execute(
         kind="AUTHOR",
         context=authorization_context(db_session, user),
         search="共同作者",

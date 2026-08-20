@@ -5,21 +5,19 @@ import shutil
 import zipfile
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingUnit,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def _login(client: TestClient, db: Session) -> User:
@@ -98,11 +96,6 @@ def _seed_epub(
         normalized_author="测试作者",
         tags="[]",
     )
-    media = LibraryMediaVersion(
-        id=f"media-publication{user_suffix}",
-        work_id=work.id,
-        media_kind="EBOOK",
-    )
     version = LibraryVersion(
         id=f"version-publication{user_suffix}",
         work_id=work.id,
@@ -129,7 +122,9 @@ def _seed_epub(
     )
     db.add(work)
     db.flush()
-    db.add_all([version, media, volume])
+    db.add(version)
+    db.flush()
+    db.add(volume)
     db.flush()
     db.add(source)
     db.commit()
@@ -153,11 +148,6 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
         author="测试作者",
         normalized_author="测试作者",
         tags="[]",
-    )
-    media = LibraryMediaVersion(
-        id="media-txt-publication",
-        work_id=work.id,
-        media_kind="EBOOK",
     )
     version = LibraryVersion(
         id="version-txt-publication",
@@ -185,7 +175,9 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
     )
     db.add(work)
     db.flush()
-    db.add_all([version, media, volume])
+    db.add(version)
+    db.flush()
+    db.add(volume)
     db.flush()
     db.add(source)
     db.commit()
@@ -295,7 +287,7 @@ def test_work_detail_and_reader_manifest_share_publication_navigation(
 
     assert detail_response.status_code == 200
     detail_volume = detail_response.json()["data"]["book"]["versions"][0]["volumes"][0]
-    assert detail_volume["chapterCount"] == 1
+    assert detail_volume["chapterCount"] is None
     assert units_response.status_code == 200
     units = units_response.json()["data"]["units"]
     assert [(unit["title"], unit["href"]) for unit in units] == [
@@ -343,11 +335,12 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
 
     assert detail_response.status_code == 200
     detail_volume = detail_response.json()["data"]["book"]["versions"][0]["volumes"][0]
-    assert detail_volume["chapterCount"] is None
+    assert detail_volume["chapterCount"] == 1
     assert units_response.status_code == 200
     assert units_response.json()["data"]["units"] == []
     db_session.expire_all()
     assert db_session.get(LibraryReadingUnit, "stale-publication-chapter") is None
+    assert db_session.get(LibraryVolume, volume.id).chapter_count is None
 
 
 def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
@@ -416,11 +409,6 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
         normalized_author="测试作者",
         tags="[]",
     )
-    media = LibraryMediaVersion(
-        id="media-mobi-publication",
-        work_id=work.id,
-        media_kind="EBOOK",
-    )
     version = LibraryVersion(
         id="version-mobi-publication",
         work_id=work.id,
@@ -447,7 +435,9 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add_all([version, media, volume])
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(volume)
     db_session.flush()
     db_session.add(source)
     db_session.commit()

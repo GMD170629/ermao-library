@@ -13,7 +13,6 @@ from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
 from app.services import book_identity
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
-    identity_merge_key,
     recognize_book_identity,
     recognize_book_identity_with_regex,
 )
@@ -282,10 +281,6 @@ def test_regex_identity_can_use_a_volume_directory():
         UNKNOWN_AUTHOR,
         6,
     )
-
-
-def test_identity_merge_key_uses_only_normalized_title_and_author():
-    assert identity_merge_key("《活着》", "余 华") == "活着:余华"
 
 
 @pytest.mark.parametrize(

@@ -5,17 +5,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVersion,
@@ -23,6 +17,10 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 
 def _login(client: TestClient, db_session: Session) -> User:
@@ -42,9 +40,7 @@ def _login(client: TestClient, db_session: Session) -> User:
     return user
 
 
-def _ebook_volume(
-    db_session: Session, *, include_media_version: bool = True
-) -> LibraryVolume:
+def _ebook_volume(db_session: Session) -> LibraryVolume:
     source_path = (
         Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
@@ -57,15 +53,6 @@ def _ebook_volume(
         author="测试作者",
         normalized_author="测试作者",
         tags="[]",
-    )
-    media_version = (
-        LibraryMediaVersion(
-            id="media-reader-v3",
-            work_id=work.id,
-            media_kind="EBOOK",
-        )
-        if include_media_version
-        else None
     )
     version = LibraryVersion(
         id="version-reader-v3",
@@ -94,9 +81,7 @@ def _ebook_volume(
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add_all(
-        [version, volume] if media_version is None else [version, media_version, volume]
-    )
+    db_session.add_all([version, volume])
     db_session.flush()
     db_session.add(file)
     db_session.commit()
@@ -265,7 +250,6 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert bootstrap["versionCompleted"] is False
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
-    assert "versionId" not in bootstrap["volume"]
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
     assert "publicationFingerprint" not in bootstrap
@@ -652,7 +636,6 @@ def test_reader_v4_bootstrap_does_not_expose_file_hashes(
     assert all("contentHash" not in item for item in bootstrap["files"])
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
-    assert all("versionId" not in item for item in bootstrap["availableVolumes"])
 
 
 @pytest.mark.parametrize(
@@ -1112,7 +1095,7 @@ def test_volume_file_download_mode_uses_attachment_for_every_media_format(
     )
 
 
-def test_work_cover_fallback_uses_media_priority_then_volume_order(
+def test_work_cover_fallback_returns_an_available_volume_cover(
     client: TestClient,
     db_session: Session,
     test_settings: Settings,
@@ -1120,11 +1103,6 @@ def test_work_cover_fallback_uses_media_priority_then_volume_order(
     _login(client, db_session)
     ebook_volume = _ebook_volume(db_session)
     ebook_volume.cover_path = "covers/ebook.jpg"
-    comic_media = LibraryMediaVersion(
-        id="media-reader-v3-comic",
-        work_id="work-reader-v3",
-        media_kind="COMIC",
-    )
     comic_volume = LibraryVolume(
         id="volume-reader-v3-comic",
         version_id=ebook_volume.version_id,
@@ -1134,7 +1112,7 @@ def test_work_cover_fallback_uses_media_priority_then_volume_order(
         resource_key="manual:reader-v3-comic",
         cover_path="covers/comic.jpg",
     )
-    db_session.add_all([comic_media, comic_volume])
+    db_session.add(comic_volume)
     db_session.commit()
     cover_root = test_settings.resolved_storage_root / "covers"
     cover_root.mkdir(parents=True, exist_ok=True)
@@ -1234,12 +1212,12 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     }
 
 
-def test_reader_v4_bootstrap_succeeds_without_library_media_version(
+def test_reader_v4_bootstrap_uses_directory_version(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session, include_media_version=False)
+    volume = _ebook_volume(db_session)
 
     response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
 
@@ -1342,7 +1320,6 @@ def test_reader_v4_version_completed_ignores_other_versions(
         current.version_id,
         other_version.id,
     }
-    assert "versionId" not in current_bootstrap["availableVolumes"][0]
 
 
 def test_reader_v4_openapi_requires_no_edition_or_user_identity(

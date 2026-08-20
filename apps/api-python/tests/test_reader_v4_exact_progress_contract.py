@@ -4,15 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
@@ -21,6 +16,9 @@ from app.models.library import (
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.reader.presentation.v4_schemas import ReaderProgressPut
+from fastapi.testclient import TestClient
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy.orm import Session
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _FIXTURES = _REPOSITORY_ROOT / "packages" / "reader-contracts" / "fixtures"
@@ -58,9 +56,7 @@ def test_former_all_readium_v4_envelope_is_rejected() -> None:
 
 
 def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
-    source_path = (
-        _REPOSITORY_ROOT / "test-data" / "library" / "epub" / "reader-v2.epub"
-    )
+    source_path = _REPOSITORY_ROOT / "test-data" / "library" / "epub" / "reader-v2.epub"
     user = User(
         email="reader-v4-exact@example.com",
         name="Reader Exact",
@@ -68,14 +64,13 @@ def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
         role="admin",
     )
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="exact-work",
         origin="MANUAL",
         title="Exact Reader",
         normalized_title="exact reader",
         tags="[]",
     )
-    media = LibraryMediaVersion(id="exact-media", work_id=work.id, media_kind="EBOOK")
     version = LibraryVersion(
         id="exact-version",
         work_id=work.id,
@@ -93,7 +88,7 @@ def _login_and_volume(client: TestClient, session: Session) -> LibraryVolume:
     session.add(user)
     session.add(work)
     session.flush()
-    session.add_all([version, media, volume])
+    session.add_all([version, volume])
     session.flush()
     session.add(
         LibraryFile(

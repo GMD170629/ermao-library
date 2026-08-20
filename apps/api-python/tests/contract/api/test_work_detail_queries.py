@@ -2,14 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import inspect
-
 from app.core.auth import hash_password
 from app.main import create_app
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVersion,
@@ -17,10 +14,10 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from sqlalchemy import inspect
 
 FORBIDDEN_WORK_DETAIL_FIELDS = {
     "mediaVersions",
-    "versionId",
     "availableMediaKinds",
     "detailTabs",
     "selectedDetailTab",
@@ -151,9 +148,6 @@ def _add_progress(
 def _add_work_with_volumes(db_session, *, volume_count: int = 12) -> None:
     work = _add_work(db_session)
     _add_version(db_session, work_id=work.id, version_id="detail-version")
-    db_session.add(
-        LibraryMediaVersion(id="detail-media", work_id=work.id, media_kind="COMIC")
-    )
     for index in range(volume_count):
         volume_number = index + 1
         _add_volume(
@@ -265,7 +259,6 @@ def test_work_volume_query_pages_deterministically_and_includes_file_summaries(
     assert data["total"] == 12
     assert data["totalPages"] == 3
     assert "mediaKind" not in data
-    assert "versionId" not in data
     assert [volume["id"] for volume in data["volumes"]] == [
         f"detail-volume-{number:02d}" for number in range(6, 11)
     ]
@@ -445,7 +438,7 @@ def test_work_detail_keeps_mixed_formats_in_one_version(client, db_session):
     ]
 
 
-def test_work_detail_returns_without_library_media_version_rows(client, db_session):
+def test_work_detail_returns_directory_versions(client, db_session):
     _login(client, db_session)
     work = _add_work(db_session, work_id="no-media-rows")
     _add_version(db_session, work_id=work.id, version_id="plain-version")
@@ -458,9 +451,6 @@ def test_work_detail_returns_without_library_media_version_rows(client, db_sessi
         sort_order=0,
     )
     db_session.commit()
-    assert db_session.get(LibraryMediaVersion, "plain-version") is None
-    assert db_session.query(LibraryMediaVersion).filter_by(work_id=work.id).count() == 0
-
     book = client.get("/api/works/no-media-rows").json()["data"]["book"]
     assert [version["id"] for version in book["versions"]] == ["plain-version"]
     units = client.get("/api/works/no-media-rows/volumes/plain-volume/reading-units")
@@ -672,4 +662,3 @@ def test_work_detail_openapi_exposes_versions_instead_of_media_tabs() -> None:
     assert "versionId" in version_page
     assert "sourceKey" in version_page
     assert "mediaKind" not in version_page
-    assert "versionId" not in version_page

@@ -2,20 +2,18 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import text
-
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     Library,
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
+from sqlalchemy import text
 from tests.conftest import recreate_application_schema
 
 PASSWORD = "starshipnas"
@@ -97,13 +95,6 @@ def _seed_library(db_session) -> None:
             organized=True,
         ),
     ]
-    media_versions = [
-        LibraryMediaVersion(id="media-a", work_id="work-a", media_kind="EBOOK"),
-        LibraryMediaVersion(id="media-b", work_id="work-b", media_kind="EBOOK"),
-        LibraryMediaVersion(
-            id="media-merged", work_id="work-merged", media_kind="EBOOK"
-        ),
-    ]
     versions = [
         LibraryVersion(id="version-a", work_id="work-a", source_key="__implicit__"),
         LibraryVersion(id="version-b", work_id="work-b", source_key="__implicit__"),
@@ -160,8 +151,6 @@ def _seed_library(db_session) -> None:
     db_session.add_all(folders)
     db_session.flush()
     db_session.add_all(works)
-    db_session.flush()
-    db_session.add_all(media_versions)
     db_session.flush()
     db_session.add_all(versions)
     db_session.flush()
@@ -632,9 +621,8 @@ def test_member_can_access_library_work_without_volumes(db_session) -> None:
 def test_delete_library_removes_catalog_but_keeps_source_files(
     client, db_session, tmp_path
 ) -> None:
-    from sqlalchemy import select
-
     from app.models.library import Library
+    from sqlalchemy import select
 
     library_root = tmp_path / "library"
     library_root.mkdir()

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from app.modules.publications.domain.model import (
     NormalizedPublication,
-    PublicationFingerprint,
     PublicationLink,
+    PublicationRevision,
     PublicationTocEntry,
 )
 from app.modules.publications.domain.navigation import flatten_publication_navigation
@@ -16,8 +16,9 @@ def _publication() -> NormalizedPublication:
         author=None,
         language="zh-CN",
         reading_progression="ltr",
-        fingerprint=PublicationFingerprint(
-            original_file_hash="sha256:" + "a" * 64,
+        revision=PublicationRevision(
+            source_size_bytes=1024,
+            source_mtime_ms=1234,
             parser="test-parser:1",
             normalization="test-normalization:1",
         ),

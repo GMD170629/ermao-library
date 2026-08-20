@@ -4,12 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
-
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingUnit,
     LibraryVersion,
     LibraryVolume,
@@ -27,8 +23,8 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
-    PublicationFingerprint,
     PublicationLink,
+    PublicationRevision,
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
@@ -44,13 +40,15 @@ from app.modules.publications.infrastructure.uow import (
     SqlAlchemyPublicationNavigationLookupUnitOfWork,
     SqlAlchemyPublicationNavigationUnitOfWork,
 )
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _seed_volume(
     db_session: Session, source_path: Path
 ) -> tuple[LibraryVolume, LibraryFile]:
     work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="navigation-work",
         origin="MANUAL",
         title="Publication Navigation",
@@ -58,11 +56,6 @@ def _seed_volume(
         author="作者",
         normalized_author="作者",
         tags="[]",
-    )
-    media = LibraryMediaVersion(
-        id="navigation-media",
-        work_id=work.id,
-        media_kind="EBOOK",
     )
     version = LibraryVersion(
         id="navigation-version",
@@ -89,7 +82,13 @@ def _seed_volume(
         size_bytes=1,
         sort_order=0,
     )
-    db_session.add_all([work, version, media, volume, source])
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(volume)
+    db_session.flush()
+    db_session.add(source)
     db_session.commit()
     return volume, source
 
@@ -97,7 +96,8 @@ def _seed_volume(
 def _publication(
     *,
     toc: tuple[PublicationTocEntry, ...],
-    original_file_hash: str = "a" * 64,
+    source_size_bytes: int = 1,
+    source_mtime_ms: int = 1,
 ) -> NormalizedPublication:
     return NormalizedPublication(
         identifier="urn:test:publication-navigation",
@@ -105,8 +105,9 @@ def _publication(
         author="作者",
         language="zh-CN",
         reading_progression="ltr",
-        fingerprint=PublicationFingerprint(
-            original_file_hash=f"sha256:{original_file_hash}",
+        revision=PublicationRevision(
+            source_size_bytes=source_size_bytes,
+            source_mtime_ms=source_mtime_ms,
             parser="epub-package:test",
             normalization="epub-normalization:test",
         ),
@@ -146,8 +147,8 @@ def _ensure(
         expire_on_commit=False,
     )
     profile = PublicationParserProfile(
-        parser=adapter.publication.fingerprint.parser,
-        normalization=adapter.publication.fingerprint.normalization,
+        parser=adapter.publication.revision.parser,
+        normalization=adapter.publication.revision.normalization,
     )
     return EnsurePublicationNavigation(
         lookup_unit_of_work_factory=lambda: (
@@ -242,7 +243,8 @@ def test_first_access_replaces_legacy_chapters_and_second_access_hits_cache(
     cache = db_session.get(PublicationNavigationCache, volume.id)
     assert cache is not None
     assert cache.file_id == source.id
-    assert cache.original_file_hash == "sha256:" + "a" * 64
+    assert cache.source_size_bytes == source.size_bytes
+    assert cache.source_mtime_ms == source.mtime_ms
     assert cache.chapter_count == 2
     assert cache.projection_version == CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
     assert db_session.get(LibraryVolume, volume.id).chapter_count == 2
@@ -368,7 +370,7 @@ def test_manifest_parse_failure_invalidates_a_matching_cache_before_reraising(
     assert db_session.get(LibraryVolume, volume.id).chapter_count is None
 
 
-def test_source_hash_change_during_parse_cannot_publish_stale_projection(
+def test_source_revision_change_during_parse_cannot_publish_stale_projection(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
@@ -389,7 +391,7 @@ def test_source_hash_change_during_parse_cannot_publish_stale_projection(
             with factory.begin() as mutation:
                 current = mutation.get(LibraryFile, source.id)
                 assert current is not None
-                current.full_hash = "b" * 64
+                current.mtime_ms = source.mtime_ms + 1
             return opened
 
     result = _ensure(db_session, _ChangingAdapter(publication)).execute(
@@ -415,7 +417,6 @@ def test_selected_file_change_regenerates_navigation_for_the_new_file(
     ensure = _ensure(db_session, adapter)
     first = ensure.execute(volume_id=volume.id, access_scope=_ADMIN)
 
-    replacement_hash = "b" * 64
     replacement = LibraryFile(
         id="replacement-navigation-file",
         volume_id=volume.id,
@@ -430,7 +431,8 @@ def test_selected_file_change_regenerates_navigation_for_the_new_file(
     db_session.commit()
     adapter.publication = _publication(
         toc=(PublicationTocEntry(href="Text/two.xhtml", title="新章"),),
-        original_file_hash=replacement_hash,
+        source_size_bytes=replacement.size_bytes,
+        source_mtime_ms=replacement.mtime_ms,
     )
 
     regenerated = ensure.execute(volume_id=volume.id, access_scope=_ADMIN)
@@ -451,7 +453,8 @@ def test_selected_file_change_regenerates_navigation_for_the_new_file(
     cache = db_session.get(PublicationNavigationCache, volume.id)
     assert cache is not None
     assert cache.file_id == replacement.id
-    assert cache.original_file_hash == f"sha256:{replacement_hash}"
+    assert cache.source_size_bytes == replacement.size_bytes
+    assert cache.source_mtime_ms == replacement.mtime_ms
 
 
 def test_unsupported_format_never_invalidates_non_publication_units(

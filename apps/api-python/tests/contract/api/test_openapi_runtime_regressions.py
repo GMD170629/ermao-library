@@ -8,13 +8,11 @@ from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.models.organize import OrganizeRun
 from app.services.library_management import sync_work_facets
 from sqlalchemy import select
 
@@ -49,27 +47,23 @@ def _login_admin(client: TestClient, db_session: Session) -> User:
 
 def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
     target_work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         title="OpenAPI 回归作品",
         normalized_title="openapi 回归作品",
         author="测试作者",
         normalized_author="测试作者",
         tags=json.dumps(["科幻", "收藏", "待删除"], ensure_ascii=False),
-        merge_key="openapi-regression-target",
     )
     source_work = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         title="OpenAPI 回归作品",
         normalized_title="openapi 回归作品",
         author="测试作者",
         normalized_author="测试作者",
         tags=json.dumps(["科幻小说"], ensure_ascii=False),
-        merge_key="openapi-regression-source",
     )
     db_session.add_all([target_work, source_work])
     db_session.flush()
-    target_media = LibraryMediaVersion(work_id=target_work.id, media_kind="EBOOK")
-    source_media = LibraryMediaVersion(work_id=source_work.id, media_kind="EBOOK")
     target_version = LibraryVersion(
         work_id=target_work.id,
         source_key=IMPLICIT_VERSION_SOURCE_KEY,
@@ -78,7 +72,7 @@ def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
         work_id=source_work.id,
         source_key=IMPLICIT_VERSION_SOURCE_KEY,
     )
-    db_session.add_all([target_media, source_media, target_version, source_version])
+    db_session.add_all([target_version, source_version])
     db_session.flush()
     db_session.add_all(
         [
@@ -153,7 +147,7 @@ def test_library_management_endpoints_return_their_documented_contracts(
     db_session: Session,
 ) -> None:
     _login_admin(client, db_session)
-    target_work, source_work = _seed_library(db_session)
+    target_work, _source_work = _seed_library(db_session)
 
     facets_response = client.get("/api/library/facets")
     assert facets_response.status_code == 200
@@ -168,21 +162,7 @@ def test_library_management_endpoints_return_their_documented_contracts(
     category = categories_response.json()["data"]["categories"][0]
     assert {"aliases", "bookCount"} <= category.keys()
 
-    duplicates_response = client.get("/api/library/duplicates")
-    assert duplicates_response.status_code == 200
-    duplicates_data = duplicates_response.json()["data"]
-    assert {
-        "page": 1,
-        "pageSize": 20,
-        "total": 1,
-        "totalPages": 1,
-    }.items() <= duplicates_data.items()
-    duplicate_group = duplicates_data["groups"][0]
-    assert duplicate_group["reasons"] == ["标题与作者规范化后相同"]
-    assert {work["id"] for work in duplicate_group["works"]} == {
-        target_work.id,
-        source_work.id,
-    }
+    assert client.get("/api/library/duplicates").status_code == 404
 
     tag_id = _facet_id(db_session, "科幻")
     rename_response = client.patch(
@@ -251,35 +231,3 @@ def test_library_management_endpoints_return_their_documented_contracts(
         json={"versionName": "修订版"},
     )
     assert retired_edition_response.status_code == 410
-
-
-def test_organize_runs_normalize_legacy_or_invalid_scope(
-    client: TestClient,
-    db_session: Session,
-) -> None:
-    _login_admin(client, db_session)
-    db_session.add_all(
-        [
-            OrganizeRun(
-                id="legacy-empty-scope",
-                trigger="MANUAL",
-                scope_json="{}",
-                status="COMPLETED",
-            ),
-            OrganizeRun(
-                id="legacy-invalid-scope",
-                trigger="MANUAL",
-                scope_json="not-json",
-                status="COMPLETED",
-            ),
-        ]
-    )
-    db_session.commit()
-
-    response = client.get("/api/organize/runs")
-    assert response.status_code == 200
-    for run in response.json()["data"]["runs"]:
-        assert run["scope"] == {
-            "workIds": [],
-            "rules": {"missingMetadata": True, "unrecognized": True},
-        }

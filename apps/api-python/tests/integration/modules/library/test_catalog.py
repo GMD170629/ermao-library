@@ -1,16 +1,14 @@
-from sqlalchemy.orm import Session
-
 from app.core.authorization import authorization_context
 from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
+    Library,
     LibraryFacet,
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.library import Library
 from app.modules.library.application.catalog import (
     CatalogWorkFilter,
     GetCatalogWork,
@@ -18,11 +16,18 @@ from app.modules.library.application.catalog import (
     ListCatalogWorks,
 )
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
+from sqlalchemy.orm import Session
 
 
-def _work(work_id: str, title: str, *, hidden: bool = False) -> LibraryWork:
+def _work(
+    work_id: str,
+    title: str,
+    *,
+    library_id: str = "test-library",
+    hidden: bool = False,
+) -> LibraryWork:
     return LibraryWork(
-            library_id="test-library", 
+        library_id=library_id,
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
@@ -40,25 +45,30 @@ def _add_volume(
     volume_id: str,
     media_kind: str = "EBOOK",
     import_status: str = "COMPLETED",
-    library_id: str | None = None,
     with_file: bool = True,
     hidden: bool = False,
 ) -> None:
-    media = LibraryMediaVersion(
-        id=f"media-{volume_id}",
+    version = LibraryVersion(
+        id=f"version-{volume_id}",
         work_id=work_id,
-        media_kind=media_kind,
+        source_key=f"catalog:version:{volume_id}",
     )
     volume = LibraryVolume(
         id=volume_id,
-        version_id=media.id,
+        version_id=version.id,
         title=f"Volume {volume_id}",
-        format="CBZ" if media_kind == "COMIC" else "EPUB",
+        format={
+            "AUDIOBOOK": "AUDIO",
+            "COMIC": "CBZ",
+        }.get(media_kind, "EPUB"),
         resource_key=f"catalog:{volume_id}",
         import_status=import_status,
         hidden=hidden,
     )
-    db.add_all([media, volume])
+    db.add(version)
+    db.flush()
+    db.add(volume)
+    db.flush()
     if with_file:
         db.add(
             LibraryFile(
@@ -67,9 +77,10 @@ def _add_volume(
                 path=f"books/{volume_id}.bin",
                 kind="BOOK",
                 mime_type=(
-                    "application/zip"
-                    if media_kind == "COMIC"
-                    else "application/epub+zip"
+                    {
+                        "AUDIOBOOK": "audio/mpeg",
+                        "COMIC": "application/zip",
+                    }.get(media_kind, "application/epub+zip")
                 ),
                 size_bytes=123,
             )
@@ -167,38 +178,35 @@ def test_catalog_applies_member_volume_scope_inside_queries(
         can_view_manual_imports=False,
     )
     allowed_folder = Library(
-            organization_mode="FLAT", 
-        id="folder-allowed", name="Allowed", root_path="/allowed"
+        organization_mode="FLAT",
+        id="folder-allowed",
+        name="Allowed",
+        root_path="/allowed",
     )
     denied_folder = Library(
-            organization_mode="FLAT", 
-        id="folder-denied", name="Denied", root_path="/denied"
+        organization_mode="FLAT", id="folder-denied", name="Denied", root_path="/denied"
     )
     db_session.add_all(
         [
             member,
             allowed_folder,
             denied_folder,
-            _work("allowed", "Allowed"),
-            _work("denied", "Denied"),
+            _work("allowed", "Allowed", library_id=allowed_folder.id),
+            _work("denied", "Denied", library_id=denied_folder.id),
             _work("manual", "Manual"),
         ]
     )
     db_session.flush()
-    db_session.add(
-        UserLibraryAccess(user_id=member.id, library_id=allowed_folder.id)
-    )
+    db_session.add(UserLibraryAccess(user_id=member.id, library_id=allowed_folder.id))
     _add_volume(
         db_session,
         work_id="allowed",
         volume_id="allowed",
-        library_id=allowed_folder.id,
     )
     _add_volume(
         db_session,
         work_id="denied",
         volume_id="denied",
-        library_id=denied_folder.id,
     )
     _add_volume(db_session, work_id="manual", volume_id="manual")
     db_session.commit()

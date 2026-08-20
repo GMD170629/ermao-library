@@ -3,11 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from time import monotonic
 
-from fastapi.testclient import TestClient
-from sqlalchemy import update
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
@@ -19,17 +14,30 @@ from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
 from app.models.auth import User
 from app.models.library import (
+    Library,
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.models.settings import SystemSetting
+from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 from tests.support.sqlalchemy import StatementRecorder
 
 
 def _seed_read_surfaces(engine: Engine) -> None:
     with Session(engine) as db:
+        db.add(
+            Library(
+                id="test-library",
+                name="Test Library",
+                root_path="/test-library",
+                organization_mode="FLAT",
+            )
+        )
         db.add(
             User(
                 id="writer-lock-admin",
@@ -40,7 +48,7 @@ def _seed_read_surfaces(engine: Engine) -> None:
             )
         )
         work = LibraryWork(
-            library_id="test-library", 
+            library_id="test-library",
             id="writer-lock-work",
             origin="MANUAL",
             title="Writer lock reader",
@@ -49,14 +57,14 @@ def _seed_read_surfaces(engine: Engine) -> None:
             normalized_author="作者",
             tags="[]",
         )
-        media = LibraryMediaVersion(
-            id="writer-lock-media",
+        version = LibraryVersion(
+            id="writer-lock-version",
             work_id=work.id,
-            media_kind="EBOOK",
+            source_key="writer-lock:version",
         )
         volume = LibraryVolume(
             id="writer-lock-volume",
-            version_id=media.id,
+            version_id=version.id,
             title="电子书",
             format="EPUB",
             resource_key="manual:writer-lock",
@@ -66,9 +74,6 @@ def _seed_read_surfaces(engine: Engine) -> None:
             id="writer-lock-file",
             volume_id=volume.id,
             path="library/writer-lock.epub",
-            fingerprint=f"sha256:{'a' * 64}",
-            full_hash="a" * 64,
-            hash_status="COMPLETED",
             mtime_ms=1,
             kind="EPUB",
             mime_type="application/epub+zip",
@@ -76,7 +81,7 @@ def _seed_read_surfaces(engine: Engine) -> None:
         )
         db.add(work)
         db.commit()
-        db.add(media)
+        db.add(version)
         db.commit()
         db.add(volume)
         db.commit()

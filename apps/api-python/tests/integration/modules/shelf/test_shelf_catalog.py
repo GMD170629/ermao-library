@@ -1,10 +1,8 @@
-from sqlalchemy.orm import Session
-
 from app.core.authorization import authorization_context
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
+    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -14,6 +12,7 @@ from app.modules.shelf.application.catalog import (
     ListCatalogShelves,
 )
 from app.modules.shelf.infrastructure.catalog import SqlAlchemyCatalogShelfQueries
+from sqlalchemy.orm import Session
 
 
 def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) -> None:
@@ -32,7 +31,7 @@ def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) ->
         role="admin",
     )
     visible = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="visible-work",
         title="Visible",
         normalized_title="visible",
@@ -41,7 +40,7 @@ def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) ->
         tags="[]",
     )
     hidden = LibraryWork(
-            library_id="test-library", 
+        library_id="test-library",
         id="hidden-work",
         title="Hidden",
         normalized_title="hidden",
@@ -65,21 +64,23 @@ def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) ->
     )
     db_session.add_all([owner, other, visible, hidden, owned, smart, foreign])
     db_session.flush()
-    media = LibraryMediaVersion(
-        id="shelf-media", work_id=visible.id, media_kind="EBOOK"
+    version = LibraryVersion(
+        id="shelf-version", work_id=visible.id, source_key="shelf:version"
     )
     volume = LibraryVolume(
         id="shelf-volume",
-        version_id=media.id,
+        version_id=version.id,
         title="Shelf Volume",
         format="EPUB",
         resource_key="shelf:volume",
         import_status="COMPLETED",
     )
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(volume)
+    db_session.flush()
     db_session.add_all(
         [
-            media,
-            volume,
             LibraryFile(
                 id="shelf-file",
                 volume_id=volume.id,

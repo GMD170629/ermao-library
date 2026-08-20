@@ -2,20 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def test_fb2_publication_manifest_and_resources_use_direct_adapter(
@@ -48,11 +46,6 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         normalized_title="直接读取 fb2",
         tags="[]",
     )
-    media = LibraryMediaVersion(
-        id="media-fb2-publication",
-        work_id=work.id,
-        media_kind="EBOOK",
-    )
     version = LibraryVersion(
         id="version-fb2-publication",
         work_id=work.id,
@@ -79,7 +72,7 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     )
     db_session.add_all([user, work])
     db_session.flush()
-    db_session.add_all([version, media, volume])
+    db_session.add_all([version, volume])
     db_session.flush()
     db_session.add(source)
     db_session.commit()
