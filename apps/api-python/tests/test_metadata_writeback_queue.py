@@ -9,7 +9,6 @@ from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -57,9 +56,6 @@ def _library_source(
             work_id="work-1",
             source_key=IMPLICIT_VERSION_SOURCE_KEY,
         )
-    )
-    db_session.add(
-        LibraryMediaVersion(id="media-1", work_id="work-1", media_kind="EBOOK")
     )
     db_session.flush()
     db_session.add(
@@ -112,7 +108,7 @@ def test_writeback_uses_immutable_snapshot_and_finishes_after_background_process
     operation_id = enqueue_metadata_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="MANUAL",
     )
     db_session.commit()
@@ -147,7 +143,7 @@ def test_external_change_is_logged_and_removed_without_retry(
     operation_id = enqueue_metadata_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="AUTOMATIC",
     )
     assert process_next_metadata_writeback(db_session, test_settings) is True
@@ -177,7 +173,7 @@ def test_writeback_adds_explicit_volume_number_to_publication_title(
     enqueue_metadata_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="MANUAL",
     )
     db_session.commit()
@@ -201,14 +197,14 @@ def test_queue_capacity_defers_new_preparation_without_dropping_it(
     first = enqueue_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="TEST_FIRST",
         max_pending_targets=1,
     )
     second = enqueue_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="TEST_SECOND",
         max_pending_targets=1,
     )
@@ -253,12 +249,17 @@ def test_multi_media_batch_defers_later_scope_when_capacity_is_full(
     _library_source(db_session, first_source)
     second_stat = second_source.stat()
     db_session.add(
-        LibraryMediaVersion(id="media-2", work_id="work-1", media_kind="AUDIOBOOK")
+        LibraryVersion(
+            id="version-audio",
+            work_id="work-1",
+            source_key="audio",
+        )
     )
+    db_session.flush()
     db_session.add(
         LibraryVolume(
             id="volume-2",
-            version_id="version-default",
+            version_id="version-audio",
             title="有声版",
             format="MP3",
             resource_key="volume-2",
@@ -359,7 +360,7 @@ def test_writeback_can_target_one_volume_in_media_version(
     operation_id = enqueue_metadata_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="MANUAL",
         volume_id="volume-1",
     )
@@ -399,7 +400,7 @@ def test_writeback_prefers_the_target_volumes_cover_over_the_work_cover(
     enqueue_metadata_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="MANUAL",
     )
     assert process_next_metadata_writeback(db_session, test_settings) is True
@@ -427,7 +428,7 @@ def test_writeback_falls_back_to_the_work_cover_when_the_volume_has_none(
     enqueue_metadata_writeback(
         db_session,
         work_id="work-1",
-        media_version_id="media-1",
+        version_id="version-default",
         source="MANUAL",
     )
     assert process_next_metadata_writeback(db_session, test_settings) is True

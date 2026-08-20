@@ -90,7 +90,7 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
         "id": task.id,
         "workId": task.work_id,
         "volumeId": task.volume_id,
-        "mediaVersionId": task.media_version_id,
+        "versionId": task.version_id,
         "importTaskId": task.import_task_id,
         "organizeJobId": task.organize_job_id,
         "status": task.status,

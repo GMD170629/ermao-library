@@ -20,7 +20,6 @@ from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportAsset, ImportTask
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -32,7 +31,6 @@ from app.models.organize import (
     MetadataWritebackTarget,
     OrganizePolicy,
 )
-from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.application.writeback import (
     NULL_SOURCE_REVISION,
@@ -171,6 +169,7 @@ def _visible_volumes_for_work(
     db: Session,
     *,
     work_id: str,
+    version_id: str | None = None,
     volume_id: str | None = None,
 ) -> tuple[LibraryVolume, ...]:
     query = (
@@ -181,6 +180,8 @@ def _visible_volumes_for_work(
             LibraryVolume.hidden.is_(False),
         )
     )
+    if version_id is not None:
+        query = query.where(LibraryVersion.id == version_id)
     if volume_id is not None:
         query = query.where(LibraryVolume.id == volume_id)
     return tuple(db.scalars(query.order_by(*_work_volume_order())).all())
@@ -190,7 +191,7 @@ def load_metadata_writeback_projection(
     db: Session,
     *,
     work_id: str,
-    media_version_id: str | None = None,
+    version_id: str | None = None,
     volume_id: str | None = None,
 ) -> MetadataWritebackProjection:
     """Load an explicit projection; callers prepare intents before their write UoW."""
@@ -198,39 +199,22 @@ def load_metadata_writeback_projection(
     work = db.scalar(select(LibraryWork).where(LibraryWork.id == work_id))
     if work is None:
         raise ValueError("作品不存在")
-    media_rows = tuple(
-        db.execute(
-            select(LibraryMediaVersion.id, LibraryMediaVersion.media_kind)
-            .where(LibraryMediaVersion.work_id == work_id)
-            .order_by(
-                LibraryMediaVersion.created_at.asc(),
-                LibraryMediaVersion.id.asc(),
+    if version_id is not None:
+        selected_version = db.scalar(
+            select(LibraryVersion.id).where(
+                LibraryVersion.id == version_id,
+                LibraryVersion.work_id == work_id,
             )
-        ).all()
-    )
-    media_by_kind = {str(row.media_kind): str(row.id) for row in media_rows}
-    if media_version_id is not None:
-        selected_media = next(
-            (row for row in media_rows if str(row.id) == media_version_id),
-            None,
         )
-        if selected_media is None:
-            raise ValueError("媒介版本不存在")
-        selected_kind = str(selected_media.media_kind)
-        media_ids = (str(selected_media.id),)
-    else:
-        selected_kind = None
-        media_ids = tuple(str(row.id) for row in media_rows)
-    matched_volumes: list[tuple[LibraryVolume, str]] = []
-    for volume in _visible_volumes_for_work(db, work_id=work_id, volume_id=volume_id):
-        volume_kind = media_kind_of(volume)
-        if selected_kind is not None and volume_kind != selected_kind:
-            continue
-        matched_media_id = media_by_kind.get(volume_kind)
-        if matched_media_id is None:
-            continue
-        matched_volumes.append((volume, matched_media_id))
-    volume_rows = tuple(volume for volume, _media_id in matched_volumes)
+        if selected_version is None:
+            raise ValueError("版本不存在")
+    volume_rows = _visible_volumes_for_work(
+        db,
+        work_id=work_id,
+        version_id=version_id,
+        volume_id=volume_id,
+    )
+    version_ids = tuple(dict.fromkeys(volume.version_id for volume in volume_rows))
     volume_ids = tuple(volume.id for volume in volume_rows)
     file_rows = (
         tuple(
@@ -292,11 +276,11 @@ def load_metadata_writeback_projection(
         series_index=work.series_index,
         cover_path=work.cover_path,
         source_revision=work.updated_at or NULL_SOURCE_REVISION,
-        media_version_ids=media_ids,
+        version_ids=version_ids,
         volumes=tuple(
             MetadataWritebackVolumeProjection(
                 id=volume.id,
-                media_version_id=media_id,
+                version_id=volume.version_id,
                 title=volume.title,
                 description=volume.description,
                 volume_index=volume.volume_index,
@@ -309,7 +293,7 @@ def load_metadata_writeback_projection(
                 isbn=volume.isbn,
                 cover_path=volume.cover_path,
             )
-            for volume, media_id in matched_volumes
+            for volume in volume_rows
         ),
         files=tuple(
             MetadataWritebackFileProjection(
@@ -361,7 +345,7 @@ def enqueue_prepared_writeback_intents(
         {
             "id": intent.operation_id,
             "work_id": intent.work_id,
-            "media_version_id": intent.media_version_id,
+            "version_id": intent.version_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,
             "status": "PENDING",
@@ -378,7 +362,7 @@ def enqueue_prepared_writeback_intents(
             "id": intent.preparation_id,
             "operation_id": intent.operation_id,
             "work_id": intent.work_id,
-            "media_version_id": intent.media_version_id,
+            "version_id": intent.version_id,
             "volume_id": intent.volume_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,
@@ -460,7 +444,7 @@ def enqueue_writeback(
     db: Session,
     *,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     source: str,
     lookup_task_id: str | None = None,
     volume_id: str | None = None,
@@ -470,7 +454,7 @@ def enqueue_writeback(
     projection = load_metadata_writeback_projection(
         db,
         work_id=work_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         volume_id=volume_id,
     )
     intents = prepare_metadata_writeback_intents(

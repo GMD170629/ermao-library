@@ -125,7 +125,7 @@ class OrganizeJob(HttpContractModel):
     id: str
     run_id: str | None = Field(alias="runId")
     volume_id: str | None = Field(alias="volumeId")
-    media_version_id: str | None = Field(default=None, alias="mediaVersionId")
+    version_id: str | None = Field(default=None, alias="versionId")
     trigger: str
     status: str
     status_category: Literal["SUCCESS", "FAILED", "RECOGNIZING", "WAITING"] = Field(

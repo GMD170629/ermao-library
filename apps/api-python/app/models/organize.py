@@ -185,7 +185,7 @@ class OrganizeJob(Base):
         ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    media_version_id: Mapped[str | None] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         "mediaVersionId",
         String(191),
         ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
@@ -262,7 +262,7 @@ class MetadataLookupTask(Base):
         ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    media_version_id: Mapped[str | None] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         "mediaVersionId",
         String(191),
         ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
@@ -344,10 +344,10 @@ class MetadataWritebackOperation(Base):
         ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    media_version_id: Mapped[str] = mapped_column(
+    version_id: Mapped[str] = mapped_column(
         "mediaVersionId",
         String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
     lookup_task_id: Mapped[str | None] = mapped_column(
@@ -431,11 +431,11 @@ class MetadataWritebackPreparation(Base):
         ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    media_version_id: Mapped[str | None] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         "mediaVersionId",
         String(191),
         ForeignKey(
-            "LibraryMediaVersion.id",
+            "LibraryVersion.id",
             ondelete="CASCADE",
             onupdate="CASCADE",
         ),

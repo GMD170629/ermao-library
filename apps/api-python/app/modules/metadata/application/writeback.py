@@ -29,7 +29,7 @@ class MetadataWritebackImportProjection:
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackVolumeProjection:
     id: str
-    media_version_id: str
+    version_id: str
     title: str
     description: str | None
     volume_index: float | None
@@ -54,7 +54,7 @@ class MetadataWritebackProjection:
     series_index: float | None
     cover_path: str | None
     source_revision: datetime | None
-    media_version_ids: tuple[str, ...]
+    version_ids: tuple[str, ...]
     volumes: tuple[MetadataWritebackVolumeProjection, ...]
     files: tuple[MetadataWritebackFileProjection, ...]
     imports: tuple[MetadataWritebackImportProjection, ...]
@@ -65,7 +65,7 @@ class PreparedWritebackIntent:
     operation_id: str
     preparation_id: str
     work_id: str
-    media_version_id: str
+    version_id: str
     lookup_task_id: str | None
     volume_id: str | None
     source: str
@@ -117,9 +117,9 @@ def prepare_metadata_writeback_intents(
                 "assetPaths": list(imported.asset_paths),
             }
         )
-    volumes_by_media: dict[str, list[dict[str, object]]] = {}
+    volumes_by_version: dict[str, list[dict[str, object]]] = {}
     for volume in projection.volumes:
-        volumes_by_media.setdefault(volume.media_version_id, []).append(
+        volumes_by_version.setdefault(volume.version_id, []).append(
             {
                 "volumeId": volume.id,
                 "payload": {
@@ -151,9 +151,9 @@ def prepare_metadata_writeback_intents(
 
     revision = (projection.source_revision or NULL_SOURCE_REVISION).isoformat()
     intents: list[PreparedWritebackIntent] = []
-    for media_version_id in projection.media_version_ids:
+    for version_id in projection.version_ids:
         snapshot_json = json.dumps(
-            {"volumes": volumes_by_media.get(media_version_id, [])},
+            {"volumes": volumes_by_version.get(version_id, [])},
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -161,7 +161,7 @@ def prepare_metadata_writeback_intents(
         key_input = "\0".join(
             (
                 projection.work_id,
-                media_version_id,
+                version_id,
                 volume_id or "",
                 lookup_task_id or "",
                 source,
@@ -175,7 +175,7 @@ def prepare_metadata_writeback_intents(
                 operation_id=f"metadata_writeback_{digest}",
                 preparation_id=f"metadata_writeback_preparation_{digest}",
                 work_id=projection.work_id,
-                media_version_id=media_version_id,
+                version_id=version_id,
                 lookup_task_id=lookup_task_id,
                 volume_id=volume_id,
                 source=source,

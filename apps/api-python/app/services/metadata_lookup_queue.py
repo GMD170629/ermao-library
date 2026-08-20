@@ -879,8 +879,8 @@ def process_metadata_lookup_task(
             projection = writeback_queue.load_metadata_writeback_projection(
                 db,
                 work_id=str(work["id"]),
-                media_version_id=(
-                    str(task["mediaVersionId"]) if task.get("mediaVersionId") else None
+                version_id=(
+                    str(task["versionId"]) if task.get("versionId") else None
                 ),
             )
             db.close()

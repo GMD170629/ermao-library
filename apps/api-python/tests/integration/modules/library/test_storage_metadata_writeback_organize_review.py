@@ -6,7 +6,6 @@ import pytest
 
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryReadingUnit,
     LibraryVersion,
     LibraryVolume,
@@ -33,8 +32,7 @@ READ_PATH_SOURCES = (
     API_ROOT / "app/modules/organize/infrastructure/review.py",
 )
 FORBIDDEN_BINDINGS = (
-    "LibraryMediaVersion.id == LibraryVolume.version_id",
-    "LibraryVolume.version_id.in_(media_version_ids)",
+    "LibraryMediaVersion",
 )
 
 
@@ -70,23 +68,6 @@ def _add_version(
     db_session.add(version)
     db_session.flush()
     return version
-
-
-def _add_media(
-    db_session,
-    *,
-    work_id: str,
-    media_id: str,
-    media_kind: str,
-) -> LibraryMediaVersion:
-    media = LibraryMediaVersion(
-        id=media_id,
-        work_id=work_id,
-        media_kind=media_kind,
-    )
-    db_session.add(media)
-    db_session.flush()
-    return media
 
 
 def _add_volume(
@@ -130,12 +111,6 @@ def _add_file(db_session, *, volume_id: str, file_id: str) -> LibraryFile:
 def _seed_mismatched_ebook_work(db_session) -> None:
     work = _add_work(db_session)
     _add_version(db_session, work_id=work.id, version_id="version-default")
-    _add_media(
-        db_session,
-        work_id=work.id,
-        media_id="media-ebook",
-        media_kind="EBOOK",
-    )
     _add_volume(
         db_session,
         version_id="version-default",
@@ -160,10 +135,6 @@ def _seed_mismatched_ebook_work(db_session) -> None:
 
 def test_storage_collects_complete_graph_when_version_ids_differ(db_session) -> None:
     _seed_mismatched_ebook_work(db_session)
-    media = db_session.get(LibraryMediaVersion, "media-ebook")
-    assert media is not None
-    db_session.delete(media)
-    db_session.commit()
 
     work_cover, volumes, files = collect_storage_values(db_session, "work-1")
 
@@ -176,33 +147,31 @@ def test_storage_collects_complete_graph_when_version_ids_differ(db_session) -> 
     assert db_session.get(LibraryReadingUnit, "unit-1").volume_id == "volume-1"
 
 
-def test_metadata_writeback_projection_uses_real_media_version_id(
+def test_metadata_writeback_projection_uses_directory_version_id(
     db_session,
 ) -> None:
     _seed_mismatched_ebook_work(db_session)
 
     projection = load_metadata_writeback_projection(db_session, work_id="work-1")
 
-    assert projection.media_version_ids == ("media-ebook",)
+    assert projection.version_ids == ("version-default",)
     assert len(projection.volumes) == 1
-    assert projection.volumes[0].media_version_id == "media-ebook"
-    assert projection.volumes[0].media_version_id != "version-default"
+    assert projection.volumes[0].version_id == "version-default"
     assert projection.volumes[0].id == "volume-1"
 
 
-def test_explicit_media_version_id_selects_volume_by_media_kind(db_session) -> None:
+def test_explicit_version_id_selects_only_that_directory_version(db_session) -> None:
     work = _add_work(db_session)
-    _add_version(db_session, work_id=work.id, version_id="version-default")
-    _add_media(db_session, work_id=work.id, media_id="media-ebook", media_kind="EBOOK")
-    _add_media(
+    _add_version(db_session, work_id=work.id, version_id="version-ebook")
+    _add_version(
         db_session,
         work_id=work.id,
-        media_id="media-audiobook",
-        media_kind="AUDIOBOOK",
+        version_id="version-audiobook",
+        source_key="audio-source",
     )
     _add_volume(
         db_session,
-        version_id="version-default",
+        version_id="version-ebook",
         volume_id="ebook-volume",
         title="电子书",
         fmt="EPUB",
@@ -210,7 +179,7 @@ def test_explicit_media_version_id_selects_volume_by_media_kind(db_session) -> N
     )
     _add_volume(
         db_session,
-        version_id="version-default",
+        version_id="version-audiobook",
         volume_id="audio-volume",
         title="有声书",
         fmt="MP3",
@@ -221,13 +190,12 @@ def test_explicit_media_version_id_selects_volume_by_media_kind(db_session) -> N
     projection = load_metadata_writeback_projection(
         db_session,
         work_id="work-1",
-        media_version_id="media-audiobook",
+        version_id="version-audiobook",
     )
 
-    assert projection.media_version_ids == ("media-audiobook",)
+    assert projection.version_ids == ("version-audiobook",)
     assert [volume.id for volume in projection.volumes] == ["audio-volume"]
-    assert projection.volumes[0].media_version_id == "media-audiobook"
-    assert projection.volumes[0].media_version_id != "version-default"
+    assert projection.volumes[0].version_id == "version-audiobook"
 
 
 def test_explicit_volume_id_belongs_to_work_through_library_version(
@@ -241,13 +209,6 @@ def test_explicit_volume_id_belongs_to_work_through_library_version(
         work_id=other.id,
         version_id="version-other",
         source_key="other-source",
-    )
-    _add_media(db_session, work_id=work.id, media_id="media-ebook", media_kind="EBOOK")
-    _add_media(
-        db_session,
-        work_id=other.id,
-        media_id="media-other",
-        media_kind="EBOOK",
     )
     _add_volume(
         db_session,
@@ -271,8 +232,7 @@ def test_explicit_volume_id_belongs_to_work_through_library_version(
         volume_id="owned-volume",
     )
     assert [volume.id for volume in owned.volumes] == ["owned-volume"]
-    assert owned.volumes[0].media_version_id == "media-ebook"
-    assert owned.volumes[0].media_version_id != "version-default"
+    assert owned.volumes[0].version_id == "version-default"
 
     foreign = load_metadata_writeback_projection(
         db_session,
@@ -281,15 +241,15 @@ def test_explicit_volume_id_belongs_to_work_through_library_version(
     )
     assert foreign.volumes == ()
 
-    with pytest.raises(ValueError, match="媒介版本不存在"):
+    with pytest.raises(ValueError, match="版本不存在"):
         load_metadata_writeback_projection(
             db_session,
             work_id="work-1",
-            media_version_id="media-other",
+            version_id="version-other",
         )
 
 
-def test_writeback_does_not_forge_media_version_id_without_media_row(
+def test_writeback_needs_only_directory_version_and_volume(
     db_session,
 ) -> None:
     work = _add_work(db_session)
@@ -309,8 +269,8 @@ def test_writeback_does_not_forge_media_version_id_without_media_row(
         volume_id="volume-1",
     )
 
-    assert projection.media_version_ids == ()
-    assert projection.volumes == ()
+    assert projection.version_ids == ("version-default",)
+    assert [volume.id for volume in projection.volumes] == ["volume-1"]
 
 
 def test_eligibility_returns_directory_version_and_volume_when_ids_differ(
@@ -326,7 +286,6 @@ def test_eligibility_returns_directory_version_and_volume_when_ids_differ(
 def test_review_lists_all_volumes_without_id_alignment(db_session) -> None:
     work = _add_work(db_session)
     _add_version(db_session, work_id=work.id, version_id="version-default")
-    _add_media(db_session, work_id=work.id, media_id="media-ebook", media_kind="EBOOK")
     _add_volume(
         db_session,
         version_id="version-default",
@@ -419,7 +378,7 @@ def test_review_orders_volumes_by_stable_version_then_volume_keys(
     assert earliest_volume_id(db_session, "work-1") == "implicit-early"
 
 
-def test_read_paths_do_not_bind_media_version_ids_to_volumes() -> None:
+def test_read_paths_do_not_use_legacy_media_versions() -> None:
     for source_path in READ_PATH_SOURCES:
         source = source_path.read_text(encoding="utf-8")
         for fragment in FORBIDDEN_BINDINGS:

@@ -17,7 +17,7 @@ def test_null_legacy_source_revision_uses_stable_epoch_sentinel() -> None:
         series_index=None,
         cover_path=None,
         source_revision=None,
-        media_version_ids=("legacy-media",),
+        version_ids=("version-1",),
         volumes=(),
         files=(),
         imports=(),

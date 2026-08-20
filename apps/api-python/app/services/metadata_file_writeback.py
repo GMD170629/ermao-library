@@ -26,13 +26,13 @@ def load_metadata_writeback_projection(
     db: Session,
     *,
     work_id: str,
-    media_version_id: str | None = None,
+    version_id: str | None = None,
     volume_id: str | None = None,
 ) -> MetadataWritebackProjection:
     return writeback_queue.load_metadata_writeback_projection(
         db,
         work_id=work_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         volume_id=volume_id,
     )
 
@@ -48,7 +48,7 @@ def enqueue_metadata_writeback(
     db: Session,
     *,
     work_id: str,
-    media_version_id: str,
+    version_id: str,
     source: str,
     lookup_task_id: str | None = None,
     volume_id: str | None = None,
@@ -56,7 +56,7 @@ def enqueue_metadata_writeback(
     result = writeback_queue.enqueue_writeback(
         db,
         work_id=work_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         source=source,
         lookup_task_id=lookup_task_id,
         volume_id=volume_id,
@@ -71,7 +71,7 @@ def schedule_work_metadata_writebacks(
     work_id: str,
     source: str,
     lookup_task_id: str | None = None,
-    media_version_id: str | None = None,
+    version_id: str | None = None,
     volume_id: str | None = None,
     settings: Settings | None = None,
 ) -> tuple[str, ...]:
@@ -83,7 +83,7 @@ def schedule_work_metadata_writebacks(
     projection = writeback_queue.load_metadata_writeback_projection(
         db,
         work_id=work_id,
-        media_version_id=media_version_id,
+        version_id=version_id,
         volume_id=volume_id,
     )
     intents = prepare_metadata_writeback_intents(

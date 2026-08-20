@@ -9,7 +9,7 @@ import pytest
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import LibraryMediaVersion, LibraryWork
+from app.models.library import Library, LibraryVersion, LibraryWork
 from app.models.organize import (
     MetadataWritebackOperation,
     MetadataWritebackPreparation,
@@ -25,8 +25,17 @@ def _seed_claim_rows(engine, source: Path) -> None:
     now = datetime.now(UTC)
     with Session(engine) as db, db.begin():
         db.add(
+            Library(
+                id="test-library",
+                name="Test Library",
+                root_path=str(source.parent),
+                organization_mode="FLAT",
+            )
+        )
+    with Session(engine) as db, db.begin():
+        db.add(
             LibraryWork(
-            library_id="test-library", 
+                library_id="test-library",
                 id="claim-work",
                 title="Claim",
                 normalized_title="claim",
@@ -37,10 +46,10 @@ def _seed_claim_rows(engine, source: Path) -> None:
         )
     with Session(engine) as db, db.begin():
         db.add(
-            LibraryMediaVersion(
-                id="claim-media",
+            LibraryVersion(
+                id="claim-version",
                 work_id="claim-work",
-                media_kind="EBOOK",
+                source_key="claim-source",
             )
         )
     with Session(engine) as db, db.begin():
@@ -48,7 +57,7 @@ def _seed_claim_rows(engine, source: Path) -> None:
             MetadataWritebackOperation(
                 id="claim-operation",
                 work_id="claim-work",
-                media_version_id="claim-media",
+                version_id="claim-version",
                 source="TEST",
                 status="PENDING",
                 total_targets=1,
@@ -61,7 +70,7 @@ def _seed_claim_rows(engine, source: Path) -> None:
                     id="claim-preparation",
                     operation_id="claim-operation",
                     work_id="claim-work",
-                    media_version_id="claim-media",
+                    version_id="claim-version",
                     source="TEST",
                     idempotency_key="claim-preparation-key",
                     source_revision="revision",

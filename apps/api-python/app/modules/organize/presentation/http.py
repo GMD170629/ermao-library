@@ -159,7 +159,7 @@ def _organize_job_view(
         "id": job.get("id"),
         "runId": job.get("runId"),
         "volumeId": job.get("volumeId"),
-        "mediaVersionId": job.get("mediaVersionId"),
+        "versionId": job.get("versionId"),
         "trigger": job.get("trigger") or "LEGACY",
         "status": raw_status,
         "statusCategory": status_category,

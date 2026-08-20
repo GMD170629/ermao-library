@@ -237,7 +237,7 @@ def create_organize_run(
             task_id=_id("metadata_lookup"),
             work_id=str(work["id"]),
             volume_id=selections[str(work["id"])][2],
-            media_version_id=selections[str(work["id"])][0],
+            version_id=selections[str(work["id"])][0],
             provider_order=tuple(provider_plans[str(work["id"])]),
             reasons=tuple(str(reason) for reason in work.get("reasonCodes") or []),
         )
@@ -304,7 +304,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     selection = organize_eligibility.first_version_selection_for_work(
         db,
         str(job["workId"]),
-        str(job.get("mediaVersionId") or "") or None,
+        str(job.get("versionId") or "") or None,
     )
     if selection is None:
         raise ValueError("作品没有可整理的媒介版本")
@@ -324,7 +324,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         task_id=new_task_id,
         work_id=str(job["workId"]),
         volume_id=volume_id,
-        media_version_id=version_id,
+        version_id=version_id,
         provider_order=tuple(providers),
         run_id=run_id,
         timestamp=now,

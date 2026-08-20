@@ -45,7 +45,7 @@ class PreparedOrganizeJobEnqueue:
     task_id: str
     work_id: str
     volume_id: str | None
-    media_version_id: str | None
+    version_id: str | None
     provider_order: tuple[str, ...]
     reasons: tuple[str, ...]
 

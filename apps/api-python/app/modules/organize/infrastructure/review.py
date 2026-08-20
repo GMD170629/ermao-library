@@ -169,7 +169,7 @@ def insert_organize_job(
         "runId": None,
         "workId": work_id,
         "volumeId": volume_id,
-        "mediaVersionId": None,
+        "versionId": None,
         "importTaskId": None,
         "trigger": "LEGACY",
         "status": status,
