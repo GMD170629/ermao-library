@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import zipfile
 from pathlib import Path
 
@@ -20,7 +19,8 @@ def _source(path: Path) -> PublicationSource:
         file_id="epub-file",
         source_format="epub",
         path=str(path),
-        full_hash=hashlib.sha256(path.read_bytes()).hexdigest(),
+        size_bytes=path.stat().st_size,
+        mtime_ms=int(path.stat().st_mtime * 1000),
         title="Fallback",
         author=None,
     )
