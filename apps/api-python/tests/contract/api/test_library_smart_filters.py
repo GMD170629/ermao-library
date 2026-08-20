@@ -553,31 +553,19 @@ def test_filter_options_are_bounded_and_author_uses_complete_raw_value(
     }
 
 
-def test_tag_filter_options_wait_for_index_and_then_use_facet_links(
+def test_tag_filter_options_use_persisted_facet_links_without_migration_barrier(
     client: TestClient,
     db_session: Session,
 ) -> None:
     user = _login_admin(client, db_session)
     _add_filter_matrix_fixture(db_session, user)
 
-    pending = client.get(
+    response = client.get(
         "/api/library/filter-options",
         params={"source": "tags", "query": "科"},
     )
-    assert pending.status_code == 200
-    assert pending.json()["data"]["options"] == []
-    assert pending.json()["data"]["indexReady"] is False
-
-    for work in db_session.query(LibraryWork).all():
-        work.facet_index_version = 1
-    db_session.commit()
-
-    ready = client.get(
-        "/api/library/filter-options",
-        params={"source": "tags", "query": "科"},
-    )
-    assert ready.status_code == 200
-    assert ready.json()["data"] == {
+    assert response.status_code == 200
+    assert response.json()["data"] == {
         "source": "tags",
         "query": "科",
         "options": [{"value": "科幻", "label": "科幻", "count": 1}],
@@ -628,7 +616,6 @@ def test_filter_schema_size_and_option_query_stay_bounded_at_high_cardinality(
                     author=f"Unique Author {index}",
                     normalized_author=f"unique author {index}",
                     tags='["must-not-be-read"]',
-                    facet_index_version=1,
                 )
                 for index in range(start, stop)
             ]

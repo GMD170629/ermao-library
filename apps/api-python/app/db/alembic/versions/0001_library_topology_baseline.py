@@ -12,7 +12,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = "0001_library_topology_baseline"
 down_revision: str | Sequence[str] | None = None
@@ -583,9 +582,6 @@ def upgrade() -> None:
         sa.Column("hidden", sa.Boolean(), server_default="0", nullable=False),
         sa.Column("organized", sa.Boolean(), server_default="0", nullable=False),
         sa.Column(
-            "facetIndexVersion", sa.Integer(), server_default="0", nullable=False
-        ),
-        sa.Column(
             "createdAt",
             sa.BigInteger(),
             server_default=(sa.func.unixepoch() * 1000),
@@ -603,11 +599,6 @@ def upgrade() -> None:
     with op.batch_alter_table("LibraryWork", schema=None) as batch_op:
         batch_op.create_index(
             "LibraryWork_createdAt_id_idx", ["createdAt", "id"], unique=False
-        )
-        batch_op.create_index(
-            "LibraryWork_facetIndexVersion_id_idx",
-            ["facetIndexVersion", "id"],
-            unique=False,
         )
         batch_op.create_index(
             "LibraryWork_hidden_createdAt_id_idx",
@@ -1243,7 +1234,6 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(length=191), nullable=False),
         sa.Column("mimeType", sa.String(length=191), nullable=False),
         sa.Column("sizeBytes", sa.Integer(), server_default="0", nullable=False),
-        sa.Column("pageIndexVersion", sa.Integer(), server_default="0", nullable=False),
         sa.Column("durationMs", sa.Integer(), nullable=True),
         sa.Column("codec", sa.String(length=191), nullable=True),
         sa.Column("bitrate", sa.Integer(), nullable=True),
@@ -1267,11 +1257,6 @@ def upgrade() -> None:
     with op.batch_alter_table("LibraryFile", schema=None) as batch_op:
         batch_op.create_index(
             "LibraryFile_filePathHash_key", ["filePathHash"], unique=True
-        )
-        batch_op.create_index(
-            "LibraryFile_kind_pageIndexVersion_id_idx",
-            ["kind", "pageIndexVersion", "id"],
-            unique=False,
         )
         batch_op.create_index("LibraryFile_pathKey_idx", ["pathKey"], unique=False)
         batch_op.create_index("LibraryFile_path_key", ["path"], unique=True)

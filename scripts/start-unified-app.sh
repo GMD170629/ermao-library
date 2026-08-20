@@ -40,7 +40,7 @@ fi
 
 (
   cd "$PYTHON_API_DIR"
-  python -m app.bootstrap.startup_data_migrations
+  python -m app.bootstrap.prestart
 )
 
 (

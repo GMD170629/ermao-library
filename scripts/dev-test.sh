@@ -113,7 +113,7 @@ export STORAGE_ROOT SESSION_SECRET WEB_PORT ERMAO_MOBI_CORE_LIBRARY
 
 (
   cd apps/api-python
-  uv run python -m app.bootstrap.startup_data_migrations
+  uv run python -m app.bootstrap.prestart
 )
 
 echo "Starting test service:"

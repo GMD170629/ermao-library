@@ -11,16 +11,13 @@ from pathlib import Path
 from sqlalchemy.exc import OperationalError
 
 from app.bootstrap.imports import persist_import_queue_operation_checkpoint
-from app.bootstrap.startup_data_migrations import (
-    verify_startup_data_migrations_complete,
-)
 from app.bootstrap.metadata import build_automatic_metadata_request_gate
+from app.bootstrap.prestart import verify_current_schema
 from app.core.config import get_settings
 from app.db.session import (
     BackgroundSessionLocal,
     HeartbeatSessionLocal,
     MetadataMaintenanceSessionLocal,
-    SessionLocal,
     engine,
 )
 from app.modules.imports.application.queue_control import (
@@ -79,7 +76,7 @@ def _persist_queue_operation_status(
 
 def main() -> None:
     settings = get_settings()
-    verify_startup_data_migrations_complete(engine, SessionLocal)
+    verify_current_schema(engine)
     manager = WorkerManager(BackgroundSessionLocal, settings)
     persistent_import_worker = start_persistent_import_worker(
         BackgroundSessionLocal,
@@ -205,7 +202,9 @@ def main() -> None:
                 queue_operation_id = None
                 queue_operation_action = None
                 queue_operation_actor_id = None
-        except Exception as exc:
+        # Worker loop is the process containment boundary and must persist an
+        # explicit terminal checkpoint for every unexpected task failure.
+        except Exception as exc:  # noqa: BLE001
             failed_operation_id = queue_operation_id
             failed_action = queue_operation_action or "restart"
             if failed_operation_id:

@@ -62,7 +62,9 @@ def wait_for_health(base_url: str, process: subprocess.Popen[str]) -> None:
             last_error = RuntimeError(
                 f"unexpected health response {response.status_code}: {payload}"
             )
-        except Exception as exc:
+        # Health polling must retain the last transport or decoding failure
+        # while the independently managed sample process is still starting.
+        except Exception as exc:  # noqa: BLE001
             last_error = exc
         time.sleep(0.25)
     raise RuntimeError(f"health check timed out: {last_error}")
@@ -255,7 +257,7 @@ def main() -> None:
             [
                 sys.executable,
                 "-m",
-                "app.bootstrap.startup_data_migrations",
+                "app.bootstrap.prestart",
             ],
             cwd=API_ROOT,
             env=env,

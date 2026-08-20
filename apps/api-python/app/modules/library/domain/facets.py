@@ -10,7 +10,6 @@ from typing import Literal
 FacetKind = Literal["AUTHOR", "TAG", "SERIES"]
 
 FACET_KINDS = frozenset({"AUTHOR", "TAG", "SERIES"})
-CURRENT_FACET_INDEX_VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)

@@ -30,7 +30,7 @@ function runStartupDataMigrations(env) {
   return new Promise((resolve, reject) => {
     const migration = spawn(
       'uv',
-      ['run', '--extra', 'dev', 'python', '-m', 'app.bootstrap.startup_data_migrations'],
+      ['run', '--extra', 'dev', 'python', '-m', 'app.bootstrap.prestart'],
       {
         cwd: apiRoot,
         env,
@@ -116,25 +116,11 @@ async function main() {
     const ping = await fetch(`http://127.0.0.1:${port}/api/__db-ping`);
     if (!ping.ok) throw new Error(`/api/__db-ping returned ${ping.status}`);
     await import('node:fs/promises').then(({ access }) => access(join(storageRoot, 'database/shuku.sqlite3')));
-    const startupMigrations = [
-      'library_facet_index_data_migration',
-      'comic_page_index_data_migration'
-    ];
-    for (const migration of startupMigrations) {
-      const startedVisible = migrationOutput.includes(`${migration} outcome=started`);
-      const successVisible = migrationOutput.includes(`${migration} outcome=success`);
-      if (!startedVisible || !successVisible) {
-        throw new Error(`${migration} lifecycle was not visible before API launch. Output: ${migrationOutput}`);
-      }
+    if (!migrationOutput.includes('prestart outcome=success')) {
+      throw new Error(`prestart did not report success. Output: ${migrationOutput}`);
     }
-    if (!migrationOutput.includes('startup_data_migrations outcome=success')) {
-      throw new Error(`startup migration barrier did not report success. Output: ${migrationOutput}`);
-    }
-    if (!runtimeOutput.includes('startup_data_migration_barrier outcome=ready')) {
-      throw new Error(`API did not verify the completed migration barrier. Output: ${runtimeOutput}`);
-    }
-    if (runtimeOutput.includes('data_migration outcome=started')) {
-      throw new Error(`API reran data migrations after process launch. Output: ${runtimeOutput}`);
+    if (!runtimeOutput.includes('schema_barrier outcome=ready')) {
+      throw new Error(`API did not verify the current schema. Output: ${runtimeOutput}`);
     }
     console.log(`Python API runtime smoke ok on port ${port}`);
     const output = `${migrationOutput}${runtimeOutput}`;

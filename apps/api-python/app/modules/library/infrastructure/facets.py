@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from hashlib import sha1
 from typing import Any
 
-from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_, update
+from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
@@ -20,7 +20,7 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.modules.library.domain.facets import CURRENT_FACET_INDEX_VERSION, FACET_KINDS
+from app.modules.library.domain.facets import FACET_KINDS
 from app.services.book_identity import UNKNOWN_AUTHOR, normalize_identity_part
 
 
@@ -198,11 +198,7 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
                 LibraryFacet.kind,
                 LibraryFacet.normalized_name,
                 LibraryFacet.id,
-            ).where(
-                tuple_(LibraryFacet.kind, LibraryFacet.normalized_name).in_(
-                    chunk
-                )
-            )
+            ).where(tuple_(LibraryFacet.kind, LibraryFacet.normalized_name).in_(chunk))
         )
         facet_ids.update(
             {(str(row.kind), str(row.normalized_name)): str(row.id) for row in rows}
@@ -223,9 +219,7 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
     ]
     persisted_work_ids = tuple(work_id for work_id, _values in prepared)
     db.execute(
-        delete(LibraryWorkFacet).where(
-            LibraryWorkFacet.work_id.in_(persisted_work_ids)
-        )
+        delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id.in_(persisted_work_ids))
     )
     for chunk in sqlite_parameter_chunks(links, parameters_per_row=4):
         db.execute(
@@ -235,15 +229,6 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
                 index_elements=[LibraryWorkFacet.facet_id, LibraryWorkFacet.work_id]
             )
         )
-
-    db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id.in_(persisted_work_ids))
-        .values(
-            facet_index_version=CURRENT_FACET_INDEX_VERSION,
-            updated_at=LibraryWork.updated_at,
-        )
-    )
 
 
 def count_categories(db: Session, kind: str, search: str = "") -> int:

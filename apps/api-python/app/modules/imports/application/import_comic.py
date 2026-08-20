@@ -7,7 +7,6 @@ import logging
 import re
 from pathlib import Path
 
-from app.contracts.comic_page_index import CURRENT_COMIC_PAGE_INDEX_VERSION
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.comic_types import ComicArchiveInspection
@@ -23,18 +22,18 @@ from app.modules.imports.application.identity_resolution import (
     resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
+    _bound_topology_target,
     _bracketed_folder_metadata,
     _classification_columns,
     _classification_result_type,
     _clean_title_part,
-    _bound_topology_target,
     _file_resource_key,
     _finalize_work_cover,
     _hash_text,
     _id,
-    _insert_identity_metadata,
     _import_version,
     _import_work,
+    _insert_identity_metadata,
     _log_import,
     _now,
     _persist_import_volume,
@@ -234,7 +233,6 @@ def _import_comic(
                 "mimeType": _comic_archive_media_type(parsed["format"]),
                 "sizeBytes": file_size,
                 "mtimeMs": int(source_stat.st_mtime * 1000),
-                "pageIndexVersion": CURRENT_COMIC_PAGE_INDEX_VERSION,
                 "sortOrder": sort_order,
                 "createdAt": _now(),
                 "updatedAt": _now(),

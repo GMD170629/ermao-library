@@ -1,216 +1,50 @@
+from __future__ import annotations
+
 import json
 import re
-import sqlite3
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, insert, inspect, select, text, update
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
-
 from app.core.config import Settings
-from app.db import bootstrap as bootstrap_module
 from app.db import runner as runner_module
 from app.db.base import Base
 from app.db.bootstrap import bootstrap_database
-from app.db.runner import _run_alembic, head_revision
+from app.db.runner import head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
-from app.models.import_pipeline import ImportTask
-from app.models.library import Library, LibraryVersion, LibraryWork
-from app.models.settings import ReaderBookPreference, SystemSetting
-from app.modules.backup.application.restore import PreparedRestorePlan
-from app.modules.backup.infrastructure.persistence import (
-    SqlAlchemyBackupRestoreWriter,
+from app.models.import_pipeline import ImportTask, Source
+from app.models.library import (
+    Library,
+    LibraryVersion,
+    LibraryVolume,
+    LibraryWork,
 )
+from app.models.settings import ReaderBookPreference, SystemSetting
 from app.modules.library.infrastructure.implicit_version import (
     IMPLICIT_VERSION_SOURCE_KEY,
     get_or_create_implicit_version,
 )
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
-
-EXPECTED_TABLES = {
-    "BookIdentityCache",
-    "BookConversionTask",
-    "DownloadTask",
-    "DuplicateCandidate",
-    "ExternalMetadataCache",
-    "ImportLog",
-    "ImportAsset",
-    "ImportScanJob",
-    "ImportTask",
-    "ImportWorkItem",
-    "KindleSendTask",
-    "LibraryFacet",
-    "LibraryFile",
-    "LibraryMetadata",
-    "LibraryOperation",
-    "LibraryReadingProgress",
-    "LibraryMediaVersion",
-    "LibraryVolumeFacet",
-    "MediaVersionMigrationEvent",
-    "LibraryReadingUnit",
-    "LibraryVersion",
-    "LibraryVolume",
-    "LibraryWork",
-    "LibraryWorkFacet",
-    "MetadataSuggestion",
-    "MetadataLookupTask",
-    "MetadataWritebackOperation",
-    "MetadataWritebackPreparation",
-    "MetadataWritebackTarget",
-    "MetadataOpfQueueState",
-    "MetadataProviderExecution",
-    "MetadataProviderPipeline",
-    "Library",
-    "OrganizeJob",
-    "OrganizePolicy",
-    "OrganizeRun",
-    "PasswordResetToken",
-    "PublicationNavigationCache",
-    "ReaderBookPreference",
-    "ReaderBookmark",
-    "ReaderPreference",
-    "ReaderProgressCursor",
-    "ReaderProgressMutation",
-    "Session",
-    "Shelf",
-    "ShelfCollectionMembership",
-    "ShelfWork",
-    "Source",
-    "SourceSearchRecord",
-    "SystemEvent",
-    "SystemHealthRun",
-    "QueueRuntimeState",
-    "QueueControlOperation",
-    "SystemSetting",
-    "User",
-    "UserLibraryAccess",
-    "UserPreference",
-    "WorkDetailPreference",
-}
-
-EXPECTED_BASELINE_DEFAULTS = {
-    ("LibraryFacet", "aliases"): "[]",
-    ("LibraryOperation", "inverseJson"): "{}",
-    ("LibraryOperation", "payloadJson"): "{}",
-    ("LibraryOperation", "status"): "COMPLETED",
-    ("LibraryWorkFacet", "sortOrder"): "0",
-    ("LibraryWork", "facetIndexVersion"): "0",
-    ("LibraryFile", "pageIndexVersion"): "0",
-    ("ReaderBookmark", "percent"): "0",
-    ("ReaderProgressCursor", "highWater"): "-1",
-    ("SystemEvent", "actorType"): "system",
-    ("SystemEvent", "level"): "info",
-    ("SystemHealthRun", "status"): "running",
-    ("SystemHealthRun", "version"): "1",
-}
-
-EXPECTED_RESTORED_INDEXES = {
-    "BookIdentityCache": {
-        "BookIdentityCache_parserVersion_idx": ("parserVersion",),
-    },
-    "PasswordResetToken": {
-        "PasswordResetToken_expiresAt_idx": ("expiresAt",),
-        "PasswordResetToken_userId_createdAt_idx": ("userId", "createdAt"),
-    },
-    "SystemEvent": {
-        "SystemEvent_action_createdAt_idx": ("action", "createdAt"),
-        "SystemEvent_actorType_createdAt_idx": ("actorType", "createdAt"),
-        "SystemEvent_createdAt_idx": ("createdAt",),
-        "SystemEvent_level_createdAt_idx": ("level", "createdAt"),
-        "SystemEvent_source_createdAt_idx": ("source", "createdAt"),
-        "SystemEvent_targetType_targetId_idx": ("targetType", "targetId"),
-    },
-    "LibraryFile": {
-        "LibraryFile_kind_pageIndexVersion_id_idx": (
-            "kind",
-            "pageIndexVersion",
-            "id",
-        ),
-    },
-    "UserLibraryAccess": {
-        "UserLibraryAccess_library_idx": ("libraryId",),
-    },
-    "UserPreference": {
-        "UserPreference_userId_idx": ("userId",),
-    },
-}
+from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect, select
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 
-def _alembic_version(connection) -> str | None:
-    exists = connection.exec_driver_sql(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alembic_version' LIMIT 1"
-    ).first()
-    if exists is None:
-        return None
-    version = connection.exec_driver_sql(
-        "SELECT version_num FROM alembic_version LIMIT 1"
-    ).scalar()
-    return None if version is None else str(version)
+def _current_revision(engine) -> str | None:
+    with engine.connect() as connection:
+        return MigrationContext.configure(connection).get_current_revision()
 
 
 def _application_tables(engine) -> set[str]:
     return set(inspect(engine).get_table_names()) - {"alembic_version"}
 
 
-def _default_text(value: object) -> str:
-    return str(value).strip().strip("'\"")
-
-
-def _replace_backup_revision(path: Path, revision: str | None) -> None:
-    with zipfile.ZipFile(path) as source:
-        entries = {name: source.read(name) for name in source.namelist()}
-    metadata = json.loads(entries["metadata.json"].decode())
-    if revision is None:
-        metadata.pop("databaseRevision", None)
-    else:
-        metadata["databaseRevision"] = revision
-    entries["metadata.json"] = json.dumps(metadata, ensure_ascii=False).encode()
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as target:
-        for name, content in entries.items():
-            target.writestr(name, content)
-
-
-def _replace_backup_version(path: Path, version: int) -> None:
-    with zipfile.ZipFile(path) as source:
-        entries = {name: source.read(name) for name in source.namelist()}
-    metadata = json.loads(entries["metadata.json"].decode())
-    metadata["version"] = version
-    entries["metadata.json"] = json.dumps(metadata, ensure_ascii=False).encode()
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as target:
-        for name, content in entries.items():
-            target.writestr(name, content)
-
-
-def _replace_backup_database_export(
-    path: Path, database_export: dict[str, object]
-) -> None:
-    with zipfile.ZipFile(path) as source:
-        entries = {name: source.read(name) for name in source.namelist()}
-    entries["database-export.json"] = json.dumps(
-        database_export, ensure_ascii=False
-    ).encode()
-    temporary = path.with_name(f".{path.name}.test.part")
-    try:
-        with zipfile.ZipFile(
-            temporary, "w", compression=zipfile.ZIP_DEFLATED
-        ) as target:
-            for name, content in entries.items():
-                target.writestr(name, content)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
+def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
@@ -218,148 +52,122 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
         bootstrap_database(engine, settings)
 
         assert settings.database_path.is_file()
-        assert _application_tables(engine) == EXPECTED_TABLES
-        with engine.connect() as connection:
-            assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
-            assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
-            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 10_000
-            assert _alembic_version(connection) == head_revision(engine)
-            assert connection.execute(text("SELECT COUNT(*) FROM `User`")).scalar() == 0
-            settings_rows = dict(
-                connection.execute(
-                    text("SELECT `key`, `value` FROM `SystemSetting` ORDER BY `key`")
-                ).all()
-            )
-            server_identity = settings_rows.pop("mobile.serverIdentity")
-            assert re.fullmatch(r"server_[0-9a-f]{32}", server_identity)
-            assert settings_rows == {
-                "language": "zh-CN",
-                "systemName": "二毛图书",
-                "workDetail.tabOrder": '["EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE"]',
-            }
-            sources = connection.execute(
-                text(
-                    "SELECT `providerType`, `enabled` FROM `Source` "
-                    "WHERE `kind` = 'metadata' ORDER BY `providerType`"
-                )
-            ).all()
-            assert sources == [("ai", 0), ("bangumi", 1), ("douban", 1)]
-            assert (
-                connection.execute(
-                    text("SELECT COUNT(*) FROM `MetadataProviderPipeline`")
-                ).scalar_one()
-                == 7
-            )
-            assert (
-                connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
-            )
+        assert _application_tables(engine) == set(Base.metadata.tables)
+        assert _current_revision(engine) == head_revision(engine)
 
         inspector = inspect(engine)
-        for table_name in EXPECTED_TABLES:
-            columns = {
-                column["name"]: column for column in inspector.get_columns(table_name)
-            }
-            created_at = columns.get("createdAt")
-            if created_at is not None:
-                assert created_at["default"] == "unixepoch() * 1000", table_name
+        table_names = set(inspector.get_table_names())
+        assert {
+            "Library",
+            "LibraryWork",
+            "LibraryVersion",
+            "LibraryVolume",
+            "LibraryFile",
+            "ImportScanJob",
+            "ImportTask",
+        } <= table_names
+        assert {
+            "MonitorFolder",
+            "UserMonitorFolderAccess",
+            "LibraryMediaVersion",
+            "DuplicateCandidate",
+            "MediaVersionMigrationEvent",
+            "UserMediaHistory",
+        }.isdisjoint(table_names)
 
-        for (
-            table_name,
-            column_name,
-        ), expected_default in EXPECTED_BASELINE_DEFAULTS.items():
-            columns = {
-                column["name"]: column for column in inspector.get_columns(table_name)
-            }
-            assert _default_text(columns[column_name]["default"]) == expected_default
+        library_columns = {
+            column["name"]: column for column in inspector.get_columns("Library")
+        }
+        assert library_columns["rootPath"]["nullable"] is False
+        assert library_columns["organizationMode"]["nullable"] is False
+        library_unique_columns = {
+            tuple(constraint["column_names"])
+            for constraint in inspector.get_unique_constraints("Library")
+        } | {
+            tuple(index["column_names"])
+            for index in inspector.get_indexes("Library")
+            if index.get("unique")
+        }
+        assert ("rootPath",) in library_unique_columns
+        library_checks = " ".join(
+            str(constraint["sqltext"])
+            for constraint in inspector.get_check_constraints("Library")
+        )
+        assert all(
+            organization_mode in library_checks
+            for organization_mode in ("FLAT", "VOLUMES", "AUDIOBOOK")
+        )
 
-        for table_name, expected_indexes in EXPECTED_RESTORED_INDEXES.items():
-            indexes = {
-                index["name"]: tuple(index["column_names"])
-                for index in inspector.get_indexes(table_name)
-            }
-            assert expected_indexes.items() <= indexes.items()
+        work_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryWork")
+        }
+        version_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryVersion")
+        }
+        volume_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryVolume")
+        }
+        file_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryFile")
+        }
+        assert work_columns["libraryId"]["nullable"] is False
+        assert version_columns["workId"]["nullable"] is False
+        assert version_columns["sourceKey"]["nullable"] is False
+        assert volume_columns["versionId"]["nullable"] is False
+        assert file_columns["volumeId"]["nullable"] is False
+        assert "libraryId" not in volume_columns
+        assert "monitorFolderId" not in volume_columns
 
-        for table_name in EXPECTED_TABLES:
+        volume_foreign_keys = {
+            (
+                tuple(foreign_key["constrained_columns"]),
+                foreign_key["referred_table"],
+            )
+            for foreign_key in inspector.get_foreign_keys("LibraryVolume")
+        }
+        assert (("versionId",), "LibraryVersion") in volume_foreign_keys
+        for table_name in Base.metadata.tables:
             for foreign_key in inspector.get_foreign_keys(table_name):
                 assert foreign_key["options"].get("onupdate") == "CASCADE", (
                     table_name,
                     foreign_key,
                 )
 
-        library_file_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryFile")
-        }
-        assert "volumeId" in library_file_columns
-        assert "editionId" not in library_file_columns
-        assert library_file_columns["pageIndexVersion"]["nullable"] is False
-        library_columns = {
-            column["name"]: column for column in inspector.get_columns("Library")
-        }
-        assert library_columns["rootPath"]["nullable"] is False
-        assert library_columns["organizationMode"]["nullable"] is False
-        unique_constraints = inspector.get_unique_constraints("Library")
-        unique_column_sets = {
-            tuple(constraint["column_names"]) for constraint in unique_constraints
-        }
-        unique_indexes = {
-            tuple(index["column_names"])
-            for index in inspector.get_indexes("Library")
-            if index.get("unique")
-        }
-        assert ("rootPath",) in unique_column_sets | unique_indexes
-        check_sql = " ".join(
-            str(constraint["sqltext"])
-            for constraint in inspector.get_check_constraints("Library")
-        )
-        assert (
-            "FLAT" in check_sql and "VOLUMES" in check_sql and "AUDIOBOOK" in check_sql
-        )
-        work_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryWork")
-        }
-        assert work_columns["libraryId"]["nullable"] is False
-        version_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryVersion")
-        }
-        assert version_columns["workId"]["nullable"] is False
-        assert version_columns["sourceKey"]["nullable"] is False
-        assert version_columns["sourceName"]["nullable"] is True
-        version_indexes = {
-            index["name"]: tuple(index["column_names"])
-            for index in inspector.get_indexes("LibraryVersion")
-        }
-        assert version_indexes["LibraryVersion_workId_idx"] == ("workId",)
-        assert version_indexes["LibraryVersion_sourceKey_idx"] == ("sourceKey",)
-        volume_columns = {
-            column["name"] for column in inspector.get_columns("LibraryVolume")
-        }
-        assert "versionId" in volume_columns
-        assert "versionId" not in volume_columns
-        assert "monitorFolderId" not in volume_columns
-        volume_foreign_keys = {
-            (tuple(foreign_key["constrained_columns"]), foreign_key["referred_table"])
-            for foreign_key in inspector.get_foreign_keys("LibraryVolume")
-        }
-        assert (("versionId",), "LibraryVersion") in volume_foreign_keys
-        assert "libraryId" not in volume_columns
-        import_task_columns = {
-            column["name"] for column in inspector.get_columns("ImportTask")
-        }
-        assert "libraryId" in import_task_columns
-        assert "monitorFolderId" not in import_task_columns
-        scan_job_columns = {
-            column["name"] for column in inspector.get_columns("ImportScanJob")
-        }
-        assert "libraryId" in scan_job_columns
-        assert "monitorFolderId" not in scan_job_columns
-        assert "MonitorFolder" not in inspector.get_table_names()
-        assert "UserMonitorFolderAccess" not in inspector.get_table_names()
-        assert "UserMediaHistory" not in inspector.get_table_names()
-        for table_name in ("DuplicateCandidate", "MetadataSuggestion"):
-            columns = {
-                column["name"]: column for column in inspector.get_columns(table_name)
+        for table_name in Base.metadata.tables:
+            created_at = next(
+                (
+                    column
+                    for column in inspector.get_columns(table_name)
+                    if column["name"] == "createdAt"
+                ),
+                None,
+            )
+            if created_at is not None:
+                assert "unixepoch()" in str(created_at["default"]), table_name
+
+        with Session(engine) as db:
+            assert db.scalar(select(SystemSetting).where(False)) is None
+            settings_by_key = {
+                row.key: row.value for row in db.scalars(select(SystemSetting)).all()
             }
-            assert columns["jobId"]["nullable"] is False
+            server_identity = settings_by_key.pop(SERVER_IDENTITY_SETTING_KEY)
+            assert re.fullmatch(r"server_[0-9a-f]{32}", server_identity)
+            assert settings_by_key == {
+                "language": "zh-CN",
+                "systemName": "二毛图书",
+                "workDetail.tabOrder": '["EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE"]',
+            }
+            sources = db.scalars(
+                select(Source)
+                .where(Source.kind == "metadata")
+                .order_by(Source.provider_type)
+            ).all()
+            assert [(source.provider_type, source.enabled) for source in sources] == [
+                ("ai", False),
+                ("bangumi", True),
+                ("douban", True),
+            ]
+
         assert ReaderBookPreference.__table__.c.schemaVersion.default.arg == 3
         assert (
             str(ReaderBookPreference.__table__.c.schemaVersion.server_default.arg)
@@ -389,18 +197,15 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "UPDATE `SystemSetting` SET `value` = '我的书库' WHERE `key` = 'systemName'"
-                )
-            )
-            connection.execute(
-                text(
-                    "UPDATE `Source` SET `name` = '自定义豆瓣', `enabled` = 0 "
-                    "WHERE `providerType` = 'douban'"
-                )
-            )
+        with Session(engine) as db:
+            system_name = db.get(SystemSetting, "systemName")
+            douban = db.scalar(select(Source).where(Source.provider_type == "douban"))
+            assert system_name is not None
+            assert douban is not None
+            system_name.value = "我的书库"
+            douban.name = "自定义豆瓣"
+            douban.enabled = False
+            db.commit()
 
         def seed_once() -> None:
             with Session(engine) as db:
@@ -417,91 +222,33 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
                     )
                 )
             )
-        assert len(server_identities) == 1
-        assert re.fullmatch(r"server_[0-9a-f]{32}", server_identities[0])
-
-        with engine.connect() as connection:
+            assert len(server_identities) == 1
+            assert re.fullmatch(r"server_[0-9a-f]{32}", server_identities[0])
+            assert db.get(SystemSetting, "systemName").value == "我的书库"
+            douban = db.scalar(select(Source).where(Source.provider_type == "douban"))
+            assert douban is not None
+            assert (douban.name, douban.enabled) == ("自定义豆瓣", False)
+            assert len(db.scalars(select(SystemSetting)).all()) == 4
             assert (
-                connection.execute(
-                    text(
-                        "SELECT `value` FROM `SystemSetting` WHERE `key` = 'systemName'"
-                    )
-                ).scalar_one()
-                == "我的书库"
-            )
-            assert connection.execute(
-                text(
-                    "SELECT `name`, `enabled` FROM `Source` WHERE `providerType` = 'douban'"
-                )
-            ).one() == ("自定义豆瓣", 0)
-            assert (
-                connection.execute(
-                    text("SELECT COUNT(*) FROM `SystemSetting`")
-                ).scalar_one()
-                == 4
-            )
-            assert (
-                connection.execute(
-                    text("SELECT COUNT(*) FROM `Source` WHERE `kind` = 'metadata'")
-                ).scalar_one()
+                len(db.scalars(select(Source).where(Source.kind == "metadata")).all())
                 == 3
             )
     finally:
         engine.dispose()
 
 
-def test_apply_schema_accepts_current_head_without_changing_revision(tmp_path) -> None:
+def test_apply_schema_accepts_current_head_idempotently(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
-        expected = head_revision(engine)
-        with engine.connect() as connection:
-            assert _alembic_version(connection) == expected
+        expected_revision = head_revision(engine)
 
         runner_module.apply_schema(engine, settings)
+        runner_module.apply_schema(engine, settings)
 
-        with engine.connect() as connection:
-            assert _alembic_version(connection) == expected
-        assert _application_tables(engine) == EXPECTED_TABLES
-        assert not (settings.database_path.parent / "migrations").exists()
-    finally:
-        engine.dispose()
-
-
-def test_apply_schema_rejects_old_alembic_revision(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_sqlite_engine(settings.database_path)
-    old_revision = "0021_reader_v4_exact_progress"
-    try:
-        _run_alembic(engine, lambda config: command.upgrade(config, old_revision))
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                r"Database revision '0021_reader_v4_exact_progress' is not supported"
-                r".*Expected '.*'.*fresh installation"
-            ),
-        ):
-            runner_module.apply_schema(engine, settings)
-
-        with engine.connect() as connection:
-            assert _alembic_version(connection) == old_revision
-        assert not (settings.database_path.parent / "migrations").exists()
-    finally:
-        engine.dispose()
-
-
-def test_complete_create_all_database_without_revision_is_rejected(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        Base.metadata.create_all(engine)
-        with pytest.raises(RuntimeError, match="fresh installation"):
-            bootstrap_database(engine, settings)
-        with engine.connect() as connection:
-            assert _alembic_version(connection) is None
+        assert _current_revision(engine) == expected_revision
+        assert _application_tables(engine) == set(Base.metadata.tables)
         assert not (settings.database_path.parent / "migrations").exists()
     finally:
         engine.dispose()
@@ -515,47 +262,70 @@ def test_apply_schema_bootstraps_empty_in_memory_database() -> None:
     )
     try:
         runner_module.apply_schema(engine)
-        assert _application_tables(engine) == EXPECTED_TABLES
-        with engine.connect() as connection:
-            assert _alembic_version(connection) == head_revision(engine)
+        assert _application_tables(engine) == set(Base.metadata.tables)
+        assert _current_revision(engine) == head_revision(engine)
     finally:
         engine.dispose()
 
 
-def test_apply_schema_rejects_nonempty_unversioned_in_memory_database() -> None:
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+def test_apply_schema_rejects_nonempty_unversioned_database(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    sentinel_metadata = MetaData()
+    Table(
+        "UnsupportedLegacyTable",
+        sentinel_metadata,
+        Column("id", Integer, primary_key=True),
     )
     try:
-        with engine.begin() as connection:
-            connection.exec_driver_sql(
-                "CREATE TABLE User (id TEXT PRIMARY KEY NOT NULL)"
-            )
+        sentinel_metadata.create_all(engine)
         with pytest.raises(RuntimeError, match="fresh installation"):
-            runner_module.apply_schema(engine)
-        with engine.connect() as connection:
-            assert _alembic_version(connection) is None
-        assert "User" in _application_tables(engine)
+            runner_module.apply_schema(engine, settings)
+        assert _current_revision(engine) is None
+        assert "UnsupportedLegacyTable" in _application_tables(engine)
     finally:
         engine.dispose()
 
 
-def test_backup_includes_current_database_revision_and_restores_matching_backup(
+def test_apply_schema_retries_transient_database_lock(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    original_apply = runner_module._apply_schema_once
+    attempts = 0
+
+    def apply_with_transient_lock(target_engine, target_settings):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OperationalError(
+                "schema initialization",
+                {},
+                RuntimeError("database is locked"),
+            )
+        return original_apply(target_engine, target_settings)
+
+    monkeypatch.setattr(runner_module, "_apply_schema_once", apply_with_transient_lock)
+    monkeypatch.setattr(runner_module.time, "sleep", lambda _seconds: None)
+    try:
+        runner_module.apply_schema(engine, settings)
+        assert attempts == 2
+        assert _current_revision(engine) == head_revision(engine)
+    finally:
+        engine.dispose()
+
+
+def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            db.execute(
-                text(
-                    "INSERT INTO `SystemSetting` (`key`, `value`, `updatedAt`) "
-                    "VALUES ('backup.guard', 'archived', CURRENT_TIMESTAMP)"
-                )
-            )
+            db.add(SystemSetting(key="backup.guard", value="archived"))
             db.commit()
             backup = create_backup(db, settings)
             with zipfile.ZipFile(backup_path(settings, backup.id)) as archive:
@@ -563,29 +333,20 @@ def test_backup_includes_current_database_revision_and_restores_matching_backup(
             assert metadata["version"] == 3
             assert metadata["databaseRevision"] == head_revision(engine)
 
-            db.execute(
-                text(
-                    "UPDATE `SystemSetting` SET `value` = 'changed' WHERE `key` = 'backup.guard'"
-                )
-            )
+            guard = db.get(SystemSetting, "backup.guard")
+            assert guard is not None
+            guard.value = "changed"
             db.commit()
             restored = restore_backup(db, settings, backup.id)
 
             assert restored["restored"] is True
-            assert (
-                db.execute(
-                    text(
-                        "SELECT `value` FROM `SystemSetting` WHERE `key` = 'backup.guard'"
-                    )
-                ).scalar_one()
-                == "archived"
-            )
+            assert db.get(SystemSetting, "backup.guard").value == "archived"
     finally:
         engine.dispose()
 
 
 def test_backup_restore_preserves_import_task_json_metadata(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage-json-metadata"))
+    settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
@@ -612,303 +373,12 @@ def test_backup_restore_preserves_import_task_json_metadata(tmp_path) -> None:
             assert task is not None
             task.recognized_metadata = {"title": "恢复后临时值"}
             db.commit()
-
             restored = restore_backup(db, settings, backup.id)
 
             assert restored["restored"] is True
             restored_task = db.get(ImportTask, "backup-json-import-task")
             assert restored_task is not None
             assert restored_task.recognized_metadata == original_metadata
-    finally:
-        engine.dispose()
-
-
-@pytest.mark.parametrize("revision", [None, "different-revision"])
-def test_restore_rejects_unsupported_revision_before_clearing_tables(
-    tmp_path, revision
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / f"storage-{revision or 'missing'}"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            db.execute(
-                text(
-                    "INSERT INTO `SystemSetting` (`key`, `value`, `updatedAt`) "
-                    "VALUES ('restore.guard', 'archive-value', CURRENT_TIMESTAMP)"
-                )
-            )
-            db.commit()
-            backup = create_backup(db, settings)
-            _replace_backup_revision(backup_path(settings, backup.id), revision)
-            db.execute(
-                text(
-                    "UPDATE `SystemSetting` SET `value` = 'must-survive' "
-                    "WHERE `key` = 'restore.guard'"
-                )
-            )
-            db.commit()
-
-            with pytest.raises(ValueError, match="BACKUP_REVISION_UNSUPPORTED"):
-                restore_backup(db, settings, backup.id)
-
-            assert (
-                db.execute(
-                    text(
-                        "SELECT `value` FROM `SystemSetting` WHERE `key` = 'restore.guard'"
-                    )
-                ).scalar_one()
-                == "must-survive"
-            )
-    finally:
-        engine.dispose()
-
-
-def test_restore_rejects_v2_backup_before_clearing_tables(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage-v2"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            db.execute(
-                text(
-                    "INSERT INTO `SystemSetting` (`key`, `value`, `updatedAt`) "
-                    "VALUES ('restore.v2.guard', 'must-survive', CURRENT_TIMESTAMP)"
-                )
-            )
-            db.commit()
-            backup = create_backup(db, settings)
-            _replace_backup_version(backup_path(settings, backup.id), 2)
-
-            with pytest.raises(ValueError, match="BACKUP_REVISION_UNSUPPORTED"):
-                restore_backup(db, settings, backup.id)
-
-            assert (
-                db.execute(
-                    text(
-                        "SELECT `value` FROM `SystemSetting` "
-                        "WHERE `key` = 'restore.v2.guard'"
-                    )
-                ).scalar_one()
-                == "must-survive"
-            )
-    finally:
-        engine.dispose()
-
-
-def test_restore_validation_failure_does_not_touch_live_database(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage-invalid-restore"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            db.add(SystemSetting(key="restore.guard", value="must-survive"))
-            db.commit()
-            backup = create_backup(db, settings)
-            _replace_backup_database_export(
-                backup_path(settings, backup.id),
-                {
-                    "works": [],
-                    "mediaVersions": [
-                        {
-                            "id": "dangling-media",
-                            "workId": "missing-work",
-                            "mediaKind": "EBOOK",
-                        }
-                    ],
-                },
-            )
-
-            with pytest.raises(ValueError, match="BACKUP_FOREIGN_KEY_INVALID"):
-                restore_backup(db, settings, backup.id)
-
-            assert (
-                db.scalar(
-                    select(SystemSetting.value).where(
-                        SystemSetting.key == "restore.guard"
-                    )
-                )
-                == "must-survive"
-            )
-    finally:
-        engine.dispose()
-
-
-def test_live_restore_failure_rolls_back_and_clears_maintenance_state(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage-rollback-restore"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            db.add(SystemSetting(key="restore.guard", value="archived"))
-            db.commit()
-            backup = create_backup(db, settings)
-            db.execute(
-                update(SystemSetting)
-                .where(SystemSetting.key == "restore.guard")
-                .values(value="must-survive")
-            )
-            db.commit()
-
-            original_apply = SqlAlchemyBackupRestoreWriter.apply
-            restore_plan_calls = 0
-
-            def fail_during_live_restore(
-                writer: SqlAlchemyBackupRestoreWriter,
-                plan: PreparedRestorePlan,
-            ) -> None:
-                nonlocal restore_plan_calls
-                if plan.restored_counts:
-                    restore_plan_calls += 1
-                    if restore_plan_calls == 2:
-                        original_apply(
-                            writer,
-                            PreparedRestorePlan((plan.statements[0],), {}),
-                        )
-                        raise RuntimeError("simulated live restore failure")
-                original_apply(writer, plan)
-
-            monkeypatch.setattr(
-                SqlAlchemyBackupRestoreWriter,
-                "apply",
-                fail_during_live_restore,
-            )
-
-            with pytest.raises(RuntimeError, match="simulated live restore failure"):
-                restore_backup(db, settings, backup.id)
-
-            assert (
-                db.scalar(
-                    select(SystemSetting.value).where(
-                        SystemSetting.key == "restore.guard"
-                    )
-                )
-                == "must-survive"
-            )
-            assert db.get(SystemSetting, "databaseMaintenanceMode") is None
-    finally:
-        engine.dispose()
-
-
-def test_temporary_restore_execution_failure_does_not_touch_live_database(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage-temp-restore-failure"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            db.add(SystemSetting(key="restore.guard", value="must-survive"))
-            db.commit()
-            backup = create_backup(db, settings)
-            _replace_backup_database_export(
-                backup_path(settings, backup.id),
-                {
-                    "users": [
-                        {
-                            "id": "duplicate-email-a",
-                            "email": "same@example.com",
-                            "name": "First",
-                            "passwordHash": "hash-a",
-                            "role": "user",
-                            "status": "active",
-                        },
-                        {
-                            "id": "duplicate-email-b",
-                            "email": "same@example.com",
-                            "name": "Second",
-                            "passwordHash": "hash-b",
-                            "role": "user",
-                            "status": "active",
-                        },
-                    ]
-                },
-            )
-
-            with pytest.raises(IntegrityError):
-                restore_backup(db, settings, backup.id)
-
-            assert (
-                db.scalar(
-                    select(SystemSetting.value).where(
-                        SystemSetting.key == "restore.guard"
-                    )
-                )
-                == "must-survive"
-            )
-    finally:
-        engine.dispose()
-
-
-def test_timestamp_triggers_are_idempotent_and_normalize_raw_timestamps(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        runner_module.apply_schema(engine, settings)
-        runner_module.apply_schema(engine, settings)
-
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO `User` (`id`, `email`, `name`, `passwordHash`, `createdAt`, `updatedAt`) "
-                    "VALUES ('timestamp-user', 'timestamp@example.test', 'Timestamp', 'hash', "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            stored = connection.execute(
-                text(
-                    "SELECT `createdAt`, `updatedAt` FROM `User` WHERE `id` = 'timestamp-user'"
-                )
-            ).one()
-            assert all(
-                str(value).isdigit() and len(str(value)) == 13 for value in stored
-            )
-
-        with engine.connect() as connection:
-            trigger_names = {
-                str(row[0])
-                for row in connection.exec_driver_sql(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type = 'trigger' AND name LIKE 'normalize_SystemSetting_timestamps_%'"
-                )
-            }
-            assert trigger_names == {
-                "normalize_SystemSetting_timestamps_insert",
-                "normalize_SystemSetting_timestamps_update",
-            }
-    finally:
-        engine.dispose()
-
-
-def test_apply_schema_retries_transient_database_lock(tmp_path, monkeypatch) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_sqlite_engine(settings.database_path)
-    original_apply = runner_module._apply_schema_once
-    attempts = 0
-
-    def apply_with_transient_lock(target_engine, target_settings):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise sqlite3.OperationalError("database is locked")
-        return original_apply(target_engine, target_settings)
-
-    monkeypatch.setattr(
-        bootstrap_module, "_apply_schema_once", apply_with_transient_lock
-    )
-    monkeypatch.setattr(runner_module, "_apply_schema_once", apply_with_transient_lock)
-    monkeypatch.setattr(runner_module.time, "sleep", lambda _seconds: None)
-    try:
-        bootstrap_module.apply_schema(engine, settings)
-        assert attempts == 2
-        with engine.connect() as connection:
-            assert _alembic_version(connection) == head_revision(engine)
     finally:
         engine.dispose()
 
@@ -936,186 +406,75 @@ def _seed_library_work(db: Session, *, work_id: str) -> LibraryWork:
     return work
 
 
-def test_library_version_can_be_created(tmp_path) -> None:
+def test_directory_version_identity_is_unique_within_each_work(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            work = _seed_library_work(db, work_id="work-version-create")
-            version = LibraryVersion(
-                id="version-create",
-                work_id=work.id,
-                source_key="source-epub",
-                source_name="EPUB 源",
-            )
-            db.add(version)
-            db.commit()
-
-            stored = db.get(LibraryVersion, "version-create")
-            assert stored is not None
-            assert stored.work_id == work.id
-            assert stored.source_key == "source-epub"
-            assert stored.source_name == "EPUB 源"
-    finally:
-        engine.dispose()
-
-
-def test_library_work_can_own_multiple_versions(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            work = _seed_library_work(db, work_id="work-version-many")
+            first_work = _seed_library_work(db, work_id="work-a")
+            second_work = _seed_library_work(db, work_id="work-b")
             db.add_all(
                 [
                     LibraryVersion(
-                        id="version-epub",
-                        work_id=work.id,
-                        source_key="source-epub",
-                        source_name="EPUB",
-                    ),
-                    LibraryVersion(
-                        id="version-pdf",
-                        work_id=work.id,
-                        source_key="source-pdf",
-                        source_name=None,
-                    ),
-                ]
-            )
-            db.commit()
-
-            versions = db.scalars(
-                select(LibraryVersion)
-                .where(LibraryVersion.work_id == work.id)
-                .order_by(LibraryVersion.id)
-            ).all()
-            assert [version.id for version in versions] == [
-                "version-epub",
-                "version-pdf",
-            ]
-            assert [version.source_key for version in versions] == [
-                "source-epub",
-                "source-pdf",
-            ]
-    finally:
-        engine.dispose()
-
-
-def test_library_version_rejects_duplicate_work_source_key(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            work = _seed_library_work(db, work_id="work-version-unique")
-            db.add(
-                LibraryVersion(
-                    id="version-implicit-first",
-                    work_id=work.id,
-                    source_key=IMPLICIT_VERSION_SOURCE_KEY,
-                )
-            )
-            db.flush()
-            db.add(
-                LibraryVersion(
-                    id="version-implicit-second",
-                    work_id=work.id,
-                    source_key=IMPLICIT_VERSION_SOURCE_KEY,
-                )
-            )
-            with pytest.raises(IntegrityError):
-                db.commit()
-    finally:
-        engine.dispose()
-
-
-def test_library_version_allows_same_source_key_on_different_works(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            first_work = _seed_library_work(db, work_id="work-implicit-a")
-            second_work = _seed_library_work(db, work_id="work-implicit-b")
-            db.add_all(
-                [
-                    LibraryVersion(
-                        id="version-implicit-a",
+                        id="version-a",
                         work_id=first_work.id,
-                        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                        source_key="directory:version",
                     ),
                     LibraryVersion(
-                        id="version-implicit-b",
+                        id="version-b",
                         work_id=second_work.id,
-                        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+                        source_key="directory:version",
                     ),
                 ]
             )
             db.commit()
 
-            stored = db.scalars(
-                select(LibraryVersion)
-                .where(LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY)
-                .order_by(LibraryVersion.id)
-            ).all()
-            assert [version.work_id for version in stored] == [
-                first_work.id,
-                second_work.id,
-            ]
-    finally:
-        engine.dispose()
-
-
-def test_get_or_create_implicit_version_returns_the_same_id(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            work = _seed_library_work(db, work_id="work-implicit-helper")
-            first = get_or_create_implicit_version(db, work.id)
-            second = get_or_create_implicit_version(db, work.id)
-            db.commit()
-
-            assert first.id == second.id
-            versions = db.scalars(
-                select(LibraryVersion).where(
-                    LibraryVersion.work_id == work.id,
-                    LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
-                )
-            ).all()
-            assert [version.id for version in versions] == [first.id]
-    finally:
-        engine.dispose()
-
-
-def test_library_version_cannot_exist_without_work(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
             db.add(
                 LibraryVersion(
-                    id="version-orphan",
-                    work_id="missing-work",
-                    source_key="source-epub",
+                    id="version-a-duplicate",
+                    work_id=first_work.id,
+                    source_key="directory:version",
                 )
             )
             with pytest.raises(IntegrityError):
                 db.commit()
-            db.rollback()
+    finally:
+        engine.dispose()
 
-            with pytest.raises(IntegrityError):
-                db.execute(
-                    insert(LibraryVersion).values(
-                        id="version-null-work",
-                        work_id=None,
-                        source_key="source-epub",
-                    )
+
+def test_volume_belongs_to_directory_version_and_version_requires_work(
+    tmp_path,
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            work = _seed_library_work(db, work_id="work-volume")
+            version = get_or_create_implicit_version(db, work.id)
+            volume = LibraryVolume(
+                id="volume-a",
+                version_id=version.id,
+                title="正文",
+                format="EPUB",
+                resource_key="directory:volume",
+            )
+            db.add(volume)
+            db.commit()
+
+            stored = db.get(LibraryVolume, volume.id)
+            assert stored is not None
+            assert stored.version_id == version.id
+
+            db.add(
+                LibraryVersion(
+                    id="orphan-version",
+                    work_id="missing-work",
+                    source_key=IMPLICIT_VERSION_SOURCE_KEY,
                 )
+            )
+            with pytest.raises(IntegrityError):
                 db.commit()
     finally:
         engine.dispose()

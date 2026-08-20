@@ -14,9 +14,7 @@ from app.api.error_handlers import (
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
 from app.bootstrap.opds import build_opds_router
-from app.bootstrap.startup_data_migrations import (
-    verify_startup_data_migrations_complete,
-)
+from app.bootstrap.prestart import verify_current_schema
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
@@ -120,7 +118,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if session_factory is None:
-            verify_startup_data_migrations_complete(engine, SessionLocal)
+            verify_current_schema(engine)
         download_queue_worker = start_download_queue_worker(
             background_runtime_factory,
             settings,

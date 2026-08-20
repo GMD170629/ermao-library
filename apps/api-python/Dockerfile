@@ -34,4 +34,4 @@ RUN pip install --no-cache-dir . \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python -m app.bootstrap.startup_data_migrations && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python -m app.bootstrap.prestart && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

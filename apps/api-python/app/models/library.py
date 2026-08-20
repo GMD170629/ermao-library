@@ -89,7 +89,6 @@ class LibraryWork(Base):
         Index("LibraryWork_organized_idx", "organized"),
         Index("LibraryWork_libraryId_idx", "libraryId"),
         Index("LibraryWork_sourceKey_idx", "sourceKey"),
-        Index("LibraryWork_facetIndexVersion_id_idx", "facetIndexVersion", "id"),
         Index("LibraryWork_createdAt_id_idx", "createdAt", "id"),
         Index("LibraryWork_hidden_createdAt_id_idx", "hidden", "createdAt", "id"),
         Index(
@@ -177,9 +176,6 @@ class LibraryWork(Base):
     )
     organized: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
-    )
-    facet_index_version: Mapped[int] = mapped_column(
-        "facetIndexVersion", Integer, nullable=False, default=0, server_default="0"
     )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
@@ -375,12 +371,6 @@ class LibraryFile(Base):
         Index("LibraryFile_volumeId_sortOrder_idx", "volumeId", "sortOrder"),
         Index("LibraryFile_sizeBytes_mtimeMs_idx", "sizeBytes", "mtimeMs"),
         Index("LibraryFile_pathKey_idx", "pathKey"),
-        Index(
-            "LibraryFile_kind_pageIndexVersion_id_idx",
-            "kind",
-            "pageIndexVersion",
-            "id",
-        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -402,9 +392,6 @@ class LibraryFile(Base):
     mime_type: Mapped[str] = mapped_column("mimeType", String(191), nullable=False)
     size_bytes: Mapped[int] = mapped_column(
         "sizeBytes", Integer, nullable=False, default=0, server_default="0"
-    )
-    page_index_version: Mapped[int] = mapped_column(
-        "pageIndexVersion", Integer, nullable=False, default=0, server_default="0"
     )
     duration_ms: Mapped[int | None] = mapped_column(
         "durationMs", Integer, nullable=True

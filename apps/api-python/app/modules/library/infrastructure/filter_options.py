@@ -11,12 +11,12 @@ from app.core.authorization import (
     work_visibility_predicate,
 )
 from app.models.library import (
+    Library,
     LibraryFacet,
     LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.models.library import Library
 from app.models.shelf import Shelf
 from app.modules.library.application.filter_options import (
     LibraryFilterOption,
@@ -52,11 +52,9 @@ class SqlAlchemyLibraryFilterQueries:
         limit: int,
     ) -> LibraryFilterOptionPage:
         if source == "tags":
-            index_ready = self._tag_index_ready()
+            index_ready = True
             options, has_more = (
-                self._tag_options(context, query, limit)
-                if query and index_ready
-                else ((), False)
+                self._tag_options(context, query, limit) if query else ((), False)
             )
         else:
             index_ready = True
@@ -140,19 +138,13 @@ class SqlAlchemyLibraryFilterQueries:
     def _library_options(
         self, context: AuthorizationContext
     ) -> tuple[LibraryFilterOption, ...]:
-        statement = select(
-            Library.id, Library.name, Library.root_path
-        )
+        statement = select(Library.id, Library.name, Library.root_path)
         if not context.is_admin:
             if not context.library_ids:
                 return ()
-            statement = statement.where(
-                Library.id.in_(context.library_ids)
-            )
+            statement = statement.where(Library.id.in_(context.library_ids))
         rows = self._db.execute(
-            statement.order_by(
-                func.lower(Library.name).asc(), Library.id.asc()
-            )
+            statement.order_by(func.lower(Library.name).asc(), Library.id.asc())
         ).all()
         return tuple(
             LibraryFilterOption(
@@ -213,12 +205,6 @@ class SqlAlchemyLibraryFilterQueries:
             ),
             has_more,
         )
-
-    def _tag_index_ready(self) -> bool:
-        pending = self._db.scalar(
-            select(LibraryWork.id).where(LibraryWork.facet_index_version < 1).limit(1)
-        )
-        return pending is None
 
     def _tag_options(
         self,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
 
-from sqlalchemy import String, and_, column, delete, select, update, values
+from sqlalchemy import String, and_, column, delete, select, values
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
@@ -17,7 +17,6 @@ from app.modules.library.application.facet_sync import (
     PreparedWorkFacet,
     WorkFacetProjection,
 )
-from app.modules.library.domain.facets import CURRENT_FACET_INDEX_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +39,7 @@ def load_work_facet_projections(
             work_id=str(row.id),
             author=str(row.author) if row.author is not None else None,
             tags_source=str(row.tags) if row.tags is not None else "[]",
-            series_name=(
-                str(row.series_name) if row.series_name is not None else None
-            ),
+            series_name=(str(row.series_name) if row.series_name is not None else None),
         )
         for row in db.execute(
             select(
@@ -144,8 +141,7 @@ def prepare_work_facet_write(
                     LibraryFacet,
                     and_(
                         LibraryFacet.kind == candidates.c.kind,
-                        LibraryFacet.normalized_name
-                        == candidates.c.normalized_name,
+                        LibraryFacet.normalized_name == candidates.c.normalized_name,
                     ),
                 ),
             )
@@ -157,21 +153,11 @@ def prepare_work_facet_write(
             )
         )
 
-    version_statement = (
-        update(LibraryWork)
-        .where(LibraryWork.id.in_(work_ids))
-        .values(
-            facet_index_version=CURRENT_FACET_INDEX_VERSION,
-            updated_at=LibraryWork.updated_at,
-        )
-    )
     return PreparedWorkFacetWrite(
-        (*facet_statements, delete_statement, *link_statements, version_statement)
+        (*facet_statements, delete_statement, *link_statements)
     )
 
 
-def execute_work_facet_write(
-    db: Session, prepared: PreparedWorkFacetWrite
-) -> None:
+def execute_work_facet_write(db: Session, prepared: PreparedWorkFacetWrite) -> None:
     for statement in prepared.statements:
         db.execute(statement)
