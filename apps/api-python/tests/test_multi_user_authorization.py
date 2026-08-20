@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from sqlalchemy import text
+
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
@@ -13,7 +15,6 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from sqlalchemy import text
 from tests.conftest import recreate_application_schema
 
 PASSWORD = "starshipnas"
@@ -621,8 +622,9 @@ def test_member_can_access_library_work_without_volumes(db_session) -> None:
 def test_delete_library_removes_catalog_but_keeps_source_files(
     client, db_session, tmp_path
 ) -> None:
-    from app.models.library import Library
     from sqlalchemy import select
+
+    from app.models.library import Library
 
     library_root = tmp_path / "library"
     library_root.mkdir()

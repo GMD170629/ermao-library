@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
-from app.modules.library.infrastructure.facets import list_categories_page
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
+
+from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
+from app.modules.library.infrastructure.facets import list_categories_page
 
 
 def test_categories_remain_page_bounded(

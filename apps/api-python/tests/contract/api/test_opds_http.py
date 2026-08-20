@@ -2,6 +2,11 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from fastapi.testclient import TestClient
+from PIL import Image
+from sqlalchemy import event, func, select
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -21,10 +26,6 @@ from app.modules.opds.public import (
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
 )
 from app.modules.system.infrastructure.settings import upsert_setting
-from fastapi.testclient import TestClient
-from PIL import Image
-from sqlalchemy import event, func, select
-from sqlalchemy.orm import Session
 
 
 def _seed_opds_publication(db: Session) -> User:

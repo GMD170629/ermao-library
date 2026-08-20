@@ -1,3 +1,5 @@
+from sqlalchemy.orm import Session
+
 from app.core.authorization import authorization_context
 from app.models.auth import User
 from app.models.library import (
@@ -12,7 +14,6 @@ from app.modules.shelf.application.catalog import (
     ListCatalogShelves,
 )
 from app.modules.shelf.infrastructure.catalog import SqlAlchemyCatalogShelfQueries
-from sqlalchemy.orm import Session
 
 
 def test_catalog_shelves_are_owned_static_and_authorized(db_session: Session) -> None:

@@ -47,8 +47,8 @@ from app.services.metadata_provider_registry import (
     search_with_metadata_provider,
 )
 from app.services.organize_service import (
-    metadata_context_for_work,
     metadata_candidate_title_exact_match,
+    metadata_context_for_work,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
 

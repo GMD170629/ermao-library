@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.library import (
@@ -16,9 +20,6 @@ from app.models.library import (
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.reader.presentation.v4_schemas import ReaderProgressPut
-from fastapi.testclient import TestClient
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.orm import Session
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _FIXTURES = _REPOSITORY_ROOT / "packages" / "reader-contracts" / "fixtures"

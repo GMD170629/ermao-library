@@ -3,6 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from time import monotonic
 
+from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
@@ -21,10 +26,6 @@ from app.models.library import (
     LibraryWork,
 )
 from app.models.settings import SystemSetting
-from fastapi.testclient import TestClient
-from sqlalchemy import update
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
 from tests.support.sqlalchemy import StatementRecorder
 
 

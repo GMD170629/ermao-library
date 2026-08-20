@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
 from app.models.library import Library
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 def _login_system_manager(client: TestClient, db: Session) -> User:

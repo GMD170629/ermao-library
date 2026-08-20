@@ -204,14 +204,14 @@ def schedule_download_scan_command(
 
 
 __all__ = [
+    "claim_download_task_command",
     "create_download_task",
     "create_download_task_command",
     "delete_download_task",
     "delete_download_task_command",
+    "finalize_download_task_command",
     "get_download_task",
     "list_download_tasks",
-    "claim_download_task_command",
-    "finalize_download_task_command",
     "schedule_download_scan_command",
     "update_download_task",
     "update_download_task_command",

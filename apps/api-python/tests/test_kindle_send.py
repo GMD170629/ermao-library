@@ -4,10 +4,11 @@ import smtplib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import select, text
+
 from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
-from tests.conftest import recreate_application_schema
 from app.models.auth import User, UserLibraryAccess
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
@@ -22,7 +23,7 @@ from app.services.kindle_queue import (
     process_next_kindle_send_task,
     recover_interrupted_tasks,
 )
-from sqlalchemy import select, text
+from tests.conftest import recreate_application_schema
 from tests.support.sqlalchemy import StatementRecorder
 
 

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
@@ -12,8 +15,6 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 def test_fb2_publication_manifest_and_resources_use_direct_adapter(

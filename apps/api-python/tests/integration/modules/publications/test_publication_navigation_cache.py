@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.models.library import (
     LibraryFile,
     LibraryReadingUnit,
@@ -40,8 +43,6 @@ from app.modules.publications.infrastructure.uow import (
     SqlAlchemyPublicationNavigationLookupUnitOfWork,
     SqlAlchemyPublicationNavigationUnitOfWork,
 )
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
 
 
 def _seed_volume(

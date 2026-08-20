@@ -1,3 +1,6 @@
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
 from app.core.authorization import authorization_context
 from app.models.auth import User, UserLibraryAccess
 from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
@@ -6,8 +9,6 @@ from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
 from app.services.library_management import sync_work_facets
-from sqlalchemy import event
-from sqlalchemy.orm import Session
 
 
 def _work(

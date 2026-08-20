@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.bootstrap.imports import fail_claimed_import_task, process_import_task
 from app.core.config import Settings
 from app.models.import_pipeline import ImportTask
@@ -12,8 +15,6 @@ from app.modules.imports.application.errors import (
     LibraryDeletedDuringImportError,
 )
 from app.modules.imports.presentation.mappers import friendly_import_error
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 
 def test_deleted_library_has_terminal_user_guidance() -> None:

@@ -1,3 +1,5 @@
+from sqlalchemy.orm import Session
+
 from app.core.authorization import authorization_context
 from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
@@ -16,7 +18,6 @@ from app.modules.library.application.catalog import (
     ListCatalogWorks,
 )
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
-from sqlalchemy.orm import Session
 
 
 def _work(

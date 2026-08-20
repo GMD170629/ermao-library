@@ -2,6 +2,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app import models as _models  # noqa: F401
 from app.core.config import Settings, get_settings
 from app.db.base import Base
@@ -9,10 +14,6 @@ from app.db.bootstrap import apply_schema
 from app.db.session import get_db
 from app.main import create_app
 from app.models.library import Library
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 _TEST_ORM_TABLES = list(Base.metadata.sorted_tables)
 

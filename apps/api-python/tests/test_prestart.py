@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table
 
-import app.bootstrap.prestart as prestart
+from app.bootstrap import prestart
 from app.core.config import Settings
 from app.db.sqlite import create_sqlite_engine
 

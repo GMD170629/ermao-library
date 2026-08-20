@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import inspect
+
 from app.core.auth import hash_password
 from app.main import create_app
 from app.models.auth import User
@@ -14,7 +16,6 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from sqlalchemy import inspect
 
 FORBIDDEN_WORK_DETAIL_FIELDS = {
     "mediaVersions",

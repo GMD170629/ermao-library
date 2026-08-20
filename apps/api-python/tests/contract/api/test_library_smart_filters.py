@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.models.auth import User, UserLibraryAccess
 from app.models.library import (
@@ -16,9 +20,6 @@ from app.models.library import (
     LibraryWorkFacet,
 )
 from app.models.shelf import Shelf, ShelfWork
-from fastapi.testclient import TestClient
-from sqlalchemy import event
-from sqlalchemy.orm import Session
 
 
 def _login_admin(client: TestClient, db: Session) -> User:

@@ -6,6 +6,9 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
@@ -17,8 +20,6 @@ from app.models.organize import (
 )
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.infrastructure import writeback_queue
-from sqlalchemy import update
-from sqlalchemy.orm import Session
 
 
 def _seed_claim_rows(engine, source: Path) -> None:

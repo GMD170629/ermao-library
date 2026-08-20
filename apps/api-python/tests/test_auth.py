@@ -6,8 +6,13 @@ from pathlib import Path
 from time import monotonic
 from urllib.parse import unquote
 
-import app.bootstrap.auth as auth_bootstrap
 import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+from sqlalchemy import event, select, text, update
+from sqlalchemy.orm import Session, sessionmaker
+
+import app.bootstrap.auth as auth_bootstrap
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import SESSION_REFRESH_DAYS, hash_password, utcnow
 from app.core.config import Settings, get_settings
@@ -17,10 +22,6 @@ from app.main import create_app
 from app.models.auth import PasswordResetToken, User
 from app.models.auth import Session as UserSession
 from app.models.settings import SystemSetting
-from fastapi.testclient import TestClient
-from PIL import Image
-from sqlalchemy import event, select, text, update
-from sqlalchemy.orm import Session, sessionmaker
 
 
 def _create_user(db_session, email="admin@example.com", password="starshipnas"):

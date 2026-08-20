@@ -4,6 +4,8 @@ import inspect
 from pathlib import Path
 
 import pytest
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.models.library import (
     LibraryFile,
@@ -24,7 +26,6 @@ from app.modules.reader.application.dto import ReaderAccessScope
 from app.modules.reader.infrastructure.volume_repository import (
     SqlAlchemyReaderVolumeRepository,
 )
-from sqlalchemy.orm import Session
 
 _API_ROOT = Path(__file__).resolve().parents[4]
 _READER_ROOT = _API_ROOT / "app" / "modules" / "reader"

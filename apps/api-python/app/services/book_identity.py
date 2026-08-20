@@ -284,7 +284,7 @@ def _identity_value_is_abnormal(value: Any) -> bool:
         return True
     if all(character.isdigit() for character in significant):
         return True
-    return bool(re.fullmatch(r"[a-z]+", significant, re.I))
+    return bool(re.fullmatch(r"[a-z]+", significant, re.IGNORECASE))
 
 
 def _identity_has_normal_title_and_author(identity: BookIdentity) -> bool:
@@ -475,7 +475,7 @@ def _ai_content(payload: Any) -> dict[str, Any]:
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, str):
             cleaned = re.sub(
-                r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I
+                r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE
             )
             parsed = json.loads(cleaned)
             if isinstance(parsed, dict):
@@ -555,8 +555,8 @@ def parse_bracketed_series_identity(
 def _looks_like_latin_alias(value: str) -> bool:
     cleaned = unicodedata.normalize("NFKC", value).strip()
     return bool(
-        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.I)
-        and re.search(r"[A-Z]", cleaned, re.I)
+        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.IGNORECASE)
+        and re.search(r"[A-Z]", cleaned, re.IGNORECASE)
     )
 
 
@@ -572,7 +572,7 @@ def _looks_like_volume_range(value: str) -> bool:
         re.search(
             r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?",
             value,
-            re.I,
+            re.IGNORECASE,
         )
     )
 
@@ -619,7 +619,7 @@ def _looks_like_download_source(value: str) -> bool:
     if not parts:
         return False
     domain = re.compile(
-        r"(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/\S*)?", re.I
+        r"(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/\S*)?", re.IGNORECASE
     )
     return all(domain.fullmatch(part) is not None for part in parts)
 
@@ -628,7 +628,7 @@ def _clean_download_title(value: str) -> str:
     cleaned = value.strip()
     edition_markers = re.compile(
         r"校[对對訂订]|精校|全本|完整版|完[结結]|番外|修[订訂]|珍藏|典藏|插[图圖]|实[体體]|增[补補]|全集",
-        re.I,
+        re.IGNORECASE,
     )
     while True:
         prefix, note = _split_trailing_parenthetical(cleaned)
@@ -651,7 +651,7 @@ def _volume_index(value: str) -> float | None:
         r"(?:^|\s)第\s*(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)\s*$",
         r"(?:^|\s)(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)\s*$",
     ]:
-        match = re.search(pattern, value, re.I)
+        match = re.search(pattern, value, re.IGNORECASE)
         if match:
             return float(match.group(1))
     numeric_fallback = split_numeric_volume_fallback(value)
@@ -673,7 +673,7 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
         r"^(.*?)\s+(\d+(?:\.\d+)?)$",
     ]
     for pattern in patterns:
-        match = re.match(pattern, cleaned, re.I)
+        match = re.match(pattern, cleaned, re.IGNORECASE)
         if match and match.group(1).strip():
             return _clean_title(match.group(1)), float(match.group(2))
     numeric_fallback = split_numeric_volume_fallback(cleaned)
@@ -685,8 +685,8 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
 
 def _directory_title_and_volume(value: str) -> tuple[str, float | None]:
     if not (
-        re.search(r"(?:vol(?:ume)?\.?|v)\s*\d+(?:\.\d+)?\s*$", value, re.I)
-        or re.search(r"第?\s*\d+(?:\.\d+)?\s*(?:卷|冊|册|集)\s*$", value, re.I)
+        re.search(r"(?:vol(?:ume)?\.?|v)\s*\d+(?:\.\d+)?\s*$", value, re.IGNORECASE)
+        or re.search(r"第?\s*\d+(?:\.\d+)?\s*(?:卷|冊|册|集)\s*$", value, re.IGNORECASE)
         or re.search(r"\s+\d+(?:\.\d+)?\s*$", value)
     ):
         return _clean_title(value), None
@@ -695,14 +695,14 @@ def _directory_title_and_volume(value: str) -> tuple[str, float | None]:
 
 def _is_volume_only(value: str) -> bool:
     return bool(
-        re.fullmatch(r"\s*(?:vol(?:ume)?\.?|v)\s*\d+(?:\.\d+)?\s*", value, re.I)
-        or re.fullmatch(r"\s*第?\s*\d+(?:\.\d+)?\s*(?:卷|冊|册|集)\s*", value, re.I)
+        re.fullmatch(r"\s*(?:vol(?:ume)?\.?|v)\s*\d+(?:\.\d+)?\s*", value, re.IGNORECASE)
+        or re.fullmatch(r"\s*第?\s*\d+(?:\.\d+)?\s*(?:卷|冊|册|集)\s*", value, re.IGNORECASE)
     )
 
 
 def _clean_title(value: str) -> str:
     # Preserve display punctuation. NFKC is applied only to the identity key.
-    cleaned = re.sub(r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$", "", value, flags=re.I)
+    cleaned = re.sub(r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$", "", value, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", cleaned.replace("_", " ")).strip(" ._-")
 
 

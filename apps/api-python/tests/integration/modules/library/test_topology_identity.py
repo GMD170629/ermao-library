@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 
 def _new_work(work_id: str) -> LibraryWork:

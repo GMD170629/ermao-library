@@ -4,6 +4,8 @@ import json
 from urllib.error import HTTPError
 
 import pytest
+from sqlalchemy import select, text
+
 from app.bootstrap.metadata import (
     prepare_metadata_source_seed_rows,
     write_metadata_source_seed_rows,
@@ -16,7 +18,6 @@ from app.services.book_identity import (
     recognize_book_identity,
     recognize_book_identity_with_regex,
 )
-from sqlalchemy import select, text
 
 
 def _configure_ai_provider(db, *, enabled: bool = True, complete: bool = True) -> None:
