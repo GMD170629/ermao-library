@@ -6,10 +6,10 @@ Accepted.
 
 ## Context
 
-Monitor folders may contain 1.8 million directory entries. Building a complete
+Library roots may contain 1.8 million directory entries. Building a complete
 candidate list, retaining paths in process memory, or creating one timer per
-filesystem event makes memory consumption proportional to the source tree and
-loses scheduling state when the worker exits.
+candidate makes memory consumption proportional to the source tree and loses
+scheduling state when the worker exits.
 
 Import history and directory-scan progress also have different lifecycle and
 API requirements. Treating a directory scan as an import task would break the
@@ -30,14 +30,13 @@ result in one short transaction, then yields to the queue. Scanning pauses when
 and idempotently rescans from the job root instead of persisting a directory
 snapshot.
 
-Filesystem events create or update persistent import work directly.
-`availableAt` implements stability delay and debounce. When event volume reaches
-the active-work high-water mark, events collapse into one scan job for the
-monitor root.
+Periodic and manual requests create one deduplicated scan job for a complete
+library root. The scanner does not consume per-file filesystem events and does
+not reconcile vanished, inaccessible, or renamed paths.
 
 Canonical absolute paths are hashed with SHA-256 for indexed deduplication.
-Existing rows are backfilled in restart-safe pages; exact-path lookup remains
-the compatibility path while a hash is absent.
+The fresh database baseline writes those keys directly and has no historical
+backfill or exact-path compatibility path.
 
 ## Consequences
 

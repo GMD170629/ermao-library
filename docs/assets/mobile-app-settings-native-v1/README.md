@@ -6,6 +6,11 @@ This package expands the Mobile settings scope to provide native functional
 equivalents for the Web settings capabilities. The user-approved scope takes
 precedence over the earlier Web-only placement for these capabilities.
 
+Topology amendment (2026-08-20): ADR 0017 retires duplicate Work merge and all
+other Work/Version/Volume structural mutations. Any such control visible in an
+older board is historical composition evidence only and is not an enabled route
+or acceptance requirement.
+
 ## Non-negotiable constraints
 
 - Every destination is an App-native page, Sheet, Menu, Dialog, or System UI.
@@ -28,7 +33,7 @@ precedence over the earlier Web-only placement for these capabilities.
 | `02-language-email-kindle.png` | Language, Kindle preferences, SMTP configuration/test |
 | `03-kindle-queue-users.png` | Kindle queue, user list, user editor, password reset |
 | `04-library-imports.png` | Library sources, server directory picker, import tasks, import preferences |
-| `05-organize-metadata.png` | Organize queue/candidates, duplicates merge/undo, provider pipelines |
+| `05-organize-metadata.png` | Organize queue/candidates, operation history/undo, provider pipelines; duplicate Work merge is retired by the topology amendment |
 | `06-opds-data-tab-order.png` | OPDS, backup/download/restore/delete, work-detail order |
 | `07-health-logs-about.png` | Health run/restart, logs/filter/export/capacity, About/releases |
 | `08-recognition-categories-provider.png` | Recognition policy, category governance, provider configuration/test |
@@ -66,8 +71,6 @@ tab.me
 │   │   └── settings.recognition-candidates              canManageSystem, Sheet
 │   ├── settings.organize-runs                           canManageSystem
 │   ├── settings.recognition-policy                      canManageSystem
-│   ├── settings.duplicates                              canManageSystem
-│   │   └── settings.duplicate-merge                     canManageSystem, Sheet
 │   ├── settings.library-operations                      canManageSystem
 │   ├── settings.categories                              canManageSystem
 │   │   ├── settings.category-rename                     canManageSystem, Sheet
@@ -97,14 +100,14 @@ to the nearest still-authorized parent.
 | Kindle settings | `GET/PUT /api/kindle-settings` |
 | Kindle queue | `GET/POST /api/kindle-send-tasks`, cancel/retry/delete task operations |
 | SMTP | `GET/PUT /api/email-settings`, `POST /api/email-settings/smtp-test` |
-| Users and scopes | `GET/POST /api/admin/users`, `GET/PATCH/DELETE /api/admin/users/{id}`, `PUT /api/admin/users/{id}/password`, monitor-folder query |
-| Library sources | monitor-folder list/create/read/update/delete and `/api/monitor-folders/tree` |
+| Users and scopes | `GET/POST /api/admin/users`, `GET/PATCH/DELETE /api/admin/users/{id}`, `PUT /api/admin/users/{id}/password`, library-root query |
+| Library sources | `GET/POST /api/libraries`, `PATCH/DELETE /api/libraries/{id}`, and `GET /api/libraries/tree` |
 | Directory scan | `POST /api/import-tasks/scan-directory` plus returned operation status/cancel contract |
 | Import tasks | list/read/logs/retry/delete, clear and rescan operations under `/api/import-tasks` |
 | Import preferences | `GET/PATCH /api/system-settings` using the existing import-preference keys |
 | Organize queue | organize jobs/pending/runs, recognize and delete job operations |
 | Recognition policy | `GET/PUT /api/organize/policy`, `GET /api/metadata/opf-sync/status` |
-| Duplicates | `GET /api/library/duplicates`, merge, operation history, operation undo |
+| Library operations | `GET /api/library/operations`, operation undo; no Work/Version/Volume structural merge |
 | Categories | list/rename/delete/merge under `/api/library/categories` |
 | Metadata providers | provider list/read/update/test and media-kind pipeline update |
 | OPDS | `GET/PUT /api/system-settings/opds` |
@@ -124,7 +127,7 @@ JSON. Server-localized `message` values never control UI branches.
   involved. Queue status refreshes through cancellable polling.
 - Photo input uses the system photo picker. Backup download/export uses the
   system file/share UI without navigating to a browser.
-- Delete, merge, restore, queue restart, account disable, password reset, and
+- Metadata-facet delete/merge, backup restore, queue restart, account disable, password reset, and
   logout use an object-specific native confirmation. Backup restore additionally
   requires the `RESTORE` confirmation literal.
 - Passwords, SMTP credentials, and provider secrets are never echoed back,

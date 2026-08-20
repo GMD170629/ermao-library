@@ -54,8 +54,9 @@ audiobooks/
 同一作品目录不能同时包含直接音轨和卷目录。音轨与卷册都使用自然文件名顺序。
 
 所有模式都读取原始文件，不生成派生出版物。上传文件必须先落到符合所选组织方式的位置，
-再由扫描器创建目录拓扑和导入任务。本阶段不处理文件消失、不可访问或用户重命名后的数据库
-对账，也不兼容旧数据库；部署本次重构时应使用新的数据库基线。
+再由定时或手动根目录扫描创建目录拓扑和导入任务；`LIBRARY_SCAN_INTERVAL_MS` 控制定时
+扫描间隔。本阶段不处理文件消失、不可访问或用户重命名后的数据库对账，也不兼容旧数据库；
+部署本次重构时应使用新的数据库基线。
 
 ## English
 
@@ -73,6 +74,7 @@ metadata never changes structure.
 
 Volumes and tracks use natural filename ordering. Every mode reads the original file and
 does not create a derived publication. Uploads must land at a valid path before the scanner
-creates topology and import tasks. This phase does not reconcile vanished, inaccessible,
-or user-renamed files, and it does not support old databases; deploy it with the fresh
-schema baseline.
+creates topology and import tasks. Periodic root scans use `LIBRARY_SCAN_INTERVAL_MS`, and
+manual rescans submit the same bounded queue work. This phase does not reconcile vanished,
+inaccessible, or user-renamed files, and it does not support old databases; deploy it with
+the fresh schema baseline.

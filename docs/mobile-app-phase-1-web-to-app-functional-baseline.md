@@ -182,7 +182,7 @@ session-expired
 isAdmin
 canManageSystem
 allLibraryScopes
-monitorFolderIds
+libraryIds
 canViewManualImports
 authzVersion
 ```
@@ -196,7 +196,7 @@ authzVersion
 | 系统管理成员 | 普通成员能力 + `canManageSystem` 保护的系统动作 | 不等于 admin；不等于自动拥有全书库 |
 | 管理员 | 系统管理 + 用户管理 | 仍应遵守资源读取和防枚举契约 |
 
-资源范围由 `allLibraryScopes`、`monitorFolderIds` 与 `canViewManualImports` 共同决定。作品、卷、封面、媒体和 Reader bootstrap 都必须由服务端重新授权。无权访问通常与不存在一样返回 `404`；App 只能显示“内容不存在或当前不可访问”，不能泄露资源是否真实存在。
+资源范围由 `allLibraryScopes`、`libraryIds` 与 `canViewManualImports` 共同决定。作品、卷、封面、媒体和 Reader bootstrap 都必须由服务端重新授权。无权访问通常与不存在一样返回 `404`；App 只能显示“内容不存在或当前不可访问”，不能泄露资源是否真实存在。
 
 ### 5.4 私有数据命名空间
 

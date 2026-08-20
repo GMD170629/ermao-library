@@ -36,7 +36,9 @@ identity.
 All Reader and download paths use the original publication format. The system does not
 create a derived EPUB, ZIP, or unpacked publication as a persisted fallback.
 
-The bounded scanner handles currently discovered candidates. Reconciliation for vanished,
+Periodic and manual requests submit one deduplicated scan job for an entire enabled library
+root; `LIBRARY_SCAN_INTERVAL_MS` controls the periodic interval. The bounded scanner handles
+currently discovered candidates. Reconciliation for vanished,
 unreadable, or user-renamed files and directories is outside this refactor. A future
 capability must define those state transitions explicitly rather than adding them to import
 heuristics.
