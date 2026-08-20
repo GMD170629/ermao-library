@@ -21,14 +21,17 @@ from app.modules.imports.application.identity_resolution import (
 from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
-    _ensure_implicit_version,
-    _ensure_work,
+    _bound_topology_target,
     _file_resource_key,
     _finalize_work_cover,
     _hash_text,
     _id,
     _insert_identity_metadata,
+    _import_media_context,
+    _import_version,
+    _import_work,
     _now,
+    _persist_import_volume,
     _prepared_default_cover,
     _source_group_key,
     _work_merge_key,
@@ -182,12 +185,14 @@ def _import_pdf(
     )
     media_kind = classification.media_kind
     result_type = _classification_result_type(classification)
+    topology_target = _bound_topology_target(queries, options)
     tags = ["pdf"]
     merge_key = _work_merge_key(identity.title)
     source_group_key = _source_group_key(options, identity.title)
-    work, created = _ensure_work(
+    work, created = _import_work(
         store,
         queries,
+        options,
         {
             "title": identity.title,
             "author": identity.author,
@@ -197,24 +202,26 @@ def _import_pdf(
             "origin": options.origin,
             "libraryId": options.library_id,
         },
+        topology_target,
     )
-    version = _ensure_implicit_version(store, work["id"])
+    version = _import_version(store, work["id"], topology_target)
     cover_path = None
     try:
         store.update_import_task(task_id, columns={"message": "正在建立 PDF 记录"})
-        media_version = store.ensure_library_media_version(
-            columns={
-                "id": _id(),
-                "workId": work["id"],
-                "libraryId": options.library_id,
-                "origin": options.origin,
-                "mediaKind": media_kind,
-                "format": "PDF",
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            },
+        media_version = _import_media_context(
+            store,
+            work_id=work["id"],
+            media_kind=media_kind,
+            format_name="PDF",
+            library_id=options.library_id,
+            origin=options.origin,
+            target=topology_target,
         )
-        volume_id = _id()
+        volume_id = (
+            str(topology_target.volume["id"])
+            if topology_target is not None
+            else _id()
+        )
         release_import_transaction(unit_of_work)
         cover = services.publish_pdf_cover(
             settings.resolved_storage_root,
@@ -230,8 +237,9 @@ def _import_pdf(
         if cover.warning:
             raw_metadata["coverWarning"] = cover.warning
         stored_cover_path = cover_path or _prepared_default_cover(options)
-        volume = store.insert_library_volume(
-            columns={
+        volume = _persist_import_volume(
+            store,
+            {
                 "id": volume_id,
                 "versionId": version["id"],
                 "title": resolved_local.metadata.volume_title or identity.title,
@@ -256,7 +264,8 @@ def _import_pdf(
                 **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
-            }
+            },
+            topology_target,
         )
         file = store.insert_library_file(
             columns={
@@ -336,8 +345,12 @@ def _import_pdf(
             inspection.page_count,
             "completed",
             False,
-            not created,
-            "new-pdf-work" if created else "same-pdf-work",
+            topology_target is None and not created,
+            "topology-bound"
+            if topology_target is not None
+            else "new-pdf-work"
+            if created
+            else "same-pdf-work",
             resolved_metadata=resolved_local.metadata,
             metadata_field_sources=resolved_local.field_sources,
             metadata_source_order=resolved_local.source_order,

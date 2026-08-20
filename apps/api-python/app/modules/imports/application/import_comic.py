@@ -27,15 +27,18 @@ from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
     _clean_title_part,
-    _ensure_implicit_version,
-    _ensure_work,
+    _bound_topology_target,
     _file_resource_key,
     _finalize_work_cover,
     _hash_text,
     _id,
     _insert_identity_metadata,
+    _import_media_context,
+    _import_version,
+    _import_work,
     _log_import,
     _now,
+    _persist_import_volume,
     _prepared_default_cover,
     _select_volume_media_version,
     _source_group_key,
@@ -178,9 +181,11 @@ def _import_comic(
     source_key = _source_group_key(options, title)
     volume_index = (volume_info or {}).get("seriesIndex")
     volume_title = resolved_local.metadata.volume_title or identity.title
-    work, created = _ensure_work(
+    topology_target = _bound_topology_target(queries, options)
+    work, created = _import_work(
         store,
         queries,
+        options,
         {
             "title": title,
             "author": author,
@@ -190,35 +195,48 @@ def _import_comic(
             "origin": options.origin,
             "libraryId": options.library_id,
         },
+        topology_target,
     )
-    version = _ensure_implicit_version(store, work["id"])
-    media_version = (
-        _select_volume_media_version(
-            queries,
-            work["id"],
-            archive_format,
-            source_key,
+    version = _import_version(store, work["id"], topology_target)
+    if topology_target is not None:
+        media_version = _import_media_context(
+            store,
+            work_id=work["id"],
+            media_kind=classification.media_kind,
+            format_name=archive_format,
+            library_id=options.library_id,
+            origin=options.origin,
+            target=topology_target,
         )
-        if volume_index is not None
-        else None
-    )
-    if media_version and media_version.get("mediaKind") != classification.media_kind:
-        media_version = None
-    created_media_version = False
-    if not media_version:
-        created_media_version = True
-        media_version = store.ensure_library_media_version(
-            columns={
-                "id": _id(),
-                "workId": work["id"],
-                "libraryId": options.library_id,
-                "origin": options.origin,
-                "mediaKind": classification.media_kind,
-                "format": archive_format,
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            }
+        created_media_version = False
+    else:
+        media_version = (
+            _select_volume_media_version(
+                queries,
+                work["id"],
+                archive_format,
+                source_key,
+            )
+            if volume_index is not None
+            else None
         )
+        if (
+            media_version
+            and media_version.get("mediaKind") != classification.media_kind
+        ):
+            media_version = None
+        created_media_version = False
+        if not media_version:
+            created_media_version = True
+            media_version = _import_media_context(
+                store,
+                work_id=work["id"],
+                media_kind=classification.media_kind,
+                format_name=archive_format,
+                library_id=options.library_id,
+                origin=options.origin,
+                target=None,
+            )
     cover_path = None
     try:
         sort_order = (
@@ -226,9 +244,14 @@ def _import_comic(
             if volume_index is not None
             else queries.count_volumes_for_media_version(str(media_version["id"]))
         )
-        volume = store.insert_library_volume(
-            columns={
-                "id": _id(),
+        volume = _persist_import_volume(
+            store,
+            {
+                "id": (
+                    str(topology_target.volume["id"])
+                    if topology_target is not None
+                    else _id()
+                ),
                 "versionId": version["id"],
                 "title": volume_title,
                 "volumeIndex": volume_index,
@@ -249,7 +272,8 @@ def _import_comic(
                 **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
-            }
+            },
+            topology_target,
         )
         store.update_import_task(task_id, columns={"message": "正在建立漫画记录"})
         comic_file = store.insert_library_file(
@@ -359,8 +383,11 @@ def _import_comic(
             parsed["pageCount"],
             "completed",
             False,
-            (not created) or (not created_media_version),
-            "new-comic-work"
+            topology_target is None
+            and ((not created) or (not created_media_version)),
+            "topology-bound"
+            if topology_target is not None
+            else "new-comic-work"
             if created
             else "new-comic-version"
             if created_media_version

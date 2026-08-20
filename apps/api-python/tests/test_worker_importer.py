@@ -94,6 +94,46 @@ def add_library(db, root_path: Path, *, folder_id: str = "folder-1") -> None:
     db.commit()
 
 
+def add_bound_topology(
+    db,
+    *,
+    identity: str,
+    format_name: str,
+) -> tuple[LibraryWork, LibraryVersion, LibraryVolume]:
+    work = LibraryWork(
+        id=f"{identity}-work",
+        library_id="test-library",
+        origin="WATCH",
+        source_key=f"work:{identity}",
+        title="Directory work",
+        normalized_title="directory work",
+        tags="[]",
+        organized=True,
+        organize_status="APPLIED",
+    )
+    version = LibraryVersion(
+        id=f"{identity}-version",
+        work_id=work.id,
+        source_key=f"version:{identity}",
+    )
+    volume = LibraryVolume(
+        id=f"{identity}-volume",
+        version_id=version.id,
+        origin="WATCH",
+        title="Directory volume",
+        format=format_name,
+        resource_key=f"volume:{identity}",
+        import_status="PENDING",
+    )
+    db.add(work)
+    db.commit()
+    db.add(version)
+    db.commit()
+    db.add(volume)
+    db.commit()
+    return work, version, volume
+
+
 def create_metadata_provider_tables(db):
     db.execute(
         text(
@@ -553,37 +593,11 @@ def test_scanned_epub_enriches_prebound_topology_without_creating_structure(
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "directory-title.epub"
     write_epub_metadata_fixture(epub, "Embedded title", "Embedded author")
-    work = LibraryWork(
-        id="topology-work",
-        library_id="test-library",
-        origin="WATCH",
-        source_key="work:directory-title.epub",
-        title="Directory work",
-        normalized_title="directory work",
-        tags="[]",
-        organized=True,
-        organize_status="APPLIED",
+    work, version, volume = add_bound_topology(
+        db_session,
+        identity="directory-title.epub",
+        format_name="EPUB",
     )
-    version = LibraryVersion(
-        id="topology-version",
-        work_id=work.id,
-        source_key="version:directory-title.epub",
-    )
-    volume = LibraryVolume(
-        id="topology-volume",
-        version_id=version.id,
-        origin="WATCH",
-        title="Directory volume",
-        format="EPUB",
-        resource_key="volume:directory-title.epub",
-        import_status="PENDING",
-    )
-    db_session.add(work)
-    db_session.commit()
-    db_session.add(version)
-    db_session.commit()
-    db_session.add(volume)
-    db_session.commit()
 
     result = import_managed_book(
         db_session,
@@ -592,6 +606,59 @@ def test_scanned_epub_enriches_prebound_topology_without_creating_structure(
             source_file_path=epub,
             origin="WATCH",
             original_name=epub.name,
+            topology_work_id=work.id,
+            topology_volume_id=volume.id,
+        ),
+    )
+
+    db_session.expire_all()
+    stored_work = db_session.get(LibraryWork, work.id)
+    stored_volume = db_session.get(LibraryVolume, volume.id)
+    assert result.work_id == work.id
+    assert result.media_version_id == version.id
+    assert result.volume_id == volume.id
+    assert result.merge_reason == "topology-bound"
+    assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryVersion") == 1
+    assert _count(db_session, "LibraryVolume") == 1
+    assert _count(db_session, "LibraryMediaVersion") == 0
+    assert stored_work is not None and stored_work.title == "Directory work"
+    assert stored_volume is not None and stored_volume.title == "Directory volume"
+    assert stored_volume.import_status == "COMPLETED"
+
+
+@pytest.mark.parametrize(
+    ("format_name", "suffix", "fixture"),
+    [
+        ("PDF", ".pdf", write_pdf_fixture),
+        ("CBZ", ".cbz", write_comic_fixture),
+    ],
+)
+def test_scanned_fixed_layout_source_enriches_prebound_topology(
+    db_session,
+    test_settings,
+    tmp_path: Path,
+    format_name: str,
+    suffix: str,
+    fixture,
+) -> None:
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    source = tmp_path / f"directory-source{suffix}"
+    fixture(source)
+    work, version, volume = add_bound_topology(
+        db_session,
+        identity=source.name,
+        format_name=format_name,
+    )
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        _options(
+            source_file_path=source,
+            origin="WATCH",
+            original_name=source.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
         ),
