@@ -20,7 +20,7 @@ Compact Work Detail is one continuous scroll in this order:
 4. one dynamic primary action;
 5. the secondary actions `下载 / 阅读状态 / 加入 / 更多`;
 6. an optional expandable plain-text description with a centered chevron control;
-7. a `Media versions` heading on the left and the real Ebook/Comic/Audiobook choices on the right, including the single-media state;
+7. a `Media types` heading on the left and the real Ebook/Comic/Audiobook choices on the right, including the single-media state;
 8. a horizontally scrolling, paginated volume rail;
 9. metadata for the currently selected volume;
 10. normal AuthenticatedShell navigation.
@@ -90,7 +90,7 @@ Implementation is not conformant until Android and iOS each cover:
 - one author/series/media line with no separate series row;
 - filled tag containers in Light and Dark;
 - HTML-free description text and a centered chevron expand/collapse action;
-- `Media versions` on the left with available media choices on the right, including single-media works;
+- `Media types` on the left with available media choices on the right, including single-media works;
 - fixed per-option media width without stretching a single option or reserving unavailable-media placeholders;
 - no chapter, track, or page directory on Work Detail;
 - Light and Dark;

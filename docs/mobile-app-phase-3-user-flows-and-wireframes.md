@@ -293,7 +293,7 @@ flowchart TD
 - 可重排格式的开始/继续动作必须先检查当前 fingerprint 的 completed 本地工件；缺失时进入下载意图并明确“下载完成后阅读”。PDF 与漫画在线时直接进入流式 Reader，下载是保存本地副本的次级动作。
 - 可重排格式由开始/继续阅读触发下载时，单卷流程依次发布“创建任务、传输进度、Ready to Open”；只有临时文件校验、原子发布和 completed manifest 落盘后才能自动进入 Reader。用户单独点击次级“下载”动作时完成后仍停留当前上下文，不擅自跳转。
 - 入队后停留 A05，并提供“查看下载”。
-- A08 显示进行中、已完成、失败三个稳定分组；已完成目录固定为 `作品（书名） → media version → volume`，media version identity/kind 来自 Reader v4 bootstrap，不得按扩展名猜测或把同一作品的电子书、漫画、有声书卷册压成一层。可在本页直接搜索本地已下载书名、作者和卷名。搜索不请求服务器书库，也不将普通缓存视为下载完成。
+- A08 显示进行中、已完成、失败三个稳定分组；已完成目录固定为 `作品（书名） → directory version → volume`，Version identity/name 来自 Reader v4 bootstrap，格式和媒介种类来自 Volume，不得按扩展名重建目录归属。可在本页直接搜索本地已下载书名、作者和卷名。搜索不请求服务器书库，也不将普通缓存视为下载完成。
 - 普通失败行内重试；空间不足引导管理下载。
 - 移除本地副本使用 Dialog，并明确不会删除服务器作品。
 
@@ -552,7 +552,7 @@ switch-failed
 
 ### 18.1 锚点状态
 
-主锚点使用“作品同时具有电子书、漫画和有声书、电子书有多个 volume、存在阅读进度、当前选中 EPUB 卷册”的状态。简介、媒介、卷册和当前卷册元数据采用连续详情流；三个真实媒介均正常可选，不因静态锚点或客户端尚未完成播放器而把有声书渲染为禁用占位。
+主锚点使用“作品具有多个目录版本与多个 volume、存在阅读进度、当前选中 EPUB 卷册”的状态。简介、目录版本、卷册和当前卷册元数据采用连续详情流；当前卷册的真实格式与媒介正常显示，不因静态锚点或客户端尚未完成播放器而渲染禁用占位。
 
 ### 18.2 Compact 内容顺序
 
@@ -564,7 +564,7 @@ switch-failed
 | Primary CTA | 固定对应当前媒介/volume 的“开始/继续阅读”或“开始/继续收听” |
 | Secondary actions | `下载 / 阅读状态 / 加入 / 更多`；“加入”打开书架选择器，不在此行放编辑动作 |
 | Description | 有简介时在同一滚动流中显示清理后的纯文本正文，居中向下/向上箭头负责展开与收起；简介为空时整个区域隐藏 |
-| Media control | 左侧固定显示“媒体版本”，右侧显示作品真实存在的电子书/漫画/有声书选项；单媒体版本仍显示唯一选项，不得显示作品不存在的媒介 |
+| Version control | 左侧固定显示“版本”，右侧显示服务器返回的真实目录版本名称；单版本仍显示唯一选项。格式与电子书/漫画/有声书种类在当前卷册信息中显示，不作为版本选项 |
 | Volume rail | 所有卷册数量均使用可横向滚动并分页加载的 2:3 封面轨道；标准 Compact 单项约为内容宽度三分之一，存在多卷时首屏显示约三项并露出下一项；单卷仍保留卷册选择、元数据和长按管理入口 |
 | Selected-volume metadata | 固定显示当前选中卷册的格式、语言、出版日期、页数、元数据信息来源和文件路径；字段值只来自当前 `volumeId`，缺失值显示 `—`，不回退到其他卷册或作品字段 |
 | Directory | Work Detail 不显示章节、音轨或页面目录；目录导航由 Reader / Now Playing 所有 |
@@ -726,13 +726,13 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 | Global status | 下载任务与待同步数量；不显示离线模式、宽限或剩余天数 |
 | Storage summary | 已用空间、可释放空间、下载设置入口 |
 | Active section | 任务标题、volume/格式、进度、已传输/总量、状态、暂停/继续 |
-| Completed section | 按“作品 → media version → volume”展开的已下载内容；作品层显示书名/作者/总大小，media version 层显示媒介种类与卷数，volume 层显示卷名/格式/大小/可本地打开；搜索命中书名、作者或卷名 |
+| Completed section | 按“作品 → directory version → volume”展开的已下载内容；作品层显示书名/作者/总大小，Version 层显示目录版本名与卷数，Volume 层显示卷名/格式/媒介/大小/可本地打开；搜索命中书名、作者或卷名 |
 | Failed section | 稳定错误摘要、重试；不弹逐项 Dialog |
 | Mini player | 有播放会话时显示 |
 
 ### 21.3 交互
 
-- 点击已完成 volume 直接进入 A06/A07，不重新进入作品详情；返回回 A08。进入前仍校验 namespace、当前 fingerprint 与本地文件，旧 manifest 缺失 media version id 时只进入稳定 legacy 分组，不伪造服务端归属。
+- 点击已完成 volume 直接进入 A06/A07，不重新进入作品详情；返回回 A08。进入前仍校验 namespace、当前 fingerprint、本地文件及完整的 Work/Version/Volume 归属；缺少 v4 目录 identity 的本地 manifest 不迁移、不展示，也不伪造服务端归属。
 - 搜索仅过滤当前 `serverIdentity + userId + authzVersion` 命名空间中、与记录 fingerprint 一致且已验证完成的本地工件；空查询恢复完整按作品列表。
 - 作品封面是非阻塞增强：首帧先显示缓存封面或统一 fallback，再通过当前 namespace 的 authenticated cover adapter 渐进替换；封面缺失/失败不得阻塞目录、搜索、下载完成或 Reader 跳转，也不得把 cover cache 计为 completed publication。
 - 点击失败任务进入 `downloads.detail` 或行内展开稳定原因。
@@ -775,7 +775,7 @@ permission-revoked
 |---|---|---|
 | Work card | A02、A03、A04 | 同一内容模型；可因上下文调整辅助信息，但标题/封面/进入详情语义一致 |
 | Progress | A02、A05、A06、A07 | 同一用户进度；百分比、页码、时间不混用错误格式 |
-| Media/volume identity | A05、A06、A07、A08 | `work → mediaVersion → volume` 层级一致 |
+| Version/volume identity | A05、A06、A07、A08 | `work → directory version → volume` 层级一致；格式和媒介种类属于 volume |
 | Downloaded badge | A03、A05、A08 | 只表示 completed 本地工件，不表示普通缓存命中 |
 | Sync status | A02、A06、A07、A08 | `synced / pending / failed / conflict` 语义一致 |
 | Server identity | A01、登录/重认证、我的 | 名称与域名一致；不暴露 Cookie 或内部路径 |

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. This is a coordinated, breaking schema and API change.
+Superseded by [ADR 0017](0017-library-root-directory-topology.md). This document is retained only as historical context and is not current implementation policy.
 
 ## Context
 

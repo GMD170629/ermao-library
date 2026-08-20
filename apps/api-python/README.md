@@ -25,7 +25,7 @@ curl http://localhost:8000/api/health
 
 ## 本地文件重置密码
 
-在登录页申请重置密码后，应用会在监控书库根目录创建 `reset-password.html`；如果没有配置监控目录，则写入应用存储目录的 `password-reset` 子目录。打开文件并点击其中的链接即可设置新密码。重置令牌仅保存哈希，30 分钟失效且只能使用一次。
+在登录页申请重置密码后，应用会在第一个可写书库根目录创建 `reset-password.html`；如果没有配置可写书库根目录，则写入应用存储目录的 `password-reset` 子目录。打开文件并点击其中的链接即可设置新密码。重置令牌仅保存哈希，30 分钟失效且只能使用一次。
 
 Backups are manual. Use the settings page or `POST /api/backups` to create a backup archive. Backup archives include system settings and database data, but exclude reader content files and cover image files.
 

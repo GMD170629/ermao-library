@@ -247,12 +247,12 @@ preflight the complete reading order. Redirect, traversal, symlink, empty-body,
 overflow, truncation, cancellation, and oversized-error cases fail closed.
 
 Reader v4 bootstrap is also the authoritative Download Center catalog source. A completed
-artifact persists the real `mediaVersion.id`, `mediaVersion.mediaKind`, server-completed
-hint, and the volume's index/sort order. The stable local hierarchy is
-`work -> media version -> volume`; title/author/cover decorate the work, never replace
-these identifiers. Pre-v4 local manifests may migrate into deterministic per-volume
-`legacy-volume:<volumeId>` groups, but an online v4 response missing or contradicting
-media-version identity fails closed.
+artifact persists the real `version.id`, `version.sourceKey`, optional
+`version.sourceName`, server-completed hint, and the volume's index/sort order. The stable
+local hierarchy is `work -> directory version -> volume`; title, author, cover, format,
+and media kind decorate that topology and never replace its identifiers. Local manifests
+without this v4 directory identity are not migrated. An online response with missing or
+contradictory Work/Version/Volume ownership fails closed.
 
 A shared foreground volume runtime exposes observable `Preparing`, `TaskCreated`,
 `Downloading`, `Progress`, `ReadyToOpen`, `Failed`, and `Cancelled` states. Reader

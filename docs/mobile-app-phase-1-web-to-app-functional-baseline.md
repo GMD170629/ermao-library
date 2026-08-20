@@ -102,7 +102,7 @@ P0 必须形成以下连续闭环：
 | 静态书架 | `/shelves`；书架 CRUD API | 按 `ownerUserId` 隔离；用户手动管理作品 | P0 | “书架”Tab；详情 Stack；创建/编辑 Sheet；明确选择模式加入作品；禁止依赖右键和桌面拖放 |
 | 智能书架 | `/shelves`；书架 CRUD 与过滤规则 | 规则计算；可能出现不支持规则 | P0 浏览，P1 编辑 | P0 展示规则摘要和计算结果，不能允许手工增删作品；不支持规则必须显式提示 |
 | 书架集合 | `/shelves`；书架 CRUD | `COLLECTION` 只能包含书架，不能直接放作品；非空集合删除冲突 | P0 浏览，P1 复杂整理 | 集合 → 书架 → 作品的层级导航；删除使用系统确认并呈现 `409` 原因 |
-| 作品详情 | `/works/[id]`；work、media versions、volumes、reading units API | 一个作品可能有 `EBOOK / COMIC / AUDIOBOOK` 多媒介和多个 volume；部分章节/卷可失败 | P0 | 折叠头部、只显示真实媒介的 segmented control、可横向滚动并分页加载的多卷封面轨道、随选中卷册更新的元数据、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
+| 作品详情 | `/works/[id]`；work、directory versions、volumes、reading units API | Version 由书库目录直接决定；一个 Version 可包含不同格式和多个 volume，媒介种类由当前 volume 派生；部分章节/卷可失败 | P0 | 折叠头部、目录版本选择、可横向滚动并分页加载的多卷封面轨道、随选中卷册更新的格式/媒介与元数据、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
 | 阅读状态 | 作品详情；Reader v4 `PUT .../reading-status` | `UNREAD / READING / FINISHED`；用户级状态 | P0 | 详情动作 Sheet；开始阅读可推进到 READING；标记完成提供可撤销反馈 |
 | 批量加入个人书架 | Web 书库选择模式 | 普通用户可操作自己的书架 | P1 | 原生明确“选择”模式和底部操作栏；不复刻 Ctrl/Cmd 多选、右键菜单 |
 
@@ -125,11 +125,11 @@ P0 必须形成以下连续闭环：
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| 手工文件导入 | 首页/书库上传；`POST /api/works/import` | 当前受 `canManageSystem` 保护；multipart；文件类型/大小/目标失败；无分块或断点续传 | P1 | 系统 Document Picker / Share Extension；前台上传进度、取消、失败重试。手机文件目录不能冒充服务器监控目录 |
+| 手工文件导入 | 首页/书库上传；`POST /api/works/import` | 当前受 `canManageSystem` 保护；目标必须位于已启用书库根目录并符合其组织方式；multipart；无分块或断点续传 | P1 | 系统 Document Picker / Share Extension；选择合法的服务器书库路径，前台上传进度、取消、失败重试；上传完成后由扫描器绑定 Work / Version / Volume，手机文件名或表单元数据不能另建结构 |
 | 导入任务 | `/settings/library`；import task 与 scan job API | `PENDING / PARSING / COMPLETED / FAILED` 等；当前管理入口要求 `canManageSystem` | P2 只读候选 | 若以后进入 App，采用任务时间线和失败摘要；扫描、清队列、删源文件保留 Web |
 | Kindle | `/settings/email` 与作品详情；kindle settings/task API | 个人任务按用户隔离；SMTP 是系统配置 | P1 | 作品动作 Sheet + 个人发送队列；SMTP 配置 Web-only |
 | 用户管理 | `/settings/users`；`/api/admin/users*` | 只有 `isAdmin`；创建、停用、授权、重置密码、删除 | Web-only | 不进入首阶段 App；`canManageSystem` 不能代替 admin |
-| 文件/监控目录 | `/settings/library`；monitor folder 与设置 API | 服务器路径、NAS、扫描策略；系统管理权限和资源范围 | Web-only | App 不复制服务器目录树；最多跳转 Web 管理后台 |
+| 书库根目录 | `/settings/library`；library root 与设置 API | 服务器路径、NAS、`FLAT / VOLUMES / AUDIOBOOK` 组织方式、扫描策略；系统管理权限和资源范围 | Web-only | App 不复制服务器目录树；最多跳转 Web 管理后台 |
 | 整理与元数据治理 | `/settings/organize`；organize、duplicates、categories、provider API | 批量、长任务、可破坏写操作、失败与回滚 | Web-only；以后可 P2 只读 | P0/P1 不出现合并、拆分、移动、重分类、元数据源配置 |
 | OPDS 配置 | `/settings/opds`；system settings | 系统管理；OPDS 是第三方客户端协议 | Web-only | 官方 App 内部数据层禁止改用 OPDS |
 | 备份、健康、队列、日志 | settings 对应入口和 system/management API | 系统管理；含高风险与运维状态 | Web-only；以后可 P2 健康摘要 | 不复制桌面日志、备份恢复、队列操作台；高风险动作继续在 Web 完成 |
@@ -289,7 +289,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 4. **下载与本地阅读**：可重排格式从详情下载完成后才能阅读；PDF/漫画可在线流式，也可显式下载到本机 → Download Center 按图书管理/搜索本地 completed 内容 → 从本地打开 → 产生本地进度 → 有网时继续正常同步。
 5. **账户安全**：我的 → 修改账户/语言/密码或退出 → 会话刷新 → 正确保留或清理私有命名空间。
 6. **权限变化**：管理员调整范围 → `authzVersion` 变化 → App 清理旧权限缓存 → 重新拉取书库和资源状态。
-7. **P1 手工导入**：有权用户选择设备文件 → 选择可访问的服务器目标 → 前台上传 → 查看自己的任务结果 → 打开新作品。
+7. **P1 手工导入**：有权用户选择设备文件 → 选择符合组织方式的服务器书库路径 → 前台上传 → 扫描器绑定目录拓扑 → 查看自己的任务结果 → 打开新作品。
 
 ## 9. 明确禁止从 Web 复制的内容
 
