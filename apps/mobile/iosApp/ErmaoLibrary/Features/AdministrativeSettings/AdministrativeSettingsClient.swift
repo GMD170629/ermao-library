@@ -57,7 +57,6 @@ protocol AdministrativeSettingsClient: Sendable {
     func loadRecognitionPolicy() async throws -> RecognitionPolicy
     func saveRecognitionPolicy(_ policy: RecognitionPolicy) async throws -> RecognitionPolicy
 
-    func loadDuplicateGroups() async throws -> [DuplicateGroup]
     func loadLibraryOperations() async throws -> [LibraryOperation]
     func undoLibraryOperation(id: String) async throws
     func loadCategories(kind: CategoryKind, query: String) async throws -> [GovernedCategory]

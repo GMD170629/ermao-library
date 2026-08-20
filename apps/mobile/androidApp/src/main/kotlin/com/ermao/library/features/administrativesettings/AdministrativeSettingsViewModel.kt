@@ -224,7 +224,6 @@ private fun AdministrativePageSnapshot.supports(route: AdministrativeSettingsRou
     AdministrativeSettingsRoute.OrganizeCandidates -> this is OrganizeCandidatesSnapshot
     AdministrativeSettingsRoute.OrganizeRuns -> this is OrganizeRunsSnapshot
     AdministrativeSettingsRoute.RecognitionPolicy -> this is RecognitionPolicySnapshot
-    AdministrativeSettingsRoute.Duplicates -> this is DuplicatesSnapshot
     AdministrativeSettingsRoute.LibraryOperations -> this is LibraryOperationsSnapshot
     is AdministrativeSettingsRoute.CategoryGovernance -> this is CategoryGovernanceSnapshot
     AdministrativeSettingsRoute.MetadataProviders -> this is MetadataProvidersSnapshot

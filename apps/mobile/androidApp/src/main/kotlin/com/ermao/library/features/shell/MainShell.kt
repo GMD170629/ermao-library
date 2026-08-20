@@ -673,9 +673,6 @@ fun MainShell(
                 entry<AdministrativeSettingsRoute.RecognitionPolicy> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
-                entry<AdministrativeSettingsRoute.Duplicates> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
                 entry<AdministrativeSettingsRoute.LibraryOperations> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }

@@ -78,7 +78,7 @@ struct AdministrativeManagementView: View {
         guard store.permissions.canManageSystem else { return [] }
         return [
             .init(copy[.organizeQueue], "sparkles", .organizeQueue, "\(summary.pendingOrganizeCount) \(copy[.pending])"),
-            .init(copy[.duplicateCategories], "square.3.layers.3d", .duplicateWorks, "\(summary.duplicateGroupCount)"),
+            .init(copy[.categoryGovernanceTitle], "tag", .categoryGovernance, nil),
             .init(copy[.metadataProviders], "person.text.rectangle", .metadataProviders, "\(summary.availableProviderCount)/\(summary.providerCount) \(copy[.available])")
         ]
     }

@@ -150,7 +150,7 @@ function reasonLabel(code: string) {
 
 function jobReasons(job: OrganizeJobView | OrganizeJobSummaryView) {
   const rawCodes = job.reasonCodes?.length ? job.reasonCodes : job.issueCodes;
-  const codes = rawCodes.filter((code) => code !== 'DUPLICATE' && !code.startsWith('SUGGEST_'));
+  const codes = rawCodes.filter((code) => !code.startsWith('SUGGEST_'));
   if (codes.length) return [...new Set(codes.map(reasonLabel))];
   if (job.trigger === 'NEW') return ['新增后自动执行'];
   if (job.trigger === 'SCHEDULE') return ['定时识别'];

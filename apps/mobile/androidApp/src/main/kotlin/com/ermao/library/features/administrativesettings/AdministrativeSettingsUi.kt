@@ -154,9 +154,6 @@ fun AdministrativeSettingsDestination(
         AdministrativeSettingsRoute.RecognitionPolicy -> RecognitionPolicyScreen(
             state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
         )
-        AdministrativeSettingsRoute.Duplicates -> DuplicatesScreen(
-            state.typed(), locale, onNavigate, { viewModel.load(route, true) }, onBack, modifier,
-        )
         AdministrativeSettingsRoute.LibraryOperations -> LibraryOperationsScreen(
             state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
         )

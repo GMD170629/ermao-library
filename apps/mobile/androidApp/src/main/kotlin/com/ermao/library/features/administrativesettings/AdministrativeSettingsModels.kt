@@ -60,9 +60,6 @@ sealed interface AdministrativeSettingsRoute : NavKey {
     data object RecognitionPolicy : AdministrativeSettingsRoute
 
     @Serializable
-    data object Duplicates : AdministrativeSettingsRoute
-
-    @Serializable
     data object LibraryOperations : AdministrativeSettingsRoute
 
     @Serializable
@@ -440,10 +437,6 @@ data class RecognitionPolicySnapshot(
 
 enum class MetadataSource { Opf, Embedded, PathAndFileName, Provider }
 
-data class DuplicatesSnapshot(
-    val groups: List<DuplicateGroup>,
-) : AdministrativePageSnapshot
-
 data class LibraryOperationsSnapshot(
     val operations: List<LibraryOperationSummary>,
 ) : AdministrativePageSnapshot
@@ -456,20 +449,6 @@ data class LibraryOperationSummary(
     val createdAtLabel: String?,
     val expiresAtLabel: String?,
     val undoAvailable: Boolean,
-)
-
-data class DuplicateGroup(
-    val id: String,
-    val title: String,
-    val author: String,
-    val confidencePercent: Int,
-    val versions: List<DuplicateVersion>,
-)
-
-data class DuplicateVersion(
-    val workId: String,
-    val title: String,
-    val subtitle: String,
 )
 
 data class CategoryGovernanceSnapshot(

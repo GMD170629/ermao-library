@@ -44,7 +44,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
             let loadedKindle = try await kindle
             return AdministrativeManagementSummary(
                 librarySourceCount: 0, monitoredSourceCount: 0, activeImportCount: 0,
-                automaticImportEnabled: false, pendingOrganizeCount: 0, duplicateGroupCount: 0,
+                automaticImportEnabled: false, pendingOrganizeCount: 0,
                 availableProviderCount: 0, providerCount: 0, userCount: loadedUsers.count,
                 smtpEnabled: false, failedKindleCount: Int(loadedKindle.pageInfo.total), opdsRunning: false,
                 latestBackupAt: nil, healthyComponentCount: 0, componentCount: 0,
@@ -55,7 +55,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
         async let imports: ErmaoShared.ImportTaskPage = value(try await repository.listImportTasks(context: context, filter: ErmaoShared.ImportTaskFilter(status: nil, keyword: nil, page: 1, pageSize: 1)))
         async let preferences: ErmaoShared.ImportPreferences = value(try await repository.loadImportPreferences(context: context))
         async let organize: ErmaoShared.OrganizeJobPage = value(try await repository.listOrganizeJobs(context: context, filter: ErmaoShared.OrganizeJobFilter(search: nil, status: nil, page: 1, pageSize: 1)))
-        async let duplicates: ErmaoShared.DuplicateGroupPage = value(try await repository.listDuplicateGroups(context: context, page: 1, pageSize: 1))
         async let providers: ErmaoShared.MetadataProviders = value(try await repository.loadMetadataProviders(context: context))
         async let users: [ErmaoShared.ManagedUser] = permissions.isAdmin
             ? value(try await repository.listUsers(context: context))
@@ -72,7 +71,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
         let loadedEvents = try await events
         let loadedPreferences = try await preferences
         let loadedOrganize = try await organize
-        let loadedDuplicates = try await duplicates
         let loadedUsers = try await users
         let loadedEmail = try await email
         let loadedKindle = try await kindle
@@ -83,7 +81,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
             activeImportCount: Int(loadedImports.summary.failed) + loadedImports.tasks.filter { $0.status == .pending || $0.status == .parsing }.count,
             automaticImportEnabled: loadedPreferences.stabilityCheckEnabled,
             pendingOrganizeCount: Int(loadedOrganize.pageInfo.total),
-            duplicateGroupCount: Int(loadedDuplicates.pageInfo.total),
             availableProviderCount: loadedProviders.providers.filter { $0.enabled && $0.lastTestStatus?.lowercased() == "ok" }.count,
             providerCount: loadedProviders.providers.count,
             userCount: loadedUsers.count,
@@ -202,7 +199,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func loadRecognitionPolicy() async throws -> RecognitionPolicy { async let policyValue: ErmaoShared.OrganizePolicy = value(try await repository.loadOrganizePolicy(context: context)); async let queueValue: ErmaoShared.OpfQueueStatus = value(try await repository.loadOpfQueueStatus(context: context)); return map(try await policyValue, queue: try await queueValue) }
     func saveRecognitionPolicy(_ policy: RecognitionPolicy) async throws -> RecognitionPolicy { let current: ErmaoShared.OrganizePolicy = try value(try await repository.loadOrganizePolicy(context: context)); let wire: ErmaoShared.OrganizePolicy = try value(try await repository.updateOrganizePolicy(context: context, policy: map(policy, onto: current))); let queue: ErmaoShared.OpfQueueStatus = try value(try await repository.loadOpfQueueStatus(context: context)); return map(wire, queue: queue) }
 
-    func loadDuplicateGroups() async throws -> [DuplicateGroup] { let wire: ErmaoShared.DuplicateGroupPage = try value(try await repository.listDuplicateGroups(context: context, page: 1, pageSize: 200)); return wire.groups.map(map) }
     func loadLibraryOperations() async throws -> [LibraryOperation] { let values: [ErmaoShared.LibraryOperation] = try value(try await repository.listLibraryOperations(context: context)); return values.map(map) }
     func undoLibraryOperation(id: String) async throws { let _: ErmaoShared.LibraryOperation = try value(try await repository.undoLibraryOperation(context: context, operationId: id)) }
     func loadCategories(kind: CategoryKind, query: String) async throws -> [GovernedCategory] { let wire: ErmaoShared.CategoryPage = try value(try await repository.listCategories(context: context, filter: ErmaoShared.CategoryFilter(kind: map(kind), search: query.isEmpty ? nil : query, page: 1, pageSize: 200))); return wire.categories.map(map) }

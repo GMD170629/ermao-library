@@ -326,7 +326,6 @@ internal fun AdministrativeSettingsRoute.requiredCapability(): AdministrativeCap
     AdministrativeSettingsRoute.OrganizeCandidates,
     AdministrativeSettingsRoute.OrganizeRuns,
     AdministrativeSettingsRoute.RecognitionPolicy,
-    AdministrativeSettingsRoute.Duplicates,
     AdministrativeSettingsRoute.LibraryOperations,
     is AdministrativeSettingsRoute.CategoryGovernance,
     -> AdministrativeCapability.ManageOrganization

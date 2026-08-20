@@ -46,12 +46,6 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { providers: [], pipelines: [] } } });
       return;
     }
-    if (pathname.endsWith('/api/library/duplicates')) {
-      const duplicatePage = Math.max(1, Number(url.searchParams.get('page') ?? 1));
-      counts[`duplicates-page-${duplicatePage}`] = (counts[`duplicates-page-${duplicatePage}`] ?? 0) + 1;
-      await route.fulfill({ json: { ok: true, data: { groups: [], page: duplicatePage, pageSize: 20, total: 21, totalPages: 2 } } });
-      return;
-    }
     if (pathname.endsWith('/api/library/categories')) {
       await route.fulfill({ json: { ok: true, data: { categories: [], page: 1, pageSize: 20, total: 0, totalPages: 1 } } });
       return;
@@ -202,17 +196,12 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   const initialAuthRequests = requestCount(counts, '/api/auth/me');
   const initialShelfRequests = requestCount(counts, '/api/shelves');
   expect(requestCount(counts, '/api/metadata/providers')).toBe(0);
-  expect(requestCount(counts, '/api/library/duplicates')).toBe(0);
   expect(requestCount(counts, '/api/library/categories')).toBe(0);
   expect(requestCount(counts, '/api/organize/policy')).toBe(0);
   expect(requestCount(counts, '/api/organize/candidates')).toBe(0);
 
   await page.locator('a[href="/settings/organize?tab=providers"]').click();
   await expect.poll(() => requestCount(counts, '/api/metadata/providers')).toBeGreaterThan(0);
-  await page.locator('a[href="/settings/organize?tab=duplicates"]').click();
-  await expect.poll(() => requestCount(counts, '/api/library/duplicates')).toBeGreaterThan(0);
-  await page.getByRole('button', { name: '下一页' }).click();
-  await expect.poll(() => counts['duplicates-page-2'] ?? 0).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=categories"]').click();
   await expect.poll(() => requestCount(counts, '/api/library/categories')).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=recognition"]').click();

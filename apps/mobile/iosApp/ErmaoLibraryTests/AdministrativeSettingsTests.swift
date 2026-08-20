@@ -64,7 +64,7 @@ final class AdministrativeSettingsTests: XCTestCase {
         client.summaryDelay = 0
         client.summary = AdministrativeManagementSummary(
             librarySourceCount: 2, monitoredSourceCount: 0, activeImportCount: 0,
-            automaticImportEnabled: false, pendingOrganizeCount: 0, duplicateGroupCount: 0,
+            automaticImportEnabled: false, pendingOrganizeCount: 0,
             availableProviderCount: 0, providerCount: 0, userCount: 0, smtpEnabled: false,
             failedKindleCount: 0, opdsRunning: false, latestBackupAt: nil,
             healthyComponentCount: 0, componentCount: 0, logBytes: 0, logLimitBytes: 0
@@ -85,7 +85,7 @@ final class AdministrativeSettingsTests: XCTestCase {
             .serverDirectoryPicker(purpose: .scanDirectory), .importTasks, .importPreferences,
             .importTaskDetail(taskID: "i"), .importScans,
             .organizeQueue, .organizeCandidates, .organizeRuns, .recognitionPolicy,
-            .duplicateWorks, .libraryOperations, .categoryGovernance, .metadataProviders,
+            .libraryOperations, .categoryGovernance, .metadataProviders,
             .metadataProvider(providerID: "p"), .metadataPipeline, .opds, .backups,
             .workDetailOrder, .health, .logs, .about
         ]
@@ -118,7 +118,7 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     var summaryDelay: UInt64 = 0
     var summary = AdministrativeManagementSummary(
         librarySourceCount: 0, monitoredSourceCount: 0, activeImportCount: 0,
-        automaticImportEnabled: false, pendingOrganizeCount: 0, duplicateGroupCount: 0,
+        automaticImportEnabled: false, pendingOrganizeCount: 0,
         availableProviderCount: 0, providerCount: 0, userCount: 0, smtpEnabled: false,
         failedKindleCount: 0, opdsRunning: false, latestBackupAt: nil,
         healthyComponentCount: 0, componentCount: 0, logBytes: 0, logLimitBytes: 0
@@ -152,7 +152,7 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     func loadImportPreferences() async throws -> ImportPreferences { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveImportPreferences(_ preferences: ImportPreferences) async throws -> ImportPreferences { try fail(); return preferences }
     func loadOrganizeJobs(status: OrganizeJobStatus?) async throws -> [OrganizeJob] { try fail(); return [] }; func loadPendingOrganizeJobs() async throws -> [OrganizeJob] { try fail(); return [] }; func loadOrganizeRuns() async throws -> [OrganizeRun] { try fail(); return [] }; func recognizeOrganizeJob(id: String) async throws { try fail() }; func deleteOrganizeJob(id: String) async throws { try fail() }; func loadRecognitionCandidates() async throws -> [RecognitionCandidate] { try fail(); return [] }
     func loadRecognitionPolicy() async throws -> RecognitionPolicy { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveRecognitionPolicy(_ policy: RecognitionPolicy) async throws -> RecognitionPolicy { try fail(); return policy }
-    func loadDuplicateGroups() async throws -> [DuplicateGroup] { try fail(); return [] }; func loadLibraryOperations() async throws -> [LibraryOperation] { try fail(); return [] }; func undoLibraryOperation(id: String) async throws { try fail() }
+    func loadLibraryOperations() async throws -> [LibraryOperation] { try fail(); return [] }; func undoLibraryOperation(id: String) async throws { try fail() }
     func loadCategories(kind: CategoryKind, query: String) async throws -> [GovernedCategory] { try fail(); return [] }; func renameCategory(id: String, name: String) async throws -> String { try fail(); return "operation" }; func mergeCategories(_ request: MergeCategoryRequest) async throws -> String { try fail(); return "operation" }; func deleteCategory(id: String) async throws { try fail() }
     func loadMetadataProviders() async throws -> [MetadataProvider] { try fail(); return [] }; func setMetadataProviderEnabled(id: String, enabled: Bool) async throws -> MetadataProvider { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func loadMetadataProviderConfiguration(id: String) async throws -> MetadataProviderConfiguration { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveMetadataProviderConfiguration(_ configuration: MetadataProviderConfiguration) async throws -> MetadataProviderConfiguration { try fail(); return configuration }; func testMetadataProvider(id: String) async throws -> MetadataProvider { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func loadMetadataPipeline() async throws -> MetadataPipeline { try fail(); return .init(mediaKind: .ebook, providerIDs: [], enabledProviderIDs: []) }; func saveMetadataPipeline(_ pipeline: MetadataPipeline) async throws -> MetadataPipeline { try fail(); return pipeline }

@@ -123,26 +123,6 @@ data class OpfQueueStatus(
     val utilization: Double,
 )
 
-data class DuplicateWork(
-    val id: String,
-    val title: String,
-    val author: String,
-    val tags: List<String>,
-    val volumeCount: Int,
-)
-
-data class DuplicateGroup(
-    val id: String,
-    val confidence: Double,
-    val reasons: List<String>,
-    val works: List<DuplicateWork>,
-)
-
-data class DuplicateGroupPage(
-    val groups: List<DuplicateGroup>,
-    val pageInfo: PageInfo,
-)
-
 data class LibraryOperation(
     val id: String,
     val action: String,

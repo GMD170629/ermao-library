@@ -586,35 +586,6 @@ internal fun JsonElement.toOpfQueueStatus(): OpfQueueStatus {
     )
 }
 
-private fun JsonObject.toDuplicateWork(): DuplicateWork {
-    val volumeCount = requiredArray("mediaVersions").sumOf { media ->
-        media.objectValue("INVALID_MEDIA_VERSION").requiredArray("volumes").size
-    }
-    return DuplicateWork(
-        id = requiredString("id"),
-        title = requiredString("title"),
-        author = requiredString("author"),
-        tags = requiredStringList("tags"),
-        volumeCount = volumeCount,
-    )
-}
-
-internal fun JsonElement.toDuplicateGroupPage(): DuplicateGroupPage {
-    val root = objectValue("INVALID_DUPLICATES").expectKeys("groups", "total", "page", "pageSize", "totalPages")
-    return DuplicateGroupPage(
-        groups = root.requiredArray("groups").map { element ->
-            val group = element.objectValue("INVALID_DUPLICATE_GROUP").expectKeys("id", "confidence", "reasons", "works")
-            DuplicateGroup(
-                id = group.requiredString("id"),
-                confidence = group.requiredDouble("confidence"),
-                reasons = group.requiredStringList("reasons"),
-                works = group.requiredArray("works").map { it.objectValue("INVALID_DUPLICATE_WORK").toDuplicateWork() },
-            )
-        },
-        pageInfo = root.toPageInfo(),
-    )
-}
-
 internal fun JsonElement.toLibraryOperations(): List<LibraryOperation> =
     objectValue("INVALID_LIBRARY_OPERATIONS").expectKeys("operations").requiredArray("operations").map(JsonElement::toLibraryOperation)
 

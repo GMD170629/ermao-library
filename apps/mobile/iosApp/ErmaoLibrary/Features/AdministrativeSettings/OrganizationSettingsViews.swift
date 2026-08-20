@@ -105,31 +105,6 @@ struct RecognitionPolicyView: View {
     private func save(_ value: RecognitionPolicy) { Task { let result = await store.performValue(id: "save-recognition-policy") { try await store.client.saveRecognitionPolicy(value) }; if case let .success(updated) = result { policy = updated; state = .loaded(updated) } } }
 }
 
-struct DuplicateCategoryView: View {
-    enum Tab: Hashable { case duplicates, categories }
-    @ObservedObject var store: AdministrativeSettingsStore
-    @State private var tab: Tab = .duplicates
-    @State private var state: AdministrativeLoadState<[DuplicateGroup]> = .idle
-    @Environment(\.administrativeCopy) private var copy
-    @Environment(\.appTheme) private var theme
-    @Environment(\.administrativeNavigate) private var navigate
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker(copy[.duplicatesTitle], selection: $tab) { Text(copy[.duplicatesTab]).tag(Tab.duplicates); Text(copy[.categoriesTab]).tag(Tab.categories) }.pickerStyle(.segmented).padding()
-            if tab == .categories { CategoryGovernanceView(store: store) } else { duplicates }
-        }.navigationTitle(copy[.duplicatesTitle]).navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Button { navigate(.libraryOperations) } label: { Image(systemName: "clock.arrow.circlepath") }.accessibilityLabel(copy[.operationHistory]) } }.task { await loadAsync() }.onDisappear { store.cancelPendingRequests() }.administrativeNotice(store: store)
-    }
-    private var duplicates: some View {
-        AdministrativeStateView(state: state, retry: load) { groups in
-            List(groups) { group in
-                DisclosureGroup { ForEach(group.works) { work in HStack { VStack(alignment: .leading) { Text(work.title); if let author = work.author { Text(author).foregroundStyle(theme.textSecondary) } }; Spacer(); Text(work.confidence, format: .percent.precision(.fractionLength(0))).foregroundStyle(theme.textSecondary) } } } label: { Text("\(group.works.first?.title ?? copy[.unknown]) · \(group.works.count)") }
-            }.administrativeListSurface().overlay { if groups.isEmpty { AdministrativeEmptyView(title: copy[.empty], systemImage: "square.3.layers.3d") } }
-        }
-    }
-    private func load() { Task { await loadAsync() } }; private func loadAsync() async { state = .loading; state = await store.load(scope: "duplicate-groups") { try await store.client.loadDuplicateGroups() } }
-}
-
 struct LibraryOperationsView: View {
     @ObservedObject var store: AdministrativeSettingsStore
     @State private var state: AdministrativeLoadState<[LibraryOperation]> = .idle

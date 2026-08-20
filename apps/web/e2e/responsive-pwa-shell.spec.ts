@@ -1009,7 +1009,6 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
             updatedAt: '2026-07-17T08:30:00.000Z',
             book: mobileBook,
             suggestions: [],
-            duplicates: []
           }],
           books: [mobileBook],
           total: 1

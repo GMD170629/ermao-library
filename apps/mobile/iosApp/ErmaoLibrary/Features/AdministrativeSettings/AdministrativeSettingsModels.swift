@@ -18,7 +18,6 @@ enum AdministrativeSettingsRoute: Hashable, Sendable {
     case organizeCandidates
     case organizeRuns
     case recognitionPolicy
-    case duplicateWorks
     case libraryOperations
     case categoryGovernance
     case metadataProviders
@@ -98,7 +97,6 @@ struct AdministrativeManagementSummary: Equatable, Sendable {
     let activeImportCount: Int
     let automaticImportEnabled: Bool
     let pendingOrganizeCount: Int
-    let duplicateGroupCount: Int
     let availableProviderCount: Int
     let providerCount: Int
     let userCount: Int
@@ -414,19 +412,6 @@ struct RecognitionPolicy: Equatable, Sendable {
     let nextRunAt: Date?
     let opfQueueCompleted: Int
     let opfQueueTotal: Int
-}
-
-struct DuplicateWork: Identifiable, Equatable, Sendable {
-    let id: String
-    let title: String
-    let author: String?
-    let fileCount: Int
-    let confidence: Double
-}
-
-struct DuplicateGroup: Identifiable, Equatable, Sendable {
-    let id: String
-    let works: [DuplicateWork]
 }
 
 struct LibraryOperation: Identifiable, Equatable, Sendable {

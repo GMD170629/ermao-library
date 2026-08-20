@@ -43,7 +43,6 @@ import com.ermao.library.shared.modules.administrativesettings.UpdateManagedUser
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTab as SharedDetailTab
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTabOrder as SharedDetailOrder
 import com.ermao.library.shared.modules.administrativesettings.domain.ProviderSettingValue as SharedProviderValue
-import kotlin.math.roundToInt
 
 class SharedAdministrativeSettingsAdapter(
     private val sharedRepository: SharedRepository,
@@ -113,15 +112,6 @@ class SharedAdministrativeSettingsAdapter(
             })
         }
         AdministrativeSettingsRoute.RecognitionPolicy -> loadRecognitionPolicy()
-        AdministrativeSettingsRoute.Duplicates -> sharedRepository.listDuplicateGroups(sharedContext, 1, 100).map { page ->
-            DuplicatesSnapshot(page.groups.map { group ->
-                val first = group.works.firstOrNull()
-                DuplicateGroup(
-                    group.id, first?.title.orEmpty(), first?.author.orEmpty(), (group.confidence * 100).roundToInt(),
-                    group.works.map { DuplicateVersion(it.id, it.title, it.author) },
-                )
-            })
-        }
         AdministrativeSettingsRoute.LibraryOperations -> sharedRepository.listLibraryOperations(sharedContext).map { operations ->
             LibraryOperationsSnapshot(operations.map { it.toLocal() })
         }
@@ -457,7 +447,7 @@ class SharedAdministrativeSettingsAdapter(
 private fun managementSnapshot(capabilities: Set<AdministrativeCapability>): ManagementSnapshot {
     val routes = listOf(
         AdministrativeSettingsRoute.LibrarySources, AdministrativeSettingsRoute.ImportTasks, AdministrativeSettingsRoute.ImportPreferences,
-        AdministrativeSettingsRoute.OrganizeQueue, AdministrativeSettingsRoute.RecognitionPolicy, AdministrativeSettingsRoute.Duplicates,
+        AdministrativeSettingsRoute.OrganizeQueue, AdministrativeSettingsRoute.RecognitionPolicy,
         AdministrativeSettingsRoute.CategoryGovernance(), AdministrativeSettingsRoute.MetadataProviders, AdministrativeSettingsRoute.Users,
         AdministrativeSettingsRoute.EmailKindle(), AdministrativeSettingsRoute.KindleQueue, AdministrativeSettingsRoute.Opds,
         AdministrativeSettingsRoute.Backups, AdministrativeSettingsRoute.DetailOrder, AdministrativeSettingsRoute.Health(), AdministrativeSettingsRoute.Logs,

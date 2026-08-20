@@ -496,7 +496,6 @@ private extension AdministrativeSettingsRoute {
         case .organizeCandidates: "organize-candidates"
         case .organizeRuns: "organize-runs"
         case .recognitionPolicy: "recognition-policy"
-        case .duplicateWorks: "duplicate-works"
         case .libraryOperations: "library-operations"
         case .categoryGovernance: "category-governance"
         case .metadataProviders: "metadata-providers"

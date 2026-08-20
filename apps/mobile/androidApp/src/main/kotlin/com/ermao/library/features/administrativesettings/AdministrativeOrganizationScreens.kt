@@ -201,33 +201,6 @@ internal fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().al
 }
 
 @Composable
-fun DuplicatesScreen(
-    state: AdministrativePageState<DuplicatesSnapshot>,
-    locale: AdministrativeLocale,
-    onNavigate: (AdministrativeSettingsRoute) -> Unit,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    AdministrativePage(AdministrativeCopy.DuplicatesAndCategories, locale, onBack, modifier) {
-        AdministrativeNavigationRow(
-            AdministrativeCopy.OperationHistory.text(locale), null,
-            { onNavigate(AdministrativeSettingsRoute.LibraryOperations) },
-        )
-        PageStateContent(state, locale, onRetry) { snapshot ->
-            snapshot.groups.forEach { group ->
-                ListItem(
-                    headlineContent = { Text("${group.title} · ${group.versions.size}") },
-                    supportingContent = { Text("${group.author} · ${group.confidencePercent}%") },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                )
-                AdministrativeDivider()
-            }
-        }
-    }
-}
-
-@Composable
 fun LibraryOperationsScreen(
     state: AdministrativePageState<LibraryOperationsSnapshot>,
     locale: AdministrativeLocale,

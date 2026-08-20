@@ -2,7 +2,7 @@ import Foundation
 
 enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case managementTitle, librarySection, organizeSection, serviceSection, systemSection
-    case librarySources, importTasks, importPreferences, organizeQueue, duplicateCategories
+    case librarySources, importTasks, importPreferences, organizeQueue
     case metadataProviders, usersPermissions, emailKindle, kindleQueue, opds, backups
     case workDetailOrder, systemHealth, systemLogs, enhancedAbout
     case loading, retry, save, saved, cancel, delete, remove, add, edit, done, close
@@ -39,8 +39,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case recognitionPolicyTitle, scheduledRecognition, schedule, runAfterImport
     case persistOPF, localMetadataFirst, metadataPriority, recognitionScope
     case recognizeUnmatched, recognizeIncomplete, eligibleCount, nextRun, opfQueue
-    case duplicatesTitle, duplicatesTab, categoriesTab, duplicateGroupsDetected
-    case compare, merge, categoryGovernanceTitle, author, tag, series
+    case merge, categoryGovernanceTitle, author, tag, series
     case selectedCount, aliases, workCount, deleteCategory, mergeCategoriesTitle
     case targetCategory, confirmMerge, renameCategory, newCategoryName, confirmRename
     case operationHistory, undoOperation, undoOperationMessage
@@ -89,7 +88,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .managementTitle: "Management", .librarySection: "Library", .organizeSection: "Organization",
         .serviceSection: "Services", .systemSection: "System", .librarySources: "Library Sources",
         .importTasks: "Import Tasks", .importPreferences: "Import Preferences", .organizeQueue: "Smart Organization",
-        .duplicateCategories: "Duplicates & Categories", .metadataProviders: "Metadata Providers",
+        .metadataProviders: "Metadata Providers",
         .usersPermissions: "Users & Permissions", .emailKindle: "Email & Kindle",
         .kindleQueue: "Kindle Send Queue", .opds: "OPDS", .backups: "Data & Backups",
         .workDetailOrder: "Work Detail Order", .systemHealth: "System Health", .systemLogs: "System Logs",
@@ -158,9 +157,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .localMetadataFirst: "Prefer Local Metadata", .metadataPriority: "Metadata Priority",
         .recognitionScope: "Recognition Scope", .recognizeUnmatched: "Unrecognized Books",
         .recognizeIncomplete: "Missing Author or Cover", .eligibleCount: "Eligible Books", .nextRun: "Next Run",
-        .opfQueue: "OPF Save Queue", .duplicatesTitle: "Duplicates & Categories", .duplicatesTab: "Duplicates",
-        .categoriesTab: "Categories", .duplicateGroupsDetected: "Duplicate Groups Detected", .compare: "Compare",
-        .merge: "Merge", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
+        .opfQueue: "OPF Save Queue", .merge: "Merge", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
         .tag: "Tags", .series: "Series", .selectedCount: "Selected", .aliases: "Aliases",
         .workCount: "Works", .deleteCategory: "Delete Category", .mergeCategoriesTitle: "Merge Categories",
         .targetCategory: "Target Category", .confirmMerge: "Confirm Merge", .renameCategory: "Rename Category",
@@ -222,7 +219,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
     private static let chineseOverrides: [AdministrativeCopyKey: String] = [
         .managementTitle: "管理", .librarySection: "书库", .organizeSection: "整理", .serviceSection: "服务",
         .systemSection: "系统", .librarySources: "书库来源", .importTasks: "导入任务", .importPreferences: "导入偏好",
-        .organizeQueue: "智能整理", .duplicateCategories: "重复项与分类", .metadataProviders: "元数据提供者",
+        .organizeQueue: "智能整理", .metadataProviders: "元数据提供者",
         .usersPermissions: "用户与权限", .emailKindle: "邮件与 Kindle", .kindleQueue: "Kindle 发送队列",
         .opds: "OPDS", .backups: "数据与备份", .workDetailOrder: "作品详情顺序", .systemHealth: "系统健康",
         .systemLogs: "系统日志", .enhancedAbout: "关于二毛图书", .loading: "正在加载…", .retry: "重试",
@@ -277,8 +274,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .schedule: "执行周期", .runAfterImport: "新增后自动执行", .persistOPF: "元数据变化自动保存到旁车 OPF",
         .localMetadataFirst: "本地元数据优先", .metadataPriority: "元数据优先级", .recognitionScope: "识别范围",
         .recognizeUnmatched: "尚未识别的读物", .recognizeIncomplete: "缺少作者或封面", .eligibleCount: "符合规则的读物",
-        .nextRun: "下次执行", .opfQueue: "OPF 保存队列", .duplicatesTitle: "重复项与分类", .duplicatesTab: "重复项",
-        .categoriesTab: "分类", .duplicateGroupsDetected: "检测到的重复组", .compare: "比较", .merge: "合并",
+        .nextRun: "下次执行", .opfQueue: "OPF 保存队列", .merge: "合并",
         .categoryGovernanceTitle: "分类治理", .author: "作者", .tag: "标签", .series: "丛书",
         .selectedCount: "已选择", .aliases: "别名", .workCount: "作品", .deleteCategory: "删除分类",
         .mergeCategoriesTitle: "合并分类", .targetCategory: "目标分类", .confirmMerge: "确认合并",

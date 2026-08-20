@@ -324,21 +324,6 @@ internal class KtorAdministrativeSettingsRepository(
     override suspend fun loadOpfQueueStatus(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/metadata/opf-sync/status", transform = JsonElement::toOpfQueueStatus)
 
-    override suspend fun listDuplicateGroups(
-        context: AdministrativeSettingsContext,
-        page: Int,
-        pageSize: Int,
-    ): AdministrativeSettingsResult<DuplicateGroupPage> {
-        validatePage(page, pageSize, 100)?.let { return it }
-        return call(
-            context,
-            ApiMethod.Get,
-            "/api/library/duplicates",
-            query = queryOf("page" to page.toString(), "pageSize" to pageSize.toString()),
-            transform = JsonElement::toDuplicateGroupPage,
-        )
-    }
-
     override suspend fun listLibraryOperations(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/library/operations", transform = JsonElement::toLibraryOperations)
 

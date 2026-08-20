@@ -94,7 +94,6 @@ struct AdministrativeSettingsDestination: View {
         case .organizeCandidates: RecognitionCandidatesView(store: store)
         case .organizeRuns: OrganizeRunsView(store: store)
         case .recognitionPolicy: RecognitionPolicyView(store: store)
-        case .duplicateWorks: DuplicateCategoryView(store: store)
         case .libraryOperations: LibraryOperationsView(store: store)
         case .categoryGovernance: CategoryGovernanceView(store: store)
         case .metadataProviders: MetadataProvidersView(store: store)
