@@ -20,7 +20,7 @@
       },
       {
         "type": "tips",
-        "helpText": "保存后 fnOS 会按资源声明应用新端口；共享数据目录“/shuku.monitor”固定挂载为 /monitor 扫描目录。"
+        "helpText": "保存后 fnOS 会按资源声明应用新端口；共享书库目录“/shuku.library”固定挂载为 /libraries/books 书库根目录。"
       }
     ]
   }

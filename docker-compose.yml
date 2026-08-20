@@ -15,7 +15,7 @@ services:
       - "${WEB_PORT:-3000}:3000"
     volumes:
       - ${STORAGE_PATH:-./data/storage}:/app/storage
-      - ${MONITOR_HOST_PATH:-./monitor}:/monitor
+      - ${LIBRARY_HOST_PATH:-./library}:/libraries/books
       # Add more host libraries as needed, for example:
       # - /path/to/another-library:/libraries/another
     command: ["./scripts/start-unified-app.sh"]
@@ -45,6 +45,6 @@ services:
       ORGANIZE_ROOT_PATHS: /data/staging
     volumes:
       - ./mange:/app/data
-      - ./monitor:/data/komga
+      - ./library:/data/komga
       - ./漫画:/data/staging
     restart: unless-stopped

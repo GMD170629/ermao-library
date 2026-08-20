@@ -17,7 +17,7 @@
 pnpm fnos:build
 ```
 
-产物生成在 `dist/fnos/`。版本默认读取根目录 `package.json`，包内镜像同步使用 `gamersgu/shuku-starship-web:<应用版本>`，例如版本 `0.2.0` 会引用 `gamersgu/shuku-starship-web:0.2.0`。构建脚本会检查版本化镜像引用、回调脚本语法、模板占位符、应用用户权限、共享数据目录、`/monitor` 挂载、独立端口入口、端口向导与范围校验、SQLite 持久化挂载和桌面图标资源。
+产物生成在 `dist/fnos/`。版本默认读取根目录 `package.json`，包内镜像同步使用 `gamersgu/shuku-starship-web:<应用版本>`，例如版本 `0.2.0` 会引用 `gamersgu/shuku-starship-web:0.2.0`。构建脚本会检查版本化镜像引用、回调脚本语法、模板占位符、应用用户权限、共享书库目录、`/libraries/books` 挂载、独立端口入口、端口向导与范围校验、SQLite 持久化挂载和桌面图标资源。
 
 GitHub Actions 会先构建并推送同版本的 Docker 镜像，再生成引用该镜像的 `.fpk`。正式发布版本时，同一次构建还会同步更新 `prod` 和 `latest` 镜像标签。Actions 页面中的 Artifact 会被 GitHub 固定包装成 ZIP，解压后是 `.fpk`。推送 `v*.*.*` 标签，或手动运行工作流并启用 `publish_release`，会把原始 `.fpk` 上传到 GitHub Releases，供 fnOS 直接下载和安装。
 
@@ -37,7 +37,7 @@ fnOS 包声明为 `platform=all`，安装时会根据设备架构拉取对应的
 http://192.168.1.10:3000/
 ```
 
-入口不经过 fnOS 统一网关，也不依赖 fnOS 的登录态；首次打开应用时由页面向导创建管理账户并添加监控文件夹。安装后可以从 fnOS 应用设置修改端口。端口发生冲突时，应选择其他未占用端口后重新保存。
+入口不经过 fnOS 统一网关，也不依赖 fnOS 的登录态；首次打开应用时由页面向导创建管理账户并添加书库根目录。安装后可以从 fnOS 应用设置修改端口。端口发生冲突时，应选择其他未占用端口后重新保存。
 
 从旧的统一网关版本升级时，升级向导会要求确认独立访问端口。升级完成后，旧的 `/app/ermao-books` 地址不再使用。
 
@@ -46,11 +46,11 @@ http://192.168.1.10:3000/
 ## 数据位置
 
 - SQLite、封面、索引、日志和会话密钥：`TRIM_PKGVAR/storage`
-- 需要扫描的原始读物：放入 fnOS 创建的 `/shuku.monitor` 共享目录，该目录整体挂载到 `/monitor`
+- 原始读物：按所选组织方式放入 fnOS 创建的 `/shuku.library` 共享目录，该目录整体挂载到 `/libraries/books`
 
 fnOS 会自动为专用应用用户授予共享目录所需的 ACL 权限。应用持久数据位于 `TRIM_PKGVAR/storage`，容器和生命周期脚本都使用同一个专用应用用户运行。
 
-`config/resource` 声明稳定的 `shuku.monitor` 共享数据目录，fnOS 安装时自动创建为 `/shuku.monitor`，并通过 `TRIM_DATA_SHARE_PATHS` 注入 Compose。`manifest` 设置 `disable_authorization_path=true`，不再额外申请任意 NAS 目录访问权限。
+`config/resource` 声明稳定的 `shuku.library` 共享书库目录，fnOS 安装时自动创建为 `/shuku.library`，并通过 `TRIM_DATA_SHARE_PATHS` 注入 Compose。`manifest` 设置 `disable_authorization_path=true`，不再额外申请任意 NAS 目录访问权限。
 
 fnOS 根据 `config/resource` 中的 `docker-project` 统一管理 Compose 项目的创建、启动、停止、升级和配置变更。生命周期回调只校验端口并以应用用户预创建持久化目录，不执行 `sudo` 或 `docker compose`，也不动态重写 Compose 文件。`cmd/main` 的 `start/stop` 交给应用中心处理，`status` 则通过 Compose 项目和服务标签准确判断 `web` 容器是否正在运行。
 
@@ -60,8 +60,8 @@ fnOS 安装向导只收集访问端口，端口通过 `wizard_port` 注入 Compo
 
 使用登录页的“忘记密码”后，应用会在 fnOS 共享书库目录中创建 `reset-password.html`。在文件管理器中打开该文件并点击链接，即可设置新密码。
 
-安装完成后，在二毛图书设置页添加 `/monitor` 作为监控文件夹。应用会递归扫描放入 `/shuku.monitor` 共享目录的读物。
+安装完成后，在二毛图书设置页添加 `/libraries/books` 作为书库根目录并选择组织方式。扫描器会把 `/shuku.library` 中的目录结构直接解释为 Work、Version 和 Volume。
 
 ## 原生 Docker Compose
 
-fnOS 模板不替代根目录的 `docker-compose.prod.yml`。普通 Linux/NAS 仍可按 README 中的方式使用 `docker compose` 部署，并继续使用 `PUID`、`PGID`、`MONITOR_HOST_PATH` 和 `STORAGE_PATH`。
+fnOS 模板不替代根目录的 `docker-compose.prod.yml`。普通 Linux/NAS 仍可按 README 中的方式使用 `docker compose` 部署，并使用 `PUID`、`PGID`、`LIBRARY_HOST_PATH` 和 `STORAGE_PATH`。
