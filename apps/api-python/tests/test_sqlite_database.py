@@ -8,6 +8,11 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect, select
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
 from app.core.config import Settings
 from app.db import runner as runner_module
 from app.db.base import Base
@@ -23,16 +28,9 @@ from app.models.library import (
     LibraryWork,
 )
 from app.models.settings import ReaderBookPreference, SystemSetting
-from app.modules.library.infrastructure.implicit_version import (
-    IMPLICIT_VERSION_SOURCE_KEY,
-    get_or_create_implicit_version,
-)
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
-from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect, select
-from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 
 def _current_revision(engine) -> str | None:
@@ -452,7 +450,13 @@ def test_volume_belongs_to_directory_version_and_version_requires_work(
         bootstrap_database(engine, settings)
         with Session(engine) as db:
             work = _seed_library_work(db, work_id="work-volume")
-            version = get_or_create_implicit_version(db, work.id)
+            version = LibraryVersion(
+                id="version-volume",
+                work_id=work.id,
+                source_key=IMPLICIT_VERSION_SOURCE_KEY,
+            )
+            db.add(version)
+            db.flush()
             volume = LibraryVolume(
                 id="volume-a",
                 version_id=version.id,

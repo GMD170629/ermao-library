@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import (
@@ -18,14 +22,9 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from app.modules.library.infrastructure.implicit_version import (
-    IMPLICIT_VERSION_SOURCE_KEY,
-)
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.services.download_executor import DownloadExecutionResult
 from app.services.download_queue import process_next_download_task
-from fastapi.testclient import TestClient
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 from tests.support.import_fixtures import add_library
 
 

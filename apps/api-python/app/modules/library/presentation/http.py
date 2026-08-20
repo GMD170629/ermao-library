@@ -62,7 +62,6 @@ from app.bootstrap.system import (
 )
 from app.contracts.http_errors import ErrorResponses
 from app.contracts.media_capabilities import ReaderType, reader_type_for_format
-from app.contracts.retired_resources import RetiredResourceError, retired_resource_error
 from app.core.authorization import (
     authorization_context,
     can_access_volume,
@@ -153,11 +152,11 @@ from app.modules.library.presentation.schemas import (
     UndoOperationResponse,
     UpdateVolumeRequest,
     UpdateWorkRequest,
+    VolumeMetadataMutationResponse,
     WorkDetailSummaryResponse,
     WorkReadingUnitsResponse,
     WorkResponse,
     WorksResponse,
-    VolumeMetadataMutationResponse,
     WorkSummariesResponse,
     WorkVolumePageResponse,
 )
@@ -280,10 +279,6 @@ def _raise_library_error(
     if status_code == 503:
         raise LibraryUnavailableError(body)
     raise LibraryBadRequestError(body)
-
-
-def _raise_edition_resource_retired() -> Never:
-    raise retired_resource_error("/api/works/{workId}/volumes/{volumeId}")
 
 
 logger = logging.getLogger(__name__)
@@ -2581,16 +2576,6 @@ async def metadata_search(
             "message": result.get("message"),
         }
     )
-
-
-@router.patch("/works/{work_id}/editions/{edition_id}", status_code=410)
-@router.post("/works/{work_id}/editions/{edition_id}/primary", status_code=410)
-@router.post("/works/{work_id}/editions/{edition_id}/split", status_code=410)
-async def update_work_edition(
-    work_id: str,
-    edition_id: str,
-) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
-    _raise_edition_resource_retired()
 
 
 @router.patch("/works/{work_id}/volumes/{volume_id}")

@@ -3,10 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.modules.imports.application.identity_policy import (
-    directory_merge_title_similarity,
-    directory_merge_titles_match,
     explicit_volume_range_start,
-    normalize_directory_merge_title,
     split_explicit_volume,
 )
 
@@ -70,46 +67,3 @@ def test_explicit_volume_range_returns_first_publication_number(
 @pytest.mark.parametrize("publication_title", ["2020-2024年", "版本 1-2", "作品名"])
 def test_volume_range_requires_a_publication_marker(publication_title: str) -> None:
     assert explicit_volume_range_start(publication_title) is None
-
-
-@pytest.mark.parametrize(
-    ("left", "right"),
-    [
-        ("東京卍復仇者 卷01", "東京卍復仇者 卷31"),
-        ("作品2023 全彩版", "作品2026 全彩版"),
-        ("第01部 第002册", "第99部 第120册"),
-        ("作品１２．５", "作品3.0"),
-    ],
-)
-def test_directory_merge_title_treats_numeric_values_as_equivalent(
-    left: str,
-    right: str,
-) -> None:
-    assert normalize_directory_merge_title(left) == normalize_directory_merge_title(
-        right
-    )
-
-
-def test_directory_merge_title_preserves_number_position_and_surrounding_text() -> None:
-    assert normalize_directory_merge_title(
-        "作品01前传"
-    ) != normalize_directory_merge_title("作品前传01")
-    assert normalize_directory_merge_title(
-        "作品01全彩"
-    ) != normalize_directory_merge_title("作品01黑白")
-
-
-def test_directory_merge_title_similarity_unifies_numbers_before_comparison() -> None:
-    assert directory_merge_title_similarity("作品2023全彩版", "作品2026全彩版") == 1.0
-
-
-def test_directory_merge_title_similarity_accepts_exactly_seventy_percent() -> None:
-    assert directory_merge_title_similarity(
-        "abcdefghij", "abcdefgxyz"
-    ) == pytest.approx(0.7)
-    assert directory_merge_titles_match("abcdefghij", "abcdefgxyz") is True
-
-
-def test_directory_merge_title_similarity_rejects_below_seventy_percent() -> None:
-    assert directory_merge_titles_match("abcdefghij", "abcdefwxyz") is False
-    assert directory_merge_titles_match("", "") is False

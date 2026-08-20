@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from difflib import SequenceMatcher
 
 UNKNOWN_AUTHOR = "未知作者"
-DIRECTORY_TITLE_SIMILARITY_THRESHOLD = 0.70
 
 _CJK_VOLUME_MARKER = (
     "(?:"
@@ -197,40 +195,6 @@ def normalize_identity_part(value: object) -> str:
         "",
         normalized,
     ).strip()
-
-
-def normalize_directory_merge_title(value: object) -> str:
-    """Normalize a watched title while treating numeric values as equivalent.
-
-    Numeric runs retain their position but not their value, so ``Series 01
-    Color`` and ``Series 31 Color`` share a directory merge key. Stored display
-    titles and non-watched identities keep their original numbers.
-    """
-
-    return re.sub(r"\d+", "{number}", normalize_identity_part(value))
-
-
-def directory_merge_title_similarity(left: object, right: object) -> float:
-    """Return character similarity for two watched-directory titles.
-
-    Both inputs use the same punctuation, case, width, whitespace, and numeric
-    normalization as directory merge keys. Empty titles never match.
-    """
-
-    left_key = normalize_directory_merge_title(left)
-    right_key = normalize_directory_merge_title(right)
-    if not left_key or not right_key:
-        return 0.0
-    return SequenceMatcher(None, left_key, right_key, autojunk=False).ratio()
-
-
-def directory_merge_titles_match(left: object, right: object) -> bool:
-    """Return whether watched-directory titles meet the merge threshold."""
-
-    return (
-        directory_merge_title_similarity(left, right)
-        >= DIRECTORY_TITLE_SIMILARITY_THRESHOLD
-    )
 
 
 def parse_bracketed_series_identity(

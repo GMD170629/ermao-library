@@ -10,7 +10,8 @@ from uuid import uuid4
 
 import pytest
 from PIL import Image
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
@@ -48,10 +49,7 @@ from app.modules.imports.infrastructure.orchestration_services import (
 from app.modules.imports.infrastructure.uploaded_file_publication import (
     AtomicUploadedFilePublisher,
 )
-from app.modules.library.infrastructure.implicit_version import (
-    IMPLICIT_VERSION_SOURCE_KEY,
-    get_or_create_implicit_version,
-)
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.services.audio_metadata import (
     AudioChapterMetadata,
     AudioFileMetadata,
@@ -273,15 +271,37 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
     return result, audio_dir
 
 
+def _ensure_test_implicit_version(
+    db_session: Session,
+    work_id: str,
+) -> LibraryVersion:
+    version = db_session.scalar(
+        select(LibraryVersion).where(
+            LibraryVersion.work_id == work_id,
+            LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY,
+        )
+    )
+    if version is not None:
+        return version
+    version = LibraryVersion(
+        id=f"implicit-{work_id}",
+        work_id=work_id,
+        source_key=IMPLICIT_VERSION_SOURCE_KEY,
+    )
+    db_session.add(version)
+    db_session.flush()
+    return version
+
+
 def _insert_media_volume(
-    db_session,
+    db_session: Session,
     *,
     volume_id: str,
     work_id: str,
     media_kind: str,
     fmt: str,
 ) -> None:
-    version = get_or_create_implicit_version(db_session, work_id)
+    version = _ensure_test_implicit_version(db_session, work_id)
     db_session.add(
         LibraryVolume(
             id=volume_id,
@@ -1006,7 +1026,7 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
     db_session.add(
         LibraryVolume(
             id="mixed-ebook-volume-2",
-            version_id=get_or_create_implicit_version(db_session, "mixed-work").id,
+            version_id=_ensure_test_implicit_version(db_session, "mixed-work").id,
             origin="MANUAL",
             title="Second ebook",
             sort_order=1,

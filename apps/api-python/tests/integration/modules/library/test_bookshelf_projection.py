@@ -13,10 +13,8 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.library.application.bookshelf import ListBookshelfItems
+from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
-from app.modules.library.infrastructure.implicit_version import (
-    IMPLICIT_VERSION_SOURCE_KEY,
-)
 
 
 def test_bookshelf_projection_uses_current_users_continue_volume_progress(

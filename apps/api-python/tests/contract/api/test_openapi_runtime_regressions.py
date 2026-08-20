@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
+
 from app.bootstrap.system import record_system_event
 from app.core.auth import hash_password
 from app.models.auth import User
@@ -14,7 +16,6 @@ from app.models.library import (
 )
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.services.library_management import sync_work_facets
-from sqlalchemy import select
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -216,18 +217,3 @@ def test_library_management_endpoints_return_their_documented_contracts(
     target_after_undo = db_session.get(LibraryWork, target_work.id)
     assert target_after_undo is not None
     assert "待删除" in json.loads(target_after_undo.tags)
-
-    volume = db_session.scalar(
-        select(LibraryVolume)
-        .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
-        )
-        .where(LibraryVersion.work_id == target_work.id)
-    )
-    assert volume is not None
-    retired_edition_response = client.patch(
-        f"/api/works/{target_work.id}/editions/{volume.version_id}",
-        json={"versionName": "修订版"},
-    )
-    assert retired_edition_response.status_code == 410
