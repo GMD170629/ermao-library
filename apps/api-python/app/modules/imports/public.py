@@ -13,7 +13,7 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.modules.imports.application.import_support import parse_series_volume_info
-from app.modules.imports.application.monitor_paths import (
+from app.modules.imports.application.library_paths import (
     LibraryPathError,
     is_inside_path,
     library_directory_tree_node,

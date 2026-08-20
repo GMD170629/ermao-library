@@ -57,9 +57,7 @@ export function UploadBookDialog({ open, onClose, onImported, onError }: UploadB
     setSaving(false);
 
     if (result.kind === 'saved') {
-      const description = result.autoImport
-        ? i18nAttribute('已保存 {value0} 个文件，等待监控识别', { value0: result.saved })
-        : i18nAttribute('已保存 {value0} 个文件；所选目录未启用监控，不会自动识别', { value0: result.saved });
+      const description = i18nAttribute('已保存 {value0} 个文件，等待书库扫描器识别', { value0: result.saved });
       toast.success(i18nAttribute('文件已保存'), description);
       onImported?.(description);
       setSelectedUploadFiles([]);
@@ -68,7 +66,7 @@ export function UploadBookDialog({ open, onClose, onImported, onError }: UploadB
     }
 
     const message = result.kind === 'rejected'
-      ? result.code === 'UPLOAD_TARGET_NOT_MONITORED'
+      ? result.code === 'UPLOAD_TARGET_OUTSIDE_LIBRARY'
         ? i18nAttribute('上传目录必须位于已启用的书库中')
         : result.message
       : result.kind === 'transport-failed'

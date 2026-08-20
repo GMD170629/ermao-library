@@ -3,9 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.bootstrap.imports import fail_claimed_import_task, process_import_task
 from app.core.config import Settings
 from app.models.import_pipeline import ImportTask
@@ -15,6 +12,8 @@ from app.modules.imports.application.errors import (
     LibraryDeletedDuringImportError,
 )
 from app.modules.imports.presentation.mappers import friendly_import_error
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 
 def test_deleted_library_has_terminal_user_guidance() -> None:
@@ -41,7 +40,7 @@ def test_claimed_import_fails_terminally_when_library_is_deleted(
     task_row = ImportTask(
         id="task-with-deleted-library",
         library_id=folder.id,
-        origin="WATCH",
+        origin="SCAN",
         status="PARSING",
         original_name=source.name,
         source_path=str(source),
@@ -87,7 +86,7 @@ def test_pending_import_without_library_id_fails_terminally(
     task_row = ImportTask(
         id="task-without-library",
         library_id=None,
-        origin="WATCH",
+        origin="SCAN",
         status="PARSING",
         original_name=source.name,
         source_path=str(source),

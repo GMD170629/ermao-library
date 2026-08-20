@@ -1,7 +1,5 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
-
 from app.bootstrap.imports import (
     clear_import_queue_records,
     persist_import_queue_operation_checkpoint,
@@ -18,13 +16,14 @@ from app.modules.imports.application.queue_control import (
     PreparedImportQueueOperationCheckpoint,
 )
 from app.services.system_events import prepare_system_event
+from sqlalchemy import func, select
 
 
 def test_clear_import_queue_deletes_every_status_and_preserves_content(
     db_session,
     test_settings,
 ):
-    source_file = test_settings.resolved_monitor_root / "preserved-source.epub"
+    source_file = test_settings.resolved_library_root / "preserved-source.epub"
     source_file.parent.mkdir(parents=True)
     source_file.write_bytes(b"source")
     work = LibraryWork(

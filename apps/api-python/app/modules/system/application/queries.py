@@ -177,8 +177,8 @@ def dashboard_system_status_payload(
         "currentImportTask": current_import_task,
         "latestImportTask": latest_import_task,
         "errorFileCount": failed_count,
-        "monitorRootReadable": checks.get(
-            "monitorRootReadable",
+        "libraryRootsReadable": checks.get(
+            "libraryRootsReadable",
             {"status": "unknown", "message": "待检测"},
         ),
         "storageWritable": checks.get(

@@ -18,7 +18,6 @@ from app.models.import_pipeline import (
     ImportTask,
 )
 from app.models.library import Library, LibraryWork
-from app.modules.imports.infrastructure.monitor import upsert_system_setting
 
 
 def get_import_task(db: Session, task_id: str) -> dict[str, Any] | None:
@@ -260,11 +259,6 @@ def list_import_logs(
     )
     logs = [dict(row) for row in rows]
     return logs, total
-
-
-def request_monitor_rescan(db: Session, requested_value: str) -> None:
-    """Persist rescan marker as a plain string (not JSON-encoded)."""
-    upsert_system_setting(db, "monitor.rescanRequestedAt", requested_value)
 
 
 def list_libraries(db: Session) -> list[dict[str, Any]]:

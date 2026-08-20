@@ -82,7 +82,7 @@ struct LibrarySourceEditorView: View {
                 Button(copy[.browseDirectory]) { navigate(.serverDirectoryPicker(purpose: sourceID.map(ServerDirectoryPurpose.updateSource) ?? .createSource)) }
             }
             Section {
-                Toggle(copy[.monitorEnabled], isOn: $source.enabled)
+                Toggle(copy[.scanningEnabled], isOn: $source.enabled)
                 Toggle(copy[.ignoreHiddenFiles], isOn: $source.ignoreHidden)
                 TextField(copy[.ignorePatterns], text: $source.ignorePatterns)
                 TextField(copy[.minimumFileSize], value: $source.minimumFileSizeBytes, format: .number).keyboardType(.numberPad)

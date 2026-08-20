@@ -215,7 +215,7 @@ def prepare_scan_candidate_batch(
                 {
                     "id": work_id,
                     "libraryId": library_id,
-                    "origin": "WATCH",
+                    "origin": "SCAN",
                     "sourceKey": topology_source.work_source_key,
                     "title": topology_source.work_title,
                     "normalizedTitle": normalize_identity_part(
@@ -262,7 +262,7 @@ def prepare_scan_candidate_batch(
                 {
                     "id": volume_id,
                     "versionId": version_id,
-                    "origin": "WATCH",
+                    "origin": "SCAN",
                     "title": topology_source.volume_title,
                     "sortOrder": topology_source.volume_sort_order,
                     "format": topology_source.volume_format,
@@ -291,7 +291,7 @@ def prepare_scan_candidate_batch(
         values, bundle_files = build_import_task_values(
             task_id=task_id,
             source=path,
-            origin="WATCH",
+            origin="SCAN",
             original_name=path.name,
             requested_title=None,
             requested_author=None,

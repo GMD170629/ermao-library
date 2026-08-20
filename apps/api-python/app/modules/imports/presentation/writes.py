@@ -233,7 +233,7 @@ def import_work(
         _raise_import_error(
             "上传目录必须位于已启用的书库中",
             status_code=400,
-            code="UPLOAD_TARGET_NOT_MONITORED",
+            code="UPLOAD_TARGET_OUTSIDE_LIBRARY",
         )
     library_id = str((library or {}).get("id") or "") or None
     if not can_access_library(db, user, library_id):
@@ -277,15 +277,13 @@ def import_work(
         )
         _raise_import_error("保存上传文件失败", status_code=500)
 
-    auto_import = library is not None
-    monitoring_status = "WATCHING" if auto_import else "NOT_MONITORED"
     logger.info(
         "upload.files_saved",
         extra={
             "actor_id": user.id,
             "target_directory": str(upload_dir),
             "file_count": len(saved_uploads),
-            "monitoring_status": monitoring_status,
+            "library_id": library_id,
         },
     )
     return ImportUploadResponse(
@@ -295,12 +293,10 @@ def import_work(
                     "sourcePath": str(saved.path),
                     "file": saved.filename,
                     "sizeBytes": saved.size_bytes,
-                    "monitoringStatus": monitoring_status,
                 }
                 for saved in saved_uploads
             ],
             "saved": len(saved_uploads),
-            "autoImport": auto_import,
         }
     )
 

@@ -283,7 +283,7 @@ data class LibrarySource(
     val id: String,
     val name: String,
     val path: String,
-    val monitoring: Boolean,
+    val enabled: Boolean,
     val organizationMode: LibraryOrganizationMode,
     val description: String?,
 )

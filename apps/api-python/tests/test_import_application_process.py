@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from app.modules.imports.application.dto import (
     ImportOptions,
     ImportResult,
@@ -108,7 +107,7 @@ def _task() -> ImportTaskDTO:
     return ImportTaskDTO(
         id="task-1",
         source_path="/tmp/book.epub",
-        origin="WATCH",
+        origin="SCAN",
         status="PARSING",
         library_id="folder-1",
         work_id="topology-work",
@@ -158,9 +157,7 @@ def test_process_import_rejects_task_without_scanner_topology_target() -> None:
             store,
             unit_of_work,
             pipeline,
-            ImportRuntimeConfig(
-                storage_root=Path("/tmp"), audiobook_max_file_bytes=1
-            ),
+            ImportRuntimeConfig(storage_root=Path("/tmp"), audiobook_max_file_bytes=1),
             task,
             now=123,
         )
@@ -178,7 +175,7 @@ def test_scanner_task_forwards_its_bound_directory_topology() -> None:
     task = ImportTaskDTO(
         id="task-scan",
         source_path="/tmp/book.epub",
-        origin="WATCH",
+        origin="SCAN",
         status="PARSING",
         library_id="folder-1",
         work_id="topology-work",

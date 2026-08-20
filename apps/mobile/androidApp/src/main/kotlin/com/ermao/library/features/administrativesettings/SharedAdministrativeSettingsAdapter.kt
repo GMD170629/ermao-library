@@ -577,7 +577,7 @@ private fun LibraryOrganizationMode.toShared() = when (this) {
 }
 
 private fun LibrarySourceDraft.toShared() = SharedLibraryDraft(
-    directory.uri, displayName.ifBlank { null }, organizationMode.toShared(), monitoring, ignorePatterns.ifBlank { null },
+    directory.uri, displayName.ifBlank { null }, organizationMode.toShared(), enabled, ignorePatterns.ifBlank { null },
     ignoreHidden, minimumFileSizeBytes, description,
 )
 

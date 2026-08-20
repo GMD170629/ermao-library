@@ -23,6 +23,7 @@ IdentitySource = Literal[
     "reflowable_metadata",
     "sidecar_opf",
 ]
+ImportOrigin = Literal["SCAN"]
 
 
 @dataclass(frozen=True)
@@ -120,7 +121,7 @@ class ImportSystemEvent:
 class ImportTaskDTO:
     id: str
     source_path: str
-    origin: str
+    origin: ImportOrigin
     status: str
     original_name: str | None = None
     requested_title: str | None = None
@@ -148,7 +149,7 @@ class ImportTaskDTO:
 @dataclass(frozen=True)
 class ImportOptions:
     source_file_path: Path
-    origin: str
+    origin: ImportOrigin
     original_name: str | None = None
     requested_title: str | None = None
     requested_author: str | None = None

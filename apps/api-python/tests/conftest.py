@@ -2,19 +2,17 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
+from app import models as _models  # noqa: F401
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.db.session import get_db
 from app.main import create_app
 from app.models.library import Library
-from app import models as _models  # noqa: F401
-
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 _TEST_ORM_TABLES = list(Base.metadata.sorted_tables)
 
@@ -42,11 +40,11 @@ def recreate_application_schema(engine) -> None:
 
 
 class TestSettings(Settings):
-    """Legacy test path fixture while production no longer has a monitor root."""
+    """Test-only filesystem root used by upload and import fixtures."""
 
     @property
-    def resolved_monitor_root(self) -> Path:
-        return self.resolved_storage_root.parent / "monitor"
+    def resolved_library_root(self) -> Path:
+        return self.resolved_storage_root.parent / "library"
 
 
 @pytest.fixture()
@@ -75,7 +73,9 @@ def db_session(test_settings: Settings) -> Generator[Session, None, None]:
         cursor.close()
 
     Base.metadata.create_all(bind=engine, tables=_TEST_ORM_TABLES)
-    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    TestingSessionLocal = sessionmaker(
+        bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
+    )
     db = TestingSessionLocal()
     db.add(
         Library(
@@ -95,7 +95,9 @@ def db_session(test_settings: Settings) -> Generator[Session, None, None]:
 
 
 @pytest.fixture()
-def client(test_settings: Settings, db_session: Session) -> Generator[TestClient, None, None]:
+def client(
+    test_settings: Settings, db_session: Session
+) -> Generator[TestClient, None, None]:
     app = create_app(test_settings, session_factory=lambda: db_session)
 
     def override_settings() -> Settings:

@@ -4,7 +4,7 @@ import { structureFileLabel } from './structure-file-label';
 
 test('audiobook structure labels hide POSIX source directories', () => {
   assert.equal(
-    structureFileLabel('audio', '/monitor/listen-book/鬼吹灯/01. 精绝古城 01.mp3'),
+    structureFileLabel('audio', '/library/listen-book/鬼吹灯/01. 精绝古城 01.mp3'),
     '01. 精绝古城 01.mp3'
   );
 });

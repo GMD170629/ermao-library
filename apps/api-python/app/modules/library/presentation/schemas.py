@@ -450,7 +450,7 @@ class ManagementCheck(HttpContractModel):
 
 class ManagementChecks(HttpContractModel):
     database: ManagementCheck
-    monitor_root_readable: ManagementCheck = Field(alias="monitorRootReadable")
+    library_roots_readable: ManagementCheck = Field(alias="libraryRootsReadable")
     storage_writable: ManagementCheck = Field(alias="storageWritable")
 
 

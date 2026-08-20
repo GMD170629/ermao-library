@@ -292,12 +292,12 @@ def _volume_index_from_suffix(value: str) -> float | None:
 def parse_series_volume_info(
     path: Path,
     original_name: str | None = None,
-    origin: str = "WATCH",
+    origin: str = "SCAN",
 ) -> SeriesVolumeInfo | None:
     source = original_name or path.name
     base = _clean_title_part(Path(source).stem)
     folder = (
-        _series_folder_metadata(path.parent.name, source) if origin == "WATCH" else None
+        _series_folder_metadata(path.parent.name, source) if origin == "SCAN" else None
     )
     folder_title = (folder or {}).get("title")
     author = (folder or {}).get("author")

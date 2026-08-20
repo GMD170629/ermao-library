@@ -45,11 +45,11 @@ fun LibrarySourcesScreen(
         toolbarActions = { IconButton({ onNavigate(AdministrativeSettingsRoute.LibrarySourceEdit()) }) { Icon(Icons.Outlined.CreateNewFolder, AdministrativeCopy.AddSource.text(locale)) } },
     ) {
         PageStateContent(state, locale, onRetry) { snapshot ->
-            AdministrativeSection(AdministrativeCopy.MonitoringFolders, locale)
+            AdministrativeSection(AdministrativeCopy.LibraryRoots, locale)
             snapshot.sources.forEach { source ->
                 ListItem(
                     headlineContent = { Text(source.name) },
-                    supportingContent = { Text("${source.path}\n${if (source.monitoring) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale)} · ${source.organizationMode.name}") },
+                    supportingContent = { Text("${source.path}\n${if (source.enabled) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale)} · ${source.organizationMode.name}") },
                     leadingContent = { Icon(Icons.Outlined.Folder, null) },
                     trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
@@ -124,7 +124,7 @@ fun LibrarySourceEditScreen(
                         ?: source?.let { NativeDirectorySelection(it.path, it.path.substringAfterLast('/')) },
                 )
             }
-            var monitoring by remember(source) { mutableStateOf(source?.monitoring ?: true) }
+            var enabled by remember(source) { mutableStateOf(source?.enabled ?: true) }
             var organizationMode by remember(source) {
                 mutableStateOf(source?.organizationMode ?: LibraryOrganizationMode.Flat)
             }
@@ -147,7 +147,7 @@ fun LibrarySourceEditScreen(
                     )
                 },
             )
-            AdministrativeSwitchRow(AdministrativeCopy.EnableMonitoring.text(locale), monitoring, { monitoring = it })
+            AdministrativeSwitchRow(AdministrativeCopy.EnableScanning.text(locale), enabled, { enabled = it })
             EnumChoiceRow(
                 AdministrativeCopy.OrganizationMode,
                 LibraryOrganizationMode.entries,
@@ -175,7 +175,7 @@ fun LibrarySourceEditScreen(
                 onCommand(
                     AdministrativeCommand.SaveLibrarySource(
                         LibrarySourceDraft(
-                            source?.id, name.trim(), requireNotNull(selectedDirectory), monitoring, organizationMode,
+                            source?.id, name.trim(), requireNotNull(selectedDirectory), enabled, organizationMode,
                             ignorePatterns, ignoreHidden, minimumFileSize.toLongOrNull() ?: 0L, description.ifBlank { null },
                         ),
                     ),

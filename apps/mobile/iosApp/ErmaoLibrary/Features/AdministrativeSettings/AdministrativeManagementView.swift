@@ -68,7 +68,7 @@ struct AdministrativeManagementView: View {
     private func libraryRows(_ summary: AdministrativeManagementSummary) -> [ManagementRow] {
         guard store.permissions.canManageSystem else { return [] }
         return [
-            .init(copy[.librarySources], "folder", .librarySources, "\(summary.librarySourceCount) · \(summary.monitoredSourceCount)"),
+            .init(copy[.librarySources], "folder", .librarySources, "\(summary.librarySourceCount) · \(summary.enabledLibraryCount)"),
             .init(copy[.importTasks], "arrow.down.to.line", .importTasks, summary.activeImportCount == 0 ? copy[.completed] : "\(summary.activeImportCount) \(copy[.active])"),
             .init(copy[.importPreferences], "slider.horizontal.3", .importPreferences, summary.automaticImportEnabled ? copy[.enabled] : copy[.disabled])
         ]

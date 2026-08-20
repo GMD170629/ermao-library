@@ -43,7 +43,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
             let loadedUsers = try await users
             let loadedKindle = try await kindle
             return AdministrativeManagementSummary(
-                librarySourceCount: 0, monitoredSourceCount: 0, activeImportCount: 0,
+                librarySourceCount: 0, enabledLibraryCount: 0, activeImportCount: 0,
                 automaticImportEnabled: false, pendingOrganizeCount: 0,
                 availableProviderCount: 0, providerCount: 0, userCount: loadedUsers.count,
                 smtpEnabled: false, failedKindleCount: Int(loadedKindle.pageInfo.total), opdsRunning: false,
@@ -77,7 +77,7 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
         let loadedOPDS = try await opds
         return AdministrativeManagementSummary(
             librarySourceCount: loadedFolders.libraries.count,
-            monitoredSourceCount: loadedFolders.libraries.filter(\.enabled).count,
+            enabledLibraryCount: loadedFolders.libraries.filter(\.enabled).count,
             activeImportCount: Int(loadedImports.summary.failed) + loadedImports.tasks.filter { $0.status == .pending || $0.status == .parsing }.count,
             automaticImportEnabled: loadedPreferences.stabilityCheckEnabled,
             pendingOrganizeCount: Int(loadedOrganize.pageInfo.total),

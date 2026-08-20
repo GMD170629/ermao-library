@@ -8,14 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-import pytest
-from PIL import Image
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
+import pytest
 from app.bootstrap.imports import (
     import_managed_book,
 )
@@ -55,6 +51,9 @@ from app.services.audio_metadata import (
     AudioFileMetadata,
     parse_audio_metadata,
 )
+from PIL import Image
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 from tests.conftest import recreate_application_schema
 
 
@@ -105,7 +104,7 @@ def _login(
     return user
 
 
-def _enable_upload_monitor(client, target: Path, name: str) -> None:
+def _create_upload_library(client, target: Path, name: str) -> None:
     response = client.post(
         "/api/libraries",
         json={
@@ -200,7 +199,7 @@ def _emby_audio_metadata(path: Path) -> AudioFileMetadata:
 
 
 def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path):
-    audio_dir = test_settings.resolved_monitor_root / "[三体][刘慈欣]"
+    audio_dir = test_settings.resolved_library_root / "[三体][刘慈欣]"
     audio_dir.mkdir(parents=True)
     # Natural filename order conflicts with the embedded track order on
     # purpose; import must honor disc/track metadata.
@@ -214,7 +213,7 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
     work = LibraryWork(
         id="audio-reader-work",
         library_id="test-library",
-        origin="WATCH",
+        origin="SCAN",
         source_key="work:audio-reader",
         title="三体",
         normalized_title="三体",
@@ -232,7 +231,7 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
     volume = LibraryVolume(
         id="audio-reader-volume",
         version_id=version.id,
-        origin="WATCH",
+        origin="SCAN",
         title="三体",
         format="AUDIO",
         resource_key="volume:audio-reader",
@@ -243,7 +242,7 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
         library_id="test-library",
         work_id=work.id,
         volume_id=volume.id,
-        origin="WATCH",
+        origin="SCAN",
         status="PROCESSING",
         original_name=audio_dir.name,
         source_path=str(audio_dir),
@@ -261,7 +260,7 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
         test_settings,
         _options(
             source_file_path=audio_dir,
-            origin="WATCH",
+            origin="SCAN",
             original_name=audio_dir.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
@@ -733,7 +732,7 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
     work = LibraryWork(
         id="audio-topology-work",
         library_id="test-library",
-        origin="WATCH",
+        origin="SCAN",
         source_key="work:Book",
         title="Book",
         normalized_title="book",
@@ -749,7 +748,7 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
     volume = LibraryVolume(
         id="audio-topology-volume",
         version_id=version.id,
-        origin="WATCH",
+        origin="SCAN",
         title="Vol.1",
         format="AUDIO",
         resource_key="volume:Book/Vol.1",
@@ -766,7 +765,7 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
         library_id="test-library",
         work_id=work.id,
         volume_id=volume.id,
-        origin="WATCH",
+        origin="SCAN",
         status="PROCESSING",
         original_name=audio_dir.name,
         source_path=str(audio_dir),
@@ -779,7 +778,7 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
         test_settings,
         _options(
             source_file_path=audio_dir,
-            origin="WATCH",
+            origin="SCAN",
             original_name=audio_dir.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
@@ -1139,9 +1138,9 @@ def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
 ) -> None:
     _initialize_schema(db_session)
     _login(client, db_session)
-    target = test_settings.resolved_monitor_root / "uploads"
+    target = test_settings.resolved_library_root / "uploads"
     target.mkdir(parents=True, exist_ok=True)
-    _enable_upload_monitor(client, target, "Audio uploads")
+    _create_upload_library(client, target, "Audio uploads")
     response = client.post(
         "/api/works/import",
         data={"targetPath": str(target)},
@@ -1153,7 +1152,6 @@ def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["saved"] == 2
-    assert data["autoImport"] is True
     assert [item["file"] for item in data["results"]] == ["01.mp3", "02.mp3"]
     assert (target / "01.mp3").read_bytes() == b"first-track"
     assert (target / "02.mp3").read_bytes() == b"second-track"
@@ -1168,9 +1166,9 @@ def test_manual_multi_audio_upload_keeps_aggregate_byte_limit(
 ) -> None:
     _initialize_schema(db_session)
     _login(client, db_session)
-    target = test_settings.resolved_monitor_root / "limited-upload"
+    target = test_settings.resolved_library_root / "limited-upload"
     target.mkdir(parents=True, exist_ok=True)
-    _enable_upload_monitor(client, target, "Limited audio uploads")
+    _create_upload_library(client, target, "Limited audio uploads")
     test_settings.audiobook_max_file_bytes = 1024
     test_settings.audiobook_max_bundle_bytes = 20
 
@@ -1196,9 +1194,9 @@ def test_failed_audio_upload_removes_staging_files_and_never_creates_task(
 ) -> None:
     _initialize_schema(db_session)
     _login(client, db_session)
-    target = test_settings.resolved_monitor_root / "failed-upload"
+    target = test_settings.resolved_library_root / "failed-upload"
     target.mkdir(parents=True, exist_ok=True)
-    _enable_upload_monitor(client, target, "Failed audio uploads")
+    _create_upload_library(client, target, "Failed audio uploads")
 
     def fail_after_partial_write(_source, staged_target: Path, *, max_bytes):
         staged_target.write_bytes(b"partial")

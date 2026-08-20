@@ -4,10 +4,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from app import models as _models  # noqa: F401
 from app.core.config import Settings, get_settings
 from app.db.base import Base
@@ -17,6 +13,9 @@ from app.models.import_pipeline import ImportTask
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.infrastructure import health_runs
 from app.services.queue_runtime import queue_runtime_view, record_queue_heartbeat
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _setup_admin(client):
@@ -72,7 +71,7 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
     test_settings,
 ):
     client, db_session = persistent_health_client
-    test_settings.resolved_monitor_root.mkdir(parents=True)
+    test_settings.resolved_library_root.mkdir(parents=True)
     for path in (
         test_settings.resolved_storage_root,
         test_settings.database_path.parent,

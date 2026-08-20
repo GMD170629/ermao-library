@@ -32,8 +32,8 @@ from app.services.queue_runtime import (
 from app.services.system_events import (
     prepare_system_event,
 )
+from app.worker.library_scanner import WorkerManager
 from app.worker.persistent_import_queue import start_persistent_import_worker
-from app.worker.watcher import WorkerManager
 
 READY_FILE = Path(os.environ.get("SCAN_WORKER_READY_FILE") or "/tmp/scan-worker-ready")
 
@@ -77,7 +77,7 @@ def _persist_queue_operation_status(
 def main() -> None:
     settings = get_settings()
     verify_current_schema(engine)
-    manager = WorkerManager(BackgroundSessionLocal, settings)
+    manager = WorkerManager(BackgroundSessionLocal)
     persistent_import_worker = start_persistent_import_worker(
         BackgroundSessionLocal,
         settings,
@@ -98,7 +98,7 @@ def main() -> None:
         if stopping:
             return
         stopping = True
-        print(f"[import-worker] signal {signum} received, closing watchers", flush=True)
+        print(f"[import-worker] signal {signum} received, stopping workers", flush=True)
         READY_FILE.unlink(missing_ok=True)
         manager.shutdown()
         persistent_import_worker.stop()
@@ -115,9 +115,7 @@ def main() -> None:
     READY_FILE.write_text(str(os.getpid()), encoding="utf-8")
     print("[import-worker] ready", flush=True)
 
-    refresh_interval = (
-        int(os.environ.get("MONITOR_REFRESH_INTERVAL_MS") or "30000") / 1000
-    )
+    refresh_interval = int(os.environ.get("LIBRARY_SCAN_INTERVAL_MS") or "30000") / 1000
     next_refresh = time.monotonic() + refresh_interval
     queue_operation_id: str | None = None
     queue_operation_action: str | None = None

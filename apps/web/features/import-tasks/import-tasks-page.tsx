@@ -19,7 +19,7 @@ import {
 
 type ImportTask = {
   id: string;
-  origin: 'MANUAL' | 'WATCH' | 'DOWNLOAD';
+  origin: 'SCAN';
   status: 'PENDING' | 'PARSING' | 'COMPLETED' | 'FAILED';
   originalName?: string | null;
   sourcePath: string;
@@ -118,9 +118,7 @@ function importStage(task: ImportTask) {
 }
 
 function originLabel(origin: ImportTask['origin']) {
-  if (origin === 'WATCH') return '监控导入';
-  if (origin === 'DOWNLOAD') return '下载导入';
-  return '手动上传';
+  return { SCAN: '扫描导入' }[origin];
 }
 
 export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {

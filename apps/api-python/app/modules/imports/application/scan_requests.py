@@ -1,4 +1,4 @@
-"""Named atomic command for prepared monitor scan requests."""
+"""Named atomic command for prepared library-root scan requests."""
 
 from __future__ import annotations
 

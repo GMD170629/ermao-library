@@ -18,7 +18,7 @@ from app.contracts.imports import ImportTaskContract
 from app.core.time import timestamp_ms_to_iso
 from app.models.library import LibraryWork
 from app.modules.imports.application.dto import ImportTaskDTO
-from app.modules.imports.application.monitor_paths import (
+from app.modules.imports.application.library_paths import (
     LibraryPathError,
     is_inside_path,
     library_directory_tree_node,

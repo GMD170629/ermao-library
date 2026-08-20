@@ -19,7 +19,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case manageSystemPermission, accountLanguage
     case allLibraries, manualImports, selectedDirectories, saveAccess, accessHint
     case sourcesTitle, storageLocation, availableSpace, libraries, browseDirectory
-    case scanDirectory, sourceName, serverPath, monitorEnabled, scanInterval, mediaTypes
+    case scanDirectory, sourceName, serverPath, scanningEnabled, scanInterval, mediaTypes
     case organizationMode, flatLayout, volumesLayout, audiobookLayout
     case includeSubdirectories, autoImportNewFiles, deleteSource, deleteSourceTitle
     case deleteSourceMessage, selectServerDirectory, parentDirectory, chooseDirectory
@@ -121,9 +121,9 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .allLibraries: "All Libraries", .manualImports: "Manual Imports", .selectedDirectories: "Selected Directories",
         .saveAccess: "Save Access Scope", .accessHint: "Users can only browse and read content inside their assigned scope.",
         .sourcesTitle: "Library Sources", .storageLocation: "Storage Location", .availableSpace: "Available Space",
-        .libraries: "Monitored Folders", .browseDirectory: "Browse Server Directory",
+        .libraries: "Library Roots", .browseDirectory: "Browse Server Directory",
         .scanDirectory: "Scan Directory", .sourceName: "Display Name", .serverPath: "Server Path",
-        .monitorEnabled: "Enable Scanning", .scanInterval: "Scan Interval", .mediaTypes: "Media Types",
+        .scanningEnabled: "Enable Scanning", .scanInterval: "Scan Interval", .mediaTypes: "Media Types",
         .organizationMode: "Organization Mode", .flatLayout: "Flat", .volumesLayout: "Volumes", .audiobookLayout: "Audiobook",
         .includeSubdirectories: "Include Subdirectories", .autoImportNewFiles: "Automatically Import New Files",
         .deleteSource: "Delete Source", .deleteSourceTitle: "Delete this library source?",
@@ -248,7 +248,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .manualImports: "手工导入内容", .selectedDirectories: "已选目录", .saveAccess: "保存访问范围",
         .accessHint: "用户只能浏览和阅读所选范围内的内容。", .sourcesTitle: "书库来源", .storageLocation: "存储位置",
         .availableSpace: "可用空间", .libraries: "书库", .browseDirectory: "浏览服务器目录",
-        .scanDirectory: "扫描指定目录", .sourceName: "显示名称", .serverPath: "服务器路径", .monitorEnabled: "启用扫描",
+        .scanDirectory: "扫描指定目录", .sourceName: "显示名称", .serverPath: "服务器路径", .scanningEnabled: "启用扫描",
         .scanInterval: "扫描间隔", .mediaTypes: "媒体类型", .organizationMode: "组织方式",
         .flatLayout: "平铺", .volumesLayout: "卷册", .audiobookLayout: "有声书", .includeSubdirectories: "包含子目录",
         .autoImportNewFiles: "自动导入新文件", .deleteSource: "删除此来源", .deleteSourceTitle: "删除此书库来源？",

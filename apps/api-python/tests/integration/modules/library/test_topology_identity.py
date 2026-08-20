@@ -15,7 +15,7 @@ def _new_work(work_id: str) -> LibraryWork:
     return LibraryWork(
         id=work_id,
         library_id="library",
-        origin="WATCH",
+        origin="SCAN",
         source_key="work:book",
         title="Book",
         normalized_title="book",
@@ -56,7 +56,7 @@ def test_path_topology_keys_are_unique_within_their_parent(tmp_path: Path) -> No
                 LibraryVolume(
                     id="volume-1",
                     version_id="version",
-                    origin="WATCH",
+                    origin="SCAN",
                     title="Volume",
                     format="EPUB",
                     resource_key="volume:book/default/volume.epub",
@@ -67,7 +67,7 @@ def test_path_topology_keys_are_unique_within_their_parent(tmp_path: Path) -> No
                 LibraryVolume(
                     id="volume-2",
                     version_id="version",
-                    origin="WATCH",
+                    origin="SCAN",
                     title="Volume duplicate",
                     format="EPUB",
                     resource_key="volume:book/default/volume.epub",

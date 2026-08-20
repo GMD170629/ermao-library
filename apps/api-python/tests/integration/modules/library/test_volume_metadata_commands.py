@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 
 def _login_admin(client, db: Session) -> None:
@@ -41,7 +40,7 @@ def _directory_topology(
     work = LibraryWork(
         id="volume-metadata-work",
         library_id=library.id,
-        origin="WATCH",
+        origin="SCAN",
         source_key="work:example",
         title="Example",
         normalized_title="example",
@@ -59,7 +58,7 @@ def _directory_topology(
         LibraryVolume(
             id="volume-metadata-first",
             version_id=version.id,
-            origin="WATCH",
+            origin="SCAN",
             title="01 First",
             sort_order=0,
             format="EPUB",
@@ -69,7 +68,7 @@ def _directory_topology(
         LibraryVolume(
             id="volume-metadata-second",
             version_id=version.id,
-            origin="WATCH",
+            origin="SCAN",
             title="02 Second",
             sort_order=1,
             format="EPUB",

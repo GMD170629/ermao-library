@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from time import monotonic
 
@@ -65,7 +64,6 @@ from app.modules.imports.application.queue_control import (
 from app.modules.imports.application.recover import (
     recover_stale_import_tasks as recover_stale_import_tasks_command,
 )
-from app.modules.imports.application.rescan import persist_rescan_completion
 from app.modules.imports.application.save_uploaded_files import (
     SavedUploadFile,
     SaveUploadedFiles,
@@ -83,7 +81,7 @@ from app.modules.imports.application.work_queue_dto import (
 )
 from app.modules.imports.infrastructure import import_http as import_http_store
 from app.modules.imports.infrastructure import library_queries as library_repository
-from app.modules.imports.infrastructure import monitor as monitor_repository
+from app.modules.imports.infrastructure import library_state as library_state_repository
 from app.modules.imports.infrastructure import tasks as task_repository
 from app.modules.imports.infrastructure import work_queue as persistent_work_queue
 from app.modules.imports.infrastructure.directory_scan import (
@@ -106,7 +104,6 @@ from app.modules.imports.infrastructure.managed_pipeline import SessionImportPip
 from app.modules.imports.infrastructure.queue_maintenance import (
     SqlAlchemyImportQueueMaintenanceStore,
 )
-from app.modules.imports.infrastructure.rescan import SqlAlchemyRescanCompletionStore
 from app.modules.imports.infrastructure.scan_batch_store import (
     load_scan_candidate_projection,
     prepare_scan_candidate_batch,
@@ -230,26 +227,6 @@ def stage_import_events(
     """Write already prepared events in the caller-owned state transaction."""
 
     SqlAlchemyPreparedImportEventStore(db).write(events)
-
-
-def persist_import_rescan_completion(
-    db: Session,
-    *,
-    setting_key: str,
-    setting_value: str,
-    checkpoint_at: datetime,
-    scan_jobs: tuple[PreparedImportScanJob, ...],
-    events: tuple[PreparedSystemEvent, ...],
-) -> int:
-    return persist_rescan_completion(
-        SqlAlchemyRescanCompletionStore(db),
-        SqlAlchemyImportUnitOfWork(db),
-        setting_key=setting_key,
-        setting_value=setting_value,
-        checkpoint_at=checkpoint_at,
-        scan_jobs=scan_jobs,
-        events=events,
-    )
 
 
 def persist_import_scan_requests(
@@ -1000,15 +977,14 @@ __all__ = [
     "is_proven_audio_bundle_directory",
     "library_config",
     "library_repository",
+    "library_state_repository",
     "list_import_scan_jobs",
     "load_persisted_scan_requests",
-    "monitor_repository",
     "persist_import_events",
     "persist_import_library_create",
     "persist_import_library_delete",
     "persist_import_library_update",
     "persist_import_queue_operation_checkpoint",
-    "persist_import_rescan_completion",
     "persist_import_scan_requests",
     "persist_import_task_retry",
     "persist_terminal_import_tasks_clear",

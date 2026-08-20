@@ -12,11 +12,13 @@ def import_task_dto_from_row(row: Mapping[str, object]) -> ImportTaskDTO:
     if source_path is None:
         source_path = row.get("source_path")
     origin = row.get("origin")
+    if origin != "SCAN":
+        raise ValueError("Import task origin must be SCAN")
     status = row.get("status")
     return ImportTaskDTO(
         id=str(row["id"]),
         source_path=str(source_path or ""),
-        origin=str(origin or "MANUAL"),
+        origin=origin,
         status=str(status or "PENDING"),
         original_name=_optional_str(
             row.get("originalName")
@@ -39,9 +41,7 @@ def import_task_dto_from_row(row: Mapping[str, object]) -> ImportTaskDTO:
             else row.get("recognized_metadata")
         ),
         library_id=_optional_str(
-            row.get("libraryId")
-            if "libraryId" in row
-            else row.get("library_id")
+            row.get("libraryId") if "libraryId" in row else row.get("library_id")
         ),
         media_kind_policy=str(
             row.get("mediaKindPolicy") or row.get("media_kind_policy") or "MIXED"

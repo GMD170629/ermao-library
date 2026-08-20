@@ -93,7 +93,7 @@ enum AdministrativeLoadState<Value: Equatable & Sendable>: Equatable, Sendable {
 
 struct AdministrativeManagementSummary: Equatable, Sendable {
     let librarySourceCount: Int
-    let monitoredSourceCount: Int
+    let enabledLibraryCount: Int
     let activeImportCount: Int
     let automaticImportEnabled: Bool
     let pendingOrganizeCount: Int
@@ -218,13 +218,6 @@ struct AdministrativeLibraryScope: Identifiable, Equatable, Sendable {
     let name: String
     let serverPath: String
     let workCount: Int
-}
-
-enum MonitorInterval: String, CaseIterable, Hashable, Sendable {
-    case realtime
-    case fiveMinutes
-    case hourly
-    case manual
 }
 
 enum MediaKind: String, CaseIterable, Hashable, Sendable {

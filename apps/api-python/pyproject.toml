@@ -23,7 +23,6 @@ dependencies = [
   "pypdfium2>=4.30.0",
   "pypdf>=5.7.0",
   "rarfile>=4.4",
-  "watchdog>=4.0.0",
   "python-multipart>=0.0.20"
 ]
 

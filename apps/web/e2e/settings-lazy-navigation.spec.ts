@@ -140,7 +140,7 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
     }
     if (pathname.endsWith('/api/libraries/tree')) {
       const requestedPath = url.searchParams.get('path');
-      await route.fulfill({ json: { ok: true, data: { node: requestedPath === '/monitor' ? { name: 'monitor', path: '/monitor', readable: true, children: [] } : { name: '/', path: '/', readable: true, children: [{ name: 'monitor', path: '/monitor', readable: true }] }, monitorRoot: null } } });
+      await route.fulfill({ json: { ok: true, data: { node: requestedPath === '/library' ? { name: 'library', path: '/library', readable: true, children: [] } : { name: '/', path: '/', readable: true, children: [{ name: 'library', path: '/library', readable: true }] } } } });
       return;
     }
     if (pathname.endsWith('/api/libraries')) {
@@ -273,12 +273,12 @@ test('new library shows expanded scan rules with a 10 KB minimum by default', as
   await page.getByRole('button', { name: '新增书库' }).click();
 
   const folderPath = page.getByRole('combobox', { name: '书库路径' });
-  await folderPath.fill('/monitor');
+  await folderPath.fill('/library');
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   const directoryTree = page.getByRole('tree');
   await expect(directoryTree.getByRole('button', { name: '/', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'monitor', exact: true }).click();
-  await expect(folderPath).toHaveValue('/monitor');
+  await page.getByRole('button', { name: 'library', exact: true }).click();
+  await expect(folderPath).toHaveValue('/library');
 
   const scanRules = page.getByRole('button', { name: /扫描规则/ });
   await expect(scanRules).toHaveAttribute('aria-expanded', 'true');

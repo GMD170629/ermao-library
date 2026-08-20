@@ -52,45 +52,6 @@ MUTAGEN_TEXT_ENCODINGS = {
 }
 
 
-def read_audio_group_identity(path: str | Path) -> tuple[str | None, str | None]:
-    """Read only the tags needed by the watcher to prove bundle membership.
-
-    This intentionally avoids ffprobe and duration parsing: watcher events can
-    arrive while a large file is still being copied.  A missing/unreadable tag
-    is represented as ``None`` and never used as proof that unrelated files
-    belong to one book.
-    """
-
-    source = Path(path).expanduser().resolve()
-    if not source.is_file() or not is_supported_audio_file(source):
-        return None, None
-    try:
-        import mutagen  # type: ignore[import-not-found]
-
-        audio = mutagen.File(str(source), easy=False)
-    # Mutagen plugins may raise format-specific exceptions that do not share a
-    # stable public base class; this read-only probe boundary treats all as no tag evidence.
-    except Exception:  # noqa: BLE001
-        return None, None
-    if audio is None:
-        return None, None
-    values = _normalized_mutagen_tags(getattr(audio, "tags", None))
-    album = _clean_text(_first_tag(values, "album", "©alb", "talb"))
-    author = _clean_text(
-        _first_tag(
-            values,
-            "albumartist",
-            "album artist",
-            "aart",
-            "©art",
-            "artist",
-            "tpe1",
-            "tpe2",
-        )
-    )
-    return album.casefold() if album else None, author.casefold() if author else None
-
-
 def _directory_identity(path: Path) -> tuple[str, str | None, float | None]:
     identity = recognize_book_identity_with_regex(f"{path.name}.epub")
     author = identity.author if identity.author != UNKNOWN_AUTHOR else None
@@ -236,35 +197,6 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
 def collect_audio_bundle_files(path: str | Path) -> list[Path]:
     structure = inspect_audio_bundle(path)
     return list(structure.files) if structure else []
-
-
-def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) -> Path:
-    source = Path(path).expanduser().resolve()
-    if source.is_dir():
-        return source
-    parent = source.parent
-    if DISC_DIRECTORY_PATTERN.match(parent.name.strip()):
-        parent = parent.parent
-    configured_root = (
-        Path(monitor_root).expanduser().resolve() if monitor_root is not None else None
-    )
-    if configured_root is not None and parent == configured_root:
-        return parent
-    grandparent = parent.parent
-    if grandparent != parent and (
-        configured_root is None
-        or grandparent == configured_root
-        or configured_root in grandparent.parents
-    ):
-        root_title, _root_author, _root_volume = _directory_identity(grandparent)
-        child_title, _child_author, child_volume = _directory_identity(parent)
-        root_key = normalize_identity_part(root_title)
-        child_key = normalize_identity_part(child_title)
-        if child_volume is not None or bool(
-            root_key and child_key and root_key != child_key and root_key in child_key
-        ):
-            return grandparent
-    return parent
 
 
 def parse_audio_metadata(

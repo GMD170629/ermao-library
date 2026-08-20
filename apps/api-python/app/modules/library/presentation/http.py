@@ -690,8 +690,8 @@ def management_overview(
                 "database": checks.get(
                     "database", {"status": "unknown", "message": "待检测"}
                 ),
-                "monitorRootReadable": checks.get(
-                    "monitorRootReadable", {"status": "unknown", "message": "待检测"}
+                "libraryRootsReadable": checks.get(
+                    "libraryRootsReadable", {"status": "unknown", "message": "待检测"}
                 ),
                 "storageWritable": checks.get(
                     "storageWritable", {"status": "unknown", "message": "待检测"}

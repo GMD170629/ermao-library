@@ -1,4 +1,4 @@
-"""Monitor-folder path helpers."""
+"""Library-root path helpers."""
 
 from __future__ import annotations
 
@@ -122,9 +122,7 @@ def library_directory_tree_node(
     )
 
 
-def target_directory_from_path(
-    target_path: Any, action_label: str
-) -> Path:
+def target_directory_from_path(target_path: Any, action_label: str) -> Path:
     raw_path = str(target_path or "").strip()
     if not raw_path:
         raise ValueError(f"请选择{action_label}目录")

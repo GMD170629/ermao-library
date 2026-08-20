@@ -105,7 +105,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     alpha_work = LibraryWork(
         id="alpha",
         library_id="folder-alpha",
-        origin="WATCH",
+        origin="SCAN",
         title="星海列车",
         normalized_title="星海列车",
         author="林川",
@@ -179,7 +179,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryVolume(
             id="volume-alpha-1",
             version_id=alpha_version.id,
-            origin="WATCH",
+            origin="SCAN",
             title="星海列车 旗舰卷",
             volume_index=1,
             sort_order=0,
@@ -199,7 +199,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryVolume(
             id="volume-alpha-2",
             version_id=alpha_version.id,
-            origin="WATCH",
+            origin="SCAN",
             title="星海列车 第二卷",
             volume_index=2,
             sort_order=1,
@@ -478,7 +478,7 @@ def test_work_list_applies_every_smart_filter_field(
         "hasCover": {"operator": "is_true"},
         "shelf": {"operator": "equals", "value": "shelf-alpha"},
         "library": {"operator": "equals", "value": "folder-alpha"},
-        "origin": {"operator": "equals", "value": "WATCH"},
+        "origin": {"operator": "equals", "value": "SCAN"},
         "importStatus": {"operator": "equals", "value": "COMPLETED"},
         "createdAt": {"operator": "equals", "value": "2026-07-10"},
         "updatedAt": {"operator": "equals", "value": "2026-07-12"},

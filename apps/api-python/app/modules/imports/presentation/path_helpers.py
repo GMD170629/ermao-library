@@ -1,17 +1,16 @@
-"""Monitor-root path helpers for download (and import) HTTP adapters."""
+"""Library-root path helpers for download and import HTTP adapters."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from app.modules.imports.application.monitor_paths import is_inside_path
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.system import upsert_setting
+from app.modules.imports.application.library_paths import is_inside_path
 
 
 def has_table(db: Session, table: str) -> bool:

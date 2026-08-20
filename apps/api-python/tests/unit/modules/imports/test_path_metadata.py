@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from app.modules.imports.application.dto import BookIdentityDTO, ImportOptions
 from app.modules.imports.application.path_metadata import (
     resolve_non_audio_path_metadata,
@@ -58,7 +57,7 @@ def test_filename_metadata_preserves_release_title_and_parsed_index(
         ImportOptions(
             source_file_path=source,
             original_name=filename,
-            origin="WATCH",
+            origin="SCAN",
         ),
     )
 
@@ -83,7 +82,7 @@ def test_filename_range_uses_start_without_reading_directory_neighbors(
         ImportOptions(
             source_file_path=tmp_path / "任意目录" / filename,
             original_name=filename,
-            origin="WATCH",
+            origin="SCAN",
         ),
     )
 
@@ -98,7 +97,7 @@ def test_filename_metadata_does_not_expose_grouping_contract(tmp_path: Path) -> 
         ImportOptions(
             source_file_path=tmp_path / "系列" / filename,
             original_name=filename,
-            origin="WATCH",
+            origin="SCAN",
         ),
     )
 

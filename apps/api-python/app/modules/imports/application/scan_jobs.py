@@ -1,4 +1,4 @@
-"""Preparation contracts for set-based monitor scan scheduling."""
+"""Preparation contracts for set-based library-root scan scheduling."""
 
 from __future__ import annotations
 

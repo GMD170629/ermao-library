@@ -6,12 +6,12 @@ import {
   isDirectoryInside
 } from '../../../components/directory/target-directory-policy';
 
-test('allows a monitored root and any nested directory', () => {
+test('allows a library root and any nested directory', () => {
   assert.equal(isDirectoryInside('/library/inbox', '/library/inbox'), true);
   assert.equal(isDirectoryInside('/library/inbox', '/library/inbox/fiction/fantasy'), true);
 });
 
-test('does not confuse a sibling with a monitored descendant', () => {
+test('does not confuse a sibling with a library descendant', () => {
   assert.equal(isDirectoryInside('/library/inbox', '/library/inbox-other'), false);
   assert.equal(isDirectoryInside('/library/inbox', '/library'), false);
 });

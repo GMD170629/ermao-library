@@ -226,7 +226,7 @@ def audio_track_name_proves_membership(path: str | Path) -> bool:
 
 
 def strict_flat_audio_title(path: str | Path) -> str | None:
-    """Extract the book title from the documented monitor-root flat layout."""
+    """Extract the book title from the documented library-root flat layout."""
 
     candidate = Path(path)
     if not is_supported_audio_file(candidate):

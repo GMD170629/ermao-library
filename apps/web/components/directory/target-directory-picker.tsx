@@ -45,8 +45,8 @@ export type TargetDirectoryStatus = {
   label: string;
 };
 
-function autoImportFor(path: string, folders: Library[]) {
-  return folders.some((folder) => folder.enabled && isDirectoryInside(folder.rootPath, path));
+function autoImportFor(path: string, libraries: Library[]) {
+  return libraries.some((library) => library.enabled && isDirectoryInside(library.rootPath, path));
 }
 
 export function TargetDirectoryPicker({
@@ -56,7 +56,7 @@ export function TargetDirectoryPicker({
   label,
   requiredMessage,
   showRequiredState = true,
-  processingMode = 'monitor',
+  processingMode = 'library',
   restrictToEnabledLibraries = false,
   onStatusChange,
   className
@@ -67,15 +67,15 @@ export function TargetDirectoryPicker({
   label: string;
   requiredMessage: string;
   showRequiredState?: boolean;
-  processingMode?: 'monitor' | 'queue';
+  processingMode?: 'library' | 'queue';
   restrictToEnabledLibraries?: boolean;
   onStatusChange?: (status: TargetDirectoryStatus) => void;
   className?: string;
 }) {
   const { t: i18nExpression } = useExpressionI18n();
   const [open, setOpen] = useState(false);
-  const [monitorRoot, setMonitorRoot] = useState('');
-  const [folders, setFolders] = useState<Library[]>([]);
+  const [directoryRoot, setDirectoryRoot] = useState('');
+  const [libraries, setLibraries] = useState<Library[]>([]);
   const [nodes, setNodes] = useState<Record<string, DirectoryNode>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingPath, setLoadingPath] = useState('');
@@ -98,7 +98,7 @@ export function TargetDirectoryPicker({
       }
       const node = payload.data.node;
       if (!restrictToEnabledLibraries) {
-        setMonitorRoot(node.path);
+        setDirectoryRoot(node.path);
       }
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
@@ -118,11 +118,11 @@ export function TargetDirectoryPicker({
         const payload = (await response.json()) as { ok: boolean; data?: LibrariesPayload; error?: { message: string } };
         if (!active) return;
         if (payload.ok) {
-          const nextFolders = payload.data?.libraries ?? [];
-          setFolders(nextFolders);
+          const nextLibraries = payload.data?.libraries ?? [];
+          setLibraries(nextLibraries);
           const lastPath = memory === 'upload' ? payload.data?.lastUploadTargetPath : payload.data?.lastDownloadTargetPath;
           if (restrictToEnabledLibraries) {
-            const allowedRoots = enabledLibraryRootPaths(nextFolders);
+            const allowedRoots = enabledLibraryRootPaths(nextLibraries);
             await Promise.all(allowedRoots.map((rootPath) => loadNode(rootPath)));
             if (!active) return;
             if (lastPath && isAllowedTargetPath(lastPath, allowedRoots)) {
@@ -139,7 +139,7 @@ export function TargetDirectoryPicker({
             const lastNode = await loadNode(lastPath);
             if (active && lastNode) onChange(lastNode.path);
           } else if (rootNode) {
-            setMonitorRoot(rootNode.path);
+            setDirectoryRoot(rootNode.path);
           }
         } else {
           setTreeError(payload.error?.message ?? '读取目录失败');
@@ -165,18 +165,18 @@ export function TargetDirectoryPicker({
 
   useEffect(() => {
     if (!onStatusChange) return;
-    const autoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, folders) : false;
+    const autoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, libraries) : false;
     onStatusChange({
       autoImport,
       label: value
           ? processingMode === 'queue'
             ? '上传文件会由后台自动处理并导入书库'
             : autoImport
-            ? '已启用监控，保存后会自动识别'
-            : '该目录未启用监控，文件将只保存不入库'
+            ? '保存到书库后会由扫描器自动识别'
+            : '该目录不属于已启用的书库，文件将只保存不入库'
         : requiredMessage
     });
-  }, [folders, onStatusChange, processingMode, requiredMessage, value]);
+  }, [libraries, onStatusChange, processingMode, requiredMessage, value]);
 
   async function toggleDirectory(path: string) {
     const nextExpanded = !expanded[path];
@@ -190,12 +190,12 @@ export function TargetDirectoryPicker({
     setOpen(false);
   }
 
-  const allowedRootPaths = restrictToEnabledLibraries ? enabledLibraryRootPaths(folders) : [];
-  const rootNode = monitorRoot ? nodes[monitorRoot] : Object.values(nodes)[0];
+  const allowedRootPaths = restrictToEnabledLibraries ? enabledLibraryRootPaths(libraries) : [];
+  const rootNode = directoryRoot ? nodes[directoryRoot] : Object.values(nodes)[0];
   const rootNodes = restrictToEnabledLibraries
     ? allowedRootPaths.map((rootPath) => nodes[rootPath]).filter((node): node is DirectoryNode => Boolean(node))
     : rootNode ? [rootNode] : [];
-  const selectedAutoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, folders) : false;
+  const selectedAutoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, libraries) : false;
 
   return (
     <div ref={rootRef} className={cn('relative', className)}>
@@ -220,8 +220,8 @@ export function TargetDirectoryPicker({
           ? processingMode === 'queue'
             ? i18nExpression("上传文件会由后台自动处理并导入书库")
             : selectedAutoImport
-              ? i18nExpression("已启用监控，保存后会自动识别")
-              : i18nExpression("该目录未启用监控，文件将只保存不入库")
+              ? i18nExpression("保存到书库后会由扫描器自动识别")
+              : i18nExpression("该目录不属于已启用的书库，文件将只保存不入库")
           : requiredMessage}
       </div>
       {open ? (
@@ -229,7 +229,7 @@ export function TargetDirectoryPicker({
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="font-medium text-slate-950">{restrictToEnabledLibraries ? <I18nText>已启用的书库</I18nText> : <I18nText>可访问目录</I18nText>}</div>
-              <div className="truncate text-xs text-slate-500">{restrictToEnabledLibraries ? i18nExpression('可选择书库及其任意子文件夹') : monitorRoot || i18nExpression("读取中")}</div>
+              <div className="truncate text-xs text-slate-500">{restrictToEnabledLibraries ? i18nExpression('可选择书库及其任意子文件夹') : directoryRoot || i18nExpression("读取中")}</div>
             </div>
             <button
               type="button"
@@ -238,7 +238,7 @@ export function TargetDirectoryPicker({
                   void Promise.all(allowedRootPaths.map((rootPath) => loadNode(rootPath)));
                   return;
                 }
-                void loadNode(value || monitorRoot || undefined);
+                void loadNode(value || directoryRoot || undefined);
               }}
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
             >
@@ -253,7 +253,7 @@ export function TargetDirectoryPicker({
                   node={node}
                   level={0}
                   selectedPath={value}
-                  folders={folders}
+                  folders={libraries}
                   allowedRootPaths={allowedRootPaths}
                   nodes={nodes}
                   expanded={expanded}

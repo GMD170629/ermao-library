@@ -9,6 +9,7 @@ from sqlalchemy import Integer, cast, select, update
 from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import ImportTask
+from app.modules.imports.application.dto import ImportOrigin
 from app.modules.imports.infrastructure.library_queries import (
     complete_download_task_for_source,
     fail_import_assets_for_task,
@@ -132,7 +133,7 @@ def build_import_task_values(
     *,
     task_id: str,
     source: Path,
-    origin: str,
+    origin: ImportOrigin,
     original_name: str | None,
     requested_title: str | None,
     requested_author: str | None,

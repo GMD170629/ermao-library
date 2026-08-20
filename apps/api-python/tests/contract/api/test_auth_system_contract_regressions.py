@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import ImportTask
 from app.models.library import Library
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def _login_system_manager(client: TestClient, db: Session) -> User:
@@ -38,11 +37,11 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
     tmp_path: Path,
 ) -> None:
     _login_system_manager(client, db_session)
-    monitored_directory = tmp_path / "comic-library"
-    monitored_directory.mkdir()
+    library_directory = tmp_path / "comic-library"
+    library_directory.mkdir()
     folder = Library(
         name="漫画目录",
-        root_path=str(monitored_directory),
+        root_path=str(library_directory),
         organization_mode="VOLUMES",
         enabled=True,
         ignore_patterns=None,
@@ -56,7 +55,7 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
         id="dashboard-contract-task",
         library_id=folder.id,
         media_kind_policy="COMIC",
-        origin="WATCHER",
+        origin="SCAN",
         status="COMPLETED",
         original_name="第一卷.cbz",
         requested_title="第一卷",
@@ -65,7 +64,7 @@ def test_dashboard_system_status_accepts_current_folder_and_import_task_rows(
             "title": "第一卷",
             "source": "PATH",
         },
-        source_path=str(monitored_directory / "第一卷.cbz"),
+        source_path=str(library_directory / "第一卷.cbz"),
         source_key="dashboard-contract-source-key",
         task_kind="FILE",
         progress=100,

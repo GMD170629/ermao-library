@@ -538,7 +538,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=191), nullable=False),
         sa.Column("libraryId", sa.String(length=191), nullable=False),
         sa.Column(
-            "origin", sa.String(length=191), server_default="MANUAL", nullable=False
+            "origin", sa.String(length=191), server_default="SCAN", nullable=False
         ),
         sa.Column("sourceKey", sa.String(length=191), nullable=True),
         sa.Column("title", sa.Text(), nullable=False),
@@ -1036,7 +1036,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=191), nullable=False),
         sa.Column("versionId", sa.String(length=191), nullable=False),
         sa.Column(
-            "origin", sa.String(length=191), server_default="MANUAL", nullable=False
+            "origin", sa.String(length=191), server_default="SCAN", nullable=False
         ),
         sa.Column("title", sa.Text(), nullable=False),
         sa.Column("volumeIndex", sa.Float(), nullable=True),

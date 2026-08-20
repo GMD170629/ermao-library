@@ -340,7 +340,7 @@ def parse_comic_volume_from_name(
 ) -> dict[str, object] | None:
     source = original_name or path.name
     base = Path(source).stem
-    parent = _comic_parent_title(path, "WATCH")
+    parent = _comic_parent_title(path, "SCAN")
     for pattern in [
         r"^(?:vol\.?|volume)\s*(\d+(?:\.\d+)?)$",
         r"^v\s*(\d+(?:\.\d+)?)$",
@@ -402,7 +402,7 @@ def _comic_archive_media_type(fmt: str) -> str:
 
 
 def _comic_parent_title(path: Path, origin: str) -> str | None:
-    if origin != "WATCH":
+    if origin != "SCAN":
         return None
     parent = _clean_title_part(path.parent.name)
     if not parent or parent.lower() in {

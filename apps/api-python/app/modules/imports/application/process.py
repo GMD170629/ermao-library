@@ -42,11 +42,7 @@ def process_import_task(
 ) -> ImportResult:
     try:
         _ensure_library_exists(store, task.library_id)
-        if (
-            task.origin != "WATCH"
-            or task.work_id is None
-            or task.volume_id is None
-        ):
+        if task.origin != "SCAN" or task.work_id is None or task.volume_id is None:
             raise ImportExecutionError(
                 "TOPOLOGY_TARGET_REQUIRED",
                 "导入任务必须由书库根目录扫描器绑定 Work 与 Volume",
@@ -60,7 +56,7 @@ def process_import_task(
                 original_name=task.original_name,
                 requested_title=task.requested_title,
                 requested_author=task.requested_author,
-                origin="WATCH",
+                origin="SCAN",
                 library_id=task.library_id,
                 media_kind_policy=task.media_kind_policy,
                 import_task_id=task.id,

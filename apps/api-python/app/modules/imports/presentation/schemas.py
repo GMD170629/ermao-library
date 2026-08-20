@@ -7,6 +7,7 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
+from app.modules.imports.application.dto import ImportOrigin
 from app.modules.library.domain.layout import LibraryOrganizationMode
 
 
@@ -137,7 +138,7 @@ class ImportTask(HttpContractModel):
     library_id: str | None = Field(alias="libraryId")
     work_id: str | None = Field(alias="workId")
     volume_id: str | None = Field(alias="volumeId")
-    origin: str
+    origin: ImportOrigin
     media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
         alias="mediaKindPolicy"
     )
@@ -283,15 +284,11 @@ class SavedUploadResult(HttpContractModel):
     source_path: str = Field(alias="sourcePath")
     file: str
     size_bytes: int = Field(alias="sizeBytes")
-    monitoring_status: Literal["WATCHING", "NOT_MONITORED"] = Field(
-        alias="monitoringStatus"
-    )
 
 
 class ImportUploadPayload(HttpContractModel):
     results: list[SavedUploadResult]
     saved: int
-    auto_import: bool = Field(alias="autoImport")
 
 
 class ImportDeletionPayload(HttpContractModel):

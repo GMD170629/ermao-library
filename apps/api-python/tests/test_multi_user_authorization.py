@@ -64,7 +64,7 @@ def _seed_library(db_session) -> None:
         LibraryWork(
             id="work-a",
             library_id="folder-a",
-            origin="WATCH",
+            origin="SCAN",
             title="A 范围作品",
             normalized_title="A 范围作品",
             author="作者",
@@ -75,7 +75,7 @@ def _seed_library(db_session) -> None:
         LibraryWork(
             id="work-b",
             library_id="folder-b",
-            origin="WATCH",
+            origin="SCAN",
             title="B 范围作品",
             normalized_title="B 范围作品",
             author="作者",
@@ -86,7 +86,7 @@ def _seed_library(db_session) -> None:
         LibraryWork(
             id="work-merged",
             library_id="folder-a",
-            origin="WATCH",
+            origin="SCAN",
             title="跨范围合并作品",
             normalized_title="跨范围合并作品",
             author="作者",
@@ -112,7 +112,7 @@ def _seed_library(db_session) -> None:
         LibraryVolume(
             id=volume_id,
             version_id=version_id,
-            origin="WATCH",
+            origin="SCAN",
             title=title,
             sort_order=sort_order,
             format="EPUB",
@@ -138,7 +138,7 @@ def _seed_library(db_session) -> None:
         ImportTask(
             id=task_id,
             library_id=folder_id,
-            origin="WATCH",
+            origin="SCAN",
             status="COMPLETED",
             original_name=f"{task_id}.epub",
             source_path=f"/library/{folder_id}/{task_id}.epub",
@@ -597,7 +597,7 @@ def test_member_can_access_library_work_without_volumes(db_session) -> None:
         LibraryWork(
             id="work-empty",
             library_id="folder-empty",
-            origin="WATCH",
+            origin="SCAN",
             title="尚无卷册",
             normalized_title="尚无卷册",
             tags="[]",
@@ -645,7 +645,7 @@ def test_delete_library_removes_catalog_but_keeps_source_files(
         LibraryWork(
             id="delete-work",
             library_id=library_id,
-            origin="WATCH",
+            origin="SCAN",
             title="将被删除的作品",
             normalized_title="将被删除的作品",
             tags="[]",

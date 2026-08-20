@@ -108,7 +108,7 @@ class LibraryWork(Base):
         nullable=False,
     )
     origin: Mapped[str] = mapped_column(
-        String(191), nullable=False, default="MANUAL", server_default="MANUAL"
+        String(191), nullable=False, default="SCAN", server_default="SCAN"
     )
     source_key: Mapped[str | None] = mapped_column(
         "sourceKey", String(191), nullable=True
@@ -266,7 +266,7 @@ class LibraryVolume(Base):
     )
     version: Mapped[LibraryVersion] = relationship(back_populates="volumes")
     origin: Mapped[str] = mapped_column(
-        String(191), nullable=False, default="MANUAL", server_default="MANUAL"
+        String(191), nullable=False, default="SCAN", server_default="SCAN"
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     volume_index: Mapped[float | None] = mapped_column(

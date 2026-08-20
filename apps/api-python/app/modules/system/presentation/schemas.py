@@ -197,15 +197,13 @@ class SystemImportTaskSummary(HttpContractModel):
 class DashboardSystemStatusPayload(HttpContractModel):
     database: SystemStatusCheck
     worker: SystemStatusCheck
-    enabled_libraries: list[EnabledLibrary] = Field(
-        alias="enabledLibraries"
-    )
+    enabled_libraries: list[EnabledLibrary] = Field(alias="enabledLibraries")
     current_import_task: SystemImportTaskSummary | None = Field(
         alias="currentImportTask"
     )
     latest_import_task: SystemImportTaskSummary | None = Field(alias="latestImportTask")
     error_file_count: int = Field(alias="errorFileCount")
-    monitor_root_readable: SystemStatusCheck = Field(alias="monitorRootReadable")
+    library_roots_readable: SystemStatusCheck = Field(alias="libraryRootsReadable")
     storage_writable: SystemStatusCheck = Field(alias="storageWritable")
 
 

@@ -274,7 +274,7 @@ data class LibrarySourceDraft(
     val id: String?,
     val displayName: String,
     val directory: NativeDirectorySelection,
-    val monitoring: Boolean,
+    val enabled: Boolean,
     val organizationMode: LibraryOrganizationMode,
     val ignorePatterns: String,
     val ignoreHidden: Boolean,

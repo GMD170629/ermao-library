@@ -17,8 +17,8 @@ from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWo
 from app.modules.imports.application.maintenance_commands import prepare_import_retry
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.imports.infrastructure import streaming_scan
-from app.modules.imports.infrastructure.library_queries import get_volume_context_by_id
 from app.modules.imports.infrastructure.directory_scan import LibraryConfig
+from app.modules.imports.infrastructure.library_queries import get_volume_context_by_id
 from app.modules.imports.infrastructure.scan_batch_store import (
     load_scan_candidate_projection,
     prepare_scan_candidate_batch,
@@ -73,7 +73,7 @@ def test_import_retry_rolls_back_state_when_event_write_fails(
     source.write_bytes(b"book")
     task = ImportTask(
         id="task-retry-rollback",
-        origin="WATCH",
+        origin="SCAN",
         status="FAILED",
         source_path=str(source),
         retryable=True,
@@ -398,7 +398,7 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
     tmp_path: Path,
 ) -> None:
     folder = Library(
-            organization_mode="FLAT", 
+        organization_mode="FLAT",
         id="folder-priority",
         name="Priority",
         root_path=str(tmp_path),
@@ -409,7 +409,7 @@ def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
     task = ImportTask(
         id="task-priority",
         library_id=folder.id,
-        origin="WATCH",
+        origin="SCAN",
         status="PENDING",
         source_path=str(tmp_path / "book.epub"),
     )
@@ -449,7 +449,7 @@ def test_pending_audio_scan_job_refreshes_stability_debounce(
     tmp_path: Path,
 ) -> None:
     folder = Library(
-            organization_mode="FLAT", 
+        organization_mode="FLAT",
         id="folder-audio-scan-debounce",
         name="Audio scan debounce",
         root_path=str(tmp_path),
@@ -487,13 +487,13 @@ def test_pending_audio_scan_job_refreshes_stability_debounce(
     assert abs((work.available_at - later_available_at).total_seconds()) < 0.001
 
 
-def test_prepared_monitor_rescan_jobs_insert_as_one_set_and_reuse_existing(
+def test_prepared_library_scan_jobs_insert_as_one_set_and_reuse_existing(
     db_session,
     tmp_path: Path,
 ) -> None:
     folders = tuple(
         Library(
-            organization_mode="FLAT", 
+            organization_mode="FLAT",
             id=f"folder-rescan-{index}",
             name=f"Rescan {index}",
             root_path=str(tmp_path / str(index)),
@@ -534,7 +534,7 @@ def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     folder = Library(
-            organization_mode="FLAT", 
+        organization_mode="FLAT",
         id="folder-batch",
         name="Batch",
         root_path=str(tmp_path),
@@ -546,12 +546,8 @@ def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
         candidate.write_bytes(b"book")
     db_session.flush()
 
-    first = _stage_scan_candidate_batch(
-        db_session, candidates, library_id=folder.id
-    )
-    second = _stage_scan_candidate_batch(
-        db_session, candidates, library_id=folder.id
-    )
+    first = _stage_scan_candidate_batch(db_session, candidates, library_id=folder.id)
+    second = _stage_scan_candidate_batch(db_session, candidates, library_id=folder.id)
     db_session.commit()
 
     assert first.queued_count == 500
@@ -580,18 +576,14 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session.add(folder)
     db_session.flush()
 
-    first = _stage_scan_candidate_batch(
-        db_session, (bundle,), library_id=folder.id
-    )
+    first = _stage_scan_candidate_batch(db_session, (bundle,), library_id=folder.id)
     task = db_session.scalar(select(ImportTask))
     assert task is not None
     task.status = "COMPLETED"
     db_session.execute(delete(ImportWorkItem))
     db_session.flush()
 
-    second = _stage_scan_candidate_batch(
-        db_session, (bundle,), library_id=folder.id
-    )
+    second = _stage_scan_candidate_batch(db_session, (bundle,), library_id=folder.id)
     db_session.commit()
 
     assert first.queued_count == 1
@@ -730,9 +722,7 @@ def test_audiobook_layout_creates_one_task_for_each_volume_directory(
         str(first_volume),
         str(second_volume),
     }
-    assert {task.volume_id for task in tasks} == {
-        volume.id for volume in volumes
-    }
+    assert {task.volume_id for task in tasks} == {volume.id for volume in volumes}
 
 
 def test_scan_worker_persists_topology_and_bound_import_in_one_checkpoint(
@@ -783,7 +773,7 @@ def test_scan_recovery_restarts_from_root_and_resets_attempt_counts(
     tmp_path: Path,
 ) -> None:
     folder = Library(
-            organization_mode="FLAT", 
+        organization_mode="FLAT",
         id="folder-recovery",
         name="Recovery",
         root_path=str(tmp_path),

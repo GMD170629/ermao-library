@@ -1,4 +1,4 @@
-"""Bounded, streaming directory discovery for very large monitor trees."""
+"""Bounded, streaming directory discovery for large library roots."""
 
 from __future__ import annotations
 

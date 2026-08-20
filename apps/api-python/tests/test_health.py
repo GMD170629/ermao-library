@@ -27,9 +27,6 @@ def _disable_fixture_library(db_session) -> None:
 
 def test_health_response_shape(client, db_session, test_settings):
     _disable_fixture_library(db_session)
-    monitor = test_settings.resolved_monitor_root
-    assert monitor is not None
-    monitor.mkdir(parents=True)
     _setup_admin(client)
 
     response = client.get("/api/system/health")
@@ -39,12 +36,12 @@ def test_health_response_shape(client, db_session, test_settings):
     assert payload["ok"] is True
     assert payload["data"]["status"] == "ok"
     assert isinstance(payload["data"]["checks"], list)
-    monitor_check = next(
+    library_roots_check = next(
         check
         for check in payload["data"]["checks"]
-        if check["name"] == "monitorRootReadable"
+        if check["name"] == "libraryRootsReadable"
     )
-    assert monitor_check["status"] == "unknown"
+    assert library_roots_check["status"] == "unknown"
     assert all(
         check["name"] != "ebookConversion" for check in payload["data"]["checks"]
     )
@@ -77,13 +74,13 @@ def test_health_aggregates_enabled_library_readability(client, db_session, tmp_p
 
     response = client.get("/api/system/health")
 
-    monitor_check = next(
+    library_roots_check = next(
         check
         for check in response.json()["data"]["checks"]
-        if check["name"] == "monitorRootReadable"
+        if check["name"] == "libraryRootsReadable"
     )
-    assert monitor_check["status"] == "ok"
-    assert monitor_check["message"] == "2 个书库可读"
+    assert library_roots_check["status"] == "ok"
+    assert library_roots_check["message"] == "2 个书库可读"
 
 
 def test_missing_enabled_library_does_not_block_service_readiness(
@@ -109,13 +106,13 @@ def test_missing_enabled_library_does_not_block_service_readiness(
     assert readiness_response.json()["data"]["status"] == "ok"
     assert diagnostics_response.status_code == 200, diagnostics_response.text
     assert diagnostics_response.json()["data"]["status"] == "ok"
-    monitor_check = next(
+    library_roots_check = next(
         check
         for check in diagnostics_response.json()["data"]["checks"]
-        if check["name"] == "monitorRootReadable"
+        if check["name"] == "libraryRootsReadable"
     )
-    assert monitor_check["status"] == "warning"
-    assert str(missing) in monitor_check["message"]
+    assert library_roots_check["status"] == "warning"
+    assert str(missing) in library_roots_check["message"]
 
 
 def test_health_reports_an_unreadable_enabled_library(
@@ -145,13 +142,13 @@ def test_health_reports_an_unreadable_enabled_library(
 
     response = client.get("/api/system/health")
 
-    monitor_check = next(
+    library_roots_check = next(
         check
         for check in response.json()["data"]["checks"]
-        if check["name"] == "monitorRootReadable"
+        if check["name"] == "libraryRootsReadable"
     )
-    assert monitor_check["status"] == "warning"
-    assert "书库不可读" in monitor_check["message"]
+    assert library_roots_check["status"] == "warning"
+    assert "书库不可读" in library_roots_check["message"]
 
 
 def test_health_allows_no_configured_libraries(client):

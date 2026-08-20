@@ -68,19 +68,19 @@ def test_regex_identity_prefers_nearest_bracketed_series_directory():
     ("logical_path", "expected_title", "expected_author", "expected_volume"),
     [
         (
-            "/monitor/comic/[柊裕一][鹰峰同学请穿上衣服][東立][Zero有水印][8未]/鹰峰同学请穿上衣服 [柊裕一][东立][扫图][繁中] Vol.08.zip",
+            "/library/comic/[柊裕一][鹰峰同学请穿上衣服][東立][Zero有水印][8未]/鹰峰同学请穿上衣服 [柊裕一][东立][扫图][繁中] Vol.08.zip",
             "鹰峰同学请穿上衣服",
             "柊裕一",
             8,
         ),
         (
-            "/monitor/comic/[山本崇一朗][擅长捉弄的高木同学（境外版）][bili][Vol.01-Vol.20][完结]/擅长捉弄的高木同学（境外版） Vol.08.zip",
+            "/library/comic/[山本崇一朗][擅长捉弄的高木同学（境外版）][bili][Vol.01-Vol.20][完结]/擅长捉弄的高木同学（境外版） Vol.08.zip",
             "擅长捉弄的高木同学（境外版）",
             "山本崇一朗",
             8,
         ),
         (
-            "/monitor/comic/[Chainsaw Man][电锯人][藤本タツキ][Vol.01-Vol.11]/VOL11.zip",
+            "/library/comic/[Chainsaw Man][电锯人][藤本タツキ][Vol.01-Vol.11]/VOL11.zip",
             "电锯人",
             "藤本タツキ",
             11,
@@ -113,7 +113,7 @@ def test_regex_identity_uses_standalone_number_as_volume_fallback(
     filename, expected_volume
 ):
     identity = recognize_book_identity_with_regex(
-        "/monitor/comic/"
+        "/library/comic/"
         "[FX戦士久留美][ですにゃん×荒酸だいすき][角川][Vol.01-Vol.05][未完]/"
         f"{filename}"
     )
@@ -209,27 +209,27 @@ def test_regex_identity_supports_bracketed_filename_and_dash_filename():
     ("logical_path", "expected_title", "expected_author"),
     [
         (
-            "/monitor/authorized/books-1991864018/无限恐怖 (zhttty) (mirror.example, archive.example).epub",
+            "/library/authorized/books-1991864018/无限恐怖 (zhttty) (mirror.example, archive.example).epub",
             "无限恐怖",
             "zhttty",
         ),
         (
-            "/monitor/authorized/books-1991864018/《惊悚乐园》(校对版全本+番外) (三天两觉) (mirror.example, archive.example).epub",
+            "/library/authorized/books-1991864018/《惊悚乐园》(校对版全本+番外) (三天两觉) (mirror.example, archive.example).epub",
             "惊悚乐园",
             "三天两觉",
         ),
         (
-            "/monitor/authorized/books-1991864018/calibre/[英]菲利普•普尔曼(Philip Pullman)/黑暗物质三部曲 (68)/黑暗物质三部曲 - [英]菲利普•普尔曼(Philip Pullman).epub",
+            "/library/authorized/books-1991864018/calibre/[英]菲利普•普尔曼(Philip Pullman)/黑暗物质三部曲 (68)/黑暗物质三部曲 - [英]菲利普•普尔曼(Philip Pullman).epub",
             "黑暗物质三部曲",
             "[英]菲利普•普尔曼(Philip Pullman)",
         ),
         (
-            "/monitor/authorized/books-1991864018/calibre/[日] 山崎丰子/白色巨塔 (52)/白色巨塔 - [日] 山崎丰子.epub",
+            "/library/authorized/books-1991864018/calibre/[日] 山崎丰子/白色巨塔 (52)/白色巨塔 - [日] 山崎丰子.epub",
             "白色巨塔",
             "[日] 山崎丰子",
         ),
         (
-            "/monitor/authorized/books-1991864018/calibre/天下霸唱/鬼吹灯-全八册 (50)/鬼吹灯-全八册 - 天下霸唱.epub",
+            "/library/authorized/books-1991864018/calibre/天下霸唱/鬼吹灯-全八册 (50)/鬼吹灯-全八册 - 天下霸唱.epub",
             "鬼吹灯-全八册",
             "天下霸唱",
         ),
@@ -422,11 +422,11 @@ def test_identity_cache_with_old_parser_version_is_refreshed(
     )
 
 
-def test_enabled_ai_is_fallback_for_incomplete_regex_and_receives_monitor_relative_path(
+def test_enabled_ai_is_fallback_for_incomplete_regex_and_receives_library_relative_path(
     db_session, test_settings, tmp_path, monkeypatch
 ):
-    monitor = test_settings.resolved_monitor_root
-    source_dir = monitor / "novels"
+    library_root = test_settings.resolved_library_root
+    source_dir = library_root / "novels"
     source_dir.mkdir(parents=True)
     source = source_dir / "messy-name.epub"
     source.write_bytes(b"book")

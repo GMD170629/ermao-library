@@ -7,9 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from sqlalchemy import String, create_engine, event, func, insert, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
-
 from app.models.import_pipeline import ImportTask
 from app.modules.imports.application.dto import ImportResult
 from app.modules.imports.application.ports import LibraryImportStore
@@ -28,6 +25,8 @@ from app.modules.imports.infrastructure.library_import_store import (
     SqlAlchemyLibraryImportStore,
 )
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
+from sqlalchemy import String, create_engine, event, func, insert, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
 class ProbeBase(DeclarativeBase):
@@ -293,7 +292,7 @@ def test_import_checkpoint_buffers_task_updates_without_creating_tasks(
         [
             ImportTask(
                 id=f"buffered-task-{index}",
-                origin="WATCH",
+                origin="SCAN",
                 status="PROCESSING",
                 source_path=f"/tmp/buffered-task-{index}.epub",
             )
@@ -319,8 +318,7 @@ def test_import_checkpoint_buffers_task_updates_without_creating_tasks(
         event.remove(db_session.bind, "before_cursor_execute", capture_statement)
 
     assert not any(
-        statement.lstrip().upper().startswith("INSERT")
-        and '"ImportTask"' in statement
+        statement.lstrip().upper().startswith("INSERT") and '"ImportTask"' in statement
         for statement in statements
     )
     assert (
@@ -482,9 +480,7 @@ def test_import_persistence_exposes_no_directory_topology_creation_writes() -> N
     assert forbidden_methods.isdisjoint(LibraryImportStore.__dict__)
     assert forbidden_methods.isdisjoint(BoundedLibraryImportStore.__dict__)
     assert "library_version" not in {target.value for target in ImportWriteTarget}
-    assert "library_media_version" not in {
-        target.value for target in ImportWriteTarget
-    }
+    assert "library_media_version" not in {target.value for target in ImportWriteTarget}
 
 
 def test_import_completion_does_not_reference_volume_version_id() -> None:

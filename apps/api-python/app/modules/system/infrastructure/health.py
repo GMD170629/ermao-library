@@ -24,21 +24,19 @@ def _env_check(name: str, value: str | None, required: bool = True) -> dict[str,
 
 def _check_libraries(paths: list[Path]) -> dict[str, str]:
     if not paths:
-        return health_check_item("monitorRootReadable", "unknown", "未启用书库")
+        return health_check_item("libraryRootsReadable", "unknown", "未启用书库")
     for path in paths:
         if not path.exists() or not path.is_dir():
             return health_check_item(
-                "monitorRootReadable", "warning", f"书库不存在：{path}"
+                "libraryRootsReadable", "warning", f"书库不存在：{path}"
             )
         try:
             next(path.iterdir(), None)
         except OSError as exc:
             return health_check_item(
-                "monitorRootReadable", "warning", f"书库不可读：{exc}"
+                "libraryRootsReadable", "warning", f"书库不可读：{exc}"
             )
-    return health_check_item(
-        "monitorRootReadable", "ok", f"{len(paths)} 个书库可读"
-    )
+    return health_check_item("libraryRootsReadable", "ok", f"{len(paths)} 个书库可读")
 
 
 def _check_storage_root(path: Path) -> dict[str, str]:
@@ -67,13 +65,13 @@ def run_system_health_checks(db: Session, settings: Settings) -> dict[str, objec
     except Exception as exc:  # noqa: BLE001 - health checks report failures.
         checks.append(health_check_item("database", "error", f"数据库不可用：{exc}"))
 
-    monitor_paths = [
+    library_root_paths = [
         Path(path)
         for path in db.scalars(
             select(Library.root_path).where(Library.enabled.is_(True))
         ).all()
         if path
     ]
-    checks.append(_check_libraries(monitor_paths))
+    checks.append(_check_libraries(library_root_paths))
     checks.append(_check_storage_root(settings.resolved_storage_root))
     return {"status": overall_health_status(checks), "checks": checks}

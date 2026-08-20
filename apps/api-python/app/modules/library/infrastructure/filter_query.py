@@ -211,13 +211,13 @@ def resolve_library_roots(
         statement = statement.where(Library.id.in_(requested_ids))
     roots: dict[str, str] = {}
     for folder_id, root_path in db.execute(statement).all():
-        normalized = _normalized_monitor_root(str(root_path))
+        normalized = _normalized_library_root(str(root_path))
         if normalized:
             roots[str(folder_id)] = normalized
     return roots
 
 
-def _normalized_monitor_root(root_path: str) -> str:
+def _normalized_library_root(root_path: str) -> str:
     normalized = root_path.strip()
     if normalized in {"/", "\\"}:
         return normalized
