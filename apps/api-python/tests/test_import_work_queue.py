@@ -21,6 +21,7 @@ from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWo
 from app.modules.imports.application.maintenance_commands import prepare_import_retry
 from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.imports.infrastructure import streaming_scan
+from app.modules.imports.infrastructure.library_queries import get_volume_context_by_id
 from app.modules.imports.infrastructure.directory_scan import LibraryConfig
 from app.modules.imports.infrastructure.scan_batch_store import (
     load_scan_candidate_projection,
@@ -681,6 +682,10 @@ def test_volume_layout_scan_materializes_and_binds_directory_topology(
     assert task is not None
     assert task.work_id == work.id
     assert task.volume_id == volume.id
+    context = get_volume_context_by_id(db_session, volume.id)
+    assert context is not None
+    assert context["workId"] == work.id
+    assert context["versionId"] == version.id
 
 
 def test_invalid_volume_layout_is_rejected_before_import_enqueue(

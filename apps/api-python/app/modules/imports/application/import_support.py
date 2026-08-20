@@ -32,6 +32,7 @@ from app.modules.imports.application.ports import (
     ImportOrchestrationServices,
     LibraryImportStore,
 )
+from app.modules.imports.application.query_ports import Record
 from app.modules.imports.application.release_titles import parse_release_title
 from app.modules.imports.application.work_resolution import resolve_work_identity
 from app.modules.imports.domain.content_classification import ContentClassification
@@ -379,6 +380,45 @@ def _ensure_implicit_version(
             "updatedAt": _now(),
         }
     )
+
+
+def _bound_topology_target(
+    queries: ImportLibraryQueries,
+    options: ImportOptions,
+) -> tuple[Record, Record] | None:
+    """Load and validate the structure selected by the library-root scanner."""
+
+    if options.topology_work_id is None and options.topology_volume_id is None:
+        return None
+    if options.topology_work_id is None or options.topology_volume_id is None:
+        raise ImportExecutionError(
+            "INCOMPLETE_TOPOLOGY_TARGET",
+            "扫描任务缺少完整的目录拓扑目标",
+            retryable=False,
+        )
+    work = queries.get_work_by_id(options.topology_work_id)
+    volume = queries.get_volume_context_by_id(options.topology_volume_id)
+    if work is None or volume is None:
+        raise ImportExecutionError(
+            "TOPOLOGY_TARGET_NOT_FOUND",
+            "扫描任务对应的目录拓扑不存在",
+            retryable=False,
+        )
+    if str(volume.get("workId") or "") != options.topology_work_id:
+        raise ImportExecutionError(
+            "TOPOLOGY_TARGET_MISMATCH",
+            "扫描任务的 Work 与 Volume 不属于同一目录拓扑",
+            retryable=False,
+        )
+    if options.library_id is not None and str(work.get("libraryId") or "") != str(
+        options.library_id
+    ):
+        raise ImportExecutionError(
+            "TOPOLOGY_LIBRARY_MISMATCH",
+            "扫描任务的目录拓扑不属于目标书库",
+            retryable=False,
+        )
+    return work, volume
 
 
 def _ensure_work(

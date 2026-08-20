@@ -862,12 +862,12 @@ def get_volume_context_by_id(db: Session, volume_id: str) -> dict[str, Any] | No
         db.execute(
             select(
                 LibraryVolume.__table__,
-                LibraryMediaVersion.id.label("mediaVersionId"),
-                LibraryMediaVersion.work_id.label("workId"),
-                LibraryMediaVersion.media_kind.label("mediaKind"),
+                LibraryVersion.id.label("versionId"),
+                LibraryVersion.id.label("mediaVersionId"),
+                LibraryVersion.work_id.label("workId"),
+                volume_effective_media_kind(LibraryVolume).label("mediaKind"),
             )
             .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-            .join(LibraryMediaVersion, _media_version_matches_volume())
             .where(LibraryVolume.id == volume_id)
         )
         .mappings()

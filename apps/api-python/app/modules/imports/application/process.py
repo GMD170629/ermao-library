@@ -42,6 +42,11 @@ def process_import_task(
     try:
         _ensure_library_exists(store, task.library_id)
         unit_of_work.release()
+        topology_bound = (
+            task.origin == "WATCH"
+            and task.work_id is not None
+            and task.volume_id is not None
+        )
         result = pipeline.import_managed_book(
             settings,
             ImportOptions(
@@ -54,6 +59,8 @@ def process_import_task(
                 media_kind_policy=task.media_kind_policy,
                 import_task_id=task.id,
                 expected_lease_owner=task.lease_owner,
+                topology_work_id=task.work_id if topology_bound else None,
+                topology_volume_id=task.volume_id if topology_bound else None,
             ),
         )
         _ensure_library_exists(store, task.library_id)

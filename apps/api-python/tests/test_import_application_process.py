@@ -162,6 +162,36 @@ def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
 
     assert pipeline.options is not None
     assert not hasattr(pipeline.options, "requested_work_id")
+    assert pipeline.options.topology_work_id is None
+    assert pipeline.options.topology_volume_id is None
+
+
+def test_scanner_task_forwards_its_bound_directory_topology() -> None:
+    unit_of_work = RecordingUnitOfWork()
+    store = RecordingStore()
+    pipeline = RecordingPipeline()
+    task = ImportTaskDTO(
+        id="task-scan",
+        source_path="/tmp/book.epub",
+        origin="WATCH",
+        status="PARSING",
+        library_id="folder-1",
+        work_id="topology-work",
+        volume_id="topology-volume",
+    )
+
+    process_import_task(
+        store,
+        unit_of_work,
+        pipeline,
+        ImportRuntimeConfig(storage_root=Path("/tmp"), audiobook_max_file_bytes=1),
+        task,
+        now=123,
+    )
+
+    assert pipeline.options is not None
+    assert pipeline.options.topology_work_id == "topology-work"
+    assert pipeline.options.topology_volume_id == "topology-volume"
 
 
 @pytest.mark.parametrize("failure", ["download"])

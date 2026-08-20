@@ -207,6 +207,8 @@ class ImportOptions:
     import_task_id: str | None = None
     original_source_file_path: Path | None = None
     expected_lease_owner: str | None = None
+    topology_work_id: str | None = None
+    topology_volume_id: str | None = None
     default_cover_path: str | None = None
     sidecar_metadata: PublicationMetadata | None = None
     sidecar_cover_path: Path | None = None
