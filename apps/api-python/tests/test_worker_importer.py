@@ -95,7 +95,7 @@ def add_bound_topology(
     *,
     identity: str,
     format_name: str,
-) -> tuple[LibraryWork, LibraryVersion, LibraryVolume]:
+) -> tuple[LibraryWork, LibraryVersion, LibraryVolume, ImportTask]:
     work = LibraryWork(
         id=f"{identity}-work",
         library_id="test-library",
@@ -127,7 +127,19 @@ def add_bound_topology(
     db.commit()
     db.add(volume)
     db.commit()
-    return work, version, volume
+    task = ImportTask(
+        id=f"{identity}-task",
+        library_id="test-library",
+        work_id=work.id,
+        volume_id=volume.id,
+        origin="WATCH",
+        status="PROCESSING",
+        original_name=identity,
+        source_path=identity,
+    )
+    db.add(task)
+    db.commit()
+    return work, version, volume, task
 
 
 def create_metadata_provider_tables(db):
@@ -589,7 +601,7 @@ def test_scanned_epub_enriches_prebound_topology_without_creating_structure(
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "directory-title.epub"
     write_epub_metadata_fixture(epub, "Embedded title", "Embedded author")
-    work, version, volume = add_bound_topology(
+    work, version, volume, task = add_bound_topology(
         db_session,
         identity="directory-title.epub",
         format_name="EPUB",
@@ -604,6 +616,7 @@ def test_scanned_epub_enriches_prebound_topology_without_creating_structure(
             original_name=epub.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
+            import_task_id=task.id,
         ),
     )
 
@@ -642,7 +655,7 @@ def test_scanned_fixed_layout_source_enriches_prebound_topology(
     test_settings.resolved_storage_root.mkdir(parents=True)
     source = tmp_path / f"directory-source{suffix}"
     fixture(source)
-    work, version, volume = add_bound_topology(
+    work, version, volume, task = add_bound_topology(
         db_session,
         identity=source.name,
         format_name=format_name,
@@ -657,6 +670,7 @@ def test_scanned_fixed_layout_source_enriches_prebound_topology(
             original_name=source.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
+            import_task_id=task.id,
         ),
     )
 
@@ -685,7 +699,7 @@ def test_scanned_text_source_enriches_prebound_topology(
     test_settings.resolved_storage_root.mkdir(parents=True)
     source = tmp_path / "embedded-title.txt"
     source.write_text("第一章\n正文内容", encoding="utf-8")
-    work, version, volume = add_bound_topology(
+    work, version, volume, task = add_bound_topology(
         db_session,
         identity=source.name,
         format_name="TXT",
@@ -700,6 +714,7 @@ def test_scanned_text_source_enriches_prebound_topology(
             original_name=source.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
+            import_task_id=task.id,
         ),
     )
 

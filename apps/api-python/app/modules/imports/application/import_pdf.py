@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
@@ -50,81 +49,6 @@ from app.modules.imports.domain.content_classification import (
 from app.modules.imports.domain.pdf_content import PdfContentKind
 
 logger = logging.getLogger(__name__)
-
-
-def refresh_existing_pdf_cover(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    services: ImportOrchestrationServices,
-    settings: ImportRuntimeConfig,
-    source_path: Path,
-    existing: ImportResult,
-    unit_of_work: ImportUnitOfWork,
-) -> ImportResult:
-    """Move a legacy shared PDF cover back to its owning volume on rescan."""
-
-    if not existing.volume_id:
-        return existing
-    volume = queries.get_volume_context_by_id(existing.volume_id)
-    if volume is None:
-        return existing
-    current_cover = str(volume.get("coverPath") or "").strip()
-    legacy_cover = (
-        settings.resolved_storage_root
-        / "books"
-        / existing.work_id
-        / existing.media_version_id
-        / "cover.jpg"
-    )
-    current_path = Path(current_cover) if current_cover else None
-    if current_path is not None and not current_path.is_absolute():
-        current_path = settings.resolved_storage_root / current_path
-    needs_repair = (
-        not current_cover
-        or services.is_default_cover_path(current_cover)
-        or current_path == legacy_cover
-    )
-    if not needs_repair:
-        return existing
-    release_import_transaction(unit_of_work)
-    publication = services.publish_pdf_cover(
-        settings.resolved_storage_root,
-        source_path,
-        existing.work_id,
-        existing.media_version_id,
-        existing.volume_id,
-    )
-    if publication.path is None:
-        logger.warning(
-            "pdf.cover-repair.failed volume_id=%s reason=%s",
-            existing.volume_id,
-            publication.warning or "render-failed",
-        )
-        return existing
-    store.update_library_volume(
-        existing.volume_id,
-        columns={
-            "coverPath": publication.path,
-            "coverStatus": services.cover_status(publication.path),
-            "updatedAt": _now(),
-        },
-    )
-    work = queries.get_work_by_id(existing.work_id)
-    if work and str(work.get("coverPath") or "").strip() == current_cover:
-        store.update_library_work(
-            existing.work_id,
-            columns={
-                "coverPath": publication.path,
-                "coverStatus": services.cover_status(publication.path),
-                "updatedAt": _now(),
-            },
-        )
-    logger.info(
-        "pdf.cover-repair.completed volume_id=%s source=%s",
-        existing.volume_id,
-        source_path.name,
-    )
-    return existing
 
 
 def _import_pdf(
@@ -189,7 +113,7 @@ def _import_pdf(
     tags = ["pdf"]
     merge_key = _work_merge_key(identity.title)
     source_group_key = _source_group_key(options, identity.title)
-    work, created = _import_work(
+    work, _created = _import_work(
         store,
         queries,
         options,
@@ -217,11 +141,7 @@ def _import_pdf(
             origin=options.origin,
             target=topology_target,
         )
-        volume_id = (
-            str(topology_target.volume["id"])
-            if topology_target is not None
-            else _id()
-        )
+        volume_id = str(topology_target.volume["id"])
         release_import_transaction(unit_of_work)
         cover = services.publish_pdf_cover(
             settings.resolved_storage_root,
@@ -345,12 +265,8 @@ def _import_pdf(
             inspection.page_count,
             "completed",
             False,
-            topology_target is None and not created,
-            "topology-bound"
-            if topology_target is not None
-            else "new-pdf-work"
-            if created
-            else "same-pdf-work",
+            False,
+            "topology-bound",
             resolved_metadata=resolved_local.metadata,
             metadata_field_sources=resolved_local.field_sources,
             metadata_source_order=resolved_local.source_order,

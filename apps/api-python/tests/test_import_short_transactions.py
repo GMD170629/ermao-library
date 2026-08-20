@@ -7,13 +7,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-import pytest
 from sqlalchemy import String, create_engine, event, func, insert, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from app.models.import_pipeline import ImportTask
 from app.modules.imports.application.dto import ImportResult
-from app.modules.imports.application.errors import ImportExecutionError
+from app.modules.imports.application.ports import LibraryImportStore
 from app.modules.imports.application.transactions import (
     BoundedLibraryImportStore,
     BufferedImportPersistence,
@@ -84,9 +83,6 @@ class CompletionStore:
     ) -> None:
         self.volume_updates.append((volume_id, columns))
 
-    def insert_library_volume(self, *, columns: dict[str, object]) -> dict[str, object]:
-        return columns
-
     def insert_import_log(self, *, columns: dict[str, object]) -> dict[str, object]:
         self.import_logs.append(columns)
         return columns
@@ -98,9 +94,7 @@ class CompletionStore:
     def apply_import_checkpoint(self, prepared: PreparedImportWriteBatch) -> None:
         for row in prepared.inserts:
             columns = dict(row.columns)
-            if row.target == ImportWriteTarget.LIBRARY_VOLUME:
-                self.insert_library_volume(columns=columns)
-            elif row.target == ImportWriteTarget.LIBRARY_READING_UNIT:
+            if row.target == ImportWriteTarget.LIBRARY_READING_UNIT:
                 cast(ReadingUnitStore, self).insert_library_reading_unit(
                     columns=columns
                 )
@@ -151,14 +145,6 @@ def test_reading_units_commit_only_at_explicit_completion_boundary() -> None:
         transactions,
         ImportCompletion(),
     )
-    store.insert_library_volume(
-        columns={
-            "id": "volume-1",
-            "versionId": "version-1",
-            "importStatus": "COMPLETED",
-        }
-    )
-
     for index in range(401):
         store.insert_library_reading_unit(
             columns={
@@ -287,7 +273,7 @@ def test_import_completion_updates_a_task_batch_with_one_statement(db_session) -
     ) == len(tasks)
 
 
-def test_import_checkpoint_buffers_and_merges_task_rows_before_one_insert(
+def test_import_checkpoint_buffers_task_updates_without_creating_tasks(
     db_session,
 ) -> None:
     statements: list[str] = []
@@ -303,17 +289,22 @@ def test_import_checkpoint_buffers_and_merges_task_rows_before_one_insert(
         transactions,
         ImportCompletion(),
     )
+    db_session.add_all(
+        [
+            ImportTask(
+                id=f"buffered-task-{index}",
+                origin="WATCH",
+                status="PROCESSING",
+                source_path=f"/tmp/buffered-task-{index}.epub",
+            )
+            for index in range(100)
+        ]
+    )
+    db_session.commit()
     event.listen(db_session.bind, "before_cursor_execute", capture_statement)
     try:
         for index in range(100):
             task_id = f"buffered-task-{index}"
-            store.insert_import_task(
-                columns={
-                    "id": task_id,
-                    "origin": "MANUAL",
-                    "sourcePath": f"/tmp/{task_id}.epub",
-                }
-            )
             store.update_import_task(
                 task_id, columns={"status": "PARSING", "progress": 5}
             )
@@ -327,13 +318,11 @@ def test_import_checkpoint_buffers_and_merges_task_rows_before_one_insert(
     finally:
         event.remove(db_session.bind, "before_cursor_execute", capture_statement)
 
-    task_inserts = [
-        statement
-        for statement in statements
-        if statement.lstrip().upper().startswith("INSERT")
+    assert not any(
+        statement.lstrip().upper().startswith("INSERT")
         and '"ImportTask"' in statement
-    ]
-    assert len(task_inserts) == 1
+        for statement in statements
+    )
     assert (
         db_session.scalar(
             select(func.count())
@@ -482,25 +471,20 @@ def test_blocked_import_preparation_does_not_block_an_independent_writer(
         assert session.scalar(select(func.count()).select_from(TransactionProbe)) == 2
 
 
-def test_insert_library_volume_requires_version_id() -> None:
-    unit_of_work = RecordingUnitOfWork()
-    transactions = ImportTransactionController(unit_of_work)
-    store = BoundedLibraryImportStore(
-        cast(BufferedImportPersistence, CompletionStore()),
-        transactions,
-        ImportCompletion(),
-    )
-
-    with pytest.raises(ImportExecutionError) as error:
-        store.insert_library_volume(
-            columns={
-                "id": "volume-missing-version",
-                "importStatus": "PARSING",
-            }
-        )
-
-    assert error.value.code == "VERSION_REQUIRED"
-    assert error.value.retryable is False
+def test_import_persistence_exposes_no_directory_topology_creation_writes() -> None:
+    forbidden_methods = {
+        "insert_library_work",
+        "ensure_library_version",
+        "ensure_library_media_version",
+        "insert_library_volume",
+        "update_library_media_version",
+    }
+    assert forbidden_methods.isdisjoint(LibraryImportStore.__dict__)
+    assert forbidden_methods.isdisjoint(BoundedLibraryImportStore.__dict__)
+    assert "library_version" not in {target.value for target in ImportWriteTarget}
+    assert "library_media_version" not in {
+        target.value for target in ImportWriteTarget
+    }
 
 
 def test_import_completion_does_not_reference_volume_media_version_id() -> None:

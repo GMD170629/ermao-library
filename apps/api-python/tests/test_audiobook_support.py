@@ -23,6 +23,7 @@ from app.bootstrap.imports import (
 )
 from app.core.auth import hash_password
 from app.models.auth import User
+from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryMediaVersion,
     LibraryReadingProgress,
@@ -801,6 +802,18 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
     db_session.commit()
     db_session.add(volume)
     db_session.commit()
+    task = ImportTask(
+        id="audio-topology-task",
+        library_id="test-library",
+        work_id=work.id,
+        volume_id=volume.id,
+        origin="WATCH",
+        status="PROCESSING",
+        original_name=audio_dir.name,
+        source_path=str(audio_dir),
+    )
+    db_session.add(task)
+    db_session.commit()
 
     result = import_managed_book(
         db_session,
@@ -811,6 +824,7 @@ def test_scanned_audio_volume_enriches_only_prebound_topology(
             original_name=audio_dir.name,
             topology_work_id=work.id,
             topology_volume_id=volume.id,
+            import_task_id=task.id,
         ),
     )
 

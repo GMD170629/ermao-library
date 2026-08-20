@@ -21,11 +21,9 @@ from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.import_pipeline import ImportAsset, ImportLog, ImportTask
 from app.models.library import (
     LibraryFile,
-    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
-    LibraryVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -57,8 +55,6 @@ class SqlAlchemyLibraryImportStore:
             ImportWriteTarget.IMPORT_ASSET: ImportAsset.__table__,
             ImportWriteTarget.IMPORT_LOG: ImportLog.__table__,
             ImportWriteTarget.LIBRARY_WORK: LibraryWork.__table__,
-            ImportWriteTarget.LIBRARY_VERSION: LibraryVersion.__table__,
-            ImportWriteTarget.LIBRARY_MEDIA_VERSION: LibraryMediaVersion.__table__,
             ImportWriteTarget.LIBRARY_VOLUME: LibraryVolume.__table__,
             ImportWriteTarget.LIBRARY_FILE: LibraryFile.__table__,
             ImportWriteTarget.LIBRARY_READING_UNIT: LibraryReadingUnit.__table__,
@@ -188,8 +184,6 @@ class SqlAlchemyLibraryImportStore:
         parent_targets = (
             ImportWriteTarget.IMPORT_TASK,
             ImportWriteTarget.LIBRARY_WORK,
-            ImportWriteTarget.LIBRARY_VERSION,
-            ImportWriteTarget.LIBRARY_MEDIA_VERSION,
             ImportWriteTarget.LIBRARY_VOLUME,
             ImportWriteTarget.LIBRARY_FILE,
         )
@@ -272,36 +266,6 @@ class SqlAlchemyLibraryImportStore:
             *self._prepare_bulk_update_by_id(LibraryVolume.__table__, volume_updates),
         ]
         self._execute_prepared_sql(tuple(executions))
-
-    def find_library_version(
-        self, work_id: str, source_key: str
-    ) -> dict[str, object] | None:
-        existing = (
-            self._db.execute(
-                select(LibraryVersion.__table__).where(
-                    LibraryVersion.work_id == work_id,
-                    LibraryVersion.source_key == source_key,
-                )
-            )
-            .mappings()
-            .first()
-        )
-        return dict(existing) if existing is not None else None
-
-    def find_library_media_version(
-        self, work_id: str, media_kind: str
-    ) -> dict[str, object] | None:
-        existing = (
-            self._db.execute(
-                select(LibraryMediaVersion.__table__).where(
-                    LibraryMediaVersion.work_id == work_id,
-                    LibraryMediaVersion.media_kind == media_kind,
-                )
-            )
-            .mappings()
-            .first()
-        )
-        return dict(existing) if existing is not None else None
 
     def get_library_volume_import_status(self, volume_id: str) -> str | None:
         status = self._db.scalar(

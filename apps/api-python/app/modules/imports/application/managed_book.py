@@ -10,9 +10,7 @@ from pathlib import Path
 
 from app.modules.imports.application.audio_types import (
     SUPPORTED_AUDIO_EXTS,
-    AudioBundleStructure,
     AudioFileMetadata,
-    audio_bundle_membership_is_proven,
 )
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
@@ -26,6 +24,7 @@ from app.modules.imports.application.dto import (
     ImportSystemEvent,
 )
 from app.modules.imports.application.identity import _record_identity_system_events
+from app.modules.imports.application.errors import ImportExecutionError
 from app.modules.imports.application.identity_resolution import (
     apply_requested_identity,
     resolve_import_metadata,
@@ -37,10 +36,7 @@ from app.modules.imports.application.import_audio import (
 )
 from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
-from app.modules.imports.application.import_pdf import (
-    _import_pdf,
-    refresh_existing_pdf_cover,
-)
+from app.modules.imports.application.import_pdf import _import_pdf
 from app.modules.imports.application.import_policy import (
     REFLOWABLE_SOURCE_EXTS,
     extension_is_allowed,
@@ -48,7 +44,6 @@ from app.modules.imports.application.import_policy import (
 )
 from app.modules.imports.application.import_support import (
     SUPPORTED_EXTS,
-    _ensure_import_task,
     _existing_audio_bundle_result,
     _existing_file_result,
     _hash_text,
@@ -57,18 +52,12 @@ from app.modules.imports.application.import_support import (
     _now,
     import_file_size_limit_bytes_for_ext,
 )
-from app.modules.imports.application.import_text import (
-    _import_reflowable_source,
-    refresh_existing_reflowable_source,
-)
+from app.modules.imports.application.import_text import _import_reflowable_source
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     ImportUnitOfWork,
     LibraryImportStore,
-)
-from app.modules.imports.application.volume_ordering import (
-    normalize_media_version_volume_order,
 )
 from app.modules.imports.application.work_grouping import (
     resolve_non_audio_work_identity,
@@ -91,44 +80,6 @@ def _publication_date(value: str | None) -> datetime | None:
         return None
 
 
-def _resolve_audio_import_source(
-    services: ImportOrchestrationServices,
-    source: Path,
-) -> tuple[Path, AudioBundleStructure | None]:
-    if not source.is_file() or source.suffix.lower() not in SUPPORTED_AUDIO_EXTS:
-        return source, None
-    parent = source.parent.resolve()
-    structure = services.inspect_audio_bundle(parent)
-    if structure is None or len(structure.files) < 2:
-        return source, None
-    if not _audio_bundle_is_proven(parent, structure):
-        return source, None
-    resolved_source = source.resolve()
-    if resolved_source not in {path.resolve() for path in structure.files}:
-        return source, None
-    return parent, structure
-
-
-def _audio_bundle_is_proven(
-    directory: Path,
-    structure: AudioBundleStructure,
-) -> bool:
-    bundled_paths = {path.resolve() for path in structure.files}
-    try:
-        has_sibling_book = any(
-            child.is_file()
-            and child.resolve() not in bundled_paths
-            and child.suffix.lower() in SUPPORTED_EXTS
-            for child in directory.iterdir()
-        )
-    except OSError:
-        return False
-    return audio_bundle_membership_is_proven(
-        list(structure.files),
-        has_sibling_book=has_sibling_book,
-    )
-
-
 def import_managed_book(
     store: LibraryImportStore,
     queries: ImportLibraryQueries,
@@ -141,19 +92,20 @@ def import_managed_book(
 
     requested_source = options.source_file_path.resolve()
     original_source = (options.original_source_file_path or requested_source).resolve()
-    source, audio_structure = (
-        (requested_source, None)
-        if options.topology_volume_id is not None
-        else _resolve_audio_import_source(services, requested_source)
-    )
-    effective_options = (
-        replace(options, source_file_path=source, original_name=source.name)
-        if source != requested_source
-        else options
-    )
-    task_id = options.import_task_id or _ensure_import_task(
-        store, queries, effective_options
-    )
+    if (
+        options.topology_work_id is None
+        or options.topology_volume_id is None
+        or options.import_task_id is None
+    ):
+        raise ImportExecutionError(
+            "TOPOLOGY_TARGET_REQUIRED",
+            "导入任务必须由书库根目录扫描器绑定 Work 与 Volume",
+            retryable=False,
+        )
+    source = requested_source
+    audio_structure = None
+    effective_options = options
+    task_id = options.import_task_id
     started = time.time()
     audio_sources: list = []
     source_ext = source.suffix.lower()
@@ -172,15 +124,6 @@ def import_managed_book(
         if not original_source.exists():
             raise FileNotFoundError(f"导入源已不存在：{original_source}")
         audio_structure = audio_structure or services.inspect_audio_bundle(source)
-        if (
-            source.is_dir()
-            and audio_structure is not None
-            and effective_options.topology_volume_id is None
-            and not _audio_bundle_is_proven(source, audio_structure)
-        ):
-            raise ValueError(
-                "Audiobook directory mixes independent resources; rescan it as individual files"
-            )
         audio_sources = list(audio_structure.files) if audio_structure else []
         source_ext = (
             source.suffix.lower()
@@ -266,26 +209,6 @@ def import_managed_book(
         )
         if existing_file:
             release_import_transaction(unit_of_work)
-            if source_ext in REFLOWABLE_SOURCE_EXTS:
-                existing_file = refresh_existing_reflowable_source(
-                    store,
-                    queries,
-                    services,
-                    settings,
-                    source,
-                    existing_file,
-                    unit_of_work,
-                )
-            elif source_ext == ".pdf":
-                existing_file = refresh_existing_pdf_cover(
-                    store,
-                    queries,
-                    services,
-                    settings,
-                    source,
-                    existing_file,
-                    unit_of_work,
-                )
             metadata_refreshed = (
                 existing_file.merge_reason == "refreshed-native-metadata"
             )
@@ -571,17 +494,6 @@ def import_managed_book(
                 work_values["seriesName"] = publication.series_name
             if publication.series_index is not None:
                 work_values["seriesIndex"] = publication.series_index
-            topology_bound = effective_options.topology_volume_id is not None
-            if publication.volume_index is not None and not topology_bound:
-                volume_values["volumeIndex"] = publication.volume_index
-            if (
-                publication.volume_title
-                and not topology_bound
-                and not (
-                    audio_metadata and (source.is_dir() or len(audio_metadata) > 1)
-                )
-            ):
-                volume_values["title"] = publication.volume_title
             for column, value in (
                 ("language", publication.language),
                 ("publisher", publication.publisher),
@@ -610,12 +522,6 @@ def import_managed_book(
             store.update_library_work(result.work_id, columns=work_values)
             if result.volume_id:
                 store.update_library_volume(result.volume_id, columns=volume_values)
-        if effective_options.topology_volume_id is None:
-            normalize_media_version_volume_order(
-                store,
-                queries,
-                result.media_version_id,
-            )
         services.sync_work_facets(result.work_id)
         if sidecar is not None and result.volume_id:
             store.insert_library_metadata(

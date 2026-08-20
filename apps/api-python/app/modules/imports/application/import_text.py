@@ -21,7 +21,6 @@ from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
     _bound_topology_target,
-    _ensure_implicit_version,
     _finalize_work_cover,
     _hash_text,
     _id,
@@ -55,158 +54,6 @@ REFLOWABLE_MIME_TYPES = {
     "FB2": "application/x-fictionbook+xml",
     "TXT": "text/plain",
 }
-
-
-def refresh_existing_reflowable_source(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    services: ImportOrchestrationServices,
-    settings: ImportRuntimeConfig,
-    source_path: Path,
-    existing: ImportResult,
-    unit_of_work: ImportUnitOfWork,
-) -> ImportResult:
-    """Refresh source metadata and invalidate navigation when content changes."""
-
-    source_format = source_path.suffix.removeprefix(".").upper()
-    if source_format not in REFLOWABLE_MIME_TYPES:
-        return existing
-    metadata = services.inspect_reflowable_book(source_path, source_format)
-    file_rows = queries.list_library_files_by_paths([str(source_path.resolve())])
-    if not file_rows:
-        return existing
-    file_row = file_rows[0]
-    volume_id = str(file_row.get("volumeId") or existing.volume_id or "")
-    volume = queries.get_volume_context_by_id(volume_id) if volume_id else None
-    if volume is None:
-        version = _ensure_implicit_version(store, existing.work_id)
-        volume = store.insert_library_volume(
-            columns={
-                "id": _id(),
-                "versionId": version["id"],
-                "title": source_path.stem,
-                "format": source_format,
-                "resourceKey": _hash_text(str(source_path)),
-                "sortOrder": queries.count_volumes_for_media_version(
-                    existing.media_version_id
-                )
-                * 1000,
-                "chapterCount": None,
-                "coverPath": None,
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            }
-        )
-    volume_id = str(volume["id"])
-    file_id = str(file_row["id"])
-    source_stat = source_path.stat()
-    content_changed = int(
-        file_row.get("sizeBytes") or -1
-    ) != source_stat.st_size or int(file_row.get("mtimeMs") or -1) != int(
-        source_stat.st_mtime * 1000
-    )
-    if not file_row.get("volumeId"):
-        store.update_library_file(
-            file_id,
-            columns={"volumeId": volume_id, "updatedAt": _now()},
-        )
-    if content_changed:
-        store.update_library_file(
-            file_id,
-            columns={
-                "sizeBytes": source_stat.st_size,
-                "mtimeMs": int(source_stat.st_mtime * 1000),
-                "updatedAt": _now(),
-            },
-        )
-    for unit in queries.list_reflowable_chapters_for_volume(volume_id):
-        unit_id = unit.get("id")
-        if unit_id:
-            store.delete_library_reading_unit(str(unit_id))
-    store.insert_library_metadata(
-        columns={
-            "id": _id(),
-            "volumeId": volume_id,
-            "source": "reflowable_source",
-            "rawJson": _reflowable_metadata_json(metadata, source_path, source_format),
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
-    release_import_transaction(unit_of_work)
-    cover_path = services.publish_reflowable_cover(
-        settings.resolved_storage_root,
-        existing.work_id,
-        existing.media_version_id,
-        volume_id,
-        metadata,
-    )
-    volume_values: dict[str, object] = {
-        "description": metadata.description,
-        "language": metadata.language,
-        "publishedAt": metadata.published_at,
-        "identifier": metadata.identifier,
-        "isbn": metadata.isbn,
-        "chapterCount": None,
-        "updatedAt": _now(),
-    }
-    if cover_path:
-        volume_values.update(
-            coverPath=cover_path,
-            coverStatus=services.cover_status(cover_path),
-        )
-    store.update_library_volume(
-        volume_id,
-        columns=volume_values,
-    )
-    work = queries.get_work_by_id(existing.work_id) or {}
-    current_title = str(work.get("title") or existing.title)
-    current_author = str(work.get("author") or "")
-    topology_owned = bool(work.get("sourceKey"))
-    selected_title = (
-        metadata.title
-        if metadata.title and current_title == source_path.stem and not topology_owned
-        else current_title
-    )
-    selected_author = (
-        metadata.author
-        if metadata.author and current_author in {"", "未知作者", "Unknown author"}
-        else current_author
-    )
-    work_values: dict[str, object] = {"updatedAt": _now()}
-    if selected_title != current_title or selected_author != current_author:
-        merge_key = _work_merge_key(selected_title)
-        work = queries.get_work_by_id(existing.work_id)
-        library_id = str((work or {}).get("libraryId") or "")
-        merge_conflict = (
-            queries.get_work_by_merge_key(library_id, merge_key) if library_id else None
-        )
-        work_values.update(
-            title=selected_title,
-            author=selected_author,
-        )
-        if merge_conflict is None or str(merge_conflict["id"]) == existing.work_id:
-            work_values["mergeKey"] = merge_key
-    if cover_path:
-        work_values.update(
-            coverPath=cover_path,
-            coverStatus=services.cover_status(cover_path),
-        )
-    store.update_library_work(existing.work_id, columns=work_values)
-    return ImportResult(
-        existing.book_id,
-        existing.work_id,
-        existing.media_version_id,
-        volume_id,
-        selected_title,
-        existing.type,
-        existing.format,
-        0,
-        existing.import_status,
-        True,
-        existing.merged,
-        "refreshed-native-metadata",
-    )
 
 
 def _reflowable_metadata_json(
@@ -298,7 +145,7 @@ def _import_reflowable_source(
     )
     topology_target = _bound_topology_target(queries, options)
     merge_key = _work_merge_key(identity.title)
-    work, created = _import_work(
+    work, _created = _import_work(
         store,
         queries,
         options,
@@ -333,20 +180,11 @@ def _import_reflowable_source(
     volume = _persist_import_volume(
         store,
         {
-            "id": (
-                str(topology_target.volume["id"])
-                if topology_target is not None
-                else _id()
-            ),
+            "id": str(topology_target.volume["id"]),
             "versionId": version["id"],
             "title": volume_title,
             "volumeIndex": volume_index,
-            "sortOrder": (
-                int(volume_index * 1000)
-                if volume_index is not None
-                else queries.count_volumes_for_media_version(str(media_version["id"]))
-                * 1000
-            ),
+            "sortOrder": 0,
             "format": source_format,
             "resourceKey": _hash_text(str(source_path)),
             "sourceGroupKey": source_group_key,
@@ -436,10 +274,8 @@ def _import_reflowable_source(
         0,
         "completed",
         False,
-        topology_target is None and not created,
-        "topology-bound"
-        if topology_target is not None
-        else "native-reflowable-metadata",
+        False,
+        "topology-bound",
         resolved_metadata=resolved_local.metadata,
         metadata_field_sources=resolved_local.field_sources,
         metadata_source_order=resolved_local.source_order,

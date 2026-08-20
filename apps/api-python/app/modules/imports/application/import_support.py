@@ -23,7 +23,6 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.errors import ImportExecutionError
 from app.modules.imports.application.identity_policy import (
-    UNKNOWN_AUTHOR,
     normalize_identity_part,
     parse_bracketed_series_identity,
 )
@@ -37,7 +36,6 @@ from app.modules.imports.application.query_ports import Record
 from app.modules.imports.application.release_titles import parse_release_title
 from app.modules.imports.application.work_resolution import resolve_work_identity
 from app.modules.imports.domain.content_classification import ContentClassification
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 
 SUPPORTED_EXTS = {
     ".epub",
@@ -378,33 +376,16 @@ def _attrs(xml: str, name: str) -> list[dict[str, str]]:
     return output
 
 
-def _ensure_implicit_version(
-    store: LibraryImportStore, work_id: object
-) -> dict[str, object]:
-    return store.ensure_library_version(
-        columns={
-            "id": _id(),
-            "workId": work_id,
-            "sourceKey": IMPLICIT_VERSION_SOURCE_KEY,
-            "sourceName": None,
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
-
-
 def _bound_topology_target(
     queries: ImportLibraryQueries,
     options: ImportOptions,
-) -> BoundTopologyTarget | None:
+) -> BoundTopologyTarget:
     """Load and validate the structure selected by the library-root scanner."""
 
-    if options.topology_work_id is None and options.topology_volume_id is None:
-        return None
     if options.topology_work_id is None or options.topology_volume_id is None:
         raise ImportExecutionError(
-            "INCOMPLETE_TOPOLOGY_TARGET",
-            "扫描任务缺少完整的目录拓扑目标",
+            "TOPOLOGY_TARGET_REQUIRED",
+            "导入任务必须由书库根目录扫描器绑定 Work 与 Volume",
             retryable=False,
         )
     work = queries.get_work_by_id(options.topology_work_id)
@@ -433,60 +414,43 @@ def _bound_topology_target(
 
 
 def _import_work(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    options: ImportOptions,
-    data: dict[str, object],
-    target: BoundTopologyTarget | None,
+    _store: LibraryImportStore,
+    _queries: ImportLibraryQueries,
+    _options: ImportOptions,
+    _data: dict[str, object],
+    target: BoundTopologyTarget,
 ) -> tuple[Record, bool]:
-    if target is not None:
-        return target.work, False
-    return _ensure_work(store, queries, data)
+    return target.work, False
 
 
 def _import_version(
-    store: LibraryImportStore,
-    work_id: object,
-    target: BoundTopologyTarget | None,
+    _store: LibraryImportStore,
+    _work_id: object,
+    target: BoundTopologyTarget,
 ) -> Record:
-    if target is not None:
-        return {
-            "id": target.version_id,
-            "workId": target.work["id"],
-            "sourceKey": target.volume.get("sourceKey"),
-        }
-    return _ensure_implicit_version(store, work_id)
+    return {
+        "id": target.version_id,
+        "workId": target.work["id"],
+        "sourceKey": target.volume.get("sourceKey"),
+    }
 
 
 def _import_media_context(
-    store: LibraryImportStore,
+    _store: LibraryImportStore,
     *,
     work_id: object,
     media_kind: str,
     format_name: str,
     library_id: str | None,
     origin: str,
-    target: BoundTopologyTarget | None,
+    target: BoundTopologyTarget,
 ) -> Record:
-    if target is not None:
-        return {
-            "id": target.version_id,
-            "workId": target.work["id"],
-            "mediaKind": media_kind,
-            "format": format_name,
-        }
-    return store.ensure_library_media_version(
-        columns={
-            "id": _id(),
-            "workId": work_id,
-            "libraryId": library_id,
-            "origin": origin,
-            "mediaKind": media_kind,
-            "format": format_name,
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
+    return {
+        "id": target.version_id,
+        "workId": target.work["id"],
+        "mediaKind": media_kind,
+        "format": format_name,
+    }
 
 
 _TOPOLOGY_VOLUME_COLUMNS = frozenset(
@@ -508,10 +472,8 @@ _TOPOLOGY_VOLUME_COLUMNS = frozenset(
 def _persist_import_volume(
     store: LibraryImportStore,
     columns: dict[str, object],
-    target: BoundTopologyTarget | None,
+    target: BoundTopologyTarget,
 ) -> Record:
-    if target is None:
-        return store.insert_library_volume(columns=columns)
     metadata_columns = {
         key: value
         for key, value in columns.items()
@@ -522,78 +484,6 @@ def _persist_import_volume(
         columns=metadata_columns,
     )
     return {**target.volume, **metadata_columns}
-
-
-def _ensure_work(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    data: dict[str, Any],
-) -> tuple[dict[str, Any], bool]:
-    library_id = str(data.get("libraryId") or "").strip()
-    if not library_id:
-        raise ImportExecutionError(
-            "LIBRARY_REQUIRED",
-            "导入必须指定所属书库",
-            retryable=False,
-        )
-    merge_key = str(data["mergeKey"])
-    existing = queries.get_work_by_merge_key(
-        library_id, merge_key
-    ) or queries.get_work_by_normalized_title(library_id, _normalize_key(data["title"]))
-    if existing and str(existing.get("libraryId") or "") != library_id:
-        existing = None
-    if existing:
-        incoming_author = str(data.get("author") or "").strip()
-        current_author = str(existing.get("author") or "").strip()
-        columns: dict[str, object] = {
-            "hidden": False,
-            "mergeKey": merge_key,
-            "updatedAt": _now(),
-        }
-        if _author_is_missing(current_author) and not _author_is_missing(
-            incoming_author
-        ):
-            columns.update(
-                author=incoming_author,
-                normalizedAuthor=_normalize_key(incoming_author),
-            )
-        store.update_library_work(existing["id"], columns=columns)
-        return queries.get_work_by_id(str(existing["id"])) or existing, False
-    row = store.insert_library_work(
-        columns={
-            "id": _id(),
-            "libraryId": library_id,
-            "origin": data["origin"],
-            "title": data["title"],
-            "normalizedTitle": _normalize_key(data["title"]),
-            "author": data["author"],
-            "normalizedAuthor": _normalize_key(data["author"]),
-            "description": data.get("description"),
-            "status": "UNREAD",
-            "publicationStatus": "UNKNOWN",
-            "trackingStatus": "NOT_TRACKING",
-            "tags": json.dumps(data["tags"], ensure_ascii=False),
-            "metadataQuality": 0,
-            "organizeStatus": "UNASSESSED",
-            "coverStatus": "PENDING",
-            "hidden": False,
-            "organized": False,
-            "mergeKey": data["mergeKey"],
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
-    return row, True
-
-
-def _author_is_missing(value: object) -> bool:
-    normalized = _normalize_key(value)
-    return normalized in {
-        "",
-        _normalize_key(UNKNOWN_AUTHOR),
-        _normalize_key("Unknown author"),
-    }
-
 
 def _preferred_work_cover_path(
     queries: ImportLibraryQueries,
@@ -667,21 +557,6 @@ def _finalize_work_cover(
     )
 
 
-def _select_volume_media_version(
-    queries: ImportLibraryQueries,
-    work_id: str,
-    fmt: str,
-    source_key: str,
-) -> dict[str, Any] | None:
-    media_versions = queries.list_visible_media_versions_for_work_and_format(
-        work_id, fmt
-    )
-    for media_version in media_versions:
-        if media_version.get("sourceGroupKey") == source_key:
-            return media_version
-    return None
-
-
 def _insert_identity_metadata(
     store: LibraryImportStore, volume_id: str, identity: Any
 ) -> None:
@@ -710,35 +585,6 @@ def _log_import(
                 "createdAt": _now(),
             }
         )
-
-
-def _ensure_import_task(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    options: ImportOptions,
-) -> str:
-    existing = queries.get_pending_import_task_for_source(str(options.source_file_path))
-    if existing:
-        return str(existing["id"])
-    row = store.insert_import_task(
-        columns={
-            "id": _id(),
-            "libraryId": options.library_id,
-            "origin": options.origin,
-            "status": "PENDING",
-            "originalName": options.original_name or options.source_file_path.name,
-            "requestedTitle": options.requested_title,
-            "requestedAuthor": options.requested_author,
-            "sourcePath": str(options.source_file_path),
-            "progress": 0,
-            "duplicate": False,
-            "duration": 0,
-            "message": "等待导入",
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
-    return str(row["id"])
 
 
 def _existing_file_result(

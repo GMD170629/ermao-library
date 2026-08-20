@@ -146,10 +146,6 @@ class LibraryImportStore(Protocol):
     never ``dict[str, Any]`` dump helpers.
     """
 
-    def insert_import_task(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
-
     def update_import_task(
         self, task_id: str, *, columns: dict[str, object]
     ) -> None: ...
@@ -171,29 +167,9 @@ class LibraryImportStore(Protocol):
 
     def insert_import_log(self, *, columns: dict[str, object]) -> dict[str, object]: ...
 
-    def insert_library_work(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
-
     def update_library_work(
         self, work_id: str, *, columns: dict[str, object]
     ) -> None: ...
-
-    def ensure_library_version(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
-
-    def ensure_library_media_version(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
-
-    def update_library_media_version(
-        self, media_version_id: str, *, columns: dict[str, object]
-    ) -> None: ...
-
-    def insert_library_volume(
-        self, *, columns: dict[str, object]
-    ) -> dict[str, object]: ...
 
     def update_library_volume(
         self, volume_id: str, *, columns: dict[str, object]
