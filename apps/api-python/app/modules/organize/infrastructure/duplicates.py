@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import case, delete, func, insert, inspect, select, update
+from sqlalchemy import delete, func, insert, inspect, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import LibraryVolume, LibraryWork
 from app.models.organize import DuplicateCandidate
 from app.modules.organize.application.dto import PreparedDuplicateAction
 from app.modules.organize.application.errors import InvalidDuplicateActionError
@@ -97,7 +97,7 @@ def duplicate_entity_as_legacy_dict(entity: DuplicateCandidate) -> dict[str, Any
 def volume_entity_as_dict(entity: LibraryVolume) -> dict[str, Any]:
     return {
         "id": entity.id,
-        "mediaVersionId": entity.version_id,
+        "versionId": entity.version_id,
         "title": entity.title,
         "volumeIndex": entity.volume_index,
         "sortOrder": entity.sort_order,
@@ -206,35 +206,6 @@ def list_visible_works_except(db: Session, work_id: str) -> list[dict[str, Any]]
         )
     ).all()
     return [work_entity_as_legacy_dict(row) for row in rows]
-
-
-def first_visible_volume(db: Session, work_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "LibraryVolume"):
-        return None
-    entity = db.scalars(
-        select(LibraryVolume)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.version_id,
-        )
-        .where(
-            LibraryMediaVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-        )
-        .order_by(
-            case(
-                (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                (LibraryMediaVersion.media_kind == "COMIC", 1),
-                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
-                else_=3,
-            ),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-        .limit(1)
-    ).first()
-    return volume_entity_as_dict(entity) if entity is not None else None
 
 
 def set_work_hidden(

@@ -188,7 +188,7 @@ class OrganizeJob(Base):
     media_version_id: Mapped[str | None] = mapped_column(
         "mediaVersionId",
         String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
@@ -265,7 +265,7 @@ class MetadataLookupTask(Base):
     media_version_id: Mapped[str | None] = mapped_column(
         "mediaVersionId",
         String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(

@@ -1,5 +1,4 @@
 import json
-
 from datetime import UTC, datetime
 
 import pytest
@@ -10,7 +9,7 @@ from app.bootstrap.organize import apply_duplicate_actions_command
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import LibraryMediaVersion, LibraryVersion, LibraryVolume, LibraryWork
+from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.presentation.schemas import MetadataProvider
@@ -40,38 +39,42 @@ def _insert_work(
     work_id: str,
     *,
     created_at: str = "2026-07-21T00:00:00+00:00",
-    with_media_version: bool = True,
+    with_volume: bool = True,
 ) -> None:
-    db.execute(
-        text(
-            """
-            INSERT INTO `Library` (`id`, `name`, `rootPath`, `organizationMode`, `createdAt`, `updatedAt`)
-            SELECT 'test-library', 'Test Library', '/library/test', 'FLAT', 0, 0
-            WHERE NOT EXISTS (SELECT 1 FROM `Library` WHERE `id` = 'test-library')
-            """
+    if db.get(Library, "test-library") is None:
+        db.add(
+            Library(
+                id="test-library",
+                name="Test Library",
+                root_path="/library/test",
+                organization_mode="FLAT",
+            )
+        )
+        db.flush()
+    timestamp = datetime.fromisoformat(created_at)
+    db.add(
+        LibraryWork(
+            id=work_id,
+            library_id="test-library",
+            origin="MANUAL",
+            title=f"测试作品 {work_id}",
+            normalized_title=f"测试作品 {work_id}",
+            author="未知作者",
+            normalized_author="未知作者",
+            tags="[]",
+            metadata_quality=0,
+            organize_status="UNASSESSED",
+            hidden=False,
+            organized=False,
+            created_at=timestamp,
+            updated_at=timestamp,
         )
     )
-    db.execute(
-        text(
-            """
-            INSERT INTO `LibraryWork`
-                (`id`, `libraryId`, `origin`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`,
-                 `tags`, `metadataQuality`, `organizeStatus`, `hidden`, `organized`,
-                 `createdAt`, `updatedAt`)
-            VALUES
-                (:id, 'test-library', 'MANUAL', :title, :title, '未知作者', '未知作者', '[]', 0,
-                 'UNASSESSED', 0, 0, :created_at, :created_at)
-            """
-        ),
-        {"id": work_id, "title": f"测试作品 {work_id}", "created_at": created_at},
-    )
     db.commit()
-    if with_media_version:
+    if with_volume:
         _insert_volume(
             db,
             work_id=work_id,
-            media_version_id=f"media-{work_id}",
-            media_kind="EBOOK",
             volume_id=f"volume-{work_id}",
             volume_format="EPUB",
         )
@@ -81,8 +84,6 @@ def _insert_volume(
     db: Session,
     *,
     work_id: str,
-    media_version_id: str,
-    media_kind: str,
     volume_id: str,
     volume_format: str,
     sort_order: int = 0,
@@ -94,14 +95,6 @@ def _insert_volume(
                 id=version_id,
                 work_id=work_id,
                 source_key=IMPLICIT_VERSION_SOURCE_KEY,
-            )
-        )
-    if db.get(LibraryMediaVersion, media_version_id) is None:
-        db.add(
-            LibraryMediaVersion(
-                id=media_version_id,
-                work_id=work_id,
-                media_kind=media_kind,
             )
         )
     db.add(
@@ -159,12 +152,10 @@ def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            _insert_work(db, "volume-target-work", with_media_version=False)
+            _insert_work(db, "volume-target-work", with_volume=False)
             _insert_volume(
                 db,
                 work_id="volume-target-work",
-                media_version_id="ebook-media",
-                media_kind="EBOOK",
                 volume_id="second-volume",
                 volume_format="PDF",
                 sort_order=20,
@@ -183,8 +174,6 @@ def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
             _insert_volume(
                 db,
                 work_id="volume-target-work",
-                media_version_id="audio-media",
-                media_kind="AUDIOBOOK",
                 volume_id="audio-volume",
                 volume_format="MP3",
                 sort_order=0,
@@ -212,13 +201,11 @@ def test_hide_duplicate_hides_source_work_without_reparenting(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            _insert_work(db, "target-work", with_media_version=False)
-            _insert_work(db, "source-work", with_media_version=False)
+            _insert_work(db, "target-work", with_volume=False)
+            _insert_work(db, "source-work", with_volume=False)
             _insert_volume(
                 db,
                 work_id="target-work",
-                media_version_id="target-ebook",
-                media_kind="EBOOK",
                 volume_id="target-epub",
                 volume_format="EPUB",
                 sort_order=7,
@@ -226,8 +213,6 @@ def test_hide_duplicate_hides_source_work_without_reparenting(tmp_path) -> None:
             _insert_volume(
                 db,
                 work_id="source-work",
-                media_version_id="source-ebook",
-                media_kind="EBOOK",
                 volume_id="source-pdf",
                 volume_format="PDF",
                 sort_order=1,
@@ -253,11 +238,9 @@ def test_hide_duplicate_hides_source_work_without_reparenting(tmp_path) -> None:
             assert source_pdf is not None
             assert source_pdf.version_id == "version-source-work"
             target_versions = db.scalars(
-                select(LibraryMediaVersion).where(
-                    LibraryMediaVersion.work_id == "target-work"
-                )
+                select(LibraryVersion).where(LibraryVersion.work_id == "target-work")
             ).all()
-            assert [row.id for row in target_versions] == ["target-ebook"]
+            assert [row.id for row in target_versions] == ["version-target-work"]
     finally:
         engine.dispose()
 
@@ -268,13 +251,11 @@ def test_merge_works_duplicate_action_is_rejected(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            _insert_work(db, "target-work", with_media_version=False)
-            _insert_work(db, "source-work", with_media_version=False)
+            _insert_work(db, "target-work", with_volume=False)
+            _insert_work(db, "source-work", with_volume=False)
             _insert_volume(
                 db,
                 work_id="source-work",
-                media_version_id="source-ebook",
-                media_kind="EBOOK",
                 volume_id="source-pdf",
                 volume_format="PDF",
                 sort_order=1,

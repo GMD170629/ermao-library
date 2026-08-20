@@ -10,11 +10,14 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, inspect, literal, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
     OrganizeJob,
+)
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
 )
 from app.modules.organize.application.dto import (
     OrganizeBookListItem,
@@ -348,18 +351,27 @@ def list_filtered_job_rows(
     work_ids = list(dict.fromkeys(str(row.work_id) for row in rows))
     media_kinds_by_work: dict[str, list[str]] = {work_id: [] for work_id in work_ids}
     if work_ids:
+        media_kind = volume_effective_media_kind(LibraryVolume)
         media_rows = db.execute(
-            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
-            .where(LibraryMediaVersion.work_id.in_(work_ids))
+            select(
+                LibraryVersion.work_id,
+                media_kind.label("media_kind"),
+            )
+            .select_from(LibraryVolume)
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .where(
+                LibraryVersion.work_id.in_(work_ids),
+                LibraryVolume.hidden.is_(False),
+            )
+            .group_by(LibraryVersion.work_id, media_kind)
             .order_by(
-                LibraryMediaVersion.work_id.asc(),
+                LibraryVersion.work_id.asc(),
                 case(
-                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                    (LibraryMediaVersion.media_kind == "COMIC", 1),
-                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                    (media_kind == "EBOOK", 0),
+                    (media_kind == "COMIC", 1),
+                    (media_kind == "AUDIOBOOK", 2),
                     else_=3,
                 ),
-                LibraryMediaVersion.id.asc(),
             )
         ).all()
         for work_id, media_kind in media_rows:

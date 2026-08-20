@@ -18,7 +18,7 @@ from app.modules.metadata.infrastructure.writeback_queue import (
     load_metadata_writeback_projection,
 )
 from app.modules.organize.infrastructure.eligibility import (
-    first_media_selection_for_work,
+    first_version_selection_for_work,
 )
 from app.modules.organize.infrastructure.review import (
     earliest_volume_id,
@@ -313,15 +313,14 @@ def test_writeback_does_not_forge_media_version_id_without_media_row(
     assert projection.volumes == ()
 
 
-def test_eligibility_returns_real_media_row_and_volume_when_ids_differ(
+def test_eligibility_returns_directory_version_and_volume_when_ids_differ(
     db_session,
 ) -> None:
     _seed_mismatched_ebook_work(db_session)
 
-    selection = first_media_selection_for_work(db_session, "work-1")
+    selection = first_version_selection_for_work(db_session, "work-1")
 
-    assert selection == ("media-ebook", "EBOOK", "volume-1")
-    assert selection[0] != "version-default"
+    assert selection == ("version-default", "EBOOK", "volume-1")
 
 
 def test_review_lists_all_volumes_without_id_alignment(db_session) -> None:

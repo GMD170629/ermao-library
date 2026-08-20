@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
 from app.models.library import (
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryVolume,
     LibraryWork,
@@ -17,6 +16,9 @@ from app.models.library import (
 from app.models.organize import OrganizeJob
 from app.modules.library.domain.media_kinds import media_kind_of
 from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.library.infrastructure.media_kind_sql import (
+    volume_effective_media_kind,
+)
 
 UNRESOLVED_JOB_STATUSES = (
     "LOOKUP_PENDING",
@@ -144,18 +146,24 @@ def select_eligible_works(
     result: list[dict[str, Any]] = []
     for entity in works:
         work = work_entity_as_legacy_dict(entity)
+        media_kind = volume_effective_media_kind(LibraryVolume)
         work["availableMediaKinds"] = list(
             db.scalars(
-                select(LibraryMediaVersion.media_kind)
-                .where(LibraryMediaVersion.work_id == entity.id)
+                select(media_kind.label("media_kind"))
+                .select_from(LibraryVolume)
+                .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+                .where(
+                    LibraryVersion.work_id == entity.id,
+                    LibraryVolume.hidden.is_(False),
+                )
+                .group_by(media_kind)
                 .order_by(
                     case(
-                        (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                        (LibraryMediaVersion.media_kind == "COMIC", 1),
-                        (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                        (media_kind == "EBOOK", 0),
+                        (media_kind == "COMIC", 1),
+                        (media_kind == "AUDIOBOOK", 2),
                         else_=3,
-                    ),
-                    LibraryMediaVersion.id.asc(),
+                    )
                 )
             ).all()
         )
@@ -165,57 +173,46 @@ def select_eligible_works(
     return result
 
 
-def first_media_selection_for_work(
-    db: Session, work_id: str, preferred_media_version_id: str | None = None
+def first_version_selection_for_work(
+    db: Session, work_id: str, preferred_version_id: str | None = None
 ) -> tuple[str, str, str | None] | None:
     inspector = inspect(db.connection())
-    if not inspector.has_table("LibraryVolume"):
+    if not all(
+        inspector.has_table(table) for table in ("LibraryVersion", "LibraryVolume")
+    ):
         return None
-    filters = [LibraryMediaVersion.work_id == work_id]
-    if preferred_media_version_id:
-        filters.append(LibraryMediaVersion.id == preferred_media_version_id)
-    media = db.execute(
-        select(LibraryMediaVersion.id, LibraryMediaVersion.media_kind)
+    media_kind = volume_effective_media_kind(LibraryVolume)
+    filters = [
+        LibraryVersion.work_id == work_id,
+        LibraryVolume.hidden.is_(False),
+    ]
+    if preferred_version_id:
+        filters.append(LibraryVersion.id == preferred_version_id)
+    row = db.execute(
+        select(LibraryVolume, LibraryVersion)
+        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
         .where(*filters)
         .order_by(
             case(
-                (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                (LibraryMediaVersion.media_kind == "COMIC", 1),
-                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                (media_kind == "EBOOK", 0),
+                (media_kind == "COMIC", 1),
+                (media_kind == "AUDIOBOOK", 2),
                 else_=3,
             ),
-            LibraryMediaVersion.id.asc(),
+            case(
+                (LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
+                else_=1,
+            ),
+            func.coalesce(LibraryVersion.source_name, ""),
+            LibraryVersion.source_key.asc(),
+            LibraryVersion.id.asc(),
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
+            LibraryVolume.id.asc(),
         )
         .limit(1)
     ).first()
-    if media is None:
+    if row is None:
         return None
-    media_kind = str(media.media_kind)
-    volume_id: str | None = None
-    if inspector.has_table("LibraryVersion"):
-        volumes = db.scalars(
-            select(LibraryVolume)
-            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-            .where(
-                LibraryVersion.work_id == work_id,
-                LibraryVolume.hidden.is_(False),
-            )
-            .order_by(
-                case(
-                    (LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
-                    else_=1,
-                ),
-                func.coalesce(LibraryVersion.source_name, ""),
-                LibraryVersion.source_key.asc(),
-                LibraryVersion.id.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.created_at.asc(),
-                LibraryVolume.id.asc(),
-            )
-        ).all()
-        matching = next(
-            (volume.id for volume in volumes if media_kind_of(volume) == media_kind),
-            None,
-        )
-        volume_id = str(matching) if matching else None
-    return (str(media.id), media_kind, volume_id)
+    volume, version = row
+    return (str(version.id), media_kind_of(volume), str(volume.id))
