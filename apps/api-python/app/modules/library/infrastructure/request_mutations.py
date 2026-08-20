@@ -13,7 +13,6 @@ from app.core.authorization import volume_visibility_predicate
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
 from app.models.library import (
-    LibraryMediaVersion,
     LibraryVersion,
     LibraryReadingProgress,
     LibraryVolume,
@@ -112,19 +111,16 @@ class SqlAlchemyLibraryRequestMutations:
             select(
                 LibraryVolume.id,
                 LibraryVolume.format,
-                LibraryMediaVersion.work_id,
+                LibraryVersion.work_id,
             )
-            .join(
-                LibraryMediaVersion,
-                LibraryVersion.id == LibraryVolume.version_id,
-            )
+            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
             .where(
-                LibraryMediaVersion.work_id.in_(command.work_ids),
+                LibraryVersion.work_id.in_(command.work_ids),
                 LibraryVolume.hidden.is_(False),
                 volume_visibility_predicate(command.context),
             )
             .order_by(
-                LibraryMediaVersion.work_id.asc(),
+                LibraryVersion.work_id.asc(),
                 LibraryVolume.sort_order.asc(),
                 LibraryVolume.id.asc(),
             )
