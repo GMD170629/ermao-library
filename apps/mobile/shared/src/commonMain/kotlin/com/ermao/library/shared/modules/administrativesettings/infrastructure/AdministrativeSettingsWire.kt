@@ -456,7 +456,7 @@ private fun JsonObject.toOrganizeWork(): OrganizeWorkSummary = OrganizeWorkSumma
 
 internal fun JsonElement.toOrganizeJob(): OrganizeJob {
     val job = objectValue("INVALID_ORGANIZE_JOB").expectKeys(
-        "id", "runId", "volumeId", "mediaVersionId", "trigger", "status", "statusCategory", "issueCodes",
+        "id", "runId", "volumeId", "versionId", "trigger", "status", "statusCategory", "issueCodes",
         "reasonCodes", "summary", "errorSummary", "metadataLookupStatus", "metadataLookupSource",
         "metadataLookupProviders", "metadataSources", "metadataLookupError", "providerExecutions", "metadataWriteback",
         "startedAt", "finishedAt", "createdAt", "updatedAt", "book",

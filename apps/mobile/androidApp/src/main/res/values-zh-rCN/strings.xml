@@ -159,7 +159,7 @@
     <string name="work_unavailable_message">作品不存在，或你已经没有访问权限。</string>
     <string name="work_reader_next_phase_message">Reader 和有声书播放将在下一阶段启用。</string>
     <string name="work_no_readable_volumes">当前媒介没有可阅读的卷册。</string>
-    <string name="work_media_versions_title">版本</string>
+    <string name="work_versions_title">版本</string>
     <string name="work_detail_title">图书详情</string>
     <string name="work_volume_accessibility_label">第 %1$s 卷，%2$s</string>
     <string name="work_volume_accessibility_progress">阅读进度 %1$d%%</string>

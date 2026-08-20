@@ -58,6 +58,8 @@ def volume_entity_as_dict(entity: LibraryVolume) -> dict[str, Any]:
         "volumeIndex": entity.volume_index,
         "sortOrder": entity.sort_order,
         "format": entity.format,
+        "classificationSource": entity.classification_source,
+        "suggestedMediaKind": entity.suggested_media_kind,
         "resourceKey": entity.resource_key,
         "importStatus": entity.import_status,
         "importError": entity.import_error,

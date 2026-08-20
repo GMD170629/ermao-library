@@ -1007,7 +1007,7 @@ private fun WorkMediaPicker(
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
             ) {
                 Text(
-                    stringResource(R.string.work_media_versions_title),
+                    stringResource(R.string.work_versions_title),
                     style = theme.typography.sectionTitle,
                 )
                 Spacer(Modifier.weight(1f))
@@ -1016,7 +1016,7 @@ private fun WorkMediaPicker(
                 }
             }
             WorkDetailMediaPickerLayout.VerticalChoices -> Column {
-                Text(stringResource(R.string.work_media_versions_title), style = theme.typography.sectionTitle)
+                Text(stringResource(R.string.work_versions_title), style = theme.typography.sectionTitle)
                 WorkMediaVerticalChoices(options = options, selected = selected, onSelect = onSelect)
             }
         }

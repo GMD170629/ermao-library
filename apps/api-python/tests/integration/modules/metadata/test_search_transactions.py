@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+
 from app.db.base import Base
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import ExternalMetadataCache
 from app.services.organize_service import metadata_search_candidates
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
 
 
 def test_metadata_search_closes_reads_and_defers_busy_cache_write(
@@ -34,8 +35,7 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
 
     context = {
         "work": {"title": "Short transaction search"},
-        "mediaVersion": {"mediaKind": "EBOOK"},
-        "mediaVersions": [],
+        "volumes": [{"format": "EPUB", "classificationSource": "AUTO"}],
         "files": [],
         "metadata": [],
     }
@@ -78,8 +78,7 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
             assert (
                 verify.scalar(
                     select(ExternalMetadataCache.id).where(
-                        ExternalMetadataCache.query_key
-                        == "shorttransactionsearch"
+                        ExternalMetadataCache.query_key == "shorttransactionsearch"
                     )
                 )
                 is None

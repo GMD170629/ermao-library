@@ -7,8 +7,8 @@ import socket
 import subprocess
 import sys
 import time
+import zipfile
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -21,21 +21,37 @@ sys.path.insert(0, str(API_ROOT))
 
 from app.bootstrap.imports import (
     claim_next_import_task,
-    load_import_enqueue_command_projection,
-    persist_import_enqueue_write,
-    prepare_import_enqueue_command,
-    prepare_import_enqueue_write,
     process_import_task,
 )
 from app.core.config import Settings
+from app.core.time import now_timestamp_ms
 from app.db.sqlite import create_sqlite_engine
-from tests.test_worker_importer import (
-    write_comic_fixture,
-    write_epub_fixture,
-    write_pdf_fixture,
+from app.models.common import db_timestamp
+from app.models.library import Library
+from app.modules.imports.infrastructure.scan_batch_store import (
+    load_scan_candidate_projection,
+    prepare_scan_candidate_batch,
+    prepare_scan_sources,
+    write_prepared_scan_candidate_batch,
 )
 
 SUPPORTED_EXTS = {".epub", ".pdf", ".cbz", ".zip"}
+SAMPLE_LIBRARY_ID = "sample-library"
+
+
+def write_epub_fixture(path: Path) -> None:
+    shutil.copyfile(REPO_ROOT / "test-data/library/epub/reader-v2.epub", path)
+
+
+def write_pdf_fixture(path: Path) -> None:
+    shutil.copyfile(REPO_ROOT / "test-data/library/pdf/reading-notes.pdf", path)
+
+
+def write_comic_fixture(path: Path) -> None:
+    pages_root = REPO_ROOT / "test-data/library/comics/starship-pages"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for page in sorted(pages_root.glob("*.png")):
+            archive.write(page, page.name)
 
 
 def free_port() -> int:
@@ -85,29 +101,35 @@ def expect_ok(response: httpx.Response) -> dict:
 def import_sample(path: Path, settings: Settings) -> dict:
     engine = create_sqlite_engine(settings.database_path)
     try:
-        command = prepare_import_enqueue_command(
-            path,
-            origin="MANUAL",
-            original_name=path.name,
+        sources = prepare_scan_sources(
+            (path,),
+            library_root=path.parent,
+            organization_mode="FLAT",
         )
         with Session(engine) as projection_db:
-            projection = load_import_enqueue_command_projection(
+            projection = load_scan_candidate_projection(
                 projection_db,
-                command,
+                sources,
+                library_id=SAMPLE_LIBRARY_ID,
             )
-        prepared = prepare_import_enqueue_write(
-            command,
+        prepared = prepare_scan_candidate_batch(
+            sources,
             projection,
-            available_at=datetime.now(UTC),
+            library_id=SAMPLE_LIBRARY_ID,
+            now_ms=now_timestamp_ms(),
+            now=db_timestamp(),
         )
         with Session(engine) as enqueue_db:
-            persist_import_enqueue_write(enqueue_db, prepared)
+            scan_result = write_prepared_scan_candidate_batch(enqueue_db, prepared)
+            assert scan_result.queued_count == 1, scan_result
+            enqueue_db.commit()
         with Session(engine) as db:
             task = claim_next_import_task(db, "sample-smoke", 900)
             assert task is not None
             result = process_import_task(db, settings, task)
+        assert result.volume_id is not None
         return {
-            "mediaVersionId": result.media_version_id,
+            "versionId": result.version_id,
             "volumeId": result.volume_id,
             "format": result.format,
             "type": result.type,
@@ -121,10 +143,10 @@ def validate_imported_sample(
 ) -> None:
     fmt = result["format"]
     bootstrap = expect_ok(
-        client.get(f"/api/reader/v3/volumes/{result['volumeId']}/bootstrap")
+        client.get(f"/api/reader/v4/volumes/{result['volumeId']}/bootstrap")
     )
     assert bootstrap["volume"]["id"] == result["volumeId"]
-    assert bootstrap["mediaVersion"]["id"] == result["mediaVersionId"]
+    assert bootstrap["version"]["id"] == result["versionId"]
     if fmt == "epub":
         assert bootstrap["readerType"] == "reflowable"
         assert bootstrap["availableVolumes"][0]["id"] == result["volumeId"]
@@ -165,6 +187,21 @@ def run_http_flow(base_url: str, sample_dir: Path, settings: Settings) -> None:
     write_epub_fixture(epub)
     write_comic_fixture(comic)
     write_pdf_fixture(pdf)
+
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        with Session(engine) as db, db.begin():
+            db.add(
+                Library(
+                    id=SAMPLE_LIBRARY_ID,
+                    name="Sample library",
+                    root_path=str(sample_dir),
+                    organization_mode="FLAT",
+                    enabled=True,
+                )
+            )
+    finally:
+        engine.dispose()
 
     with httpx.Client(base_url=base_url, follow_redirects=False, timeout=10) as client:
         status = expect_ok(client.get("/api/auth/setup/status"))

@@ -155,11 +155,11 @@ def _date(
 def _visible_volume(
     context: AuthorizationContext,
     volume: type[LibraryVolume],
-    media_version: type[LibraryVersion],
+    library_version: type[LibraryVersion],
 ) -> ColumnElement[bool]:
     return and_(
-        media_version.work_id == LibraryWork.id,
-        volume.version_id == media_version.id,
+        library_version.work_id == LibraryWork.id,
+        volume.version_id == library_version.id,
         volume.hidden.is_(False),
         volume_visibility_predicate(context, volume),
     )
@@ -245,7 +245,7 @@ def _path_has_prefix(
 
 def _library(
     volume: type[LibraryVolume],
-    media_version: type[LibraryVersion],
+    library_version: type[LibraryVersion],
     visible: ColumnElement[bool],
     condition: FilterCondition,
     library_roots: Mapping[str, str],
@@ -265,9 +265,9 @@ def _reading_status(
     context: AuthorizationContext, user_id: str, condition: FilterCondition
 ) -> ColumnElement[bool]:
     volume = aliased(LibraryVolume)
-    media_version = aliased(LibraryVersion)
+    library_version = aliased(LibraryVersion)
     progress = aliased(LibraryReadingProgress)
-    visible = _visible_volume(context, volume, media_version)
+    visible = _visible_volume(context, volume, library_version)
     has_volume = exists(select(volume.id).where(visible))
     if condition.operator == "is_empty":
         return ~has_volume
@@ -276,12 +276,12 @@ def _reading_status(
     started = exists(
         select(progress.id)
         .join(volume, volume.id == progress.volume_id)
-        .join(media_version, media_version.id == volume.version_id)
+        .join(library_version, library_version.id == volume.version_id)
         .where(visible, progress.user_id == user_id, progress.percent > 0)
     )
     unfinished = exists(
         select(volume.id)
-        .join(media_version, media_version.id == volume.version_id)
+        .join(library_version, library_version.id == volume.version_id)
         .outerjoin(
             progress,
             and_(progress.volume_id == volume.id, progress.user_id == user_id),
@@ -323,8 +323,8 @@ def _condition(
     if field in WORK_DATE_FIELDS:
         return _date(WORK_DATE_FIELDS[field], condition)
     volume = aliased(LibraryVolume)
-    media_version = aliased(LibraryVersion)
-    visible = _visible_volume(context, volume, media_version)
+    library_version = aliased(LibraryVersion)
+    visible = _visible_volume(context, volume, library_version)
     if field in VOLUME_TEXT_FIELDS or field == "mediaKind":
         expression = (
             volume_effective_media_kind(volume)
@@ -333,7 +333,7 @@ def _condition(
         )
         return _relation_text(
             select(volume.id)
-            .join(media_version, media_version.id == volume.version_id)
+            .join(library_version, library_version.id == volume.version_id)
             .where(visible),
             expression,
             condition,
@@ -362,7 +362,7 @@ def _condition(
     if field == "library":
         return _library(
             volume,
-            media_version,
+            library_version,
             visible,
             condition,
             library_roots,
@@ -372,7 +372,7 @@ def _condition(
         return _relation_text(
             select(file.id)
             .join(volume, volume.id == file.volume_id)
-            .join(media_version, media_version.id == volume.version_id)
+            .join(library_version, library_version.id == volume.version_id)
             .where(visible),
             file.path,
             condition,
@@ -380,7 +380,7 @@ def _condition(
     scalar = {
         "fileSize": select(func.sum(LibraryFile.size_bytes))
         .join(volume, volume.id == LibraryFile.volume_id)
-        .join(media_version, media_version.id == volume.version_id)
+        .join(library_version, library_version.id == volume.version_id)
         .where(visible)
         .scalar_subquery(),
         "pageCount": select(func.max(volume.page_count))
@@ -409,7 +409,7 @@ def _condition(
         statement = (
             select(progress)
             .join(volume, volume.id == progress.volume_id)
-            .join(media_version, media_version.id == volume.version_id)
+            .join(library_version, library_version.id == volume.version_id)
             .where(visible)
         )
         if user_id:

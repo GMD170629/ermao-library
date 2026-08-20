@@ -82,7 +82,7 @@ class SqlAlchemyLibraryQueries:
             if status_predicate is not None:
                 predicates.append(status_predicate)
         if criteria.media_kinds:
-            media_version = aliased(LibraryVersion)
+            library_version = aliased(LibraryVersion)
             volume = aliased(LibraryVolume)
             volume_predicates = [volume.hidden.is_(False)]
             if context is not None:
@@ -90,9 +90,9 @@ class SqlAlchemyLibraryQueries:
             predicates.append(
                 exists(
                     select(volume.id)
-                    .join(media_version, media_version.id == volume.version_id)
+                    .join(library_version, library_version.id == volume.version_id)
                     .where(
-                        media_version.work_id == LibraryWork.id,
+                        library_version.work_id == LibraryWork.id,
                         volume_effective_media_kind(volume).in_(criteria.media_kinds),
                         *volume_predicates,
                     )

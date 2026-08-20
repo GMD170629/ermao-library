@@ -13,7 +13,6 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 export type KindleSendTask = {
   id: string;
   workId: string | null;
-  mediaVersionId: string;
   mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
   volumeId: string;
   fileId: string | null;

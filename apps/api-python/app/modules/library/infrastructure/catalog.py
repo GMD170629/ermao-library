@@ -43,15 +43,15 @@ CATALOG_READY_IMPORT_STATUSES = ("COMPLETED", "IMPORTED", "READY")
 
 
 def _eligible_volume_exists(context: AuthorizationContext) -> ColumnElement[bool]:
-    media_version = aliased(LibraryVersion)
+    library_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     file = aliased(LibraryFile)
     return exists(
         select(volume.id)
-        .join(media_version, media_version.id == volume.version_id)
+        .join(library_version, library_version.id == volume.version_id)
         .join(file, file.volume_id == volume.id)
         .where(
-            media_version.work_id == LibraryWork.id,
+            library_version.work_id == LibraryWork.id,
             volume_effective_media_kind(volume).in_(CATALOG_MEDIA_KINDS),
             volume.hidden.is_(False),
             volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
@@ -109,15 +109,15 @@ def _work_predicates(
 def _latest_eligible_volume_at(
     context: AuthorizationContext,
 ) -> ScalarSelect[datetime]:
-    media_version = aliased(LibraryVersion)
+    library_version = aliased(LibraryVersion)
     volume = aliased(LibraryVolume)
     file = aliased(LibraryFile)
     return (
         select(func.max(volume.updated_at))
-        .join(media_version, media_version.id == volume.version_id)
+        .join(library_version, library_version.id == volume.version_id)
         .join(file, file.volume_id == volume.id)
         .where(
-            media_version.work_id == LibraryWork.id,
+            library_version.work_id == LibraryWork.id,
             volume_effective_media_kind(volume).in_(CATALOG_MEDIA_KINDS),
             volume.hidden.is_(False),
             volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),

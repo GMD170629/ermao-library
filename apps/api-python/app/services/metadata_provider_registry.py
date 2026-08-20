@@ -12,6 +12,7 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
+from app.modules.library.domain.media_kinds import effective_media_kind
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
@@ -673,12 +674,7 @@ def search_with_metadata_provider(
         return plugin.search(
             db, context, query, config=config, force=force, use_cache=use_cache
         )
-    media_version = (
-        context.get("mediaVersion")
-        if isinstance(context.get("mediaVersion"), dict)
-        else {}
-    )
-    media_kind = media_version.get("mediaKind")
+    media_kind = _context_media_kind(context)
     config = metadata_provider_runtime_config(
         db, provider_id, str(media_kind) if media_kind else None
     )
@@ -706,6 +702,28 @@ def search_with_metadata_provider(
     return plugin.search(
         db, context, query, config=config, force=force, use_cache=use_cache
     )
+
+
+def _context_media_kind(context: dict[str, Any]) -> str | None:
+    volumes = context.get("volumes")
+    if not isinstance(volumes, list):
+        return None
+    for raw_volume in volumes:
+        if not isinstance(raw_volume, dict) or raw_volume.get("hidden") is True:
+            continue
+        volume_format = str(raw_volume.get("format") or "").strip()
+        if not volume_format:
+            continue
+        return effective_media_kind(
+            format=volume_format,
+            classification_source=str(raw_volume.get("classificationSource") or "AUTO"),
+            suggested_media_kind=(
+                str(raw_volume["suggestedMediaKind"])
+                if raw_volume.get("suggestedMediaKind")
+                else None
+            ),
+        )
+    return None
 
 
 def reset_metadata_provider_registry_for_tests() -> None:

@@ -873,8 +873,7 @@ def test_provider_enabled_flags_cannot_be_bypassed_with_force(db_session):
     _disable_all_metadata_providers(db_session)
     context = {
         "work": {"title": "测试图书"},
-        "mediaVersion": {"mediaKind": "EBOOK"},
-        "mediaVersions": [],
+        "volumes": [{"format": "EPUB", "classificationSource": "AUTO"}],
         "files": [],
         "metadata": [],
     }
@@ -972,8 +971,7 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
     db_session.commit()
     context = {
         "work": {"title": "AI 测试图书"},
-        "mediaVersion": {"mediaKind": "EBOOK"},
-        "mediaVersions": [],
+        "volumes": [{"format": "EPUB", "classificationSource": "AUTO"}],
         "files": [],
         "metadata": [],
     }

@@ -312,7 +312,7 @@ def test_multi_media_batch_defers_later_scope_when_capacity_is_full(
     assert state.pending_preparations == 1
 
 
-def test_writeback_can_target_one_volume_in_media_version(
+def test_writeback_can_target_one_volume_in_directory_version(
     db_session, test_settings, tmp_path: Path
 ) -> None:
     first_source = tmp_path / "first.txt"
