@@ -20,12 +20,16 @@ from app.modules.imports.application.identity_resolution import (
 from app.modules.imports.application.import_support import (
     _classification_columns,
     _classification_result_type,
+    _bound_topology_target,
     _ensure_implicit_version,
-    _ensure_work,
     _finalize_work_cover,
     _hash_text,
     _id,
+    _import_media_context,
+    _import_version,
+    _import_work,
     _now,
+    _persist_import_volume,
     _prepared_default_cover,
     _source_group_key,
     _work_merge_key,
@@ -158,9 +162,10 @@ def refresh_existing_reflowable_source(
     work = queries.get_work_by_id(existing.work_id) or {}
     current_title = str(work.get("title") or existing.title)
     current_author = str(work.get("author") or "")
+    topology_owned = bool(work.get("sourceKey"))
     selected_title = (
         metadata.title
-        if metadata.title and current_title == source_path.stem
+        if metadata.title and current_title == source_path.stem and not topology_owned
         else current_title
     )
     selected_author = (
@@ -291,10 +296,12 @@ def _import_reflowable_source(
             title=identity.title,
         ),
     )
+    topology_target = _bound_topology_target(queries, options)
     merge_key = _work_merge_key(identity.title)
-    work, created = _ensure_work(
+    work, created = _import_work(
         store,
         queries,
+        options,
         {
             "title": identity.title,
             "author": identity.author,
@@ -304,27 +311,33 @@ def _import_reflowable_source(
             "origin": options.origin,
             "libraryId": options.library_id,
         },
+        topology_target,
     )
-    version = _ensure_implicit_version(store, work["id"])
+    version = _import_version(store, work["id"], topology_target)
     volume_title = resolved_local.metadata.volume_title or identity.title
     volume_index = identity.volume_index
     source_group_key = _source_group_key(options, identity.title)
     store.update_import_task(
         task_id, columns={"message": f"正在建立 {source_format} 原始文件卷册"}
     )
-    media_version = store.ensure_library_media_version(
-        columns={
-            "id": _id(),
-            "workId": work["id"],
-            "mediaKind": classification.media_kind,
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
+    media_version = _import_media_context(
+        store,
+        work_id=work["id"],
+        media_kind=classification.media_kind,
+        format_name=source_format,
+        library_id=options.library_id,
+        origin=options.origin,
+        target=topology_target,
     )
     mime_type = REFLOWABLE_MIME_TYPES[source_format]
-    volume = store.insert_library_volume(
-        columns={
-            "id": _id(),
+    volume = _persist_import_volume(
+        store,
+        {
+            "id": (
+                str(topology_target.volume["id"])
+                if topology_target is not None
+                else _id()
+            ),
             "versionId": version["id"],
             "title": volume_title,
             "volumeIndex": volume_index,
@@ -352,7 +365,8 @@ def _import_reflowable_source(
             **_classification_columns(classification),
             "createdAt": _now(),
             "updatedAt": _now(),
-        }
+        },
+        topology_target,
     )
     store.insert_library_file(
         columns={
@@ -422,8 +436,10 @@ def _import_reflowable_source(
         0,
         "completed",
         False,
-        not created,
-        "native-reflowable-metadata",
+        topology_target is None and not created,
+        "topology-bound"
+        if topology_target is not None
+        else "native-reflowable-metadata",
         resolved_metadata=resolved_local.metadata,
         metadata_field_sources=resolved_local.field_sources,
         metadata_source_order=resolved_local.source_order,

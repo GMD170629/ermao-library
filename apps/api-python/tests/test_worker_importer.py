@@ -680,6 +680,46 @@ def test_scanned_fixed_layout_source_enriches_prebound_topology(
     assert stored_volume.import_status == "COMPLETED"
 
 
+def test_scanned_text_source_enriches_prebound_topology(
+    db_session,
+    test_settings,
+    tmp_path: Path,
+) -> None:
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    source = tmp_path / "embedded-title.txt"
+    source.write_text("第一章\n正文内容", encoding="utf-8")
+    work, version, volume = add_bound_topology(
+        db_session,
+        identity=source.name,
+        format_name="TXT",
+    )
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        _options(
+            source_file_path=source,
+            origin="WATCH",
+            original_name=source.name,
+            topology_work_id=work.id,
+            topology_volume_id=volume.id,
+        ),
+    )
+
+    db_session.expire_all()
+    stored_work = db_session.get(LibraryWork, work.id)
+    stored_volume = db_session.get(LibraryVolume, volume.id)
+    assert result.work_id == work.id
+    assert result.media_version_id == version.id
+    assert result.volume_id == volume.id
+    assert result.merge_reason == "topology-bound"
+    assert _count(db_session, "LibraryMediaVersion") == 0
+    assert stored_work is not None and stored_work.title == "Directory work"
+    assert stored_volume is not None and stored_volume.title == "Directory volume"
+    assert stored_volume.import_status == "COMPLETED"
+
+
 def test_import_retry_reuses_hidden_partial_volume_and_file(
     db_session, test_settings, tmp_path
 ):
