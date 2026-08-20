@@ -73,6 +73,11 @@ class Library(Base):
 class LibraryWork(Base):
     __tablename__ = "LibraryWork"
     __table_args__ = (
+        UniqueConstraint(
+            "libraryId",
+            "sourceKey",
+            name="LibraryWork_libraryId_sourceKey_key",
+        ),
         Index("LibraryWork_publicationStatus_idx", "publicationStatus"),
         Index("LibraryWork_trackingStatus_idx", "trackingStatus"),
         Index("LibraryWork_title_idx", "title"),
@@ -83,6 +88,7 @@ class LibraryWork(Base):
         Index("LibraryWork_hidden_idx", "hidden"),
         Index("LibraryWork_organized_idx", "organized"),
         Index("LibraryWork_libraryId_idx", "libraryId"),
+        Index("LibraryWork_sourceKey_idx", "sourceKey"),
         Index("LibraryWork_mergeKey_idx", "mergeKey"),
         Index("LibraryWork_facetIndexVersion_id_idx", "facetIndexVersion", "id"),
         Index("LibraryWork_createdAt_id_idx", "createdAt", "id"),
@@ -105,6 +111,9 @@ class LibraryWork(Base):
     )
     origin: Mapped[str] = mapped_column(
         String(191), nullable=False, default="MANUAL", server_default="MANUAL"
+    )
+    source_key: Mapped[str | None] = mapped_column(
+        "sourceKey", String(191), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_title: Mapped[str] = mapped_column(
@@ -272,6 +281,11 @@ class LibraryMediaVersion(Base):
 class LibraryVolume(Base):
     __tablename__ = "LibraryVolume"
     __table_args__ = (
+        UniqueConstraint(
+            "versionId",
+            "resourceKey",
+            name="LibraryVolume_versionId_resourceKey_key",
+        ),
         Index("LibraryVolume_versionId_sortOrder_idx", "versionId", "sortOrder"),
         Index(
             "LibraryVolume_versionId_volumeIndex_idx",
