@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from collections.abc import Sequence
 from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.models.common import cuid
@@ -26,6 +27,24 @@ from app.modules.library.domain.readable_resource_states import AssetRole
 class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def replace_with_fresh_library_scan(self, library_id: str) -> None:
+        """Drop every target task for the library and enqueue one SCAN_LIBRARY."""
+        self._session.execute(
+            delete(LibraryImportTask).where(LibraryImportTask.library_id == library_id)
+        )
+        self._session.flush()
+        self.enqueue(kind="SCAN_LIBRARY", library_id=library_id)
+
+    def delete_tasks_for_source_nodes(self, source_node_ids: Sequence[str]) -> None:
+        if not source_node_ids:
+            return
+        self._session.execute(
+            delete(LibraryImportTask).where(
+                LibraryImportTask.source_node_id.in_(tuple(source_node_ids))
+            )
+        )
+        self._session.flush()
 
     def enqueue(
         self,

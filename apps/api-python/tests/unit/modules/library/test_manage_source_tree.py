@@ -130,17 +130,35 @@ class FakeLog:
         self.events.append(event)
 
 
+class FakeImportTasks:
+    def __init__(self) -> None:
+        self.fresh_scans: list[str] = []
+        self.deleted_for_nodes: list[tuple[str, ...]] = []
+
+    def replace_with_fresh_library_scan(self, library_id: str) -> None:
+        self.fresh_scans.append(library_id)
+
+    def delete_tasks_for_source_nodes(self, source_node_ids: object) -> None:
+        self.deleted_for_nodes.append(tuple(source_node_ids))
+
+
 def test_delete_source_node_cleans_subtree_and_assets() -> None:
     nodes = FakeSourceNodes()
     books = FakeBooks()
+    import_tasks = FakeImportTasks()
     uow = RecordingUoW()
     log = FakeLog()
     result = DeleteSourceNode(
-        source_nodes=nodes, books_resources=books, uow=uow, log=log
+        source_nodes=nodes,
+        books_resources=books,
+        import_tasks=import_tasks,
+        uow=uow,
+        log=log,
     ).execute("node-1")
     assert result.ok is True
     assert nodes.deleted == ["node-1"]
     assert books.deleted_assets == [("node-1", "node-1-child")]
+    assert import_tasks.deleted_for_nodes == [("node-1", "node-1-child")]
     assert books.reevaluated == [("res-1",)]
     assert "source_tree.delete.completed" in log.events
     assert uow.events == ["begin", "commit"]
@@ -150,6 +168,7 @@ def test_delete_missing_source_node() -> None:
     result = DeleteSourceNode(
         source_nodes=FakeSourceNodes(),
         books_resources=FakeBooks(),
+        import_tasks=FakeImportTasks(),
         uow=RecordingUoW(),
         log=FakeLog(),
     ).execute("missing")
@@ -160,13 +179,19 @@ def test_delete_missing_source_node() -> None:
 def test_change_organization_mode_deletes_overlay_then_updates() -> None:
     books = FakeBooks()
     libraries = FakeLibraries()
+    import_tasks = FakeImportTasks()
     uow = RecordingUoW()
     result = ChangeLibraryOrganizationMode(
-        libraries=libraries, books_resources=books, uow=uow, log=FakeLog()
+        libraries=libraries,
+        books_resources=books,
+        import_tasks=import_tasks,
+        uow=uow,
+        log=FakeLog(),
     ).execute("lib-1", "VOLUMES")
     assert result.ok is True
     assert books.deleted_overlay == ["lib-1"]
     assert libraries.modes == [("lib-1", TargetLibraryOrganizationMode.VOLUMES)]
+    assert import_tasks.fresh_scans == ["lib-1"]
     # Overlay wipe precedes mode update within the same transaction.
     assert uow.events == ["begin", "commit"]
 
@@ -175,6 +200,7 @@ def test_change_organization_mode_rejects_audiobook() -> None:
     result = ChangeLibraryOrganizationMode(
         libraries=FakeLibraries(),
         books_resources=FakeBooks(),
+        import_tasks=FakeImportTasks(),
         uow=RecordingUoW(),
         log=FakeLog(),
     ).execute("lib-1", "AUDIOBOOK")

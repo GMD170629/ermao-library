@@ -167,6 +167,7 @@ class LibrarySourceNode(Base):
             "and_(LibrarySourceNode.id==LibraryBook.source_node_id,"
             "LibrarySourceNode.library_id==LibraryBook.library_id)"
         ),
+        passive_deletes=True,
     )
     anchored_resources: Mapped[list["LibraryReadableResource"]] = relationship(
         back_populates="source_node",
@@ -175,6 +176,7 @@ class LibrarySourceNode(Base):
             "and_(LibrarySourceNode.id==LibraryReadableResource.source_node_id,"
             "LibrarySourceNode.library_id==LibraryReadableResource.library_id)"
         ),
+        passive_deletes=True,
     )
     resource_assets: Mapped[list["LibraryResourceAsset"]] = relationship(
         back_populates="source_node",
@@ -183,6 +185,7 @@ class LibrarySourceNode(Base):
             "and_(LibrarySourceNode.id==LibraryResourceAsset.source_node_id,"
             "LibrarySourceNode.library_id==LibraryResourceAsset.library_id)"
         ),
+        passive_deletes=True,
     )
 
 
@@ -339,6 +342,7 @@ class LibraryBook(Base):
             "and_(LibraryBook.id==LibraryReadableResource.book_id,"
             "LibraryBook.library_id==LibraryReadableResource.library_id)"
         ),
+        passive_deletes=True,
     )
 
 
@@ -505,6 +509,7 @@ class LibraryReadableResource(Base):
             "and_(LibraryReadableResource.id==LibraryResourceAsset.resource_id,"
             "LibraryReadableResource.library_id==LibraryResourceAsset.library_id)"
         ),
+        passive_deletes=True,
     )
 
 

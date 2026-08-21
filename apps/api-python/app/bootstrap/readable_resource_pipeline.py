@@ -127,12 +127,14 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
         delete_source_node=DeleteSourceNode(
             source_nodes=source_nodes,
             books_resources=books_resources,
+            import_tasks=queue,
             uow=uow,
             log=log,
         ),
         change_library_organization_mode=ChangeLibraryOrganizationMode(
             libraries=libraries,
             books_resources=books_resources,
+            import_tasks=queue,
             uow=uow,
             log=log,
         ),

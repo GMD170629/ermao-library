@@ -9,6 +9,7 @@ from app.modules.library.application.commands.manage_ports import (
     ManageBookResourcePort,
     ManageFilesystemPort,
     ManageLibraryConfigPort,
+    ManageLibraryImportTasksPort,
     ManagePipelineLogPort,
     ManageSourceNodePort,
     ManageUnitOfWorkPort,
@@ -32,11 +33,13 @@ class DeleteSourceNode:
         *,
         source_nodes: ManageSourceNodePort,
         books_resources: ManageBookResourcePort,
+        import_tasks: ManageLibraryImportTasksPort,
         uow: ManageUnitOfWorkPort,
         log: ManagePipelineLogPort,
     ) -> None:
         self._source_nodes = source_nodes
         self._books_resources = books_resources
+        self._import_tasks = import_tasks
         self._uow = uow
         self._log = log
 
@@ -51,6 +54,7 @@ class DeleteSourceNode:
                 affected_resources = self._books_resources.delete_assets_for_source_nodes(
                     subtree
                 )
+                self._import_tasks.delete_tasks_for_source_nodes(subtree)
                 self._source_nodes.delete_subtree(source_node_id)
                 self._books_resources.reevaluate_ready_after_asset_loss(
                     affected_resources
@@ -73,11 +77,13 @@ class ChangeLibraryOrganizationMode:
         *,
         libraries: ManageLibraryConfigPort,
         books_resources: ManageBookResourcePort,
+        import_tasks: ManageLibraryImportTasksPort,
         uow: ManageUnitOfWorkPort,
         log: ManagePipelineLogPort,
     ) -> None:
         self._libraries = libraries
         self._books_resources = books_resources
+        self._import_tasks = import_tasks
         self._uow = uow
         self._log = log
 
@@ -87,8 +93,10 @@ class ChangeLibraryOrganizationMode:
             return ManagementResult(ok=False, code=parsed.value)
         try:
             with self._uow.transaction():
+                # Clear overlay → update mode → replace tasks with fresh scan.
                 self._books_resources.delete_library_overlay_rows(library_id)
                 self._libraries.update_organization_mode(library_id, parsed)
+                self._import_tasks.replace_with_fresh_library_scan(library_id)
             self._log.emit(
                 "source_tree.organization_mode.changed",
                 library_id=library_id,

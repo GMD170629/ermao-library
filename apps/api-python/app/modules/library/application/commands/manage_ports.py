@@ -75,6 +75,20 @@ class ManageBookResourcePort(Protocol):
     def reevaluate_ready_after_asset_loss(self, resource_ids: Sequence[str]) -> None: ...
 
 
+class ManageLibraryImportTasksPort(Protocol):
+    """Library-scoped target import-task maintenance for management use cases."""
+
+    def replace_with_fresh_library_scan(self, library_id: str) -> None:
+        """Delete every target task for the library and enqueue SCAN_LIBRARY."""
+        ...
+
+    def delete_tasks_for_source_nodes(
+        self, source_node_ids: Sequence[str]
+    ) -> None:
+        """Delete CONTINUE_SOURCE / IMPORT_ASSET tasks keyed by source nodes."""
+        ...
+
+
 class ManagePipelineLogPort(Protocol):
     def emit(
         self,
