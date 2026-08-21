@@ -810,7 +810,7 @@ class OpdsMediaResources:
         )
         if output_media_type == "image/gif":
             width = None
-        if source is not None and source.kind == "COMIC":
+        if source is not None and source.role == "PRIMARY":
             metadata = _json_object(unit.metadata_json)
             entry_name = metadata.get("zipEntryName") or unit.href
             return media_streaming.send_pse_page_zip_entry(

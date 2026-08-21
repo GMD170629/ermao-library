@@ -95,7 +95,7 @@ def prepare_organize_run_write(
         if job_rows
         else None
     )
-    task_rows_by_job_id = {
+    task_rows_by_job_id: dict[str, dict[str, object]] = {
         plan.job_id: {
             "id": plan.task_id,
             "book_id": plan.book_id,

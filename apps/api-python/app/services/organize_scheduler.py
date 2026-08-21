@@ -194,18 +194,23 @@ def create_organize_run(
         limit=limit,
         force_selected=bool(selected) and normalized_trigger == "MANUAL",
     )
-    selections = {
+    selections: dict[str, tuple[str, str, str | None] | None] = {
         str(book["id"]): organize_eligibility.first_resource_selection_for_book(
             db, str(book["id"])
         )
         for book in books
     }
-    books = [book for book in books if selections[str(book["id"])] is not None]
+    selected_books = tuple(
+        (book, selection)
+        for book in books
+        if (selection := selections[str(book["id"])] or None) is not None
+    )
+    books = [book for book, _selection in selected_books]
     provider_plans = {
         str(book["id"]): enabled_metadata_provider_ids(
-            db, selections[str(book["id"])][1]
+            db, selection[1]
         )
-        for book in books
+        for book, selection in selected_books
     }
     # All policy, eligibility, media and provider projections are detached
     # before dedupe/ID construction or the write unit of work begins.
@@ -226,11 +231,11 @@ def create_organize_run(
             job_id=_id("organize_job"),
             task_id=_id("metadata_lookup"),
             book_id=str(book["id"]),
-            resource_id=selections[str(book["id"])][0],
+            resource_id=selection[0],
             provider_order=tuple(provider_plans[str(book["id"])]),
             reasons=tuple(str(reason) for reason in book.get("reasonCodes") or []),
         )
-        for book in books
+        for book, selection in selected_books
     )
     # The eligibility read and inserts are intentionally separated. A
     # concurrent organizer may claim a book in between; the database

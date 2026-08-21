@@ -777,9 +777,14 @@ def process_metadata_lookup_task(
             )
             continue
         enabled_providers += 1
-        candidates = (
-            result.get("candidates")
-            if isinstance(result.get("candidates"), list)
+        raw_candidates = result.get("candidates")
+        candidates: list[dict[str, Any]] = (
+            [
+                {str(key): value for key, value in candidate.items()}
+                for candidate in raw_candidates
+                if isinstance(candidate, dict)
+            ]
+            if isinstance(raw_candidates, list)
             else []
         )
         candidate, exact = _choose_exact_candidate(

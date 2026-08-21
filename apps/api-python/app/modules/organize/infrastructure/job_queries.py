@@ -10,7 +10,7 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import LibraryBook, LibraryReadableResource
+from app.models import LibraryBook, LibraryBookMetadata, LibraryReadableResource
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -142,8 +142,8 @@ def _search_predicates(
         return []
     term = f"%{normalized}%"
     predicates: list[Any] = [
-        func.lower(func.coalesce(LibraryBook.title, "")).like(term),
-        func.lower(func.coalesce(LibraryBook.author, "")).like(term),
+        func.lower(func.coalesce(LibraryBookMetadata.title, "")).like(term),
+        func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(term),
         func.lower(func.coalesce(OrganizeJob.summary, "")).like(term),
         func.lower(func.coalesce(OrganizeJob.issue_codes, "")).like(term),
     ]
@@ -248,6 +248,7 @@ def count_filtered_jobs(
         select(func.count())
         .select_from(OrganizeJob)
         .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
+        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
     )
     predicates = _filter_predicates(
         db, status=status, search=search, provider_ids=provider_ids
@@ -277,10 +278,11 @@ def list_filtered_job_rows(
             OrganizeJob.created_at,
             OrganizeJob.updated_at,
             LibraryBook.id.label("book_id"),
-            LibraryBook.title,
-            LibraryBook.author,
+            LibraryBookMetadata.title,
+            LibraryBookMetadata.author,
         )
         .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
+        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .outerjoin(
             LibraryReadableResource,
             LibraryReadableResource.id == OrganizeJob.resource_id,

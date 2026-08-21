@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -95,17 +96,19 @@ class SqlAlchemyMediaResourceRepository:
 
     @staticmethod
     def _asset_resource(
-        row: tuple[
-            LibraryResourceAsset,
-            LibrarySourceNode,
-            LibraryResourceAssetMetadata | None,
-            Library,
-        ]
-        | None,
+        row: object,
     ) -> MediaAssetResource | None:
         if row is None:
             return None
-        asset, source_node, metadata, library = row
+        asset, source_node, metadata, library = cast(
+            tuple[
+                LibraryResourceAsset,
+                LibrarySourceNode,
+                LibraryResourceAssetMetadata | None,
+                Library,
+            ],
+            row,
+        )
         return MediaAssetResource(
             id=asset.id,
             path=str(Path(library.root_path) / source_node.relative_path),
