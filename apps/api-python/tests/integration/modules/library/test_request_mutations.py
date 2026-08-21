@@ -20,6 +20,9 @@ from app.modules.library.application.request_mutations import BulkReadingStatusM
 from app.modules.library.infrastructure.request_mutations import (
     SqlAlchemyLibraryRequestMutations,
 )
+from app.modules.shelf.infrastructure.memberships import (
+    SqlAlchemyShelfBookMembership,
+)
 
 
 def _graph(db_session, book_id: str, resource_id: str, resource_format: str) -> None:
@@ -110,6 +113,7 @@ def test_bulk_reading_status_targets_resources_by_book_identity(db_session) -> N
     db_session.commit()
     gateway = SqlAlchemyLibraryRequestMutations(
         db_session,
+        shelf_memberships=SqlAlchemyShelfBookMembership(db_session),
         write_events=lambda _db, _events: None,
         write_metadata=lambda _db, _intents: (),
     )

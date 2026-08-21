@@ -35,7 +35,7 @@ from app.modules.library.infrastructure.facet_sync import (
     PreparedBookFacetWrite,
     execute_book_facet_write,
 )
-from app.modules.shelf.infrastructure import shelves
+from app.modules.shelf.public import ShelfBookMembershipPort
 
 EventWriter = Callable[[Session, list[object]], None]
 MetadataWriter = Callable[[Session, tuple[object, ...]], object]
@@ -66,10 +66,12 @@ class SqlAlchemyLibraryRequestMutations:
         self,
         db: Session,
         *,
+        shelf_memberships: ShelfBookMembershipPort,
         write_events: EventWriter,
         write_metadata: MetadataWriter,
     ) -> None:
         self._db = db
+        self._shelf_memberships = shelf_memberships
         self._write_events = write_events
         self._write_metadata = write_metadata
 
@@ -192,15 +194,13 @@ class SqlAlchemyLibraryRequestMutations:
 
     def update_shelf_membership(self, command: BulkShelfMembershipMutation) -> int:
         if command.membership == "ADD":
-            shelves.add_shelf_books(
-                self._db,
+            self._shelf_memberships.add_books(
                 shelf_id=command.shelf_id,
                 book_ids=command.book_ids,
                 now=command.now,
             )
         else:
-            shelves.remove_shelf_books(
-                self._db,
+            self._shelf_memberships.remove_books(
                 shelf_id=command.shelf_id,
                 book_ids=command.book_ids,
             )

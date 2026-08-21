@@ -27,10 +27,6 @@ from app.modules.library.application.filter_options import (
 from app.modules.library.application.queries import (
     SmartShelfCriteria,
 )
-from app.modules.library.application.resource_cover import (
-    RegenerateResourceCover,
-    ResourceSourceContinuationPort,
-)
 from app.modules.library.infrastructure import books as library_books
 from app.modules.library.infrastructure import dashboard as library_dashboard
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
@@ -59,7 +55,6 @@ from app.modules.library.infrastructure.filter_options import (
 from app.modules.library.infrastructure.resource_commands import (
     SqlAlchemyResourceMetadata,
 )
-from app.modules.library.infrastructure.resource_cover import SqlAlchemyResourceCover
 
 
 def bookshelf_items(db: Session) -> ListBookshelfItems:
@@ -118,26 +113,6 @@ def get_book(db: Session, book_id: str) -> dict[str, object] | None:
 
 def update_book(db: Session) -> UpdateBook:
     return UpdateBook(SqlAlchemyBookMutation(db), db)
-
-
-class ReadableResourceSourceContinuation(ResourceSourceContinuationPort):
-    """Composition adapter from cover regeneration to the import queue."""
-
-    def __init__(self, db: Session) -> None:
-        self._db = db
-
-    def enqueue_source_import(self, source_node_id: str) -> str | None:
-        from app.bootstrap.readable_resource_pipeline import continue_source_import
-
-        return continue_source_import(self._db, source_node_id).task_id
-
-
-def regenerate_resource_cover(db: Session) -> RegenerateResourceCover:
-    return RegenerateResourceCover(
-        SqlAlchemyResourceCover(db),
-        ReadableResourceSourceContinuation(db),
-        db,
-    )
 
 
 def delete_resource_asset(db: Session) -> DeleteResourceAsset:
@@ -201,7 +176,6 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
 
 __all__ = [
     "PreparedBookFacetWrite",
-    "ReadableResourceSourceContinuation",
     "bookshelf_items",
     "delete_resource_asset",
     "execute_book_facet_write",
@@ -222,7 +196,6 @@ __all__ = [
     "load_metadata_apply_job_ids",
     "prepare_book_facet",
     "prepare_book_facet_write",
-    "regenerate_resource_cover",
     "resource_metadata",
     "smart_shelf_book_ids",
     "update_book",

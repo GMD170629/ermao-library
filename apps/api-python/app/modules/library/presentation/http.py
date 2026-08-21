@@ -15,10 +15,10 @@ from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import (
     delete_resource_asset,
     list_books,
-    regenerate_resource_cover,
     resource_metadata,
     update_book,
 )
+from app.bootstrap.library_resource_actions import regenerate_resource_cover
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
     authorization_context,
