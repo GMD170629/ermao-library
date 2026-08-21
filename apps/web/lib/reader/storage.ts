@@ -111,7 +111,6 @@ function openDatabase() {
         store.createIndex('by-user', 'userId', { unique: false });
       }
       if (database.objectStoreNames.contains('progress-conflicts')) database.deleteObjectStore('progress-conflicts');
-      if (database.objectStoreNames.contains('book-files')) database.deleteObjectStore('book-files');
       if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(DIAGNOSTICS_STORE)) database.createObjectStore(DIAGNOSTICS_STORE, { keyPath: 'id' });
       if (!database.objectStoreNames.contains(RESOURCE_CACHE_STORE)) {
@@ -210,7 +209,7 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderResourceCach
       }
     });
   }
-  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'resourceId'>) {
+  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'resourceId' | 'assetId'>) {
     await withTransaction(PDF_RANGE_CHUNKS_STORE, 'readwrite', async (stores) => {
       const store = stores(PDF_RANGE_CHUNKS_STORE);
       const keys = await requestResult(store.index('by-namespace').getAllKeys(pdfRangeNamespaceKey(identity)));

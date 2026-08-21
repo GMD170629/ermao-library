@@ -1554,7 +1554,9 @@ function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, 
           <ResourceSelect
             items={navigation.resourceSections.map((resource, index) => ({
               id: resource.id,
-              title: resource.title || i18nAttribute("第 {value0} 卷", { value0: index + 1 })
+              title: resource.title || (isComic
+                ? i18nAttribute("第 {value0} 话", { value0: index + 1 })
+                : i18nAttribute("第 {value0} 资源", { value0: index + 1 }))
             }))}
             value={navigation.currentResourceId}
             onChange={navigation.onSelectResource}
@@ -1577,7 +1579,9 @@ function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, 
             >
               <span className="w-8 shrink-0 tabular-nums opacity-60">{index + 1}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{resource.title || i18nAttribute("第 {value0} {value1}", { value0: index + 1, value1: isComic ? '话' : '卷' })}</span>
+                <span className="block truncate font-medium">{resource.title || (isComic
+                  ? i18nAttribute("第 {value0} 话", { value0: index + 1 })
+                  : i18nAttribute("第 {value0} 资源", { value0: index + 1 }))}</span>
                 <span className="mt-0.5 block truncate text-xs opacity-65">{resource.pageCount || 0} {isComic ? i18nAttribute("页") : i18nAttribute("章")}</span>
               </span>
             </button>
@@ -1585,7 +1589,7 @@ function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, 
         </ResourceNavigationGroup>
       ) : null}
 
-      <ResourceNavigationGroup title={isComic ? (showResources ? i18nAttribute("当前卷页码") : i18nAttribute("页码")) : (showResources ? i18nAttribute("当前卷章节") : i18nAttribute("章节"))}>
+      <ResourceNavigationGroup title={isComic ? (showResources ? i18nAttribute("当前资源页码") : i18nAttribute("页码")) : (showResources ? i18nAttribute("当前资源章节") : i18nAttribute("章节"))}>
         {navigation.pages.length === 0 ? <div className="py-6 text-sm opacity-60">{isComic ? i18nAttribute("暂无可跳转页码") : i18nAttribute("暂无可跳转章节")}</div> : null}
         <div className={isComic ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-3' : 'space-y-1'}>
           {navigation.pages.map((item, itemIndex) => (

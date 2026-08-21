@@ -201,7 +201,8 @@ export function ReaderEngineRuntime({
               serverIdentity: currentReaderServerIdentity(),
               userId: bootstrap.userId,
               authorizationVersion: currentAuthorizationVersion(bootstrap.userId),
-              resourceId: bootstrap.resource.id
+              resourceId: bootstrap.resource.id,
+              assetId: pdfAsset.id
             },
             cache: pdfRangeCache
           }

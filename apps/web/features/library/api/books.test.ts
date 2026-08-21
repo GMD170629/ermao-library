@@ -33,7 +33,7 @@ test('bookshelf projection validates and preserves cover progress', () => {
   assert.equal(book.progress, 42.5);
 });
 
-test('management projection maps media and progress summaries without mediaVersions', () => {
+test('management projection maps media and progress summaries', () => {
   const book = mapLibraryBookSummary({
     id: 'book-1',
     title: 'Example',

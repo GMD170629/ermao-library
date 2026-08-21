@@ -25,7 +25,8 @@ function access(bytes: Uint8Array): PdfRangeAccess {
       serverIdentity: 'https://reader.test',
       userId: 'user-1',
       authorizationVersion: 3,
-      resourceId: 'resource-1'
+      resourceId: 'resource-1',
+      assetId: 'asset-1'
     },
     cache: new MemoryReaderStorage()
   };

@@ -38,6 +38,7 @@ function pdfRangeFixture() {
         userId: 'user-1',
         authorizationVersion: 1,
         resourceId: 'resource-1',
+        assetId: 'asset-1',
       },
       cache: new MemoryReaderStorage()
     },

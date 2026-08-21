@@ -47,7 +47,7 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderResourceCache, 
       namespaceKey: pdfRangeNamespaceKey(identity)
     });
   }
-  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'resourceId'>) {
+  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'resourceId' | 'assetId'>) {
     const namespaceKey = pdfRangeNamespaceKey(identity);
     for (const [key, chunk] of this.pdfRangeChunks) {
       if (chunk.namespaceKey === namespaceKey) this.pdfRangeChunks.delete(key);
