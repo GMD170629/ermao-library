@@ -17,7 +17,8 @@ test('disables unavailable navigation without hiding management actions', () => 
   assert.equal(actions.some((item) => item.action === 'set-comic'), false);
 });
 
-test('keeps edit visible but disables it for multiple selected resources', () => {
+test('removes single-asset download from multiple selected resources', () => {
   const actions = resourceActionAvailability({ canManage: true, readable: true, mediaKind: 'EBOOK', selectionCount: 2 });
+  assert.equal(actions.find((item) => item.action === 'download'), undefined);
   assert.equal(actions.find((item) => item.action === 'edit')?.disabled, true);
 });

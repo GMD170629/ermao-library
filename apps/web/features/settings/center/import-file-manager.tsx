@@ -1,14 +1,12 @@
 'use client';
 
-import { ChevronRight, Folder, FolderOpen, RefreshCw, Search } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { cn } from '../../../components/ui/cn';
-import { useToast } from '../../../components/ui/feedback';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { useI18n as useExpressionI18n } from '@/i18n/provider';
-import { continueLibraryImport, type ContinueImportResult } from '../../import-tasks/public';
 
 type Library = {
   id: string;
@@ -43,10 +41,7 @@ export function ImportFileManager() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState('');
   const [loadingPath, setLoadingPath] = useState('');
-  const [continuing, setContinuing] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<ContinueImportResult | null>(null);
-  const toast = useToast();
 
   const loadNode = useCallback(async (path?: string) => {
     const key = path || '__root__';
@@ -114,35 +109,14 @@ export function ImportFileManager() {
     if (!nodes[path]) await loadNode(path);
   }
 
-  async function continueSelectedLibrary() {
-    if (!selectedLibrary) return;
-    setContinuing(true);
-    setError('');
-    try {
-      const next = await continueLibraryImport(selectedLibrary.id);
-      setResult(next);
-      if (next.requeuedFailed > 0 || next.enqueued) {
-        toast.success(i18nAttribute('书库导入已继续'));
-      } else {
-        toast.success(i18nAttribute('没有新的导入任务'));
-      }
-    } catch (reason) {
-      const message = reason instanceof Error ? reason.message : i18nAttribute('继续导入失败');
-      setError(message);
-      toast.error(i18nAttribute('继续导入失败'), message);
-    } finally {
-      setContinuing(false);
-    }
-  }
-
   const rootNode = rootPath ? nodes[rootPath] : Object.values(nodes)[0];
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="font-semibold text-[#2A2825]"><I18nText>继续导入书库</I18nText></div>
-          <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>选择已启用书库后继续扫描。导入任务和资源资产状态会在导入记录中更新。</I18nText></p>
+          <div className="font-semibold text-[#2A2825]"><I18nText>浏览书库目录</I18nText></div>
+          <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>选择已启用书库查看目录；继续导入请从具体源节点的导入任务操作。</I18nText></p>
         </div>
         <Button variant="secondary" icon={RefreshCw} loading={loadingPath === (selectedPath || '__root__')} loadingText={i18nAttribute('刷新中')} onClick={() => void loadNode(selectedPath || undefined)}><I18nText>刷新目录</I18nText></Button>
       </div>
@@ -164,17 +138,7 @@ export function ImportFileManager() {
           <div className={cn('mt-4 rounded-xl px-3 py-2 text-xs leading-5', selectedLibrary ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800')}>
             {selectedLibrary ? i18nAttribute('使用“{value0}”继续导入', { value0: selectedLibrary.name }) : i18nAttribute('此目录不在已启用的书库内，不能继续导入。')}
           </div>
-          {result ? (
-            <div className="mt-4 space-y-2 border-t border-[#E9E5DF] pt-4 text-sm text-[#5F5953]">
-              <div><I18nText>任务已提交：</I18nText><span data-i18n-skip>{result.taskId ?? '—'}</span></div>
-              <div><I18nText>重新排队的失败任务：</I18nText>{result.requeuedFailed}</div>
-              <div><I18nText>已加入队列：</I18nText>{result.enqueued ? i18nAttribute('是') : i18nAttribute('否')}</div>
-            </div>
-          ) : null}
           {error ? <div className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">{error}</div> : null}
-          <div className="mt-auto pt-4">
-            <Button className="w-full" icon={Search} disabled={!selectedLibrary} loading={continuing} loadingText={i18nAttribute('继续中')} onClick={() => void continueSelectedLibrary()}><I18nText>继续导入书库</I18nText></Button>
-          </div>
         </aside>
       </div>
     </div>

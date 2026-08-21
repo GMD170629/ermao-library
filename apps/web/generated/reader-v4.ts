@@ -130,7 +130,6 @@ export type ReaderBootstrapData = {
   readerType: "reflowable" | "comic" | "pdf" | "audio";
   sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "zip" | "cbr" | "rar" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
   book: ReaderBookSummary;
-  bookCompleted: boolean;
   resource: ReaderResourceSummary;
   availableResources: Array<ReaderResourceSummary>;
   assets: Array<ReaderAssetSummary>;

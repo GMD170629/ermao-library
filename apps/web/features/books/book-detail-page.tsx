@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, Check, CheckCircle2, Download, Edit3, Ellipsis, EllipsisVertical, Headphones, Images, LoaderCircle, RefreshCw, ScanSearch, Settings2, Sparkles, Trash2, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, CheckCircle2, Download, Edit3, Ellipsis, EllipsisVertical, Headphones, Images, LoaderCircle, RefreshCw, Settings2, Sparkles, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Cover } from '../../components/book/cover';
@@ -14,7 +14,6 @@ import { useAppSession } from '../../components/layout/app-session-context';
 import type { MediaKind, ReaderType, ReadableResourceView, BookView } from '../../types/book';
 import { I18nText, useI18n } from '@/i18n/provider';
 import {
-  downloadResourceArchive,
   deleteResourceSource,
   fetchBook,
   fetchEbookChapterDetail,
@@ -22,7 +21,6 @@ import {
   regenerateResourceCover,
   reclassifyResource,
   assetDownloadUrl,
-  rescanResourceSource,
   runResourceBatchAction,
   updateResource,
   updateResourceReadingStatus,
@@ -48,7 +46,7 @@ type ResourceForm = Readonly<{
   narrator: string;
 }>;
 
-type ResourceCardActionId = 'edit' | 'regenerate-cover' | 'recognize' | 'rescan' | 'delete';
+type ResourceCardActionId = 'edit' | 'regenerate-cover' | 'recognize' | 'delete';
 type ResourceCardActionTarget = Readonly<{
   resourceId: string;
   title: string;
@@ -59,7 +57,6 @@ const RESOURCE_CARD_ACTION_DETAILS: Record<ResourceCardActionId, { label: string
   edit: { label: '编辑', description: '修改所选资源的出版元数据', icon: Edit3 },
   'regenerate-cover': { label: '重新生成封面', description: '从资源资产重新提取或生成封面', icon: RefreshCw },
   recognize: { label: '识别', description: '识别所选资源的出版元数据', icon: Sparkles },
-  rescan: { label: '重新扫描', description: '重新读取所选资源的源资产', icon: ScanSearch },
   delete: { label: '删除', description: '永久删除对应的真实源资产', icon: Trash2, destructive: true }
 };
 
@@ -276,7 +273,6 @@ const ACTION_LABELS: Record<BookActionId, string> = {
   metadata: '元数据识别',
   'upload-cover': '上传自定义封面',
   'regenerate-cover': '重新生成封面',
-  download: '下载资源',
   kindle: '发送到 Kindle'
 };
 
@@ -334,7 +330,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const activeReaderHref = activeResource?.readable ? readerHref(activeResource) : null;
   const activeProgress = activeResource?.progress ?? 0;
   const activeStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
-  const actions = book ? bookActionIds({ canManage, hasDownload: resources.some((resource) => resource.readable), kindleSendAvailable: resources.some((resource) => resource.kindleSendAvailable) }) : [];
+  const actions = book ? bookActionIds({ canManage, kindleSendAvailable: resources.some((resource) => resource.kindleSendAvailable) }) : [];
   const batchResourceActions = resourceActionAvailability({
     canManage,
     readable: selectedResources.length > 0 && selectedResources.every((resource) => resource.readable),
@@ -368,22 +364,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }
   };
 
-  const downloadResources = async (targets: ReadableResourceView[]) => {
-    const ids = targets.filter((resource) => resource.readable).map((resource) => resource.id);
-    if (ids.length === 0) return;
-    if (ids.length === 1 && ids[0]) {
-      const assetId = targets.find((resource) => resource.readable)?.assets[0]?.id;
-      if (!assetId) throw new Error(t('资源缺少可下载资产'));
-      window.location.href = assetDownloadUrl(assetId);
-      return;
-    }
-    const archive = await downloadResourceArchive(bookId, ids);
-    const url = URL.createObjectURL(archive.blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = archive.filename;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  const downloadResource = (resource: ReadableResourceView | undefined) => {
+    if (!resource?.readable) return;
+    const assetId = resource.assets[0]?.id;
+    if (!assetId) throw new Error(t('资源缺少可下载资产'));
+    window.location.href = assetDownloadUrl(assetId);
   };
 
   const invokeAction = async (action: BookActionId) => {
@@ -394,7 +379,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     if (action === 'kindle') { setKindleOpen(true); return; }
     try {
       if (action === 'regenerate-cover') { await regenerateBookCover(book.id); setCoverRevision(Date.now()); feedback.success(t('封面已重新生成')); }
-      if (action === 'download') await downloadResources(resources);
       await refresh();
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
@@ -410,7 +394,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       return;
     }
     try {
-      if (action === 'download') await downloadResources(selectedResources);
+      if (action === 'download') {
+        if (selectedResources.length !== 1) return;
+        downloadResource(selectedResources[0]);
+      }
       if (action === 'set-ebook' || action === 'set-comic' || action === 'set-audiobook') {
         const targetMediaKind = action === 'set-ebook' ? 'EBOOK' : action === 'set-comic' ? 'COMIC' : 'AUDIOBOOK';
         await runResourceBatchAction(book.id, { action: 'SET_MEDIA_KIND', resourceIds: selectedResources.map((resource) => resource.id), targetMediaKind });
@@ -451,9 +438,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       if (action === 'regenerate-cover') {
         await regenerateResourceCover(book.id, target.resourceId);
         feedback.success(t('封面已重新生成'));
-      } else if (action === 'rescan') {
-        await rescanResourceSource(book.id, target.resourceId);
-        feedback.success(t('已加入重新扫描队列'));
       } else if (action === 'delete') {
         await deleteResourceSource(book.id, target.resourceId, target.title);
         feedback.success(t('源资产已永久删除'));

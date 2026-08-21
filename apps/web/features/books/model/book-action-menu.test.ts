@@ -3,17 +3,16 @@ import test from 'node:test';
 import { bookActionIds } from './book-action-menu';
 
 test('keeps directory-owned structure out of the manager menu', () => {
-  assert.deepEqual(bookActionIds({ canManage: true, hasDownload: true, kindleSendAvailable: true }), [
+  assert.deepEqual(bookActionIds({ canManage: true, kindleSendAvailable: true }), [
     'edit',
     'metadata',
     'upload-cover',
     'regenerate-cover',
-    'download',
     'kindle'
   ]);
 });
 
-test('derives member actions from concrete file capabilities', () => {
-  assert.deepEqual(bookActionIds({ canManage: false, hasDownload: true, kindleSendAvailable: false }), ['download']);
-  assert.deepEqual(bookActionIds({ canManage: false, hasDownload: false, kindleSendAvailable: true }), ['kindle']);
+test('keeps only supported member actions in the manager menu', () => {
+  assert.deepEqual(bookActionIds({ canManage: false, kindleSendAvailable: false }), []);
+  assert.deepEqual(bookActionIds({ canManage: false, kindleSendAvailable: true }), ['kindle']);
 });

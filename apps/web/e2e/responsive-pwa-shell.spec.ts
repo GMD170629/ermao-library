@@ -204,11 +204,10 @@ test('book detail resource covers support selection, keyboard-accessible context
   const firstActions = page.getByRole('button', { name: '管理 第一资源', exact: true });
   await firstActions.click();
   const cardMenu = page.getByRole('menu', { name: '管理资源' });
-  await expect(cardMenu.getByRole('menuitem')).toHaveCount(5);
+  await expect(cardMenu.getByRole('menuitem')).toHaveCount(4);
   await expect(cardMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: /^识别/ })).toBeVisible();
-  await expect(cardMenu.getByRole('menuitem', { name: /^重新扫描/ })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: /^删除/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(firstActions).toBeFocused();

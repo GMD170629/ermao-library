@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseContinueImportResult, parseImportTasksPage, parseLibraryImportTask } from './client';
+import { parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
 
 const task = {
   id: 'task-1',
@@ -26,7 +26,8 @@ test('parses the canonical LibraryImportTask identity and terminal state', () =>
 test('parses import task pagination and summary', () => {
   const page = parseImportTasksPage({
     tasks: [task],
-    summary: { completed: 4, failed: 1 },
+    completed: 4,
+    failed: 1,
     page: 2,
     pageSize: 10,
     total: 11,
@@ -35,6 +36,13 @@ test('parses import task pagination and summary', () => {
   assert.equal(page.tasks[0]?.id, 'task-1');
   assert.deepEqual(page.summary, { completed: 4, failed: 1 });
   assert.equal(page.totalPages, 2);
+});
+
+test('parses canonical library selection and task detail envelopes', () => {
+  assert.deepEqual(parseImportLibraries({ libraries: [{ id: 'library-1', name: '主书库', enabled: true }] }), [
+    { id: 'library-1', name: '主书库', enabled: true }
+  ]);
+  assert.equal(parseImportTaskDetail({ task }).id, 'task-1');
 });
 
 test('parses ContinueImport result without queue-control fields', () => {

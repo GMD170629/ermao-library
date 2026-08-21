@@ -267,7 +267,7 @@ export async function updateResource(bookId: string, resourceId: string, body: R
   });
 }
 
-async function runResourceAction(bookId: string, resourceId: string, action: 'cover/regenerate' | 'rescan'): Promise<void> {
+async function runResourceAction(bookId: string, resourceId: string, action: 'cover/regenerate'): Promise<void> {
   await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/${action}`, {
     method: 'POST'
   });
@@ -275,10 +275,6 @@ async function runResourceAction(bookId: string, resourceId: string, action: 'co
 
 export async function regenerateResourceCover(bookId: string, resourceId: string): Promise<void> {
   await runResourceAction(bookId, resourceId, 'cover/regenerate');
-}
-
-export async function rescanResourceSource(bookId: string, resourceId: string): Promise<void> {
-  await runResourceAction(bookId, resourceId, 'rescan');
 }
 
 export async function deleteResourceSource(bookId: string, resourceId: string, confirmation: string): Promise<void> {
@@ -327,28 +323,6 @@ export async function runResourceBatchAction(bookId: string, request: ResourceBa
   return {
     affectedResourceIds: Array.isArray(data.affectedResourceIds) ? data.affectedResourceIds.filter((value): value is string => typeof value === 'string') : [],
     operationIds: Array.isArray(data.operationIds) ? data.operationIds.filter((value): value is string => typeof value === 'string') : []
-  };
-}
-
-export async function downloadResourceArchive(bookId: string, resourceIds: string[]): Promise<{ blob: Blob; filename: string }> {
-  const response = await fetch(`/api/books/${encodeURIComponent(bookId)}/resources/download`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ resourceIds })
-  });
-  if (!response.ok) {
-    const payload: unknown = await response.json().catch(() => null);
-    const error = record(payload);
-    const nestedError = record(error.error);
-    throw new Error(stringValue(nestedError.message) || stringValue(error.detail) || `请求失败（${response.status}）`);
-  }
-  const disposition = response.headers.get('content-disposition') ?? '';
-  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
-  return {
-    blob: await response.blob(),
-    filename: encodedName ? decodeURIComponent(encodedName) : 'resources.zip'
   };
 }
 

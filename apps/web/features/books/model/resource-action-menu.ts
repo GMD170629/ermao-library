@@ -24,10 +24,10 @@ export function resourceActionAvailability({
 }): ResourceActionAvailability[] {
   if (!canManage) return [];
   const actions: ResourceActionAvailability[] = [
-    { action: 'download', disabled: !readable },
     { action: 'edit', disabled: selectionCount !== 1 },
     { action: 'set-media-kind', disabled: false }
   ];
+  if (selectionCount === 1) actions.unshift({ action: 'download', disabled: !readable });
   if (mediaKind !== 'EBOOK') actions.push({ action: 'set-ebook', disabled: false });
   if (mediaKind !== 'COMIC') actions.push({ action: 'set-comic', disabled: false });
   if (mediaKind !== 'AUDIOBOOK') actions.push({ action: 'set-audiobook', disabled: false });

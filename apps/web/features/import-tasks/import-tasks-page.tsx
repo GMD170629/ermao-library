@@ -10,9 +10,10 @@ import { I18nText, useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import {
-  continueLibraryImport,
   continueSourceImport,
+  fetchImportLibraries,
   fetchImportTasks,
+  type ImportLibrary,
   type ImportTaskState,
   type LibraryImportTask
 } from './public';
@@ -59,6 +60,9 @@ function taskDate(value: string | null, locale: string): string {
 export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const { t, locale } = useI18n();
   const toast = useToast();
+  const [libraries, setLibraries] = useState<ImportLibrary[]>([]);
+  const [selectedLibraryId, setSelectedLibraryId] = useState('');
+  const [librariesLoading, setLibrariesLoading] = useState(true);
   const [tasks, setTasks] = useState<LibraryImportTask[]>([]);
   const [summary, setSummary] = useState({ completed: 0, failed: 0 });
   const [page, setPage] = useState(1);
@@ -71,11 +75,41 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    setLibrariesLoading(true);
+    void fetchImportLibraries(controller.signal)
+      .then((next) => {
+        const enabled = next.filter((library) => library.enabled);
+        setLibraries(enabled);
+        setSelectedLibraryId((current) => enabled.some((library) => library.id === current) ? current : enabled[0]?.id ?? '');
+        if (enabled.length === 0) setError(t('未找到可访问的书库'));
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        const message = reason instanceof Error ? reason.message : t('读取书库失败');
+        setError(message);
+        toast.error(t('读取书库失败'), message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLibrariesLoading(false);
+      });
+    return () => controller.abort();
+  }, [t, toast]);
+
   const loadTasks = useCallback(async (targetPage: number, signal?: AbortSignal) => {
     const requestId = ++requestIdRef.current;
+    if (!selectedLibraryId) {
+      setTasks([]);
+      setSummary({ completed: 0, failed: 0 });
+      setTotal(0);
+      setTotalPages(1);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const result = await fetchImportTasks(targetPage, pageSize, stateFilter === 'ALL' ? null : stateFilter, signal);
+      const result = await fetchImportTasks(selectedLibraryId, targetPage, pageSize, stateFilter === 'ALL' ? null : stateFilter, signal);
       if (requestId !== requestIdRef.current) return;
       const nextPage = Math.min(result.totalPages, Math.max(1, result.page));
       setTasks(result.tasks);
@@ -92,7 +126,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       if (!signal?.aborted && requestId === requestIdRef.current) setLoading(false);
     }
-  }, [pageSize, stateFilter, t, toast]);
+  }, [pageSize, selectedLibraryId, stateFilter, t, toast]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -106,12 +140,10 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   );
 
   async function continueTask(task: LibraryImportTask) {
-    if (task.state !== 'FAILED') return;
+    if (task.state !== 'FAILED' || !task.sourceNodeId) return;
     setContinuingTaskId(task.id);
     try {
-      const result = task.sourceNodeId
-        ? await continueSourceImport(task.sourceNodeId)
-        : await continueLibraryImport(task.libraryId);
+      const result = await continueSourceImport(task.sourceNodeId);
       if (result.requeuedFailed > 0 || result.enqueued) {
         toast.success(t('已重新加入导入队列'));
       } else {
@@ -154,6 +186,16 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       )}
 
       <div className="flex flex-wrap items-center gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3">
+        <Select
+          value={selectedLibraryId}
+          options={libraries.map((library) => ({ value: library.id, label: library.name, translate: false }))}
+          onChange={(value) => { setSelectedLibraryId(value); setPage(1); }}
+          ariaLabel={t('书库')}
+          disabled={librariesLoading || libraries.length === 0}
+          className="min-w-[180px]"
+          triggerClassName="h-10"
+          menuClassName="min-w-[220px]"
+        />
         <span className="text-sm font-medium text-[#4F4A45]"><I18nText>按状态筛选</I18nText></span>
         <Select
           value={stateFilter}
@@ -232,7 +274,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2 text-sm text-slate-500">
                 <span>{taskDate(task.createdAt, locale)}</span>
-                {task.state === 'FAILED' ? (
+                {task.state === 'FAILED' && task.sourceNodeId ? (
                   <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={continuingTaskId === task.id} loadingText={t('继续中')} onClick={() => void continueTask(task)}>
                     <I18nText>继续导入</I18nText>
                   </Button>

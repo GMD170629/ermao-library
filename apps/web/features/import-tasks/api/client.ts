@@ -25,6 +25,12 @@ export type ImportTasksPage = Readonly<{
   totalPages: number;
 }>;
 
+export type ImportLibrary = Readonly<{
+  id: string;
+  name: string;
+  enabled: boolean;
+}>;
+
 export type ContinueImportResult = Readonly<{
   taskId: string | null;
   libraryId: string;
@@ -91,20 +97,41 @@ export function parseLibraryImportTask(value: unknown): LibraryImportTask {
 }
 
 export function parseImportTasksPage(value: unknown): ImportTasksPage {
-  if (!isObject(value) || !Array.isArray(value.tasks) || !isObject(value.summary)) {
+  if (!isObject(value) || !Array.isArray(value.tasks)) {
     throw new Error('导入任务分页响应无效');
   }
   return {
     tasks: value.tasks.map(parseLibraryImportTask),
     summary: {
-      completed: nonNegativeInteger(value.summary.completed),
-      failed: nonNegativeInteger(value.summary.failed)
+      completed: nonNegativeInteger(value.completed),
+      failed: nonNegativeInteger(value.failed)
     },
     page: positiveInteger(value.page, 1),
     pageSize: positiveInteger(value.pageSize, 10),
     total: nonNegativeInteger(value.total),
     totalPages: positiveInteger(value.totalPages, 1)
   };
+}
+
+export function parseImportLibrary(value: unknown): ImportLibrary {
+  if (!isObject(value)) throw new Error('书库响应无效');
+  return {
+    id: requiredString(value.id, 'id'),
+    name: requiredString(value.name, 'name'),
+    enabled: value.enabled === true
+  };
+}
+
+export function parseImportLibraries(value: unknown): ImportLibrary[] {
+  if (!isObject(value) || !Array.isArray(value.libraries)) {
+    throw new Error('书库列表响应无效');
+  }
+  return value.libraries.map(parseImportLibrary);
+}
+
+export function parseImportTaskDetail(value: unknown): LibraryImportTask {
+  if (!isObject(value) || !('task' in value)) throw new Error('导入任务详情响应无效');
+  return parseLibraryImportTask(value.task);
 }
 
 export function parseContinueImportResult(value: unknown): ContinueImportResult {
@@ -130,6 +157,7 @@ async function apiJson(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 export async function fetchImportTasks(
+  libraryId: string,
   page: number,
   pageSize: number,
   state: ImportTaskState | null = null,
@@ -137,15 +165,19 @@ export async function fetchImportTasks(
 ): Promise<ImportTasksPage> {
   const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (state) query.set('state', state);
-  return parseImportTasksPage(await apiJson(`/api/import-tasks?${query.toString()}`, { signal }));
+  return parseImportTasksPage(await apiJson(`/api/libraries/${encodeURIComponent(libraryId)}/import-tasks?${query.toString()}`, { signal }));
+}
+
+export async function fetchImportLibraries(signal?: AbortSignal): Promise<ImportLibrary[]> {
+  return parseImportLibraries(await apiJson('/api/libraries', { signal }));
+}
+
+export async function fetchImportTask(taskId: string, signal?: AbortSignal): Promise<LibraryImportTask> {
+  return parseImportTaskDetail(await apiJson(`/api/library-import-tasks/${encodeURIComponent(taskId)}`, { signal }));
 }
 
 async function continueImport(path: string, signal?: AbortSignal): Promise<ContinueImportResult> {
   return parseContinueImportResult(await apiJson(path, { method: 'POST', signal }));
-}
-
-export function continueLibraryImport(libraryId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
-  return continueImport(`/api/libraries/${encodeURIComponent(libraryId)}/scan`, signal);
 }
 
 export function continueSourceImport(sourceNodeId: string, signal?: AbortSignal): Promise<ContinueImportResult> {

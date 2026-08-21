@@ -90,8 +90,8 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { tasks: [], total: 0 } } });
       return;
     }
-    if (pathname.endsWith('/api/import-tasks')) {
-      await route.fulfill({ json: { ok: true, data: { tasks: [], summary: { completed: 0, failed: 0 }, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
+    if (pathname.endsWith('/api/libraries/library-1/import-tasks')) {
+      await route.fulfill({ json: { ok: true, data: { tasks: [], completed: 0, failed: 0, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
       return;
     }
     if (pathname.endsWith('/api/libraries/tree')) {
@@ -100,7 +100,7 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       return;
     }
     if (pathname.endsWith('/api/libraries')) {
-      await route.fulfill({ json: { ok: true, data: { libraries: [] } } });
+      await route.fulfill({ json: { ok: true, data: { libraries: [{ id: 'library-1', name: '主书库', rootPath: '/library', enabled: true }] } } });
       return;
     }
     if (pathname.endsWith('/api/system-settings')) {
@@ -206,11 +206,11 @@ test('settings navigation keeps session and shelves stable while tabs load on de
 test('library import sections fetch only when their tab mounts and refresh after remount', async ({ page }) => {
   const counts = await mockSettingsApi(page);
   await page.goto('/settings/library');
-  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/libraries/library-1/import-tasks')).toBeGreaterThan(0);
   await expect(page.getByRole('button', { name: '清理导入队列' })).toHaveCount(0);
-  const initialImportTaskRequests = requestCount(counts, '/api/import-tasks');
+  const initialImportTaskRequests = requestCount(counts, '/api/libraries/library-1/import-tasks');
   expect(requestCount(counts, '/api/libraries/tree')).toBe(0);
-  expect(requestCount(counts, '/api/libraries')).toBe(0);
+  expect(requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
   expect(requestCount(counts, '/api/system-settings')).toBe(0);
 
   await page.getByRole('tab', { name: '文件管理' }).click();
@@ -220,7 +220,7 @@ test('library import sections fetch only when their tab mounts and refresh after
   await page.getByRole('tab', { name: '偏好设置' }).click();
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '导入记录' }).click();
-  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
+  await expect.poll(() => requestCount(counts, '/api/libraries/library-1/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
 });
 
 test('new library shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
