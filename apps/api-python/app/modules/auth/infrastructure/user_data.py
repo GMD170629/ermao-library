@@ -176,7 +176,7 @@ def prepare_user_with_preferences(
     now: datetime,
 ) -> PreparedUserInsert:
     preference_write = _prepare_user_preference_rows(user.id, preferences, now)
-    user_values = {
+    user_values: dict[str, object] = {
         "id": user.id,
         "email": user.email,
         "name": user.name,
@@ -220,7 +220,7 @@ def prepare_personal_user_deletion(
         )
     )
     statements.append(delete(Shelf).where(Shelf.owner_user_id == user_id))
-    for model in (
+    for preference_model in (
         ReaderBookmark,
         BookDetailPreference,
         ReaderResourceProgress,
@@ -232,10 +232,14 @@ def prepare_personal_user_deletion(
         PasswordResetToken,
         UserSession,
     ):
-        statements.append(delete(model).where(model.user_id == user_id))
-    for model in (KindleSendTask, LibraryOperation):
         statements.append(
-            update(model).where(model.user_id == user_id).values(user_id=None)
+            delete(preference_model).where(preference_model.user_id == user_id)
+        )
+    for nullable_model in (KindleSendTask, LibraryOperation):
+        statements.append(
+            update(nullable_model)
+            .where(nullable_model.user_id == user_id)
+            .values(user_id=None)
         )
     statements.append(
         update(SystemEvent)

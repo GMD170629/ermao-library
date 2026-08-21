@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import delete, insert, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.core.auth import (
@@ -246,7 +248,7 @@ def delete_expired_or_disabled_sessions(
 
     statement = prepare_invalid_sessions_delete(current_time=current_time)
     with AuthWriteTransaction(db):
-        result = db.execute(statement)
+        result = cast(CursorResult[Any], db.execute(statement))
     return int(result.rowcount or 0)
 
 

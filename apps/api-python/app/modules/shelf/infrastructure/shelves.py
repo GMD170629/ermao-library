@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import Mapper, Session
 
 from app.core.authorization import (
     AuthorizationContext,
@@ -21,7 +22,8 @@ from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 
 def _entity_record(entity: object) -> dict[str, Any]:
-    mapper = sa_inspect(entity).mapper
+    inspection = sa_inspect(entity)
+    mapper = cast(Mapper[Any], getattr(inspection, "mapper", inspection))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
@@ -67,7 +69,7 @@ def list_collection_ids_by_shelf_ids(
     db: Session,
     shelf_ids: list[str],
 ) -> dict[str, list[str]]:
-    result = {shelf_id: [] for shelf_id in shelf_ids}
+    result: dict[str, list[str]] = {shelf_id: [] for shelf_id in shelf_ids}
     if not shelf_ids:
         return result
     rows = db.execute(
@@ -435,7 +437,9 @@ def delete_shelf(db: Session, shelf_id: str) -> bool:
         )
     )
     db.execute(delete(ShelfBook).where(ShelfBook.shelf_id == shelf_id))
-    result = db.execute(delete(Shelf).where(Shelf.id == shelf_id))
+    result = cast(
+        CursorResult[Any], db.execute(delete(Shelf).where(Shelf.id == shelf_id))
+    )
     return bool(result.rowcount)
 
 

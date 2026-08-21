@@ -18,7 +18,8 @@ from app.models.settings import SystemSetting
 def entity_record(entity: object) -> dict[str, Any]:
     """Return a queue row as a transport-neutral column record."""
 
-    mapper = cast(Mapper[Any], sa_inspect(entity))
+    inspection = sa_inspect(entity)
+    mapper = cast(Mapper[Any], getattr(inspection, "mapper", inspection))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }

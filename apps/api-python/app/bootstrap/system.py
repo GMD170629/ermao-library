@@ -192,7 +192,7 @@ def persist_system_settings_update(
     with SystemWriteTransaction(db):
         write_prepared_settings(db, prepared_settings)
         if clear_keys:
-            delete_settings(db, clear_keys)
+            delete_settings(db, list(clear_keys))
         write_prepared_system_events(db, (event,))
 
 

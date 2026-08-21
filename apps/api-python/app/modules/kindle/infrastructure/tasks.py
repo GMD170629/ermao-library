@@ -25,7 +25,8 @@ from app.models.import_pipeline import KindleSendTask
 
 
 def entity_record(entity: object) -> dict[str, Any]:
-    mapper = cast(Mapper[Any], sa_inspect(entity))
+    inspection = sa_inspect(entity)
+    mapper = cast(Mapper[Any], getattr(inspection, "mapper", inspection))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }

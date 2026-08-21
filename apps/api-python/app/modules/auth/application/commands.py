@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 class AuthUnitOfWork(Protocol):
@@ -24,7 +24,7 @@ class AuthWriteTransaction:
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         if exception_type is not None:
             self._unit_of_work.rollback()
             return False
