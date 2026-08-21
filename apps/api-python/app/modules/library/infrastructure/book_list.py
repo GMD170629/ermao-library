@@ -5,7 +5,12 @@ from __future__ import annotations
 from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.authorization import AuthorizationContext, authorization_context, book_visibility_predicate, resource_visibility_predicate
+from app.core.authorization import (
+    AuthorizationContext,
+    authorization_context,
+    book_visibility_predicate,
+    resource_visibility_predicate,
+)
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
@@ -22,15 +27,24 @@ from app.modules.library.infrastructure.filter_query import compile_filter_expre
 
 
 def _resource_exists(
-    context: AuthorizationContext,
     *,
     book_id: ColumnElement[object],
     media_kinds: tuple[str, ...] = (),
     formats: tuple[str, ...] = (),
 ) -> ColumnElement[bool]:
+    """Match readable resources belonging to an already-authorized Book.
+
+    ``LibraryReadableResource`` has a composite foreign key from ``bookId`` and
+    ``libraryId`` to ``LibraryBook``. The enclosing Book predicate therefore
+    owns both the authorization scope and the library relationship. Keeping
+    the correlated predicate on ``bookId`` lets SQLite use the dedicated
+    ``LibraryReadableResource_bookId_idx`` instead of rescanning every resource
+    through the separate library index for each Book.
+    """
     predicates: list[ColumnElement[bool]] = [
         LibraryReadableResource.book_id == book_id,
-        resource_visibility_predicate(context),
+        LibraryReadableResource.enablement_state == "ENABLED",
+        LibraryReadableResource.import_state == "READY",
     ]
     if media_kinds:
         predicates.append(LibraryReadableResource.media_kind.in_(media_kinds))
@@ -66,11 +80,11 @@ def _predicates(
         normalized = query.type_filter.strip().upper()
         media_values = {"EBOOK": "EBOOK", "AUDIO": "AUDIOBOOK", "AUDIOBOOK": "AUDIOBOOK", "COMIC": "COMIC"}
         if normalized in media_values:
-            predicates.append(_resource_exists(context, book_id=LibraryBook.id, media_kinds=(media_values[normalized],)))
+            predicates.append(_resource_exists(book_id=LibraryBook.id, media_kinds=(media_values[normalized],)))
         else:
-            predicates.append(_resource_exists(context, book_id=LibraryBook.id, formats=(normalized,)))
+            predicates.append(_resource_exists(book_id=LibraryBook.id, formats=(normalized,)))
     if query.media_kinds:
-        predicates.append(_resource_exists(context, book_id=LibraryBook.id, media_kinds=query.media_kinds))
+        predicates.append(_resource_exists(book_id=LibraryBook.id, media_kinds=query.media_kinds))
     statuses = tuple(dict.fromkeys((*query.statuses, query.status) if query.status else query.statuses))
     for status in statuses:
         normalized = status.upper()
@@ -89,7 +103,7 @@ def _predicates(
         elif normalized == "UNREAD":
             predicates.append(~started)
         elif normalized == "FINISHED":
-            predicates.append(_resource_exists(context, book_id=LibraryBook.id))
+            predicates.append(_resource_exists(book_id=LibraryBook.id))
     if query.publication_status:
         predicates.append(LibraryBookMetadata.publication_status == query.publication_status)
     if query.tracking_status:
@@ -115,7 +129,7 @@ def _predicates(
             )
         )
     if query.new_import:
-        predicates.append(_resource_exists(context, book_id=LibraryBook.id))
+        predicates.append(_resource_exists(book_id=LibraryBook.id))
     if query.series_name:
         predicates.append(func.trim(LibraryBookMetadata.series_name) == query.series_name.strip())
     if query.facet_kind and query.facet_id:
