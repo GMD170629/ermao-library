@@ -313,7 +313,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const refresh = useCallback(async () => {
     const next = await fetchBook(bookId, undefined, requestedResourceId);
     setBook(next);
-    return next;
   }, [bookId, requestedResourceId]);
 
   useEffect(() => {
