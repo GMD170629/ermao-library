@@ -46,8 +46,8 @@ test('messages translate static text, interpolated text, and surrounding JSX whi
   assert.equal(translateMessage('en-US', '保存'), 'Save');
   assert.equal(translateMessage('en-US', '  保存  '), '  Save  ');
   assert.equal(
-    translateMessage('en-US', '创建下载任务：{value0}', { value0: 'Example' }),
-    'Created download task: Example'
+    translateMessage('en-US', '创建于 {value0}', { value0: 'Example' }),
+    'Created Example'
   );
   assert.equal(
     translateMessage('zh-CN', '查看《{value0}》，阅读进度 {value1}%', { value0: '示例', value1: 42 }),
@@ -57,7 +57,7 @@ test('messages translate static text, interpolated text, and surrounding JSX whi
     translateMessage('en-US', '查看《{value0}》，阅读进度 {value1}%', { value0: 'Example', value1: 42 }),
     'View Example, 42% read'
   );
-  assert.equal(translateMessage('en-US', '创建下载任务：Example'), 'Created download task: Example');
+  assert.equal(translateMessage('en-US', '创建于 Example'), 'Created Example');
 });
 
 test('nested application copy is translated before interpolation', () => {
@@ -74,8 +74,8 @@ test('nested application copy is translated before interpolation', () => {
     }),
     '1 rule(s) enabled · All conditions'
   );
-  assert.equal(translateMessage('en-US', '卷号 {value0}', { value0: 2 }), 'Volume 2');
-  assert.equal(translateMessage('zh-CN', '卷号 {value0}', { value0: 1 }), '卷号 1');
+  assert.equal(translateMessage('en-US', '已选 {value0} 本', { value0: 2 }), '2 books selected');
+  assert.equal(translateMessage('zh-CN', '已选 {value0} 本', { value0: 1 }), '已选 1 本');
 });
 
 test('brand metadata has a deliberate English translation', () => {

@@ -86,10 +86,10 @@
     "audioLocation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "fileId", "positionMillis"],
+      "required": ["kind", "assetId", "positionMillis"],
       "properties": {
         "kind": {"const": "audio"},
-        "fileId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
+        "assetId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
         "chapterId": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "\\S"},
         "positionMillis": {"type": "integer", "minimum": 0},
         "engineLocator": {"$ref": "#/$defs/engineLocator"}

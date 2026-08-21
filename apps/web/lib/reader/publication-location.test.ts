@@ -18,6 +18,9 @@ test('parses every canonical publication-location morphology and rejects legacy 
   assert.deepEqual(fixtures.map((fixture) => parsePublicationLocation(fixture.locator)?.kind), [
     'reflowable', 'pdf', 'comic', 'audio'
   ]);
+  const audio = parsePublicationLocation(audioRequest.locator);
+  assert.ok(audio?.kind === 'audio');
+  assert.equal(audio.assetId, 'audio-asset-1');
   assert.equal(parsePublicationLocation({
     engine: 'readium', platform: 'web', version: 'legacy', publication: {}, payload: {}
   }), null);
