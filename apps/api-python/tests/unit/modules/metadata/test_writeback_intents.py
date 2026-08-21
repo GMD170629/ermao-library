@@ -6,10 +6,10 @@ from app.modules.metadata.application.writeback import (
 )
 
 
-def test_null_legacy_source_revision_uses_stable_epoch_sentinel() -> None:
+def test_null_source_revision_uses_stable_epoch_sentinel() -> None:
     projection = MetadataWritebackProjection(
-        work_id="legacy-work",
-        title="Legacy",
+        book_id="book-1",
+        title="Book",
         author=None,
         description=None,
         tags_json="[]",
@@ -17,9 +17,9 @@ def test_null_legacy_source_revision_uses_stable_epoch_sentinel() -> None:
         series_index=None,
         cover_path=None,
         source_revision=None,
-        version_ids=("version-1",),
-        volumes=(),
-        files=(),
+        resource_ids=("resource-1",),
+        resources=(),
+        assets=(),
         imports=(),
     )
 

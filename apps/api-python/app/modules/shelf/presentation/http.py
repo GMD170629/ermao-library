@@ -168,7 +168,7 @@ def _shelf_book_ids(
     if kind == "SMART" and _unsupported_rule_fields(rules):
         return []
     book_ids = (
-        smart_shelf_book_ids(db, rules, user.id)
+        smart_shelf_book_ids(db, rules, user_id=user.id)
         if kind == "SMART"
         else shelf_store.list_static_shelf_book_ids(db, str(shelf["id"]))
     )

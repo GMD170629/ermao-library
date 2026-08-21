@@ -34,7 +34,7 @@ def test_pse_preserves_uniform_png_and_never_upscales(tmp_path: Path) -> None:
         "user-1",
         _settings(tmp_path / "storage"),
         max_width=640,
-        file_id="page-1",
+        asset_id="asset-1",
         output_media_type="image/png",
     )
 
@@ -61,7 +61,7 @@ def test_pse_gif_is_returned_without_a_width_variant_and_head_has_no_body(
         "user-1",
         settings,
         max_width=None,
-        file_id="page-1",
+        asset_id="asset-1",
         output_media_type="image/gif",
     )
     head_response = send_pse_page_file(
@@ -70,7 +70,7 @@ def test_pse_gif_is_returned_without_a_width_variant_and_head_has_no_body(
         "user-1",
         settings,
         max_width=None,
-        file_id="page-1",
+        asset_id="asset-1",
         output_media_type="image/gif",
     )
 

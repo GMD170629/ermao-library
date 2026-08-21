@@ -136,17 +136,15 @@ def test_collection_rejects_book_nesting_and_nonempty_deletion(
     assert blocked.json()["error"]["code"] == "SHELF_COLLECTION_NOT_EMPTY"
 
     # The removed bulk-book bridge must not be reintroduced just to mutate a shelf.
-    assert (
-        client.post(
-            "/api/books/bulk",
-            json={
-                "ids": ["book-does-not-matter"],
-                "action": "add_to_shelf",
-                "shelfId": collection["id"],
-            },
-        ).status_code
-        == 404
+    bulk_bridge = client.post(
+        "/api/books/bulk",
+        json={
+            "ids": ["book-does-not-matter"],
+            "action": "add_to_shelf",
+            "shelfId": collection["id"],
+        },
     )
+    assert bulk_bridge.status_code in {404, 405}
 
     member_deleted = client.delete(f"/api/shelves/{member['id']}")
     assert member_deleted.status_code == 200

@@ -14,20 +14,20 @@ from app.modules.library.domain.layout import (
 
 def _topology(
     mode: LibraryOrganizationMode, path: str
-) -> tuple[str, str, str | None, str, str, str]:
+) -> tuple[str, str, str, str, str, int]:
     result = parse_library_file_path(path, mode)
     assert result.violations == ()
-    assert result.work is not None
-    work = result.work
-    version = work.versions[0]
-    volume = version.volumes[0]
+    assert result.book is not None
+    book = result.book
+    resource = book.resources[0]
+    asset = resource.assets[0]
     return (
-        work.source_key,
-        work.source_name,
-        version.source_name,
-        version.source_key,
-        volume.source_name,
-        volume.source_key,
+        book.source_key,
+        book.source_name,
+        resource.source_key,
+        resource.source_name,
+        asset.relative_path,
+        asset.order,
     )
 
 
@@ -36,30 +36,16 @@ def _topology(
     [
         (
             "A/B/book.epub",
-            (
-                "work:A/B/book.epub",
-                "book",
-                None,
-                "version:A/B/book.epub",
-                "book",
-                "volume:A/B/book.epub",
-            ),
+            ("book:A/B/book.epub", "book", "resource:A/B/book.epub", "book", "A/B/book.epub", 0),
         ),
         (
             "十/级/以/上/目录/作品.pdf",
-            (
-                "work:十/级/以/上/目录/作品.pdf",
-                "作品",
-                None,
-                "version:十/级/以/上/目录/作品.pdf",
-                "作品",
-                "volume:十/级/以/上/目录/作品.pdf",
-            ),
+            ("book:十/级/以/上/目录/作品.pdf", "作品", "resource:十/级/以/上/目录/作品.pdf", "作品", "十/级/以/上/目录/作品.pdf", 0),
         ),
     ],
 )
-def test_flat_maps_every_file_to_an_independent_work(
-    path: str, expected: tuple[str, str, str | None, str, str, str]
+def test_flat_maps_every_resource_to_an_independent_book(
+    path: str, expected: tuple[str, str, str, str, str, int]
 ) -> None:
     assert _topology(LibraryOrganizationMode.FLAT, path) == expected
 
@@ -69,41 +55,20 @@ def test_flat_maps_every_file_to_an_independent_work(
     [
         (
             "book.epub",
-            (
-                "work:book.epub",
-                "book",
-                None,
-                "version:book.epub",
-                "book",
-                "volume:book.epub",
-            ),
+            ("book:book.epub", "book", "resource:book.epub", "book", "book.epub", 0),
         ),
         (
             "三体/01.epub",
-            (
-                "work:三体",
-                "三体",
-                None,
-                "version:三体",
-                "01",
-                "volume:三体/01.epub",
-            ),
+            ("book:三体", "三体", "resource:三体/01.epub", "01", "三体/01.epub", 0),
         ),
         (
             "三体/中文版/精校/01.epub",
-            (
-                "work:三体",
-                "三体",
-                "中文版",
-                "version:三体/中文版",
-                "01",
-                "volume:三体/中文版/精校/01.epub",
-            ),
+            ("book:三体", "三体", "resource:三体/中文版/精校/01.epub", "01", "三体/中文版/精校/01.epub", 0),
         ),
     ],
 )
-def test_volumes_uses_only_fixed_work_and_version_positions(
-    path: str, expected: tuple[str, str, str | None, str, str, str]
+def test_volumes_anchors_book_and_resource_from_the_source_path(
+    path: str, expected: tuple[str, str, str, str, str, int]
 ) -> None:
     assert _topology(LibraryOrganizationMode.VOLUMES, path) == expected
 
@@ -113,63 +78,28 @@ def test_volumes_uses_only_fixed_work_and_version_positions(
     [
         (
             "book.mp3",
-            (
-                "work:book.mp3",
-                "book",
-                None,
-                "version:book.mp3",
-                "book",
-                "volume:book.mp3",
-            ),
+            ("book:book.mp3", "book", "resource:book.mp3", "book", "book.mp3", 0),
         ),
         (
             "Book/CD1/01.mp3",
-            (
-                "work:Book",
-                "Book",
-                None,
-                "version:Book",
-                "Book",
-                "volume:Book",
-            ),
+            ("book:Book", "Book", "resource:Book", "Book", "Book/CD1/01.mp3", 0),
         ),
         (
             "Book/V1/CD1/01.mp3",
-            (
-                "work:Book",
-                "Book",
-                "V1",
-                "version:Book/V1",
-                "V1",
-                "volume:Book/V1",
-            ),
+            ("book:Book", "Book", "resource:Book/V1", "V1", "Book/V1/CD1/01.mp3", 0),
         ),
         (
             "Book/V1/Vol1/CD2/01.mp3",
-            (
-                "work:Book",
-                "Book",
-                "V1",
-                "version:Book/V1",
-                "Vol1",
-                "volume:Book/V1/Vol1",
-            ),
+            ("book:Book", "Book", "resource:Book/V1/Vol1", "Vol1", "Book/V1/Vol1/CD2/01.mp3", 0),
         ),
         (
             "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3",
-            (
-                "work:Book",
-                "Book",
-                "V1",
-                "version:Book/V1",
-                "Vol1",
-                "volume:Book/V1/Vol1",
-            ),
+            ("book:Book", "Book", "resource:Book/V1/Vol1/Extra", "Extra", "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3", 0),
         ),
     ],
 )
-def test_audiobook_uses_fixed_positions_after_transparent_disc_directories(
-    path: str, expected: tuple[str, str, str | None, str, str, str]
+def test_audiobook_uses_resource_positions_after_transparent_disc_directories(
+    path: str, expected: tuple[str, str, str, str, str, int]
 ) -> None:
     assert _topology(LibraryOrganizationMode.AUDIOBOOK, path) == expected
 
@@ -182,12 +112,14 @@ def test_disc_directory_variants_are_transparent(name: str) -> None:
     assert is_audiobook_disc_directory(name)
 
 
-def test_multiple_audio_files_replay_the_same_volume_identity() -> None:
+def test_multiple_audio_assets_replay_the_same_resource_identity() -> None:
     first = _topology(LibraryOrganizationMode.AUDIOBOOK, "Book/V1/Vol1/CD1/01.mp3")
     second = _topology(LibraryOrganizationMode.AUDIOBOOK, "Book/V1/Vol1/CD2/99.mp3")
 
-    assert first[:5] == second[:5]
-    assert first[5] == second[5] == "volume:Book/V1/Vol1"
+    assert first[:4] == second[:4]
+    assert first[2] == "resource:Book/V1/Vol1"
+    assert first[4] == "Book/V1/Vol1/CD1/01.mp3"
+    assert second[4] == "Book/V1/Vol1/CD2/99.mp3"
 
 
 def test_same_path_is_independent_of_other_inputs_and_order() -> None:
@@ -213,13 +145,10 @@ def test_backslashes_are_normalized() -> None:
         "三体\\中文版\\精校\\01.epub", LibraryOrganizationMode.VOLUMES
     )
 
-    assert result.work is not None
-    assert result.work.source_key == "work:三体"
-    assert result.work.versions[0].source_key == "version:三体/中文版"
-    assert result.work.versions[0].volumes[0].source_key == (
-        "volume:三体/中文版/精校/01.epub"
-    )
-    assert result.work.versions[0].volumes[0].assets[0].relative_path == (
+    assert result.book is not None
+    assert result.book.source_key == "book:三体"
+    assert result.book.resources[0].source_key == "resource:三体/中文版/精校/01.epub"
+    assert result.book.resources[0].assets[0].relative_path == (
         "三体/中文版/精校/01.epub"
     )
 
@@ -231,12 +160,14 @@ def test_nfc_spelling_produces_the_same_topology_keys() -> None:
     nfd = parse_library_file_path(nfd_path, LibraryOrganizationMode.VOLUMES)
     nfc = parse_library_file_path(nfc_path, LibraryOrganizationMode.VOLUMES)
 
-    assert nfd.work is not None and nfc.work is not None
-    assert nfd.work.source_key == nfc.work.source_key == "work:café"
-    assert nfd.work.versions[0].source_key == nfc.work.versions[0].source_key
+    assert nfd.book is not None and nfc.book is not None
+    assert nfd.book.source_key == nfc.book.source_key == "book:café"
+    assert nfd.book.resources[0].source_key == nfc.book.resources[0].source_key
     assert (
-        nfd.work.versions[0].volumes[0].source_key
-        == nfc.work.versions[0].volumes[0].source_key
+        nfd.book.resources[0].assets[0].relative_path == nfd_path
+    )
+    assert (
+        nfc.book.resources[0].assets[0].relative_path == nfc_path
     )
 
 
@@ -247,7 +178,7 @@ def test_nfc_spelling_produces_the_same_topology_keys() -> None:
 def test_invalid_relative_paths_return_one_stable_violation(path: str) -> None:
     result = parse_library_file_path(path, LibraryOrganizationMode.FLAT)
 
-    assert result.work is None
+    assert result.book is None
     assert len(result.violations) == 1
     assert result.violations[0].code is LayoutViolationCode.INVALID_RELATIVE_PATH
     assert result.violations[0].relative_path == path

@@ -75,7 +75,7 @@ def test_bangumi_gate_is_used_only_when_automatic_lookup_supplies_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gate = RecordingGate()
-    context = {"work": {"title": "test"}, "volumes": []}
+    context = {"book": {"title": "test"}, "resources": []}
     monkeypatch.setattr(
         organize_service, "urlopen", lambda *_args, **_kwargs: JsonResponse()
     )

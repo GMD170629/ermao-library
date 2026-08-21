@@ -11,11 +11,11 @@ from app.modules.shelf.domain.policies import (
 def test_collection_rejects_books_and_smart_rules() -> None:
     with pytest.raises(
         ShelfCollectionPolicyError,
-        match="COLLECTION_CANNOT_CONTAIN_WORKS",
+        match="COLLECTION_CANNOT_CONTAIN_BOOKS",
     ):
         validate_shelf_content(
             kind=ShelfKind.COLLECTION,
-            work_ids=("work-1",),
+            book_ids=("book-1",),
             has_smart_rules=False,
         )
 
@@ -25,7 +25,7 @@ def test_collection_rejects_books_and_smart_rules() -> None:
     ):
         validate_shelf_content(
             kind=ShelfKind.COLLECTION,
-            work_ids=(),
+            book_ids=(),
             has_smart_rules=True,
         )
 
