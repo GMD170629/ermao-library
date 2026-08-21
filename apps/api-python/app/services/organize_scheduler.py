@@ -207,9 +207,7 @@ def create_organize_run(
     )
     books = [book for book, _selection in selected_books]
     provider_plans = {
-        str(book["id"]): enabled_metadata_provider_ids(
-            db, selection[1]
-        )
+        str(book["id"]): enabled_metadata_provider_ids(db, selection[1])
         for book, selection in selected_books
     }
     # All policy, eligibility, media and provider projections are detached
