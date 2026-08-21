@@ -74,7 +74,7 @@ def main() -> None:
             except Exception:
                 # This is the process-level containment boundary.  Task-level
                 # failures are contained and persisted by the target worker.
-                import_session.rollback()
+                readable_worker.recover_after_loop_failure()
                 logger.exception("readable_resource.worker.loop_failure")
                 outcome = "error"
             if outcome == "idle":

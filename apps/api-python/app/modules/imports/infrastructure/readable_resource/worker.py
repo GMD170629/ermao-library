@@ -43,6 +43,11 @@ class ReadableResourceWorkerProcessor:
                 finished_at=self._clock.now()
             )
 
+    def recover_after_loop_failure(self) -> None:
+        """Reset a failed unit of work before the process loop continues."""
+
+        self._uow.rollback()
+
     def process_once(self) -> str:
         with self._uow.transaction():
             task = self._queue.next_queued()

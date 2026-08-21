@@ -41,6 +41,7 @@ from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 class RecordingUoW:
     def __init__(self) -> None:
         self.in_transaction = False
+        self.rollback_count = 0
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -54,6 +55,7 @@ class RecordingUoW:
         assert not self.in_transaction
 
     def rollback(self) -> None:
+        self.rollback_count += 1
         self.in_transaction = False
 
 
@@ -375,6 +377,22 @@ def test_continue_import_constructs_without_clock() -> None:
         uow=RecordingUoW(),
         log=FakeLog(),
     )
+
+
+def test_worker_exposes_explicit_process_loop_recovery() -> None:
+    queue = FakeQueue(_import_task())
+    unit_of_work = RecordingUoW()
+    worker = ReadableResourceWorkerProcessor(
+        queue=queue,
+        scan=cast(ScanLibrarySourceTree, UnusedScan()),
+        process_import=_process(adapters=BoomAdapters(), queue=queue),
+        uow=unit_of_work,
+        clock=FixedClock(),
+    )
+
+    worker.recover_after_loop_failure()
+
+    assert unit_of_work.rollback_count == 1
 
 
 def test_worker_containment_logs_without_worker_id(
