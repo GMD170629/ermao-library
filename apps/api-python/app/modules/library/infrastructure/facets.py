@@ -20,11 +20,9 @@ from app.models import (
     LibraryBook,
     LibraryBookFacet,
 )
-from app.modules.imports.public import (
-    UNKNOWN_AUTHOR,
-    normalize_identity_part,
-)
+from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
 from app.modules.library.domain.facets import FACET_KINDS
+from app.modules.library.domain.facets import normalize_facet_name
 
 
 def parse_json(value: Any, fallback: Any) -> Any:
@@ -37,7 +35,7 @@ def parse_json(value: Any, fallback: Any) -> Any:
 
 
 def normalized_name(value: Any) -> str:
-    return normalize_identity_part(str(value or "").strip())
+    return normalize_facet_name(str(value or "").strip())
 
 
 def unique_names(values: Iterable[Any]) -> list[str]:
@@ -55,7 +53,7 @@ def unique_names(values: Iterable[Any]) -> list[str]:
 
 def split_authors(value: Any) -> list[str]:
     text_value = str(value or "").strip()
-    if not text_value or text_value == UNKNOWN_AUTHOR:
+    if not text_value or text_value == UNKNOWN_AUTHOR_PLACEHOLDER:
         return []
     return unique_names(
         re.split(r"\s*(?:,|，|;|；|、|/|&|\band\b)\s*", text_value, flags=re.IGNORECASE)
