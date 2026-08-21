@@ -163,16 +163,6 @@ class ResourceReaderService:
             progress.resource_id: progress for progress in progresses
         }
         selected_progress = progress_by_resource_id.get(resource_id)
-        selected_resources = [
-            resource
-            for resource in available_resources
-            if resource.id == context.resource.id
-        ]
-        book_completed = bool(selected_resources) and all(
-            progress_by_resource_id.get(resource.id) is not None
-            and progress_by_resource_id[resource.id].percent >= 100
-            for resource in selected_resources
-        )
         return ReaderBootstrapDto(
             context=context,
             available_resources=tuple(available_resources),
@@ -184,7 +174,6 @@ class ResourceReaderService:
                 if selected_progress is not None
                 else None
             ),
-            book_completed=book_completed,
         )
 
     def load_progress(

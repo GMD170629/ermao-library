@@ -45,22 +45,22 @@ SYSTEM_MANAGER_PREFIXES = (
     "/api/libraries",
     "/api/system-settings",
     "/api/metadata/providers",
-    "/api/sources",
-    "/api/source-search-records",
     "/api/download-tasks",
-    "/api/import-tasks",
     "/api/organize",
     "/api/backups",
     "/api/tracking",
     "/api/email-settings",
     "/api/system/health/",
-    "/api/system/queues",
-    "/api/system/queue-operations",
     "/api/system/log-settings",
 )
 
 
 def _requires_system_manager(path: str, method: str) -> bool:
+    if method in {"GET", "HEAD"} and (
+        path.startswith("/api/library-import-tasks/")
+        or (path.startswith("/api/libraries/") and path.endswith("/import-tasks"))
+    ):
+        return False
     if path in {"/api/dashboard/system-status", "/api/system/health"}:
         return True
     if path == "/api/metadata/cover-proxy":

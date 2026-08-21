@@ -171,10 +171,13 @@ def list_import_tasks_page(
     *,
     page: int,
     page_size: int,
+    library_id: str | None = None,
     state: str | None = None,
 ) -> tuple[list[dict[str, object]], int, dict[str, int]]:
     scope = library_visibility_predicate(context, LibraryImportTask.library_id)
     filters = [scope]
+    if library_id is not None:
+        filters.append(LibraryImportTask.library_id == library_id)
     normalized_state = str(state or "").strip().upper()
     if normalized_state and normalized_state != "ALL":
         filters.append(LibraryImportTask.state == normalized_state)

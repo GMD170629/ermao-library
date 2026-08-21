@@ -1,8 +1,6 @@
 """System capability composition root."""
 
 from typing import Any
-from uuid import uuid4
-
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -36,7 +34,6 @@ from app.modules.system.infrastructure.health import (
     run_system_health_checks,
 )
 from app.modules.system.infrastructure.health_runs import (
-    active_health_run_id,
     health_run_snapshot,
     prepare_abandoned_health_runs,
     prepare_health_run_creation,
@@ -51,15 +48,8 @@ from app.modules.system.infrastructure.import_status import (
 )
 from app.modules.system.infrastructure.queue_runtime import (
     QueueHeartbeatPump,
-    active_queue_operation,
-    active_restart_operation,
     prepare_queue_heartbeat_write,
-    prepare_queue_operation_creation,
-    prepare_queue_operation_update,
     prepare_queue_stopped_write,
-    queue_operation_view,
-    queue_runtime_view,
-    write_prepared_queue_operation_creation,
     write_prepared_queue_runtime,
 )
 from app.modules.system.infrastructure.settings import (
@@ -279,73 +269,12 @@ def mark_queue_stopped(db: Session, queue_name: str, instance_id: str) -> None:
         write_prepared_queue_runtime(db, prepared)
 
 
-def create_restart_operation(
-    db: Session,
-    actor_user_id: str,
-) -> tuple[dict[str, Any], bool]:
-    return create_queue_operation(db, actor_user_id, action="restart")
-
-
-def create_queue_operation(
-    db: Session,
-    actor_user_id: str,
-    *,
-    action: str,
-) -> tuple[dict[str, Any], bool]:
-    operation_id = f"queue_{uuid4().hex}"
-    now = now_timestamp_ms()
-    existing = active_queue_operation(db)
-    db.close()
-    prepared = prepare_queue_operation_creation(
-        existing,
-        actor_user_id,
-        action=action,
-        operation_id=operation_id,
-        now=now,
-    )
-    if not prepared.created:
-        return prepared.view, False
-    with SystemWriteTransaction(db):
-        result = write_prepared_queue_operation_creation(db, prepared)
-    return result
-
-
-def update_queue_operation(
-    db: Session,
-    operation_id: str,
-    status: str,
-    message_code: str,
-) -> None:
-    prepared = prepare_queue_operation_update(
-        operation_id,
-        status,
-        message_code,
-        now=now_timestamp_ms(),
-    )
-    with SystemWriteTransaction(db):
-        write_prepared_queue_runtime(db, prepared)
-
-
-def update_restart_operation(
-    db: Session,
-    operation_id: str,
-    status: str,
-    message_code: str,
-) -> None:
-    update_queue_operation(db, operation_id, status, message_code)
-
-
 __all__ = [
     "QueueHeartbeatPump",
-    "active_health_run_id",
-    "active_queue_operation",
-    "active_restart_operation",
     "clear_info_warning_events",
     "clear_system_events_with_audit",
     "configured_max_event_bytes",
     "create_or_reuse_health_run",
-    "create_queue_operation",
-    "create_restart_operation",
     "delete_setting",
     "delete_settings",
     "existing_setting_keys",
@@ -371,8 +300,6 @@ __all__ = [
     "probe_database",
     "prune_old_health_runs",
     "prune_system_events",
-    "queue_operation_view",
-    "queue_runtime_view",
     "record_queue_heartbeat",
     "record_system_event",
     "run_system_health_checks",
@@ -380,8 +307,6 @@ __all__ = [
     "start_health_run",
     "system_event_size_bytes",
     "system_event_storage_view",
-    "update_queue_operation",
-    "update_restart_operation",
     "upsert_setting",
     "upsert_settings",
     "write_prepared_system_events",

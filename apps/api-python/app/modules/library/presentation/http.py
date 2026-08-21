@@ -320,45 +320,6 @@ def update_library_resource(
 
 
 @router.post(
-    "/books/{book_id}/resources/{resource_id}/rescan",
-    response_model=ResourceImportAcceptedResponse,
-    status_code=202,
-)
-def rescan_library_resource(
-    book_id: str,
-    resource_id: str,
-    request: Request,
-    db: DatabaseSession,
-    settings: ApplicationSettings,
-) -> ResourceImportAcceptedResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    manager_error = _require_manager(user)
-    if manager_error:
-        return manager_error
-    if not can_access_book(db, user, book_id) or not can_access_resource(
-        db, user, resource_id
-    ):
-        return fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-    row = db.execute(
-        select(LibraryReadableResource.book_id, LibraryReadableResource.source_node_id)
-        .where(LibraryReadableResource.id == resource_id)
-    ).first()
-    if row is None or row.book_id != book_id:
-        return fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-    result = continue_source_import(db, str(row.source_node_id))
-    return ok(
-        {
-            "resourceId": resource_id,
-            "accepted": True,
-            "taskId": result.task_id,
-        },
-        status_code=202,
-    )
-
-
-@router.post(
     "/books/{book_id}/resources/{resource_id}/cover/regenerate",
     response_model=ResourceImportAcceptedResponse,
     status_code=202,

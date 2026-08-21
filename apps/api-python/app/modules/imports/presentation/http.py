@@ -16,9 +16,11 @@ from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
     continue_library_import,
+    get_import_task,
     get_library,
     get_library_by_root_path,
     library_has_topology,
+    list_import_tasks_page,
     list_libraries,
     list_library_access_user_ids,
     persist_import_library_create,
@@ -54,6 +56,8 @@ from app.modules.imports.presentation.schemas import (
     ImportConflictError,
     ImportForbiddenError,
     ImportNotFoundError,
+    LibraryImportTaskDetailResponse,
+    LibraryImportTaskListResponse,
     LibrariesResponse,
     LibraryDirectoryResponse,
     LibraryResponse,
@@ -117,6 +121,71 @@ def list_library_roots(
             ),
         }
     )
+
+
+@router.get("/libraries/{library_id}/import-tasks")
+def list_library_import_tasks(
+    library_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, alias="pageSize", ge=1, le=100),
+    state: Literal["ALL", "QUEUED", "RUNNING", "SUCCEEDED", "FAILED"] | None = Query(
+        default=None
+    ),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LibraryImportTaskListResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if (
+        user is None
+        or get_library(db, library_id) is None
+        or not can_access_library(db, user, library_id)
+    ):
+        return fail("书库不存在或无权访问", status_code=404, code="LIBRARY_NOT_FOUND")
+
+    context = authorization_context(db, user)
+    tasks, total, summary = list_import_tasks_page(
+        db,
+        context,
+        page=page,
+        page_size=page_size,
+        library_id=library_id,
+        state=state,
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    normalized_page = min(max(1, page), total_pages)
+    return ok(
+        {
+            "tasks": tasks,
+            "page": normalized_page,
+            "pageSize": page_size,
+            "total": total,
+            "totalPages": total_pages,
+            "completed": summary["completed"],
+            "failed": summary["failed"],
+        }
+    )
+
+
+@router.get("/library-import-tasks/{task_id}")
+def get_library_import_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LibraryImportTaskDetailResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if user is None:
+        return fail("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+
+    task = get_import_task(db, task_id, authorization_context(db, user))
+    if task is None:
+        return fail("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+    return ok({"task": task})
 
 
 @router.get("/libraries/tree")

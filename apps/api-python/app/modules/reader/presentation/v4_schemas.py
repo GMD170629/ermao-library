@@ -536,7 +536,6 @@ class ReaderBootstrapData(ReaderWireModel):
     reader_type: ReaderFormat = Field(alias="readerType")
     source_format: ReaderSourceFormat = Field(alias="sourceFormat")
     book: ReaderBookSummary
-    book_completed: bool = Field(alias="bookCompleted")
     resource: ReaderResourceSummary
     available_resources: list[ReaderResourceSummary] = Field(alias="availableResources")
     assets: list[ReaderAssetSummary] = Field(alias="assets")

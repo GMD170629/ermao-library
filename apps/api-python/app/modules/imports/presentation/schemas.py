@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
+
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
@@ -110,6 +112,40 @@ class ContinueImportPayload(HttpContractModel):
 
 
 ContinueImportResponse = SuccessEnvelope[ContinueImportPayload]
+
+
+class LibraryImportTaskView(HttpContractModel):
+    """The public, read-only projection of one canonical import task."""
+
+    id: str
+    kind: Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
+    library_id: str = Field(alias="libraryId")
+    resource_id: str | None = Field(default=None, alias="resourceId")
+    source_node_id: str | None = Field(default=None, alias="sourceNodeId")
+    role: Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"] | None = None
+    state: Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
+    error_summary: str | None = Field(default=None, alias="errorSummary")
+    created_at: datetime = Field(alias="createdAt")
+    started_at: datetime | None = Field(default=None, alias="startedAt")
+    finished_at: datetime | None = Field(default=None, alias="finishedAt")
+
+
+class LibraryImportTaskListPayload(HttpContractModel):
+    tasks: list[LibraryImportTaskView]
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+    completed: int
+    failed: int
+
+
+class LibraryImportTaskDetailPayload(HttpContractModel):
+    task: LibraryImportTaskView
+
+
+LibraryImportTaskListResponse = SuccessEnvelope[LibraryImportTaskListPayload]
+LibraryImportTaskDetailResponse = SuccessEnvelope[LibraryImportTaskDetailPayload]
 
 
 class SavedUploadResult(HttpContractModel):

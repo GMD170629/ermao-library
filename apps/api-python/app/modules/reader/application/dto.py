@@ -173,4 +173,3 @@ class ReaderBootstrapDto:
     units: tuple[ReaderNavigationUnitDto, ...]
     progress_by_resource_id: dict[str, ReaderProgressDto]
     resume_location_json: str | None
-    book_completed: bool

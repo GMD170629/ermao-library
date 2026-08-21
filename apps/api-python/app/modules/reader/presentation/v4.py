@@ -573,7 +573,6 @@ def reader_bootstrap_v4(
                 author=context.book.author,
                 coverUrl=f"/api/books/{context.book.id}/cover",
             ),
-            bookCompleted=bootstrap.book_completed,
             resource=_resource_summary(context.resource, progress),
             availableResources=[
                 _resource_summary(

@@ -491,6 +491,33 @@ def _queue_result(
     queue = str(options["queue"])
     if not bool(options.get("enabled")):
         return "skipped", "health.queue.disabled", {"queue": queue}
+
+    if queue == "import":
+        details: dict[str, Any] = {"queue": queue}
+        for key, states in (
+            ("pending", ("QUEUED",)),
+            ("running", ("RUNNING",)),
+            ("failed", ("FAILED",)),
+        ):
+            details[key] = int(
+                db.scalar(
+                    select(func.count())
+                    .select_from(LibraryImportTask)
+                    .where(LibraryImportTask.state.in_(states))
+                )
+                or 0
+            )
+        details["oldestPendingAt"] = timestamp_ms_to_iso(
+            db.scalar(
+                select(func.min(LibraryImportTask.created_at)).where(
+                    LibraryImportTask.state == "QUEUED"
+                )
+            )
+        )
+        if details["failed"]:
+            return "warning", "health.queue.failed", details
+        return "ok", "health.queue.ok", details
+
     runtime = queue_runtime_view(db, queue)
     details: dict[str, Any] = {"queue": queue, "runtime": runtime}
     model, pending_values, running_values, failed_values = QUEUE_MODELS[queue]
@@ -897,9 +924,3 @@ def prepare_old_health_runs_prune(max_age_hours: int = 24) -> Delete:
 def write_prepared_old_health_runs_prune(db: Session, statement: Delete) -> int:
     result = db.execute(statement)
     return int(result.rowcount or 0)
-
-
-def active_health_run_id(db: Session) -> str | None:
-    return db.scalar(
-        select(SystemHealthRun.id).where(SystemHealthRun.status == "running").limit(1)
-    )
