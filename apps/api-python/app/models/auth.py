@@ -229,11 +229,11 @@ class ReaderBookmark(Base):
     __table_args__ = (
         UniqueConstraint(
             "userId",
-            "volumeId",
+            "resourceId",
             "bookmarkId",
-            name="ReaderBookmark_user_volume_bookmark_key",
+            name="ReaderBookmark_user_resource_bookmark_key",
         ),
-        Index("ReaderBookmark_user_volume_idx", "userId", "volumeId"),
+        Index("ReaderBookmark_user_resource_idx", "userId", "resourceId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -243,10 +243,12 @@ class ReaderBookmark(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
     )
     bookmark_id: Mapped[str] = mapped_column("bookmarkId", Text, nullable=False)
@@ -271,4 +273,9 @@ class ReaderBookmark(Base):
         nullable=False,
         default=db_timestamp,
         onupdate=db_timestamp,
+    )
+
+    user: Mapped[User] = relationship("User")
+    resource: Mapped["LibraryReadableResource"] = relationship(
+        "LibraryReadableResource"
     )

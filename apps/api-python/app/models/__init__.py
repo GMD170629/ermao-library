@@ -1,4 +1,4 @@
-"""SQLAlchemy model package — import all models so Base.metadata is complete."""
+"""SQLAlchemy model package; importing it registers the complete fresh schema."""
 
 from __future__ import annotations
 
@@ -12,31 +12,21 @@ from app.models.auth import (
 )
 from app.models.import_pipeline import (
     DownloadTask,
-    ImportAsset,
-    ImportLog,
-    ImportScanJob,
-    ImportTask,
-    ImportWorkItem,
     KindleSendTask,
     Source,
     SourceSearchRecord,
 )
 from app.models.library import (
+    BookDetailPreference,
     ExternalMetadataCache,
     Library,
+    LibraryBookFacet,
     LibraryFacet,
-    LibraryFile,
-    LibraryMetadata,
     LibraryOperation,
-    LibraryReadingProgress,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryVolumeFacet,
-    LibraryWork,
-    LibraryWorkFacet,
+    LibraryReadableResourceFacet,
+    ReadableResourceNavigationUnit,
     ReaderProgressMutation,
-    WorkDetailPreference,
+    ReaderResourceProgress,
 )
 from app.models.organize import (
     MetadataLookupTask,
@@ -52,8 +42,6 @@ from app.models.organize import (
     OrganizeRun,
 )
 from app.models.settings import (
-    BookIdentityCache,
-    QueueControlOperation,
     QueueRuntimeState,
     ReaderBookPreference,
     ReaderPreference,
@@ -62,7 +50,7 @@ from app.models.settings import (
     SystemHealthRun,
     SystemSetting,
 )
-from app.models.shelf import Shelf, ShelfWork
+from app.models.shelf import Shelf, ShelfBook
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
@@ -77,43 +65,29 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibrarySourceNodeInterpretation,
     LibrarySourceNodeMetadata,
 )
-from app.modules.publications.infrastructure.models import (
-    PublicationNavigationCache,
-)
+from app.modules.publications.infrastructure.models import PublicationNavigationCache
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
-    "BookIdentityCache",
+    "BookDetailPreference",
     "DownloadTask",
     "ExternalMetadataCache",
-    "ImportAsset",
-    "ImportLog",
-    "ImportScanJob",
-    "ImportTask",
-    "ImportWorkItem",
     "KindleSendTask",
     "Library",
     "LibraryBook",
+    "LibraryBookFacet",
     "LibraryBookMetadata",
     "LibraryFacet",
-    "LibraryFile",
     "LibraryImportTask",
-    "LibraryMetadata",
     "LibraryOperation",
     "LibraryReadableResource",
+    "LibraryReadableResourceFacet",
     "LibraryReadableResourceMetadata",
-    "LibraryReadingProgress",
-    "LibraryReadingUnit",
     "LibraryResourceAsset",
     "LibraryResourceAssetMetadata",
     "LibrarySourceNode",
     "LibrarySourceNodeInterpretation",
     "LibrarySourceNodeMetadata",
-    "LibraryVersion",
-    "LibraryVolume",
-    "LibraryVolumeFacet",
-    "LibraryWork",
-    "LibraryWorkFacet",
     "MetadataLookupTask",
     "MetadataOpfQueueState",
     "MetadataProviderExecution",
@@ -127,17 +101,18 @@ __all__ = [
     "OrganizeRun",
     "PasswordResetToken",
     "PublicationNavigationCache",
-    "QueueControlOperation",
     "QueueRuntimeState",
+    "ReadableResourceNavigationUnit",
     "ReaderBookPreference",
     "ReaderBookmark",
     "ReaderPreference",
     "ReaderProgressCursor",
     "ReaderProgressMutation",
+    "ReaderResourceProgress",
     "Session",
     "Shelf",
+    "ShelfBook",
     "ShelfCollectionMembership",
-    "ShelfWork",
     "Source",
     "SourceSearchRecord",
     "SystemEvent",
@@ -146,5 +121,4 @@ __all__ = [
     "User",
     "UserLibraryAccess",
     "UserPreference",
-    "WorkDetailPreference",
 ]

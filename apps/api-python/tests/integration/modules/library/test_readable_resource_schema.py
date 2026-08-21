@@ -98,6 +98,19 @@ def test_fresh_schema_includes_overlay_tables(tmp_path: Path) -> None:
         names = set(inspect(engine).get_table_names())
         assert OVERLAY_TABLES <= names
         assert {
+            "LibraryBookFacet",
+            "LibraryReadableResourceFacet",
+            "ShelfBook",
+            "BookDetailPreference",
+            "ReaderBookPreference",
+            "ReaderProgressCursor",
+            "ReaderResourceProgress",
+            "ReaderProgressMutation",
+            "ReaderBookmark",
+            "ReadableResourceNavigationUnit",
+            "PublicationNavigationCache",
+        } <= names
+        assert {
             "LibraryImportRun",
             "ResourceCandidate",
             "AssetCandidate",
@@ -107,6 +120,20 @@ def test_fresh_schema_includes_overlay_tables(tmp_path: Path) -> None:
             "LibraryVersion",
             "LibraryVolume",
             "LibraryFile",
+            "LibraryReadingUnit",
+            "LibraryReadingProgress",
+            "LibraryMetadata",
+            "LibraryWorkFacet",
+            "LibraryVolumeFacet",
+            "ShelfWork",
+            "WorkDetailPreference",
+            "ImportTask",
+            "ImportScanJob",
+            "ImportWorkItem",
+            "ImportAsset",
+            "ImportLog",
+            "BookIdentityCache",
+            "QueueControlOperation",
         } <= names
     finally:
         engine.dispose()

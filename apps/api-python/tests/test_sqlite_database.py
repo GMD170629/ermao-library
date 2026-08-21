@@ -9,7 +9,7 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect, select
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -20,15 +20,9 @@ from app.db.bootstrap import bootstrap_database
 from app.db.runner import head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
-from app.models.import_pipeline import ImportTask, Source
-from app.models.library import (
-    Library,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
-)
+from app.models.import_pipeline import Source
+from app.models.library import Library
 from app.models.settings import ReaderBookPreference, SystemSetting
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
 
@@ -57,22 +51,45 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         table_names = set(inspector.get_table_names())
         assert {
             "Library",
-            "LibraryWork",
-            "LibraryVersion",
-            "LibraryVolume",
-            "LibraryFile",
-            "ImportScanJob",
-            "ImportTask",
             "LibrarySourceNode",
             "LibraryBook",
             "LibraryReadableResource",
             "LibraryResourceAsset",
             "LibraryImportTask",
+            "LibraryBookFacet",
+            "LibraryReadableResourceFacet",
+            "ShelfBook",
+            "BookDetailPreference",
+            "ReaderBookPreference",
+            "ReaderProgressCursor",
+            "ReaderResourceProgress",
+            "ReaderProgressMutation",
+            "ReaderBookmark",
+            "ReadableResourceNavigationUnit",
+            "PublicationNavigationCache",
         } <= table_names
         assert {
             "LibraryImportRun",
             "ResourceCandidate",
             "AssetCandidate",
+            "LibraryWork",
+            "LibraryVersion",
+            "LibraryVolume",
+            "LibraryFile",
+            "LibraryReadingUnit",
+            "LibraryReadingProgress",
+            "LibraryMetadata",
+            "LibraryWorkFacet",
+            "LibraryVolumeFacet",
+            "ShelfWork",
+            "WorkDetailPreference",
+            "ImportTask",
+            "ImportScanJob",
+            "ImportWorkItem",
+            "ImportAsset",
+            "ImportLog",
+            "BookIdentityCache",
+            "QueueControlOperation",
         }.isdisjoint(table_names)
         assert {
             "MonitorFolder",
@@ -101,33 +118,27 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             str(constraint["sqltext"])
             for constraint in inspector.get_check_constraints("Library")
         )
-        assert all(
-            organization_mode in library_checks
-            for organization_mode in ("FLAT", "VOLUMES", "AUDIOBOOK")
-        )
+        assert '"FLAT"' in library_checks
+        assert '"VOLUMES"' in library_checks
+        assert "AUDIOBOOK" not in library_checks
 
-        work_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryWork")
+        book_columns = {
+            column["name"]: column for column in inspector.get_columns("LibraryBook")
         }
-        version_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryVersion")
+        resource_columns = {
+            column["name"]: column
+            for column in inspector.get_columns("LibraryReadableResource")
         }
-        volume_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryVolume")
+        asset_columns = {
+            column["name"]: column
+            for column in inspector.get_columns("LibraryResourceAsset")
         }
-        file_columns = {
-            column["name"]: column for column in inspector.get_columns("LibraryFile")
-        }
-        assert work_columns["libraryId"]["nullable"] is False
-        assert version_columns["workId"]["nullable"] is False
-        assert version_columns["sourceKey"]["nullable"] is False
-        assert "coverPath" in version_columns
-        assert version_columns["coverPath"]["nullable"] is True
-        assert version_columns["coverStatus"]["nullable"] is False
-        assert volume_columns["versionId"]["nullable"] is False
-        assert file_columns["volumeId"]["nullable"] is False
-        assert "libraryId" not in volume_columns
-        assert "monitorFolderId" not in volume_columns
+        assert book_columns["libraryId"]["nullable"] is False
+        assert book_columns["sourceNodeId"]["nullable"] is False
+        assert resource_columns["bookId"]["nullable"] is False
+        assert resource_columns["sourceNodeId"]["nullable"] is False
+        assert asset_columns["resourceId"]["nullable"] is False
+        assert asset_columns["sourceNodeId"]["nullable"] is False
 
         source_node_checks = {
             constraint["name"]
@@ -140,14 +151,32 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         assert "LibraryImportTask_import_asset_key" in import_task_indexes
         assert "LibraryImportTask_queued_createdAt_idx" in import_task_indexes
 
-        volume_foreign_keys = {
-            (
-                tuple(foreign_key["constrained_columns"]),
-                foreign_key["referred_table"],
-            )
-            for foreign_key in inspector.get_foreign_keys("LibraryVolume")
+        import_task_columns = {
+            column["name"] for column in inspector.get_columns("LibraryImportTask")
         }
-        assert (("versionId",), "LibraryVersion") in volume_foreign_keys
+        assert import_task_columns == {
+            "id",
+            "kind",
+            "libraryId",
+            "resourceId",
+            "sourceNodeId",
+            "role",
+            "state",
+            "errorSummary",
+            "createdAt",
+            "startedAt",
+            "finishedAt",
+        }
+        assert {
+            "attempts",
+            "priority",
+            "availableAt",
+            "leaseOwnerId",
+            "leaseExpiresAt",
+            "heartbeatAt",
+            "claimVersion",
+            "fencingToken",
+        }.isdisjoint(import_task_columns)
         for table_name in Base.metadata.tables:
             for foreign_key in inspector.get_foreign_keys(table_name):
                 assert foreign_key["options"].get("onupdate") == "CASCADE", (
@@ -408,142 +437,64 @@ def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> N
         engine.dispose()
 
 
-def test_backup_restore_preserves_import_task_json_metadata(tmp_path) -> None:
+def test_final_identity_foreign_keys_point_to_target_entities(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            original_metadata = {
-                "title": "恢复前标题",
-                "subjects": ["数据库", "备份"],
-                "source": "PATH",
+        inspector = inspect(engine)
+
+        def targets(table_name: str) -> set[tuple[tuple[str, ...], str]]:
+            return {
+                (
+                    tuple(foreign_key["constrained_columns"]),
+                    foreign_key["referred_table"],
+                )
+                for foreign_key in inspector.get_foreign_keys(table_name)
             }
-            db.add(
-                ImportTask(
-                    id="backup-json-import-task",
-                    origin="BACKUP_TEST",
-                    status="COMPLETED",
-                    source_path="/library/backup-test.epub",
-                    source_key="backup-json-source-key",
-                    recognized_metadata=original_metadata,
-                )
-            )
-            db.commit()
-            backup = create_backup(db, settings)
 
-            task = db.get(ImportTask, "backup-json-import-task")
-            assert task is not None
-            task.recognized_metadata = {"title": "恢复后临时值"}
-            db.commit()
-            restored = restore_backup(db, settings, backup.id)
+        expected = {
+            "LibraryBookFacet": (("bookId",), "LibraryBook"),
+            "LibraryReadableResourceFacet": (
+                ("resourceId",),
+                "LibraryReadableResource",
+            ),
+            "ShelfBook": (("bookId",), "LibraryBook"),
+            "BookDetailPreference": (("bookId",), "LibraryBook"),
+            "ReaderBookPreference": (("bookId",), "LibraryBook"),
+            "ReaderProgressCursor": (("resourceId",), "LibraryReadableResource"),
+            "ReaderResourceProgress": (("resourceId",), "LibraryReadableResource"),
+            "ReaderProgressMutation": (("resourceId",), "LibraryReadableResource"),
+            "ReaderBookmark": (("resourceId",), "LibraryReadableResource"),
+            "ReadableResourceNavigationUnit": (
+                ("resourceId",),
+                "LibraryReadableResource",
+            ),
+            "PublicationNavigationCache": (
+                ("resourceId",),
+                "LibraryReadableResource",
+            ),
+            "KindleSendTask": (("bookId",), "LibraryBook"),
+            "OrganizeJob": (("bookId",), "LibraryBook"),
+            "MetadataLookupTask": (("bookId",), "LibraryBook"),
+            "MetadataWritebackOperation": (("bookId",), "LibraryBook"),
+            "MetadataWritebackPreparation": (("bookId",), "LibraryBook"),
+        }
+        for table_name, foreign_key in expected.items():
+            assert foreign_key in targets(table_name), table_name
 
-            assert restored["restored"] is True
-            restored_task = db.get(ImportTask, "backup-json-import-task")
-            assert restored_task is not None
-            assert restored_task.recognized_metadata == original_metadata
-    finally:
-        engine.dispose()
-
-
-def _seed_library_work(db: Session, *, work_id: str) -> LibraryWork:
-    library = db.get(Library, "version-library")
-    if library is None:
-        library = Library(
-            id="version-library",
-            name="Version Library",
-            root_path="/version-library",
-            organization_mode="FLAT",
-        )
-        db.add(library)
-        db.flush()
-    work = LibraryWork(
-        id=work_id,
-        library_id=library.id,
-        title="星海纪行",
-        normalized_title="星海纪行",
-        tags="[]",
-    )
-    db.add(work)
-    db.flush()
-    return work
-
-
-def test_directory_version_identity_is_unique_within_each_work(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            first_work = _seed_library_work(db, work_id="work-a")
-            second_work = _seed_library_work(db, work_id="work-b")
-            db.add_all(
-                [
-                    LibraryVersion(
-                        id="version-a",
-                        work_id=first_work.id,
-                        source_key="directory:version",
-                    ),
-                    LibraryVersion(
-                        id="version-b",
-                        work_id=second_work.id,
-                        source_key="directory:version",
-                    ),
-                ]
-            )
-            db.commit()
-
-            db.add(
-                LibraryVersion(
-                    id="version-a-duplicate",
-                    work_id=first_work.id,
-                    source_key="directory:version",
-                )
-            )
-            with pytest.raises(IntegrityError):
-                db.commit()
-    finally:
-        engine.dispose()
-
-
-def test_volume_belongs_to_directory_version_and_version_requires_work(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            work = _seed_library_work(db, work_id="work-volume")
-            version = LibraryVersion(
-                id="version-volume",
-                work_id=work.id,
-                source_key=IMPLICIT_VERSION_SOURCE_KEY,
-            )
-            db.add(version)
-            db.flush()
-            volume = LibraryVolume(
-                id="volume-a",
-                version_id=version.id,
-                title="正文",
-                format="EPUB",
-                resource_key="directory:volume",
-            )
-            db.add(volume)
-            db.commit()
-
-            stored = db.get(LibraryVolume, volume.id)
-            assert stored is not None
-            assert stored.version_id == version.id
-
-            db.add(
-                LibraryVersion(
-                    id="orphan-version",
-                    work_id="missing-work",
-                    source_key=IMPLICIT_VERSION_SOURCE_KEY,
-                )
-            )
-            with pytest.raises(IntegrityError):
-                db.commit()
+        for table_name in (
+            "ReadableResourceNavigationUnit",
+            "PublicationNavigationCache",
+            "KindleSendTask",
+            "OrganizeJob",
+            "MetadataLookupTask",
+            "MetadataWritebackOperation",
+            "MetadataWritebackPreparation",
+        ):
+            assert (
+                ("assetId",),
+                "LibraryResourceAsset",
+            ) in targets(table_name), table_name
     finally:
         engine.dispose()

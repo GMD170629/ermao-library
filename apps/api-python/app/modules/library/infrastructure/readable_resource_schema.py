@@ -1,9 +1,4 @@
-"""Target ADR 0018 physical SourceNode / Book / Resource / Asset ORM tables.
-
-Not wired into scanner, API, or worker composition roots in phase 1B.
-Shadow columns exist only to express composite FK / CHECK constraints in SQLite
-and must not appear on domain or API DTOs.
-"""
+"""Fresh-baseline ORM tables for the SourceNode / Book / Resource / Asset model."""
 
 from __future__ import annotations
 
@@ -313,6 +308,20 @@ class LibraryBook(Base):
     source_node_id: Mapped[str] = mapped_column(
         "sourceNodeId", String(191), nullable=False
     )
+    visibility_state: Mapped[str] = mapped_column(
+        "visibilityState",
+        String(32),
+        nullable=False,
+        default="VISIBLE",
+        server_default="VISIBLE",
+    )
+    curation_state: Mapped[str] = mapped_column(
+        "curationState",
+        String(32),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -541,8 +550,8 @@ class LibraryReadableResourceMetadata(Base):
     track_count: Mapped[int | None] = mapped_column("trackCount", Integer, nullable=True)
     narrator: Mapped[str | None] = mapped_column(Text, nullable=True)
     abridged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    volume_index: Mapped[float | None] = mapped_column(
-        "volumeIndex", Float, nullable=True
+    resource_index: Mapped[float | None] = mapped_column(
+        "resourceIndex", Float, nullable=True
     )
     cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
     cover_status: Mapped[str] = mapped_column(

@@ -40,11 +40,11 @@ class Shelf(Base):
     updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
 
-class ShelfWork(Base):
-    __tablename__ = "ShelfWork"
+class ShelfBook(Base):
+    __tablename__ = "ShelfBook"
     __table_args__ = (
-        Index("ShelfWork_workId_idx", "workId"),
-        Index("ShelfWork_shelfId_createdAt_idx", "shelfId", "createdAt"),
+        Index("ShelfBook_bookId_idx", "bookId"),
+        Index("ShelfBook_shelfId_createdAt_idx", "shelfId", "createdAt"),
     )
 
     shelf_id: Mapped[str] = mapped_column(
@@ -53,10 +53,10 @@ class ShelfWork(Base):
         ForeignKey("Shelf.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(

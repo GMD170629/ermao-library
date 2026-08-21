@@ -1,8 +1,4 @@
-"""Target ADR 0018 LibraryImportTask ORM table (single-consumer queue).
-
-Isolated from the legacy ImportTask / ImportScanJob pipeline. Not wired into
-production workers in this phase.
-"""
+"""Fresh-baseline ORM table for the single-consumer ContinueImport task."""
 
 from __future__ import annotations
 
@@ -27,7 +23,7 @@ from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
 
 
 class LibraryImportTask(Base):
-    """Single-consumer continue-import work item (not legacy ImportTask)."""
+    """Single-consumer ContinueImport task."""
 
     __tablename__ = "LibraryImportTask"
     __table_args__ = (

@@ -142,10 +142,10 @@ class OrganizeRun(Base):
 class OrganizeJob(Base):
     __tablename__ = "OrganizeJob"
     __table_args__ = (
-        Index("OrganizeJob_workId_status_idx", "workId", "status"),
+        Index("OrganizeJob_bookId_status_idx", "bookId", "status"),
         Index(
-            "OrganizeJob_unresolved_workId_key",
-            "workId",
+            "OrganizeJob_unresolved_bookId_key",
+            "bookId",
             unique=True,
             sqlite_where=column("status", String).in_(
                 (
@@ -160,8 +160,8 @@ class OrganizeJob(Base):
             ),
         ),
         Index("OrganizeJob_runId_status_idx", "runId", "status"),
-        Index("OrganizeJob_volumeId_idx", "volumeId"),
-        Index("OrganizeJob_versionId_idx", "versionId"),
+        Index("OrganizeJob_resourceId_idx", "resourceId"),
+        Index("OrganizeJob_assetId_idx", "assetId"),
         Index("OrganizeJob_importTaskId_idx", "importTaskId"),
         Index("OrganizeJob_status_updatedAt_idx", "status", "updatedAt"),
     )
@@ -173,28 +173,32 @@ class OrganizeJob(Base):
         ForeignKey("OrganizeRun.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    volume_id: Mapped[str | None] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str | None] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
         nullable=True,
     )
-    version_id: Mapped[str | None] = mapped_column(
-        "versionId",
+    asset_id: Mapped[str | None] = mapped_column(
+        "assetId",
         String(191),
-        ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
         "importTaskId",
         String(191),
-        ForeignKey("ImportTask.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("LibraryImportTask.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     trigger: Mapped[str] = mapped_column(String(191), nullable=False)
@@ -241,35 +245,39 @@ class MetadataLookupTask(Base):
             "leaseExpiresAt",
             "createdAt",
         ),
-        Index("MetadataLookupTask_workId_createdAt_idx", "workId", "createdAt"),
-        Index("MetadataLookupTask_volumeId_idx", "volumeId"),
-        Index("MetadataLookupTask_versionId_idx", "versionId"),
+        Index("MetadataLookupTask_bookId_createdAt_idx", "bookId", "createdAt"),
+        Index("MetadataLookupTask_resourceId_idx", "resourceId"),
+        Index("MetadataLookupTask_assetId_idx", "assetId"),
         UniqueConstraint("importTaskId", name="MetadataLookupTask_importTaskId_key"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    volume_id: Mapped[str | None] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str | None] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
         nullable=True,
     )
-    version_id: Mapped[str | None] = mapped_column(
-        "versionId",
+    asset_id: Mapped[str | None] = mapped_column(
+        "assetId",
         String(191),
-        ForeignKey("LibraryVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
         "importTaskId",
         String(191),
-        ForeignKey("ImportTask.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("LibraryImportTask.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     organize_job_id: Mapped[str | None] = mapped_column(
@@ -332,21 +340,33 @@ class MetadataWritebackOperation(Base):
     __tablename__ = "MetadataWritebackOperation"
     __table_args__ = (
         Index("MetadataWritebackOperation_status_createdAt_idx", "status", "createdAt"),
-        Index("MetadataWritebackOperation_workId_createdAt_idx", "workId", "createdAt"),
+        Index("MetadataWritebackOperation_bookId_createdAt_idx", "bookId", "createdAt"),
+        Index("MetadataWritebackOperation_resourceId_idx", "resourceId"),
+        Index("MetadataWritebackOperation_assetId_idx", "assetId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    version_id: Mapped[str] = mapped_column(
-        "versionId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
+    )
+    asset_id: Mapped[str | None] = mapped_column(
+        "assetId",
+        String(191),
+        ForeignKey(
+            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
+        nullable=True,
     )
     lookup_task_id: Mapped[str | None] = mapped_column(
         "lookupTaskId",
@@ -403,8 +423,16 @@ class MetadataWritebackPreparation(Base):
             "operationId",
         ),
         Index(
-            "MetadataWritebackPreparation_workId_idx",
-            "workId",
+            "MetadataWritebackPreparation_bookId_idx",
+            "bookId",
+        ),
+        Index(
+            "MetadataWritebackPreparation_resourceId_idx",
+            "resourceId",
+        ),
+        Index(
+            "MetadataWritebackPreparation_assetId_idx",
+            "assetId",
         ),
         UniqueConstraint(
             "idempotencyKey",
@@ -423,26 +451,28 @@ class MetadataWritebackPreparation(Base):
         ),
         nullable=True,
     )
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    version_id: Mapped[str | None] = mapped_column(
-        "versionId",
+    resource_id: Mapped[str | None] = mapped_column(
+        "resourceId",
         String(191),
         ForeignKey(
-            "LibraryVersion.id",
+            "LibraryReadableResource.id",
             ondelete="CASCADE",
             onupdate="CASCADE",
         ),
         nullable=True,
     )
-    volume_id: Mapped[str | None] = mapped_column(
-        "volumeId",
+    asset_id: Mapped[str | None] = mapped_column(
+        "assetId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
         nullable=True,
     )
     lookup_task_id: Mapped[str | None] = mapped_column(
@@ -529,10 +559,12 @@ class MetadataWritebackTarget(Base):
         ),
         nullable=False,
     )
-    library_file_id: Mapped[str | None] = mapped_column(
-        "libraryFileId",
+    asset_id: Mapped[str | None] = mapped_column(
+        "assetId",
         String(191),
-        ForeignKey("LibraryFile.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
+        ),
         nullable=True,
     )
     target_key: Mapped[str] = mapped_column("targetKey", String(64), nullable=False)

@@ -3,8 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
@@ -31,29 +42,13 @@ class SystemSetting(Base):
         default=db_timestamp,
         server_default=timestamp_ms_server_default(),
     )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
-
-
-class BookIdentityCache(Base):
-    __tablename__ = "BookIdentityCache"
-    __table_args__ = (Index("BookIdentityCache_parserVersion_idx", "parserVersion"),)
-
-    logical_path: Mapped[str] = mapped_column("logicalPath", Text, primary_key=True)
-    title: Mapped[str] = mapped_column(Text, nullable=False)
-    author: Mapped[str] = mapped_column(Text, nullable=False)
-    volume_index: Mapped[float | None] = mapped_column("volumeIndex", Float, nullable=True)
-    source: Mapped[str] = mapped_column(String(32), nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    parser_version: Mapped[int] = mapped_column("parserVersion", Integer, nullable=False)
-    raw_json: Mapped[str] = mapped_column("rawJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
         TimestampMilliseconds(),
         nullable=False,
         default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
+        onupdate=db_timestamp,
     )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
 
 class SystemEvent(Base):
@@ -75,7 +70,9 @@ class SystemEvent(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    level: Mapped[str] = mapped_column(String(191), nullable=False, default="info", server_default="info")
+    level: Mapped[str] = mapped_column(
+        String(191), nullable=False, default="info", server_default="info"
+    )
     source: Mapped[str] = mapped_column(String(191), nullable=False)
     actor_type: Mapped[str] = mapped_column(
         "actorType",
@@ -86,7 +83,9 @@ class SystemEvent(Base):
     )
     actor_id: Mapped[str | None] = mapped_column("actorId", String(191), nullable=True)
     action: Mapped[str] = mapped_column(String(191), nullable=False)
-    target_type: Mapped[str | None] = mapped_column("targetType", String(191), nullable=True)
+    target_type: Mapped[str | None] = mapped_column(
+        "targetType", String(191), nullable=True
+    )
     target_id: Mapped[str | None] = mapped_column("targetId", String(191), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
@@ -104,11 +103,17 @@ class SystemHealthRun(Base):
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     actor_user_id: Mapped[str] = mapped_column("actorUserId", String(191), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", server_default="running")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="running", server_default="running"
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     snapshot: Mapped[str] = mapped_column(Text, nullable=False)
-    started_at: Mapped[datetime] = mapped_column("startedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
-    finished_at: Mapped[datetime | None] = mapped_column("finishedAt", TimestampMilliseconds(), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        "startedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        "finishedAt", TimestampMilliseconds(), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -116,46 +121,48 @@ class SystemHealthRun(Base):
         default=db_timestamp,
         server_default=timestamp_ms_server_default(),
     )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
 
 
 class QueueRuntimeState(Base):
+    """Process-level runtime status retained independently of import tasks."""
+
     __tablename__ = "QueueRuntimeState"
 
     queue_name: Mapped[str] = mapped_column("queueName", String(64), primary_key=True)
     instance_id: Mapped[str] = mapped_column("instanceId", String(191), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    poll_interval_seconds: Mapped[float] = mapped_column("pollIntervalSeconds", Float, nullable=False)
-    started_at: Mapped[datetime] = mapped_column("startedAt", TimestampMilliseconds(), nullable=False)
-    heartbeat_at: Mapped[datetime] = mapped_column("heartbeatAt", TimestampMilliseconds(), nullable=False)
-    last_processed_at: Mapped[datetime | None] = mapped_column("lastProcessedAt", TimestampMilliseconds(), nullable=True)
-    last_error: Mapped[str | None] = mapped_column("lastError", Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False)
-
-
-class QueueControlOperation(Base):
-    __tablename__ = "QueueControlOperation"
-    __table_args__ = (
-        Index("QueueControlOperation_queue_status_idx", "queueName", "status", "requestedAt"),
+    poll_interval_seconds: Mapped[float] = mapped_column(
+        "pollIntervalSeconds", Float, nullable=False
     )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    queue_name: Mapped[str] = mapped_column("queueName", String(64), nullable=False)
-    action: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    actor_user_id: Mapped[str] = mapped_column("actorUserId", String(191), nullable=False)
-    message_code: Mapped[str | None] = mapped_column("messageCode", String(191), nullable=True)
-    requested_at: Mapped[datetime] = mapped_column("requestedAt", TimestampMilliseconds(), nullable=False)
-    started_at: Mapped[datetime | None] = mapped_column("startedAt", TimestampMilliseconds(), nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column("finishedAt", TimestampMilliseconds(), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        "startedAt", TimestampMilliseconds(), nullable=False
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        "heartbeatAt", TimestampMilliseconds(), nullable=False
+    )
+    last_processed_at: Mapped[datetime | None] = mapped_column(
+        "lastProcessedAt", TimestampMilliseconds(), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column("lastError", Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", TimestampMilliseconds(), nullable=False
+    )
 
 
 class ReaderPreference(Base):
     __tablename__ = "ReaderPreference"
     __table_args__ = (
         Index("ReaderPreference_userId_idx", "userId"),
-        UniqueConstraint("userId", "readerType", name="ReaderPreference_userId_readerType_key"),
+        UniqueConstraint(
+            "userId", "readerType", name="ReaderPreference_userId_readerType_key"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -174,25 +181,43 @@ class ReaderPreference(Base):
         default=db_timestamp,
         server_default=timestamp_ms_server_default(),
     )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
 
 
 class ReaderBookPreference(Base):
-    """Versioned server default for one user's view of one library work."""
+    """Versioned server default for one user's view of one book."""
 
     __tablename__ = "ReaderBookPreference"
-    __table_args__ = (UniqueConstraint("userId", "workId", name="ReaderBookPreference_userId_workId_key"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "userId", "bookId", name="ReaderBookPreference_userId_bookId_key"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    user_id: Mapped[str] = mapped_column("userId", String(191), ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    user_id: Mapped[str] = mapped_column(
+        "userId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
         index=True,
     )
-    schema_version: Mapped[int] = mapped_column("schemaVersion", Integer, nullable=False, default=3, server_default="3")
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
+        String(191),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    schema_version: Mapped[int] = mapped_column(
+        "schemaVersion", Integer, nullable=False, default=3, server_default="3"
+    )
     preferences: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
@@ -201,33 +226,55 @@ class ReaderBookPreference(Base):
         default=db_timestamp,
         server_default=timestamp_ms_server_default(),
     )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+    user: Mapped["User"] = relationship("User")
+    book: Mapped["LibraryBook"] = relationship("LibraryBook")
 
 
 class ReaderProgressCursor(Base):
-    """Durable per-client high-water mark for monotonic reader progress."""
+    """Durable per-client high-water mark for monotonic resource progress."""
 
     __tablename__ = "ReaderProgressCursor"
-    __table_args__ = (UniqueConstraint("userId", "workId", "clientId", name="ReaderProgressCursor_userId_workId_clientId_key"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "userId",
+            "resourceId",
+            "clientId",
+            name="ReaderProgressCursor_userId_resourceId_clientId_key",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    user_id: Mapped[str] = mapped_column("userId", String(191), ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    user_id: Mapped[str] = mapped_column(
+        "userId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
+        String(191),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
         index=True,
     )
     client_id: Mapped[str] = mapped_column("clientId", String(191), nullable=False)
     high_water: Mapped[int] = mapped_column(
-        "highWater",
-        BigInteger,
-        nullable=False,
-        default=-1,
-        server_default="-1",
+        "highWater", BigInteger, nullable=False, default=-1, server_default="-1"
     )
-    last_mutation_id: Mapped[str | None] = mapped_column("lastMutationId", String(191), nullable=True)
+    last_mutation_id: Mapped[str | None] = mapped_column(
+        "lastMutationId", String(191), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -235,4 +282,26 @@ class ReaderProgressCursor(Base):
         default=db_timestamp,
         server_default=timestamp_ms_server_default(),
     )
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+    user: Mapped["User"] = relationship("User")
+    resource: Mapped["LibraryReadableResource"] = relationship(
+        "LibraryReadableResource"
+    )
+
+
+__all__ = [
+    "QueueRuntimeState",
+    "ReaderBookPreference",
+    "ReaderPreference",
+    "ReaderProgressCursor",
+    "SystemEvent",
+    "SystemHealthRun",
+    "SystemSetting",
+]
