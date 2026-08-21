@@ -5,13 +5,12 @@ from datetime import UTC, datetime
 from app.modules.publications.domain.model import PublicationUnsupportedError
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
+    ReaderAssetDto,
+    ReaderBookDto,
     ReaderEngineLocatorDto,
-    ReaderFileDto,
     ReaderReflowableExactLocationDto,
-    ReaderVersionDto,
-    ReaderVolumeContextDto,
-    ReaderVolumeDto,
-    ReaderWorkDto,
+    ReaderResourceContextDto,
+    ReaderResourceDto,
 )
 from app.modules.reader.infrastructure.publication_locator_index import (
     NormalizedPublicationLocatorIndex,
@@ -25,34 +24,31 @@ class _UnavailablePublication:
 
 class _ReaderRepository:
     def __init__(self) -> None:
-        volume = ReaderVolumeDto(
-            id="volume-1",
-            version_id="version-1",
+        resource = ReaderResourceDto(
+            id="resource-1",
+            book_id="book-1",
+            source_node_id="source-1",
             title="Legacy MOBI",
-            volume_index=1,
-            sort_order=0,
+            media_kind="EBOOK",
             format="MOBI",
+            resource_index=1,
+            sort_order=0,
             page_count=None,
             chapter_count=None,
             duration_ms=None,
             track_count=None,
             updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
-        self.context = ReaderVolumeContextDto(
-            work=ReaderWorkDto("work-1", "Legacy MOBI", "Author"),
-            version=ReaderVersionDto(
-                "version-1",
-                "work-1",
-                "__implicit__",
-                None,
-            ),
-            volume=volume,
+        self.context = ReaderResourceContextDto(
+            book=ReaderBookDto("book-1", "Legacy MOBI", "Author"),
+            resource=resource,
         )
-        self.files = [
-            ReaderFileDto(
-                id="file-1",
-                volume_id=volume.id,
-                kind="MOBI",
+        self.assets = [
+            ReaderAssetDto(
+                id="asset-1",
+                resource_id=resource.id,
+                source_node_id="source-1",
+                role="PRIMARY",
                 mime_type="application/x-mobipocket-ebook",
                 size_bytes=100,
                 duration_ms=None,
@@ -63,11 +59,15 @@ class _ReaderRepository:
             )
         ]
 
-    def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
-        return self.context if volume_id == self.context.volume.id else None
+    def get_context(self, resource_id: str) -> ReaderResourceContextDto | None:
+        return self.context if resource_id == self.context.resource.id else None
 
-    def list_files(self, volume_id: str) -> list[ReaderFileDto]:
-        return self.files if volume_id == self.context.volume.id else []
+    def list_assets(self, resource_id: str) -> list[ReaderAssetDto]:
+        return self.assets if resource_id == self.context.resource.id else []
+
+    def list_navigation_units(self, resource_id: str) -> list[object]:
+        del resource_id
+        return []
 
 
 def test_reflowable_validation_fails_when_publication_is_unavailable() -> None:
@@ -78,7 +78,7 @@ def test_reflowable_validation_fails_when_publication_is_unavailable() -> None:
     )
 
     valid = index.validate(
-        volume_id="volume-1",
+        resource_id="resource-1",
         access_scope=ReaderAccessScope(
             is_admin=True,
             can_view_manual_imports=True,
