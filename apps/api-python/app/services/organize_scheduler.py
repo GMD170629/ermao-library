@@ -124,7 +124,7 @@ def eligible_organize_works(
     db: Session,
     policy: dict[str, Any] | None = None,
     *,
-    work_ids: list[str] | None = None,
+    book_ids: list[str] | None = None,
     trigger: str = "MANUAL",
     limit: int = 500,
     force_selected: bool = False,
@@ -133,7 +133,7 @@ def eligible_organize_works(
     return organize_eligibility.select_eligible_works(
         db,
         rules=policy["rules"],
-        work_ids=work_ids,
+        book_ids=book_ids,
         trigger=trigger,
         limit=limit,
         force_selected=force_selected,
@@ -168,11 +168,11 @@ def organize_candidate_summary(db: Session) -> dict[str, Any]:
 
 
 def _run_dedupe_key(
-    trigger: str, work_ids: list[str], supplied: str | None = None
+    trigger: str, book_ids: list[str], supplied: str | None = None
 ) -> str:
     if supplied:
         return supplied
-    digest = hashlib.sha256("\n".join(sorted(work_ids)).encode("utf-8")).hexdigest()[
+    digest = hashlib.sha256("\n".join(sorted(book_ids)).encode("utf-8")).hexdigest()[
         :20
     ]
     return f"{trigger.lower()}:{digest}:{uuid4().hex}"
@@ -182,7 +182,7 @@ def create_organize_run(
     db: Session,
     *,
     trigger: str = "MANUAL",
-    work_ids: list[str] | None = None,
+    book_ids: list[str] | None = None,
     dedupe_key: str | None = None,
     limit: int = 500,
 ) -> dict[str, Any]:
@@ -195,17 +195,17 @@ def create_organize_run(
     if normalized_trigger not in {"MANUAL", "SCHEDULE", "NEW"}:
         raise ValueError("不支持的整理任务触发方式")
     policy = get_organize_policy(db)
-    selected = [str(item) for item in (work_ids or []) if str(item).strip()]
+    selected = [str(item) for item in (book_ids or []) if str(item).strip()]
     works = eligible_organize_works(
         db,
         policy,
-        work_ids=selected or None,
+        book_ids=selected or None,
         trigger=normalized_trigger,
         limit=limit,
         force_selected=bool(selected) and normalized_trigger == "MANUAL",
     )
     selections = {
-        str(work["id"]): organize_eligibility.first_version_selection_for_work(
+        str(work["id"]): organize_eligibility.first_resource_selection_for_book(
             db, str(work["id"])
         )
         for work in works
@@ -230,14 +230,13 @@ def create_organize_run(
     now = _now()
     run_id = _id("organize_run")
     run_status = "RUNNING" if works else "COMPLETED"
-    scope = {"workIds": selected, "rules": policy["rules"]}
+    scope = {"bookIds": selected, "rules": policy["rules"]}
     job_plans = tuple(
         PreparedOrganizeJobEnqueue(
             job_id=_id("organize_job"),
             task_id=_id("metadata_lookup"),
-            work_id=str(work["id"]),
-            volume_id=selections[str(work["id"])][2],
-            version_id=selections[str(work["id"])][0],
+            book_id=str(work["id"]),
+            resource_id=selections[str(work["id"])][0],
             provider_order=tuple(provider_plans[str(work["id"])]),
             reasons=tuple(str(reason) for reason in work.get("reasonCodes") or []),
         )
@@ -276,7 +275,7 @@ def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         raise ValueError("当前状态无法取消")
     now = _now()
     persist_cancel_organize_job(
-        db, job_id=job_id, work_id=str(job["workId"]), timestamp=now
+        db, job_id=job_id, book_id=str(job["bookId"]), timestamp=now
     )
     return organize_runs.get_job_row(db, job_id) or {}
 
@@ -287,12 +286,12 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     )
     if not job:
         raise ValueError("整理记录不存在")
-    work = organize_jobs.get_work_row(db, str(job["workId"]))
+    work = organize_jobs.get_work_row(db, str(job["bookId"]))
     if not work:
         raise ValueError("作品已不存在")
     current_unresolved = organize_jobs.get_unresolved_job_for_work(
         db,
-        work_id=str(job["workId"]),
+        book_id=str(job["bookId"]),
         exclude_job_id=job_id,
     )
     if current_unresolved:
@@ -301,14 +300,14 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         job = current_unresolved
         job_id = str(current_unresolved["id"])
     now = _now()
-    selection = organize_eligibility.first_version_selection_for_work(
+    selection = organize_eligibility.first_resource_selection_for_book(
         db,
-        str(job["workId"]),
-        str(job.get("versionId") or "") or None,
+        str(job["bookId"]),
+        str(job.get("resourceId") or "") or None,
     )
     if selection is None:
         raise ValueError("作品没有可整理的版本")
-    version_id, media_kind, volume_id = selection
+    _, media_kind, resource_id = selection
     providers = enabled_metadata_provider_ids(db, media_kind)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
     new_task_id = _id("metadata_lookup")
@@ -321,9 +320,8 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         job_id=job_id,
         task_ids=tuple(task_ids),
         task_id=new_task_id,
-        work_id=str(job["workId"]),
-        volume_id=volume_id,
-        version_id=version_id,
+        book_id=str(job["bookId"]),
+        resource_id=resource_id,
         provider_order=tuple(providers),
         run_id=run_id,
         timestamp=now,
@@ -344,18 +342,18 @@ def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     if not job:
         raise ValueError("整理记录不存在")
 
-    work_id = str(job.get("workId") or "")
+    book_id = str(job.get("bookId") or "")
     run_id = str(job.get("runId") or "") or None
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
     now = _now()
-    has_work_table = bool(work_id) and _has_table(db, "LibraryWork")
+    has_work_table = bool(book_id) and _has_table(db, "LibraryBook")
     remaining_status = (
-        organize_jobs.latest_job_status_for_work_excluding(db, work_id, job_id)
+        organize_jobs.latest_job_status_for_work_excluding(db, book_id, job_id)
         if has_work_table
         else None
     )
     organized = (
-        organize_jobs.work_is_organized(db, work_id) if has_work_table else False
+        organize_jobs.work_is_organized(db, book_id) if has_work_table else False
     )
     organize_status = (
         remaining_status or ("APPLIED" if organized else "UNASSESSED")
@@ -367,12 +365,12 @@ def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         db,
         job_id=job_id,
         task_ids=tuple(task_ids),
-        work_id=work_id,
+        book_id=book_id,
         organize_status=organize_status,
         run_id=run_id if has_run else None,
         timestamp=now,
     )
-    return {"id": job_id, "workId": work_id, "deleted": True}
+    return {"id": job_id, "bookId": book_id, "deleted": True}
 
 
 def process_organize_schedule_tick(db: Session) -> int:
@@ -389,7 +387,7 @@ def process_organize_schedule_tick(db: Session) -> int:
             result = create_organize_run(
                 db,
                 trigger="NEW",
-                work_ids=ids,
+                book_ids=ids,
                 dedupe_key=f"new:{hashlib.sha256('|'.join(sorted(ids)).encode()).hexdigest()[:24]}",
             )
             queued += int(result.get("queuedCount") or 0)

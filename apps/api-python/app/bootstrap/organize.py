@@ -80,7 +80,7 @@ def cancel_organize_job_command(
     db: Session,
     *,
     job_id: str,
-    work_id: str,
+    book_id: str,
     timestamp: datetime,
 ) -> None:
     sync_statement = prepare_sync_organize_runs(now=timestamp)
@@ -88,7 +88,7 @@ def cancel_organize_job_command(
         organize_jobs.cancel_lookup_tasks_for_job(db, job_id=job_id, now=timestamp)
         organize_jobs.cancel_job(db, job_id=job_id, now=timestamp)
         organize_jobs.mark_work_organize_status(
-            db, work_id=work_id, status="UNASSESSED", now=timestamp
+            db, book_id=book_id, status="UNASSESSED", now=timestamp
         )
         execute_sync_organize_runs(db, sync_statement)
 
@@ -99,9 +99,8 @@ def recognize_organize_job_command(
     job_id: str,
     task_ids: tuple[str, ...],
     task_id: str,
-    work_id: str,
-    volume_id: str | None,
-    version_id: str,
+    book_id: str,
+    resource_id: str | None,
     provider_order: tuple[str, ...],
     run_id: str | None,
     timestamp: datetime,
@@ -109,9 +108,8 @@ def recognize_organize_job_command(
     prepared_task_ids = list(task_ids)
     prepared_task = organize_jobs.prepare_lookup_task_row(
         task_id=task_id,
-        work_id=work_id,
-        volume_id=volume_id,
-        version_id=version_id,
+        book_id=book_id,
+        resource_id=resource_id,
         job_id=job_id,
         provider_order=provider_order,
         timestamp=timestamp,
@@ -123,7 +121,7 @@ def recognize_organize_job_command(
         organize_jobs.insert_prepared_lookup_task(db, prepared_task)
         organize_jobs.reset_job_for_recognition(db, job_id=job_id, now=timestamp)
         organize_jobs.mark_work_organize_status(
-            db, work_id=work_id, status="LOOKUP_PENDING", now=timestamp
+            db, book_id=book_id, status="LOOKUP_PENDING", now=timestamp
         )
         if run_id is not None:
             organize_jobs.reopen_run(db, run_id=run_id, now=timestamp)
@@ -134,7 +132,7 @@ def delete_organize_job_command(
     *,
     job_id: str,
     task_ids: tuple[str, ...],
-    work_id: str,
+    book_id: str,
     organize_status: str | None,
     run_id: str | None,
     timestamp: datetime,
@@ -155,9 +153,9 @@ def delete_organize_job_command(
             job_id=job_id,
             task_ids=prepared_task_ids,
         )
-        if work_id and organize_status is not None:
+        if book_id and organize_status is not None:
             organize_jobs.mark_work_organize_status(
-                db, work_id=work_id, status=organize_status, now=timestamp
+                db, book_id=book_id, status=organize_status, now=timestamp
             )
         if refresh_statement is not None:
             organize_jobs.execute_refresh_run_queue_count(db, refresh_statement)

@@ -24,18 +24,14 @@ from app.models.auth import (
     Session as UserSession,
 )
 from app.models.import_pipeline import KindleSendTask
-from app.models.library import (
-    LibraryOperation,
-    LibraryReadingProgress,
-    WorkDetailPreference,
-)
+from app.models import BookDetailPreference, LibraryOperation, ReaderResourceProgress
 from app.models.settings import (
     ReaderBookPreference,
     ReaderPreference,
     ReaderProgressCursor,
     SystemEvent,
 )
-from app.models.shelf import Shelf, ShelfWork
+from app.models.shelf import Shelf, ShelfBook
 
 
 @dataclass(frozen=True)
@@ -218,10 +214,10 @@ def prepare_personal_user_deletion(
 
     tables = set(sa_inspect(db.connection()).get_table_names())
     statements: list[Delete | Update] = []
-    if {"Shelf", "ShelfWork"}.issubset(tables):
+    if {"Shelf", "ShelfBook"}.issubset(tables):
         statements.append(
-            delete(ShelfWork).where(
-                ShelfWork.shelf_id.in_(
+            delete(ShelfBook).where(
+                ShelfBook.shelf_id.in_(
                     select(Shelf.id).where(Shelf.owner_user_id == user_id)
                 )
             )
@@ -230,8 +226,8 @@ def prepare_personal_user_deletion(
         statements.append(delete(Shelf).where(Shelf.owner_user_id == user_id))
     for model in (
         ReaderBookmark,
-        WorkDetailPreference,
-        LibraryReadingProgress,
+        BookDetailPreference,
+        ReaderResourceProgress,
         ReaderProgressCursor,
         ReaderBookPreference,
         ReaderPreference,

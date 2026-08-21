@@ -1,4 +1,4 @@
-"""Stable identity keys for LibraryVersion records."""
+"""Stable identity keys for LibraryReadableResource records."""
 
 from __future__ import annotations
 

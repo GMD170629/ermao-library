@@ -13,7 +13,7 @@ class BookAnchorDecision:
     """Where a newly recognized Resource should attach as a Book."""
 
     create_new_book_at_source_node: bool
-    volumes_root_folder_relative_path: str | None
+    resource_root_folder_relative_path: str | None
 
 
 def decide_book_anchor_for_resource(
@@ -27,22 +27,22 @@ def decide_book_anchor_for_resource(
     if organization_mode is TargetLibraryOrganizationMode.FLAT:
         return BookAnchorDecision(
             create_new_book_at_source_node=True,
-            volumes_root_folder_relative_path=None,
+            resource_root_folder_relative_path=None,
         )
 
     root_segment = resource_relative_path.value.split("/", 1)[0]
     if resource_relative_path.is_root_child and not resource_is_directory:
         return BookAnchorDecision(
             create_new_book_at_source_node=True,
-            volumes_root_folder_relative_path=None,
+            resource_root_folder_relative_path=None,
         )
     return BookAnchorDecision(
         create_new_book_at_source_node=False,
-        volumes_root_folder_relative_path=root_segment,
+        resource_root_folder_relative_path=root_segment,
     )
 
 
-def volumes_root_folder_creates_empty_book_on_discovery(
+def resource_root_folder_creates_empty_book_on_discovery(
     organization_mode: TargetLibraryOrganizationMode,
     *,
     is_root_child_directory: bool,

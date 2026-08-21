@@ -29,7 +29,7 @@ class SmartShelfCriteria:
     media_kinds: tuple[str, ...]
     tags: tuple[str, ...]
     authors: tuple[str, ...]
-    included_work_ids: tuple[str, ...]
+    included_book_ids: tuple[str, ...]
     filters: FilterExpression
 
     @classmethod
@@ -52,7 +52,7 @@ class SmartShelfCriteria:
             media_kinds=media_kinds,
             tags=_strings(value.get("tags")),
             authors=_strings(value.get("authors")),
-            included_work_ids=_strings(value.get("includedWorkIds")),
+            included_book_ids=_strings(value.get("includedBookIds")),
             filters=parse_filter_expression(
                 {
                     "combinator": value.get("combinator", "ALL"),
@@ -63,7 +63,7 @@ class SmartShelfCriteria:
 
 
 class SmartShelfQueryPort(Protocol):
-    def matching_work_ids(
+    def matching_book_ids(
         self,
         criteria: SmartShelfCriteria,
         *,
@@ -72,7 +72,7 @@ class SmartShelfQueryPort(Protocol):
 
 
 @dataclass(frozen=True)
-class GetSmartShelfWorkIds:
+class GetSmartShelfBookIds:
     query: SmartShelfQueryPort
 
     def execute(
@@ -81,4 +81,4 @@ class GetSmartShelfWorkIds:
         *,
         user_id: str | None,
     ) -> list[str]:
-        return self.query.matching_work_ids(criteria, user_id=user_id)
+        return self.query.matching_book_ids(criteria, user_id=user_id)

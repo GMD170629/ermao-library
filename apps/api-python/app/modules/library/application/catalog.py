@@ -14,7 +14,7 @@ CatalogSort = Literal["title", "recent"]
 
 
 @dataclass(frozen=True)
-class CatalogFile:
+class CatalogAsset:
     id: str
     mime_type: str
     size_bytes: int
@@ -22,12 +22,12 @@ class CatalogFile:
 
 
 @dataclass(frozen=True)
-class CatalogVolume:
+class CatalogResource:
     id: str
     title: str
     media_kind: str
     format: str
-    volume_index: float | None
+    resource_index: float | None
     sort_order: int
     description: str | None
     language: str | None
@@ -37,19 +37,19 @@ class CatalogVolume:
     isbn: str | None
     page_count: int | None
     has_cover: bool
-    file: CatalogFile
+    asset: CatalogAsset
     updated_at: datetime
 
 
 @dataclass(frozen=True)
-class CatalogWorkFacet:
+class CatalogBookFacet:
     id: str
     kind: CatalogFacetKind
     name: str
 
 
 @dataclass(frozen=True)
-class CatalogWork:
+class CatalogBook:
     id: str
     title: str
     author: str | None
@@ -57,24 +57,24 @@ class CatalogWork:
     series_name: str | None
     series_index: float | None
     has_cover: bool
-    facets: tuple[CatalogWorkFacet, ...]
-    volumes: tuple[CatalogVolume, ...]
+    facets: tuple[CatalogBookFacet, ...]
+    resources: tuple[CatalogResource, ...]
     created_at: datetime
     updated_at: datetime
 
 
 @dataclass(frozen=True)
-class CatalogWorkFilter:
+class CatalogBookFilter:
     search: str = ""
     facet_kind: CatalogFacetKind | None = None
     facet_id: str | None = None
-    work_ids: tuple[str, ...] | None = None
+    book_ids: tuple[str, ...] | None = None
     sort: CatalogSort = "title"
 
 
 @dataclass(frozen=True)
-class CatalogWorkPage:
-    works: tuple[CatalogWork, ...]
+class CatalogBookPage:
+    books: tuple[CatalogBook, ...]
     total: int
     page: int
     page_size: int
@@ -87,7 +87,7 @@ class CatalogFacet:
     kind: CatalogFacetKind
     name: str
     normalized_name: str
-    work_count: int
+    book_count: int
     updated_at: datetime
 
 
@@ -101,21 +101,21 @@ class CatalogFacetPage:
 
 
 class CatalogQueryPort(Protocol):
-    def list_works(
+    def list_books(
         self,
         *,
         context: AuthorizationContext,
-        filters: CatalogWorkFilter,
+        filters: CatalogBookFilter,
         page: int,
         page_size: int,
-    ) -> CatalogWorkPage: ...
+    ) -> CatalogBookPage: ...
 
-    def get_work(
+    def get_book(
         self,
         *,
         context: AuthorizationContext,
-        work_id: str,
-    ) -> CatalogWork | None: ...
+        book_id: str,
+    ) -> CatalogBook | None: ...
 
     def list_facets(
         self,
@@ -129,29 +129,29 @@ class CatalogQueryPort(Protocol):
 
 
 @dataclass(frozen=True)
-class ListCatalogWorks:
+class ListCatalogBooks:
     query: CatalogQueryPort
 
     def execute(
         self,
         *,
         context: AuthorizationContext,
-        filters: CatalogWorkFilter | None = None,
+        filters: CatalogBookFilter | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> CatalogWorkPage:
-        normalized_filters = filters or CatalogWorkFilter()
+    ) -> CatalogBookPage:
+        normalized_filters = filters or CatalogBookFilter()
         if (normalized_filters.facet_kind is None) != (
             normalized_filters.facet_id is None
         ):
             raise ValueError("facet kind and id must be provided together")
-        return self.query.list_works(
+        return self.query.list_books(
             context=context,
-            filters=CatalogWorkFilter(
+            filters=CatalogBookFilter(
                 search=normalized_filters.search.strip(),
                 facet_kind=normalized_filters.facet_kind,
                 facet_id=normalized_filters.facet_id,
-                work_ids=normalized_filters.work_ids,
+                book_ids=normalized_filters.book_ids,
                 sort=normalized_filters.sort,
             ),
             page=max(1, page),
@@ -160,19 +160,19 @@ class ListCatalogWorks:
 
 
 @dataclass(frozen=True)
-class GetCatalogWork:
+class GetCatalogBook:
     query: CatalogQueryPort
 
     def execute(
         self,
         *,
         context: AuthorizationContext,
-        work_id: str,
-    ) -> CatalogWork | None:
-        normalized_id = work_id.strip()
+        book_id: str,
+    ) -> CatalogBook | None:
+        normalized_id = book_id.strip()
         if not normalized_id:
             return None
-        return self.query.get_work(context=context, work_id=normalized_id)
+        return self.query.get_book(context=context, book_id=normalized_id)
 
 
 @dataclass(frozen=True)

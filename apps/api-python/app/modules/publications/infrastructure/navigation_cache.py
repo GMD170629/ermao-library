@@ -8,7 +8,13 @@ from collections.abc import Mapping
 from sqlalchemy import delete, exists, select, update
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryFile, LibraryReadingUnit, LibraryVolume
+from app.models import ReadableResourceNavigationUnit
+from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+)
 from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.navigation import (
     CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION,
@@ -37,14 +43,14 @@ class SqlAlchemyPublicationNavigationCacheReader:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def find(self, *, volume_id: str) -> PublicationNavigationCacheState | None:
-        cache = self._session.get(PublicationNavigationCache, volume_id)
+    def find(self, *, resource_id: str) -> PublicationNavigationCacheState | None:
+        cache = self._session.get(PublicationNavigationCache, resource_id)
         if cache is None:
             return None
         return PublicationNavigationCacheState(
             identity=PublicationNavigationCacheIdentity(
-                volume_id=cache.volume_id,
-                file_id=cache.file_id,
+                resource_id=cache.resource_id,
+                asset_id=cache.asset_id,
                 source_size_bytes=cache.source_size_bytes,
                 source_mtime_ms=cache.source_mtime_ms,
                 parser=cache.parser,
@@ -54,17 +60,18 @@ class SqlAlchemyPublicationNavigationCacheReader:
             projection_version=cache.projection_version,
         )
 
-    def has_materialized_projection(self, *, volume_id: str) -> bool:
+    def has_materialized_projection(self, *, resource_id: str) -> bool:
         cache_exists, chapter_exists, count_exists = self._session.execute(
             select(
-                exists().where(PublicationNavigationCache.volume_id == volume_id),
+                exists().where(PublicationNavigationCache.resource_id == resource_id),
                 exists().where(
-                    LibraryReadingUnit.volume_id == volume_id,
-                    LibraryReadingUnit.unit_type == "chapter",
+                    ReadableResourceNavigationUnit.resource_id == resource_id,
+                    ReadableResourceNavigationUnit.unit_type == "chapter",
                 ),
                 exists().where(
-                    LibraryVolume.id == volume_id,
-                    LibraryVolume.chapter_count.is_not(None),
+                    LibraryReadableResource.id == resource_id,
+                    LibraryReadableResourceMetadata.resource_id == resource_id,
+                    LibraryReadableResourceMetadata.chapter_count.is_not(None),
                 ),
             )
         ).one()
@@ -107,13 +114,13 @@ class SqlAlchemyPublicationNavigationWriteRepository:
         if not cas_result:
             return False
 
-        self._delete_projection(volume_id=source.volume_id)
+        self._delete_projection(resource_id=source.resource_id)
         self._session.add_all(
             [
-                LibraryReadingUnit(
+                ReadableResourceNavigationUnit(
                     id=entry.id,
-                    volume_id=source.volume_id,
-                    file_id=source.file_id,
+                    resource_id=source.resource_id,
+                    asset_id=source.asset_id,
                     unit_type="chapter",
                     title=entry.title,
                     href=entry.href,
@@ -124,11 +131,11 @@ class SqlAlchemyPublicationNavigationWriteRepository:
                 for entry in entries
             ]
         )
-        cache = self._session.get(PublicationNavigationCache, source.volume_id)
+        cache = self._session.get(PublicationNavigationCache, source.resource_id)
         if cache is None:
-            cache = PublicationNavigationCache(volume_id=source.volume_id)
+            cache = PublicationNavigationCache(resource_id=source.resource_id)
             self._session.add(cache)
-        cache.file_id = source.file_id
+        cache.asset_id = source.asset_id
         cache.source_size_bytes = identity.source_size_bytes
         cache.source_mtime_ms = identity.source_mtime_ms
         cache.parser = identity.parser
@@ -140,7 +147,7 @@ class SqlAlchemyPublicationNavigationWriteRepository:
     def invalidate_if_source_current(self, *, source: PublicationSource) -> bool:
         if not self._source_cas_update(source=source, chapter_count=None):
             return False
-        self._delete_projection(volume_id=source.volume_id)
+        self._delete_projection(resource_id=source.resource_id)
         return True
 
     def _source_cas_update(
@@ -149,48 +156,32 @@ class SqlAlchemyPublicationNavigationWriteRepository:
         source: PublicationSource,
         chapter_count: int | None,
     ) -> bool:
-        first_file_id = (
-            select(LibraryFile.id)
-            .where(LibraryFile.volume_id == LibraryVolume.id)
-            .order_by(
-                LibraryFile.sort_order.asc(),
-                LibraryFile.created_at.asc(),
-                LibraryFile.id.asc(),
-            )
-            .limit(1)
-            .correlate(LibraryVolume)
-            .scalar_subquery()
-        )
         current_source = exists(
-            select(LibraryFile.id).where(
-                LibraryFile.id == source.file_id,
-                LibraryFile.volume_id == source.volume_id,
-                LibraryFile.size_bytes == source.size_bytes,
-                LibraryFile.mtime_ms == source.mtime_ms,
+            select(LibraryResourceAsset.id)
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
-        )
-        updated_volume_id = self._session.scalar(
-            update(LibraryVolume)
             .where(
-                LibraryVolume.id == source.volume_id,
-                first_file_id == source.file_id,
-                current_source,
+                LibraryResourceAsset.id == source.asset_id,
+                LibraryResourceAsset.resource_id == source.resource_id,
+                LibraryResourceAsset.import_state == "READY",
+                LibrarySourceNode.observed_size_bytes == source.size_bytes,
+                LibrarySourceNode.observed_mtime_ns == source.mtime_ms * 1_000_000,
             )
-            .values(chapter_count=chapter_count)
-            .returning(LibraryVolume.id)
         )
-        return updated_volume_id == source.volume_id
+        return bool(self._session.scalar(select(current_source)))
 
-    def _delete_projection(self, *, volume_id: str) -> None:
+    def _delete_projection(self, *, resource_id: str) -> None:
         self._session.execute(
-            delete(LibraryReadingUnit).where(
-                LibraryReadingUnit.volume_id == volume_id,
-                LibraryReadingUnit.unit_type == "chapter",
+            delete(ReadableResourceNavigationUnit).where(
+                ReadableResourceNavigationUnit.resource_id == resource_id,
+                ReadableResourceNavigationUnit.unit_type == "chapter",
             )
         )
         self._session.execute(
             delete(PublicationNavigationCache).where(
-                PublicationNavigationCache.volume_id == volume_id
+                PublicationNavigationCache.resource_id == resource_id
             )
         )
 

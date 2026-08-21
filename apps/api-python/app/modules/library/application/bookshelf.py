@@ -25,7 +25,7 @@ class BookshelfItemQueryPort(Protocol):
         self,
         *,
         context: AuthorizationContext,
-        work_ids: tuple[str, ...],
+        book_ids: tuple[str, ...],
     ) -> tuple[BookshelfItemSummary, ...]: ...
 
 
@@ -37,13 +37,13 @@ class ListBookshelfItems:
         self,
         *,
         context: AuthorizationContext,
-        work_ids: tuple[str, ...],
+        book_ids: tuple[str, ...],
     ) -> tuple[BookshelfItemSummary, ...]:
         normalized_ids = tuple(
-            dict.fromkeys(work_id.strip() for work_id in work_ids if work_id.strip())
+            dict.fromkeys(book_id.strip() for book_id in book_ids if book_id.strip())
         )
         if len(normalized_ids) > 200:
-            raise ValueError("bookshelf projection is limited to 200 works")
+            raise ValueError("bookshelf projection is limited to 200 books")
         if not normalized_ids:
             return ()
-        return self.query.list_items(context=context, work_ids=normalized_ids)
+        return self.query.list_items(context=context, book_ids=normalized_ids)

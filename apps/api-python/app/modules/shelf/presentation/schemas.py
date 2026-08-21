@@ -26,7 +26,7 @@ class ShelfRules(HttpContractModel):
     publishers: list[str] | None = None
     combinator: Literal["ALL", "ANY"] | None = None
     conditions: list[ShelfCondition] | None = None
-    included_work_ids: list[str] | None = Field(default=None, alias="includedWorkIds")
+    included_book_ids: list[str] | None = Field(default=None, alias="includedBookIds")
 
 
 class ShelfWriteRequest(HttpContractModel):
@@ -36,7 +36,6 @@ class ShelfWriteRequest(HttpContractModel):
     rules: ShelfRules | None = None
     pinned: bool | None = None
     book_ids: list[str] | None = Field(default=None, alias="bookIds")
-    work_ids: list[str] | None = Field(default=None, alias="workIds")
     collection_ids: list[str] | None = Field(default=None, alias="collectionIds")
     member_shelf_ids: list[str] | None = Field(
         default=None,

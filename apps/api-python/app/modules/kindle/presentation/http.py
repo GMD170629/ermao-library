@@ -19,7 +19,7 @@ from app.bootstrap.kindle import (
     delete_kindle_send_task_command,
     find_active_kindle_task,
     get_kindle_send_task,
-    get_library_file_details_for_kindle,
+    get_library_asset_details_for_kindle,
     has_table,
     retry_kindle_send_task_command,
     update_email_settings_command,
@@ -30,7 +30,7 @@ from app.bootstrap.kindle import (
 )
 from app.core.auth import get_current_user
 from app.core.authorization import (
-    can_access_file,
+    can_access_asset,
     read_user_preferences,
 )
 from app.core.config import Settings, get_settings
@@ -117,9 +117,10 @@ def _prepared_event(
         target_type="kindleSendTask",
         target_id=str(task.get("id") or ""),
         metadata={
-            "workId": task.get("workId"),
-            "fileId": task.get("fileId"),
+            "bookId": task.get("bookId"),
+            "assetId": task.get("assetId"),
             "fileName": task.get("fileName"),
+            "resourceTitle": task.get("resourceTitle"),
             "format": task.get("format"),
             "sizeBytes": task.get("sizeBytes"),
             "recipientEmail": mask_email(task.get("recipientEmail")),
@@ -331,11 +332,11 @@ def create_kindle_send_task(
         return fail("Kindle 发送队列尚未初始化", status_code=503)
     if payload is None:
         return fail("发送参数格式不正确", status_code=400)
-    file_id = str(payload.file_id or "").strip()
-    work_id = str(payload.work_id or "").strip()
-    if not file_id:
+    asset_id = str(payload.asset_id or "").strip()
+    book_id = str(payload.book_id or "").strip()
+    if not asset_id:
         return fail("请选择要发送的图书文件", status_code=400)
-    if not can_access_file(db, user, file_id):
+    if not can_access_asset(db, user, asset_id):
         return fail("选择的图书文件不存在", status_code=404, code="FILE_NOT_FOUND")
     try:
         email_values = get_email_settings(db, include_password=True)
@@ -355,12 +356,12 @@ def create_kindle_send_task(
             details={"settingsHref": "/settings/email?tab=kindle"},
         )
 
-    file_row = get_library_file_details_for_kindle(db, file_id)
+    file_row = get_library_asset_details_for_kindle(db, asset_id)
     db.close()
-    if not file_row or (work_id and str(file_row["workId"]) != work_id):
+    if not file_row or (book_id and str(file_row["bookId"]) != book_id):
         return fail("选择的图书文件不存在", status_code=404)
-    file_format = str(file_row.get("volumeFormat") or "").upper()
-    file_name = Path(str(file_row.get("path") or "")).name
+    file_format = str(file_row.get("resourceFormat") or "").upper()
+    file_name = Path(str(file_row.get("sourcePath") or "")).name
     if (
         file_format not in SUPPORTED_FORMATS
         or Path(file_name).suffix.lower() not in SUPPORTED_EXTENSIONS
@@ -376,7 +377,7 @@ def create_kindle_send_task(
             status_code=400,
         )
 
-    existing = find_active_kindle_task(db, file_id=file_id, recipient_email=recipient)
+    existing = find_active_kindle_task(db, asset_id=asset_id, recipient_email=recipient)
     db.close()
     if existing:
         if not _can_access_task(user, existing):
@@ -398,11 +399,11 @@ def create_kindle_send_task(
     params = {
         "id": task_id,
         "userId": user.id,
-        "workId": file_row["workId"],
-        "volumeId": file_row.get("volumeId"),
-        "fileId": file_id,
+        "bookId": file_row["bookId"],
+        "resourceId": file_row.get("resourceId"),
+        "assetId": asset_id,
         "bookTitle": str(file_row.get("bookTitle") or fallback_book_title),
-        "volumeTitle": file_row.get("volumeTitle"),
+        "resourceTitle": file_row.get("resourceTitle"),
         "fileName": file_name,
         "format": file_format,
         "mimeType": file_row.get("mimeType")
@@ -431,7 +432,7 @@ def create_kindle_send_task(
         create_kindle_send_task_command(db, params, event=prepared_event)
     except IntegrityError:
         existing = find_active_kindle_task(
-            db, file_id=file_id, recipient_email=recipient
+            db, asset_id=asset_id, recipient_email=recipient
         )
         db.close()
         if existing:
@@ -505,7 +506,7 @@ def retry_kindle_send_task(
         return fail("只有失败、已取消或结果未知的任务可以重试", status_code=400)
     active_duplicate = find_active_kindle_task(
         db,
-        file_id=str(task.get("fileId") or ""),
+        asset_id=str(task.get("assetId") or ""),
         recipient_email=str(task.get("recipientEmail") or ""),
         exclude_task_id=task_id,
     )

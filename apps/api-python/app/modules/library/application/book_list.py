@@ -11,7 +11,7 @@ MAX_LIBRARY_PAGE_SIZE = 500
 
 
 @dataclass(frozen=True)
-class WorkListQuery:
+class BookListQuery:
     page: int
     requested_page_size: int | None
     visibility: str = "active"
@@ -35,8 +35,8 @@ class WorkListQuery:
 
 
 @dataclass(frozen=True)
-class WorkListResult:
-    works: list[dict[str, Any]]
+class BookListResult:
+    books: list[dict[str, Any]]
     total: int
     page: int
     page_size: int

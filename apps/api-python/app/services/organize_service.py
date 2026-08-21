@@ -216,9 +216,9 @@ def first_exact_title_candidate(
 
 
 def metadata_context_for_work(
-    db: Session, work_id: str
+    db: Session, book_id: str
 ) -> dict[str, Any] | None:
-    return organize_review.load_work_context(db, work_id)
+    return organize_review.load_work_context(db, book_id)
 
 
 def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:

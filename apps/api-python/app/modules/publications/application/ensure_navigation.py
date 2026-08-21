@@ -74,11 +74,11 @@ class EnsurePublicationNavigation:
     def execute(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> EnsurePublicationNavigationResult:
         source, cached, has_projection = self._lookup(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=access_scope,
         )
 
@@ -113,12 +113,12 @@ class EnsurePublicationNavigation:
                 chapter_count=None,
             )
         entries = flatten_publication_navigation(
-            volume_id=source.volume_id,
+            resource_id=source.resource_id,
             publication=publication,
         )
         actual_identity = publication_cache_identity(
-            volume_id=source.volume_id,
-            file_id=source.file_id,
+            resource_id=source.resource_id,
+            asset_id=source.asset_id,
             source_size_bytes=publication.revision.source_size_bytes,
             source_mtime_ms=publication.revision.source_mtime_ms,
             profile=profile,
@@ -143,13 +143,13 @@ class EnsurePublicationNavigation:
     def open_and_ensure(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> OpenPublicationNavigationResult:
         """Open once and reuse that Publication when the manifest needs caching."""
 
         source, cached, has_projection = self._lookup(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=access_scope,
         )
         profile = self._profile(source)
@@ -172,8 +172,8 @@ class EnsurePublicationNavigation:
                 self._invalidate(source)
             raise
         actual_identity = publication_cache_identity(
-            volume_id=source.volume_id,
-            file_id=source.file_id,
+            resource_id=source.resource_id,
+            asset_id=source.asset_id,
             source_size_bytes=publication.revision.source_size_bytes,
             source_mtime_ms=publication.revision.source_mtime_ms,
             profile=profile,
@@ -195,7 +195,7 @@ class EnsurePublicationNavigation:
         if cache_matches and not self._invalidate(source):
             raise PublicationNavigationSourceChangedError
         entries = flatten_publication_navigation(
-            volume_id=source.volume_id,
+            resource_id=source.resource_id,
             publication=publication,
         )
         if not self._publish(source=source, identity=actual_identity, entries=entries):
@@ -211,17 +211,17 @@ class EnsurePublicationNavigation:
     def _lookup(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> tuple[PublicationSource, PublicationNavigationCacheState | None, bool]:
         with self._lookup_unit_of_work_factory() as lookup:
             source = lookup.sources.find_source(
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=access_scope,
             )
-            cached = lookup.cache.find(volume_id=volume_id)
+            cached = lookup.cache.find(resource_id=resource_id)
             has_projection = lookup.cache.has_materialized_projection(
-                volume_id=volume_id
+                resource_id=resource_id
             )
         if source is None:
             raise PublicationNotFoundError
@@ -259,8 +259,8 @@ class EnsurePublicationNavigation:
         profile: PublicationParserProfile,
     ) -> PublicationNavigationCacheIdentity:
         return publication_cache_identity(
-            volume_id=source.volume_id,
-            file_id=source.file_id,
+            resource_id=source.resource_id,
+            asset_id=source.asset_id,
             source_size_bytes=source.size_bytes,
             source_mtime_ms=source.mtime_ms,
             profile=profile,

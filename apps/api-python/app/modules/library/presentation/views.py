@@ -1,278 +1,327 @@
-"""Library HTTP projections and work detail views."""
+"""Book and resource projections used by delivery adapters."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
+from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
-from fastapi.responses import Response
-from sqlalchemy import case, func, inspect, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.bootstrap.library import (
-    library_projections,
-    library_storage,
-    library_works,
-    volume_effective_media_kind,
+from app.contracts.media_capabilities import kindle_send_available_for_format, reader_type_for_format
+from app.models import (
+    Library,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
+    ReaderResourceProgress,
 )
-from app.bootstrap.organize import organize_jobs
-from app.contracts.media_capabilities import (
-    kindle_send_available_for_format,
-    reader_type_for_format,
-)
-from app.core.authorization import (
-    authorization_context,
-    can_access_work,
-    can_manage_system,
-    volume_visibility_predicate,
-)
-from app.core.time import timestamp_ms_to_iso
-from app.models.auth import User
-from app.models.library import (
-    LibraryFile,
-    LibraryReadingProgress,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
-)
+from app.modules.library.infrastructure.books import get_book as load_book
+from app.modules.library.infrastructure.readable_resource_schema import LibraryBook
 from app.modules.library.application.bookshelf import BookshelfItemSummary
-from app.modules.library.domain.media_kinds import media_kind_of
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.modules.reader.public import (
-    progress_navigation as _progress_navigation,
-)
-from app.schemas.responses import fail
-from app.services.book_identity import normalize_identity_part
-from app.services.organize_service import metadata_context_for_work
 
 
-def _now() -> datetime:
-    return datetime.now(UTC)
+def _dt(value: object) -> datetime | None:
+    return value if isinstance(value, datetime) else None
 
 
-def _has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except SQLAlchemyError:
-        return False
+def _format_bytes(value: int | None) -> str:
+    size = max(0, int(value or 0))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size / (1 if unit == 'KB' else 1024):.1f} {unit}"
+        size /= 1024
+    return "0 B"
 
 
-def _has_column(db: Session, table: str, column: str) -> bool:
-    try:
-        return any(
-            item.get("name") == column
-            for item in inspect(db.connection()).get_columns(table)
-        )
-    except SQLAlchemyError:
-        return False
-
-
-def _parse_json(value: Any, fallback: Any) -> Any:
+def _parse_json(value: object, fallback: object) -> object:
     if value is None:
         return fallback
     if isinstance(value, (dict, list)):
         return value
     try:
-        return json.loads(str(value))
+        parsed = json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError):
         return fallback
+    return parsed
 
 
-def _dt(value: Any) -> str | None:
-    if value is None:
-        return None
-    return timestamp_ms_to_iso(value) or str(value)
+def _cover_url(kind: str, identity: str, book: dict[str, Any] | None = None, *, size: str | None = None) -> str:
+    path = f"/api/{kind}/{quote(identity, safe='')}/cover"
+    return f"{path}?size={quote(size, safe='')}" if size else path
 
 
-def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
-    boolean_keys = {
-        "enabled",
-        "ignoreHidden",
-        "downloadAvailable",
-        "duplicate",
-        "primary",
-        "hidden",
-        "organized",
-        "abridged",
-        "pinned",
-    }
-    for key in boolean_keys & row.keys():
-        if row[key] in (0, 1):
-            row[key] = bool(row[key])
-    return row
+def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
+    return load_book(db, book_id)
 
 
-def _get_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    return library_works.get_work(db, work_id)
-
-
-def _visible_work_or_none(
-    db: Session, user: User, work_id: str
-) -> dict[str, Any] | None:
-    if not can_access_work(db, user, work_id):
-        return None
-    return _get_work(db, work_id)
-
-
-def _require_work_manager(db: Session, user: User, work_id: str) -> Response | None:
-    if not can_access_work(db, user, work_id):
-        return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
-    if not can_manage_system(user):
-        return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
-    return None
-
-
-def _cover_url(
-    kind: str, row_id: str, row: dict[str, Any] | None = None, **params: Any
-) -> str:
-    query = {key: value for key, value in params.items() if value is not None}
-    version_source = ""
-    if row:
-        version_source = "|".join(
-            [str(row.get("coverPath") or ""), _dt(row.get("updatedAt")) or ""]
-        )
-    if version_source.strip("|"):
-        query["v"] = hashlib.sha1(version_source.encode("utf-8")).hexdigest()[:12]
-    suffix = f"?{urlencode(query)}" if query else ""
-    return f"/api/{kind}/{row_id}/cover{suffix}"
-
-
-def _format_bytes(value: Any) -> str:
-    try:
-        size = float(value or 0)
-    except (TypeError, ValueError):
-        size = 0
-    if size <= 0:
-        return "0 B"
-    units = ["B", "KB", "MB", "GB", "TB"]
-    index = 0
-    while size >= 1024 and index < len(units) - 1:
-        size /= 1024
-        index += 1
-    return f"{size:.0f} {units[index]}" if index == 0 else f"{size:.1f} {units[index]}"
-
-
-def _coerce_int(value: Any, fallback: int = 0) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _labels() -> dict[str, dict[str, str]]:
-    return {
-        "format": {
-            "EPUB": "EPUB",
-            "COMIC": "漫画",
-            "PDF": "PDF",
-            "AUDIO": "音频",
-            "MOBI": "MOBI",
-            "AZW": "AZW",
-            "AZW3": "AZW3",
-            "PRC": "PRC",
-            "FB2": "FB2",
-            "TXT": "TXT",
-        },
-        "status": {"UNREAD": "未读", "READING": "在读", "FINISHED": "已读"},
-        "publication": {
-            "UNKNOWN": "未知",
-            "ONGOING": "连载中",
-            "COMPLETED": "已完结",
-            "HIATUS": "休刊",
-            "CANCELLED": "已取消",
-        },
-        "tracking": {
-            "NOT_TRACKING": "未追踪",
-            "TRACKING": "追踪中",
-            "PAUSED": "已暂停",
-            "IGNORED": "已忽略",
-        },
-    }
-
-
-def _reading_status(value: Any) -> str:
-    normalized = str(value or "UNREAD").strip().upper()
-    if normalized == "WANT":
-        return "UNREAD"
-    return normalized if normalized in {"UNREAD", "READING", "FINISHED"} else "UNREAD"
-
-
-def _available_media_kinds(db: Session, work_id: str) -> list[str]:
-    media_kind = volume_effective_media_kind(LibraryVolume)
-    return [
-        str(kind)
-        for kind in db.scalars(
-            select(media_kind.label("media_kind"))
-            .select_from(LibraryVolume)
-            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-            .where(
-                LibraryVersion.work_id == work_id,
-                LibraryVolume.hidden.is_(False),
+def _resource_rows(db: Session, book_id: str) -> list[tuple[LibraryReadableResource, LibraryReadableResourceMetadata | None]]:
+    return list(
+        db.execute(
+            select(LibraryReadableResource, LibraryReadableResourceMetadata)
+            .outerjoin(
+                LibraryReadableResourceMetadata,
+                LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
             )
-            .distinct()
+            .where(
+                LibraryReadableResource.book_id == book_id,
+                LibraryReadableResource.enablement_state == "ENABLED",
+                LibraryReadableResource.import_state == "READY",
+            )
             .order_by(
-                case(
-                    (media_kind == "EBOOK", 0),
-                    (media_kind == "COMIC", 1),
-                    (media_kind == "AUDIOBOOK", 2),
-                    else_=3,
-                )
+                LibraryReadableResourceMetadata.resource_index.asc().nulls_last(),
+                LibraryReadableResource.id.asc(),
             )
         ).all()
+    )
+
+
+def _asset_rows(
+    db: Session, resource_id: str
+) -> list[
+    tuple[
+        LibraryResourceAsset,
+        LibraryResourceAssetMetadata | None,
+        LibrarySourceNode,
+        Library,
     ]
+]:
+    return list(
+        db.execute(
+            select(
+                LibraryResourceAsset,
+                LibraryResourceAssetMetadata,
+                LibrarySourceNode,
+                Library,
+            )
+            .outerjoin(
+                LibraryResourceAssetMetadata,
+                LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+            )
+            .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+            .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == "READY",
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+            )
+            .order_by(LibraryResourceAsset.sequence_index, LibraryResourceAsset.id)
+        ).all()
+    )
 
 
-def _available_media_kinds_by_work(
-    db: Session, work_ids: list[str]
-) -> dict[str, list[str]]:
-    if not work_ids:
-        return {}
-    media_kind = volume_effective_media_kind(LibraryVolume)
-    rows = db.execute(
-        select(
-            LibraryVersion.work_id,
-            media_kind.label("media_kind"),
-        )
-        .select_from(LibraryVolume)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .where(
-            LibraryVersion.work_id.in_(work_ids),
-            LibraryVolume.hidden.is_(False),
-        )
-        .group_by(LibraryVersion.work_id, media_kind)
-        .order_by(
-            LibraryVersion.work_id.asc(),
-            case(
-                (media_kind == "EBOOK", 0),
-                (media_kind == "COMIC", 1),
-                (media_kind == "AUDIOBOOK", 2),
-                else_=3,
-            ),
-        )
-    ).all()
-    media_kinds = {work_id: [] for work_id in work_ids}
-    for row in rows:
-        media_kinds.setdefault(str(row.work_id), []).append(str(row.media_kind))
-    return media_kinds
-
-
-def _bookshelf_work_view(
-    work: dict[str, Any], media_kinds: list[str]
+def _resource_view(
+    db: Session,
+    resource: LibraryReadableResource,
+    metadata: LibraryReadableResourceMetadata | None,
+    *,
+    progress: ReaderResourceProgress | None = None,
+    include_assets: bool = True,
+    sort_order: int = 0,
 ) -> dict[str, Any]:
+    format_value = str(resource.format)
+    reader_type = reader_type_for_format(format_value)
+    assets = _asset_rows(db, resource.id) if include_assets else []
+    asset_views = [
+        {
+            "id": asset.id,
+            "resourceId": asset.resource_id,
+            "sourceNodeId": asset.source_node_id,
+            "role": asset.role,
+            "mimeType": asset_metadata.mime_type if asset_metadata else "application/octet-stream",
+            "sizeBytes": int(source.observed_size_bytes or 0),
+            "path": str(Path(library.root_path) / source.relative_path),
+            "kind": asset.role,
+            "size": _format_bytes(source.observed_size_bytes),
+            "mtimeMs": int(source.observed_mtime_ns // 1_000_000),
+            "durationMs": asset_metadata.duration_ms if asset_metadata else None,
+            "codec": asset_metadata.codec if asset_metadata else None,
+            "discNumber": asset_metadata.disc_number if asset_metadata else None,
+            "trackNumber": asset_metadata.track_number if asset_metadata else None,
+            "sortOrder": int(asset.sequence_index or 0),
+            "url": f"/api/assets/{quote(asset.id, safe='')}",
+        }
+        for asset, asset_metadata, source, library in assets
+    ]
+    total_size = sum(int(item["sizeBytes"]) for item in asset_views)
+    media_kind = str(resource.media_kind)
     return {
-        "id": work["id"],
-        "title": work.get("title") or "未命名作品",
-        "author": work.get("author") or "未知作者",
-        "availableMediaKinds": media_kinds,
-        "gradient": "from-slate-950 via-blue-800 to-cyan-500",
-        "coverStatus": work.get("coverStatus") or "PENDING",
-        "coverUrl": _cover_url("works", work["id"], work, size="medium"),
+        "id": resource.id,
+        "bookId": resource.book_id,
+        "sourceNodeId": resource.source_node_id,
+        "title": metadata.title if metadata else "",
+        "resourceIndex": metadata.resource_index if metadata else None,
+        "sortOrder": sort_order,
+        "format": format_value,
+        "mediaKind": media_kind,
+        "readerType": reader_type.value if reader_type else "reflowable",
+        "classification": {
+            "source": "AUTO",
+            "reason": "FORMAT_DEFAULT",
+            "suggestedMediaKind": media_kind,
+        },
+        "kindleSendAvailable": kindle_send_available_for_format(format_value),
+        "publisher": metadata.publisher if metadata else None,
+        "publishedAt": _dt(metadata.published_at) if metadata else None,
+        "language": metadata.language if metadata else None,
+        "isbn": metadata.isbn if metadata else None,
+        "identifier": metadata.identifier if metadata else None,
+        "narrator": metadata.narrator if metadata else None,
+        "abridged": metadata.abridged if metadata else None,
+        "importStatus": resource.import_state,
+        "importError": None,
+        "sizeBytes": total_size,
+        "pageCount": metadata.page_count if metadata else None,
+        "chapterCount": metadata.chapter_count if metadata else None,
+        "durationMs": metadata.duration_ms if metadata else None,
+        "trackCount": metadata.track_count if metadata else None,
+        "coverStatus": metadata.cover_status if metadata else "PENDING",
+        "coverPath": metadata.cover_path if metadata else None,
+        "coverUrl": _cover_url("resources", resource.id),
+        "progress": float(progress.percent if progress else 0),
+        "lastReadAt": _dt(progress.updated_at) if progress else None,
+        "resourceCompleted": bool(progress and progress.percent >= 100),
+        "hidden": resource.enablement_state != "ENABLED",
+        "readable": resource.import_state == "READY" and bool(asset_views),
+        "assets": asset_views,
     }
+
+
+def _format_bytes(value: int | None) -> str:
+    size = max(0, int(value or 0))
+    units = ("B", "KB", "MB", "GB", "TB")
+    index = 0
+    while size >= 1024 and index < len(units) - 1:
+        size //= 1024
+        index += 1
+    return f"{size} {units[index]}"
+
+
+def book_view(db: Session, book: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
+    book_id = str(book["id"])
+    progress_by_resource: dict[str, ReaderResourceProgress] = {}
+    if user_id:
+        resource_ids = [resource.id for resource, _metadata in _resource_rows(db, book_id)]
+        if resource_ids:
+            progress_by_resource = {
+                row.resource_id: row
+                for row in db.scalars(
+                    select(ReaderResourceProgress).where(
+                        ReaderResourceProgress.user_id == user_id,
+                        ReaderResourceProgress.resource_id.in_(resource_ids),
+                    )
+                ).all()
+            }
+    resources = [
+        _resource_view(
+            db,
+            resource,
+            metadata,
+            progress=progress_by_resource.get(resource.id),
+            sort_order=index,
+        )
+        for index, (resource, metadata) in enumerate(_resource_rows(db, book_id))
+    ]
+    unfinished = [item for item in resources if item["progress"] < 100]
+    selected = max(
+        (item for item in resources if item["lastReadAt"] is not None),
+        key=lambda item: item["lastReadAt"],
+        default=None,
+    )
+    return {
+        **book,
+        "tags": list(book.get("tags") or []),
+        "ignored": book.get("visibilityState") != "VISIBLE",
+        "organized": book.get("curationState") not in {None, "PENDING"},
+        "addedAt": book.get("createdAt"),
+        "updatedAt": book.get("updatedAt"),
+        "gradient": "",
+        "coverUrl": _cover_url("books", book_id, book, size="medium"),
+        "resources": resources,
+        "availableMediaKinds": sorted({str(item["mediaKind"]) for item in resources}),
+        "completed": bool(resources) and not unfinished,
+        "continueResourceId": selected["id"] if selected else None,
+        "continueResourceTitle": selected["title"] if selected else None,
+        "continueResourceProgress": selected["progress"] if selected else 0,
+    }
+
+
+def resource_view(
+    db: Session,
+    resource_id: str,
+    user_id: str | None = None,
+) -> dict[str, Any] | None:
+    row = db.execute(
+        select(LibraryReadableResource, LibraryReadableResourceMetadata)
+        .outerjoin(
+            LibraryReadableResourceMetadata,
+            LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+        )
+        .where(LibraryReadableResource.id == resource_id)
+    ).first()
+    if row is None:
+        return None
+    progress = None
+    if user_id:
+        progress = db.scalar(
+            select(ReaderResourceProgress).where(
+                ReaderResourceProgress.user_id == user_id,
+                ReaderResourceProgress.resource_id == resource_id,
+            )
+        )
+    return _resource_view(db, row[0], row[1], progress=progress)
+
+
+def list_resource_views(
+    db: Session,
+    book_id: str,
+    user_id: str | None,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    """Return one deterministic Resource page with actor-scoped progress."""
+
+    rows = _resource_rows(db, book_id)
+    total = len(rows)
+    normalized_page = max(1, page)
+    normalized_size = min(500, max(1, page_size))
+    start = (normalized_page - 1) * normalized_size
+    selected = rows[start : start + normalized_size]
+    resource_ids = [resource.id for resource, _metadata in selected]
+    progress_by_resource: dict[str, ReaderResourceProgress] = {}
+    if user_id and resource_ids:
+        progress_by_resource = {
+            row.resource_id: row
+            for row in db.scalars(
+                select(ReaderResourceProgress).where(
+                    ReaderResourceProgress.user_id == user_id,
+                    ReaderResourceProgress.resource_id.in_(resource_ids),
+                )
+            ).all()
+        }
+    offset = start
+    return (
+        [
+            _resource_view(
+                db,
+                resource,
+                metadata,
+                progress=progress_by_resource.get(resource.id),
+                sort_order=offset + index,
+            )
+            for index, (resource, metadata) in enumerate(selected)
+        ],
+        normalized_page,
+        normalized_size,
+        total,
+    )
 
 
 def bookshelf_item_view(item: BookshelfItemSummary) -> dict[str, Any]:
@@ -280,888 +329,28 @@ def bookshelf_item_view(item: BookshelfItemSummary) -> dict[str, Any]:
         "id": item.id,
         "title": item.title,
         "author": item.author,
-        "coverUrl": _cover_url(
-            "works",
-            item.id,
-            {"coverPath": item.cover_path, "updatedAt": item.updated_at},
-            size="medium",
-        ),
+        "coverUrl": _cover_url("books", item.id, size="medium"),
         "availableMediaKinds": list(item.available_media_kinds),
-        "progress": item.progress,
+        "progress": float(item.progress),
     }
 
 
-def bookshelf_item_views(
-    items: tuple[BookshelfItemSummary, ...],
-) -> list[dict[str, Any]]:
+def bookshelf_item_views(items: tuple[BookshelfItemSummary, ...] | list[BookshelfItemSummary]) -> list[dict[str, Any]]:
     return [bookshelf_item_view(item) for item in items]
 
 
-def _management_work_views(
-    db: Session,
-    works: list[dict[str, Any]],
-    user_id: str,
-) -> list[dict[str, Any]]:
-    if not works:
-        return []
-    work_ids = [str(work["id"]) for work in works]
-    user = db.get(User, user_id)
-    context = authorization_context(db, user) if user is not None else None
-    filters = [
-        LibraryVersion.work_id.in_(work_ids),
-        LibraryVolume.hidden.is_(False),
-    ]
-    if context is not None:
-        filters.append(volume_visibility_predicate(context))
-    rows = db.execute(
-        select(LibraryVersion, LibraryVolume)
-        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
-        .where(*filters)
-        .order_by(
-            LibraryVersion.work_id,
-            LibraryVolume.sort_order,
-            LibraryVolume.created_at,
-            LibraryVolume.id,
-        )
-    ).all()
-    resources: dict[str, list[tuple[LibraryVersion, LibraryVolume]]] = {
-        work_id: [] for work_id in work_ids
-    }
-    volume_ids: list[str] = []
-    for version, volume in rows:
-        resources.setdefault(version.work_id, []).append((version, volume))
-        volume_ids.append(volume.id)
-    progresses = (
-        {
-            progress.volume_id: progress
-            for progress in db.scalars(
-                select(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == user_id,
-                    LibraryReadingProgress.volume_id.in_(volume_ids),
-                )
-            ).all()
-        }
-        if volume_ids
-        else {}
-    )
-    result: list[dict[str, Any]] = []
-    for work in works:
-        work_resources = resources.get(str(work["id"]), [])
-        media_kinds = list(
-            dict.fromkeys(media_kind_of(volume) for _version, volume in work_resources)
-        )
-        percents = [
-            float(progresses[volume.id].percent) if volume.id in progresses else 0.0
-            for _version, volume in work_resources
-        ]
-        latest = max(
-            (
-                progresses[volume.id].updated_at
-                for _version, volume in work_resources
-                if volume.id in progresses
-            ),
-            default=None,
-        )
-        completed = bool(percents) and all(percent >= 100 for percent in percents)
-        reading = any(percent > 0 for percent in percents)
-        result.append(
-            {
-                **_bookshelf_work_view(work, media_kinds),
-                "seriesName": work.get("seriesName"),
-                "tags": _parse_json(work.get("tags"), []),
-                "statusValue": "FINISHED"
-                if completed
-                else "READING"
-                if reading
-                else "UNREAD",
-                "lastReadAt": _dt(latest),
-                "importedAt": _dt(work.get("createdAt")),
-            }
-        )
-    return result
+def preferred_book_cover_path(book: dict[str, Any]) -> str | None:
+    value = book.get("coverPath")
+    return str(value) if value else None
 
 
-def _volume_file_view(file: LibraryFile) -> dict[str, Any]:
-    return {
-        "id": file.id,
-        "volumeId": file.volume_id,
-        "path": file.path,
-        "mimeType": file.mime_type,
-        "kind": file.kind,
-        "sortOrder": file.sort_order,
-        "sizeBytes": file.size_bytes,
-        "size": _format_bytes(file.size_bytes),
-        "durationMs": file.duration_ms,
-        "discNumber": file.disc_number,
-        "trackNumber": file.track_number,
-        "url": f"/api/files/{quote(file.id, safe='')}",
-    }
-
-
-def _volume_file_summary_view(file: LibraryFile) -> dict[str, Any]:
-    return {
-        "id": file.id,
-        "path": file.path,
-        "sizeBytes": file.size_bytes,
-        "size": _format_bytes(file.size_bytes),
-    }
-
-
-def _library_volume_view(
-    volume: LibraryVolume,
-    *,
-    version_id: str,
-    progress: LibraryReadingProgress | None,
-    files: list[LibraryFile],
-) -> dict[str, Any]:
-    percent = min(100.0, max(0.0, float(progress.percent if progress else 0)))
-    reader_type = reader_type_for_format(volume.format)
-    return {
-        "id": volume.id,
-        "versionId": version_id,
-        "title": volume.title,
-        "volumeIndex": volume.volume_index,
-        "sortOrder": volume.sort_order,
-        "format": volume.format,
-        "readerType": reader_type.value if reader_type else "reflowable",
-        "classification": {
-            "source": volume.classification_source,
-            "reason": volume.classification_reason,
-            "suggestedMediaKind": volume.suggested_media_kind,
-        },
-        "readable": reader_type is not None,
-        "kindleSendAvailable": kindle_send_available_for_format(volume.format),
-        "publisher": volume.publisher,
-        "publishedAt": _dt(volume.published_at),
-        "language": volume.language,
-        "isbn": volume.isbn,
-        "identifier": volume.identifier,
-        "narrator": volume.narrator,
-        "abridged": volume.abridged,
-        "origin": volume.origin,
-        "importStatus": volume.import_status,
-        "importError": volume.import_error,
-        "coverStatus": volume.cover_status,
-        "coverUrl": _cover_url(
-            "volumes",
-            volume.id,
-            {"coverPath": volume.cover_path, "updatedAt": volume.updated_at},
-        ),
-        "sizeBytes": volume.size_bytes,
-        "pageCount": volume.page_count,
-        "chapterCount": volume.chapter_count,
-        "durationMs": volume.duration_ms,
-        "trackCount": volume.track_count,
-        "progress": percent,
-        "completed": percent >= 100,
-        "lastReadAt": _dt(progress.updated_at) if progress else None,
-        "files": [_volume_file_view(file) for file in files],
-    }
-
-
-def _library_volume_page_view(
-    volume: LibraryVolume,
-    *,
-    version_id: str,
-    progress: LibraryReadingProgress | None,
-    files: list[LibraryFile],
-) -> dict[str, Any]:
-    legacy_view = _library_volume_view(
-        volume,
-        version_id=version_id,
-        progress=progress,
-        files=[],
-    )
-    return _work_detail_volume_view(
-        legacy_view,
-        files=[_volume_file_summary_view(file) for file in files],
-    )
-
-
-def _work_detail_volume_view(
-    volume: dict[str, Any],
-    *,
-    files: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    source_files = files if files is not None else volume.get("files", [])
-    return {
-        "id": volume["id"],
-        "versionId": volume["versionId"],
-        "title": volume["title"],
-        "volumeIndex": volume.get("volumeIndex"),
-        "sortOrder": volume["sortOrder"],
-        "format": volume["format"],
-        "readerType": volume["readerType"],
-        "classification": volume["classification"],
-        "readable": volume["readable"],
-        "kindleSendAvailable": volume["kindleSendAvailable"],
-        "publisher": volume.get("publisher"),
-        "publishedAt": volume.get("publishedAt"),
-        "language": volume.get("language"),
-        "isbn": volume.get("isbn"),
-        "identifier": volume.get("identifier"),
-        "narrator": volume.get("narrator"),
-        "coverUrl": volume["coverUrl"],
-        "sizeBytes": volume["sizeBytes"],
-        "pageCount": volume.get("pageCount"),
-        "chapterCount": volume.get("chapterCount"),
-        "durationMs": volume.get("durationMs"),
-        "trackCount": volume.get("trackCount"),
-        "progress": volume["progress"],
-        "files": [
-            {
-                "id": file["id"],
-                "path": file["path"],
-                "sizeBytes": file["sizeBytes"],
-                "size": file["size"],
-            }
-            for file in source_files
-        ],
-    }
-
-
-def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": book["id"],
-        "title": book["title"],
-        "author": book["author"],
-        "description": book.get("description"),
-        "tags": book["tags"],
-        "seriesName": book.get("seriesName"),
-        "seriesIndex": book.get("seriesIndex"),
-        "seriesFacet": book.get("seriesFacet"),
-        "authorFacets": book.get("authorFacets", []),
-        "coverStatus": book["coverStatus"],
-        "coverUrl": book["coverUrl"],
-        "continueVolumeId": book.get("continueVolumeId"),
-        "continueVersionId": book.get("continueVersionId"),
-        "continueVolumeTitle": book.get("continueVolumeTitle"),
-        "continueVolumeProgress": book.get("continueVolumeProgress", 0.0),
-        "continueReaderType": book.get("continueReaderType"),
-        "completed": book["completed"],
-        "versions": [
-            {
-                "id": version["id"],
-                "sourceKey": version["sourceKey"],
-                "sourceName": version.get("sourceName"),
-                "completed": version["completed"],
-                "volumeCount": version["volumeCount"],
-                "sizeBytes": version["sizeBytes"],
-                "coverStatus": version["coverStatus"],
-                "coverUrl": version["coverUrl"],
-                "volumes": [
-                    _work_detail_volume_view(volume) for volume in version["volumes"]
-                ],
-            }
-            for version in book["versions"]
-        ],
-    }
-
-
-def _reading_unit_view(unit: LibraryReadingUnit) -> dict[str, Any]:
-    return {
-        "id": unit.id,
-        "volumeId": unit.volume_id,
-        "fileId": unit.file_id,
-        "unitType": unit.unit_type,
-        "title": unit.title,
-        "href": unit.href,
-        "mediaType": unit.media_type,
-        "sortOrder": unit.sort_order,
-        "startMs": unit.start_ms,
-        "endMs": unit.end_ms,
-        "durationMs": unit.duration_ms,
-        "width": unit.width,
-        "height": unit.height,
-        "size": unit.size,
-        "metadataJson": _parse_json(unit.metadata_json, {}),
-        "createdAt": _dt(unit.created_at),
-        "updatedAt": _dt(unit.updated_at),
-    }
-
-
-def _version_sort_key(version: LibraryVersion) -> tuple[int, str, str, str]:
-    return (
-        0 if version.source_key == IMPLICIT_VERSION_SOURCE_KEY else 1,
-        version.source_name or "",
-        version.source_key,
-        version.id,
-    )
-
-
-def _continue_volume_from_progress(
-    volumes: list[LibraryVolume],
-    progresses: dict[str, LibraryReadingProgress],
-) -> LibraryVolume | None:
-    if not volumes:
-        return None
-    unfinished = [
-        volume
-        for volume in volumes
-        if float(progresses[volume.id].percent if volume.id in progresses else 0) < 100
-    ]
-    pool = unfinished or volumes
-    with_progress = [volume for volume in pool if volume.id in progresses]
-    if not with_progress:
-        return pool[0]
-    return max(
-        with_progress,
-        key=lambda volume: (progresses[volume.id].updated_at, volume.id),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _WorkViewBatch:
-    metadata_lookups: dict[str, dict[str, object]]
-    rows_by_work: dict[str, list[tuple[LibraryVersion, LibraryVolume]]]
-    progresses: dict[str, LibraryReadingProgress]
-    files: dict[str, list[LibraryFile]]
-
-
-def _load_work_view_batch(
-    db: Session,
-    works: list[dict[str, Any]],
-    user_id: str | None,
-    *,
-    include_files: bool,
-) -> _WorkViewBatch:
-    work_ids = [str(work["id"]) for work in works]
-    user = db.get(User, user_id) if user_id else None
-    context = authorization_context(db, user) if user is not None else None
-    filters = [
-        LibraryVersion.work_id.in_(work_ids),
-        LibraryVolume.hidden.is_(False),
-    ]
-    if context is not None:
-        filters.append(volume_visibility_predicate(context))
-    rows = db.execute(
-        select(LibraryVersion, LibraryVolume)
-        .join(LibraryVolume, LibraryVolume.version_id == LibraryVersion.id)
-        .where(*filters)
-        .order_by(
-            LibraryVersion.work_id.asc(),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-    ).all()
-    rows_by_work: dict[str, list[tuple[LibraryVersion, LibraryVolume]]] = {
-        work_id: [] for work_id in work_ids
-    }
-    volume_ids: list[str] = []
-    for version, volume in rows:
-        rows_by_work.setdefault(version.work_id, []).append((version, volume))
-        volume_ids.append(volume.id)
-
-    progresses = (
-        {
-            progress.volume_id: progress
-            for progress in db.scalars(
-                select(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == user_id,
-                    LibraryReadingProgress.volume_id.in_(volume_ids),
-                )
-            ).all()
-        }
-        if user_id and volume_ids
-        else {}
-    )
-    files: dict[str, list[LibraryFile]] = {volume_id: [] for volume_id in volume_ids}
-    if include_files and volume_ids:
-        for file in db.scalars(
-            select(LibraryFile)
-            .where(LibraryFile.volume_id.in_(volume_ids))
-            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
-        ).all():
-            files[file.volume_id].append(file)
-
-    return _WorkViewBatch(
-        metadata_lookups=library_projections.latest_metadata_lookups_for_works(
-            db, work_ids
-        ),
-        rows_by_work=rows_by_work,
-        progresses=progresses,
-        files=files,
-    )
-
-
-def _work_views(
-    db: Session,
-    works: list[dict[str, Any]],
-    user_id: str | None = None,
-    *,
-    include_files: bool = True,
-) -> list[dict[str, Any]]:
-    if not works:
-        return []
-    batch = _load_work_view_batch(
-        db,
-        works,
-        user_id,
-        include_files=include_files,
-    )
-    return [
-        _work_view(
-            db,
-            work,
-            user_id,
-            include_files=include_files,
-            batch=batch,
-        )
-        for work in works
-    ]
-
-
-def _work_view(
-    db: Session,
-    work: dict[str, Any],
-    user_id: str | None = None,
-    *,
-    volume_limit_per_version: int | None = None,
-    selected_version_id: str | None = None,
-    selected_volume_id: str | None = None,
-    current_version_only: bool = False,
-    include_files: bool = True,
-    batch: _WorkViewBatch | None = None,
-) -> dict[str, Any]:
-    work_id = str(work["id"])
-    metadata_lookup = (
-        batch.metadata_lookups.get(work_id)
-        if batch is not None
-        else library_projections.latest_metadata_lookup_for_work(db, work_id)
-    )
-    if batch is not None:
-        rows = batch.rows_by_work.get(work_id, [])
-    else:
-        user = db.get(User, user_id) if user_id else None
-        context = authorization_context(db, user) if user is not None else None
-        filters = [
-            LibraryVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-        ]
-        if context is not None:
-            filters.append(volume_visibility_predicate(context))
-        rows = db.execute(
-            select(LibraryVersion, LibraryVolume)
-            .join(
-                LibraryVolume,
-                LibraryVolume.version_id == LibraryVersion.id,
-            )
-            .where(*filters)
-            .order_by(
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.created_at.asc(),
-                LibraryVolume.id.asc(),
-            )
-        ).all()
-    grouped: dict[str, tuple[LibraryVersion, list[LibraryVolume]]] = {}
-    for version, volume in rows:
-        grouped.setdefault(version.id, (version, []))[1].append(volume)
-    ordered = sorted(grouped.values(), key=lambda item: _version_sort_key(item[0]))
-    volume_ids = [volume.id for _version, volume in rows]
-    progresses = (
-        batch.progresses
-        if batch is not None
-        else (
-            {
-                progress.volume_id: progress
-                for progress in db.scalars(
-                    select(LibraryReadingProgress).where(
-                        LibraryReadingProgress.user_id == user_id,
-                        LibraryReadingProgress.volume_id.in_(volume_ids),
-                    )
-                ).all()
-            }
-            if user_id and volume_ids
-            else {}
-        )
-    )
-    incomplete: dict[str, list[LibraryVolume]] = {}
-    all_volumes: list[LibraryVolume] = []
-    for version, volumes in ordered:
-        all_volumes.extend(volumes)
-        incomplete[version.id] = [
-            volume
-            for volume in volumes
-            if float(progresses[volume.id].percent if volume.id in progresses else 0)
-            < 100
-        ]
-    continue_volume = _continue_volume_from_progress(all_volumes, progresses)
-    requested_volume = next(
-        (volume for volume in all_volumes if volume.id == selected_volume_id),
-        None,
-    )
-    available_version_ids = {version.id for version, _volumes in ordered}
-    current_version_id = (
-        selected_version_id
-        if selected_version_id in available_version_ids
-        else requested_volume.version_id
-        if requested_volume is not None
-        else continue_volume.version_id
-        if continue_volume is not None
-        else ordered[0][0].id
-        if ordered
-        else None
-    )
-    loaded_version_id = (
-        selected_version_id
-        if selected_version_id in available_version_ids
-        else requested_volume.version_id
-        if requested_volume is not None
-        else ordered[0][0].id
-        if current_version_only and len(ordered) == 1
-        else current_version_id
-        if not current_version_only
-        else None
-    )
-    response_volumes: dict[str, list[LibraryVolume]] = {}
-    for version, volumes in ordered:
-        selected = []
-        if not current_version_only or version.id == loaded_version_id:
-            selected = (
-                list(volumes)
-                if volume_limit_per_version is None
-                else list(volumes[:volume_limit_per_version])
-            )
-        if (
-            continue_volume is not None
-            and continue_volume.version_id == version.id
-            and (not current_version_only or version.id == loaded_version_id)
-            and all(volume.id != continue_volume.id for volume in selected)
-        ):
-            selected.append(continue_volume)
-        response_volumes[version.id] = selected
-    response_volume_ids = [
-        volume.id for volumes in response_volumes.values() for volume in volumes
-    ]
-    files: dict[str, list[LibraryFile]] = (
-        batch.files
-        if batch is not None
-        else {volume_id: [] for volume_id in response_volume_ids}
-    )
-    if batch is None and include_files and response_volume_ids:
-        for file in db.scalars(
-            select(LibraryFile)
-            .where(LibraryFile.volume_id.in_(response_volume_ids))
-            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
-        ).all():
-            files[file.volume_id].append(file)
-    version_views = []
-    for version, volumes in ordered:
-        representative = next((volume for volume in volumes if volume.cover_path), None)
-        if representative is None and volumes:
-            representative = volumes[0]
-        version_cover_url = (
-            _cover_url(
-                "versions",
-                version.id,
-                {"coverPath": version.cover_path, "updatedAt": version.updated_at},
-            )
-            if version.cover_path
-            else _cover_url(
-                "volumes",
-                representative.id,
-                {
-                    "coverPath": representative.cover_path,
-                    "updatedAt": representative.updated_at,
-                },
-            )
-            if representative is not None
-            else _cover_url("versions", version.id)
-        )
-        version_views.append({
-            "id": version.id,
-            "sourceKey": version.source_key,
-            "sourceName": version.source_name,
-            "completed": bool(volumes) and not incomplete[version.id],
-            "volumeCount": len(volumes),
-            "sizeBytes": sum(volume.size_bytes for volume in volumes),
-            "coverStatus": (
-                version.cover_status
-                if version.cover_path
-                else representative.cover_status
-                if representative is not None
-                else "MISSING"
-            ),
-            "coverUrl": version_cover_url,
-            "volumes": [
-                _library_volume_view(
-                    volume,
-                    version_id=version.id,
-                    progress=progresses.get(volume.id),
-                    files=files.get(volume.id, []),
-                )
-                for volume in response_volumes[version.id]
-            ],
-        })
-    media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
-    kinds = sorted(
-        dict.fromkeys(media_kind_of(volume) for volume in all_volumes),
-        key=lambda kind: media_order.get(kind, 99),
-    )
-    last_progress = max(
-        progresses.values(), key=lambda progress: progress.updated_at, default=None
-    )
-    return {
-        "id": work_id,
-        "title": work.get("title") or "未命名作品",
-        "author": work.get("author") or "未知作者",
-        "description": work.get("description"),
-        "publicationStatus": work.get("publicationStatus") or "UNKNOWN",
-        "trackingStatus": work.get("trackingStatus") or "NOT_TRACKING",
-        "tags": _parse_json(work.get("tags"), []),
-        "seriesName": work.get("seriesName"),
-        "seriesIndex": work.get("seriesIndex"),
-        "organized": bool(work.get("organized")),
-        "organizeStatus": work.get("organizeStatus") or "REVIEWING",
-        "metadataQuality": int(work.get("metadataQuality") or 0),
-        "metadataLookupStatus": (metadata_lookup or {}).get("status"),
-        "metadataLookupSource": (metadata_lookup or {}).get("resultSource"),
-        "metadataLookupError": (metadata_lookup or {}).get("errorSummary"),
-        "coverStatus": work.get("coverStatus") or "PENDING",
-        "coverUrl": _cover_url("works", work_id, work, size="medium"),
-        "continueVolumeId": continue_volume.id if continue_volume else None,
-        "continueVersionId": continue_volume.version_id if continue_volume else None,
-        "continueVolumeTitle": continue_volume.title if continue_volume else None,
-        "continueVolumeProgress": float(progresses[continue_volume.id].percent)
-        if continue_volume and continue_volume.id in progresses
-        else 0.0,
-        "continueReaderType": (
-            reader_type_for_format(continue_volume.format)
-            if continue_volume is not None
-            else None
-        ),
-        "completed": bool(all_volumes)
-        and all(
-            float(progresses[volume.id].percent if volume.id in progresses else 0)
-            >= 100
-            for volume in all_volumes
-        ),
-        "lastReadAt": _dt(last_progress.updated_at) if last_progress else None,
-        "addedAt": _dt(work.get("createdAt")),
-        "versions": version_views,
-        "availableMediaKinds": kinds,
-    }
-
-
-def _work_volume_page_view(
-    db: Session,
-    *,
-    user: User,
-    work_id: str,
-    version_id: str,
-    page: int,
-    page_size: int,
-) -> dict[str, Any] | None:
-    context = authorization_context(db, user)
-    version = db.scalar(
-        select(LibraryVersion).where(
-            LibraryVersion.id == version_id,
-            LibraryVersion.work_id == work_id,
-        )
-    )
-    if version is None:
-        return None
-    filters = [
-        LibraryVolume.hidden.is_(False),
-        volume_visibility_predicate(context),
-        LibraryVolume.version_id == version.id,
-    ]
-    total = int(db.scalar(select(func.count(LibraryVolume.id)).where(*filters)) or 0)
-    bounded_page_size = min(100, max(1, page_size))
-    total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
-    bounded_page = min(max(1, page), total_pages)
-    volumes = db.scalars(
-        select(LibraryVolume)
-        .where(*filters)
-        .order_by(
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-        .limit(bounded_page_size)
-        .offset((bounded_page - 1) * bounded_page_size)
-    ).all()
-    volume_ids = [volume.id for volume in volumes]
-    progresses = (
-        {
-            progress.volume_id: progress
-            for progress in db.scalars(
-                select(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == user.id,
-                    LibraryReadingProgress.volume_id.in_(volume_ids),
-                )
-            ).all()
-        }
-        if volume_ids
-        else {}
-    )
-    files: dict[str, list[LibraryFile]] = {volume_id: [] for volume_id in volume_ids}
-    if volume_ids:
-        for file in db.scalars(
-            select(LibraryFile)
-            .where(LibraryFile.volume_id.in_(volume_ids))
-            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
-        ).all():
-            files[file.volume_id].append(file)
-    return {
-        "versionId": version.id,
-        "sourceKey": version.source_key,
-        "sourceName": version.source_name,
-        "volumes": [
-            _library_volume_page_view(
-                volume,
-                version_id=version.id,
-                progress=progresses.get(volume.id),
-                files=files.get(volume.id, []),
-            )
-            for volume in volumes
-        ],
-        "page": bounded_page,
-        "pageSize": bounded_page_size,
-        "total": total,
-        "totalPages": total_pages,
-    }
-
-
-def _work_reading_units_view(
-    db: Session,
-    *,
-    user: User,
-    work_id: str,
-    volume_id: str,
-    page: int,
-    page_size: int,
-) -> dict[str, Any] | None:
-    context = authorization_context(db, user)
-    volume = db.scalar(
-        select(LibraryVolume)
-        .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
-        )
-        .where(
-            LibraryVolume.id == volume_id,
-            LibraryVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-            volume_visibility_predicate(context),
-        )
-    )
-    if volume is None:
-        return None
-    bounded_page_size = min(200, max(1, page_size))
-    total = int(
-        db.scalar(
-            select(func.count(LibraryReadingUnit.id)).where(
-                LibraryReadingUnit.volume_id == volume_id
-            )
-        )
-        or 0
-    )
-    total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
-    bounded_page = min(max(1, page), total_pages)
-    all_units = db.scalars(
-        select(LibraryReadingUnit)
-        .where(LibraryReadingUnit.volume_id == volume_id)
-        .order_by(LibraryReadingUnit.sort_order, LibraryReadingUnit.id)
-    ).all()
-    all_unit_views = [_reading_unit_view(unit) for unit in all_units]
-    unit_views = all_unit_views[
-        (bounded_page - 1) * bounded_page_size : bounded_page * bounded_page_size
-    ]
-    progress = db.scalar(
-        select(LibraryReadingProgress).where(
-            LibraryReadingProgress.user_id == user.id,
-            LibraryReadingProgress.volume_id == volume_id,
-        )
-    )
-    progress_view = (
-        {
-            "volumeId": progress.volume_id,
-            "percent": progress.percent,
-            "locationJson": progress.location_json,
-            "updatedAt": progress.updated_at,
-        }
-        if progress is not None
-        else None
-    )
-    navigation = _progress_navigation(progress_view, all_unit_views)
-    return {
-        "units": unit_views,
-        "page": {
-            "page": bounded_page,
-            "pageSize": bounded_page_size,
-            "total": total,
-            "totalPages": total_pages,
-        },
-        "progress": min(
-            100.0, max(0.0, float(progress.percent if progress is not None else 0))
-        ),
-        "currentHref": navigation.get("currentHref"),
-        "currentChapterIndex": navigation.get("currentChapterIndex"),
-        "currentChapterTitle": navigation.get("currentChapterTitle"),
-        "currentChapterSortOrder": navigation.get("currentChapterSortOrder"),
-        "currentPageNumber": navigation.get("currentPageNumber"),
-    }
-
-
-def _empty_reading_units_page(page_size: int) -> dict[str, int]:
-    return {"page": 1, "pageSize": page_size, "total": 0, "totalPages": 1}
-
-
-def _preferred_work_cover_path(db: Session, work_id: str) -> str | None:
-    return library_storage.preferred_work_cover_path(db, work_id)
-
-
-def _json_text(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _metadata_context_for_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    return metadata_context_for_work(db, work_id)
-
-
-def _metadata_field_patch(
-    candidate: dict[str, Any], fields: list[str]
-) -> dict[str, Any]:
-    patch: dict[str, Any] = {}
-    selected = set(fields)
-    if (
-        "title" in selected
-        and isinstance(candidate.get("title"), str)
-        and candidate.get("title").strip()
-    ):
-        patch["title"] = candidate["title"].strip()
-        patch["normalizedTitle"] = normalize_identity_part(candidate["title"])
-    if "author" in selected and isinstance(candidate.get("author"), str):
-        patch["author"] = candidate["author"].strip() or None
-        patch["normalizedAuthor"] = normalize_identity_part(candidate["author"]) or None
-    if "description" in selected and isinstance(candidate.get("description"), str):
-        patch["description"] = candidate["description"].strip() or None
-    if "tags" in selected and isinstance(candidate.get("tags"), list):
-        tags = sorted(
-            {
-                str(tag).strip()
-                for tag in candidate.get("tags") or []
-                if str(tag).strip()
-            }
-        )
-        patch["tags"] = _json_text(tags)
-    if "seriesName" in selected and isinstance(candidate.get("seriesName"), str):
-        patch["seriesName"] = candidate["seriesName"].strip() or None
-    if "seriesIndex" in selected and candidate.get("seriesIndex") is not None:
-        try:
-            patch["seriesIndex"] = float(candidate["seriesIndex"])
-        except (TypeError, ValueError):
-            pass
-    return patch
-
-
-def _finish_metadata_organize_work(db: Session, work_id: str) -> list[str]:
-    if not _has_table(db, "OrganizeJob"):
-        return []
-    return organize_jobs.finish_unresolved_jobs_for_work(
-        db,
-        work_id=work_id,
-        now=_now(),
-    )
+__all__ = [
+    "_cover_url",
+    "book_view",
+    "bookshelf_item_view",
+    "bookshelf_item_views",
+    "get_book",
+    "list_resource_views",
+    "preferred_book_cover_path",
+    "resource_view",
+]

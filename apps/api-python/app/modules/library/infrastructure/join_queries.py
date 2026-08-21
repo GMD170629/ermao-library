@@ -1,4 +1,4 @@
-"""Typed Version-to-Volume joins for library adapters."""
+"""Typed Version-to-Resource joins for library adapters."""
 
 from __future__ import annotations
 
@@ -7,101 +7,101 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.library import (
-    LibraryFile,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
+from app.models import (
+    LibraryResourceAsset,
+    ReadableResourceNavigationUnit,
+    LibraryReadableResource,
+    LibraryReadableResource,
 )
 from app.modules.library.domain.media_kinds import media_kind_of
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.infrastructure.books import entity_record
 
 
-def get_volume_context(db: Session, volume_id: str) -> dict[str, Any] | None:
+def get_volume_context(db: Session, resource_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryVersion)
+        select(LibraryReadableResource, LibraryReadableResource)
         .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryReadableResource.resource_id,
         )
-        .where(LibraryVolume.id == volume_id)
+        .where(LibraryReadableResource.id == resource_id)
     ).first()
     if row is None:
         return None
     volume, version = row
-    payload = entity_as_legacy_dict(volume)
+    payload = entity_record(volume)
     payload.update(
-        workId=version.work_id,
+        bookId=version.book_id,
         mediaKind=media_kind_of(volume),
-        versionId=version.id,
+        resourceId=version.id,
     )
     return payload
 
 
 def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryReadingUnit, LibraryVolume, LibraryVersion)
-        .join(LibraryVolume, LibraryVolume.id == LibraryReadingUnit.volume_id)
+        select(ReadableResourceNavigationUnit, LibraryReadableResource, LibraryReadableResource)
+        .join(LibraryReadableResource, LibraryReadableResource.id == ReadableResourceNavigationUnit.resource_id)
         .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryReadableResource.resource_id,
         )
-        .where(LibraryReadingUnit.id == unit_id)
+        .where(ReadableResourceNavigationUnit.id == unit_id)
     ).first()
     if row is None:
         return None
     unit, volume, version = row
-    payload = entity_as_legacy_dict(unit)
+    payload = entity_record(unit)
     payload.update(
-        workId=version.work_id,
+        bookId=version.book_id,
         mediaKind=media_kind_of(volume),
-        versionId=version.id,
+        resourceId=version.id,
         format=volume.format,
     )
     return payload
 
 
-def list_file_paths_for_work(db: Session, work_id: str) -> list[str]:
+def list_file_paths_for_work(db: Session, book_id: str) -> list[str]:
     paths = db.scalars(
-        select(LibraryFile.path)
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        select(LibraryResourceAsset.path)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryResourceAsset.resource_id)
         .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryReadableResource.resource_id,
         )
-        .where(LibraryVersion.work_id == work_id)
+        .where(LibraryReadableResource.book_id == book_id)
     ).all()
     return [str(path) for path in paths if path]
 
 
 def get_volume_for_work(
-    db: Session, *, volume_id: str, work_id: str
+    db: Session, *, resource_id: str, book_id: str
 ) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryVersion)
+        select(LibraryReadableResource, LibraryReadableResource)
         .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryReadableResource.resource_id,
         )
         .where(
-            LibraryVolume.id == volume_id,
-            LibraryVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
+            LibraryReadableResource.id == resource_id,
+            LibraryReadableResource.book_id == book_id,
+            LibraryReadableResource.hidden.is_(False),
         )
     ).first()
     if row is None:
         return None
     volume, version = row
-    payload = entity_as_legacy_dict(volume)
+    payload = entity_record(volume)
     payload.update(
-        sourceWorkId=version.work_id,
+        sourceWorkId=version.book_id,
         sourceFormat=volume.format,
-        versionId=version.id,
+        resourceId=version.id,
     )
     return payload
 
 
 def get_volume_belonging_to_work(
-    db: Session, *, volume_id: str, work_id: str
+    db: Session, *, resource_id: str, book_id: str
 ) -> dict[str, Any] | None:
-    return get_volume_for_work(db, volume_id=volume_id, work_id=work_id)
+    return get_volume_for_work(db, resource_id=resource_id, book_id=book_id)

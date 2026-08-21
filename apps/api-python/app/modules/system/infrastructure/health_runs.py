@@ -21,7 +21,7 @@ from app.core.safe_errors import safe_error_message
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
 from app.models.auth import UserPreference
-from app.models.import_pipeline import DownloadTask, ImportTask, KindleSendTask
+from app.models import DownloadTask, KindleSendTask, LibraryImportTask
 from app.models.organize import MetadataLookupTask
 from app.models.library import Library
 from app.models.settings import SystemHealthRun
@@ -48,7 +48,7 @@ from app.services.email_settings import (
 
 SessionFactory = Callable[[], Session]
 QUEUE_MODELS = {
-    "import": (ImportTask, ("PENDING",), ("PARSING",), ("FAILED",)),
+    "import": (LibraryImportTask, ("QUEUED",), ("RUNNING",), ("FAILED",)),
     "download": (
         DownloadTask,
         ("queued",),

@@ -17,12 +17,11 @@ from sqlalchemy.sql.base import Executable
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
-from app.models.import_pipeline import ImportAsset, ImportTask
-from app.models.library import (
-    LibraryFile,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryImportTask,
+    LibraryResourceAsset,
+    LibraryReadableResource,
+    LibraryBook,
 )
 from app.models.organize import (
     MetadataOpfQueueState,
@@ -31,7 +30,7 @@ from app.models.organize import (
     MetadataWritebackTarget,
     OrganizePolicy,
 )
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.library.domain.resource_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.metadata.application.writeback import (
     NULL_SOURCE_REVISION,
     MetadataWritebackFileProjection,
@@ -115,9 +114,9 @@ def load_writeback_cleanup_projection(
         tuple(
             str(value)
             for value in db.scalars(
-                select(LibraryFile.path)
-                .where(LibraryFile.path.is_not(None))
-                .order_by(LibraryFile.updated_at.desc())
+                select(LibraryResourceAsset.path)
+                .where(LibraryResourceAsset.path.is_not(None))
+                .order_by(LibraryResourceAsset.updated_at.desc())
                 .limit(remaining)
             ).all()
             if value
@@ -155,106 +154,100 @@ def write_metadata_to_files_enabled(db: Session) -> bool:
 
 def _work_volume_order() -> tuple[object, ...]:
     return (
-        case((LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0), else_=1),
-        func.coalesce(LibraryVersion.source_name, ""),
-        LibraryVersion.source_key.asc(),
-        LibraryVersion.id.asc(),
-        LibraryVolume.sort_order.asc(),
-        LibraryVolume.created_at.asc(),
-        LibraryVolume.id.asc(),
+        case((LibraryReadableResource.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0), else_=1),
+        func.coalesce(LibraryReadableResource.source_name, ""),
+        LibraryReadableResource.source_key.asc(),
+        LibraryReadableResource.id.asc(),
+        LibraryReadableResource.sort_order.asc(),
+        LibraryReadableResource.created_at.asc(),
+        LibraryReadableResource.id.asc(),
     )
 
 
 def _visible_volumes_for_work(
     db: Session,
     *,
-    work_id: str,
-    version_id: str | None = None,
-    volume_id: str | None = None,
-) -> tuple[LibraryVolume, ...]:
+    book_id: str,
+    resource_id: str | None = None,
+) -> tuple[LibraryReadableResource, ...]:
     query = (
-        select(LibraryVolume)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        select(LibraryReadableResource)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
         .where(
-            LibraryVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
+            LibraryReadableResource.book_id == book_id,
+            LibraryReadableResource.hidden.is_(False),
         )
     )
-    if version_id is not None:
-        query = query.where(LibraryVersion.id == version_id)
-    if volume_id is not None:
-        query = query.where(LibraryVolume.id == volume_id)
+    if resource_id is not None:
+        query = query.where(LibraryReadableResource.id == resource_id)
     return tuple(db.scalars(query.order_by(*_work_volume_order())).all())
 
 
 def load_metadata_writeback_projection(
     db: Session,
     *,
-    work_id: str,
-    version_id: str | None = None,
-    volume_id: str | None = None,
+    book_id: str,
+    resource_id: str | None = None,
 ) -> MetadataWritebackProjection:
     """Load an explicit projection; callers prepare intents before their write UoW."""
 
-    work = db.scalar(select(LibraryWork).where(LibraryWork.id == work_id))
+    work = db.scalar(select(LibraryBook).where(LibraryBook.id == book_id))
     if work is None:
         raise ValueError("作品不存在")
-    if version_id is not None:
+    if resource_id is not None:
         selected_version = db.scalar(
-            select(LibraryVersion.id).where(
-                LibraryVersion.id == version_id,
-                LibraryVersion.work_id == work_id,
+            select(LibraryReadableResource.id).where(
+                LibraryReadableResource.id == resource_id,
+                LibraryReadableResource.book_id == book_id,
             )
         )
         if selected_version is None:
             raise ValueError("版本不存在")
     volume_rows = _visible_volumes_for_work(
         db,
-        work_id=work_id,
-        version_id=version_id,
-        volume_id=volume_id,
+        book_id=book_id,
+        resource_id=resource_id,
     )
-    version_ids = tuple(dict.fromkeys(volume.version_id for volume in volume_rows))
-    volume_ids = tuple(volume.id for volume in volume_rows)
+    resource_ids = tuple(volume.id for volume in volume_rows)
     file_rows = (
         tuple(
             db.scalars(
-                select(LibraryFile)
-                .where(LibraryFile.volume_id.in_(volume_ids))
+                select(LibraryResourceAsset)
+                .where(LibraryResourceAsset.resource_id.in_(resource_ids))
                 .order_by(
-                    LibraryFile.volume_id.asc(),
-                    LibraryFile.sort_order.asc(),
-                    LibraryFile.id.asc(),
+                    LibraryResourceAsset.resource_id.asc(),
+                    LibraryResourceAsset.sort_order.asc(),
+                    LibraryResourceAsset.id.asc(),
                 )
             ).all()
         )
-        if volume_ids
+        if resource_ids
         else ()
     )
     import_rows = (
         tuple(
             db.execute(
-                select(ImportTask.id, ImportTask.volume_id, ImportTask.source_path)
+                select(LibraryImportTask.id, LibraryImportTask.resource_id, LibraryImportTask.source_path)
                 .where(
-                    ImportTask.volume_id.in_(volume_ids),
-                    ImportTask.status == "COMPLETED",
+                    LibraryImportTask.resource_id.in_(resource_ids),
+                    LibraryImportTask.status == "COMPLETED",
                 )
-                .order_by(ImportTask.created_at.asc(), ImportTask.id.asc())
+                .order_by(LibraryImportTask.created_at.asc(), LibraryImportTask.id.asc())
             ).all()
         )
-        if volume_ids
+        if resource_ids
         else ()
     )
     import_ids = tuple(str(row.id) for row in import_rows)
     asset_rows = (
         tuple(
             db.execute(
-                select(ImportAsset.import_task_id, ImportAsset.source_path)
-                .where(ImportAsset.import_task_id.in_(import_ids))
+                select(LibraryResourceAsset.import_task_id, LibraryResourceAsset.source_path)
+                .where(LibraryResourceAsset.import_task_id.in_(import_ids))
                 .order_by(
-                    ImportAsset.import_task_id.asc(),
-                    ImportAsset.sort_order.asc(),
-                    ImportAsset.id.asc(),
+                    LibraryResourceAsset.import_task_id.asc(),
+                    LibraryResourceAsset.sort_order.asc(),
+                    LibraryResourceAsset.id.asc(),
                 )
             ).all()
         )
@@ -267,7 +260,7 @@ def load_metadata_writeback_projection(
             str(asset.source_path)
         )
     return MetadataWritebackProjection(
-        work_id=work.id,
+        book_id=work.id,
         title=work.title,
         author=work.author,
         description=work.description,
@@ -276,11 +269,11 @@ def load_metadata_writeback_projection(
         series_index=work.series_index,
         cover_path=work.cover_path,
         source_revision=work.updated_at or NULL_SOURCE_REVISION,
-        version_ids=version_ids,
+        resource_ids=resource_ids,
         volumes=tuple(
             MetadataWritebackVolumeProjection(
                 id=volume.id,
-                version_id=volume.version_id,
+                resource_id=volume.resource_id,
                 title=volume.title,
                 description=volume.description,
                 volume_index=volume.volume_index,
@@ -298,7 +291,7 @@ def load_metadata_writeback_projection(
         files=tuple(
             MetadataWritebackFileProjection(
                 id=file.id,
-                volume_id=file.volume_id,
+                resource_id=file.resource_id,
                 path=file.path,
                 size_bytes=file.size_bytes,
                 mtime_ms=file.mtime_ms,
@@ -307,7 +300,7 @@ def load_metadata_writeback_projection(
         ),
         imports=tuple(
             MetadataWritebackImportProjection(
-                volume_id=str(row.volume_id),
+                resource_id=str(row.resource_id),
                 source_path=str(row.source_path),
                 asset_paths=tuple(assets_by_import.get(str(row.id), ())),
             )
@@ -344,8 +337,8 @@ def enqueue_prepared_writeback_intents(
     operation_rows = tuple(
         {
             "id": intent.operation_id,
-            "work_id": intent.work_id,
-            "version_id": intent.version_id,
+            "book_id": intent.book_id,
+            "resource_id": intent.resource_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,
             "status": "PENDING",
@@ -361,9 +354,9 @@ def enqueue_prepared_writeback_intents(
         {
             "id": intent.preparation_id,
             "operation_id": intent.operation_id,
-            "work_id": intent.work_id,
-            "version_id": intent.version_id,
-            "volume_id": intent.volume_id,
+            "book_id": intent.book_id,
+            "resource_id": intent.resource_id,
+            "resource_id": intent.resource_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,
             "idempotency_key": intent.idempotency_key,
@@ -443,25 +436,23 @@ def enqueue_prepared_writeback_intents(
 def enqueue_writeback(
     db: Session,
     *,
-    work_id: str,
-    version_id: str,
+    book_id: str,
+    resource_id: str,
     source: str,
     lookup_task_id: str | None = None,
-    volume_id: str | None = None,
     max_pending_targets: int = DEFAULT_MAX_PENDING_TARGETS,
 ) -> EnqueueWritebackResult:
     del max_pending_targets  # Capacity is checked when preparation becomes targets.
     projection = load_metadata_writeback_projection(
         db,
-        work_id=work_id,
-        version_id=version_id,
-        volume_id=volume_id,
+        book_id=book_id,
+        resource_id=resource_id,
     )
     intents = prepare_metadata_writeback_intents(
         projection,
         source=source,
         lookup_task_id=lookup_task_id,
-        volume_id=volume_id,
+        resource_id=resource_id,
     )
     operation_ids = enqueue_prepared_writeback_intents(db, intents)
     if not operation_ids:
@@ -526,9 +517,9 @@ def operation_view_for_lookup_task(
     return operation_view(db, operation_id) if operation_id else None
 
 
-def operation_work_id(db: Session, operation_id: str) -> str | None:
+def operation_book_id(db: Session, operation_id: str) -> str | None:
     return db.scalar(
-        select(MetadataWritebackOperation.work_id).where(
+        select(MetadataWritebackOperation.book_id).where(
             MetadataWritebackOperation.id == operation_id
         )
     )
@@ -614,7 +605,7 @@ def claim_next_preparation(
         .returning(
             MetadataWritebackPreparation.id,
             MetadataWritebackPreparation.operation_id,
-            MetadataWritebackPreparation.work_id,
+            MetadataWritebackPreparation.book_id,
             MetadataWritebackPreparation.source_revision,
             MetadataWritebackPreparation.snapshot_json,
             MetadataWritebackPreparation.attempts,
@@ -631,7 +622,7 @@ def claim_next_preparation(
     return {
         "id": row.id,
         "operationId": row.operation_id,
-        "workId": row.work_id,
+        "bookId": row.book_id,
         "sourceRevision": row.source_revision,
         "snapshotJson": row.snapshot_json,
         "attempts": row.attempts,
@@ -1106,8 +1097,8 @@ def complete_target(
         return False
     if row.library_file_id and size_bytes is not None and mtime_ms is not None:
         db.execute(
-            update(LibraryFile)
-            .where(LibraryFile.id == row.library_file_id)
+            update(LibraryResourceAsset)
+            .where(LibraryResourceAsset.id == row.library_file_id)
             .values(
                 size_bytes=size_bytes,
                 mtime_ms=mtime_ms,

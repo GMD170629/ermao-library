@@ -9,26 +9,24 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import (
     AuthorizationContext,
-    volume_visibility_predicate,
-    work_visibility_predicate,
+    book_visibility_predicate,
+    resource_visibility_predicate,
 )
-from app.models.library import (
-    LibraryReadingProgress,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    ReaderResourceProgress,
 )
 from app.modules.library.application.bookshelf import (
     BookshelfItemQueryPort,
     BookshelfItemSummary,
 )
-from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
-)
 from app.modules.reader.public import (
     MediaKind,
-    VolumeReadingState,
-    choose_continue_volume_id,
+    ResourceReadingState,
+    choose_continue_resource_id,
 )
 
 _MEDIA_KIND_ORDER = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
@@ -42,92 +40,101 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
         self,
         *,
         context: AuthorizationContext,
-        work_ids: tuple[str, ...],
+        book_ids: tuple[str, ...],
     ) -> tuple[BookshelfItemSummary, ...]:
-        works = self._db.scalars(
-            select(LibraryWork).where(
-                LibraryWork.id.in_(work_ids),
-                LibraryWork.hidden.is_(False),
-                work_visibility_predicate(context),
+        book_rows = self._db.execute(
+            select(
+                LibraryBook.id,
+                LibraryBook.updated_at,
+                LibraryBookMetadata.title,
+                LibraryBookMetadata.author,
+                LibraryBookMetadata.cover_path,
+            )
+            .select_from(LibraryBook)
+            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+            .where(
+                LibraryBook.id.in_(book_ids),
+                LibraryBook.visibility_state == "VISIBLE",
+                book_visibility_predicate(context),
             )
         ).all()
-        work_by_id = {work.id: work for work in works}
-        visible_work_ids = tuple(
-            work_id for work_id in work_ids if work_id in work_by_id
-        )
-        if not visible_work_ids:
+        book_by_id = {str(row.id): row for row in book_rows}
+        visible_book_ids = tuple(book_id for book_id in book_ids if book_id in book_by_id)
+        if not visible_book_ids:
             return ()
 
-        media_kind = volume_effective_media_kind(LibraryVolume)
         rows = self._db.execute(
             select(
-                LibraryVersion.work_id,
-                media_kind.label("media_kind"),
-                LibraryVolume.id.label("volume_id"),
-                LibraryVolume.sort_order,
-                LibraryReadingProgress.percent,
-                LibraryReadingProgress.updated_at.label("progress_updated_at"),
+                LibraryReadableResource.book_id,
+                LibraryReadableResource.media_kind,
+                LibraryReadableResource.id.label("resource_id"),
+                LibraryReadableResourceMetadata.resource_index,
+                ReaderResourceProgress.percent,
+                ReaderResourceProgress.updated_at.label("progress_updated_at"),
             )
-            .select_from(LibraryVolume)
-            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .select_from(LibraryReadableResource)
+            .join(
+                LibraryReadableResourceMetadata,
+                LibraryReadableResourceMetadata.resource_id
+                == LibraryReadableResource.id,
+            )
             .outerjoin(
-                LibraryReadingProgress,
+                ReaderResourceProgress,
                 and_(
-                    LibraryReadingProgress.volume_id == LibraryVolume.id,
-                    LibraryReadingProgress.user_id == context.user_id,
+                    ReaderResourceProgress.resource_id == LibraryReadableResource.id,
+                    ReaderResourceProgress.user_id == context.user_id,
                 ),
             )
             .where(
-                LibraryVersion.work_id.in_(visible_work_ids),
-                LibraryVolume.hidden.is_(False),
-                volume_visibility_predicate(context),
+                LibraryReadableResource.book_id.in_(visible_book_ids),
+                resource_visibility_predicate(context),
             )
             .order_by(
-                LibraryVersion.work_id.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.id.asc(),
+                LibraryReadableResource.book_id.asc(),
+                LibraryReadableResourceMetadata.resource_index.asc(),
+                LibraryReadableResource.id.asc(),
             )
         ).all()
-        media_kinds_by_work: dict[str, set[str]] = defaultdict(set)
-        states_by_work: dict[str, list[VolumeReadingState]] = defaultdict(list)
-        percent_by_volume: dict[str, float] = {}
+        media_kinds_by_book: dict[str, set[str]] = defaultdict(set)
+        states_by_book: dict[str, list[ResourceReadingState]] = defaultdict(list)
+        percent_by_resource: dict[str, float] = {}
         for row in rows:
-            work_id = str(row.work_id)
+            book_id = str(row.book_id)
             media_kind = MediaKind(str(row.media_kind))
-            media_kinds_by_work[work_id].add(media_kind.value)
+            media_kinds_by_book[book_id].add(media_kind.value)
             percent = min(100.0, max(0.0, float(row.percent or 0)))
-            volume_id = str(row.volume_id)
-            percent_by_volume[volume_id] = percent
-            states_by_work[work_id].append(
-                VolumeReadingState(
-                    volume_id=volume_id,
+            resource_id = str(row.resource_id)
+            percent_by_resource[resource_id] = percent
+            states_by_book[book_id].append(
+                ResourceReadingState(
+                    resource_id=resource_id,
                     media_kind=media_kind,
-                    sort_order=int(row.sort_order),
+                    sort_order=int(row.resource_index or 0),
                     percent=int(percent),
                     last_read_at=row.progress_updated_at,
                 )
             )
 
         summaries: list[BookshelfItemSummary] = []
-        for work_id in visible_work_ids:
-            work = work_by_id[work_id]
-            continue_volume_id = choose_continue_volume_id(states_by_work[work_id])
+        for book_id in visible_book_ids:
+            book = book_by_id[book_id]
+            continue_resource_id = choose_continue_resource_id(states_by_book[book_id])
             summaries.append(
                 BookshelfItemSummary(
-                    id=work.id,
-                    title=work.title or "未命名作品",
-                    author=work.author or "未知作者",
-                    cover_path=work.cover_path,
-                    updated_at=work.updated_at,
+                    id=book_id,
+                    title=str(book.title),
+                    author=str(book.author or "未知作者"),
+                    cover_path=book.cover_path,
+                    updated_at=book.updated_at,
                     available_media_kinds=tuple(
                         sorted(
-                            media_kinds_by_work[work_id],
+                            media_kinds_by_book[book_id],
                             key=lambda kind: _MEDIA_KIND_ORDER.get(kind, 99),
                         )
                     ),
                     progress=(
-                        percent_by_volume.get(continue_volume_id, 0.0)
-                        if continue_volume_id is not None
+                        percent_by_resource.get(continue_resource_id, 0.0)
+                        if continue_resource_id is not None
                         else 0.0
                     ),
                 )

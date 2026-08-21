@@ -22,12 +22,12 @@ class OpdsCatalogPort(Protocol):
 
 class OpdsProgressionPort(Protocol):
     def get_progression(
-        self, actor_id: str, volume_id: str
+        self, actor_id: str, resource_id: str
     ) -> OpdsProgressionDocumentDto | None: ...
 
     def update_progression(
         self,
         actor_id: str,
-        volume_id: str,
+        resource_id: str,
         document: OpdsProgressionDocumentDto,
     ) -> OpdsProgressionUpdateResultDto: ...

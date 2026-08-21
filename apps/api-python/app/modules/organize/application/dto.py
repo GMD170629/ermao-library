@@ -34,9 +34,9 @@ class OrganizeJobListItem:
 class PreparedOrganizeJobEnqueue:
     job_id: str
     task_id: str
-    work_id: str
-    volume_id: str | None
-    version_id: str | None
+    book_id: str
+    resource_id: str | None
+    resource_id: str | None
     provider_order: tuple[str, ...]
     reasons: tuple[str, ...]
 

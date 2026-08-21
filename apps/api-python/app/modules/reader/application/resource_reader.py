@@ -1,4 +1,4 @@
-"""Volume-first reader queries and commands."""
+"""Resource-first reader queries and commands."""
 
 from __future__ import annotations
 
@@ -16,14 +16,14 @@ from app.modules.reader.application.dto import (
     ReaderComicExactLocationDto,
     ReaderExactLocationDto,
     ReaderExternalProgressDto,
-    ReaderFileDto,
+    ReaderAssetDto,
     ReaderLocationKind,
     ReaderPdfExactLocationDto,
     ReaderProgressDto,
     ReaderReadingStatus,
     ReaderReflowableExactLocationDto,
-    ReaderUnitDto,
-    ReaderVolumeContextDto,
+    ReaderNavigationUnitDto,
+    ReaderResourceContextDto,
 )
 from app.modules.reader.application.exact_location import (
     exact_location_kind,
@@ -32,19 +32,19 @@ from app.modules.reader.application.ports import (
     ReaderClock,
     ReaderPublicationLocatorIndex,
     ReaderUnitOfWork,
-    ReaderVolumeRepository,
+    ReaderResourceRepository,
 )
-from app.modules.reader.domain.volume_format import (
+from app.modules.reader.domain.resource_format import (
     ReaderType,
-    reader_type_for_volume_format,
+    reader_type_for_format,
 )
 
 
-class ReaderVolumeNotFound(Exception):
+class ReaderResourceNotFound(Exception):
     pass
 
 
-class ReaderVolumeFormatUnsupported(Exception):
+class ReaderResourceFormatUnsupported(Exception):
     pass
 
 
@@ -78,7 +78,7 @@ class ReaderProgressBaseRevisionInvalid(Exception):
 @dataclass(frozen=True, slots=True)
 class SaveProgressCommand:
     user_id: str
-    volume_id: str
+    resource_id: str
     access_scope: ReaderAccessScope
     client_id: str
     mutation_id: str
@@ -88,9 +88,9 @@ class SaveProgressCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class SetVolumeReadingStatusCommand:
+class SetResourceReadingStatusCommand:
     user_id: str
-    volume_id: str
+    resource_id: str
     access_scope: ReaderAccessScope
     status: ReaderReadingStatus
 
@@ -98,7 +98,7 @@ class SetVolumeReadingStatusCommand:
 @dataclass(frozen=True, slots=True)
 class ReplaceBookmarksCommand:
     user_id: str
-    volume_id: str
+    resource_id: str
     access_scope: ReaderAccessScope
     bookmarks: tuple[ReaderBookmarkDto, ...]
     location_kinds: tuple[ReaderLocationKind, ...]
@@ -107,7 +107,7 @@ class ReplaceBookmarksCommand:
 @dataclass(frozen=True, slots=True)
 class SaveExternalProgressCommand:
     user_id: str
-    volume_id: str
+    resource_id: str
     access_scope: ReaderAccessScope
     progression: float
     modified_at: datetime
@@ -121,10 +121,10 @@ class ReaderProgressDateConflict(Exception):
     current: ReaderExternalProgressDto
 
 
-class VolumeReaderService:
+class ResourceReaderService:
     def __init__(
         self,
-        repository: ReaderVolumeRepository,
+        repository: ReaderResourceRepository,
         unit_of_work: ReaderUnitOfWork,
         clock: ReaderClock,
         publication_locator_index: ReaderPublicationLocatorIndex,
@@ -134,79 +134,79 @@ class VolumeReaderService:
         self._clock = clock
         self._publication_locator_index = publication_locator_index
 
-    def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
-        return self._repository.get_context(volume_id)
+    def get_context(self, resource_id: str) -> ReaderResourceContextDto | None:
+        return self._repository.get_context(resource_id)
 
     def load_bootstrap(
         self,
         *,
         user_id: str,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
     ) -> ReaderBootstrapDto:
-        context = self._repository.get_context(volume_id)
+        context = self._repository.get_context(resource_id)
         if context is None:
-            raise ReaderVolumeNotFound
-        if reader_type_for_volume_format(context.volume.format) is None:
-            raise ReaderVolumeFormatUnsupported
-        available_volumes = self._repository.list_visible_volumes_for_work(
-            context.work.id, access_scope
+            raise ReaderResourceNotFound
+        if reader_type_for_format(context.resource.format) is None:
+            raise ReaderResourceFormatUnsupported
+        available_resources = self._repository.list_visible_resources_for_book(
+            context.book.id, access_scope
         )
-        if all(volume.id != volume_id for volume in available_volumes):
-            raise ReaderVolumeNotFound
-        files = self._repository.list_files(volume_id)
-        units = self._repository.list_units(volume_id)
+        if all(resource.id != resource_id for resource in available_resources):
+            raise ReaderResourceNotFound
+        assets = self._repository.list_assets(resource_id)
+        units = self._repository.list_navigation_units(resource_id)
         progresses = self._repository.list_progresses(
-            user_id, [volume.id for volume in available_volumes]
+            user_id, [resource.id for resource in available_resources]
         )
-        progress_by_volume_id = {
-            progress.volume_id: progress for progress in progresses
+        progress_by_resource_id = {
+            progress.resource_id: progress for progress in progresses
         }
-        selected_progress = progress_by_volume_id.get(volume_id)
-        selected_version_volumes = [
-            volume
-            for volume in available_volumes
-            if volume.version_id == context.version.id
+        selected_progress = progress_by_resource_id.get(resource_id)
+        selected_resources = [
+            resource
+            for resource in available_resources
+            if resource.id == context.resource.id
         ]
-        version_completed = bool(selected_version_volumes) and all(
-            progress_by_volume_id.get(volume.id) is not None
-            and progress_by_volume_id[volume.id].percent >= 100
-            for volume in selected_version_volumes
+        book_completed = bool(selected_resources) and all(
+            progress_by_resource_id.get(resource.id) is not None
+            and progress_by_resource_id[resource.id].percent >= 100
+            for resource in selected_resources
         )
         return ReaderBootstrapDto(
             context=context,
-            available_volumes=tuple(available_volumes),
-            files=tuple(files),
+            available_resources=tuple(available_resources),
+            assets=tuple(assets),
             units=tuple(units),
-            progress_by_volume_id=progress_by_volume_id,
+            progress_by_resource_id=progress_by_resource_id,
             resume_location_json=(
                 selected_progress.location_json
                 if selected_progress is not None
                 else None
             ),
-            version_completed=version_completed,
+            book_completed=book_completed,
         )
 
     def load_progress(
         self,
         *,
         user_id: str,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
     ) -> ReaderProgressDto | None:
-        context = self._require_visible_context(volume_id, access_scope)
-        if reader_type_for_volume_format(context.volume.format) is None:
-            raise ReaderVolumeFormatUnsupported
-        progress = self._repository.get_progress(user_id, volume_id)
+        context = self._require_visible_context(resource_id, access_scope)
+        if reader_type_for_format(context.resource.format) is None:
+            raise ReaderResourceFormatUnsupported
+        progress = self._repository.get_progress(user_id, resource_id)
         if progress is None or progress.revision < 1 or progress.exact_location is None:
             return None
         return progress
 
     def save_progress(self, command: SaveProgressCommand) -> ReaderProgressDto:
-        context = self._require_visible_context(command.volume_id, command.access_scope)
-        reader_type = reader_type_for_volume_format(context.volume.format)
+        context = self._require_visible_context(command.resource_id, command.access_scope)
+        reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None:
-            raise ReaderVolumeFormatUnsupported
+            raise ReaderResourceFormatUnsupported
         received_kind = exact_location_kind(command.location)
         if received_kind != reader_type.value:
             raise ReaderLocationFormatMismatch(
@@ -214,7 +214,7 @@ class VolumeReaderService:
                 received=received_kind,
             )
         location_is_valid = self._publication_locator_index.validate(
-            volume_id=command.volume_id,
+            resource_id=command.resource_id,
             access_scope=command.access_scope,
             location=command.location,
         )
@@ -229,11 +229,11 @@ class VolumeReaderService:
             tz=UTC,
         )
         repeated = self._repository.get_progress_mutation(
-            command.user_id, command.volume_id, command.mutation_id
+            command.user_id, command.resource_id, command.mutation_id
         )
         if repeated is not None:
             return repeated
-        current = self._repository.get_progress(command.user_id, command.volume_id)
+        current = self._repository.get_progress(command.user_id, command.resource_id)
         if current is None and command.base_revision != 0:
             raise ReaderProgressBaseRevisionInvalid
         if current is not None and current.revision != command.base_revision:
@@ -241,9 +241,9 @@ class VolumeReaderService:
         next_revision = command.base_revision + 1
         display_percent = _derive_display_percent(
             current=current,
-            units=self._repository.list_units(command.volume_id),
-            files=self._repository.list_files(command.volume_id),
-            page_count=context.volume.page_count,
+            units=self._repository.list_navigation_units(command.resource_id),
+            assets=self._repository.list_assets(command.resource_id),
+            page_count=context.resource.page_count,
             location=command.location,
         )
         try:
@@ -262,13 +262,13 @@ class VolumeReaderService:
             )
             if progress is None:
                 repeated = self._repository.get_progress_mutation(
-                    command.user_id, command.volume_id, command.mutation_id
+                    command.user_id, command.resource_id, command.mutation_id
                 )
                 if repeated is not None:
                     self._unit_of_work.rollback()
                     return repeated
                 current = self._repository.get_progress(
-                    command.user_id, command.volume_id
+                    command.user_id, command.resource_id
                 )
                 if current is None:
                     raise ReaderProgressBaseRevisionInvalid
@@ -279,15 +279,15 @@ class VolumeReaderService:
             raise
         return progress
 
-    def set_volume_reading_status(
-        self, command: SetVolumeReadingStatusCommand
+    def set_resource_reading_status(
+        self, command: SetResourceReadingStatusCommand
     ) -> ReaderProgressDto | None:
         if command.status not in {"UNREAD", "FINISHED"}:
             raise ValueError("status must be UNREAD or FINISHED")
-        context = self._require_visible_context(command.volume_id, command.access_scope)
-        reader_type = reader_type_for_volume_format(context.volume.format)
+        context = self._require_visible_context(command.resource_id, command.access_scope)
+        reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None:
-            raise ReaderVolumeFormatUnsupported
+            raise ReaderResourceFormatUnsupported
         try:
             progress = self._repository.set_reading_status(
                 user_id=command.user_id,
@@ -306,11 +306,11 @@ class VolumeReaderService:
         self,
         *,
         user_id: str,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
     ) -> ReaderExternalProgressDto | None:
-        self._require_visible_context(volume_id, access_scope)
-        progress = self._repository.get_progress(user_id, volume_id)
+        self._require_visible_context(resource_id, access_scope)
+        progress = self._repository.get_progress(user_id, resource_id)
         return _external_progress_dto(progress) if progress is not None else None
 
     def save_external_progress(
@@ -318,25 +318,25 @@ class VolumeReaderService:
     ) -> ReaderExternalProgressDto:
         if not 0 <= command.progression <= 1:
             raise ValueError("progression must be between zero and one")
-        context = self._require_visible_context(command.volume_id, command.access_scope)
-        reader_type = reader_type_for_volume_format(context.volume.format)
+        context = self._require_visible_context(command.resource_id, command.access_scope)
+        reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None or reader_type.value == "audio":
-            raise ReaderVolumeFormatUnsupported
+            raise ReaderResourceFormatUnsupported
         modified_at = _aware_utc(command.modified_at)
-        existing = self._repository.get_progress(command.user_id, command.volume_id)
+        existing = self._repository.get_progress(command.user_id, command.resource_id)
         if existing is not None and _aware_utc(existing.progressed_at) > modified_at:
             raise ReaderProgressDateConflict(_external_progress_dto(existing))
         location_json = _external_location_json(
             reader_type=reader_type.value,
-            volume_id=command.volume_id,
+            resource_id=command.resource_id,
             progression=command.progression,
-            page_count=context.volume.page_count,
+            page_count=context.resource.page_count,
             references=command.references,
         )
         mutation_source = "\0".join(
             (
                 command.user_id,
-                command.volume_id,
+                command.resource_id,
                 command.device_id,
                 modified_at.isoformat(),
                 f"{command.progression:.12f}",
@@ -369,41 +369,41 @@ class VolumeReaderService:
         return _external_progress_dto(progress)
 
     def _require_visible_context(
-        self, volume_id: str, access_scope: ReaderAccessScope
-    ) -> ReaderVolumeContextDto:
-        context = self._repository.get_context(volume_id)
+        self, resource_id: str, access_scope: ReaderAccessScope
+    ) -> ReaderResourceContextDto:
+        context = self._repository.get_context(resource_id)
         if context is None:
-            raise ReaderVolumeNotFound
-        visible = self._repository.list_visible_volumes_for_work(
-            context.work.id, access_scope
+            raise ReaderResourceNotFound
+        visible = self._repository.list_visible_resources_for_book(
+            context.book.id, access_scope
         )
-        if all(volume.id != volume_id for volume in visible):
-            raise ReaderVolumeNotFound
+        if all(resource.id != resource_id for resource in visible):
+            raise ReaderResourceNotFound
         return context
 
     def list_bookmarks(
         self,
         *,
         user_id: str,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
     ) -> list[ReaderBookmarkDto]:
-        self._require_visible_context(volume_id, access_scope)
-        return self._repository.list_bookmarks(user_id, volume_id)
+        self._require_visible_context(resource_id, access_scope)
+        return self._repository.list_bookmarks(user_id, resource_id)
 
     def replace_bookmarks(
         self, command: ReplaceBookmarksCommand
     ) -> list[ReaderBookmarkDto]:
-        context = self._require_visible_context(command.volume_id, command.access_scope)
-        reader_type = reader_type_for_volume_format(context.volume.format)
+        context = self._require_visible_context(command.resource_id, command.access_scope)
+        reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None:
-            raise ReaderVolumeFormatUnsupported
+            raise ReaderResourceFormatUnsupported
         for location_kind in command.location_kinds:
             _require_matching_location_kind(reader_type, location_kind)
         try:
             result = self._repository.replace_bookmarks(
                 user_id=command.user_id,
-                volume_id=command.volume_id,
+                resource_id=command.resource_id,
                 bookmarks=list(command.bookmarks),
                 now=_aware_utc(self._clock.now()),
             )
@@ -462,8 +462,8 @@ def _require_matching_locator_media_type(
 def _derive_display_percent(
     *,
     current: ReaderProgressDto | None,
-    units: list[ReaderUnitDto],
-    files: list[ReaderFileDto],
+    units: list[ReaderNavigationUnitDto],
+    assets: list[ReaderAssetDto],
     page_count: int | None,
     location: ReaderExactLocationDto,
 ) -> float:
@@ -490,12 +490,12 @@ def _derive_display_percent(
             return 100
         return round(location.page_index / (page_count - 1) * 100, 6)
     elif isinstance(location, ReaderAudioExactLocationDto):
-        known_files = [file for file in files if file.duration_ms is not None]
-        if known_files and len(known_files) == len(files):
-            total_duration = sum(file.duration_ms or 0 for file in files)
+        known_assets = [file for file in assets if file.duration_ms is not None]
+        if known_assets and len(known_assets) == len(assets):
+            total_duration = sum(file.duration_ms or 0 for file in assets)
             elapsed = 0
-            for file in files:
-                if file.id == location.file_id:
+            for file in assets:
+                if file.id == location.asset_id:
                     elapsed += location.position_millis
                     break
                 elapsed += file.duration_ms or 0
@@ -513,7 +513,7 @@ def _location_reference(location: ReaderExactLocationDto) -> str:
         return f"page-{location.page_index + 1}"
     if isinstance(location, ReaderComicExactLocationDto):
         return location.resource_href
-    return location.file_id
+    return location.asset_id
 
 
 def _page_from_references(references: tuple[str, ...]) -> int | None:
@@ -545,7 +545,7 @@ def _external_page(
 def _external_location_json(
     *,
     reader_type: str,
-    volume_id: str,
+    resource_id: str,
     progression: float,
     page_count: int | None,
     references: tuple[str, ...],
@@ -553,13 +553,13 @@ def _external_location_json(
     if reader_type == "comic":
         location: dict[str, object] = {
             "type": "comic",
-            "volumeId": volume_id,
+            "resourceId": resource_id,
             "pageIndex": _external_page(progression, page_count, references),
         }
     elif reader_type == "pdf":
         location = {
             "type": "pdf",
-            "volumeId": volume_id,
+            "resourceId": resource_id,
             "pageNumber": _external_page(progression, page_count, references),
         }
     else:
@@ -569,7 +569,7 @@ def _external_location_json(
         )
         location = {
             "type": "reflowable",
-            "volumeId": volume_id,
+            "resourceId": resource_id,
             "format": "epub",
             "progression": progression,
         }
@@ -600,7 +600,7 @@ def _progress_references(progress: ReaderProgressDto) -> tuple[str, ...]:
 
 def _external_progress_dto(progress: ReaderProgressDto) -> ReaderExternalProgressDto:
     return ReaderExternalProgressDto(
-        volume_id=progress.volume_id,
+        resource_id=progress.resource_id,
         progression=max(0, min(1, progress.percent / 100)),
         modified_at=progress.progressed_at,
         device_id=progress.client_id or "urn:shuku:web",

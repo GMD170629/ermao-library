@@ -20,8 +20,8 @@ class PublicationAccessScope:
 
 @dataclass(frozen=True, slots=True)
 class PublicationSource:
-    volume_id: str
-    file_id: str
+    resource_id: str
+    asset_id: str
     source_format: str
     path: str
     size_bytes: int
@@ -34,7 +34,7 @@ class PublicationSourceRepository(Protocol):
     def find_source(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> PublicationSource | None: ...
 

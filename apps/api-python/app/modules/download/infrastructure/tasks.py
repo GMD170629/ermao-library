@@ -13,7 +13,7 @@ from app.models.common import db_timestamp
 from app.models.import_pipeline import DownloadTask
 from app.models.library import Library
 from app.models.settings import SystemSetting
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.infrastructure.books import entity_record
 
 
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
@@ -31,7 +31,7 @@ def get_download_task(db: Session, task_id: str) -> dict[str, Any] | None:
     if not has_table(db, "DownloadTask"):
         return None
     task = db.get(DownloadTask, task_id)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def next_queued_download_task(db: Session) -> dict[str, Any] | None:
@@ -43,7 +43,7 @@ def next_queued_download_task(db: Session) -> dict[str, Any] | None:
         .order_by(DownloadTask.created_at.asc())
         .limit(1)
     ).scalar_one_or_none()
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def prepare_mark_download_task_importing(
@@ -101,7 +101,7 @@ def claim_download_task(
 ) -> dict[str, Any] | None:
     statement = prepare_claim_download_task(task_id, now=now)
     task = execute_download_task_row_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def prepare_download_task_state_update(
@@ -131,7 +131,7 @@ def update_download_task(
         return None
     statement = prepare_download_task_state_update(task_id, values)
     task = execute_download_task_row_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | None:
@@ -146,7 +146,7 @@ def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | N
         .order_by(DownloadTask.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def system_setting_value(db: Session, key: str) -> str | None:
@@ -162,4 +162,4 @@ def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
     rows = db.execute(
         select(Library).where(Library.enabled.is_(True))
     ).scalars().all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_record(row) for row in rows]

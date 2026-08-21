@@ -27,9 +27,9 @@ class CatalogShelfPage:
 
 
 @dataclass(frozen=True)
-class CatalogShelfWorkPage:
+class CatalogShelfBookPage:
     shelf: CatalogShelf
-    work_ids: tuple[str, ...]
+    book_ids: tuple[str, ...]
     total: int
     page: int
     page_size: int
@@ -45,14 +45,14 @@ class CatalogShelfQueryPort(Protocol):
         page_size: int,
     ) -> CatalogShelfPage: ...
 
-    def list_shelf_work_ids(
+    def list_shelf_book_ids(
         self,
         *,
         context: AuthorizationContext,
         shelf_id: str,
         page: int,
         page_size: int,
-    ) -> CatalogShelfWorkPage | None: ...
+    ) -> CatalogShelfBookPage | None: ...
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class ListCatalogShelves:
 
 
 @dataclass(frozen=True)
-class ListCatalogShelfWorkIds:
+class ListCatalogShelfBookIds:
     query: CatalogShelfQueryPort
 
     def execute(
@@ -84,11 +84,11 @@ class ListCatalogShelfWorkIds:
         shelf_id: str,
         page: int = 1,
         page_size: int = 100,
-    ) -> CatalogShelfWorkPage | None:
+    ) -> CatalogShelfBookPage | None:
         normalized_id = shelf_id.strip()
         if not normalized_id:
             return None
-        return self.query.list_shelf_work_ids(
+        return self.query.list_shelf_book_ids(
             context=context,
             shelf_id=normalized_id,
             page=max(1, page),

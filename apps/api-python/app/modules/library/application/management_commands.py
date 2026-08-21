@@ -35,9 +35,9 @@ class LibraryManagementGateway(Protocol):
 
 
 class FacetSyncGateway(Protocol):
-    def sync_work(self, work_id: str) -> None: ...
+    def sync_work(self, book_id: str) -> None: ...
 
-    def sync_works(self, work_ids: Iterable[str]) -> None: ...
+    def sync_books(self, book_ids: Iterable[str]) -> None: ...
 
 
 class MergeLibraryCategories:
@@ -106,29 +106,29 @@ class UndoLibraryOperation:
         return result
 
 
-class SyncWorkFacets:
+class SyncBookFacets:
     def __init__(self, gateway: FacetSyncGateway, uow: LibraryManagementUnitOfWork) -> None:
         self._gateway = gateway
         self._uow = uow
 
-    def execute(self, work_id: str) -> None:
+    def execute(self, book_id: str) -> None:
         try:
-            self._gateway.sync_work(work_id)
+            self._gateway.sync_work(book_id)
             self._uow.commit()
         except Exception:
             self._uow.rollback()
             raise
 
 
-class SyncWorksFacets:
+class SyncBooksFacets:
     def __init__(self, gateway: FacetSyncGateway, uow: LibraryManagementUnitOfWork) -> None:
         self._gateway = gateway
         self._uow = uow
 
-    def execute(self, work_ids: Iterable[str]) -> None:
-        prepared_ids = tuple(work_ids)
+    def execute(self, book_ids: Iterable[str]) -> None:
+        prepared_ids = tuple(book_ids)
         try:
-            self._gateway.sync_works(prepared_ids)
+            self._gateway.sync_books(prepared_ids)
             self._uow.commit()
         except Exception:
             self._uow.rollback()

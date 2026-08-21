@@ -146,7 +146,7 @@ FILTER_FIELD_DEFINITIONS = (
         unit="%",
     ),
     LibraryFilterFieldDefinition(
-        "volumeTitle", "卷册名称", "卷册元数据", "text", TEXT_OPERATORS
+        "resourceTitle", "卷册名称", "卷册元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "narrator", "演播者", "卷册元数据", "text", TEXT_OPERATORS

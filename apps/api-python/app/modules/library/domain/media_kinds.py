@@ -1,4 +1,4 @@
-"""Volume media-kind derivation that does not use LibraryVersion.sourceKey."""
+"""Volume media-kind derivation that does not use LibraryReadableResource.sourceKey."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ class VolumeMediaKindSource(Protocol):
     suggested_media_kind: str | None
 
 
-def media_kind_for_format(volume_format: str) -> str:
-    normalized = volume_format.strip().upper()
+def media_kind_for_format(resource_format: str) -> str:
+    normalized = resource_format.strip().upper()
     if normalized in _AUDIO_FORMATS:
         return "AUDIOBOOK"
     if normalized in _COMIC_FORMATS:

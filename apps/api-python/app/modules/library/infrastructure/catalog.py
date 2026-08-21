@@ -1,187 +1,109 @@
-"""SQLAlchemy projections for an authorized OPDS-compatible catalog."""
+"""SQLAlchemy catalog queries for visible Books and ReadableResources."""
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, exists, func, or_, select
-from sqlalchemy.orm import Session, aliased
-from sqlalchemy.sql.selectable import ScalarSelect
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
 
-from app.core.authorization import (
-    AuthorizationContext,
-    volume_visibility_predicate,
-    work_visibility_predicate,
-)
-from app.models.library import (
+from app.core.authorization import AuthorizationContext, book_visibility_predicate
+from app.models import (
+    LibraryBookFacet,
+    LibraryBook,
+    LibraryBookMetadata,
     LibraryFacet,
-    LibraryFile,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
-    LibraryWorkFacet,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
 )
 from app.modules.library.application.catalog import (
+    CatalogAsset,
+    CatalogBook,
+    CatalogBookFacet,
+    CatalogBookFilter,
+    CatalogBookPage,
     CatalogFacet,
     CatalogFacetKind,
     CatalogFacetPage,
-    CatalogFile,
-    CatalogVolume,
-    CatalogWork,
-    CatalogWorkFacet,
-    CatalogWorkFilter,
-    CatalogWorkPage,
-)
-from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
+    CatalogQueryPort,
+    CatalogResource,
 )
 
-CATALOG_MEDIA_KINDS = ("EBOOK", "COMIC")
-CATALOG_READY_IMPORT_STATUSES = ("COMPLETED", "IMPORTED", "READY")
 
-
-def _eligible_volume_exists(context: AuthorizationContext) -> ColumnElement[bool]:
-    library_version = aliased(LibraryVersion)
-    volume = aliased(LibraryVolume)
-    file = aliased(LibraryFile)
-    return exists(
-        select(volume.id)
-        .join(library_version, library_version.id == volume.version_id)
-        .join(file, file.volume_id == volume.id)
-        .where(
-            library_version.work_id == LibraryWork.id,
-            volume_effective_media_kind(volume).in_(CATALOG_MEDIA_KINDS),
-            volume.hidden.is_(False),
-            volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
-            volume_visibility_predicate(context, volume),
-        )
-    )
-
-
-def _work_predicates(
-    context: AuthorizationContext,
-    filters: CatalogWorkFilter,
-) -> list[ColumnElement[bool]]:
-    predicates: list[ColumnElement[bool]] = [
-        LibraryWork.hidden.is_(False),
-        work_visibility_predicate(context),
-        _eligible_volume_exists(context),
-    ]
-    if filters.search:
-        term = filters.search.casefold()
-        predicates.append(
-            or_(
-                func.lower(LibraryWork.title).contains(term, autoescape=True),
-                func.lower(func.coalesce(LibraryWork.author, "")).contains(
-                    term, autoescape=True
-                ),
-                func.lower(func.coalesce(LibraryWork.series_name, "")).contains(
-                    term, autoescape=True
-                ),
-                func.lower(LibraryWork.tags).contains(term, autoescape=True),
-            )
-        )
-    if filters.facet_kind is not None and filters.facet_id is not None:
-        facet_link = aliased(LibraryWorkFacet)
-        facet = aliased(LibraryFacet)
-        predicates.append(
-            exists(
-                select(facet_link.work_id)
-                .join(facet, facet.id == facet_link.facet_id)
-                .where(
-                    facet_link.work_id == LibraryWork.id,
-                    facet_link.facet_id == filters.facet_id,
-                    facet.kind == filters.facet_kind,
-                )
-            )
-        )
-    if filters.work_ids is not None:
-        predicates.append(
-            LibraryWork.id.in_(filters.work_ids)
-            if filters.work_ids
-            else LibraryWork.id.is_(None)
-        )
-    return predicates
-
-
-def _latest_eligible_volume_at(
-    context: AuthorizationContext,
-) -> ScalarSelect[datetime]:
-    library_version = aliased(LibraryVersion)
-    volume = aliased(LibraryVolume)
-    file = aliased(LibraryFile)
-    return (
-        select(func.max(volume.updated_at))
-        .join(library_version, library_version.id == volume.version_id)
-        .join(file, file.volume_id == volume.id)
-        .where(
-            library_version.work_id == LibraryWork.id,
-            volume_effective_media_kind(volume).in_(CATALOG_MEDIA_KINDS),
-            volume.hidden.is_(False),
-            volume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
-            volume_visibility_predicate(context, volume),
-        )
-        .correlate(LibraryWork)
-        .scalar_subquery()
-    )
-
-
-class SqlAlchemyCatalogQueries:
+class SqlAlchemyCatalogQueries(CatalogQueryPort):
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def list_works(
+    def _book_predicates(self, context: AuthorizationContext):
+        return [book_visibility_predicate(context)]
+
+    def list_books(
         self,
         *,
         context: AuthorizationContext,
-        filters: CatalogWorkFilter,
+        filters: CatalogBookFilter,
         page: int,
         page_size: int,
-    ) -> CatalogWorkPage:
-        predicates = _work_predicates(context, filters)
-        total = int(
-            self._db.scalar(
-                select(func.count()).select_from(LibraryWork).where(*predicates)
+    ) -> CatalogBookPage:
+        predicates = self._book_predicates(context)
+        if filters.book_ids:
+            predicates.append(self._book_id_column().in_(filters.book_ids))
+        if filters.search:
+            query = f"%{filters.search}%"
+            predicates.append(
+                or_(
+                    LibraryBookMetadata.title.ilike(query),
+                    LibraryBookMetadata.author.ilike(query),
+                    LibraryBookMetadata.series_name.ilike(query),
+                )
             )
-            or 0
+        if filters.facet_kind and filters.facet_id:
+            predicates.append(
+                self._book_id_column().in_(
+                    select(LibraryBookFacet.book_id)
+                    .join(LibraryFacet, LibraryFacet.id == LibraryBookFacet.facet_id)
+                    .where(
+                        LibraryFacet.kind == filters.facet_kind,
+                        LibraryFacet.id == filters.facet_id,
+                    )
+                )
+            )
+        base = (
+            select(LibraryBook, LibraryBookMetadata)
+            .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+            .where(*predicates)
         )
-        statement = select(LibraryWork).where(*predicates)
+        total = int(self._db.scalar(select(func.count()).select_from(base.subquery())) or 0)
+        order = (
+            LibraryBookMetadata.title.asc(),
+            LibraryBook.id.asc(),
+        )
         if filters.sort == "recent":
-            latest = _latest_eligible_volume_at(context)
-            statement = statement.order_by(
-                latest.desc(), LibraryWork.updated_at.desc(), LibraryWork.id.asc()
-            )
-        else:
-            statement = statement.order_by(
-                LibraryWork.normalized_title.asc(), LibraryWork.id.asc()
-            )
-        work_rows = self._db.scalars(
-            statement.offset((page - 1) * page_size).limit(page_size)
+            order = (LibraryBook.updated_at.desc(), LibraryBook.id.asc())
+        rows = self._db.execute(
+            base.order_by(*order).offset((page - 1) * page_size).limit(page_size)
         ).all()
-        works = self._assemble_works(context, work_rows)
-        return CatalogWorkPage(
-            works=works,
+        books = tuple(self._assemble_book(book, metadata, context) for book, metadata in rows)
+        return CatalogBookPage(
+            books=books,
             total=total,
             page=page,
             page_size=page_size,
-            updated_at=max((work.updated_at for work in works), default=None),
+            updated_at=max((book.updated_at for book in books), default=None),
         )
 
-    def get_work(
-        self,
-        *,
-        context: AuthorizationContext,
-        work_id: str,
-    ) -> CatalogWork | None:
-        page = self.list_works(
+    def get_book(self, *, context: AuthorizationContext, book_id: str) -> CatalogBook | None:
+        page = self.list_books(
             context=context,
-            filters=CatalogWorkFilter(work_ids=(work_id,)),
+            filters=CatalogBookFilter(book_ids=(book_id,)),
             page=1,
             page_size=1,
         )
-        return page.works[0] if page.works else None
+        return page.books[0] if page.books else None
 
     def list_facets(
         self,
@@ -192,56 +114,37 @@ class SqlAlchemyCatalogQueries:
         page: int,
         page_size: int,
     ) -> CatalogFacetPage:
-        filters: list[ColumnElement[bool]] = [
-            LibraryFacet.kind == kind,
-            func.trim(LibraryFacet.name) != "",
-            LibraryWork.hidden.is_(False),
-            work_visibility_predicate(context),
-            _eligible_volume_exists(context),
-        ]
+        predicates = [LibraryFacet.kind == kind]
         if search:
-            filters.append(
-                func.lower(LibraryFacet.name).contains(
-                    search.casefold(), autoescape=True
-                )
+            predicates.append(LibraryFacet.name.ilike(f"%{search}%"))
+        visible_book_ids = select(LibraryBook.id).where(book_visibility_predicate(context))
+        base = (
+            select(LibraryFacet, func.count(LibraryBookFacet.book_id))
+            .outerjoin(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
+            .outerjoin(
+                LibraryBook,
+                (LibraryBook.id == LibraryBookFacet.book_id)
+                & LibraryBook.id.in_(visible_book_ids),
             )
-        grouped = (
-            select(
-                LibraryFacet.id.label("facet_id"),
-                LibraryFacet.kind.label("facet_kind"),
-                LibraryFacet.name.label("facet_name"),
-                LibraryFacet.normalized_name.label("normalized_name"),
-                func.count(func.distinct(LibraryWork.id)).label("work_count"),
-                func.max(LibraryFacet.updated_at).label("facet_updated_at"),
-                func.max(LibraryWork.updated_at).label("work_updated_at"),
-            )
-            .join(LibraryWorkFacet, LibraryWorkFacet.facet_id == LibraryFacet.id)
-            .join(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
-            .where(*filters)
-            .group_by(
-                LibraryFacet.id,
-                LibraryFacet.kind,
-                LibraryFacet.name,
-                LibraryFacet.normalized_name,
-            )
-        ).subquery()
-        total = int(self._db.scalar(select(func.count()).select_from(grouped)) or 0)
+            .where(*predicates)
+            .group_by(LibraryFacet.id)
+        )
+        total = int(self._db.scalar(select(func.count()).select_from(LibraryFacet).where(*predicates)) or 0)
         rows = self._db.execute(
-            select(grouped)
-            .order_by(grouped.c.normalized_name.asc(), grouped.c.facet_id.asc())
+            base.order_by(LibraryFacet.name.asc(), LibraryFacet.id.asc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
         facets = tuple(
             CatalogFacet(
-                id=str(row.facet_id),
+                id=facet.id,
                 kind=kind,
-                name=str(row.facet_name),
-                normalized_name=str(row.normalized_name),
-                work_count=int(row.work_count),
-                updated_at=max(row.facet_updated_at, row.work_updated_at),
+                name=facet.name,
+                normalized_name=facet.normalized_name,
+                book_count=int(count or 0),
+                updated_at=facet.updated_at,
             )
-            for row in rows
+            for facet, count in rows
         )
         return CatalogFacetPage(
             facets=facets,
@@ -251,141 +154,101 @@ class SqlAlchemyCatalogQueries:
             updated_at=max((facet.updated_at for facet in facets), default=None),
         )
 
-    def _assemble_works(
+    @staticmethod
+    def _book_id_column():
+        return LibraryBook.id
+
+    def _assemble_book(
         self,
+        book,
+        metadata: LibraryBookMetadata | None,
         context: AuthorizationContext,
-        work_rows: Sequence[LibraryWork],
-    ) -> tuple[CatalogWork, ...]:
-        if not work_rows:
-            return ()
-        work_ids = [work.id for work in work_rows]
-        volumes = self._volumes_by_work(context, work_ids)
-        facets = self._facets_by_work(work_ids)
-        return tuple(
-            CatalogWork(
-                id=work.id,
-                title=work.title,
-                author=work.author,
-                description=work.description,
-                series_name=work.series_name,
-                series_index=work.series_index,
-                has_cover=bool(work.cover_path and work.cover_status == "READY"),
-                facets=facets.get(work.id, ()),
-                volumes=volumes.get(work.id, ()),
-                created_at=work.created_at,
-                updated_at=max(
-                    [work.updated_at]
-                    + [volume.updated_at for volume in volumes.get(work.id, ())]
-                ),
-            )
-            for work in work_rows
+    ) -> CatalogBook:
+        facets = tuple(
+            CatalogBookFacet(id=facet.id, kind=facet.kind, name=facet.name)
+            for facet in self._db.scalars(
+                select(LibraryFacet)
+                .join(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
+                .where(LibraryBookFacet.book_id == book.id)
+                .order_by(LibraryFacet.kind, LibraryFacet.name, LibraryFacet.id)
+            ).all()
+        )
+        resources = tuple(
+            self._resource(resource, resource_metadata)
+            for resource, resource_metadata in self._db.execute(
+                select(LibraryReadableResource, LibraryReadableResourceMetadata)
+                .outerjoin(
+                    LibraryReadableResourceMetadata,
+                    LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+                )
+                .where(
+                    LibraryReadableResource.book_id == book.id,
+                    LibraryReadableResource.enablement_state == "ENABLED",
+                    LibraryReadableResource.import_state == "READY",
+                )
+                .order_by(LibraryReadableResource.id)
+            ).all()
+        )
+        return CatalogBook(
+            id=book.id,
+            title=metadata.title if metadata else "",
+            author=metadata.author if metadata else None,
+            description=metadata.description if metadata else None,
+            series_name=metadata.series_name if metadata else None,
+            series_index=metadata.series_index if metadata else None,
+            has_cover=bool(metadata and metadata.cover_path),
+            facets=facets,
+            resources=resources,
+            created_at=book.created_at,
+            updated_at=book.updated_at,
         )
 
-    def _volumes_by_work(
+    def _resource(
         self,
-        context: AuthorizationContext,
-        work_ids: list[str],
-    ) -> dict[str, tuple[CatalogVolume, ...]]:
-        preferred_file_id = (
-            select(LibraryFile.id)
-            .where(LibraryFile.volume_id == LibraryVolume.id)
-            .order_by(LibraryFile.sort_order.asc(), LibraryFile.id.asc())
-            .limit(1)
-            .correlate(LibraryVolume)
-            .scalar_subquery()
+        resource: LibraryReadableResource,
+        metadata: LibraryReadableResourceMetadata | None,
+    ) -> CatalogResource:
+        asset_row = self._db.execute(
+            select(LibraryResourceAsset, LibraryResourceAssetMetadata, LibrarySourceNode)
+            .outerjoin(LibraryResourceAssetMetadata, LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id)
+            .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+            .where(
+                LibraryResourceAsset.resource_id == resource.id,
+                LibraryResourceAsset.import_state == "READY",
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+            )
+            .order_by(LibraryResourceAsset.sequence_index, LibraryResourceAsset.id)
+        ).first()
+        if asset_row is None:
+            asset = CatalogAsset(
+                id="",
+                mime_type="application/octet-stream",
+                size_bytes=0,
+                updated_at=resource.updated_at,
+            )
+        else:
+            asset_row_entity, asset_metadata, source = asset_row
+            asset = CatalogAsset(
+                id=asset_row_entity.id,
+                mime_type=asset_metadata.mime_type if asset_metadata and asset_metadata.mime_type else "application/octet-stream",
+                size_bytes=int(source.observed_size_bytes or 0),
+                updated_at=source.updated_at,
+            )
+        return CatalogResource(
+            id=resource.id,
+            title=metadata.title if metadata else "",
+            media_kind=resource.media_kind,
+            format=resource.format,
+            resource_index=metadata.resource_index if metadata else None,
+            sort_order=int(metadata.resource_index or 0) if metadata and metadata.resource_index is not None else 0,
+            description=metadata.description if metadata else None,
+            language=metadata.language if metadata else None,
+            publisher=metadata.publisher if metadata else None,
+            published_at=metadata.published_at if metadata else None,
+            identifier=metadata.identifier if metadata else None,
+            isbn=metadata.isbn if metadata else None,
+            page_count=metadata.page_count if metadata else None,
+            has_cover=bool(metadata and metadata.cover_path),
+            asset=asset,
+            updated_at=resource.updated_at,
         )
-        rows = self._db.execute(
-            select(
-                LibraryVersion.work_id,
-                volume_effective_media_kind(LibraryVolume).label("media_kind"),
-                LibraryVolume,
-                LibraryFile.id.label("file_id"),
-                LibraryFile.mime_type,
-                LibraryFile.size_bytes.label("file_size_bytes"),
-                LibraryFile.updated_at.label("file_updated_at"),
-            )
-            .join(
-                LibraryVersion,
-                LibraryVersion.id == LibraryVolume.version_id,
-            )
-            .join(LibraryFile, LibraryFile.id == preferred_file_id)
-            .where(
-                LibraryVersion.work_id.in_(work_ids),
-                volume_effective_media_kind(LibraryVolume).in_(CATALOG_MEDIA_KINDS),
-                LibraryVolume.hidden.is_(False),
-                LibraryVolume.import_status.in_(CATALOG_READY_IMPORT_STATUSES),
-                volume_visibility_predicate(context),
-            )
-            .order_by(
-                LibraryVersion.work_id.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.volume_index.asc(),
-                LibraryVolume.id.asc(),
-            )
-        ).all()
-        by_work: defaultdict[str, list[CatalogVolume]] = defaultdict(list)
-        for row in rows:
-            volume = row.LibraryVolume
-            by_work[str(row.work_id)].append(
-                CatalogVolume(
-                    id=volume.id,
-                    title=volume.title,
-                    media_kind=str(row.media_kind),
-                    format=volume.format,
-                    volume_index=volume.volume_index,
-                    sort_order=volume.sort_order,
-                    description=volume.description,
-                    language=volume.language,
-                    publisher=volume.publisher,
-                    published_at=volume.published_at,
-                    identifier=volume.identifier,
-                    isbn=volume.isbn,
-                    page_count=volume.page_count,
-                    has_cover=bool(
-                        volume.cover_path and volume.cover_status == "READY"
-                    ),
-                    file=CatalogFile(
-                        id=str(row.file_id),
-                        mime_type=str(row.mime_type),
-                        size_bytes=int(row.file_size_bytes),
-                        updated_at=row.file_updated_at,
-                    ),
-                    updated_at=max(volume.updated_at, row.file_updated_at),
-                )
-            )
-        return {work_id: tuple(items) for work_id, items in by_work.items()}
-
-    def _facets_by_work(
-        self,
-        work_ids: list[str],
-    ) -> dict[str, tuple[CatalogWorkFacet, ...]]:
-        rows = self._db.execute(
-            select(
-                LibraryWorkFacet.work_id,
-                LibraryFacet.id,
-                LibraryFacet.kind,
-                LibraryFacet.name,
-            )
-            .join(LibraryFacet, LibraryFacet.id == LibraryWorkFacet.facet_id)
-            .where(
-                LibraryWorkFacet.work_id.in_(work_ids),
-                LibraryFacet.kind.in_(("AUTHOR", "SERIES", "TAG")),
-            )
-            .order_by(
-                LibraryWorkFacet.work_id.asc(),
-                LibraryFacet.kind.asc(),
-                LibraryWorkFacet.sort_order.asc(),
-                LibraryFacet.normalized_name.asc(),
-                LibraryFacet.id.asc(),
-            )
-        ).all()
-        by_work: defaultdict[str, list[CatalogWorkFacet]] = defaultdict(list)
-        for work_id, facet_id, kind, name in rows:
-            by_work[str(work_id)].append(
-                CatalogWorkFacet(
-                    id=str(facet_id),
-                    kind=kind,
-                    name=str(name),
-                )
-            )
-        return {work_id: tuple(items) for work_id, items in by_work.items()}

@@ -22,8 +22,8 @@ class PublicationParserProfile:
 
 @dataclass(frozen=True, slots=True)
 class PublicationNavigationCacheIdentity:
-    volume_id: str
-    file_id: str
+    resource_id: str
+    asset_id: str
     source_size_bytes: int
     source_mtime_ms: int
     parser: str
@@ -52,15 +52,15 @@ class PublicationNavigationEntry:
 
 def publication_cache_identity(
     *,
-    volume_id: str,
-    file_id: str,
+    resource_id: str,
+    asset_id: str,
     source_size_bytes: int,
     source_mtime_ms: int,
     profile: PublicationParserProfile,
 ) -> PublicationNavigationCacheIdentity:
     return PublicationNavigationCacheIdentity(
-        volume_id=volume_id,
-        file_id=file_id,
+        resource_id=resource_id,
+        asset_id=asset_id,
         source_size_bytes=source_size_bytes,
         source_mtime_ms=source_mtime_ms,
         parser=profile.parser,
@@ -73,15 +73,15 @@ def _href_without_fragment(href: str) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, split.query, ""))
 
 
-def _navigation_key(volume_id: str, href: str, path: tuple[int, ...]) -> str:
+def _navigation_key(resource_id: str, href: str, path: tuple[int, ...]) -> str:
     path_key = ".".join(str(part) for part in path)
-    digest = hashlib.sha256(f"{volume_id}\0{href}\0{path_key}".encode()).hexdigest()
+    digest = hashlib.sha256(f"{resource_id}\0{href}\0{path_key}".encode()).hexdigest()
     return f"pubnav_{digest[:32]}"
 
 
 def flatten_publication_navigation(
     *,
-    volume_id: str,
+    resource_id: str,
     publication: NormalizedPublication,
 ) -> tuple[PublicationNavigationEntry, ...]:
     """Flatten Publication TOC using stable zero-based pre-order traversal."""
@@ -102,7 +102,7 @@ def flatten_publication_navigation(
     ) -> None:
         for child_index, entry in enumerate(entries):
             path = (*parent, child_index)
-            navigation_key = _navigation_key(volume_id, entry.href, path)
+            navigation_key = _navigation_key(resource_id, entry.href, path)
             flattened.append(
                 PublicationNavigationEntry(
                     id=navigation_key,

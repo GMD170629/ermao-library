@@ -1,4 +1,4 @@
-"""Volume-first Reader v4 HTTP surface."""
+"""Resource-first Reader v4 HTTP surface."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from app.bootstrap.media import media_page_index, media_streaming
 from app.bootstrap.publications import (
     ensure_publication_navigation,
 )
-from app.bootstrap.reader import reader_volume_service
+from app.bootstrap.reader import reader_resource_service
 from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user
-from app.core.authorization import authorization_context, can_access_volume
+from app.core.authorization import authorization_context, can_access_resource
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
@@ -40,29 +40,29 @@ from app.modules.reader.application.dto import (
     ReaderComicExactLocationDto,
     ReaderEngineLocatorDto,
     ReaderExactLocationDto,
-    ReaderFileDto,
+    ReaderAssetDto,
     ReaderPdfExactLocationDto,
     ReaderProgressDto,
     ReaderReflowableExactLocationDto,
-    ReaderVolumeDto,
+    ReaderResourceDto,
 )
-from app.modules.reader.application.volume_reader import (
+from app.modules.reader.application.resource_reader import (
     ReaderLocationFormatMismatch,
     ReaderLocatorMediaTypeMismatch,
     ReaderLocatorResourceMismatch,
     ReaderProgressBaseRevisionInvalid,
     ReaderProgressRevisionConflict,
-    ReaderVolumeFormatUnsupported,
-    ReaderVolumeNotFound,
+    ReaderResourceFormatUnsupported,
+    ReaderResourceNotFound,
     ReplaceBookmarksCommand,
     SaveProgressCommand,
-    SetVolumeReadingStatusCommand,
-    VolumeReaderService,
+    SetResourceReadingStatusCommand,
+    ResourceReaderService,
 )
-from app.modules.reader.domain.volume_format import (
+from app.modules.reader.domain.resource_format import (
     ReaderType,
     capabilities_for_reader_type,
-    reader_type_for_volume_format,
+    reader_type_for_format,
 )
 from app.modules.reader.presentation.v4_schemas import (
     AudioExactLocation,
@@ -86,7 +86,7 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderComicPageResponse,
     ReaderConflictError,
     ReaderErrorBody,
-    ReaderFileSummary,
+    ReaderAssetSummary,
     ReaderJsonValue,
     ReaderLocation,
     ReaderNotFoundError,
@@ -103,10 +103,9 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderReadingStatusResponse,
     ReaderSourceFormat,
     ReaderUnauthorizedError,
-    ReaderUnitSummary,
+    ReaderNavigationUnitSummary,
     ReaderValidationError,
-    ReaderVersionSchema,
-    ReaderVolumeSummary,
+    ReaderResourceSummary,
     ReadiumEngineLocator,
     ReadiumLocatorPayload,
     ReflowableExactLocation,
@@ -143,13 +142,13 @@ def _current_user(db: Session, request: Request, settings: Settings) -> User:
     return user
 
 
-def _service(db: Session, settings: Settings) -> VolumeReaderService:
-    return reader_volume_service(db, settings)
+def _service(db: Session, settings: Settings) -> ResourceReaderService:
+    return reader_resource_service(db, settings)
 
 
 def _not_found() -> ReaderNotFoundError:
     return ReaderNotFoundError(
-        ReaderErrorBody(message="卷册不存在", code="VOLUME_NOT_FOUND")
+        ReaderErrorBody(message="卷册不存在", code="RESOURCE_NOT_FOUND")
     )
 
 
@@ -174,26 +173,26 @@ def _authorized_bootstrap(
     db: Session,
     request: Request,
     settings: Settings,
-    volume_id: str,
+    resource_id: str,
 ) -> tuple[User, ReaderAccessScope, ReaderBootstrapDto]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     scope = _access_scope(db, user)
     try:
         bootstrap = _service(db, settings).load_bootstrap(
             user_id=user.id,
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=scope,
         )
-    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+    except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
         _raise_service_error(error)
     return user, scope, bootstrap
 
 
-def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderFileDto, str]:
+def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderAssetDto, str]:
     context = bootstrap.context
-    source_format = context.volume.format.strip().lower()
+    source_format = context.resource.format.strip().lower()
     if source_format not in _COMIC_SOURCE_FORMATS:
         raise ReaderValidationError(
             ReaderErrorBody(
@@ -204,8 +203,8 @@ def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderFileDto, str]:
     source = next(
         (
             item
-            for item in bootstrap.files
-            if item.kind.strip().upper() in {"COMIC", "CBZ", "ZIP", "CBR", "RAR"}
+            for item in bootstrap.assets
+            if item.role.strip().upper() in {"COMIC", "CBZ", "ZIP", "CBR", "RAR"}
         ),
         None,
     )
@@ -221,13 +220,13 @@ def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
     return cast(sessionmaker[Session], factory)
 
 
-def _reader_type(volume_format: str) -> ReaderType:
-    reader_type = reader_type_for_volume_format(volume_format)
+def _reader_type(resource_format: str) -> ReaderType:
+    reader_type = reader_type_for_format(resource_format)
     if reader_type is None:
         raise ReaderValidationError(
             ReaderErrorBody(
                 message="卷册格式不支持直接阅读",
-                code="VOLUME_FORMAT_UNSUPPORTED",
+                code="RESOURCE_FORMAT_UNSUPPORTED",
             )
         )
     return reader_type
@@ -304,7 +303,7 @@ def _exact_location_dto(value: ExactReaderLocation) -> ReaderExactLocationDto:
             ),
         )
     return ReaderAudioExactLocationDto(
-        file_id=value.file_id,
+        asset_id=value.asset_id,
         chapter_id=value.chapter_id,
         position_millis=value.position_millis,
         engine_locator=(
@@ -360,7 +359,7 @@ def _exact_location_model(value: ReaderExactLocationDto) -> ExactReaderLocation:
         )
     return AudioExactLocation(
         kind="audio",
-        fileId=value.file_id,
+        assetId=value.asset_id,
         chapterId=value.chapter_id,
         positionMillis=value.position_millis,
         engineLocator=_opaque_engine_model(value.engine_locator),
@@ -379,24 +378,27 @@ def _epoch_millis(value: datetime) -> int:
     return int(aware.timestamp() * 1000)
 
 
-def _volume_summary(
-    volume: ReaderVolumeDto,
+def _resource_summary(
+    resource: ReaderResourceDto,
     progress: ReaderProgressDto | None,
-) -> ReaderVolumeSummary:
-    reader_type = _reader_type(volume.format)
-    return ReaderVolumeSummary(
-        id=volume.id,
-        versionId=volume.version_id,
-        title=volume.title,
-        volumeIndex=volume.volume_index,
-        sortOrder=volume.sort_order,
-        format=volume.format,
+) -> ReaderResourceSummary:
+    reader_type = _reader_type(resource.format)
+    return ReaderResourceSummary(
+        id=resource.id,
+        bookId=resource.book_id,
+        sourceNodeId=resource.source_node_id,
+        title=resource.title,
+        resourceIndex=resource.resource_index,
+        sortOrder=resource.sort_order,
+        format=resource.format,
+        mediaKind=resource.media_kind,
         readerType=reader_type.value,
-        pageCount=volume.page_count,
-        chapterCount=volume.chapter_count,
-        durationMs=volume.duration_ms,
-        trackCount=volume.track_count,
+        pageCount=resource.page_count,
+        chapterCount=resource.chapter_count,
+        durationMs=resource.duration_ms,
+        trackCount=resource.track_count,
         progress=progress.percent if progress else 0,
+        resourceCompleted=bool(progress and progress.percent >= 100),
         lastReadAt=progress.progressed_at if progress else None,
     )
 
@@ -422,19 +424,19 @@ def _progress_etag(progress: ReaderProgressDto | None) -> str:
 
 
 def _raise_service_error(error: Exception) -> Never:
-    if isinstance(error, ReaderVolumeNotFound):
+    if isinstance(error, ReaderResourceNotFound):
         raise _not_found() from error
-    if isinstance(error, ReaderVolumeFormatUnsupported):
+    if isinstance(error, ReaderResourceFormatUnsupported):
         raise ReaderValidationError(
             ReaderErrorBody(
-                message="卷册格式不支持直接阅读",
-                code="VOLUME_FORMAT_UNSUPPORTED",
+                message="资源格式不支持直接阅读",
+                code="RESOURCE_FORMAT_UNSUPPORTED",
             )
         ) from error
     if isinstance(error, ReaderLocationFormatMismatch):
         raise ReaderValidationError(
             ReaderErrorBody(
-                message="阅读位置格式与卷册格式不匹配",
+                message="阅读位置格式与资源格式不匹配",
                 code="READER_LOCATION_FORMAT_MISMATCH",
                 details={
                     "expectedKind": error.expected,
@@ -445,7 +447,7 @@ def _raise_service_error(error: Exception) -> Never:
     if isinstance(error, ReaderLocatorMediaTypeMismatch):
         raise ReaderValidationError(
             ReaderErrorBody(
-                message="Readium Locator 媒体类型与卷册格式不匹配",
+                message="Readium Locator 媒体类型与资源格式不匹配",
                 code="READER_LOCATOR_MEDIA_TYPE_MISMATCH",
                 details={
                     "expectedReaderType": error.expected,
@@ -472,12 +474,12 @@ def _raise_service_error(error: Exception) -> Never:
 
 
 @router.get(
-    "/volumes/{volume_id}/bootstrap",
+    "/resources/{resource_id}/bootstrap",
     response_model=ReaderBootstrapResponse,
     response_model_by_alias=True,
 )
 def reader_bootstrap_v4(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
@@ -490,7 +492,7 @@ def reader_bootstrap_v4(
     ),
 ]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     user_id = user.id
     reader_scope = _access_scope(db, user)
@@ -499,7 +501,7 @@ def reader_bootstrap_v4(
         ensure_publication_navigation(
             _runtime_session_factory(request),
             settings,
-        ).execute(volume_id=volume_id, access_scope=publication_scope)
+        ).execute(resource_id=resource_id, access_scope=publication_scope)
     except (
         OSError,
         PublicationCorruptError,
@@ -508,47 +510,47 @@ def reader_bootstrap_v4(
         PublicationUnsupportedError,
     ) as error:
         LOGGER.warning(
-            "reader_navigation_generation outcome=unavailable volume_id=%s "
+            "reader_navigation_generation outcome=unavailable resource_id=%s "
             "error_type=%s",
-            volume_id,
+            resource_id,
             type(error).__name__,
         )
     try:
         bootstrap = _service(db, settings).load_bootstrap(
             user_id=user_id,
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=reader_scope,
         )
-    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+    except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
         _raise_service_error(error)
 
     context = bootstrap.context
-    reader_type = _reader_type(context.volume.format)
-    progress = bootstrap.progress_by_volume_id.get(volume_id)
+    reader_type = _reader_type(context.resource.format)
+    progress = bootstrap.progress_by_resource_id.get(resource_id)
     capabilities = capabilities_for_reader_type(reader_type)
-    normalized_format = context.volume.format.lower()
+    normalized_format = context.resource.format.lower()
     publication_access = None
     if normalized_format in _PUBLICATION_SERVER_FORMATS:
         publication_access = ReaderPublicationAccess(
             kind="reflowable",
             manifestUrl=(
-                f"/api/reader/v4/volumes/{volume_id}/publication/manifest.json"
+                f"/api/reader/v4/resources/{resource_id}/publication/manifest.json"
             ),
             positionsUrl=(
-                f"/api/reader/v4/volumes/{volume_id}/publication/positions.json"
+                f"/api/reader/v4/resources/{resource_id}/publication/positions.json"
             ),
         )
     elif normalized_format in _COMIC_SOURCE_FORMATS:
         comic_source, comic_source_format = _comic_source(bootstrap)
         publication_access = ReaderPublicationAccess(
             kind="comic",
-            manifestUrl=f"/api/reader/v4/volumes/{volume_id}/comic/manifest",
+            manifestUrl=f"/api/reader/v4/resources/{resource_id}/comic/manifest",
             pageUrlTemplate=(
-                f"/api/reader/v4/volumes/{volume_id}/comic/pages/{{pageIndex}}"
+                f"/api/reader/v4/resources/{resource_id}/comic/pages/{{pageIndex}}"
             ),
             imageVariants=_COMIC_IMAGE_VARIANTS,
             downloadArtifact=ReaderComicDownloadArtifact(
-                url=f"/api/reader/v4/volumes/{volume_id}/comic/archive",
+                url=f"/api/reader/v4/resources/{resource_id}/comic/archive",
                 sourceFormat=cast(
                     Literal["cbz", "zip", "cbr", "rar"], comic_source_format
                 ),
@@ -566,48 +568,44 @@ def reader_bootstrap_v4(
             readerType=reader_type.value,
             sourceFormat=cast(ReaderSourceFormat, normalized_format),
             book=ReaderBookSummary(
-                id=context.work.id,
-                title=context.work.title,
-                author=context.work.author,
-                coverUrl=f"/api/works/{context.work.id}/cover",
+                id=context.book.id,
+                title=context.book.title,
+                author=context.book.author,
+                coverUrl=f"/api/books/{context.book.id}/cover",
             ),
-            version=ReaderVersionSchema(
-                id=context.version.id,
-                workId=context.version.work_id,
-                sourceKey=context.version.source_key,
-                sourceName=context.version.source_name,
-            ),
-            versionCompleted=bootstrap.version_completed,
-            volume=_volume_summary(context.volume, progress),
-            availableVolumes=[
-                _volume_summary(
-                    volume,
-                    bootstrap.progress_by_volume_id.get(volume.id),
+            bookCompleted=bootstrap.book_completed,
+            resource=_resource_summary(context.resource, progress),
+            availableResources=[
+                _resource_summary(
+                    resource,
+                    bootstrap.progress_by_resource_id.get(resource.id),
                 )
-                for volume in bootstrap.available_volumes
+                for resource in bootstrap.available_resources
             ],
-            files=[
-                ReaderFileSummary(
-                    id=file.id,
-                    kind=file.kind,
-                    mimeType=file.mime_type,
-                    sizeBytes=file.size_bytes,
-                    durationMs=file.duration_ms,
-                    discNumber=file.disc_number,
-                    trackNumber=file.track_number,
-                    sortOrder=file.sort_order,
-                    url=f"/api/files/{file.id}",
-                    codec=file.codec,
+            assets=[
+                ReaderAssetSummary(
+                    id=asset.id,
+                    resourceId=asset.resource_id,
+                    sourceNodeId=asset.source_node_id,
+                    role=asset.role,
+                    mimeType=asset.mime_type,
+                    sizeBytes=asset.size_bytes,
+                    durationMs=asset.duration_ms,
+                    discNumber=asset.disc_number,
+                    trackNumber=asset.track_number,
+                    sortOrder=asset.sort_order,
+                    url=f"/api/assets/{asset.id}",
+                    codec=asset.codec,
                 )
-                for file in bootstrap.files
+                for asset in bootstrap.assets
             ],
             units=[
-                ReaderUnitSummary(
+                ReaderNavigationUnitSummary(
                     id=unit.id,
                     index=unit.sort_order,
                     title=unit.title,
                     href=unit.href,
-                    fileId=unit.file_id,
+                    assetId=unit.asset_id,
                     startMs=unit.start_ms,
                     endMs=unit.end_ms,
                     durationMs=unit.duration_ms,
@@ -615,7 +613,7 @@ def reader_bootstrap_v4(
                 )
                 for unit in bootstrap.units
             ],
-            fileUrl=f"/api/volumes/{volume_id}/file",
+            resourceUrl=f"/api/resources/{resource_id}",
             capabilities=ReaderCapabilities(
                 canGoNext=capabilities.can_go_next,
                 canGoPrevious=capabilities.can_go_previous,
@@ -641,12 +639,12 @@ def reader_bootstrap_v4(
 
 
 @router.get(
-    "/volumes/{volume_id}/comic/manifest",
+    "/resources/{resource_id}/comic/manifest",
     response_model=ReaderComicManifestResponse,
     response_model_by_alias=True,
 )
 def get_comic_manifest_v4(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     response: Response,
     db: DatabaseSession,
@@ -659,12 +657,12 @@ def get_comic_manifest_v4(
         ReaderValidationError,
     ),
 ]:
-    _user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
+    _user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
     _source, source_format = _comic_source(bootstrap)
     index = media_page_index.resolve_read_only(
-        media_page_index.load_read_only(db, volume_id)
+        media_page_index.load_read_only(db, resource_id)
     )
-    etag = f'W/"comic-manifest-{volume_id}-{len(index.pages)}"'
+    etag = f'W/"comic-manifest-{resource_id}-{len(index.pages)}"'
     cache_headers = {
         "Cache-Control": "private, no-cache",
         "ETag": etag,
@@ -699,7 +697,7 @@ def get_comic_manifest_v4(
         data=ReaderComicManifestData(
             schemaVersion=1,
             kind="comic",
-            volumeId=volume_id,
+            resourceId=resource_id,
             sourceFormat=cast(Literal["cbz", "zip", "cbr", "rar"], source_format),
             pageCount=len(pages),
             readingOrder=pages,
@@ -708,11 +706,11 @@ def get_comic_manifest_v4(
 
 
 @router.get(
-    "/volumes/{volume_id}/comic/pages/{page_index}",
+    "/resources/{resource_id}/comic/pages/{page_index}",
     response_class=ReaderComicPageResponse,
 )
 def get_comic_page_v4(
-    volume_id: str,
+    resource_id: str,
     page_index: int,
     request: Request,
     db: DatabaseSession,
@@ -722,9 +720,9 @@ def get_comic_page_v4(
         Query(alias="imageVariant"),
     ] = "original",
 ) -> Response:
-    user, _scope, _bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
+    user, _scope, _bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
     index = media_page_index.resolve_read_only(
-        media_page_index.load_read_only(db, volume_id)
+        media_page_index.load_read_only(db, resource_id)
     )
     if page_index < 0 or page_index >= len(index.pages):
         raise ReaderNotFoundError(
@@ -734,7 +732,7 @@ def get_comic_page_v4(
             )
         )
     page = index.pages[page_index]
-    source = index.source_for(page.file_id)
+    source = index.source_for(page.asset_id)
     if source is None or source.kind != "COMIC":
         raise _not_found()
     _ = image_variant
@@ -746,7 +744,7 @@ def get_comic_page_v4(
         settings,
         page.media_type,
         route="reader-v4-comic-page",
-        file_id=page.id,
+        asset_id=page.id,
     )
     page_response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
     page_response.headers["X-Comic-Page-Index"] = str(page_index)
@@ -755,19 +753,19 @@ def get_comic_page_v4(
 
 
 @router.get(
-    "/volumes/{volume_id}/comic/archive",
+    "/resources/{resource_id}/comic/archive",
     response_class=ReaderComicArchiveResponse,
 )
 def download_comic_archive_v4(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
 ) -> Response:
-    user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, volume_id)
+    user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
     source, source_format = _comic_source(bootstrap)
     indexed_source = media_page_index.resolve_read_only(
-        media_page_index.load_read_only(db, volume_id)
+        media_page_index.load_read_only(db, resource_id)
     ).source_for(source.id)
     if indexed_source is None:
         raise _not_found()
@@ -781,18 +779,18 @@ def download_comic_archive_v4(
         user.id,
         media_type=source.mime_type or _COMIC_ARCHIVE_MIME_TYPES[source_format],
         route="reader-v4-comic-archive",
-        file_id=source.id,
+        asset_id=source.id,
         as_attachment=True,
     )
 
 
 @router.put(
-    "/volumes/{volume_id}/reading-status",
+    "/resources/{resource_id}/reading-status",
     response_model=ReaderReadingStatusResponse,
     response_model_by_alias=True,
 )
-def set_volume_reading_status_v4(
-    volume_id: str,
+def set_resource_reading_status_v4(
+    resource_id: str,
     payload: ReaderReadingStatusPut,
     request: Request,
     db: DatabaseSession,
@@ -806,22 +804,22 @@ def set_volume_reading_status_v4(
     ),
 ]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings).set_volume_reading_status(
-            SetVolumeReadingStatusCommand(
+        progress = _service(db, settings).set_resource_reading_status(
+            SetResourceReadingStatusCommand(
                 user_id=user.id,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=_access_scope(db, user),
                 status=payload.status,
             )
         )
-    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+    except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
         _raise_service_error(error)
     return ReaderReadingStatusResponse(
         data=ReaderReadingStatusData(
-            volumeId=volume_id,
+            resourceId=resource_id,
             status=payload.status,
             percent=progress.percent if progress is not None else 0,
         )
@@ -829,12 +827,12 @@ def set_volume_reading_status_v4(
 
 
 @router.put(
-    "/volumes/{volume_id}/progress",
+    "/resources/{resource_id}/progress",
     response_model=ReaderProgressResponse,
     response_model_by_alias=True,
 )
 def save_progress_v4(
-    volume_id: str,
+    resource_id: str,
     payload: ReaderProgressPut,
     request: Request,
     db: DatabaseSession,
@@ -850,13 +848,13 @@ def save_progress_v4(
     ),
 ]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
         progress = _service(db, settings).save_progress(
             SaveProgressCommand(
                 user_id=user.id,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=_access_scope(db, user),
                 client_id=payload.client_id,
                 mutation_id=str(payload.mutation_id),
@@ -866,8 +864,8 @@ def save_progress_v4(
             )
         )
     except (
-        ReaderVolumeNotFound,
-        ReaderVolumeFormatUnsupported,
+        ReaderResourceNotFound,
+        ReaderResourceFormatUnsupported,
         ReaderLocationFormatMismatch,
         ReaderLocatorMediaTypeMismatch,
         ReaderLocatorResourceMismatch,
@@ -885,12 +883,12 @@ def save_progress_v4(
 
 
 @router.get(
-    "/volumes/{volume_id}/progress",
+    "/resources/{resource_id}/progress",
     response_model=ReaderProgressStateResponse,
     response_model_by_alias=True,
 )
 def get_progress_v4(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     response: Response,
     db: DatabaseSession,
@@ -904,15 +902,15 @@ def get_progress_v4(
     ),
 ]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
         progress = _service(db, settings).load_progress(
             user_id=user.id,
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=_access_scope(db, user),
         )
-    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+    except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
         _raise_service_error(error)
     etag = _progress_etag(progress)
     headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Cookie"}
@@ -934,12 +932,12 @@ def get_progress_v4(
 
 
 @router.get(
-    "/volumes/{volume_id}/bookmarks",
+    "/resources/{resource_id}/bookmarks",
     response_model=ReaderBookmarksResponse,
     response_model_by_alias=True,
 )
 def list_bookmarks_v4(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
@@ -953,15 +951,15 @@ def list_bookmarks_v4(
     ),
 ]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
         bookmarks = _service(db, settings).list_bookmarks(
             user_id=user.id,
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=_access_scope(db, user),
         )
-    except ReaderVolumeNotFound as error:
+    except ReaderResourceNotFound as error:
         _raise_service_error(error)
     return ReaderBookmarksResponse(
         data=ReaderBookmarksData(
@@ -980,12 +978,12 @@ def list_bookmarks_v4(
 
 
 @router.put(
-    "/volumes/{volume_id}/bookmarks",
+    "/resources/{resource_id}/bookmarks",
     response_model=ReaderBookmarksResponse,
     response_model_by_alias=True,
 )
 def replace_bookmarks_v4(
-    volume_id: str,
+    resource_id: str,
     payload: ReaderBookmarksReplaceRequest,
     request: Request,
     db: DatabaseSession,
@@ -1000,7 +998,7 @@ def replace_bookmarks_v4(
     ),
 ]:
     user = _current_user(db, request, settings)
-    if not can_access_volume(db, user, volume_id):
+    if not can_access_resource(db, user, resource_id):
         raise _not_found()
     incoming = [
         ReaderBookmarkDto(
@@ -1017,7 +1015,7 @@ def replace_bookmarks_v4(
         bookmarks = _service(db, settings).replace_bookmarks(
             ReplaceBookmarksCommand(
                 user_id=user.id,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=_access_scope(db, user),
                 bookmarks=tuple(incoming),
                 location_kinds=tuple(
@@ -1026,8 +1024,8 @@ def replace_bookmarks_v4(
             )
         )
     except (
-        ReaderVolumeNotFound,
-        ReaderVolumeFormatUnsupported,
+        ReaderResourceNotFound,
+        ReaderResourceFormatUnsupported,
         ReaderLocationFormatMismatch,
     ) as error:
         _raise_service_error(error)

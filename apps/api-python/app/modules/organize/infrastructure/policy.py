@@ -33,7 +33,7 @@ def has_policy_table(db: Session) -> bool:
     return inspect(db.connection()).has_table("OrganizePolicy")
 
 
-def entity_as_legacy_dict(entity: OrganizePolicy) -> dict[str, Any]:
+def entity_record(entity: OrganizePolicy) -> dict[str, Any]:
     """Map an ORM policy to camelCase keys matching legacy raw-SQL row dicts."""
 
     return {
@@ -92,7 +92,7 @@ def get_policy_row(
     db: Session, policy_id: str = DEFAULT_POLICY_ID
 ) -> dict[str, Any] | None:
     entity = db.scalar(select(OrganizePolicy).where(OrganizePolicy.id == policy_id))
-    return entity_as_legacy_dict(entity) if entity is not None else None
+    return entity_record(entity) if entity is not None else None
 
 
 def ensure_organize_policy(db: Session) -> dict[str, Any]:

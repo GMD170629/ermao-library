@@ -7,17 +7,16 @@ from typing import Any
 from sqlalchemy import case, func, inspect, select, update
 from sqlalchemy.orm import Session
 
-from app.models.library import (
-    LibraryFile,
-    LibraryMetadata,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryResourceAsset,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryBook,
 )
 from app.models.organize import OrganizeJob
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.modules.organize.infrastructure.eligibility import work_entity_as_legacy_dict
-from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
+from app.modules.library.domain.resource_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.organize.infrastructure.eligibility import work_entity_record
+from app.modules.organize.infrastructure.runs import job_entity_record
 
 JOB_UPDATE_FIELD_MAP = {
     "status": "status",
@@ -29,7 +28,7 @@ JOB_UPDATE_FIELD_MAP = {
     "startedAt": "started_at",
     "finishedAt": "finished_at",
     "trigger": "trigger",
-    "volumeId": "volume_id",
+    "resourceId": "resource_id",
 }
 WORK_UPDATE_FIELD_MAP = {
     "title": "title",
@@ -50,10 +49,10 @@ WORK_UPDATE_FIELD_MAP = {
 }
 
 
-def volume_entity_as_dict(entity: LibraryVolume) -> dict[str, Any]:
+def volume_entity_as_dict(entity: LibraryReadableResource) -> dict[str, Any]:
     return {
         "id": entity.id,
-        "versionId": entity.version_id,
+        "resourceId": entity.resource_id,
         "title": entity.title,
         "volumeIndex": entity.volume_index,
         "sortOrder": entity.sort_order,
@@ -83,48 +82,48 @@ def get_job(db: Session, job_id: str) -> dict[str, Any] | None:
     if not _has_table(db, "OrganizeJob"):
         return None
     entity = db.get(OrganizeJob, job_id)
-    return job_entity_as_legacy_dict(entity) if entity is not None else None
+    return job_entity_record(entity) if entity is not None else None
 
 
-def get_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "LibraryWork"):
+def get_work(db: Session, book_id: str) -> dict[str, Any] | None:
+    if not _has_table(db, "LibraryBook"):
         return None
-    entity = db.get(LibraryWork, work_id)
-    return work_entity_as_legacy_dict(entity) if entity is not None else None
+    entity = db.get(LibraryBook, book_id)
+    return work_entity_record(entity) if entity is not None else None
 
 
 def _volumes_belonging_to_work(
-    db: Session, work_id: str, *, visible_only: bool
-) -> list[LibraryVolume]:
-    if not _has_table(db, "LibraryVolume") or not _has_table(db, "LibraryVersion"):
+    db: Session, book_id: str, *, visible_only: bool
+) -> list[LibraryReadableResource]:
+    if not _has_table(db, "LibraryReadableResource") or not _has_table(db, "LibraryReadableResource"):
         return []
     query = (
-        select(LibraryVolume)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .where(LibraryVersion.work_id == work_id)
+        select(LibraryReadableResource)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
+        .where(LibraryReadableResource.book_id == book_id)
     )
     if visible_only:
-        query = query.where(LibraryVolume.hidden.is_(False))
+        query = query.where(LibraryReadableResource.hidden.is_(False))
     return list(
         db.scalars(
             query.order_by(
                 case(
-                    (LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
+                    (LibraryReadableResource.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
                     else_=1,
                 ),
-                func.coalesce(LibraryVersion.source_name, ""),
-                LibraryVersion.source_key.asc(),
-                LibraryVersion.id.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.created_at.asc(),
-                LibraryVolume.id.asc(),
+                func.coalesce(LibraryReadableResource.source_name, ""),
+                LibraryReadableResource.source_key.asc(),
+                LibraryReadableResource.id.asc(),
+                LibraryReadableResource.sort_order.asc(),
+                LibraryReadableResource.created_at.asc(),
+                LibraryReadableResource.id.asc(),
             )
         ).all()
     )
 
 
-def earliest_volume_id(db: Session, work_id: str) -> str | None:
-    volumes = _volumes_belonging_to_work(db, work_id, visible_only=True)
+def earliest_resource_id(db: Session, book_id: str) -> str | None:
+    volumes = _volumes_belonging_to_work(db, book_id, visible_only=True)
     return volumes[0].id if volumes else None
 
 
@@ -144,7 +143,7 @@ def update_job(
         "startedAt": "started_at",
         "finishedAt": "finished_at",
         "trigger": "trigger",
-        "volumeId": "volume_id",
+        "resourceId": "resource_id",
     }
     for key, value in values.items():
         attr = field_map.get(key)
@@ -177,9 +176,9 @@ def write_prepared_job_updates(db: Session, rows: tuple[dict[str, Any], ...]) ->
 
 
 def update_work(
-    db: Session, work_id: str, values: dict[str, Any]
+    db: Session, book_id: str, values: dict[str, Any]
 ) -> dict[str, Any] | None:
-    if not _has_table(db, "LibraryWork"):
+    if not _has_table(db, "LibraryBook"):
         return None
     field_map = {
         "title": "title",
@@ -205,9 +204,9 @@ def update_work(
             mapped[attr] = value
     if mapped:
         db.execute(
-            update(LibraryWork).where(LibraryWork.id == work_id).values(**mapped)
+            update(LibraryBook).where(LibraryBook.id == book_id).values(**mapped)
         )
-    return get_work(db, work_id)
+    return get_work(db, book_id)
 
 
 def prepare_work_update_rows(
@@ -228,32 +227,32 @@ def prepare_work_update_rows(
 
 def write_prepared_work_updates(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
     if rows:
-        db.execute(update(LibraryWork), list(rows))
+        db.execute(update(LibraryBook), list(rows))
 
 
-def list_files_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]]:
-    if not _has_table(db, "LibraryFile"):
+def list_files_for_volume(db: Session, resource_id: str) -> list[dict[str, Any]]:
+    if not _has_table(db, "LibraryResourceAsset"):
         return []
     # Project only columns shared by production schema and lean test fixtures.
     rows = db.execute(
         select(
-            LibraryFile.id,
-            LibraryFile.volume_id,
-            LibraryFile.path,
-            LibraryFile.file_path_hash,
-            LibraryFile.mtime_ms,
-            LibraryFile.kind,
-            LibraryFile.mime_type,
-            LibraryFile.size_bytes,
-            LibraryFile.sort_order,
-            LibraryFile.created_at,
-            LibraryFile.updated_at,
-        ).where(LibraryFile.volume_id == volume_id)
+            LibraryResourceAsset.id,
+            LibraryResourceAsset.resource_id,
+            LibraryResourceAsset.path,
+            LibraryResourceAsset.file_path_hash,
+            LibraryResourceAsset.mtime_ms,
+            LibraryResourceAsset.kind,
+            LibraryResourceAsset.mime_type,
+            LibraryResourceAsset.size_bytes,
+            LibraryResourceAsset.sort_order,
+            LibraryResourceAsset.created_at,
+            LibraryResourceAsset.updated_at,
+        ).where(LibraryResourceAsset.resource_id == resource_id)
     ).all()
     return [
         {
             "id": row.id,
-            "volumeId": row.volume_id,
+            "resourceId": row.resource_id,
             "path": row.path,
             "filePathHash": row.file_path_hash,
             "mtimeMs": row.mtime_ms,
@@ -268,16 +267,16 @@ def list_files_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]]:
     ]
 
 
-def list_metadata_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]]:
-    if not _has_table(db, "LibraryMetadata"):
+def list_metadata_for_volume(db: Session, resource_id: str) -> list[dict[str, Any]]:
+    if not _has_table(db, "LibraryBookMetadata"):
         return []
     rows = db.scalars(
-        select(LibraryMetadata).where(LibraryMetadata.volume_id == volume_id)
+        select(LibraryBookMetadata).where(LibraryBookMetadata.book_id == resource_id)
     ).all()
     return [
         {
             "id": row.id,
-            "volumeId": row.volume_id,
+            "resourceId": row.resource_id,
             "source": row.source,
             "rawJson": row.raw_json,
             "createdAt": row.created_at,
@@ -287,8 +286,8 @@ def list_metadata_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]
     ]
 
 
-def load_work_context(db: Session, work_id: str) -> dict[str, Any] | None:
-    work = get_work(db, work_id)
+def load_work_context(db: Session, book_id: str) -> dict[str, Any] | None:
+    work = get_work(db, book_id)
     if not work:
         return None
     volumes = list_volumes_for_work(db, str(work["id"]))
@@ -300,16 +299,16 @@ def load_work_context(db: Session, work_id: str) -> dict[str, Any] | None:
     return {"work": work, "volumes": volumes, "files": files, "metadata": metadata}
 
 
-def list_volumes_for_work(db: Session, work_id: str) -> list[dict[str, Any]]:
+def list_volumes_for_work(db: Session, book_id: str) -> list[dict[str, Any]]:
     return [
         volume_entity_as_dict(row)
-        for row in _volumes_belonging_to_work(db, work_id, visible_only=False)
+        for row in _volumes_belonging_to_work(db, book_id, visible_only=False)
     ]
 
 
 def work_column_names(db: Session) -> set[str]:
-    if not _has_table(db, "LibraryWork"):
+    if not _has_table(db, "LibraryBook"):
         return set()
     return {
-        column["name"] for column in inspect(db.connection()).get_columns("LibraryWork")
+        column["name"] for column in inspect(db.connection()).get_columns("LibraryBook")
     }

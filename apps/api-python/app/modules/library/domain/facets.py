@@ -13,7 +13,7 @@ FACET_KINDS = frozenset({"AUTHOR", "TAG", "SERIES"})
 
 
 @dataclass(frozen=True, slots=True)
-class WorkFacetValue:
+class BookFacetValue:
     kind: FacetKind
     name: str
     normalized_name: str
@@ -67,19 +67,19 @@ def parse_tag_names(value: str) -> tuple[str, ...]:
     return ()
 
 
-def build_work_facet_values(
+def build_book_facet_values(
     *,
     author: str | None,
     tags: tuple[str, ...],
     series_name: str | None,
-) -> tuple[WorkFacetValue, ...]:
+) -> tuple[BookFacetValue, ...]:
     values_by_kind: tuple[tuple[FacetKind, tuple[str, ...]], ...] = (
         ("AUTHOR", split_author_names(author)),
         ("TAG", unique_facet_names(tags)),
         ("SERIES", unique_facet_names((str(series_name or ""),))),
     )
     return tuple(
-        WorkFacetValue(
+        BookFacetValue(
             kind=kind,
             name=name,
             normalized_name=normalize_facet_name(name),

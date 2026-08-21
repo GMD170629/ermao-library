@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, NotRequired
+from typing import Literal
 
 from fastapi.responses import Response
 from pydantic import Field, model_validator
-from typing_extensions import TypedDict
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.system_events import SystemEvent
@@ -140,58 +139,18 @@ class EnabledLibrary(HttpContractModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
-class SystemRecognizedImportMetadata(TypedDict):
-    """Known dashboard fields from current and legacy import recognizers."""
-
-    title: NotRequired[str]
-    volumeTitle: NotRequired[str]
-    author: NotRequired[str | None]
-    volumeIndex: NotRequired[float | None]
-    fields: NotRequired[list[str]]
-    fieldSources: NotRequired[
-        dict[str, Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]]
-    ]
-    sourceOrder: NotRequired[list[Literal["SIDECAR_OPF", "EMBEDDED", "PATH"]]]
-    source: NotRequired[Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]]
-    subjects: NotRequired[list[str]]
-
-
 class SystemImportTaskSummary(HttpContractModel):
     id: str
-    library_id: str | None = Field(alias="libraryId")
-    work_id: str | None = Field(alias="workId")
-    volume_id: str | None = Field(alias="volumeId")
-    origin: str
-    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
-        alias="mediaKindPolicy"
-    )
-    status: str
-    original_name: str | None = Field(alias="originalName")
-    requested_title: str | None = Field(alias="requestedTitle")
-    requested_author: str | None = Field(alias="requestedAuthor")
-    recognized_metadata: SystemRecognizedImportMetadata | None = Field(
-        alias="recognizedMetadata"
-    )
-    source_path: str = Field(alias="sourcePath")
-    source_key: str | None = Field(alias="sourceKey")
-    task_kind: str = Field(alias="taskKind")
-    bundle_key: str | None = Field(alias="bundleKey")
-    asset_count: int = Field(alias="assetCount")
-    processed_asset_count: int = Field(alias="processedAssetCount")
-    progress: int
-    duplicate: bool
-    duration: int
+    kind: str
+    library_id: str = Field(alias="libraryId")
+    resource_id: str | None = Field(alias="resourceId")
+    source_node_id: str | None = Field(alias="sourceNodeId")
+    role: str | None = None
+    state: str
     error_summary: str | None = Field(alias="errorSummary")
-    error_code: str | None = Field(alias="errorCode")
-    retryable: bool
-    attempts: int
-    lease_owner: str | None = Field(alias="leaseOwner")
-    lease_expires_at: datetime | None = Field(alias="leaseExpiresAt")
-    message: str | None
     started_at: datetime | None = Field(alias="startedAt")
     finished_at: datetime | None = Field(alias="finishedAt")
     created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
 
 
 class DashboardSystemStatusPayload(HttpContractModel):

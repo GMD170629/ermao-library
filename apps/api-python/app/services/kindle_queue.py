@@ -29,7 +29,7 @@ from app.core.safe_errors import mask_email, safe_error_message
 from app.core.time import now_timestamp_ms
 from app.modules.kindle.infrastructure.tasks import (
     get_kindle_send_task,
-    get_library_file_for_kindle,
+    get_library_asset_for_kindle,
     list_sending_kindle_tasks,
     next_queued_kindle_task,
 )
@@ -93,10 +93,10 @@ def _claim_task(db: Session, task_id: str) -> dict[str, Any] | None:
 
 
 def _file_for_task(db: Session, task: dict[str, Any]) -> dict[str, Any]:
-    file_id = task.get("fileId")
-    if not file_id:
+    asset_id = task.get("assetId")
+    if not asset_id:
         raise KindleSendError("附件记录已不存在")
-    row = get_library_file_for_kindle(db, str(file_id))
+    row = get_library_asset_for_kindle(db, str(asset_id))
     if not row:
         raise KindleSendError("附件记录已不存在")
     return row
@@ -148,8 +148,8 @@ def _prepared_event(
         target_type="kindleSendTask",
         target_id=str(task.get("id") or ""),
         metadata={
-            "workId": task.get("workId"),
-            "fileId": task.get("fileId"),
+            "bookId": task.get("bookId"),
+            "assetId": task.get("assetId"),
             "fileName": task.get("fileName"),
             "format": task.get("format"),
             "sizeBytes": task.get("sizeBytes"),
@@ -178,20 +178,20 @@ def _update_send_snapshot(
 
 
 def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
-    file_id = task.get("fileId")
-    if not file_id:
+    asset_id = task.get("assetId")
+    if not asset_id:
         raise KindleSendError("附件记录已不存在")
     values = get_email_settings(db, include_password=True)
-    file_row = get_library_file_for_kindle(db, str(file_id))
+    file_row = get_library_asset_for_kindle(db, str(asset_id))
     locale = configured_locale(db)
     db.close()
     if not file_row:
         raise KindleSendError("附件记录已不存在")
     config = smtp_connection_settings(values)
-    path = _stored_path(file_row.get("path"), settings)
+    path = _stored_path(file_row.get("sourcePath"), settings)
     if path is None or not path.is_file():
         raise KindleSendError("附件文件已不存在或不在受管理目录中")
-    file_format = str(task.get("format") or file_row.get("volumeFormat") or "").upper()
+    file_format = str(task.get("format") or file_row.get("resourceFormat") or "").upper()
     suffix = path.suffix.lower()
     if file_format not in SUPPORTED_FORMATS or suffix not in SUPPORTED_EXTENSIONS:
         raise KindleSendError("Kindle 邮件发送目前仅支持 EPUB 和 PDF")

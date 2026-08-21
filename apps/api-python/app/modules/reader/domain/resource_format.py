@@ -1,10 +1,13 @@
-"""Reader capabilities derived from a concrete volume format."""
+"""Reader capabilities derived from a concrete resource format."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.contracts.media_capabilities import ReaderType, reader_type_for_format
+from app.contracts.media_capabilities import (
+    ReaderType,
+    reader_type_for_format as contract_reader_type_for_format,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,8 +24,8 @@ class ReaderCapabilities:
     supports_spreads: bool
 
 
-def reader_type_for_volume_format(volume_format: str) -> ReaderType | None:
-    return reader_type_for_format(volume_format)
+def reader_type_for_format(resource_format: str) -> ReaderType | None:
+    return contract_reader_type_for_format(resource_format)
 
 
 def capabilities_for_reader_type(reader_type: ReaderType) -> ReaderCapabilities:

@@ -16,7 +16,7 @@ class LibraryFacetReference:
 
 
 @dataclass(frozen=True)
-class WorkFacetReferences:
+class BookFacetReferences:
     series: LibraryFacetReference | None
     authors: tuple[LibraryFacetReference, ...]
 
@@ -30,4 +30,4 @@ class LibraryFacetReferenceQueryPort(Protocol):
         facet_id: str,
     ) -> LibraryFacetReference | None: ...
 
-    def for_visible_work(self, work_id: str) -> WorkFacetReferences: ...
+    def for_visible_work(self, book_id: str) -> BookFacetReferences: ...

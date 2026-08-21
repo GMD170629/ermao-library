@@ -579,7 +579,7 @@ def _acquire_file_stream_slot(user_id: str):
 def _log_slow_file_request(
     request: Request,
     route: str,
-    file_id: str,
+    asset_id: str,
     range_header: str | None,
     bytes_sent: int,
     status_code: int,
@@ -590,10 +590,10 @@ def _log_slow_file_request(
     if duration_ms < threshold_ms:
         return
     logger.warning(
-        "[slow-file-request] route=%s userId=%s fileId=%s range=%s bytes=%s status=%s durationMs=%s",
+        "[slow-file-request] route=%s userId=%s assetId=%s range=%s bytes=%s status=%s durationMs=%s",
         route,
         getattr(request.state, "user_id", "unknown"),
-        file_id,
+        asset_id,
         range_header,
         bytes_sent,
         status_code,
@@ -609,7 +609,7 @@ def _file_response(
     name: str | None = None,
     missing_message: str = "文件不存在",
     route: str = "file",
-    file_id: str | None = None,
+    asset_id: str | None = None,
     *,
     as_attachment: bool = False,
 ) -> Response:
@@ -703,7 +703,7 @@ def _file_response(
             _log_slow_file_request(
                 request,
                 route,
-                file_id or str(path),
+                asset_id or str(path),
                 range_header,
                 bytes_sent,
                 status_code,
@@ -740,7 +740,7 @@ def _send_file(
     media_type: str | None = None,
     name: str | None = None,
     route: str = "file",
-    file_id: str | None = None,
+    asset_id: str | None = None,
     *,
     as_attachment: bool = False,
 ) -> Response:
@@ -751,7 +751,7 @@ def _send_file(
         media_type=media_type,
         name=name,
         route=route,
-        file_id=file_id,
+        asset_id=asset_id,
         as_attachment=as_attachment,
     )
 
@@ -763,7 +763,7 @@ def _send_zip_entry(
     user_id: str,
     media_type: str | None = None,
     route: str = "zip-entry",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     if (
         archive_path is None
@@ -848,7 +848,7 @@ def _send_zip_entry(
             _log_slow_file_request(
                 request,
                 route,
-                file_id or entry_name,
+                asset_id or entry_name,
                 range_header,
                 bytes_sent,
                 status_code,
@@ -889,11 +889,11 @@ def _send_original_comic_page_file(
     user_id: str,
     media_type: str | None = None,
     route: str = "volume-page",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     return _with_comic_page_variant_header(
         _send_file(
-            path, request, user_id, media_type=media_type, route=route, file_id=file_id
+            path, request, user_id, media_type=media_type, route=route, asset_id=asset_id
         ),
         COMIC_PAGE_ORIGINAL_VARIANT,
     )
@@ -906,7 +906,7 @@ def _send_original_comic_page_zip_entry(
     user_id: str,
     media_type: str | None = None,
     route: str = "volume-page-zip",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     return _with_comic_page_variant_header(
         _send_zip_entry(
@@ -916,7 +916,7 @@ def _send_original_comic_page_zip_entry(
             user_id,
             media_type=media_type,
             route=route,
-            file_id=file_id,
+            asset_id=asset_id,
         ),
         COMIC_PAGE_ORIGINAL_VARIANT,
     )
@@ -929,7 +929,7 @@ def _send_comic_page_file(
     settings: Settings,
     media_type: str | None = None,
     route: str = "volume-page",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     variant = _comic_page_image_variant(request)
     if path is None or not path.exists() or not path.is_file():
@@ -946,7 +946,7 @@ def _send_comic_page_file(
             user_id,
             media_type=resolved_media_type,
             route=route,
-            file_id=file_id,
+            asset_id=asset_id,
         )
 
     request.state.user_id = user_id
@@ -979,7 +979,7 @@ def _send_comic_page_file(
             user_id,
             media_type=resolved_media_type,
             route=route,
-            file_id=file_id,
+            asset_id=asset_id,
         )
     _write_cache_bytes(cache_path, optimized)
     return _comic_page_webp_response(
@@ -995,7 +995,7 @@ def _send_comic_page_zip_entry(
     settings: Settings,
     media_type: str | None = None,
     route: str = "volume-page-zip",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     variant = _comic_page_image_variant(request)
     if (
@@ -1013,7 +1013,7 @@ def _send_comic_page_zip_entry(
             user_id,
             media_type=media_type,
             route=route,
-            file_id=file_id,
+            asset_id=asset_id,
         )
 
     try:
@@ -1032,7 +1032,7 @@ def _send_comic_page_zip_entry(
                     user_id,
                     media_type=resolved_media_type,
                     route=route,
-                    file_id=file_id,
+                    asset_id=asset_id,
                 )
             archive_stat = archive_path.stat()
             cache_key = (
@@ -1065,7 +1065,7 @@ def _send_comic_page_zip_entry(
             user_id,
             media_type=resolved_media_type,
             route=route,
-            file_id=file_id,
+            asset_id=asset_id,
         )
     _write_cache_bytes(cache_path, optimized)
     return _comic_page_webp_response(
@@ -1100,7 +1100,7 @@ def send_file(
     media_type: str | None = None,
     name: str | None = None,
     route: str = "file",
-    file_id: str | None = None,
+    asset_id: str | None = None,
     *,
     as_attachment: bool = False,
 ) -> Response:
@@ -1111,7 +1111,7 @@ def send_file(
         media_type=media_type,
         name=name,
         route=route,
-        file_id=file_id,
+        asset_id=asset_id,
         as_attachment=as_attachment,
     )
 
@@ -1129,7 +1129,7 @@ def send_comic_page_file(
     settings: Settings,
     media_type: str | None = None,
     route: str = "volume-page",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     return _send_comic_page_file(
         path,
@@ -1138,7 +1138,7 @@ def send_comic_page_file(
         settings,
         media_type=media_type,
         route=route,
-        file_id=file_id,
+        asset_id=asset_id,
     )
 
 
@@ -1150,7 +1150,7 @@ def send_comic_page_zip_entry(
     settings: Settings,
     media_type: str | None = None,
     route: str = "volume-page-zip",
-    file_id: str | None = None,
+    asset_id: str | None = None,
 ) -> Response:
     return _send_comic_page_zip_entry(
         archive_path,
@@ -1160,7 +1160,7 @@ def send_comic_page_zip_entry(
         settings,
         media_type=media_type,
         route=route,
-        file_id=file_id,
+        asset_id=asset_id,
     )
 
 
@@ -1171,7 +1171,7 @@ def send_pse_page_file(
     settings: Settings,
     *,
     max_width: int | None,
-    file_id: str,
+    asset_id: str,
     output_media_type: str = "image/jpeg",
 ) -> Response:
     if path is None or not path.is_file():
@@ -1203,7 +1203,7 @@ def send_pse_page_zip_entry(
     settings: Settings,
     *,
     max_width: int | None,
-    file_id: str,
+    asset_id: str,
     output_media_type: str = "image/jpeg",
 ) -> Response:
     if archive_path is None or not archive_path.is_file() or not entry_name:

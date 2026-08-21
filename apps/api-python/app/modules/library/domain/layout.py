@@ -26,24 +26,17 @@ class LayoutAsset:
 
 
 @dataclass(frozen=True, slots=True)
-class LayoutVolume:
+class LayoutResource:
     source_key: str
     source_name: str
     assets: tuple[LayoutAsset, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class LayoutVersion:
-    source_key: str
-    source_name: str | None
-    volumes: tuple[LayoutVolume, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class LayoutWork:
+class LayoutBook:
     source_key: str
     source_name: str
-    versions: tuple[LayoutVersion, ...]
+    resources: tuple[LayoutResource, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +49,7 @@ class LayoutViolation:
 class ParsedLayoutPath:
     """The only possible topology result for one admitted source file."""
 
-    work: LayoutWork | None
+    book: LayoutBook | None
     violations: tuple[LayoutViolation, ...] = ()
 
 
@@ -77,7 +70,7 @@ def parse_library_file_path(
     physical_path = _logical_relative_path(relative_path)
     if physical_path is None:
         return ParsedLayoutPath(
-            work=None,
+            book=None,
             violations=(
                 LayoutViolation(
                     code=LayoutViolationCode.INVALID_RELATIVE_PATH,
@@ -87,14 +80,14 @@ def parse_library_file_path(
         )
     canonical_path = unicodedata.normalize("NFC", physical_path)
     if organization_mode is LibraryOrganizationMode.FLAT:
-        work = _single_file_work(physical_path, canonical_path)
+        book = _single_file_book(physical_path, canonical_path)
     elif organization_mode is LibraryOrganizationMode.VOLUMES:
-        work = _publication_work(physical_path, canonical_path)
+        book = _publication_book(physical_path, canonical_path)
     elif organization_mode is LibraryOrganizationMode.AUDIOBOOK:
-        work = _audiobook_work(physical_path, canonical_path)
+        book = _audiobook_book(physical_path, canonical_path)
     else:
         raise ValueError(f"unsupported organization mode: {organization_mode}")
-    return ParsedLayoutPath(work=work)
+    return ParsedLayoutPath(book=book)
 
 
 def is_audiobook_disc_directory(name: str) -> bool:
@@ -103,66 +96,48 @@ def is_audiobook_disc_directory(name: str) -> bool:
     return bool(_DISC_DIRECTORY_PATTERN.fullmatch(unicodedata.normalize("NFC", name)))
 
 
-def _single_file_work(physical_path: str, canonical_path: str) -> LayoutWork:
+def _single_file_book(physical_path: str, canonical_path: str) -> LayoutBook:
     source_name = _file_stem(physical_path)
-    volume = _single_asset_volume(
-        source_key=_volume_key(canonical_path),
+    resource = _single_asset_resource(
+        source_key=_resource_key(canonical_path),
         source_name=source_name,
         physical_path=physical_path,
     )
-    return LayoutWork(
-        source_key=_work_key(canonical_path),
+    return LayoutBook(
+        source_key=_book_key(canonical_path),
         source_name=source_name,
-        versions=(
-            LayoutVersion(
-                source_key=_version_key(canonical_path),
-                source_name=None,
-                volumes=(volume,),
-            ),
-        ),
+        resources=(resource,),
     )
 
 
-def _publication_work(physical_path: str, canonical_path: str) -> LayoutWork:
+def _publication_book(physical_path: str, canonical_path: str) -> LayoutBook:
     physical_parts = physical_path.split("/")
     canonical_parts = canonical_path.split("/")
     if len(physical_parts) == 1:
-        return _single_file_work(physical_path, canonical_path)
+        return _single_file_book(physical_path, canonical_path)
 
-    work_path = canonical_parts[0]
-    work_name = physical_parts[0]
-    if len(physical_parts) >= 3:
-        version_path = "/".join(canonical_parts[:2])
-        version_name: str | None = physical_parts[1]
-    else:
-        version_path = work_path
-        version_name = None
-    volume = _single_asset_volume(
-        source_key=_volume_key(canonical_path),
+    book_path = canonical_parts[0]
+    book_name = physical_parts[0]
+    resource = _single_asset_resource(
+        source_key=_resource_key(canonical_path),
         source_name=_file_stem(physical_path),
         physical_path=physical_path,
     )
-    return LayoutWork(
-        source_key=_work_key(work_path),
-        source_name=work_name,
-        versions=(
-            LayoutVersion(
-                source_key=_version_key(version_path),
-                source_name=version_name,
-                volumes=(volume,),
-            ),
-        ),
+    return LayoutBook(
+        source_key=_book_key(book_path),
+        source_name=book_name,
+        resources=(resource,),
     )
 
 
-def _audiobook_work(physical_path: str, canonical_path: str) -> LayoutWork:
+def _audiobook_book(physical_path: str, canonical_path: str) -> LayoutBook:
     physical_parts = physical_path.split("/")
     canonical_parts = canonical_path.split("/")
     if len(physical_parts) == 1:
-        return _single_file_work(physical_path, canonical_path)
+        return _single_file_book(physical_path, canonical_path)
 
-    work_name = physical_parts[0]
-    work_path = canonical_parts[0]
+    book_name = physical_parts[0]
+    book_path = canonical_parts[0]
     semantic_directories = [
         (physical, canonical)
         for physical, canonical in zip(
@@ -170,44 +145,27 @@ def _audiobook_work(physical_path: str, canonical_path: str) -> LayoutWork:
         )
         if not is_audiobook_disc_directory(physical)
     ]
-    version = semantic_directories[0] if semantic_directories else None
-    volume = semantic_directories[1] if len(semantic_directories) >= 2 else None
-    version_path = (
-        f"{work_path}/{version[1]}" if version is not None else work_path
+    resource_path = "/".join(canonical_parts[: len(semantic_directories) + 1])
+    resource_name = (
+        semantic_directories[-1][0] if semantic_directories else book_name
     )
-    volume_path = (
-        f"{version_path}/{volume[1]}" if volume is not None else version_path
-    )
-    volume_name = (
-        volume[0]
-        if volume is not None
-        else version[0]
-        if version is not None
-        else work_name
-    )
-    return LayoutWork(
-        source_key=_work_key(work_path),
-        source_name=work_name,
-        versions=(
-            LayoutVersion(
-                source_key=_version_key(version_path),
-                source_name=version[0] if version is not None else None,
-                volumes=(
-                    _single_asset_volume(
-                        source_key=_volume_key(volume_path),
-                        source_name=volume_name,
-                        physical_path=physical_path,
-                    ),
-                ),
+    return LayoutBook(
+        source_key=_book_key(book_path),
+        source_name=book_name,
+        resources=(
+            _single_asset_resource(
+                source_key=_resource_key(resource_path),
+                source_name=resource_name,
+                physical_path=physical_path,
             ),
         ),
     )
 
 
-def _single_asset_volume(
+def _single_asset_resource(
     *, source_key: str, source_name: str, physical_path: str
-) -> LayoutVolume:
-    return LayoutVolume(
+) -> LayoutResource:
+    return LayoutResource(
         source_key=source_key,
         source_name=source_name,
         assets=(LayoutAsset(relative_path=physical_path, order=0),),
@@ -243,13 +201,9 @@ def _has_windows_drive_prefix(path: str) -> bool:
     )
 
 
-def _work_key(path: str) -> str:
-    return f"work:{path}"
+def _book_key(path: str) -> str:
+    return f"book:{path}"
 
 
-def _version_key(path: str) -> str:
-    return f"version:{path}"
-
-
-def _volume_key(path: str) -> str:
-    return f"volume:{path}"
+def _resource_key(path: str) -> str:
+    return f"resource:{path}"

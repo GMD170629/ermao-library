@@ -55,7 +55,7 @@ from app.modules.publications.presentation.schemas import (
 )
 
 router = APIRouter(
-    prefix="/reader/v4/volumes/{volume_id}/publication",
+    prefix="/reader/v4/resources/{resource_id}/publication",
     tags=["reader-v4-publication"],
     route_class=TypedContractRoute,
 )
@@ -108,7 +108,7 @@ def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
 
 def _open_manifest_publication(
     *,
-    volume_id: str,
+    resource_id: str,
     request: Request,
     settings: Settings,
     scope: PublicationAccessScope,
@@ -119,7 +119,7 @@ def _open_manifest_publication(
             settings,
         )
         .open_and_ensure(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=scope,
         )
         .publication
@@ -180,7 +180,7 @@ def _manifest(publication: NormalizedPublication) -> PublicationManifest:
     response_model_exclude_none=True,
 )
 def publication_manifest(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
@@ -188,7 +188,7 @@ def publication_manifest(
     _user, scope = _authenticated_scope(db, request, settings)
     try:
         publication = _open_manifest_publication(
-            volume_id=volume_id,
+            resource_id=resource_id,
             request=request,
             settings=settings,
             scope=scope,
@@ -209,7 +209,7 @@ def publication_manifest(
     response_model_by_alias=True,
 )
 def publication_positions(
-    volume_id: str,
+    resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
@@ -217,7 +217,7 @@ def publication_positions(
     _user, scope = _authenticated_scope(db, request, settings)
     try:
         publication = _open_manifest_publication(
-            volume_id=volume_id,
+            resource_id=resource_id,
             request=request,
             settings=settings,
             scope=scope,
@@ -248,7 +248,7 @@ def publication_positions(
 @router.get("/{resource_href:path}", response_class=PublicationResourceResponse)
 @router.head("/{resource_href:path}", response_class=PublicationResourceResponse)
 def publication_resource(
-    volume_id: str,
+    resource_id: str,
     resource_href: str,
     request: Request,
     db: DatabaseSession,
@@ -257,7 +257,7 @@ def publication_resource(
     _user, scope = _authenticated_scope(db, request, settings)
     try:
         resource = open_publication(db, settings).resource(
-            volume_id=volume_id,
+            resource_id=resource_id,
             href=resource_href,
             access_scope=scope,
         )

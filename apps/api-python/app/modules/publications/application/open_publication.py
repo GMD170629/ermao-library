@@ -27,22 +27,22 @@ class OpenPublication:
     def manifest(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> NormalizedPublication:
         return self._adapter.open(
-            self._require_source(volume_id=volume_id, access_scope=access_scope)
+            self._require_source(resource_id=resource_id, access_scope=access_scope)
         )
 
     def resource(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         href: str,
         access_scope: PublicationAccessScope,
     ) -> PublicationResource:
         source = self._require_source(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=access_scope,
         )
         return self._adapter.read_resource(source, href)
@@ -50,11 +50,11 @@ class OpenPublication:
     def _require_source(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> PublicationSource:
         source = self._repository.find_source(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=access_scope,
         )
         if source is None:

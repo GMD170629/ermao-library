@@ -16,7 +16,7 @@ from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_iso
 from app.db.session import get_db
-from app.modules.library.public import get_work, work_view
+from app.modules.library.public import get_book, book_view
 from app.modules.organize.application.dto import OrganizeJobListItem
 from app.modules.organize.presentation.schemas import (
     DeletedOrganizeJobResponse,
@@ -76,14 +76,14 @@ def _dt(value: Any) -> str | None:
     return timestamp_ms_to_iso(value) or str(value)
 
 
-def _get_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    return get_work(db, work_id)
+def _get_work(db: Session, book_id: str) -> dict[str, Any] | None:
+    return get_book(db, book_id)
 
 
 def _work_view(
     db: Session, work: dict[str, Any], user_id: str | None = None
 ) -> dict[str, Any]:
-    return work_view(db, work, user_id)
+    return book_view(db, work, user_id)
 
 
 def _positive_int(value: Any, fallback: int, maximum: int) -> int:
@@ -122,7 +122,7 @@ def _organize_job_view(
     lookup: dict[str, Any] | None = None,
     executions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    work = _get_work(db, str(job.get("workId") or ""))
+    work = _get_work(db, str(job.get("bookId") or ""))
     if not work:
         return None
     if lookup is None:
@@ -158,8 +158,8 @@ def _organize_job_view(
     return {
         "id": job.get("id"),
         "runId": job.get("runId"),
-        "volumeId": job.get("volumeId"),
-        "versionId": job.get("versionId"),
+        "resourceId": job.get("resourceId"),
+        "resourceId": job.get("resourceId"),
         "trigger": job.get("trigger") or "SCHEDULE",
         "status": raw_status,
         "statusCategory": status_category,

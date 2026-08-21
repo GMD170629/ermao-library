@@ -13,15 +13,17 @@ from sqlalchemy.sql.dml import Insert, Update
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import timestamp_ms_to_datetime
 from app.models.import_pipeline import KindleSendTask
-from app.models.library import (
-    LibraryFile,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
 )
 
 
-def entity_as_legacy_dict(entity: object) -> dict[str, Any]:
+def entity_record(entity: object) -> dict[str, Any]:
     mapper = sa_inspect(entity).mapper
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
@@ -44,7 +46,7 @@ def get_kindle_send_task(db: Session, task_id: str) -> dict[str, Any] | None:
     if not has_table(db, "KindleSendTask"):
         return None
     task = db.get(KindleSendTask, task_id)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def list_kindle_send_tasks(
@@ -74,20 +76,20 @@ def list_kindle_send_tasks(
         .scalars()
         .all()
     )
-    return [entity_as_legacy_dict(row) for row in rows], total
+    return [entity_record(row) for row in rows], total
 
 
 def find_active_kindle_task(
     db: Session,
     *,
-    file_id: str,
+    asset_id: str,
     recipient_email: str,
     exclude_task_id: str | None = None,
 ) -> dict[str, Any] | None:
     if not has_table(db, "KindleSendTask"):
         return None
     filters = [
-        KindleSendTask.file_id == file_id,
+        KindleSendTask.asset_id == asset_id,
         KindleSendTask.recipient_email == recipient_email,
         KindleSendTask.status.in_(("queued", "sending")),
     ]
@@ -99,7 +101,7 @@ def find_active_kindle_task(
         .order_by(KindleSendTask.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def prepare_kindle_send_task_insert(values: dict[str, Any]) -> Insert:
@@ -167,7 +169,7 @@ def next_queued_kindle_task(db: Session, now_ms: int) -> dict[str, Any] | None:
         .order_by(KindleSendTask.created_at.asc(), KindleSendTask.id.asc())
         .limit(1)
     ).scalar_one_or_none()
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def claim_kindle_send_task(
@@ -179,7 +181,7 @@ def claim_kindle_send_task(
         db,
         prepare_claim_kindle_send_task(task_id, now=now),
     )
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def prepare_claim_kindle_send_task(task_id: str, *, now: datetime) -> Update:
@@ -229,7 +231,7 @@ def update_kindle_send_snapshot(
             now=now,
         ),
     )
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def prepare_kindle_send_snapshot_update(
@@ -309,7 +311,7 @@ def list_sending_kindle_tasks(db: Session) -> list[dict[str, Any]]:
         .scalars()
         .all()
     )
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_record(row) for row in rows]
 
 
 def mark_kindle_task_unknown(
@@ -347,50 +349,60 @@ def mark_kindle_tasks_unknown(
         )
 
 
-def get_library_file_for_kindle(db: Session, file_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "LibraryFile"):
+def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] | None:
+    if not has_table(db, "LibraryResourceAsset"):
         return None
     row = db.execute(
         select(
-            LibraryFile,
-            LibraryVersion.work_id.label("workId"),
-            LibraryVolume.format.label("volumeFormat"),
+            LibraryResourceAsset,
+            LibraryReadableResource.book_id.label("bookId"),
+            LibraryReadableResource.format.label("resourceFormat"),
+            LibrarySourceNode.relative_path.label("sourcePath"),
+            LibrarySourceNode.observed_size_bytes.label("sizeBytes"),
         )
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .where(LibraryFile.id == file_id)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryResourceAsset.resource_id)
+        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+        .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:
         return None
-    file_row = entity_as_legacy_dict(row[0])
-    file_row["workId"] = row.workId
-    file_row["volumeFormat"] = row.volumeFormat
+    file_row = entity_record(row[0])
+    file_row["bookId"] = row.bookId
+    file_row["resourceFormat"] = row.resourceFormat
+    file_row["sourcePath"] = row.sourcePath
+    file_row["sizeBytes"] = int(row.sizeBytes or 0)
     return file_row
 
 
-def get_library_file_details_for_kindle(
-    db: Session, file_id: str
+def get_library_asset_details_for_kindle(
+    db: Session, asset_id: str
 ) -> dict[str, Any] | None:
-    if not has_table(db, "LibraryFile"):
+    if not has_table(db, "LibraryResourceAsset"):
         return None
     row = db.execute(
         select(
-            LibraryFile,
-            LibraryVersion.work_id.label("workId"),
-            LibraryVolume.format.label("volumeFormat"),
-            LibraryWork.title.label("bookTitle"),
-            LibraryVolume.title.label("volumeTitle"),
+            LibraryResourceAsset,
+            LibraryReadableResource.book_id.label("bookId"),
+            LibraryReadableResource.format.label("resourceFormat"),
+            LibraryBookMetadata.title.label("bookTitle"),
+            LibraryReadableResourceMetadata.title.label("resourceTitle"),
+            LibrarySourceNode.relative_path.label("sourcePath"),
+            LibrarySourceNode.observed_size_bytes.label("sizeBytes"),
         )
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
-        .where(LibraryFile.id == file_id)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryResourceAsset.resource_id)
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
+        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .join(LibraryReadableResourceMetadata, LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id)
+        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+        .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:
         return None
-    file_row = entity_as_legacy_dict(row[0])
-    file_row["workId"] = row.workId
-    file_row["volumeFormat"] = row.volumeFormat
+    file_row = entity_record(row[0])
+    file_row["bookId"] = row.bookId
+    file_row["resourceFormat"] = row.resourceFormat
     file_row["bookTitle"] = row.bookTitle
-    file_row["volumeTitle"] = row.volumeTitle
+    file_row["resourceTitle"] = row.resourceTitle
+    file_row["sourcePath"] = row.sourcePath
+    file_row["sizeBytes"] = int(row.sizeBytes or 0)
     return file_row

@@ -13,7 +13,7 @@ NULL_SOURCE_REVISION = datetime(1970, 1, 1, tzinfo=UTC)
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackFileProjection:
     id: str
-    volume_id: str
+    resource_id: str
     path: str
     size_bytes: int
     mtime_ms: int
@@ -21,7 +21,7 @@ class MetadataWritebackFileProjection:
 
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackImportProjection:
-    volume_id: str
+    resource_id: str
     source_path: str
     asset_paths: tuple[str, ...]
 
@@ -29,7 +29,7 @@ class MetadataWritebackImportProjection:
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackVolumeProjection:
     id: str
-    version_id: str
+    resource_id: str
     title: str
     description: str | None
     volume_index: float | None
@@ -45,7 +45,7 @@ class MetadataWritebackVolumeProjection:
 
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackProjection:
-    work_id: str
+    book_id: str
     title: str
     author: str | None
     description: str | None
@@ -54,7 +54,7 @@ class MetadataWritebackProjection:
     series_index: float | None
     cover_path: str | None
     source_revision: datetime | None
-    version_ids: tuple[str, ...]
+    resource_ids: tuple[str, ...]
     volumes: tuple[MetadataWritebackVolumeProjection, ...]
     files: tuple[MetadataWritebackFileProjection, ...]
     imports: tuple[MetadataWritebackImportProjection, ...]
@@ -64,10 +64,10 @@ class MetadataWritebackProjection:
 class PreparedWritebackIntent:
     operation_id: str
     preparation_id: str
-    work_id: str
-    version_id: str
+    book_id: str
+    resource_id: str
     lookup_task_id: str | None
-    volume_id: str | None
+    asset_id: str | None
     source: str
     idempotency_key: str
     source_revision: str
@@ -95,13 +95,13 @@ def prepare_metadata_writeback_intents(
     *,
     source: str,
     lookup_task_id: str | None = None,
-    volume_id: str | None = None,
+    resource_id: str | None = None,
 ) -> tuple[PreparedWritebackIntent, ...]:
     """Purely normalize one immutable projection into durable queue intents."""
 
     files_by_volume: dict[str, list[dict[str, object]]] = {}
     for file in projection.files:
-        files_by_volume.setdefault(file.volume_id, []).append(
+        files_by_volume.setdefault(file.resource_id, []).append(
             {
                 "id": file.id,
                 "path": file.path,
@@ -111,7 +111,7 @@ def prepare_metadata_writeback_intents(
         )
     imports_by_volume: dict[str, list[dict[str, object]]] = {}
     for imported in projection.imports:
-        imports_by_volume.setdefault(imported.volume_id, []).append(
+        imports_by_volume.setdefault(imported.resource_id, []).append(
             {
                 "sourcePath": imported.source_path,
                 "assetPaths": list(imported.asset_paths),
@@ -119,9 +119,9 @@ def prepare_metadata_writeback_intents(
         )
     volumes_by_version: dict[str, list[dict[str, object]]] = {}
     for volume in projection.volumes:
-        volumes_by_version.setdefault(volume.version_id, []).append(
+        volumes_by_version.setdefault(volume.resource_id, []).append(
             {
-                "volumeId": volume.id,
+                "resourceId": volume.id,
                 "payload": {
                     "title": projection.title,
                     "volumeTitle": volume.title,
@@ -151,18 +151,18 @@ def prepare_metadata_writeback_intents(
 
     revision = (projection.source_revision or NULL_SOURCE_REVISION).isoformat()
     intents: list[PreparedWritebackIntent] = []
-    for version_id in projection.version_ids:
+    for resource_id in projection.resource_ids:
         snapshot_json = json.dumps(
-            {"volumes": volumes_by_version.get(version_id, [])},
+            {"volumes": volumes_by_version.get(resource_id, [])},
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
         key_input = "\0".join(
             (
-                projection.work_id,
-                version_id,
-                volume_id or "",
+                projection.book_id,
+                resource_id,
+                resource_id or "",
                 lookup_task_id or "",
                 source,
                 revision,
@@ -174,10 +174,10 @@ def prepare_metadata_writeback_intents(
             PreparedWritebackIntent(
                 operation_id=f"metadata_writeback_{digest}",
                 preparation_id=f"metadata_writeback_preparation_{digest}",
-                work_id=projection.work_id,
-                version_id=version_id,
+                book_id=projection.book_id,
+                asset_id=resource_id,
                 lookup_task_id=lookup_task_id,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 source=source,
                 idempotency_key=digest,
                 source_revision=revision,

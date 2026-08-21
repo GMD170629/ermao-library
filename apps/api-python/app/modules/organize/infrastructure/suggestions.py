@@ -14,7 +14,7 @@ def _has_table(db: Session, table: str) -> bool:
     return inspect(db.connection()).has_table(table)
 
 
-def suggestion_entity_as_legacy_dict(entity: MetadataSuggestion) -> dict[str, Any]:
+def suggestion_entity_record(entity: MetadataSuggestion) -> dict[str, Any]:
     return {
         "id": entity.id,
         "jobId": entity.job_id,
@@ -39,7 +39,7 @@ def list_pending_suggestions(db: Session, job_id: str) -> list[dict[str, Any]]:
             MetadataSuggestion.status == "PENDING",
         )
     ).all()
-    return [suggestion_entity_as_legacy_dict(row) for row in rows]
+    return [suggestion_entity_record(row) for row in rows]
 
 
 def list_suggestion_dedupe_keys(db: Session, job_id: str) -> set[str]:

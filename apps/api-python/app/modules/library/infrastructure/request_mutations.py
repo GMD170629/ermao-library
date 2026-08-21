@@ -9,20 +9,20 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.core.authorization import volume_visibility_predicate
+from app.core.authorization import resource_visibility_predicate
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
-from app.models.library import (
-    LibraryReadingProgress,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    ReaderResourceProgress,
+    LibraryReadableResource,
+    LibraryReadableResource,
+    LibraryBook,
 )
 from app.models.organize import OrganizeJob
 from app.modules.library.application.request_mutations import (
     BulkReadingStatusMutation,
     BulkShelfMembershipMutation,
-    BulkWorkMutation,
+    BulkBookMutation,
     CoverMutation,
     CoverPublicationFailure,
     DetailPreferenceMutation,
@@ -30,10 +30,10 @@ from app.modules.library.application.request_mutations import (
     MetadataApplyResult,
     WorkRecordMutation,
 )
-from app.modules.library.infrastructure import projections, storage, works
+from app.modules.library.infrastructure import projections, storage, books
 from app.modules.library.infrastructure.facet_sync import (
-    PreparedWorkFacetWrite,
-    execute_work_facet_write,
+    PreparedBookFacetWrite,
+    execute_book_facet_write,
 )
 from app.modules.shelf.infrastructure import shelves
 
@@ -41,22 +41,22 @@ EventWriter = Callable[[Session, list[object]], None]
 MetadataWriter = Callable[[Session, tuple[object, ...]], object]
 
 
-def load_metadata_apply_job_ids(db: Session, work_id: str) -> tuple[str, ...]:
+def load_metadata_apply_job_ids(db: Session, book_id: str) -> tuple[str, ...]:
     return tuple(
         str(job_id)
         for job_id in db.scalars(
             select(OrganizeJob.id).where(
-                OrganizeJob.work_id == work_id,
+                OrganizeJob.book_id == book_id,
                 OrganizeJob.status.in_(("PENDING", "REVIEWING", "FAILED")),
             )
         ).all()
     )
 
 
-def _prepared_facets(value: object | None) -> PreparedWorkFacetWrite | None:
+def _prepared_facets(value: object | None) -> PreparedBookFacetWrite | None:
     if value is None:
         return None
-    if not isinstance(value, PreparedWorkFacetWrite):
+    if not isinstance(value, PreparedBookFacetWrite):
         raise TypeError("facet write must be prepared before the mutation")
     return value
 
@@ -77,27 +77,27 @@ class SqlAlchemyLibraryRequestMutations:
         projections.save_detail_preference(
             self._db,
             user_id=command.user_id,
-            work_id=command.work_id,
+            book_id=command.book_id,
             selected_tab=command.selected_tab,
             now=command.now,
         )
 
     def update_work(self, command: WorkRecordMutation) -> dict[str, object] | None:
         facet_write = _prepared_facets(command.facet_write)
-        updated = works.update_work_fields(
-            self._db, command.work_id, dict(command.values)
+        updated = books.update_book_fields(
+            self._db, command.book_id, dict(command.values)
         )
         if facet_write is not None:
-            execute_work_facet_write(self._db, facet_write)
+            execute_book_facet_write(self._db, facet_write)
         self._write_metadata(self._db, command.writeback_intents)
         return updated
 
-    def update_works(self, command: BulkWorkMutation) -> int:
+    def update_books(self, command: BulkBookMutation) -> int:
         facet_write = _prepared_facets(command.facet_write)
-        updates = tuple((work_id, dict(values)) for work_id, values in command.updates)
-        updated = works.update_work_fields_bulk(self._db, updates)
+        updates = tuple((book_id, dict(values)) for book_id, values in command.updates)
+        updated = books.update_book_fields_bulk(self._db, updates)
         if facet_write is not None:
-            execute_work_facet_write(self._db, facet_write)
+            execute_book_facet_write(self._db, facet_write)
         self._write_metadata(self._db, command.writeback_intents)
         result_count = (
             command.reported_count if command.reported_count is not None else updated
@@ -109,32 +109,32 @@ class SqlAlchemyLibraryRequestMutations:
     def update_reading_status(self, command: BulkReadingStatusMutation) -> int:
         rows = self._db.execute(
             select(
-                LibraryVolume.id,
-                LibraryVolume.format,
-                LibraryVersion.work_id,
+                LibraryReadableResource.id,
+                LibraryReadableResource.format,
+                LibraryReadableResource.book_id,
             )
-            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
             .where(
-                LibraryVersion.work_id.in_(command.work_ids),
-                LibraryVolume.hidden.is_(False),
-                volume_visibility_predicate(command.context),
+                LibraryReadableResource.book_id.in_(command.book_ids),
+                LibraryReadableResource.hidden.is_(False),
+                resource_visibility_predicate(command.context),
             )
             .order_by(
-                LibraryVersion.work_id.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.id.asc(),
+                LibraryReadableResource.book_id.asc(),
+                LibraryReadableResource.sort_order.asc(),
+                LibraryReadableResource.id.asc(),
             )
         ).all()
-        volume_ids = tuple(str(row.id) for row in rows)
-        updated = len({str(row.work_id) for row in rows})
+        resource_ids = tuple(str(row.id) for row in rows)
+        updated = len({str(row.book_id) for row in rows})
         statements: list[Executable] = []
         if command.status == "UNREAD":
             statements.extend(
-                delete(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == command.context.user_id,
-                    LibraryReadingProgress.volume_id.in_(chunk),
+                delete(ReaderResourceProgress).where(
+                    ReaderResourceProgress.user_id == command.context.user_id,
+                    ReaderResourceProgress.resource_id.in_(chunk),
                 )
-                for chunk in sqlite_parameter_chunks(volume_ids, parameters_per_row=1)
+                for chunk in sqlite_parameter_chunks(resource_ids, parameters_per_row=1)
             )
         else:
             target_percent = 100.0 if command.status == "FINISHED" else 0.01
@@ -142,7 +142,7 @@ class SqlAlchemyLibraryRequestMutations:
                 {
                     "id": cuid(),
                     "user_id": command.context.user_id,
-                    "volume_id": str(row.id),
+                    "resource_id": str(row.id),
                     "reader_type": (
                         "audio"
                         if str(row.format).upper() in {"M4B", "M4A", "MP3"}
@@ -164,16 +164,16 @@ class SqlAlchemyLibraryRequestMutations:
                 for row in rows
             )
             statements.extend(
-                sqlite_insert(LibraryReadingProgress)
+                sqlite_insert(ReaderResourceProgress)
                 .values(list(chunk))
                 .on_conflict_do_update(
                     index_elements=[
-                        LibraryReadingProgress.user_id,
-                        LibraryReadingProgress.volume_id,
+                        ReaderResourceProgress.user_id,
+                        ReaderResourceProgress.resource_id,
                     ],
                     set_={
-                        LibraryReadingProgress.percent: target_percent,
-                        LibraryReadingProgress.updated_at: command.now,
+                        ReaderResourceProgress.percent: target_percent,
+                        ReaderResourceProgress.updated_at: command.now,
                     },
                 )
                 for chunk in sqlite_parameter_chunks(
@@ -188,26 +188,26 @@ class SqlAlchemyLibraryRequestMutations:
 
     def update_shelf_membership(self, command: BulkShelfMembershipMutation) -> int:
         if command.membership == "ADD":
-            shelves.add_shelf_works(
+            shelves.add_shelf_books(
                 self._db,
                 shelf_id=command.shelf_id,
-                work_ids=command.work_ids,
+                book_ids=command.book_ids,
                 now=command.now,
             )
         else:
-            shelves.remove_shelf_works(
+            shelves.remove_shelf_books(
                 self._db,
                 shelf_id=command.shelf_id,
-                work_ids=command.work_ids,
+                book_ids=command.book_ids,
             )
-        if command.work_ids and command.events:
+        if command.book_ids and command.events:
             self._write_events(self._db, list(command.events))
-        return len(command.work_ids)
+        return len(command.book_ids)
 
     def update_covers(self, command: CoverMutation) -> int:
         cover_rows = tuple(
             {
-                "id": record.work_id,
+                "id": record.book_id,
                 "cover_path": record.cover_path,
                 "cover_status": record.cover_status,
                 "updated_at": command.now,
@@ -235,13 +235,13 @@ class SqlAlchemyLibraryRequestMutations:
             else None
         )
         volume_rows = tuple(dict(row) for row in command.volume_rows)
-        work = works.update_work_fields(
-            self._db, command.work_id, dict(command.work_values)
+        work = books.update_book_fields(
+            self._db, command.book_id, dict(command.work_values)
         )
         if volume_rows:
-            self._db.execute(update(LibraryVolume), list(volume_rows))
+            self._db.execute(update(LibraryReadableResource), list(volume_rows))
         if facet_write is not None:
-            execute_work_facet_write(self._db, facet_write)
+            execute_book_facet_write(self._db, facet_write)
         if finish_jobs_statement is not None:
             self._db.execute(finish_jobs_statement)
         operation_ids = self._write_metadata(self._db, command.writeback_intents)
@@ -256,11 +256,11 @@ class SqlAlchemyLibraryRequestMutations:
         command: CoverPublicationFailure,
     ) -> bool:
         result = self._db.execute(
-            update(LibraryWork)
+            update(LibraryBook)
             .where(
-                LibraryWork.id == command.work_id,
-                LibraryWork.cover_path == command.expected_cover_path,
-                LibraryWork.updated_at == command.expected_updated_at,
+                LibraryBook.id == command.book_id,
+                LibraryBook.cover_path == command.expected_cover_path,
+                LibraryBook.updated_at == command.expected_updated_at,
             )
             .values(
                 cover_path=command.fallback_cover_path,

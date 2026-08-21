@@ -8,16 +8,15 @@ from sqlalchemy import case, func, inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
-from app.models.library import (
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryReadableResource,
+    LibraryBook,
 )
 from app.models.organize import OrganizeJob
 from app.modules.library.domain.media_kinds import media_kind_of
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.library.domain.resource_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
+    resource_media_kind,
 )
 
 UNRESOLVED_JOB_STATUSES = (
@@ -31,7 +30,7 @@ UNRESOLVED_JOB_STATUSES = (
 )
 
 
-def work_entity_as_legacy_dict(entity: LibraryWork) -> dict[str, Any]:
+def work_entity_record(entity: LibraryBook) -> dict[str, Any]:
     return {
         "id": entity.id,
         "libraryId": entity.library_id,
@@ -84,33 +83,33 @@ def select_eligible_works(
     db: Session,
     *,
     rules: dict[str, Any],
-    work_ids: list[str] | None = None,
+    book_ids: list[str] | None = None,
     trigger: str = "MANUAL",
     limit: int = 500,
     force_selected: bool = False,
     auto_run_on_new_since: Any = None,
 ) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("LibraryWork"):
+    if not inspect(db.connection()).has_table("LibraryBook"):
         return []
 
     bounded = min(max(int(limit), 1), 2000)
     filters = [
-        func.coalesce(LibraryWork.hidden, False).is_(False),
-        func.coalesce(LibraryWork.organize_status, "") != "DISMISSED",
+        func.coalesce(LibraryBook.hidden, False).is_(False),
+        func.coalesce(LibraryBook.organize_status, "") != "DISMISSED",
     ]
-    if work_ids:
+    if book_ids:
         normalized_ids = list(
-            dict.fromkeys(str(item) for item in work_ids if str(item).strip())
+            dict.fromkeys(str(item) for item in book_ids if str(item).strip())
         )
         if not normalized_ids:
             return []
-        filters.append(LibraryWork.id.in_(normalized_ids))
+        filters.append(LibraryBook.id.in_(normalized_ids))
 
     if inspect(db.connection()).has_table("OrganizeJob"):
         unresolved_exists = (
             select(OrganizeJob.id)
             .where(
-                OrganizeJob.work_id == LibraryWork.id,
+                OrganizeJob.book_id == LibraryBook.id,
                 OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
             )
             .exists()
@@ -120,7 +119,7 @@ def select_eligible_works(
             new_trigger_exists = (
                 select(OrganizeJob.id)
                 .where(
-                    OrganizeJob.work_id == LibraryWork.id, OrganizeJob.trigger == "NEW"
+                    OrganizeJob.book_id == LibraryBook.id, OrganizeJob.trigger == "NEW"
                 )
                 .exists()
             )
@@ -133,27 +132,27 @@ def select_eligible_works(
         since_dt = timestamp_ms_to_datetime(since_ms)
         if since_dt is None:
             return []
-        filters.append(LibraryWork.created_at >= since_dt)
+        filters.append(LibraryBook.created_at >= since_dt)
 
     works = db.scalars(
-        select(LibraryWork)
+        select(LibraryBook)
         .where(*filters)
-        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc())
+        .order_by(LibraryBook.created_at.asc(), LibraryBook.id.asc())
         .limit(bounded)
     ).all()
 
     result: list[dict[str, Any]] = []
     for entity in works:
-        work = work_entity_as_legacy_dict(entity)
-        media_kind = volume_effective_media_kind(LibraryVolume)
+        work = work_entity_record(entity)
+        media_kind = resource_media_kind(LibraryReadableResource)
         work["availableMediaKinds"] = list(
             db.scalars(
                 select(media_kind.label("media_kind"))
-                .select_from(LibraryVolume)
-                .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+                .select_from(LibraryReadableResource)
+                .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
                 .where(
-                    LibraryVersion.work_id == entity.id,
-                    LibraryVolume.hidden.is_(False),
+                    LibraryReadableResource.book_id == entity.id,
+                    LibraryReadableResource.hidden.is_(False),
                 )
                 .group_by(media_kind)
                 .order_by(
@@ -172,24 +171,24 @@ def select_eligible_works(
     return result
 
 
-def first_version_selection_for_work(
-    db: Session, work_id: str, preferred_version_id: str | None = None
+def first_resource_selection_for_book(
+    db: Session, book_id: str, preferred_resource_id: str | None = None
 ) -> tuple[str, str, str | None] | None:
     inspector = inspect(db.connection())
     if not all(
-        inspector.has_table(table) for table in ("LibraryVersion", "LibraryVolume")
+        inspector.has_table(table) for table in ("LibraryReadableResource", "LibraryReadableResource")
     ):
         return None
-    media_kind = volume_effective_media_kind(LibraryVolume)
+    media_kind = resource_media_kind(LibraryReadableResource)
     filters = [
-        LibraryVersion.work_id == work_id,
-        LibraryVolume.hidden.is_(False),
+        LibraryReadableResource.book_id == book_id,
+        LibraryReadableResource.hidden.is_(False),
     ]
-    if preferred_version_id:
-        filters.append(LibraryVersion.id == preferred_version_id)
+    if preferred_resource_id:
+        filters.append(LibraryReadableResource.id == preferred_resource_id)
     row = db.execute(
-        select(LibraryVolume, LibraryVersion)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+        select(LibraryReadableResource, LibraryReadableResource)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
         .where(*filters)
         .order_by(
             case(
@@ -199,15 +198,15 @@ def first_version_selection_for_work(
                 else_=3,
             ),
             case(
-                (LibraryVersion.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
+                (LibraryReadableResource.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
                 else_=1,
             ),
-            func.coalesce(LibraryVersion.source_name, ""),
-            LibraryVersion.source_key.asc(),
-            LibraryVersion.id.asc(),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
+            func.coalesce(LibraryReadableResource.source_name, ""),
+            LibraryReadableResource.source_key.asc(),
+            LibraryReadableResource.id.asc(),
+            LibraryReadableResource.sort_order.asc(),
+            LibraryReadableResource.created_at.asc(),
+            LibraryReadableResource.id.asc(),
         )
         .limit(1)
     ).first()

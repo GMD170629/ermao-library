@@ -27,10 +27,10 @@ class RemoteCoverPublication:
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root
 
-    def prepare(self, *, work_id: str, cover_url: str) -> PreparedCoverPublication:
+    def prepare(self, *, book_id: str, cover_url: str) -> PreparedCoverPublication:
         if not cover_url.startswith(("http://", "https://")):
             raise ValueError("Remote cover URL must use HTTP or HTTPS")
-        if not work_id or Path(work_id).name != work_id:
+        if not book_id or Path(book_id).name != book_id:
             raise ValueError("Invalid work identifier")
         request = UrlRequest(
             cover_url,
@@ -42,7 +42,7 @@ class RemoteCoverPublication:
         )
         target_dir = self._storage_root / "covers"
         target_dir.mkdir(parents=True, exist_ok=True)
-        temporary_path = target_dir / f".{work_id}.{uuid4().hex}.part"
+        temporary_path = target_dir / f".{book_id}.{uuid4().hex}.part"
         try:
             with urlopen(request, timeout=30) as response:
                 payload = response.read(_MAX_COVER_BYTES + 1)
@@ -63,9 +63,9 @@ class RemoteCoverPublication:
         ) as exc:
             temporary_path.unlink(missing_ok=True)
             raise ValueError("Remote cover could not be validated") from exc
-        final_path = target_dir / f"{work_id}{suffix}"
+        final_path = target_dir / f"{book_id}{suffix}"
         return PreparedCoverPublication(
-            work_id=work_id,
+            book_id=book_id,
             temporary_path=temporary_path,
             final_path=final_path,
             stored_path=str(final_path.relative_to(self._storage_root)),

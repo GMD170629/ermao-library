@@ -1,4 +1,4 @@
-"""Volume-scoped library file, cover, and storage queries."""
+"""Resource-scoped library file, cover, and storage queries."""
 
 from __future__ import annotations
 
@@ -7,48 +7,48 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models.library import (
-    LibraryFile,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryResourceAsset,
+    LibraryReadableResource,
+    LibraryReadableResource,
+    LibraryBook,
 )
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.infrastructure.books import entity_record
 
 
-def get_file(db: Session, file_id: str) -> dict[str, object] | None:
-    file = db.get(LibraryFile, file_id)
-    return entity_as_legacy_dict(file) if file is not None else None
+def get_file(db: Session, asset_id: str) -> dict[str, object] | None:
+    file = db.get(LibraryResourceAsset, asset_id)
+    return entity_record(file) if file is not None else None
 
 
-def first_file_for_volume(db: Session, *, volume_id: str) -> dict[str, object] | None:
+def first_file_for_volume(db: Session, *, resource_id: str) -> dict[str, object] | None:
     file = db.scalar(
-        select(LibraryFile)
-        .where(LibraryFile.volume_id == volume_id)
+        select(LibraryResourceAsset)
+        .where(LibraryResourceAsset.resource_id == resource_id)
         .order_by(
-            LibraryFile.sort_order.asc(),
-            LibraryFile.created_at.asc(),
-            LibraryFile.id.asc(),
+            LibraryResourceAsset.sort_order.asc(),
+            LibraryResourceAsset.created_at.asc(),
+            LibraryResourceAsset.id.asc(),
         )
         .limit(1)
     )
-    return entity_as_legacy_dict(file) if file is not None else None
+    return entity_record(file) if file is not None else None
 
 
 def get_cover_record(
     db: Session,
     *,
-    work_id: str | None = None,
-    volume_id: str | None = None,
+    book_id: str | None = None,
+    resource_id: str | None = None,
 ) -> dict[str, object] | None:
     record = (
-        db.get(LibraryWork, work_id)
-        if work_id is not None
-        else db.get(LibraryVolume, volume_id)
-        if volume_id is not None
+        db.get(LibraryBook, book_id)
+        if book_id is not None
+        else db.get(LibraryReadableResource, resource_id)
+        if resource_id is not None
         else None
     )
-    return entity_as_legacy_dict(record) if record is not None else None
+    return entity_record(record) if record is not None else None
 
 
 def update_cover_record(
@@ -60,7 +60,7 @@ def update_cover_record(
     cover_status: str | None,
     now: datetime,
 ) -> None:
-    model = LibraryWork if record_type == "LibraryWork" else LibraryVolume
+    model = LibraryBook if record_type == "LibraryBook" else LibraryReadableResource
     values: dict[str, object] = {"cover_path": cover_path, "updated_at": now}
     if cover_status is not None:
         values["cover_status"] = cover_status
@@ -68,23 +68,23 @@ def update_cover_record(
     db.flush()
 
 
-def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
+def preferred_work_cover_path(db: Session, book_id: str) -> str | None:
     cover = db.scalar(
-        select(LibraryVolume.cover_path)
+        select(LibraryReadableResource.cover_path)
         .join(
-            LibraryVersion,
-            LibraryVersion.id == LibraryVolume.version_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryReadableResource.resource_id,
         )
         .where(
-            LibraryVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-            LibraryVolume.cover_path.is_not(None),
-            LibraryVolume.cover_path != "",
+            LibraryReadableResource.book_id == book_id,
+            LibraryReadableResource.hidden.is_(False),
+            LibraryReadableResource.cover_path.is_not(None),
+            LibraryReadableResource.cover_path != "",
         )
         .order_by(
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
+            LibraryReadableResource.sort_order.asc(),
+            LibraryReadableResource.created_at.asc(),
+            LibraryReadableResource.id.asc(),
         )
         .limit(1)
     )
@@ -94,14 +94,14 @@ def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
 def update_work_cover(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     cover_path: str,
     cover_status: str,
     now: datetime,
 ) -> bool:
     result = db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
+        update(LibraryBook)
+        .where(LibraryBook.id == book_id)
         .values(
             cover_path=cover_path,
             cover_status=cover_status,
@@ -117,40 +117,40 @@ def update_work_covers(
 ) -> int:
     if not rows:
         return 0
-    db.execute(update(LibraryWork), list(rows))
+    db.execute(update(LibraryBook), list(rows))
     return len(rows)
 
 
 def collect_storage_values(
-    db: Session, work_id: str
+    db: Session, book_id: str
 ) -> tuple[
     str | None,
     list[dict[str, object]],
     list[dict[str, object]],
 ]:
     work_cover = db.scalar(
-        select(LibraryWork.cover_path).where(LibraryWork.id == work_id)
+        select(LibraryBook.cover_path).where(LibraryBook.id == book_id)
     )
     volumes = db.scalars(
-        select(LibraryVolume)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .where(LibraryVersion.work_id == work_id)
+        select(LibraryReadableResource)
+        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
+        .where(LibraryReadableResource.book_id == book_id)
         .order_by(
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
+            LibraryReadableResource.sort_order.asc(),
+            LibraryReadableResource.created_at.asc(),
+            LibraryReadableResource.id.asc(),
         )
     ).all()
-    volume_ids = [volume.id for volume in volumes]
+    resource_ids = [volume.id for volume in volumes]
     files = (
         db.scalars(
-            select(LibraryFile).where(LibraryFile.volume_id.in_(volume_ids))
+            select(LibraryResourceAsset).where(LibraryResourceAsset.resource_id.in_(resource_ids))
         ).all()
-        if volume_ids
+        if resource_ids
         else []
     )
     return (
         work_cover,
-        [entity_as_legacy_dict(volume) for volume in volumes],
-        [entity_as_legacy_dict(file) for file in files],
+        [entity_record(volume) for volume in volumes],
+        [entity_record(file) for file in files],
     )

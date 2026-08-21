@@ -7,10 +7,10 @@ from datetime import datetime
 
 
 @dataclass(frozen=True)
-class VolumePageUnit:
+class ResourcePageUnit:
     id: str
-    volume_id: str
-    file_id: str | None
+    resource_id: str
+    asset_id: str | None
     unit_type: str
     title: str
     href: str
@@ -25,64 +25,65 @@ class VolumePageUnit:
 
 
 @dataclass(frozen=True)
-class VolumePageSource:
+class ResourcePageSource:
     id: str
     path: str
-    kind: str
-    mime_type: str
+    role: str
+    import_state: str
     size_bytes: int
     sort_order: int
+    mtime_ms: int
 
 
 @dataclass(frozen=True)
-class VolumePageIndexProjection:
+class ResourcePageIndexProjection:
     """Database projection captured before any archive file is inspected."""
 
-    volume_id: str
-    volume_index: float | None
-    persisted_pages: tuple[VolumePageUnit, ...]
-    sources: tuple[VolumePageSource, ...]
+    resource_id: str
+    resource_index: float | None
+    persisted_pages: tuple[ResourcePageUnit, ...]
+    sources: tuple[ResourcePageSource, ...]
 
-    def comic_source(self) -> VolumePageSource | None:
-        return next((source for source in self.sources if source.kind == "COMIC"), None)
+    def comic_source(self) -> ResourcePageSource | None:
+        return next((source for source in self.sources if source.role == "PRIMARY"), None)
 
 
 @dataclass(frozen=True)
-class ResolvedVolumePageIndex:
+class ResolvedResourcePageIndex:
     """Page data resolved without changing database state."""
 
-    pages: tuple[VolumePageUnit, ...]
-    sources: tuple[VolumePageSource, ...]
+    pages: tuple[ResourcePageUnit, ...]
+    sources: tuple[ResourcePageSource, ...]
 
-    def page(self, page_index: int) -> VolumePageUnit | None:
+    def page(self, page_index: int) -> ResourcePageUnit | None:
         return next(
             (page for page in self.pages if page.sort_order == page_index),
             None,
         )
 
-    def source_for(self, file_id: str | None) -> VolumePageSource | None:
-        if file_id is None:
+    def source_for(self, asset_id: str | None) -> ResourcePageSource | None:
+        if asset_id is None:
             return None
-        return next((source for source in self.sources if source.id == file_id), None)
+        return next((source for source in self.sources if source.id == asset_id), None)
 
 
-class ReadOnlyVolumePageIndex:
+class ReadOnlyResourcePageIndex:
     """Resolve only the persisted page index prepared before API startup."""
 
     def execute(
         self,
-        projection: VolumePageIndexProjection,
-    ) -> ResolvedVolumePageIndex:
-        return ResolvedVolumePageIndex(
+        projection: ResourcePageIndexProjection,
+    ) -> ResolvedResourcePageIndex:
+        return ResolvedResourcePageIndex(
             pages=projection.persisted_pages,
             sources=projection.sources,
         )
 
 
 __all__ = [
-    "ReadOnlyVolumePageIndex",
-    "ResolvedVolumePageIndex",
-    "VolumePageIndexProjection",
-    "VolumePageSource",
-    "VolumePageUnit",
+    "ReadOnlyResourcePageIndex",
+    "ResolvedResourcePageIndex",
+    "ResourcePageIndexProjection",
+    "ResourcePageSource",
+    "ResourcePageUnit",
 ]

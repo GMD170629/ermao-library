@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
 from app.core.time import now_timestamp_ms, to_timestamp_ms
-from app.models.settings import QueueControlOperation, QueueRuntimeState
+from app.models import LibraryOperation, QueueRuntimeState
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.domain.queue import (
     ACTIVE_OPERATION_STATUSES,
@@ -59,17 +59,17 @@ def _runtime_row_dict(row: QueueRuntimeState) -> dict[str, Any]:
     }
 
 
-def _operation_row_dict(row: QueueControlOperation) -> dict[str, Any]:
+def _operation_row_dict(row: LibraryOperation) -> dict[str, Any]:
     return {
         "id": row.id,
-        "queueName": row.queue_name,
+        "queueName": row.target_id,
         "action": row.action,
         "status": row.status,
-        "actorUserId": row.actor_user_id,
-        "messageCode": row.message_code,
-        "requestedAt": row.requested_at,
-        "startedAt": row.started_at,
-        "finishedAt": row.finished_at,
+        "actorUserId": row.user_id,
+        "messageCode": row.summary,
+        "requestedAt": row.created_at,
+        "startedAt": None,
+        "finishedAt": None,
         "updatedAt": row.updated_at,
     }
 
@@ -258,21 +258,22 @@ def prepare_queue_operation_creation(
         return PreparedQueueOperationCreation(view=existing, statement=None)
     values = {
         "id": operation_id,
-        "queue_name": "import",
-        "action": action,
+        "user_id": actor_user_id,
+        "action": f"QUEUE_{action.upper()}",
         "status": "requested",
-        "actor_user_id": actor_user_id,
-        "message_code": f"queue.{action}.requested",
-        "requested_at": now,
-        "started_at": None,
-        "finished_at": None,
+        "target_type": "QUEUE",
+        "target_id": "import",
+        "summary": f"queue.{action}.requested",
+        "payload_json": "{}",
+        "inverse_json": "{}",
+        "created_at": now,
         "updated_at": now,
     }
     return PreparedQueueOperationCreation(
         view={
             "id": operation_id,
             "queueName": "import",
-            "action": action,
+            "action": f"QUEUE_{action.upper()}",
             "status": "requested",
             "actorUserId": actor_user_id,
             "messageCode": f"queue.{action}.requested",
@@ -281,7 +282,7 @@ def prepare_queue_operation_creation(
             "finishedAt": None,
             "updatedAt": now,
         },
-        statement=sqlite_insert(QueueControlOperation).values(values),
+        statement=sqlite_insert(LibraryOperation).values(values),
     )
 
 
@@ -296,12 +297,13 @@ def write_prepared_queue_operation_creation(
 
 def active_queue_operation(db: Session) -> dict[str, Any] | None:
     row = db.scalars(
-        select(QueueControlOperation)
+        select(LibraryOperation)
         .where(
-            QueueControlOperation.queue_name == "import",
-            QueueControlOperation.status.in_(ACTIVE_OPERATION_STATUSES),
+            LibraryOperation.target_type == "QUEUE",
+            LibraryOperation.target_id == "import",
+            LibraryOperation.status.in_(ACTIVE_OPERATION_STATUSES),
         )
-        .order_by(QueueControlOperation.requested_at.asc())
+        .order_by(LibraryOperation.created_at.asc())
         .limit(1)
     ).first()
     return _operation_row_dict(row) if row else None
@@ -318,31 +320,18 @@ def prepare_queue_operation_update(
         raise ValueError(status)
     values: dict[str, Any] = {
         "status": status,
-        "message_code": message_code,
+        "summary": message_code,
         "updated_at": now,
     }
-    values["started_at"] = case(
-        (
-            QueueControlOperation.started_at.is_(None)
-            & (status in {"waiting", "running", "completed"}),
-            now,
-        ),
-        else_=QueueControlOperation.started_at,
-    )
-    values["finished_at"] = (
-        now
-        if status in TERMINAL_OPERATION_STATUSES
-        else QueueControlOperation.finished_at
-    )
     return PreparedQueueRuntimeWrite(
-        update(QueueControlOperation)
-        .where(QueueControlOperation.id == operation_id)
+        update(LibraryOperation)
+        .where(LibraryOperation.id == operation_id)
         .values(**values)
     )
 
 
 def queue_operation_view(db: Session, operation_id: str) -> dict[str, Any] | None:
-    row = db.get(QueueControlOperation, operation_id)
+    row = db.get(LibraryOperation, operation_id)
     return _operation_row_dict(row) if row else None
 
 

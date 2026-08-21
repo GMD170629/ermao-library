@@ -3,7 +3,7 @@
 from app.modules.library.domain.layout import (
     ParsedLayoutPath,
     LayoutViolation,
-    LayoutWork,
+    LayoutBook,
     LibraryOrganizationMode,
     is_audiobook_disc_directory,
     parse_library_file_path,
@@ -12,7 +12,7 @@ from app.modules.library.domain.layout import (
 __all__ = [
     "ParsedLayoutPath",
     "LayoutViolation",
-    "LayoutWork",
+    "LayoutBook",
     "LibraryOrganizationMode",
     "is_audiobook_disc_directory",
     "parse_library_file_path",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -13,6 +12,7 @@ from app.bootstrap.system import (
     write_prepared_settings,
     write_prepared_system_events,
 )
+from app.bootstrap.readable_resource_pipeline import continue_library_import
 from app.models.common import db_timestamp
 from app.models.library import Library
 from app.modules.download.application.dto import (
@@ -31,15 +31,16 @@ from app.modules.download.infrastructure.download_http import (
     write_prepared_download_task_create,
 )
 from app.modules.download.infrastructure.tasks import (
-    entity_as_legacy_dict,
+    entity_record,
     execute_download_task_row_update,
     prepare_claim_download_task,
     prepare_download_task_state_update,
     prepare_mark_download_task_importing,
 )
 from app.modules.download.public import DownloadWriteTransaction
-from app.modules.imports.application.work_queue_dto import ImportScanJobDTO
-from app.modules.imports.infrastructure.work_queue import create_or_reuse_scan_job
+from app.modules.imports.application.readable_resource.continue_import import (
+    ContinueImportResult,
+)
 from app.modules.system.domain.events import PreparedSystemEvent
 
 
@@ -158,7 +159,7 @@ def claim_download_task_command(
     statement = prepare_claim_download_task(task_id, now=timestamp)
     with DownloadWriteTransaction(db):
         task = execute_download_task_row_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def finalize_download_task_command(
@@ -172,35 +173,28 @@ def finalize_download_task_command(
     with DownloadWriteTransaction(db):
         task = execute_download_task_row_update(db, statement)
         write_prepared_system_events(db, (event,))
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
-def schedule_download_scan_command(
+def continue_download_import_command(
     db: Session,
     *,
     task_id: str,
     library_id: str | None,
-) -> ImportScanJobDTO:
+) -> ContinueImportResult:
     if library_id is None:
         raise ValueError("downloaded file is not owned by a library")
     library = db.get(Library, library_id)
     if library is None or not library.enabled:
         raise ValueError("download target library is unavailable")
-    root_path = Path(library.root_path).expanduser().resolve()
     mark_importing_statement = prepare_mark_download_task_importing(
         task_id,
         updated_at=db_timestamp(),
     )
+    result = continue_library_import(db, library_id)
     with DownloadWriteTransaction(db):
-        scan_job, _created = create_or_reuse_scan_job(
-            db,
-            library_id=library_id,
-            actor_user_id=None,
-            root_path=root_path,
-            trigger="download_completed",
-        )
         db.execute(mark_importing_statement)
-    return scan_job
+    return result
 
 
 __all__ = [
@@ -212,7 +206,7 @@ __all__ = [
     "finalize_download_task_command",
     "get_download_task",
     "list_download_tasks",
-    "schedule_download_scan_command",
+    "continue_download_import_command",
     "update_download_task",
     "update_download_task_command",
     "write_download_task",

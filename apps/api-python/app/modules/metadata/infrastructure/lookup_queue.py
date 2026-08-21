@@ -10,8 +10,7 @@ from sqlalchemy import and_, func, insert, inspect, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.models.import_pipeline import ImportTask
-from app.models.library import LibraryMetadata, LibraryVolume, LibraryWork
+from app.models import LibraryBookMetadata, LibraryImportTask, LibraryReadableResource, LibraryBook
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -87,9 +86,9 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
 
     return {
         "id": task.id,
-        "workId": task.work_id,
-        "volumeId": task.volume_id,
-        "versionId": task.version_id,
+        "bookId": task.book_id,
+        "resourceId": task.resource_id,
+        "resourceId": task.resource_id,
         "importTaskId": task.import_task_id,
         "organizeJobId": task.organize_job_id,
         "status": task.status,
@@ -386,36 +385,36 @@ def write_prepared_provider_execution(
     return prepared.execution_id
 
 
-def get_work(db: Session, work_id: str | None) -> dict[str, Any] | None:
-    if not work_id:
+def get_work(db: Session, book_id: str | None) -> dict[str, Any] | None:
+    if not book_id:
         return None
     row = db.execute(
         select(
-            LibraryWork.id,
-            LibraryWork.title,
-            LibraryWork.author,
-            LibraryWork.description,
-            LibraryWork.tags,
-            LibraryWork.series_name,
-            LibraryWork.series_index,
-            LibraryWork.cover_path,
-            LibraryWork.cover_status,
-            LibraryWork.metadata_quality,
-            LibraryWork.organized,
-            LibraryWork.organize_status,
-            LibraryWork.normalized_title,
-            LibraryWork.normalized_author,
-        ).where(LibraryWork.id == work_id)
+            LibraryBook.id,
+            LibraryBook.title,
+            LibraryBook.author,
+            LibraryBook.description,
+            LibraryBook.tags,
+            LibraryBook.series_name,
+            LibraryBook.series_index,
+            LibraryBook.cover_path,
+            LibraryBook.cover_status,
+            LibraryBook.metadata_quality,
+            LibraryBook.organized,
+            LibraryBook.organize_status,
+            LibraryBook.normalized_title,
+            LibraryBook.normalized_author,
+        ).where(LibraryBook.id == book_id)
     ).one_or_none()
     return work_row_to_dict(row) if row else None
 
 
-def get_work_organize_state(db: Session, work_id: str | None) -> dict[str, Any] | None:
-    if not work_id:
+def get_work_organize_state(db: Session, book_id: str | None) -> dict[str, Any] | None:
+    if not book_id:
         return None
     row = db.execute(
-        select(LibraryWork.organized, LibraryWork.organize_status).where(
-            LibraryWork.id == work_id
+        select(LibraryBook.organized, LibraryBook.organize_status).where(
+            LibraryBook.id == book_id
         )
     ).one_or_none()
     if row is None:
@@ -426,29 +425,29 @@ def get_work_organize_state(db: Session, work_id: str | None) -> dict[str, Any] 
     }
 
 
-def get_volume(db: Session, volume_id: str | None) -> dict[str, Any] | None:
-    if not volume_id:
+def get_volume(db: Session, resource_id: str | None) -> dict[str, Any] | None:
+    if not resource_id:
         return None
     row = db.execute(
         select(
-            LibraryVolume.id,
-            LibraryVolume.cover_path,
-            LibraryVolume.published_at,
-            LibraryVolume.language,
-            LibraryVolume.isbn,
-        ).where(LibraryVolume.id == volume_id)
+            LibraryReadableResource.id,
+            LibraryReadableResource.cover_path,
+            LibraryReadableResource.published_at,
+            LibraryReadableResource.language,
+            LibraryReadableResource.isbn,
+        ).where(LibraryReadableResource.id == resource_id)
     ).one_or_none()
     return volume_row_to_dict(row) if row else None
 
 
-def volume_has_cover(db: Session, volume_id: str) -> bool:
+def volume_has_cover(db: Session, resource_id: str) -> bool:
     return (
         db.scalar(
-            select(LibraryVolume.id)
+            select(LibraryReadableResource.id)
             .where(
-                LibraryVolume.id == volume_id,
-                LibraryVolume.cover_path.is_not(None),
-                LibraryVolume.cover_path != "",
+                LibraryReadableResource.id == resource_id,
+                LibraryReadableResource.cover_path.is_not(None),
+                LibraryReadableResource.cover_path != "",
             )
             .limit(1)
         )
@@ -459,7 +458,7 @@ def volume_has_cover(db: Session, volume_id: str) -> bool:
 def get_import_task_status(db: Session, import_task_id: str | None) -> str | None:
     if not import_task_id:
         return None
-    return db.scalar(select(ImportTask.status).where(ImportTask.id == import_task_id))
+    return db.scalar(select(LibraryImportTask.status).where(LibraryImportTask.id == import_task_id))
 
 
 def get_lookup_task_status(db: Session, task_id: str) -> str | None:
@@ -468,23 +467,23 @@ def get_lookup_task_status(db: Session, task_id: str) -> str | None:
     )
 
 
-def update_work(db: Session, work_id: str, patch: dict[str, Any]) -> None:
+def update_work(db: Session, book_id: str, patch: dict[str, Any]) -> None:
     mapped = {_WORK_CAMEL_TO_SNAKE[key]: value for key, value in patch.items()}
-    db.execute(update(LibraryWork).where(LibraryWork.id == work_id).values(**mapped))
+    db.execute(update(LibraryBook).where(LibraryBook.id == book_id).values(**mapped))
 
 
 def clear_remote_cover_if_current(
     db: Session,
-    work_id: str,
+    book_id: str,
     *,
     cover_path: str,
     now: datetime,
 ) -> None:
     db.execute(
-        update(LibraryWork)
+        update(LibraryBook)
         .where(
-            LibraryWork.id == work_id,
-            LibraryWork.cover_path == cover_path,
+            LibraryBook.id == book_id,
+            LibraryBook.cover_path == cover_path,
         )
         .values(
             cover_path=None,
@@ -494,17 +493,17 @@ def clear_remote_cover_if_current(
     )
 
 
-def update_volume(db: Session, volume_id: str, patch: dict[str, Any]) -> None:
+def update_resource(db: Session, resource_id: str, patch: dict[str, Any]) -> None:
     mapped = {_VOLUME_CAMEL_TO_SNAKE[key]: value for key, value in patch.items()}
     db.execute(
-        update(LibraryVolume).where(LibraryVolume.id == volume_id).values(**mapped)
+        update(LibraryReadableResource).where(LibraryReadableResource.id == resource_id).values(**mapped)
     )
 
 
-def mark_work_reviewing(db: Session, work_id: str, *, now: datetime) -> None:
+def mark_work_reviewing(db: Session, book_id: str, *, now: datetime) -> None:
     db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
+        update(LibraryBook)
+        .where(LibraryBook.id == book_id)
         .values(organized=False, organize_status="REVIEWING", updated_at=now)
     )
 
@@ -552,16 +551,16 @@ def mark_organize_job_retry_wait(
 def insert_library_metadata(
     db: Session,
     *,
-    volume_id: str,
+    resource_id: str,
     source: str,
     raw_json: str,
     metadata_id: str,
     now: datetime,
 ) -> None:
     db.add(
-        LibraryMetadata(
+        LibraryBookMetadata(
             id=metadata_id,
-            volume_id=volume_id,
+            resource_id=resource_id,
             source=source,
             raw_json=raw_json,
             created_at=now,

@@ -13,23 +13,23 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.models.library import (
+from app.models import (
     LibraryFacet,
     LibraryOperation,
-    LibraryVolume,
-    LibraryVolumeFacet,
-    LibraryWork,
-    LibraryWorkFacet,
+    LibraryReadableResource,
+    LibraryReadableResourceFacet,
+    LibraryBook,
+    LibraryBookFacet,
 )
-from app.modules.library.application.volume_commands import OperationSummary
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.application.resource_commands import OperationSummary
+from app.modules.library.infrastructure.books import entity_record
 
 _SNAPSHOT_MODELS: dict[str, type] = {
     model.__tablename__: model
     for model in (
         LibraryFacet,
-        LibraryWorkFacet,
-        LibraryVolumeFacet,
+        LibraryBookFacet,
+        LibraryReadableResourceFacet,
     )
 }
 
@@ -159,7 +159,7 @@ def operation_summary(operation: dict[str, Any]) -> OperationSummary:
 
 def get_operation(db: Session, operation_id: str) -> dict[str, Any] | None:
     operation = db.get(LibraryOperation, operation_id)
-    return entity_as_legacy_dict(operation) if operation is not None else None
+    return entity_record(operation) if operation is not None else None
 
 
 def list_operations_for_user(
@@ -179,7 +179,7 @@ def list_operations_for_user(
         .order_by(LibraryOperation.created_at.desc(), LibraryOperation.id.desc())
         .limit(limit)
     ).all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_record(row) for row in rows]
 
 
 def mark_operation_undone(db: Session, *, operation_id: str, now: datetime) -> None:
@@ -223,8 +223,8 @@ def insert_snapshot(db: Session, table: str, row: dict[str, Any]) -> None:
 def restore_work_metadata(db: Session, row: dict[str, Any]) -> None:
     """Restore category-owned fields without touching directory topology identity."""
 
-    work_id = str(row.get("id") or "")
-    if not work_id:
+    book_id = str(row.get("id") or "")
+    if not book_id:
         raise ValueError("Work metadata snapshot is missing its id")
     field_map = {
         "author": "author",
@@ -240,7 +240,7 @@ def restore_work_metadata(db: Session, row: dict[str, Any]) -> None:
         if column in row
     }
     result = db.execute(
-        update(LibraryWork).where(LibraryWork.id == work_id).values(**values)
+        update(LibraryBook).where(LibraryBook.id == book_id).values(**values)
     )
     if result.rowcount != 1:
         raise ValueError("Work metadata snapshot target does not exist")
@@ -249,9 +249,9 @@ def restore_work_metadata(db: Session, row: dict[str, Any]) -> None:
 def restore_volume_metadata(db: Session, row: dict[str, Any]) -> None:
     """Restore category/classification fields without touching volume placement."""
 
-    volume_id = str(row.get("id") or "")
-    if not volume_id:
-        raise ValueError("Volume metadata snapshot is missing its id")
+    resource_id = str(row.get("id") or "")
+    if not resource_id:
+        raise ValueError("Resource metadata snapshot is missing its id")
     field_map = {
         "publisher": "publisher",
         "classificationSource": "classification_source",
@@ -265,10 +265,10 @@ def restore_volume_metadata(db: Session, row: dict[str, Any]) -> None:
         if column in row
     }
     result = db.execute(
-        update(LibraryVolume).where(LibraryVolume.id == volume_id).values(**values)
+        update(LibraryReadableResource).where(LibraryReadableResource.id == resource_id).values(**values)
     )
     if result.rowcount != 1:
-        raise ValueError("Volume metadata snapshot target does not exist")
+        raise ValueError("Resource metadata snapshot target does not exist")
 
 
 def restore_facet_row(db: Session, facet_id: str, row: dict[str, Any]) -> None:
@@ -276,11 +276,11 @@ def restore_facet_row(db: Session, facet_id: str, row: dict[str, Any]) -> None:
     insert_snapshot(db, "LibraryFacet", row)
 
 
-def delete_work_facets_for_work(db: Session, work_id: str) -> None:
-    db.execute(delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id == work_id))
+def delete_work_facets_for_work(db: Session, book_id: str) -> None:
+    db.execute(delete(LibraryBookFacet).where(LibraryBookFacet.book_id == book_id))
 
 
-def delete_volume_facets_for_volume(db: Session, volume_id: str) -> None:
+def delete_volume_facets_for_volume(db: Session, resource_id: str) -> None:
     db.execute(
-        delete(LibraryVolumeFacet).where(LibraryVolumeFacet.volume_id == volume_id)
+        delete(LibraryReadableResourceFacet).where(LibraryReadableResourceFacet.resource_id == resource_id)
     )

@@ -23,7 +23,6 @@ from app.bootstrap.download import (
 from app.bootstrap.download import (
     list_download_tasks as list_download_tasks_query,
 )
-from app.bootstrap.imports import import_http_store
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -80,8 +79,10 @@ def _enabled_library_for_path(
 
 
 def _load_enabled_libraries(db: Session) -> tuple[dict[str, Any], ...]:
+    from app.modules.download.infrastructure.tasks import list_enabled_libraries
+
     folders = (
-        tuple(import_http_store.list_enabled_library_rows(db))
+        tuple(list_enabled_libraries(db))
         if _has_table(db, "Library")
         else ()
     )

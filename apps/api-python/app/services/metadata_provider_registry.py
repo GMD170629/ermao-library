@@ -705,21 +705,21 @@ def search_with_metadata_provider(
 
 
 def _context_media_kind(context: dict[str, Any]) -> str | None:
-    volumes = context.get("volumes")
-    if not isinstance(volumes, list):
+    resources = context.get("resources")
+    if not isinstance(resources, list):
         return None
-    for raw_volume in volumes:
-        if not isinstance(raw_volume, dict) or raw_volume.get("hidden") is True:
+    for raw_resource in resources:
+        if not isinstance(raw_resource, dict) or raw_resource.get("hidden") is True:
             continue
-        volume_format = str(raw_volume.get("format") or "").strip()
-        if not volume_format:
+        resource_format = str(raw_resource.get("format") or "").strip()
+        if not resource_format:
             continue
         return effective_media_kind(
-            format=volume_format,
-            classification_source=str(raw_volume.get("classificationSource") or "AUTO"),
+            format=resource_format,
+            classification_source=str(raw_resource.get("classificationSource") or "AUTO"),
             suggested_media_kind=(
-                str(raw_volume["suggestedMediaKind"])
-                if raw_volume.get("suggestedMediaKind")
+                str(raw_resource["suggestedMediaKind"])
+                if raw_resource.get("suggestedMediaKind")
                 else None
             ),
         )

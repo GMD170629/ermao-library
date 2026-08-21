@@ -74,9 +74,9 @@ def _requires_system_manager(path: str, method: str) -> bool:
     }:
         return True
     if path in {
-        "/api/works/import",
-        "/api/works/bulk/cover",
-        "/api/works/bulk/find-replace/preview",
+        "/api/books/import",
+        "/api/books/bulk/cover",
+        "/api/books/bulk/find-replace/preview",
     }:
         return True
     return method != "GET" and path.startswith("/api/metadata/")

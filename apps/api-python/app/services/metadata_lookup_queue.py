@@ -200,16 +200,16 @@ def _parse_tags(value: Any) -> list[str]:
 
 
 def _local_cover_exists(
-    db: Session, work: dict[str, Any], volume_id: str | None
+    db: Session, work: dict[str, Any], resource_id: str | None
 ) -> bool:
     if str(work.get("coverPath") or "").strip():
         return True
-    if not volume_id:
+    if not resource_id:
         return False
-    volume = lookup_persist.get_volume(db, volume_id)
+    volume = lookup_persist.get_volume(db, resource_id)
     if str((volume or {}).get("coverPath") or "").strip():
         return True
-    return lookup_persist.volume_has_cover(db, volume_id)
+    return lookup_persist.volume_has_cover(db, resource_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,14 +222,14 @@ class _PreparedRemoteCover:
 def _cleanup_orphan_remote_cover_parts(
     target_dir: Path,
     *,
-    work_id: str,
+    book_id: str,
     current_time: float | None = None,
 ) -> int:
     cutoff = (time() if current_time is None else current_time) - (
         ORPHAN_COVER_PART_MAX_AGE_SECONDS
     )
     removed = 0
-    for part_path in target_dir.glob(f".{work_id}-remote-*.part"):
+    for part_path in target_dir.glob(f".{book_id}-remote-*.part"):
         try:
             if part_path.stat().st_mtime > cutoff:
                 continue
@@ -251,7 +251,7 @@ def _validated_remote_cover_suffix(data: bytes) -> str:
 
 
 def _download_remote_cover(
-    work_id: str, cover_url: str, settings: Settings
+    book_id: str, cover_url: str, settings: Settings
 ) -> _PreparedRemoteCover | None:
     if not cover_url.startswith(("http://", "https://")):
         return None
@@ -269,8 +269,8 @@ def _download_remote_cover(
     suffix = _validated_remote_cover_suffix(data)
     target_dir = settings.resolved_storage_root / "covers"
     target_dir.mkdir(parents=True, exist_ok=True)
-    _cleanup_orphan_remote_cover_parts(target_dir, work_id=work_id)
-    final_path = target_dir / f"{work_id}-remote-{uuid4().hex}{suffix}"
+    _cleanup_orphan_remote_cover_parts(target_dir, book_id=book_id)
+    final_path = target_dir / f"{book_id}-remote-{uuid4().hex}{suffix}"
     temporary_path = final_path.with_name(f".{final_path.name}.part")
     temporary_path.write_bytes(data)
     if temporary_path.stat().st_size != len(data):
@@ -298,8 +298,8 @@ def _discard_remote_cover(prepared: _PreparedRemoteCover | None) -> None:
 
 @dataclass(frozen=True, slots=True)
 class _PreparedCandidateApplication:
-    work_id: str
-    volume_id: str | None
+    book_id: str
+    resource_id: str | None
     work_patch: dict[str, Any]
     volume_patch: dict[str, Any]
     organize_job_id: str | None
@@ -320,16 +320,16 @@ def _prepare_candidate_application(
     provider: str,
     candidate: dict[str, Any],
 ) -> _PreparedCandidateApplication:
-    work = lookup_persist.get_work(db, str(task["workId"]))
+    work = lookup_persist.get_work(db, str(task["bookId"]))
     if not work:
         raise ValueError("作品已不存在")
     facet_projections = load_work_facet_projections(db, (str(work["id"]),))
     if len(facet_projections) != 1:
         raise ValueError("WORK_FACET_PROJECTION_NOT_FOUND")
-    volume_id = str(task.get("volumeId") or "") or None
-    volume = lookup_persist.get_volume(db, volume_id) if volume_id else None
+    resource_id = str(task.get("resourceId") or "") or None
+    volume = lookup_persist.get_volume(db, resource_id) if resource_id else None
     prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
-    local_cover_exists = _local_cover_exists(db, work, volume_id)
+    local_cover_exists = _local_cover_exists(db, work, resource_id)
 
     # End every projection read before parsing provider data, downloading a
     # cover or constructing the prepared SQL statements for the write phase.
@@ -467,7 +467,7 @@ def _prepare_candidate_application(
             {"candidate": candidate, "appliedFields": applied},
             ensure_ascii=False,
         )
-        if volume_id
+        if resource_id
         else None
     )
     final_facet_projection = replace(
@@ -489,8 +489,8 @@ def _prepare_candidate_application(
         now=now,
     )
     return _PreparedCandidateApplication(
-        work_id=str(work["id"]),
-        volume_id=volume_id,
+        book_id=str(work["id"]),
+        resource_id=resource_id,
         work_patch=work_patch,
         volume_patch=volume_patch,
         organize_job_id=job_id,
@@ -510,11 +510,11 @@ def _persist_candidate_application(
     prepared: _PreparedCandidateApplication,
     provider: str,
 ) -> None:
-    lookup_persist.update_work(db, prepared.work_id, prepared.work_patch)
-    if prepared.volume_id and prepared.volume_patch:
-        lookup_persist.update_volume(
+    lookup_persist.update_work(db, prepared.book_id, prepared.work_patch)
+    if prepared.resource_id and prepared.volume_patch:
+        lookup_persist.update_resource(
             db,
-            prepared.volume_id,
+            prepared.resource_id,
             prepared.volume_patch,
         )
     execute_work_facet_write(db, prepared.facet_write)
@@ -531,11 +531,11 @@ def _persist_candidate_application(
     if (
         prepared.library_metadata_json is not None
         and prepared.library_metadata_id is not None
-        and prepared.volume_id is not None
+        and prepared.resource_id is not None
     ):
         lookup_persist.insert_library_metadata(
             db,
-            volume_id=prepared.volume_id,
+            resource_id=prepared.resource_id,
             source=provider,
             raw_json=prepared.library_metadata_json,
             metadata_id=prepared.library_metadata_id,
@@ -554,7 +554,7 @@ def _compensate_remote_cover_publish_failure(
     with MetadataWriteTransaction(db):
         lookup_persist.clear_remote_cover_if_current(
             db,
-            prepared.work_id,
+            prepared.book_id,
             cover_path=remote_cover.relative_final_path,
             now=now,
         )
@@ -562,7 +562,7 @@ def _compensate_remote_cover_publish_failure(
 
 @dataclass(frozen=True, slots=True)
 class _PreparedUnresolvedOrganizeUpdate:
-    work_id: str | None
+    book_id: str | None
     organize_job_id: str | None
     message: str
     failed: bool
@@ -572,16 +572,16 @@ class _PreparedUnresolvedOrganizeUpdate:
 def _prepare_unresolved_organize_update(
     db: Session, task: dict[str, Any], message: str, *, failed: bool, now: datetime
 ) -> _PreparedUnresolvedOrganizeUpdate:
-    work = lookup_persist.get_work_organize_state(db, task.get("workId"))
+    work = lookup_persist.get_work_organize_state(db, task.get("bookId"))
     db.close()
     already_organized = (
         bool((work or {}).get("organized"))
         or (work or {}).get("organizeStatus") == "APPLIED"
     )
     return _PreparedUnresolvedOrganizeUpdate(
-        work_id=(
-            str(task["workId"])
-            if work and not already_organized and task.get("workId")
+        book_id=(
+            str(task["bookId"])
+            if work and not already_organized and task.get("bookId")
             else None
         ),
         organize_job_id=(
@@ -596,8 +596,8 @@ def _prepare_unresolved_organize_update(
 def _persist_unresolved_organize_update(
     db: Session, prepared: _PreparedUnresolvedOrganizeUpdate
 ) -> None:
-    if prepared.work_id:
-        lookup_persist.mark_work_reviewing(db, prepared.work_id, now=prepared.now)
+    if prepared.book_id:
+        lookup_persist.mark_work_reviewing(db, prepared.book_id, now=prepared.now)
     if prepared.organize_job_id:
         lookup_persist.finish_organize_job(
             db,
@@ -735,7 +735,7 @@ def process_metadata_lookup_task(
     if import_status is not None and import_status != "COMPLETED":
         _schedule_retry(db, task, "等待本地导入任务完成", [])
         return "PENDING"
-    work = lookup_persist.get_work(db, task.get("workId"))
+    work = lookup_persist.get_work(db, task.get("bookId"))
     if not work:
         _finish_without_match(db, task, "FAILED", [], "作品已不存在")
         return "FAILED"
@@ -876,9 +876,9 @@ def process_metadata_lookup_task(
                 )
             projection = writeback_queue.load_metadata_writeback_projection(
                 db,
-                work_id=str(work["id"]),
-                version_id=(
-                    str(task["versionId"]) if task.get("versionId") else None
+                book_id=str(work["id"]),
+                resource_id=(
+                    str(task["resourceId"]) if task.get("resourceId") else None
                 ),
             )
             db.close()

@@ -17,7 +17,7 @@ from app.contracts.http_errors import (
     BasicUnauthorizedError,
     ErrorResponses,
 )
-from app.core.authorization import can_access_work
+from app.core.authorization import can_access_book
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.metadata.presentation.schemas import (
@@ -38,7 +38,7 @@ from app.modules.metadata.presentation.schemas import (
 from app.services.metadata_file_writeback import (
     metadata_opf_queue_status,
     metadata_writeback_view,
-    metadata_writeback_work_id,
+    metadata_writeback_book_id,
 )
 from app.services.metadata_provider_registry import (
     get_metadata_provider,
@@ -86,8 +86,8 @@ def get_metadata_writeback(
     ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
 ]:
     user = _auth(db, request, settings)
-    work_id = metadata_writeback_work_id(db, operation_id)
-    if work_id is None or not can_access_work(db, user, work_id):
+    book_id = metadata_writeback_book_id(db, operation_id)
+    if book_id is None or not can_access_book(db, user, book_id):
         raise BasicNotFoundError(MessageError(message="元数据旁车 OPF 保存任务不存在"))
     operation = metadata_writeback_view(db, operation_id)
     if operation is None:

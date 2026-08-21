@@ -10,21 +10,21 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, inspect, literal, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryVersion, LibraryVolume, LibraryWork
+from app.models import LibraryReadableResource, LibraryBook
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
     OrganizeJob,
 )
 from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
+    resource_media_kind,
 )
 from app.modules.organize.application.dto import (
     OrganizeBookListItem,
     OrganizeJobListItem,
     OrganizeStatusCategory,
 )
-from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
+from app.modules.organize.infrastructure.runs import job_entity_record
 
 STATUS_CATEGORIES = ("SUCCESS", "FAILED", "RECOGNIZING", "WAITING")
 
@@ -63,7 +63,7 @@ class OrganizeJobPageResult:
 
 
 def has_work_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("LibraryWork")
+    return inspect(db.connection()).has_table("LibraryBook")
 
 
 def has_job_tables(db: Session) -> bool:
@@ -134,7 +134,7 @@ def count_status_categories(db: Session) -> dict[str, int]:
     rows = db.execute(
         select(category_expr.label("category"), func.count())
         .select_from(OrganizeJob)
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
         .group_by(category_expr)
     ).all()
     for category, count in rows:
@@ -175,8 +175,8 @@ def _search_predicates(
         return []
     term = f"%{normalized}%"
     predicates: list[Any] = [
-        func.lower(func.coalesce(LibraryWork.title, "")).like(term),
-        func.lower(func.coalesce(LibraryWork.author, "")).like(term),
+        func.lower(func.coalesce(LibraryBook.title, "")).like(term),
+        func.lower(func.coalesce(LibraryBook.author, "")).like(term),
         func.lower(func.coalesce(OrganizeJob.summary, "")).like(term),
         func.lower(func.coalesce(OrganizeJob.issue_codes, "")).like(term),
     ]
@@ -293,7 +293,7 @@ def count_filtered_jobs(
     stmt = (
         select(func.count())
         .select_from(OrganizeJob)
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
     )
     predicates = _filter_predicates(
         db, status=status, search=search, provider_ids=provider_ids
@@ -324,14 +324,14 @@ def list_filtered_job_rows(
             OrganizeJob.reason_codes,
             OrganizeJob.created_at,
             OrganizeJob.updated_at,
-            LibraryWork.id.label("work_id"),
-            LibraryWork.title,
-            LibraryWork.author,
+            LibraryBook.id.label("book_id"),
+            LibraryBook.title,
+            LibraryBook.author,
         )
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
         .outerjoin(
-            LibraryVolume,
-            LibraryVolume.id == OrganizeJob.volume_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == OrganizeJob.resource_id,
         )
     )
     predicates = _filter_predicates(
@@ -348,24 +348,24 @@ def list_filtered_job_rows(
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
-    work_ids = list(dict.fromkeys(str(row.work_id) for row in rows))
-    media_kinds_by_work: dict[str, list[str]] = {work_id: [] for work_id in work_ids}
-    if work_ids:
-        media_kind = volume_effective_media_kind(LibraryVolume)
+    book_ids = list(dict.fromkeys(str(row.book_id) for row in rows))
+    media_kinds_by_work: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
+    if book_ids:
+        media_kind = resource_media_kind(LibraryReadableResource)
         media_rows = db.execute(
             select(
-                LibraryVersion.work_id,
+                LibraryReadableResource.book_id,
                 media_kind.label("media_kind"),
             )
-            .select_from(LibraryVolume)
-            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
+            .select_from(LibraryReadableResource)
+            .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
             .where(
-                LibraryVersion.work_id.in_(work_ids),
-                LibraryVolume.hidden.is_(False),
+                LibraryReadableResource.book_id.in_(book_ids),
+                LibraryReadableResource.hidden.is_(False),
             )
-            .group_by(LibraryVersion.work_id, media_kind)
+            .group_by(LibraryReadableResource.book_id, media_kind)
             .order_by(
-                LibraryVersion.work_id.asc(),
+                LibraryReadableResource.book_id.asc(),
                 case(
                     (media_kind == "EBOOK", 0),
                     (media_kind == "COMIC", 1),
@@ -374,8 +374,8 @@ def list_filtered_job_rows(
                 ),
             )
         ).all()
-        for work_id, media_kind in media_rows:
-            media_kinds_by_work[str(work_id)].append(str(media_kind))
+        for book_id, media_kind in media_rows:
+            media_kinds_by_work[str(book_id)].append(str(media_kind))
     return [
         OrganizeJobListItem(
             id=str(row.id),
@@ -390,10 +390,10 @@ def list_filtered_job_rows(
             created_at=row.created_at,
             updated_at=row.updated_at,
             book=OrganizeBookListItem(
-                id=str(row.work_id),
+                id=str(row.book_id),
                 title=str(row.title or "未命名作品"),
                 author=str(row.author or "未知作者"),
-                available_media_kinds=media_kinds_by_work[str(row.work_id)],
+                available_media_kinds=media_kinds_by_work[str(row.book_id)],
             ),
         )
         for row in rows
@@ -463,15 +463,15 @@ def list_pending_job_rows(db: Session, *, limit: int) -> list[dict[str, Any]]:
         return []
     rows = db.scalars(
         select(OrganizeJob)
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
         .where(
             OrganizeJob.status == "REVIEWING",
-            func.coalesce(LibraryWork.hidden, False).is_(False),
+            func.coalesce(LibraryBook.hidden, False).is_(False),
         )
         .order_by(OrganizeJob.updated_at.desc(), OrganizeJob.id.desc())
         .limit(limit)
     ).all()
-    return [job_entity_as_legacy_dict(row) for row in rows]
+    return [job_entity_record(row) for row in rows]
 
 
 def latest_lookup_rows_by_job(

@@ -1,20 +1,19 @@
 from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import ColumnElement, exists, false, select, true
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
 
 from app.models.auth import User, UserLibraryAccess, UserPreference
-from app.models.library import (
-    LibraryFile,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
+    LibraryReadableResource,
+    LibraryResourceAsset,
+    LibrarySourceNode,
 )
 
 ADMIN_ROLE = "admin"
@@ -73,8 +72,6 @@ def library_visibility_predicate(
     context: AuthorizationContext,
     library_column: ColumnElement[str],
 ) -> ColumnElement[bool]:
-    """Build a typed authorization predicate for a library-id column."""
-
     if context.is_admin:
         return true()
     if not context.library_ids:
@@ -82,28 +79,48 @@ def library_visibility_predicate(
     return library_column.in_(context.library_ids)
 
 
-def work_visibility_predicate(
+def book_visibility_predicate(
     context: AuthorizationContext,
-    work: type[LibraryWork] = LibraryWork,
+    book: type[LibraryBook] = LibraryBook,
 ) -> ColumnElement[bool]:
     if context.is_admin:
-        return work.id.is_not(None)
-    return library_visibility_predicate(context, work.library_id)
+        return book.id.is_not(None)
+    return library_visibility_predicate(context, book.library_id)
 
 
-def volume_visibility_predicate(
+def resource_visibility_predicate(
     context: AuthorizationContext,
-    volume: type[LibraryVolume] = LibraryVolume,
+    resource: type[LibraryReadableResource] = LibraryReadableResource,
 ) -> ColumnElement[bool]:
+    state = (
+        resource.enablement_state == "ENABLED",
+        resource.import_state == "READY",
+    )
     if context.is_admin:
-        return volume.id.is_not(None)
-    accessible_work = aliased(LibraryWork)
-    accessible_version = aliased(LibraryVersion)
+        return resource.id.is_not(None) & state[0] & state[1]
+    return library_visibility_predicate(context, resource.library_id) & state[0] & state[1]
+
+
+def asset_visibility_predicate(
+    context: AuthorizationContext,
+    asset: type[LibraryResourceAsset] = LibraryResourceAsset,
+) -> ColumnElement[bool]:
+    source_node = LibrarySourceNode
     return exists(
-        select(accessible_work.id).where(
-            accessible_version.id == volume.version_id,
-            accessible_work.id == accessible_version.work_id,
-            work_visibility_predicate(context, accessible_work),
+        select(LibraryReadableResource.id)
+        .join(
+            LibraryBook,
+            LibraryBook.id == LibraryReadableResource.book_id,
+        )
+        .join(
+            source_node,
+            source_node.id == asset.source_node_id,
+        )
+        .where(
+            LibraryReadableResource.id == asset.resource_id,
+            asset.import_state == "READY",
+            source_node.physical_kind == "REGULAR_FILE",
+            resource_visibility_predicate(context),
         )
     )
 
@@ -124,43 +141,39 @@ def can_access_library(db: Session, user: User, library_id: str | None) -> bool:
     )
 
 
-def can_access_work(db: Session, user: User, work_id: str) -> bool:
+def can_access_book(db: Session, user: User, book_id: str) -> bool:
     context = authorization_context(db, user)
     return (
         db.scalar(
-            select(LibraryWork.id).where(
-                LibraryWork.id == work_id,
-                work_visibility_predicate(context),
+            select(LibraryBook.id).where(
+                LibraryBook.id == book_id,
+                book_visibility_predicate(context),
             )
         )
         is not None
     )
 
 
-def can_access_volume(db: Session, user: User, volume_id: str) -> bool:
+def can_access_resource(db: Session, user: User, resource_id: str) -> bool:
     context = authorization_context(db, user)
     return (
         db.scalar(
-            select(LibraryVolume.id).where(
-                LibraryVolume.id == volume_id,
-                LibraryVolume.hidden.is_(False),
-                volume_visibility_predicate(context),
+            select(LibraryReadableResource.id).where(
+                LibraryReadableResource.id == resource_id,
+                resource_visibility_predicate(context),
             )
         )
         is not None
     )
 
 
-def can_access_file(db: Session, user: User, file_id: str) -> bool:
+def can_access_asset(db: Session, user: User, asset_id: str) -> bool:
     context = authorization_context(db, user)
     return (
         db.scalar(
-            select(LibraryFile.id)
-            .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-            .where(
-                LibraryFile.id == file_id,
-                LibraryVolume.hidden.is_(False),
-                volume_visibility_predicate(context),
+            select(LibraryResourceAsset.id).where(
+                LibraryResourceAsset.id == asset_id,
+                asset_visibility_predicate(context, LibraryResourceAsset),
             )
         )
         is not None

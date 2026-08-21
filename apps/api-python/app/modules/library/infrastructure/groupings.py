@@ -5,12 +5,12 @@ from __future__ import annotations
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, aliased
 
-from app.core.authorization import AuthorizationContext, work_visibility_predicate
-from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
+from app.core.authorization import AuthorizationContext, book_visibility_predicate
+from app.models import LibraryFacet, LibraryBook, LibraryBookFacet
 from app.modules.library.application.groupings import (
     LibraryGrouping,
     LibraryGroupingPage,
-    LibraryGroupingWork,
+    LibraryGroupingBook,
 )
 
 
@@ -32,12 +32,12 @@ class SqlAlchemyLibraryGroupingQueries:
             filters.append(func.trim(LibraryFacet.name) != "未知作者")
         if search:
             filters.append(func.lower(LibraryFacet.name).like(f"%{search.casefold()}%"))
-        count_link = aliased(LibraryWorkFacet)
-        count_work = aliased(LibraryWork)
+        count_link = aliased(LibraryBookFacet)
+        count_work = aliased(LibraryBook)
         count_work_visible = select(count_work.id).where(
-            count_work.id == count_link.work_id,
+            count_work.id == count_link.book_id,
             count_work.hidden.is_(False),
-            work_visibility_predicate(context, count_work),
+            book_visibility_predicate(context, count_work),
         )
         book_count = (
             select(func.count())
@@ -48,14 +48,14 @@ class SqlAlchemyLibraryGroupingQueries:
             )
             .scalar_subquery()
         )
-        latest_link = aliased(LibraryWorkFacet)
-        latest_work = aliased(LibraryWork)
+        latest_link = aliased(LibraryBookFacet)
+        latest_work = aliased(LibraryBook)
         visible_work_updated_at = (
             select(latest_work.updated_at)
             .where(
-                latest_work.id == latest_link.work_id,
+                latest_work.id == latest_link.book_id,
                 latest_work.hidden.is_(False),
-                work_visibility_predicate(context, latest_work),
+                book_visibility_predicate(context, latest_work),
             )
             .scalar_subquery()
         )
@@ -68,16 +68,16 @@ class SqlAlchemyLibraryGroupingQueries:
             )
             .scalar_subquery()
         )
-        visible_link = aliased(LibraryWorkFacet)
-        visible_work = aliased(LibraryWork)
+        visible_link = aliased(LibraryBookFacet)
+        visible_work = aliased(LibraryBook)
         has_visible_work = exists(
-            select(visible_link.work_id).where(
+            select(visible_link.book_id).where(
                 visible_link.facet_id == LibraryFacet.id,
                 select(visible_work.id)
                 .where(
-                    visible_work.id == visible_link.work_id,
+                    visible_work.id == visible_link.book_id,
                     visible_work.hidden.is_(False),
-                    work_visibility_predicate(context, visible_work),
+                    book_visibility_predicate(context, visible_work),
                 )
                 .exists(),
             )
@@ -107,7 +107,7 @@ class SqlAlchemyLibraryGroupingQueries:
             if rows
             else int(self._db.scalar(select(func.count()).select_from(grouped)) or 0)
         )
-        representative_works = self._representative_works(
+        representative_books = self._representative_books(
             context=context,
             facet_ids=tuple(str(row.facet_id) for row in rows),
         )
@@ -122,7 +122,7 @@ class SqlAlchemyLibraryGroupingQueries:
                         row.facet_updated_at,
                         row.latest_work_updated_at,
                     ),
-                    representative_works=representative_works.get(
+                    representative_books=representative_books.get(
                         str(row.facet_id), ()
                     ),
                 )
@@ -131,34 +131,34 @@ class SqlAlchemyLibraryGroupingQueries:
             total=total,
         )
 
-    def _representative_works(
+    def _representative_books(
         self,
         *,
         context: AuthorizationContext,
         facet_ids: tuple[str, ...],
-    ) -> dict[str, tuple[LibraryGroupingWork, ...]]:
+    ) -> dict[str, tuple[LibraryGroupingBook, ...]]:
         if not facet_ids:
             return {}
         ranked = (
             select(
-                LibraryWorkFacet.facet_id.label("facet_id"),
-                LibraryWork.id.label("work_id"),
-                LibraryWork.title,
-                LibraryWork.author,
-                LibraryWork.cover_path,
-                LibraryWork.updated_at,
+                LibraryBookFacet.facet_id.label("facet_id"),
+                LibraryBook.id.label("book_id"),
+                LibraryBook.title,
+                LibraryBook.author,
+                LibraryBook.cover_path,
+                LibraryBook.updated_at,
                 func.row_number()
                 .over(
-                    partition_by=LibraryWorkFacet.facet_id,
-                    order_by=(LibraryWork.updated_at.desc(), LibraryWork.id.asc()),
+                    partition_by=LibraryBookFacet.facet_id,
+                    order_by=(LibraryBook.updated_at.desc(), LibraryBook.id.asc()),
                 )
                 .label("representative_rank"),
             )
-            .join(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
+            .join(LibraryBook, LibraryBook.id == LibraryBookFacet.book_id)
             .where(
-                LibraryWorkFacet.facet_id.in_(facet_ids),
-                LibraryWork.hidden.is_(False),
-                work_visibility_predicate(context),
+                LibraryBookFacet.facet_id.in_(facet_ids),
+                LibraryBook.hidden.is_(False),
+                book_visibility_predicate(context),
             )
             .subquery()
         )
@@ -167,15 +167,15 @@ class SqlAlchemyLibraryGroupingQueries:
             .where(ranked.c.representative_rank <= 3)
             .order_by(ranked.c.facet_id.asc(), ranked.c.representative_rank.asc())
         ).all()
-        grouped: dict[str, list[LibraryGroupingWork]] = {}
+        grouped: dict[str, list[LibraryGroupingBook]] = {}
         for row in rows:
             grouped.setdefault(str(row.facet_id), []).append(
-                LibraryGroupingWork(
-                    id=str(row.work_id),
+                LibraryGroupingBook(
+                    id=str(row.book_id),
                     title=str(row.title),
                     author=str(row.author or ""),
                     cover_path=(str(row.cover_path) if row.cover_path else None),
                     updated_at=row.updated_at,
                 )
             )
-        return {facet_id: tuple(works) for facet_id, works in grouped.items()}
+        return {facet_id: tuple(books) for facet_id, books in grouped.items()}

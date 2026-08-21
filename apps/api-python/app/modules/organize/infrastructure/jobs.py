@@ -12,7 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.models.library import LibraryWork
+from app.models import LibraryBook
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -22,7 +22,7 @@ from app.models.organize import (
 )
 from app.modules.organize.application.dto import PreparedOrganizeJobEnqueue
 from app.modules.organize.infrastructure.eligibility import UNRESOLVED_JOB_STATUSES
-from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
+from app.modules.organize.infrastructure.runs import job_entity_record
 
 ACTIVE_LOOKUP_STATUSES = ("PENDING", "RUNNING")
 
@@ -68,9 +68,8 @@ def prepare_organize_run_write(
         {
             "id": plan.job_id,
             "run_id": run_id,
-            "work_id": plan.work_id,
-            "volume_id": plan.volume_id,
-            "version_id": plan.version_id,
+            "book_id": plan.book_id,
+            "resource_id": plan.resource_id,
             "import_task_id": None,
             "trigger": trigger,
             "status": "LOOKUP_PENDING",
@@ -89,7 +88,7 @@ def prepare_organize_run_write(
         sqlite_insert(OrganizeJob)
         .values(list(job_rows))
         .on_conflict_do_nothing(
-            index_elements=[OrganizeJob.work_id],
+            index_elements=[OrganizeJob.book_id],
             index_where=OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
         )
         .returning(OrganizeJob.id)
@@ -99,9 +98,8 @@ def prepare_organize_run_write(
     task_rows_by_job_id = {
         plan.job_id: {
             "id": plan.task_id,
-            "work_id": plan.work_id,
-            "volume_id": plan.volume_id,
-            "version_id": plan.version_id,
+            "book_id": plan.book_id,
+            "resource_id": plan.resource_id,
             "import_task_id": None,
             "organize_job_id": plan.job_id,
             "status": "PENDING",
@@ -113,12 +111,12 @@ def prepare_organize_run_write(
         }
         for plan in job_plans
     }
-    work_ids_for_run = select(OrganizeJob.work_id).where(
+    book_ids_for_run = select(OrganizeJob.book_id).where(
         OrganizeJob.run_id == run_id
     )
     work_statement = (
-        update(LibraryWork)
-        .where(LibraryWork.id.in_(work_ids_for_run))
+        update(LibraryBook)
+        .where(LibraryBook.id.in_(book_ids_for_run))
         .values(organize_status="LOOKUP_PENDING", updated_at=timestamp)
         if job_plans
         else None
@@ -173,18 +171,16 @@ def execute_organize_run_write(
 def prepare_lookup_task_row(
     *,
     task_id: str,
-    work_id: str,
-    volume_id: str | None,
-    version_id: str | None,
+    book_id: str,
+    resource_id: str | None,
     job_id: str,
     provider_order: tuple[str, ...],
     timestamp: datetime,
 ) -> dict[str, object]:
     return {
         "id": task_id,
-        "work_id": work_id,
-        "volume_id": volume_id,
-        "version_id": version_id,
+        "book_id": book_id,
+        "resource_id": resource_id,
         "import_task_id": None,
         "organize_job_id": job_id,
         "status": "PENDING",
@@ -210,11 +206,11 @@ def _has_table(db: Session, table: str) -> bool:
 
 
 def mark_work_organize_status(
-    db: Session, *, work_id: str, status: str, now: Any
+    db: Session, *, book_id: str, status: str, now: Any
 ) -> None:
     db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
+        update(LibraryBook)
+        .where(LibraryBook.id == book_id)
         .values(organize_status=status, updated_at=now)
     )
 
@@ -240,32 +236,32 @@ def cancel_job(db: Session, *, job_id: str, now: Any) -> None:
     )
 
 
-def get_work_row(db: Session, work_id: str) -> dict[str, Any] | None:
+def get_work_row(db: Session, book_id: str) -> dict[str, Any] | None:
     from app.modules.organize.infrastructure.eligibility import (
-        work_entity_as_legacy_dict,
+        work_entity_record,
     )
 
-    entity = db.get(LibraryWork, work_id)
-    return work_entity_as_legacy_dict(entity) if entity is not None else None
+    entity = db.get(LibraryBook, book_id)
+    return work_entity_record(entity) if entity is not None else None
 
 
 def get_unresolved_job_for_work(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     exclude_job_id: str,
 ) -> dict[str, Any] | None:
     entity = db.scalars(
         select(OrganizeJob)
         .where(
-            OrganizeJob.work_id == work_id,
+            OrganizeJob.book_id == book_id,
             OrganizeJob.id != exclude_job_id,
             OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
         )
         .order_by(OrganizeJob.updated_at.desc(), OrganizeJob.created_at.desc())
         .limit(1)
     ).first()
-    return job_entity_as_legacy_dict(entity) if entity is not None else None
+    return job_entity_record(entity) if entity is not None else None
 
 
 def list_lookup_task_ids_for_job(db: Session, job_id: str) -> list[str]:
@@ -353,22 +349,22 @@ def delete_job_graph(db: Session, *, job_id: str, task_ids: list[str]) -> None:
     db.execute(delete(OrganizeJob).where(OrganizeJob.id == job_id))
 
 
-def latest_job_status_for_work(db: Session, work_id: str) -> str | None:
+def latest_job_status_for_work(db: Session, book_id: str) -> str | None:
     return db.scalar(
         select(OrganizeJob.status)
-        .where(OrganizeJob.work_id == work_id)
+        .where(OrganizeJob.book_id == book_id)
         .order_by(OrganizeJob.created_at.desc())
         .limit(1)
     )
 
 
 def latest_job_status_for_work_excluding(
-    db: Session, work_id: str, excluded_job_id: str
+    db: Session, book_id: str, excluded_job_id: str
 ) -> str | None:
     return db.scalar(
         select(OrganizeJob.status)
         .where(
-            OrganizeJob.work_id == work_id,
+            OrganizeJob.book_id == book_id,
             OrganizeJob.id != excluded_job_id,
         )
         .order_by(OrganizeJob.created_at.desc())
@@ -376,16 +372,16 @@ def latest_job_status_for_work_excluding(
     )
 
 
-def work_is_organized(db: Session, work_id: str) -> bool:
+def work_is_organized(db: Session, book_id: str) -> bool:
     return bool(
-        db.scalar(select(LibraryWork.organized).where(LibraryWork.id == work_id))
+        db.scalar(select(LibraryBook.organized).where(LibraryBook.id == book_id))
     )
 
 
 def finish_unresolved_jobs_for_work(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     now: Any,
 ) -> list[str]:
     statuses = ("PENDING", "REVIEWING", "FAILED")
@@ -393,7 +389,7 @@ def finish_unresolved_jobs_for_work(
         str(job_id)
         for job_id in db.scalars(
             select(OrganizeJob.id).where(
-                OrganizeJob.work_id == work_id,
+                OrganizeJob.book_id == book_id,
                 OrganizeJob.status.in_(statuses),
             )
         ).all()

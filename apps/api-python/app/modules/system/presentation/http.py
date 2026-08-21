@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.imports import import_http_store
 from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
     clear_system_events_with_audit,
@@ -48,6 +47,9 @@ from app.modules.system.application.queries import (
     parse_event_date_bounds,
     prepare_system_settings_update,
     system_settings_payload,
+)
+from app.modules.system.infrastructure.import_status import (
+    library_import_dashboard_snapshot,
 )
 from app.modules.system.presentation.health_schemas import SystemManagerRequiredError
 from app.modules.system.presentation.schemas import (
@@ -288,17 +290,14 @@ def dashboard_system_status(
     if auth_error:
         return auth_error
     health = run_system_health_checks(db, settings)
-    enabled = import_http_store.list_enabled_library_rows(db)
-    current_task, latest_task, failed_count = import_http_store.import_status_snapshot(
-        db
-    )
+    snapshot = library_import_dashboard_snapshot(db)
     return DashboardSystemStatusResponse(
         data=dashboard_system_status_payload(
             health=health,
-            enabled_libraries=enabled,
-            current_import_task=current_task,
-            latest_import_task=latest_task,
-            failed_count=failed_count,
+            enabled_libraries=snapshot["enabled_libraries"],
+            current_import_task=snapshot["current_task"],
+            latest_import_task=snapshot["latest_task"],
+            failed_count=snapshot["failed_count"],
         )
     )
 
@@ -510,5 +509,5 @@ def download_backup(
         media_type="application/zip",
         name=f"{backup_id}.zip",
         route="backup-download",
-        file_id=backup_id,
+        asset_id=backup_id,
     )

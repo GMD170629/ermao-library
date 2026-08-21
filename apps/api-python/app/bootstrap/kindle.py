@@ -16,12 +16,12 @@ from app.modules.kindle.infrastructure.tasks import (
     cancel_queued_kindle_task,
     create_kindle_send_task,
     delete_kindle_send_task,
-    entity_as_legacy_dict,
+    entity_record,
     execute_kindle_send_task_insert,
     execute_kindle_send_task_update,
     find_active_kindle_task,
     get_kindle_send_task,
-    get_library_file_details_for_kindle,
+    get_library_asset_details_for_kindle,
     has_table,
     list_kindle_send_tasks,
     mark_kindle_task_failed,
@@ -122,7 +122,7 @@ def claim_kindle_send_task_command(
     statement = prepare_claim_kindle_send_task(task_id, now=timestamp)
     with KindleWriteTransaction(db):
         task = execute_kindle_send_task_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def update_kindle_send_snapshot_command(
@@ -149,7 +149,7 @@ def update_kindle_send_snapshot_command(
     )
     with KindleWriteTransaction(db):
         task = execute_kindle_send_task_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def schedule_kindle_retry_command(
@@ -228,7 +228,7 @@ __all__ = [
     "fail_kindle_send_task_command",
     "find_active_kindle_task",
     "get_kindle_send_task",
-    "get_library_file_details_for_kindle",
+    "get_library_asset_details_for_kindle",
     "has_table",
     "list_kindle_send_tasks",
     "record_kindle_event_command",

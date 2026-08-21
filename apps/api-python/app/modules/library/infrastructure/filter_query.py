@@ -1,66 +1,52 @@
-"""Compile validated library filters against volume-owned resource fields."""
+"""Compile validated library filters against Book/Resource/Asset fields."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import (
-    ColumnElement,
-    Float,
-    and_,
-    cast,
-    exists,
-    false,
-    func,
-    not_,
-    or_,
-    select,
-    true,
-)
+from sqlalchemy import ColumnElement, Float, and_, cast, exists, false, func, not_, or_, select, true
 from sqlalchemy.orm import Session, aliased
 
-from app.core.authorization import AuthorizationContext, volume_visibility_predicate
-from app.models.library import (
+from app.core.authorization import AuthorizationContext, book_visibility_predicate, resource_visibility_predicate
+from app.models import (
     Library,
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
     LibraryFacet,
-    LibraryFile,
-    LibraryReadingProgress,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
-    LibraryWorkFacet,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+    OrganizeJob,
+    ReaderResourceProgress,
 )
-from app.models.shelf import Shelf, ShelfWork
+from app.models.shelf import Shelf, ShelfBook
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
-from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
-)
 
-WORK_TEXT_FIELDS = {
-    "title": LibraryWork.title,
-    "author": LibraryWork.author,
-    "description": LibraryWork.description,
-    "series": LibraryWork.series_name,
-    "publicationStatus": LibraryWork.publication_status,
-    "trackingStatus": LibraryWork.tracking_status,
-    "organizeStatus": LibraryWork.organize_status,
-    "origin": LibraryWork.origin,
+BOOK_TEXT_FIELDS = {
+    "title": LibraryBookMetadata.title,
+    "author": LibraryBookMetadata.author,
+    "description": LibraryBookMetadata.description,
+    "series": LibraryBookMetadata.series_name,
+    "publicationStatus": LibraryBookMetadata.publication_status,
+    "trackingStatus": LibraryBookMetadata.tracking_status,
 }
-WORK_NUMBER_FIELDS = {
-    "seriesIndex": LibraryWork.series_index,
-    "metadataQuality": LibraryWork.metadata_quality,
+BOOK_NUMBER_FIELDS = {
+    "seriesIndex": LibraryBookMetadata.series_index,
+    "metadataQuality": LibraryBookMetadata.metadata_quality,
 }
-WORK_DATE_FIELDS = {
-    "createdAt": LibraryWork.created_at,
-    "updatedAt": LibraryWork.updated_at,
+BOOK_DATE_FIELDS = {
+    "createdAt": LibraryBook.created_at,
+    "updatedAt": LibraryBook.updated_at,
 }
-VOLUME_TEXT_FIELDS = {
-    "volumeTitle": "title",
+RESOURCE_TEXT_FIELDS = {
+    "resourceTitle": "title",
     "narrator": "narrator",
     "format": "format",
-    "importStatus": "import_status",
+    "importStatus": "import_state",
 }
 
 
@@ -79,9 +65,7 @@ def _text(
     empty_values: tuple[str, ...] = (),
 ) -> ColumnElement[bool]:
     normalized = _normalized_text(expression)
-    empty_predicate = normalized.in_(
-        ("", *(value.casefold() for value in empty_values))
-    )
+    empty_predicate = normalized.in_(("", *(value.casefold() for value in empty_values)))
     if condition.operator == "is_empty":
         return empty_predicate
     if condition.operator == "is_not_empty":
@@ -108,10 +92,7 @@ def _number(
     numeric = cast(expression, Float)
     if condition.operator == "between":
         assert isinstance(condition.value, tuple)
-        return numeric.between(
-            float(condition.value[0]) * scale,
-            float(condition.value[1]) * scale,
-        )
+        return numeric.between(float(condition.value[0]) * scale, float(condition.value[1]) * scale)
     value = float(str(condition.value)) * scale
     return {
         "equals": numeric == value,
@@ -123,9 +104,7 @@ def _number(
     }[condition.operator]
 
 
-def _date(
-    expression: ColumnElement[object], condition: FilterCondition
-) -> ColumnElement[bool]:
+def _date(expression: ColumnElement[object], condition: FilterCondition) -> ColumnElement[bool]:
     if condition.operator == "is_empty":
         return expression.is_(None)
     if condition.operator == "is_not_empty":
@@ -133,9 +112,7 @@ def _date(
     if condition.operator == "between":
         assert isinstance(condition.value, tuple)
         start = datetime.fromisoformat(condition.value[0]).replace(tzinfo=UTC)
-        end = datetime.fromisoformat(condition.value[1]).replace(
-            tzinfo=UTC
-        ) + timedelta(days=1)
+        end = datetime.fromisoformat(condition.value[1]).replace(tzinfo=UTC) + timedelta(days=1)
         return and_(expression >= start, expression < end)
     start = datetime.fromisoformat(str(condition.value)).replace(tzinfo=UTC)
     end = start + timedelta(days=1)
@@ -152,17 +129,12 @@ def _date(
     return expression < end
 
 
-def _visible_volume(
+def _visible_resource(
     context: AuthorizationContext,
-    volume: type[LibraryVolume],
-    library_version: type[LibraryVersion],
+    resource: type[LibraryReadableResource],
+    book: type[LibraryBook],
 ) -> ColumnElement[bool]:
-    return and_(
-        library_version.work_id == LibraryWork.id,
-        volume.version_id == library_version.id,
-        volume.hidden.is_(False),
-        volume_visibility_predicate(context, volume),
-    )
+    return and_(resource.book_id == book.id, resource_visibility_predicate(context, resource))
 
 
 def _relation_text(
@@ -189,113 +161,55 @@ def resolve_library_roots(
     expression: FilterExpression,
     context: AuthorizationContext,
 ) -> dict[str, str]:
-    conditions = tuple(
-        condition for condition in expression.conditions if condition.field == "library"
-    )
+    conditions = tuple(c for c in expression.conditions if c.field == "library")
     if not conditions:
         return {}
-    include_all_accessible = any(
-        condition.operator in {"is_empty", "is_not_empty"} for condition in conditions
-    )
-    requested_ids = {
-        str(condition.value) for condition in conditions if condition.value is not None
-    }
-    if not context.is_admin and not context.library_ids:
-        return {}
+    include_all = any(c.operator in {"is_empty", "is_not_empty"} for c in conditions)
+    requested_ids = {str(c.value) for c in conditions if c.value is not None}
     statement = select(Library.id, Library.root_path)
     if not context.is_admin:
         statement = statement.where(Library.id.in_(context.library_ids))
-    if not include_all_accessible:
+    if not include_all:
         if not requested_ids:
             return {}
         statement = statement.where(Library.id.in_(requested_ids))
-    roots: dict[str, str] = {}
-    for folder_id, root_path in db.execute(statement).all():
-        normalized = _normalized_library_root(str(root_path))
-        if normalized:
-            roots[str(folder_id)] = normalized
-    return roots
+    return {
+        str(library_id): _normalized_library_root(str(root_path))
+        for library_id, root_path in db.execute(statement).all()
+        if _normalized_library_root(str(root_path))
+    }
 
 
 def _normalized_library_root(root_path: str) -> str:
     normalized = root_path.strip()
     if normalized in {"/", "\\"}:
         return normalized
-    if (
-        len(normalized) >= 3
-        and normalized[1] == ":"
-        and set(normalized[2:]).issubset({"/", "\\"})
-    ):
+    if len(normalized) >= 3 and normalized[1] == ":" and set(normalized[2:]).issubset({"/", "\\"}):
         return normalized[:3]
     return normalized.rstrip("/\\")
 
 
-def _root_prefixes(root: str) -> tuple[str, ...]:
-    if root.endswith(("/", "\\")):
-        return (root,)
-    return (f"{root}/", f"{root}\\")
-
-
-def _path_has_prefix(
-    path: ColumnElement[str],
-    prefix: str,
-) -> ColumnElement[bool]:
-    return and_(path >= prefix, path < f"{prefix}\U0010ffff")
-
-
-def _library(
-    volume: type[LibraryVolume],
-    library_version: type[LibraryVersion],
-    visible: ColumnElement[bool],
-    condition: FilterCondition,
-    library_roots: Mapping[str, str],
-) -> ColumnElement[bool]:
+def _reading_status(context: AuthorizationContext, user_id: str, condition: FilterCondition) -> ColumnElement[bool]:
+    resource = aliased(LibraryReadableResource)
+    progress = aliased(ReaderResourceProgress)
+    visible = and_(resource_visibility_predicate(context, resource), resource.book_id == LibraryBook.id)
+    has_resource = exists(select(resource.id).where(visible))
     if condition.operator == "is_empty":
-        return false()
+        return ~has_resource
     if condition.operator == "is_not_empty":
-        return true()
-    library_id = str(condition.value or "")
-    if not library_id:
-        return false() if condition.operator == "equals" else true()
-    matches = LibraryWork.library_id == library_id
-    return not_(matches) if condition.operator == "not_equals" else matches
-
-
-def _reading_status(
-    context: AuthorizationContext, user_id: str, condition: FilterCondition
-) -> ColumnElement[bool]:
-    volume = aliased(LibraryVolume)
-    library_version = aliased(LibraryVersion)
-    progress = aliased(LibraryReadingProgress)
-    visible = _visible_volume(context, volume, library_version)
-    has_volume = exists(select(volume.id).where(visible))
-    if condition.operator == "is_empty":
-        return ~has_volume
-    if condition.operator == "is_not_empty":
-        return has_volume
+        return has_resource
     started = exists(
         select(progress.id)
-        .join(volume, volume.id == progress.volume_id)
-        .join(library_version, library_version.id == volume.version_id)
+        .join(resource, resource.id == progress.resource_id)
         .where(visible, progress.user_id == user_id, progress.percent > 0)
     )
     unfinished = exists(
-        select(volume.id)
-        .join(library_version, library_version.id == volume.version_id)
-        .outerjoin(
-            progress,
-            and_(progress.volume_id == volume.id, progress.user_id == user_id),
-        )
+        select(resource.id)
+        .outerjoin(progress, and_(progress.resource_id == resource.id, progress.user_id == user_id))
         .where(visible, func.coalesce(progress.percent, 0) < 100)
     )
     status = str(condition.value or "UNREAD").upper()
-    predicate = (
-        and_(has_volume, ~unfinished)
-        if status == "FINISHED"
-        else and_(started, unfinished)
-        if status == "READING"
-        else ~started
-    )
+    predicate = and_(has_resource, ~unfinished) if status == "FINISHED" else and_(started, unfinished) if status == "READING" else ~started
     return not_(predicate) if condition.operator == "not_equals" else predicate
 
 
@@ -307,132 +221,96 @@ def _condition(
     shelf_owner_user_id: str | None,
     library_roots: Mapping[str, str],
 ) -> ColumnElement[bool]:
+    del library_roots
     field = condition.field
     if field == "readingStatus" and user_id:
         return _reading_status(context, user_id, condition)
     if field == "author":
-        return _text(
-            LibraryWork.author,
-            condition,
-            empty_values=(UNKNOWN_AUTHOR_PLACEHOLDER,),
-        )
-    if field in WORK_TEXT_FIELDS:
-        return _text(WORK_TEXT_FIELDS[field], condition)
-    if field in WORK_NUMBER_FIELDS:
-        return _number(WORK_NUMBER_FIELDS[field], condition)
-    if field in WORK_DATE_FIELDS:
-        return _date(WORK_DATE_FIELDS[field], condition)
-    volume = aliased(LibraryVolume)
-    library_version = aliased(LibraryVersion)
-    visible = _visible_volume(context, volume, library_version)
-    if field in VOLUME_TEXT_FIELDS or field == "mediaKind":
-        expression = (
-            volume_effective_media_kind(volume)
-            if field == "mediaKind"
-            else getattr(volume, VOLUME_TEXT_FIELDS[field])
-        )
-        return _relation_text(
-            select(volume.id)
-            .join(library_version, library_version.id == volume.version_id)
-            .where(visible),
-            expression,
-            condition,
-        )
+        return _text(LibraryBookMetadata.author, condition, empty_values=(UNKNOWN_AUTHOR_PLACEHOLDER,))
+    if field in BOOK_TEXT_FIELDS:
+        return _text(BOOK_TEXT_FIELDS[field], condition)
+    if field in BOOK_NUMBER_FIELDS:
+        return _number(BOOK_NUMBER_FIELDS[field], condition)
+    if field in BOOK_DATE_FIELDS:
+        return _date(BOOK_DATE_FIELDS[field], condition)
+
+    resource = aliased(LibraryReadableResource)
+    resource_metadata = aliased(LibraryReadableResourceMetadata)
+    visible = _visible_resource(context, resource, LibraryBook)
+    resource_base = (
+        select(resource.id)
+        .join(resource_metadata, resource_metadata.resource_id == resource.id)
+        .where(visible)
+    )
+    if field in RESOURCE_TEXT_FIELDS or field == "mediaKind":
+        expression = resource.media_kind if field == "mediaKind" else getattr(resource_metadata if field in {"resourceTitle", "narrator"} else resource, RESOURCE_TEXT_FIELDS[field])
+        return _relation_text(resource_base, expression, condition)
     if field == "tag":
-        link = aliased(LibraryWorkFacet)
+        link = aliased(LibraryBookFacet)
         facet = aliased(LibraryFacet)
         return _relation_text(
-            select(link.work_id)
+            select(link.book_id)
             .join(facet, facet.id == link.facet_id)
-            .where(link.work_id == LibraryWork.id, facet.kind == "TAG"),
+            .where(link.book_id == LibraryBook.id, facet.kind == "TAG"),
             facet.name,
             condition,
         )
     if field == "shelf":
-        link = aliased(ShelfWork)
+        link = aliased(ShelfBook)
         shelf = aliased(Shelf)
-        clauses = [link.work_id == LibraryWork.id, shelf.kind == "STATIC"]
+        clauses = [link.book_id == LibraryBook.id, shelf.kind == "STATIC"]
         if shelf_owner_user_id:
             clauses.append(shelf.owner_user_id == shelf_owner_user_id)
-        return _relation_text(
-            select(link.work_id).join(shelf, shelf.id == link.shelf_id).where(*clauses),
-            shelf.id,
-            condition,
-        )
+        return _relation_text(select(link.book_id).join(shelf, shelf.id == link.shelf_id).where(*clauses), shelf.id, condition)
     if field == "library":
-        return _library(
-            volume,
-            library_version,
-            visible,
-            condition,
-            library_roots,
-        )
+        expression = LibraryBook.library_id
+        return _text(expression, condition)
     if field == "sourcePath":
-        file = aliased(LibraryFile)
+        asset = aliased(LibraryResourceAsset)
+        source_node = aliased(LibrarySourceNode)
         return _relation_text(
-            select(file.id)
-            .join(volume, volume.id == file.volume_id)
-            .join(library_version, library_version.id == volume.version_id)
-            .where(visible),
-            file.path,
+            select(asset.id)
+            .join(resource, resource.id == asset.resource_id)
+            .join(source_node, source_node.id == asset.source_node_id)
+            .where(visible, asset.import_state == "READY"),
+            source_node.relative_path,
             condition,
         )
+
     scalar = {
-        "fileSize": select(func.sum(LibraryFile.size_bytes))
-        .join(volume, volume.id == LibraryFile.volume_id)
-        .join(library_version, library_version.id == volume.version_id)
-        .where(visible)
-        .scalar_subquery(),
-        "pageCount": select(func.max(volume.page_count))
-        .where(visible)
-        .scalar_subquery(),
-        "chapterCount": select(func.max(volume.chapter_count))
-        .where(visible)
-        .scalar_subquery(),
-        "duration": select(func.max(volume.duration_ms))
-        .where(visible)
-        .scalar_subquery(),
-        "volumeCount": select(func.count(volume.id)).where(visible).scalar_subquery(),
+        "fileSize": (
+            select(func.sum(source_node.observed_size_bytes))
+            .select_from(LibraryResourceAsset)
+            .join(resource, resource.id == LibraryResourceAsset.resource_id)
+            .join(source_node, source_node.id == LibraryResourceAsset.source_node_id)
+            .where(visible, LibraryResourceAsset.import_state == "READY")
+            .scalar_subquery()
+        ),
+        "pageCount": select(func.max(resource_metadata.page_count)).where(resource_base.exists()).scalar_subquery(),
+        "chapterCount": select(func.max(resource_metadata.chapter_count)).where(resource_base.exists()).scalar_subquery(),
+        "duration": select(func.max(resource_metadata.duration_ms)).where(resource_base.exists()).scalar_subquery(),
+        "resourceCount": select(func.count(resource.id)).where(visible).scalar_subquery(),
     }
     if field in scalar:
-        return _number(
-            scalar[field],
-            condition,
-            scale=1048576
-            if field == "fileSize"
-            else 60000
-            if field == "duration"
-            else 1,
-        )
+        return _number(scalar[field], condition, scale=1048576 if field == "fileSize" else 60000 if field == "duration" else 1)
     if field in {"progress", "lastReadAt"}:
-        progress = aliased(LibraryReadingProgress)
-        statement = (
-            select(progress)
-            .join(volume, volume.id == progress.volume_id)
-            .join(library_version, library_version.id == volume.version_id)
-            .where(visible)
-        )
+        progress = aliased(ReaderResourceProgress)
+        statement = select(progress).join(resource, resource.id == progress.resource_id).where(visible)
         if user_id:
             statement = statement.where(progress.user_id == user_id)
         if field == "progress":
-            value = (
-                statement.with_only_columns(progress.percent)
-                .order_by(progress.updated_at.desc())
-                .limit(1)
-                .scalar_subquery()
-            )
+            value = statement.with_only_columns(progress.percent).order_by(progress.updated_at.desc()).limit(1).scalar_subquery()
             return _number(value, condition)
-        value = statement.with_only_columns(
-            func.max(progress.updated_at)
-        ).scalar_subquery()
+        value = statement.with_only_columns(func.max(progress.updated_at)).scalar_subquery()
         return _date(value, condition)
+    if field == "organizeStatus":
+        job = aliased(OrganizeJob)
+        return _relation_text(select(job.book_id).where(job.book_id == LibraryBook.id), job.status, condition)
     if field == "organized":
-        value = LibraryWork.organized.is_(True)
+        value = ~exists(select(OrganizeJob.id).where(OrganizeJob.book_id == LibraryBook.id, OrganizeJob.status != "COMPLETED"))
         return value if condition.operator == "is_true" else not_(value)
     if field == "hasCover":
-        value = and_(
-            LibraryWork.cover_path.is_not(None), LibraryWork.cover_status == "READY"
-        )
+        value = and_(LibraryBookMetadata.cover_path.is_not(None), LibraryBookMetadata.cover_status == "READY")
         return value if condition.operator == "is_true" else not_(value)
     raise ValueError(f"Unsupported filter field: {field}")
 
