@@ -11,11 +11,15 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def test_work_merge_http_surface_is_removed(client: TestClient, db_session: Session) -> None:
+def test_book_merge_surface_is_explicitly_retired(
+    client: TestClient, db_session: Session
+) -> None:
+    """A fresh cutover exposes no merge bridge under either identity."""
+
     db_session.add(
         User(
-            email="work-merge-removed@example.com",
-            name="Work Merge Removed",
+            email="book-merge-removed@example.com",
+            name="Book merge removed",
             password_hash=hash_password("starshipnas"),
             role="admin",
             can_manage_system=True,
@@ -24,26 +28,24 @@ def test_work_merge_http_surface_is_removed(client: TestClient, db_session: Sess
     db_session.commit()
     login = client.post(
         "/api/auth/login",
-        json={"email": "work-merge-removed@example.com", "password": "starshipnas"},
+        json={"email": "book-merge-removed@example.com", "password": "starshipnas"},
     )
     assert login.status_code == 200
 
-    schema = create_app().openapi()
-    paths = schema["paths"]
-    assert "/api/works/merge" not in paths
-    assert "/api/works/merge/preview" not in paths
+    paths = create_app().openapi()["paths"]
+    assert "/api/books/merge" not in paths
+    assert "/api/books/merge/preview" not in paths
     assert "/api/library/duplicates/merge" not in paths
 
-    merge_status = client.post("/api/works/merge", json={"workIds": ["a", "b"]}).status_code
-    assert merge_status in {404, 405}
+    assert client.post("/api/books/merge", json={"bookIds": ["a", "b"]}).status_code == 404
     assert (
-        client.post("/api/works/merge/preview", json={"workIds": ["a", "b"]}).status_code
+        client.post("/api/books/merge/preview", json={"bookIds": ["a", "b"]}).status_code
         == 404
     )
     assert (
         client.post(
             "/api/library/duplicates/merge",
-            json={"targetWorkId": "a", "sourceWorkIds": ["b"]},
+            json={"targetBookId": "a", "sourceBookIds": ["b"]},
         ).status_code
         == 404
     )

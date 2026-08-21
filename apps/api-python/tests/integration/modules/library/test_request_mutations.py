@@ -1,69 +1,80 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from app.core.authorization import AuthorizationContext
-from app.models.auth import User
-from app.models.library import (
-    LibraryReadingProgress,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibrarySourceNode,
+    ReaderResourceProgress,
 )
+from app.models.auth import User
 from app.modules.library.application.request_mutations import BulkReadingStatusMutation
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
 from app.modules.library.infrastructure.request_mutations import (
     SqlAlchemyLibraryRequestMutations,
 )
 
 
-def _add_work_with_volume(
-    db_session,
-    *,
-    work_id: str,
-    volume_id: str,
-    format: str,
-) -> None:
-    db_session.add(
-        LibraryWork(
-            id=work_id,
-            library_id="test-library",
-            title=work_id,
-            normalized_title=work_id,
-            author="Author",
-            normalized_author="author",
-            tags="[]",
-        )
+def _graph(db_session, book_id: str, resource_id: str, resource_format: str) -> None:
+    book_path = f"{book_id}/"
+    resource_path = f"{book_id}/{resource_id}.{resource_format.lower()}"
+    book_node = LibrarySourceNode(
+        id=f"{book_id}-node",
+        library_id="test-library",
+        relative_path=book_path,
+        path_key="v1:" + hashlib.sha256(book_path.encode()).hexdigest(),
+        name=book_id,
+        physical_kind="DIRECTORY",
+        observed_size_bytes=None,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
     )
-    db_session.flush()
-    version_id = f"version-{work_id}"
-    db_session.add(
-        LibraryVersion(
-            id=version_id,
-            work_id=work_id,
-            source_key=IMPLICIT_VERSION_SOURCE_KEY,
-        )
+    resource_node = LibrarySourceNode(
+        id=f"{resource_id}-node",
+        library_id="test-library",
+        relative_path=resource_path,
+        path_key="v1:" + hashlib.sha256(resource_path.encode()).hexdigest(),
+        name=resource_id,
+        physical_kind="REGULAR_FILE",
+        observed_size_bytes=10,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
     )
-    db_session.flush()
-    db_session.add(
-        LibraryVolume(
-            id=volume_id,
-            version_id=version_id,
-            title=volume_id,
-            sort_order=0,
-            format=format,
-            resource_key=f"resource:{volume_id}",
-            import_status="COMPLETED",
-        )
+    db_session.add_all(
+        [
+            book_node,
+            resource_node,
+            LibraryBook(id=book_id, library_id="test-library", source_node_id=book_node.id),
+            LibraryBookMetadata(
+                book_id=book_id,
+                title=book_id,
+                normalized_title=book_id,
+                author="Author",
+            ),
+            LibraryReadableResource(
+                id=resource_id,
+                library_id="test-library",
+                book_id=book_id,
+                source_node_id=resource_node.id,
+                adapter_id="audio-file" if resource_format == "AUDIO" else "epub-file",
+                adapter_version="1",
+                media_kind="AUDIOBOOK" if resource_format == "AUDIO" else "EBOOK",
+                format=resource_format,
+                import_state="READY",
+            ),
+            LibraryReadableResourceMetadata(resource_id=resource_id, title=resource_id),
+        ]
     )
     db_session.flush()
 
 
-def test_bulk_reading_status_uses_structural_versions_without_media_versions(
-    db_session,
-) -> None:
+def test_bulk_reading_status_targets_resources_by_book_identity(db_session) -> None:
     db_session.add(
         User(
             id="reader-user",
@@ -74,18 +85,9 @@ def test_bulk_reading_status_uses_structural_versions_without_media_versions(
         )
     )
     db_session.flush()
-    _add_work_with_volume(
-        db_session,
-        work_id="reading-ebook",
-        volume_id="reading-epub-volume",
-        format="EPUB",
-    )
-    _add_work_with_volume(
-        db_session,
-        work_id="reading-audio",
-        volume_id="reading-audio-volume",
-        format="M4B",
-    )
+    _graph(db_session, "reading-ebook", "reading-epub", "EPUB")
+    _graph(db_session, "reading-audio", "reading-audio", "AUDIO")
+    db_session.commit()
     gateway = SqlAlchemyLibraryRequestMutations(
         db_session,
         write_events=lambda _db, _events: None,
@@ -104,7 +106,7 @@ def test_bulk_reading_status_uses_structural_versions_without_media_versions(
     updated = gateway.update_reading_status(
         BulkReadingStatusMutation(
             context=context,
-            work_ids=("reading-ebook", "reading-audio"),
+            book_ids=("reading-ebook", "reading-audio"),
             status="FINISHED",
             now=now,
         )
@@ -112,21 +114,20 @@ def test_bulk_reading_status_uses_structural_versions_without_media_versions(
 
     assert updated == 2
     progress = db_session.scalars(
-        select(LibraryReadingProgress).order_by(LibraryReadingProgress.volume_id)
+        select(ReaderResourceProgress).order_by(ReaderResourceProgress.resource_id)
     ).all()
-    assert [(row.volume_id, row.reader_type, row.percent) for row in progress] == [
-        ("reading-audio-volume", "audio", 100.0),
-        ("reading-epub-volume", "epub", 100.0),
+    assert [(row.resource_id, row.percent) for row in progress] == [
+        ("reading-audio", 100.0),
+        ("reading-epub", 100.0),
     ]
 
     cleared = gateway.update_reading_status(
         BulkReadingStatusMutation(
             context=context,
-            work_ids=("reading-ebook", "reading-audio"),
+            book_ids=("reading-ebook", "reading-audio"),
             status="UNREAD",
             now=now,
         )
     )
-
     assert cleared == 2
-    assert db_session.scalars(select(LibraryReadingProgress.id)).all() == []
+    assert db_session.scalars(select(ReaderResourceProgress.id)).all() == []

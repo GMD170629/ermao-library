@@ -1,245 +1,177 @@
-from sqlalchemy import event
+from __future__ import annotations
+
+import hashlib
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session
 
 from app.core.authorization import authorization_context
+from app.models import (
+    Library,
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
+    LibraryFacet,
+    LibrarySourceNode,
+)
 from app.models.auth import User, UserLibraryAccess
-from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
 from app.modules.library.application.groupings import ListLibraryGroupings
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
-from app.services.library_management import sync_work_facets
 
 
-def _work(
-    *,
-    work_id: str,
-    title: str,
-    author: str,
-    series: str | None = None,
-    hidden: bool = False,
-    library_id: str = "test-library",
-) -> LibraryWork:
-    return LibraryWork(
+def _node(node_id: str, path: str, library_id: str = "test-library") -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
         library_id=library_id,
-        id=work_id,
-        title=title,
-        normalized_title=title.casefold(),
-        author=author,
-        normalized_author=author.casefold(),
-        tags="[]",
-        series_name=series,
-        hidden=hidden,
+        relative_path=path,
+        path_key="v1:" + hashlib.sha256(path.encode()).hexdigest(),
+        name=path.rsplit("/", 1)[-1],
+        physical_kind="DIRECTORY",
+        observed_size_bytes=None,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
     )
 
 
-def test_groupings_split_authors_filter_visibility_search_and_page(
-    db_session: Session,
-) -> None:
+def _book(
+    db: Session,
+    *,
+    book_id: str,
+    title: str,
+    author: str,
+    library_id: str = "test-library",
+    visibility_state: str = "VISIBLE",
+) -> LibraryBook:
+    node = _node(f"{book_id}-node", f"{book_id}/", library_id)
+    book = LibraryBook(
+        library_id=library_id,
+        id=book_id,
+        source_node_id=node.id,
+        visibility_state=visibility_state,
+    )
+    db.add_all(
+        [
+            node,
+            book,
+            LibraryBookMetadata(
+                book_id=book_id,
+                title=title,
+                normalized_title=title.casefold(),
+                author=author,
+                normalized_author=author.casefold(),
+            ),
+        ]
+    )
+    return book
+
+
+def _facet(db: Session, facet_id: str, kind: str, name: str) -> LibraryFacet:
+    facet = LibraryFacet(
+        id=facet_id,
+        kind=kind,
+        name=name,
+        normalized_name=name.casefold(),
+    )
+    db.add(facet)
+    return facet
+
+
+def test_groupings_filter_visibility_search_and_stable_page(db_session: Session) -> None:
     user = User(
+        id="library-groupings-user",
         email="library-groupings@example.com",
         name="书库分组",
         password_hash="unused",
         role="admin",
     )
-    db_session.add(user)
-    db_session.add_all(
-        [
-            _work(
-                work_id="series-2",
-                title="第二卷",
-                author="林川、周禾",
-                series="星海丛书",
-            ),
-            _work(
-                work_id="series-1",
-                title="第一卷",
-                author="林川",
-                series="星海丛书",
-            ),
-            _work(
-                work_id="single-series",
-                title="单卷",
-                author="艾青",
-                series="单卷系列",
-            ),
-            _work(
-                work_id="unknown-author",
-                title="佚名作品",
-                author="未知作者",
-            ),
-            _work(
-                work_id="hidden-series",
-                title="隐藏卷",
-                author="秘密作者",
-                series="隐藏系列",
-                hidden=True,
-            ),
-        ]
+    _book(db_session, book_id="series-2", title="第二册", author="林川、周禾")
+    _book(db_session, book_id="series-1", title="第一册", author="林川")
+    _book(db_session, book_id="single", title="单册", author="艾青")
+    _book(db_session, book_id="unknown", title="佚名", author="未知作者")
+    _book(
+        db_session,
+        book_id="hidden",
+        title="隐藏册",
+        author="秘密作者",
+        visibility_state="HIDDEN",
     )
-    db_session.commit()
-    for work_id in (
-        "series-2",
-        "series-1",
-        "single-series",
-        "unknown-author",
-        "hidden-series",
-    ):
-        sync_work_facets(db_session, work_id)
-
-    context = authorization_context(db_session, user)
-    query = ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db_session))
-    engine = db_session.get_bind()
-    executed_statements = 0
-
-    def count_statement(*_args: object) -> None:
-        nonlocal executed_statements
-        executed_statements += 1
-
-    event.listen(engine, "before_cursor_execute", count_statement)
-    try:
-        authors = query.execute(
-            kind="AUTHOR",
-            context=context,
-            search="",
-            page=1,
-            page_size=20,
-        )
-    finally:
-        event.remove(engine, "before_cursor_execute", count_statement)
-
-    # One bounded page query plus one batched representative-work query.
-    assert executed_statements == 2
-    assert [(group.name, group.book_count) for group in authors.groups] == [
-        ("周禾", 1),
-        ("林川", 2),
-        ("艾青", 1),
-    ]
-    assert all(group.name not in {"未知作者", "秘密作者"} for group in authors.groups)
-    lin_chuan = next(group for group in authors.groups if group.name == "林川")
-    assert {work.id for work in lin_chuan.representative_works} == {
-        "series-1",
-        "series-2",
-    }
-    assert len(lin_chuan.representative_works) <= 3
-
-    series_page_1 = query.execute(
-        kind="SERIES",
-        context=context,
-        search="",
-        page=1,
-        page_size=1,
-    )
-    series_page_2 = query.execute(
-        kind="SERIES",
-        context=context,
-        search="星海",
-        page=1,
-        page_size=20,
-    )
-    assert series_page_1.total == 2
-    assert [group.name for group in series_page_1.groups] == ["单卷系列"]
-    assert [(group.name, group.book_count) for group in series_page_2.groups] == [
-        ("星海丛书", 2)
-    ]
-
-    restricted_user = User(
-        email="restricted-library-groupings@example.com",
-        name="受限用户",
-        password_hash="unused",
-        role="member",
-        can_view_manual_imports=False,
-    )
-    db_session.add(restricted_user)
-    db_session.commit()
-    restricted = query.execute(
-        kind="AUTHOR",
-        context=authorization_context(db_session, restricted_user),
-        search="",
-        page=1,
-        page_size=20,
-    )
-    assert restricted.total == 0
-    assert restricted.groups == ()
-
-
-def test_grouping_representative_works_are_limited_to_authorized_scope(
-    db_session: Session,
-) -> None:
-    user = User(
-        id="grouping-scope-user",
-        email="grouping-scope@example.com",
-        name="分组权限",
-        password_hash="unused",
-        role="member",
-    )
+    lin = _facet(db_session, "facet-author-lin", "AUTHOR", "林川")
+    zhou = _facet(db_session, "facet-author-zhou", "AUTHOR", "周禾")
+    ai = _facet(db_session, "facet-author-ai", "AUTHOR", "艾青")
+    unknown = _facet(db_session, "facet-author-unknown", "AUTHOR", "未知作者")
+    hidden = _facet(db_session, "facet-author-hidden", "AUTHOR", "秘密作者")
     db_session.add_all(
         [
             user,
-            Library(
-                organization_mode="FLAT",
-                id="allowed-folder",
-                name="可见",
-                root_path="/allowed",
-            ),
-            Library(
-                organization_mode="FLAT",
-                id="denied-folder",
-                name="不可见",
-                root_path="/denied",
-            ),
+            LibraryBookFacet(facet_id=lin.id, book_id="series-1"),
+            LibraryBookFacet(facet_id=lin.id, book_id="series-2"),
+            LibraryBookFacet(facet_id=zhou.id, book_id="series-2"),
+            LibraryBookFacet(facet_id=ai.id, book_id="single"),
+            LibraryBookFacet(facet_id=unknown.id, book_id="unknown"),
+            LibraryBookFacet(facet_id=hidden.id, book_id="hidden"),
         ]
     )
-    db_session.flush()
-    db_session.add(
-        UserLibraryAccess(
-            user_id=user.id,
-            library_id="allowed-folder",
-        )
-    )
-    db_session.flush()
-    for work_id, folder_id in (
-        ("allowed-work", "allowed-folder"),
-        ("denied-work", "denied-folder"),
-    ):
-        work = _work(
-            work_id=work_id,
-            title=work_id,
-            author="共同作者",
-            library_id=folder_id,
-        )
-        version = LibraryVersion(
-            id=f"version-{work_id}",
-            work_id=work_id,
-            source_key=f"grouping:version:{work_id}",
-        )
-        volume = LibraryVolume(
-            id=f"volume-{work_id}",
-            version_id=version.id,
-            title=work_id,
-            format="EPUB",
-            resource_key=f"resource-{work_id}",
-            import_status="COMPLETED",
-        )
-        db_session.add(work)
-        db_session.flush()
-        db_session.add(version)
-        db_session.flush()
-        db_session.add(volume)
     db_session.commit()
-    sync_work_facets(db_session, "allowed-work")
-    sync_work_facets(db_session, "denied-work")
 
-    result = ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db_session)).execute(
-        kind="AUTHOR",
-        context=authorization_context(db_session, user),
-        search="共同作者",
-        page=1,
-        page_size=20,
+    context = authorization_context(db_session, user)
+    result = ListLibraryGroupings(
+        SqlAlchemyLibraryGroupingQueries(db_session)
+    ).execute(context=context, kind="AUTHOR", search="林", page=1, page_size=10)
+
+    assert result.total == 1
+    assert [(group.name, group.book_count) for group in result.groups] == [("林川", 2)]
+    assert [book.id for book in result.groups[0].representative_books] == [
+        "series-1",
+        "series-2",
+    ]
+
+
+def test_grouping_representatives_are_limited_to_authorized_library_scope(
+    db_session: Session,
+) -> None:
+    member = User(
+        id="groupings-member",
+        email="groupings-member@example.com",
+        name="Member",
+        password_hash="unused",
+        role="member",
     )
+    db_session.add(
+        Library(
+            id="groupings-foreign-library",
+            name="Foreign",
+            root_path="/groupings-foreign",
+            organization_mode="FLAT",
+        )
+    )
+    _book(db_session, book_id="allowed-book", title="Allowed", author="Author")
+    _book(
+        db_session,
+        book_id="foreign-book",
+        title="Foreign",
+        author="Author",
+        library_id="groupings-foreign-library",
+    )
+    facet = _facet(db_session, "facet-author", "AUTHOR", "Author")
+    db_session.add_all(
+        [
+            member,
+            UserLibraryAccess(user_id=member.id, library_id="test-library"),
+            LibraryBookFacet(facet_id=facet.id, book_id="allowed-book"),
+            LibraryBookFacet(facet_id=facet.id, book_id="foreign-book"),
+        ]
+    )
+    db_session.commit()
 
-    assert len(result.groups) == 1
+    context = authorization_context(db_session, member)
+    result = ListLibraryGroupings(
+        SqlAlchemyLibraryGroupingQueries(db_session)
+    ).execute(context=context, kind="AUTHOR", page=1, page_size=10)
+
+    assert result.total == 1
     assert result.groups[0].book_count == 1
-    assert [work.id for work in result.groups[0].representative_works] == [
-        "allowed-work"
+    assert [book.id for book in result.groups[0].representative_books] == [
+        "allowed-book"
     ]

@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.library import LibraryWork
 
 
 def _login(client: TestClient, db: Session) -> User:
@@ -89,13 +90,13 @@ def test_collection_membership_is_many_to_many_and_exposed_in_views(
     )
     assert updated.status_code == 200
     assert updated.json()["data"]["shelf"]["collectionIds"] == [second_collection["id"]]
-    first_detail = client.get(f"/api/shelves/{first_collection['id']}").json()["data"][
-        "shelf"
-    ]
+    first_detail = client.get(f"/api/shelves/{first_collection['id']}").json()[
+        "data"
+    ]["shelf"]
     assert first_detail["memberShelfIds"] == [smart_shelf["id"]]
 
 
-def test_collection_rejects_books_nesting_and_nonempty_deletion(
+def test_collection_rejects_book_nesting_and_nonempty_deletion(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -107,17 +108,17 @@ def test_collection_rejects_books_nesting_and_nonempty_deletion(
         json={
             "name": "非法合集",
             "kind": "COLLECTION",
-            "bookIds": ["work-does-not-matter"],
+            "bookIds": ["book-does-not-matter"],
         },
     )
     assert with_books.status_code == 400
-    assert with_books.json()["error"]["code"] == "COLLECTION_CANNOT_CONTAIN_WORKS"
+    assert with_books.json()["error"]["code"] == "COLLECTION_CANNOT_CONTAIN_BOOKS"
 
     collection = _create_shelf(
         client,
         name="有效合集",
         kind="COLLECTION",
-        member_shelf_ids=[str(member["id"])],
+        member_shelf_ids=[member["id"]],
     )
     nested = client.post(
         "/api/shelves",
@@ -134,25 +135,18 @@ def test_collection_rejects_books_nesting_and_nonempty_deletion(
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "SHELF_COLLECTION_NOT_EMPTY"
 
-    db_session.add(
-        LibraryWork(
-            library_id="test-library", 
-            id="collection-guard-work",
-            title="不能加入合集",
-            normalized_title="不能加入合集",
-            tags="[]",
-        )
+    # The removed bulk-book bridge must not be reintroduced just to mutate a shelf.
+    assert (
+        client.post(
+            "/api/books/bulk",
+            json={
+                "ids": ["book-does-not-matter"],
+                "action": "add_to_shelf",
+                "shelfId": collection["id"],
+            },
+        ).status_code
+        == 404
     )
-    db_session.commit()
-    bulk_add = client.post(
-        "/api/works/bulk",
-        json={
-            "ids": ["collection-guard-work"],
-            "action": "add_to_shelf",
-            "shelfId": collection["id"],
-        },
-    )
-    assert bulk_add.status_code == 400
 
     member_deleted = client.delete(f"/api/shelves/{member['id']}")
     assert member_deleted.status_code == 200
