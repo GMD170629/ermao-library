@@ -121,10 +121,24 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         assert work_columns["libraryId"]["nullable"] is False
         assert version_columns["workId"]["nullable"] is False
         assert version_columns["sourceKey"]["nullable"] is False
+        assert "coverPath" in version_columns
+        assert version_columns["coverPath"]["nullable"] is True
+        assert version_columns["coverStatus"]["nullable"] is False
         assert volume_columns["versionId"]["nullable"] is False
         assert file_columns["volumeId"]["nullable"] is False
         assert "libraryId" not in volume_columns
         assert "monitorFolderId" not in volume_columns
+
+        source_node_checks = {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("LibrarySourceNode")
+        }
+        assert "LibrarySourceNode_pathKey_format_check" in source_node_checks
+        import_task_indexes = {
+            index["name"] for index in inspector.get_indexes("LibraryImportTask")
+        }
+        assert "LibraryImportTask_import_asset_key" in import_task_indexes
+        assert "LibraryImportTask_queued_createdAt_idx" in import_task_indexes
 
         volume_foreign_keys = {
             (
@@ -181,6 +195,47 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             str(ReaderBookPreference.__table__.c.schemaVersion.server_default.arg)
             == "3"
         )
+    finally:
+        engine.dispose()
+
+
+def test_alembic_script_directory_has_single_fresh_baseline_head() -> None:
+    from alembic.script import ScriptDirectory
+
+    from app.db.runner import alembic_config_for_engine, head_revision
+
+    config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
+    script = ScriptDirectory.from_config(config)
+    revisions = list(script.walk_revisions())
+    assert len(revisions) == 1
+    assert script.get_heads() == ["0001_library_topology_baseline"]
+    assert head_revision() == "0001_library_topology_baseline"
+    assert revisions[0].revision == "0001_library_topology_baseline"
+    assert revisions[0].down_revision is None
+
+
+def test_apply_schema_rejects_former_development_revisions(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        for retired in (
+            "0002_version_covers",
+            "0003_readable_resource_overlay_schema",
+        ):
+            with engine.begin() as connection:
+                connection.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+                connection.exec_driver_sql(
+                    "CREATE TABLE alembic_version ("
+                    "version_num VARCHAR(191) NOT NULL PRIMARY KEY)"
+                )
+                connection.exec_driver_sql(
+                    f"INSERT INTO alembic_version (version_num) VALUES ('{retired}')"
+                )
+            with pytest.raises(RuntimeError, match="fresh installation"):
+                runner_module.apply_schema(engine, settings)
+            assert _current_revision(engine) == retired
+            assert _application_tables(engine) == set()
     finally:
         engine.dispose()
 

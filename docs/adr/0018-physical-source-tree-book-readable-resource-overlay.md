@@ -434,8 +434,9 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 目标实现放在未激活的 target composition root 中。每个阶段从 fresh database 验收并保持
 全仓可构建、适用测试为绿色。
 
-开发期可使用临时增量 schema revision。全部目标模型和导入流程稳定、首次发布前压平为
-唯一 fresh baseline；baseline 发布后不可重写。
+Alembic 已压平为唯一 fresh-install baseline
+（`0001_library_topology_baseline`，含 version covers 与 ADR 0018 overlay 表）。
+不支持从已删除的开发期 revision（原 `0002` / `0003`）升级；baseline 发布后不可重写。
 
 ## 12. 验收矩阵
 
@@ -524,7 +525,6 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 
 ### 下一步
 
-- fresh baseline 压平 0001～0003；
 - 最终接线（是否激活 target composition root）；
 - 规模验收收尾。
 

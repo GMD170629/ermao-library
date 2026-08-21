@@ -394,14 +394,20 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
 
 
 def test_readable_resource_overlay_migration_is_immutable_and_self_contained() -> None:
-    path = (
-        APP_ROOT
-        / "db"
-        / "alembic"
-        / "versions"
-        / "0003_readable_resource_overlay_schema.py"
-    )
+    versions_dir = APP_ROOT / "db" / "alembic" / "versions"
+    revision_files = sorted(versions_dir.glob("*.py"))
+    assert [path.name for path in revision_files] == [
+        "0001_library_topology_baseline.py"
+    ]
+    path = revision_files[0]
     source = path.read_text(encoding="utf-8")
+    assert 'revision: str = "0001_library_topology_baseline"' in source
+    assert "down_revision: str | Sequence[str] | None = None" in source
+    assert "_build_overlay_metadata" in source
+    assert "LibrarySourceNode" in source
+    assert "LibraryImportTask" in source
+    assert "coverPath" in source
+    assert "coverStatus" in source
     forbidden = (
         "app.models",
         "app.db.base",
@@ -411,8 +417,21 @@ def test_readable_resource_overlay_migration_is_immutable_and_self_contained() -
         "from sqlalchemy import text",
         "importlib",
         "__import__",
+        "exec_driver_sql",
+        "import sqlite3",
+        "0002_version_covers",
+        "0003_readable_resource_overlay_schema",
     )
     for token in forbidden:
+        # Docstring may name retired revisions as unsupported; only ban imports/code paths.
+        if token in {
+            "0002_version_covers",
+            "0003_readable_resource_overlay_schema",
+        }:
+            # Allowed only in module docstring describing unsupported upgrades.
+            body = source.split('"""', 2)[-1]
+            assert token not in body, token
+            continue
         assert token not in source, token
 
 
@@ -471,6 +490,61 @@ def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None
     assert check_count == 16
 
 
+def test_readable_resource_baseline_overlay_check_constraints_use_typed_expressions() -> (
+    None
+):
+    import ast
+
+    path = (
+        APP_ROOT
+        / "db"
+        / "alembic"
+        / "versions"
+        / "0001_library_topology_baseline.py"
+    )
+    source = path.read_text(encoding="utf-8")
+    start = source.index("def _build_overlay_metadata()")
+    end = source.index("\ndef upgrade()")
+    tree = ast.parse(source[start:end], filename=str(path))
+
+    def _is_check_constraint_call(node: ast.Call) -> bool:
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == "CheckConstraint"
+        if isinstance(func, ast.Attribute):
+            return func.attr == "CheckConstraint"
+        return False
+
+    def _is_string_expression(node: ast.AST | None) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return _is_string_expression(node.left) or _is_string_expression(
+                node.right
+            )
+        return False
+
+    check_count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_check_constraint_call(node):
+            continue
+        check_count += 1
+        expression: ast.AST | None = node.args[0] if node.args else None
+        for keyword in node.keywords:
+            if keyword.arg == "sqltext":
+                expression = keyword.value
+        assert not _is_string_expression(expression), (
+            f"overlay CheckConstraint must use typed SQLAlchemy expressions "
+            f"(line {node.lineno})"
+        )
+    assert check_count >= 10
+    assert "sqlite_where" in source[start:end]
+
+
 def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
     """Target overlay must not reintroduce Run/candidate/lease/WorkItem bridge."""
 
@@ -514,7 +588,7 @@ def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
         / "db"
         / "alembic"
         / "versions"
-        / "0003_readable_resource_overlay_schema.py",
+        / "0001_library_topology_baseline.py",
     )
     files: list[Path] = []
     for root in roots:
@@ -527,6 +601,15 @@ def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
         if path.name == "__init__.py":
             continue
         source = path.read_text(encoding="utf-8")
+        if path.name == "0001_library_topology_baseline.py":
+            # Only the overlay builder is an ADR 0018 target; the rest of the
+            # baseline still contains unrelated legacy writeback lease columns.
+            start = source.index("def _build_overlay_metadata()")
+            end = source.index("\ndef upgrade()")
+            source = source[start:end]
+            assert "LibraryImportTask" in source
+            assert "leaseExpiresAt" not in source
+            assert "heartbeat" not in source
         for token in forbidden:
             assert token not in source, f"{path}: forbidden {token}"
         if path.name in {"work_queue.py", "worker.py", "ports.py"}:

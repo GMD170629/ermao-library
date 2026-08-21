@@ -28,7 +28,8 @@ See [Library Root Layout](library-root-layout.md).
 ## Fresh schema baseline
 
 Alembic has one current revision:
-`0001_library_topology_baseline`. Startup behavior is intentionally narrow:
+`0001_library_topology_baseline` (library topology, version covers, and ADR 0018
+readable-resource overlay tables). Startup behavior is intentionally narrow:
 
 - an empty database is created at the current head;
 - a database already stamped at the current head is accepted;

@@ -116,7 +116,10 @@ def test_alembic_metadata_has_no_diff_for_overlay(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     try:
         with engine.connect() as connection:
-            context = MigrationContext.configure(connection)
+            context = MigrationContext.configure(
+                connection,
+                opts={"compare_type": True, "compare_server_default": True},
+            )
             diff = compare_metadata(context, Base.metadata)
         overlay_diff = [
             item
