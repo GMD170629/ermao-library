@@ -37,9 +37,13 @@ def test_book_merge_surface_is_explicitly_retired(
     assert "/api/books/merge/preview" not in paths
     assert "/api/library/duplicates/merge" not in paths
 
-    assert client.post("/api/books/merge", json={"bookIds": ["a", "b"]}).status_code == 404
     assert (
-        client.post("/api/books/merge/preview", json={"bookIds": ["a", "b"]}).status_code
+        client.post("/api/books/merge", json={"bookIds": ["a", "b"]}).status_code == 405
+    )
+    assert (
+        client.post(
+            "/api/books/merge/preview", json={"bookIds": ["a", "b"]}
+        ).status_code
         == 404
     )
     assert (

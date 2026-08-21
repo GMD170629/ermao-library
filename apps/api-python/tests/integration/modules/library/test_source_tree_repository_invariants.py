@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -54,7 +54,7 @@ def _path_key(relative_path: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime(2024, 7, 1, tzinfo=timezone.utc)
+    return datetime(2024, 7, 1, tzinfo=UTC)
 
 
 def _bootstrap(tmp_path: Path):
@@ -136,9 +136,7 @@ def test_insert_rejects_missing_parent_and_rolls_back(tmp_path: Path) -> None:
                 nodes.insert_if_absent(
                     library_id="lib-1",
                     parent_id=None,
-                    entry=_entry(
-                        "Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE
-                    ),
+                    entry=_entry("Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE),
                 )
             assert caught.value.code is SourceNodeViolationCode.PARENT_PATH_MISMATCH
             db.rollback()
@@ -168,9 +166,7 @@ def test_insert_rejects_wrong_parent_path_and_non_directory(tmp_path: Path) -> N
                 nodes.insert_if_absent(
                     library_id="lib-1",
                     parent_id=other_dir.id,
-                    entry=_entry(
-                        "Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE
-                    ),
+                    entry=_entry("Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE),
                 )
             assert wrong.value.code is SourceNodeViolationCode.PARENT_PATH_MISMATCH
             with pytest.raises(SourceNodeTopologyError) as nondir:
@@ -204,9 +200,7 @@ def test_insert_rejects_cross_library_parent(tmp_path: Path) -> None:
                 nodes.insert_if_absent(
                     library_id="lib-1",
                     parent_id=parent.id,
-                    entry=_entry(
-                        "Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE
-                    ),
+                    entry=_entry("Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE),
                 )
             assert caught.value.code is SourceNodeViolationCode.CROSS_LIBRARY_PARENT
     finally:
@@ -274,9 +268,7 @@ def test_insert_missing_parent_id_raises_parent_not_found(tmp_path: Path) -> Non
                 nodes.insert_if_absent(
                     library_id="lib-1",
                     parent_id="missing-parent",
-                    entry=_entry(
-                        "Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE
-                    ),
+                    entry=_entry("Series/a.epub", SourceNodePhysicalKind.REGULAR_FILE),
                 )
             assert caught.value.code is SourceNodeViolationCode.PARENT_NOT_FOUND
     finally:
@@ -310,9 +302,7 @@ def test_book_and_resource_library_and_anchor_scope(tmp_path: Path) -> None:
             sibling, _ = nodes.insert_if_absent(
                 library_id="lib-1",
                 parent_id=sibling_dir.id,
-                entry=_entry(
-                    "book-other/a.epub", SourceNodePhysicalKind.REGULAR_FILE
-                ),
+                entry=_entry("book-other/a.epub", SourceNodePhysicalKind.REGULAR_FILE),
             )
             foreign, _ = nodes.insert_if_absent(
                 library_id="lib-2",
@@ -331,9 +321,7 @@ def test_book_and_resource_library_and_anchor_scope(tmp_path: Path) -> None:
                     source_node_id=foreign.id,
                     title="X",
                 )
-            assert (
-                cross.value.code is ReadableResourceAnchorViolationCode.CROSS_LIBRARY
-            )
+            assert cross.value.code is ReadableResourceAnchorViolationCode.CROSS_LIBRARY
 
             book_id = books.ensure_book(
                 library_id="lib-1", source_node_id=directory.id, title="Book"
@@ -378,7 +366,7 @@ def test_book_and_resource_library_and_anchor_scope(tmp_path: Path) -> None:
                 books.create_pending_resource(
                     library_id="lib-1",
                     book_id=file_book,
-                    source_node_id=child.id,
+                    source_node_id=sibling.id,
                     adapter=_adapter(),
                 )
             assert (
@@ -603,15 +591,13 @@ def test_schema_uniques_and_metadata_cascade(tmp_path: Path) -> None:
                 observed_at=_now(),
             )
             db.add(node)
+            db.flush()
             db.add(LibrarySourceNodeMetadata(source_node_id="n1", title="A"))
-            db.add(
-                LibraryBook(id="b1", library_id="lib-1", source_node_id="n1")
-            )
-            db.add(
-                LibraryBookMetadata(
-                    book_id="b1", title="A", normalized_title="a"
-                )
-            )
+            db.flush()
+            db.add(LibraryBook(id="b1", library_id="lib-1", source_node_id="n1"))
+            db.flush()
+            db.add(LibraryBookMetadata(book_id="b1", title="A", normalized_title="a"))
+            db.flush()
             db.add(
                 LibraryReadableResource(
                     id="r1",
@@ -626,9 +612,9 @@ def test_schema_uniques_and_metadata_cascade(tmp_path: Path) -> None:
                     import_state="READY",
                 )
             )
-            db.add(
-                LibraryReadableResourceMetadata(resource_id="r1", title="A")
-            )
+            db.flush()
+            db.add(LibraryReadableResourceMetadata(resource_id="r1", title="A"))
+            db.flush()
             db.add(
                 LibraryResourceAsset(
                     id="a1",
@@ -640,13 +626,12 @@ def test_schema_uniques_and_metadata_cascade(tmp_path: Path) -> None:
                     import_state="READY",
                 )
             )
+            db.flush()
             db.add(LibraryResourceAssetMetadata(asset_id="a1"))
             db.commit()
 
             with pytest.raises(IntegrityError):
-                db.add(
-                    LibraryBook(id="b2", library_id="lib-1", source_node_id="n1")
-                )
+                db.add(LibraryBook(id="b2", library_id="lib-1", source_node_id="n1"))
                 db.flush()
             db.rollback()
 

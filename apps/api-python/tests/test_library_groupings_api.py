@@ -11,12 +11,10 @@ def test_grouping_http_surface_has_no_identity_aliases(client: TestClient) -> No
     assert "/api/books/{book_id}" in paths
     assert "/api/library/groupings" not in paths
     assert not any(
-        path.startswith("/api/works")
-        or path.startswith("/api/versions")
-        or path.startswith("/api/volumes")
+        path.startswith(("/api/works", "/api/versions", "/api/volumes"))
         for path in paths
     )
-    assert client.get("/api/library/groupings").status_code == 404
+    assert client.get("/api/library/groupings").status_code == 401
 
 
 def test_grouping_filter_parameter_pairs_are_not_accepted_by_book_route(

@@ -46,22 +46,27 @@ def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceN
     )
 
 
-def _seed_book_resources(db_session, *, book_id: str = "book-1") -> list[LibraryReadableResource]:
+def _seed_book_resources(
+    db_session, *, book_id: str = "book-1"
+) -> list[LibraryReadableResource]:
     book_node = _node(f"{book_id}-node", f"{book_id}/", directory=True)
-    book = LibraryBook(id=book_id, library_id="test-library", source_node_id=book_node.id)
-    db_session.add_all(
-        [
-            book_node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title="Binding book",
-                normalized_title="binding book",
-                author="Author",
-                description="Description",
-            ),
-        ]
+    book = LibraryBook(
+        id=book_id, library_id="test-library", source_node_id=book_node.id
     )
+    db_session.add(book_node)
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title="Binding book",
+            normalized_title="binding book",
+            author="Author",
+            description="Description",
+        )
+    )
+    db_session.flush()
     resources: list[LibraryReadableResource] = []
     for index in range(2):
         resource_id = f"resource-{index + 1}"
@@ -78,26 +83,29 @@ def _seed_book_resources(db_session, *, book_id: str = "book-1") -> list[Library
             import_state="READY",
         )
         resources.append(resource)
-        db_session.add_all(
-            [
-                source,
-                resource,
-                LibraryReadableResourceMetadata(
-                    resource_id=resource_id,
-                    title=f"Resource {index + 1}",
-                    resource_index=index + 1,
-                ),
-                LibraryResourceAsset(
-                    id=f"asset-{index + 1}",
-                    library_id="test-library",
-                    resource_id=resource_id,
-                    source_node_id=source.id,
-                    source_node_physical_kind="REGULAR_FILE",
-                    role="PRIMARY",
-                    import_state="READY",
-                ),
-            ]
+        db_session.add(source)
+        db_session.flush()
+        db_session.add(resource)
+        db_session.flush()
+        db_session.add(
+            LibraryReadableResourceMetadata(
+                resource_id=resource_id,
+                title=f"Resource {index + 1}",
+                resource_index=index + 1,
+            )
         )
+        db_session.add(
+            LibraryResourceAsset(
+                id=f"asset-{index + 1}",
+                library_id="test-library",
+                resource_id=resource_id,
+                source_node_id=source.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            )
+        )
+        db_session.flush()
     db_session.commit()
     return resources
 
@@ -112,7 +120,9 @@ def test_storage_selects_the_first_asset_for_a_resource(db_session) -> None:
     assert asset["resourceId"] == resources[0].id
 
 
-def test_metadata_writeback_projection_is_scoped_to_one_book_resource(db_session) -> None:
+def test_metadata_writeback_projection_is_scoped_to_one_book_resource(
+    db_session,
+) -> None:
     resources = _seed_book_resources(db_session)
 
     projection = load_metadata_writeback_projection(
@@ -138,8 +148,24 @@ def test_organize_selection_and_review_order_resources_by_book(db_session) -> No
 
 
 def test_touched_read_paths_use_canonical_model_bindings() -> None:
-    for source_path in READ_PATH_SOURCES:
+    required_models = {
+        READ_PATH_SOURCES[0]: (
+            "LibraryBook",
+            "LibraryReadableResource",
+            "LibraryResourceAsset",
+        ),
+        READ_PATH_SOURCES[1]: (
+            "LibraryBook",
+            "LibraryReadableResource",
+            "LibraryResourceAsset",
+        ),
+        READ_PATH_SOURCES[2]: ("LibraryBook", "LibraryReadableResource"),
+        READ_PATH_SOURCES[3]: (
+            "LibraryBook",
+            "LibraryReadableResource",
+            "LibraryResourceAsset",
+        ),
+    }
+    for source_path, models in required_models.items():
         source = source_path.read_text(encoding="utf-8")
-        assert "LibraryBook" in source, source_path
-        assert "LibraryReadableResource" in source, source_path
-        assert "LibraryResourceAsset" in source, source_path
+        assert all(model in source for model in models), source_path

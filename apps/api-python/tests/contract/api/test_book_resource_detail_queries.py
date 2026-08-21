@@ -60,17 +60,17 @@ def _add_book(
         library_id="test-library",
         source_node_id=book_node.id,
     )
-    db_session.add_all(
-        [
-            book_node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title="Detail book",
-                normalized_title="detail book",
-                author="Author",
-            ),
-        ]
+    db_session.add(book_node)
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title="Detail book",
+            normalized_title="detail book",
+            author="Author",
+        )
     )
     db_session.flush()
 
@@ -93,33 +93,39 @@ def _add_book(
             import_state="READY",
         )
         resources.append(resource)
-        db_session.add_all(
-            [
-                source_node,
-                resource,
-                LibraryReadableResourceMetadata(
-                    resource_id=resource_id,
-                    title=f"Resource {index + 1}",
-                    resource_index=index + 1,
-                    chapter_count=index + 2,
-                ),
-                LibraryResourceAsset(
-                    id=f"{resource_id}-asset",
-                    library_id="test-library",
-                    resource_id=resource_id,
-                    source_node_id=source_node.id,
-                    source_node_physical_kind="REGULAR_FILE",
-                    role="PRIMARY",
-                    import_state="READY",
-                    sequence_index=0,
-                ),
-                LibraryResourceAssetMetadata(
-                    asset_id=f"{resource_id}-asset",
-                    mime_type="application/epub+zip",
-                ),
-            ]
+        db_session.add(source_node)
+        db_session.flush()
+        db_session.add(resource)
+        db_session.flush()
+        db_session.add(
+            LibraryReadableResourceMetadata(
+                resource_id=resource_id,
+                title=f"Resource {index + 1}",
+                resource_index=index + 1,
+                chapter_count=index + 2,
+            )
         )
-    db_session.flush()
+        db_session.flush()
+        db_session.add(
+            LibraryResourceAsset(
+                id=f"{resource_id}-asset",
+                library_id="test-library",
+                resource_id=resource_id,
+                source_node_id=source_node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+                sequence_index=0,
+            )
+        )
+        db_session.flush()
+        db_session.add(
+            LibraryResourceAssetMetadata(
+                asset_id=f"{resource_id}-asset",
+                mime_type="application/epub+zip",
+            )
+        )
+        db_session.flush()
     return book, resources
 
 
@@ -141,7 +147,9 @@ def _login(client, db_session, *, email: str = "detail@example.com") -> User:
     return user
 
 
-def test_book_detail_is_bounded_and_projects_resource_assets(client, db_session) -> None:
+def test_book_detail_is_bounded_and_projects_resource_assets(
+    client, db_session
+) -> None:
     user = _login(client, db_session)
     _book, resources = _add_book(db_session, resource_count=12)
     db_session.add(
@@ -178,7 +186,9 @@ def test_book_detail_is_bounded_and_projects_resource_assets(client, db_session)
         "detail-resource-11",
         "detail-resource-12",
     ]
-    selected = next(item for item in payload["resources"] if item["id"] == "detail-resource-02")
+    selected = next(
+        item for item in payload["resources"] if item["id"] == "detail-resource-02"
+    )
     assert selected["resourceCompleted"] is False
     assert selected["progress"] == 42.5
     assert selected["assets"][0]["resourceId"] == selected["id"]
@@ -256,7 +266,11 @@ def test_book_resource_contract_preserves_auth_and_retires_old_routes(
     assert client.get("/api/books/missing-book").status_code == 401
     assert client.get("/api/works/detail-book").status_code == 404
     assert client.get("/api/books/detail-book/versions").status_code == 404
-    assert client.get("/api/books/detail-book/resources/missing-resource").status_code == 401
+    assert client.get("/api/resources/missing-resource").status_code == 401
+    assert (
+        client.get("/api/books/detail-book/resources/missing-resource").status_code
+        == 405
+    )
 
 
 def test_openapi_exposes_only_canonical_book_resource_reader_paths() -> None:
@@ -266,8 +280,6 @@ def test_openapi_exposes_only_canonical_book_resource_reader_paths() -> None:
     assert "/api/resources/{resource_id}" in paths
     assert "/api/reader/v4/resources/{resource_id}/bootstrap" in paths
     assert not any(
-        path.startswith("/api/works")
-        or "/versions" in path
-        or "/volumes" in path
+        path.startswith("/api/works") or "/versions" in path or "/volumes" in path
         for path in paths
     )

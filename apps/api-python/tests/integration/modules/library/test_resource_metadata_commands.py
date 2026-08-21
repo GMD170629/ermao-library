@@ -40,16 +40,19 @@ def _resource_graph(db: Session) -> tuple[LibraryBook, list[LibraryReadableResou
         source_node_id=book_node.id,
     )
     resources: list[LibraryReadableResource] = []
-    rows: list[object] = [
-        book_node,
-        book,
+    db.add(book_node)
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(
         LibraryBookMetadata(
             book_id=book.id,
             title="Resource command book",
             normalized_title="resource command book",
             author="Author",
-        ),
-    ]
+        )
+    )
+    db.flush()
     for index in range(2):
         resource_id = f"resource-command-{index + 1}"
         source_node = _node(
@@ -67,28 +70,29 @@ def _resource_graph(db: Session) -> tuple[LibraryBook, list[LibraryReadableResou
             import_state="READY",
         )
         resources.append(resource)
-        rows.extend(
-            [
-                source_node,
-                resource,
-                LibraryReadableResourceMetadata(
-                    resource_id=resource.id,
-                    title=f"Resource {index + 1}",
-                    resource_index=index + 1,
-                ),
-                LibraryResourceAsset(
-                    id=f"{resource.id}-asset",
-                    library_id="test-library",
-                    resource_id=resource.id,
-                    source_node_id=source_node.id,
-                    source_node_physical_kind="REGULAR_FILE",
-                    role="PRIMARY",
-                    import_state="READY",
-                ),
-            ]
+        db.add(source_node)
+        db.flush()
+        db.add(resource)
+        db.flush()
+        db.add(
+            LibraryReadableResourceMetadata(
+                resource_id=resource.id,
+                title=f"Resource {index + 1}",
+                resource_index=index + 1,
+            )
         )
-    db.add_all(rows)
-    db.flush()
+        db.add(
+            LibraryResourceAsset(
+                id=f"{resource.id}-asset",
+                library_id="test-library",
+                resource_id=resource.id,
+                source_node_id=source_node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            )
+        )
+        db.flush()
     return book, resources
 
 
@@ -110,7 +114,9 @@ def _login_admin(client, db: Session) -> None:
     assert response.status_code == 200, response.text
 
 
-def test_resource_metadata_update_preserves_identity_owned_fields(client, db_session: Session) -> None:
+def test_resource_metadata_update_preserves_identity_owned_fields(
+    client, db_session: Session
+) -> None:
     _login_admin(client, db_session)
     book, resources = _resource_graph(db_session)
     db_session.commit()
@@ -135,7 +141,11 @@ def test_batch_resource_classification_preserves_book_resource_topology(
 ) -> None:
     _login_admin(client, db_session)
     book, resources = _resource_graph(db_session)
-    before = db_session.scalar(select(LibraryReadableResource.id).where(LibraryReadableResource.book_id == book.id))
+    before = db_session.scalar(
+        select(LibraryReadableResource.id).where(
+            LibraryReadableResource.book_id == book.id
+        )
+    )
     assert before is not None
     db_session.commit()
 
@@ -154,7 +164,8 @@ def test_batch_resource_classification_preserves_book_resource_topology(
     assert len(payload["operationIds"]) == 2
     db_session.expire_all()
     assert [
-        db_session.get(LibraryReadableResource, item.id).media_kind for item in resources
+        db_session.get(LibraryReadableResource, item.id).media_kind
+        for item in resources
     ] == ["COMIC", "COMIC"]
     assert all(
         db_session.get(LibraryReadableResource, item.id).book_id == book.id
@@ -162,14 +173,20 @@ def test_batch_resource_classification_preserves_book_resource_topology(
     )
 
 
-def test_batch_structural_action_is_rejected_by_resource_contract(client, db_session: Session) -> None:
+def test_batch_structural_action_is_rejected_by_resource_contract(
+    client, db_session: Session
+) -> None:
     _login_admin(client, db_session)
     book, resources = _resource_graph(db_session)
     db_session.commit()
 
     response = client.post(
         f"/api/books/{book.id}/resources/batch",
-        json={"action": "DELETE", "resourceIds": [resources[0].id], "targetMediaKind": "EBOOK"},
+        json={
+            "action": "DELETE",
+            "resourceIds": [resources[0].id],
+            "targetMediaKind": "EBOOK",
+        },
     )
 
     assert response.status_code == 422

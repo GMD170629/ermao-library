@@ -11,25 +11,26 @@ from sqlalchemy.sql.base import Executable
 
 from app.core.authorization import resource_visibility_predicate
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models.common import cuid
 from app.models import (
-    ReaderResourceProgress,
+    LibraryBookMetadata,
     LibraryReadableResource,
-    LibraryBook,
+    LibraryReadableResourceMetadata,
+    ReaderResourceProgress,
 )
+from app.models.common import cuid
 from app.models.organize import OrganizeJob
 from app.modules.library.application.request_mutations import (
+    BookRecordMutation,
+    BulkBookMutation,
     BulkReadingStatusMutation,
     BulkShelfMembershipMutation,
-    BulkBookMutation,
     CoverMutation,
     CoverPublicationFailure,
     DetailPreferenceMutation,
     MetadataApplyMutation,
     MetadataApplyResult,
-    BookRecordMutation,
 )
-from app.modules.library.infrastructure import projections, storage, books
+from app.modules.library.infrastructure import books, projections, storage
 from app.modules.library.infrastructure.facet_sync import (
     PreparedBookFacetWrite,
     execute_book_facet_write,
@@ -112,15 +113,19 @@ class SqlAlchemyLibraryRequestMutations:
                 LibraryReadableResource.format,
                 LibraryReadableResource.book_id,
             )
-            .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
+            .join(
+                LibraryReadableResourceMetadata,
+                LibraryReadableResourceMetadata.resource_id
+                == LibraryReadableResource.id,
+            )
             .where(
                 LibraryReadableResource.book_id.in_(command.book_ids),
-                LibraryReadableResource.hidden.is_(False),
+                LibraryReadableResource.enablement_state == "ENABLED",
                 resource_visibility_predicate(command.context),
             )
             .order_by(
                 LibraryReadableResource.book_id.asc(),
-                LibraryReadableResource.sort_order.asc(),
+                LibraryReadableResourceMetadata.resource_index.asc().nulls_last(),
                 LibraryReadableResource.id.asc(),
             )
         ).all()
@@ -255,11 +260,11 @@ class SqlAlchemyLibraryRequestMutations:
         command: CoverPublicationFailure,
     ) -> bool:
         result = self._db.execute(
-            update(LibraryBook)
+            update(LibraryBookMetadata)
             .where(
-                LibraryBook.id == command.book_id,
-                LibraryBook.cover_path == command.expected_cover_path,
-                LibraryBook.updated_at == command.expected_updated_at,
+                LibraryBookMetadata.book_id == command.book_id,
+                LibraryBookMetadata.cover_path == command.expected_cover_path,
+                LibraryBookMetadata.updated_at == command.expected_updated_at,
             )
             .values(
                 cover_path=command.fallback_cover_path,

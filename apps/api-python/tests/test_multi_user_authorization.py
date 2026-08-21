@@ -61,18 +61,19 @@ def _add_book_graph(
         library_id=library_id,
         source_node_id=book_node.id,
     )
-    db_session.add_all(
-        [
-            book_node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title=book_id,
-                normalized_title=book_id,
-                author="Author",
-            ),
-        ]
+    db_session.add(book_node)
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title=book_id,
+            normalized_title=book_id,
+            author="Author",
+        )
     )
+    db_session.flush()
     if not with_resource:
         return book, None, None
 
@@ -97,18 +98,22 @@ def _add_book_graph(
         role="PRIMARY",
         import_state="READY",
     )
-    db_session.add_all(
-        [
-            resource_node,
-            resource,
-            LibraryReadableResourceMetadata(resource_id=resource.id, title=book_id),
-            asset,
-        ]
+    db_session.add(resource_node)
+    db_session.flush()
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add(
+        LibraryReadableResourceMetadata(resource_id=resource.id, title=book_id)
     )
+    db_session.flush()
+    db_session.add(asset)
+    db_session.flush()
     return book, resource, asset
 
 
-def _seed_scoped_graph(db_session) -> tuple[User, User, LibraryReadableResource, LibraryResourceAsset]:
+def _seed_scoped_graph(
+    db_session,
+) -> tuple[User, User, LibraryReadableResource, LibraryResourceAsset]:
     folder_a = Library(
         id="folder-a",
         name="A Library",
@@ -135,17 +140,18 @@ def _seed_scoped_graph(db_session) -> tuple[User, User, LibraryReadableResource,
         password_hash=hash_password(PASSWORD),
         role="admin",
     )
+    db_session.add_all([folder_a, folder_b])
+    db_session.flush()
     _add_book_graph(db_session, book_id="book-a", library_id=folder_a.id)
     _add_book_graph(db_session, book_id="book-b", library_id=folder_b.id)
     db_session.add_all(
         [
-            folder_a,
-            folder_b,
             member,
             admin,
-            UserLibraryAccess(user_id=member.id, library_id=folder_a.id),
         ]
     )
+    db_session.flush()
+    db_session.add(UserLibraryAccess(user_id=member.id, library_id=folder_a.id))
     db_session.flush()
     resource = db_session.get(LibraryReadableResource, "book-a-resource")
     asset = db_session.get(LibraryResourceAsset, "book-a-asset")
@@ -183,12 +189,14 @@ def test_member_can_access_empty_book_without_readable_resources(db_session) -> 
         password_hash=hash_password(PASSWORD),
         role="member",
     )
+    db_session.add(library)
+    db_session.flush()
     book, _, _ = _add_book_graph(
         db_session, book_id="empty-book", library_id=library.id, with_resource=False
     )
-    db_session.add_all(
-        [library, member, UserLibraryAccess(user_id=member.id, library_id=library.id)]
-    )
+    db_session.add(member)
+    db_session.flush()
+    db_session.add(UserLibraryAccess(user_id=member.id, library_id=library.id))
     db_session.commit()
 
     assert can_access_book(db_session, member, book.id)
@@ -200,14 +208,18 @@ def test_deleting_a_book_cascades_its_resource_and_asset_graph(db_session) -> No
         db_session, book_id="cascade-book", library_id="test-library"
     )
     assert resource is not None and asset is not None
+    book_id = book.id
+    resource_id = resource.id
+    asset_id = asset.id
     db_session.commit()
 
     db_session.delete(book)
     db_session.commit()
+    db_session.expire_all()
 
-    assert db_session.get(LibraryBook, book.id) is None
-    assert db_session.get(LibraryReadableResource, resource.id) is None
-    assert db_session.get(LibraryResourceAsset, asset.id) is None
+    assert db_session.get(LibraryBook, book_id) is None
+    assert db_session.get(LibraryReadableResource, resource_id) is None
+    assert db_session.get(LibraryResourceAsset, asset_id) is None
 
 
 def test_preferences_progress_bookmarks_and_shelves_are_user_isolated(
@@ -232,27 +244,31 @@ def test_preferences_progress_bookmarks_and_shelves_are_user_isolated(
     )
     assert resource is not None
     shelf = Shelf(id="first-shelf", owner_user_id=first.id, name="First", kind="STATIC")
+    db_session.add_all([first, second])
+    db_session.flush()
     db_session.add_all(
         [
-            first,
-            second,
             UserLibraryAccess(user_id=first.id, library_id="test-library"),
             UserLibraryAccess(user_id=second.id, library_id="test-library"),
             UserPreference(user_id=first.id, key="locale", value='"en-US"'),
             UserPreference(user_id=second.id, key="locale", value='"zh-CN"'),
-            shelf,
-            ShelfBook(shelf_id=shelf.id, book_id=book.id),
-            ReaderResourceProgress(
-                id="first-progress",
-                user_id=first.id,
-                resource_id=resource.id,
-                reader_type="reflowable",
-                position="chapter-1",
-                percent=50,
-                extra="{}",
-                progressed_at=datetime.now(UTC),
-            ),
         ]
+    )
+    db_session.flush()
+    db_session.add(shelf)
+    db_session.flush()
+    db_session.add(ShelfBook(shelf_id=shelf.id, book_id=book.id))
+    db_session.add(
+        ReaderResourceProgress(
+            id="first-progress",
+            user_id=first.id,
+            resource_id=resource.id,
+            reader_type="reflowable",
+            position="chapter-1",
+            percent=50,
+            extra="{}",
+            progressed_at=datetime.now(UTC),
+        )
     )
     db_session.commit()
 
@@ -262,27 +278,43 @@ def test_preferences_progress_bookmarks_and_shelves_are_user_isolated(
     second_preferences = db_session.scalars(
         select(UserPreference).where(UserPreference.user_id == second.id)
     ).all()
-    assert [(row.key, row.value) for row in first_preferences] == [("locale", '"en-US"')]
-    assert [(row.key, row.value) for row in second_preferences] == [("locale", '"zh-CN"')]
-    assert db_session.scalar(
-        select(ReaderResourceProgress.percent).where(
-            ReaderResourceProgress.user_id == first.id,
-            ReaderResourceProgress.resource_id == resource.id,
+    assert [(row.key, row.value) for row in first_preferences] == [
+        ("locale", '"en-US"')
+    ]
+    assert [(row.key, row.value) for row in second_preferences] == [
+        ("locale", '"zh-CN"')
+    ]
+    assert (
+        db_session.scalar(
+            select(ReaderResourceProgress.percent).where(
+                ReaderResourceProgress.user_id == first.id,
+                ReaderResourceProgress.resource_id == resource.id,
+            )
         )
-    ) == 50
-    assert db_session.scalar(
-        select(ReaderResourceProgress.percent).where(
-            ReaderResourceProgress.user_id == second.id,
-            ReaderResourceProgress.resource_id == resource.id,
+        == 50
+    )
+    assert (
+        db_session.scalar(
+            select(ReaderResourceProgress.percent).where(
+                ReaderResourceProgress.user_id == second.id,
+                ReaderResourceProgress.resource_id == resource.id,
+            )
         )
-    ) is None
-    assert db_session.scalar(
-        select(ShelfBook.book_id)
-        .join(Shelf, Shelf.id == ShelfBook.shelf_id)
-        .where(Shelf.owner_user_id == first.id)
-    ) == book.id
-    assert db_session.scalar(
-        select(ShelfBook.book_id)
-        .join(Shelf, Shelf.id == ShelfBook.shelf_id)
-        .where(Shelf.owner_user_id == second.id)
-    ) is None
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(ShelfBook.book_id)
+            .join(Shelf, Shelf.id == ShelfBook.shelf_id)
+            .where(Shelf.owner_user_id == first.id)
+        )
+        == book.id
+    )
+    assert (
+        db_session.scalar(
+            select(ShelfBook.book_id)
+            .join(Shelf, Shelf.id == ShelfBook.shelf_id)
+            .where(Shelf.owner_user_id == second.id)
+        )
+        is None
+    )

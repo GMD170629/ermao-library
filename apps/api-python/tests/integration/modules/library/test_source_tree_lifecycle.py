@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -50,7 +50,7 @@ def _path_key(relative_path: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime(2024, 6, 1, tzinfo=timezone.utc)
+    return datetime(2024, 6, 1, tzinfo=UTC)
 
 
 def _bootstrap(tmp_path: Path):
@@ -162,6 +162,7 @@ def _seed_full_target_topology(db: Session, root: Path) -> dict[str, str]:
         physical_kind="REGULAR_FILE",
     )
     db.add_all([album, track, outer, shared])
+    db.flush()
     db.add_all(
         [
             LibrarySourceNodeMetadata(source_node_id="node-album", title="Album"),
@@ -194,6 +195,7 @@ def _seed_full_target_topology(db: Session, root: Path) -> dict[str, str]:
             ),
         ]
     )
+    db.flush()
     db.add_all(
         [
             LibraryBookMetadata(
@@ -208,6 +210,7 @@ def _seed_full_target_topology(db: Session, root: Path) -> dict[str, str]:
             ),
         ]
     )
+    db.flush()
     db.add_all(
         [
             LibraryReadableResource(
@@ -278,6 +281,7 @@ def _seed_full_target_topology(db: Session, root: Path) -> dict[str, str]:
             ),
         ]
     )
+    db.flush()
     db.add(LibraryResourceAssetMetadata(asset_id="asset-track"))
     db.add_all(
         [
@@ -355,14 +359,10 @@ def test_organization_mode_switch_clears_target_topology_and_queues_fresh_scan(
                 db.scalar(select(func.count()).select_from(LibraryResourceAsset)) == 0
             )
             assert (
-                db.scalar(
-                    select(func.count()).select_from(LibrarySourceNodeMetadata)
-                )
+                db.scalar(select(func.count()).select_from(LibrarySourceNodeMetadata))
                 == 0
             )
-            assert (
-                db.scalar(select(func.count()).select_from(LibraryBookMetadata)) == 0
-            )
+            assert db.scalar(select(func.count()).select_from(LibraryBookMetadata)) == 0
             tasks = db.scalars(select(LibraryImportTask)).all()
             assert len(tasks) == 1
             task = tasks[0]
@@ -375,9 +375,7 @@ def test_organization_mode_switch_clears_target_topology_and_queues_fresh_scan(
             assert task.id != "task-scan"
 
             # Second switch must still leave exactly one fresh SCAN_LIBRARY.
-            result2 = pipeline.change_library_organization_mode.execute(
-                "lib-1", "FLAT"
-            )
+            result2 = pipeline.change_library_organization_mode.execute("lib-1", "FLAT")
             assert result2.ok is True
             db.commit()
             tasks2 = db.scalars(select(LibraryImportTask)).all()
@@ -455,9 +453,7 @@ def test_delete_subtree_cleans_cross_resource_assets_and_keeps_ready_survivor(
                 physical_kind="REGULAR_FILE",
             )
             db.add_all([album, track, shared, outer])
-            db.add(
-                LibrarySourceNodeMetadata(source_node_id="node-track", title="T")
-            )
+            db.add(LibrarySourceNodeMetadata(source_node_id="node-track", title="T"))
             db.add(
                 LibraryBook(
                     id="book-album", library_id="lib-1", source_node_id="node-album"
@@ -783,7 +779,9 @@ def test_relocate_library_root_preserves_source_tree_identity(tmp_path: Path) ->
                 row.id: (row.kind, row.state, row.source_node_id, row.resource_id)
                 for row in db.scalars(select(LibraryImportTask)).all()
             } == before_tasks
-            assert {row.id for row in db.scalars(select(LibraryBook)).all()} == before_books
+            assert {
+                row.id for row in db.scalars(select(LibraryBook)).all()
+            } == before_books
             assert {
                 row.id for row in db.scalars(select(LibraryReadableResource)).all()
             } == before_resources

@@ -13,8 +13,8 @@ from app.models import LibraryBook
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.shelf.application.catalog import (
     CatalogShelf,
-    CatalogShelfPage,
     CatalogShelfBookPage,
+    CatalogShelfPage,
 )
 
 
@@ -117,7 +117,7 @@ class SqlAlchemyCatalogShelfQueries:
             )
         book_filters = (
             ShelfBook.shelf_id == shelf.id,
-            LibraryBook.hidden.is_(False),
+            LibraryBook.visibility_state == "VISIBLE",
             book_visibility_predicate(context),
         )
         total = int(

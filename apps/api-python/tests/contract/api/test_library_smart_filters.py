@@ -48,20 +48,21 @@ def _book(
         source_node_id=node.id,
         visibility_state=visibility_state,
     )
-    db.add_all(
-        [
-            node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title=title,
-                normalized_title=title.casefold(),
-                author=author,
-                normalized_author=author.casefold() if author else None,
-                series_name="Series" if book_id != "empty" else None,
-            ),
-        ]
+    db.add(node)
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title=title,
+            normalized_title=title.casefold(),
+            author=author,
+            normalized_author=author.casefold() if author else None,
+            series_name="Series" if book_id != "empty" else None,
+        )
     )
+    db.flush()
     return book
 
 
@@ -102,7 +103,9 @@ def test_book_list_search_is_deterministic_and_keeps_empty_books(
     assert payload["books"][0]["completed"] is False
 
 
-def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(db_session: Session) -> None:
+def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(
+    db_session: Session,
+) -> None:
     user = User(
         id="smart-filter-user",
         email="smart-filter-user@example.com",
@@ -118,10 +121,10 @@ def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(db_session: S
         name="Fiction",
         normalized_name="fiction",
     )
+    db_session.add_all([user, facet])
+    db_session.flush()
     db_session.add_all(
         [
-            user,
-            facet,
             LibraryBookFacet(facet_id=facet.id, book_id="book-a"),
             LibraryBookFacet(facet_id=facet.id, book_id="book-b"),
         ]
@@ -140,7 +143,9 @@ def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(db_session: S
     assert [item.id for item in result.books] == ["book-a", "book-b"]
 
 
-def test_catalog_filter_contract_rejects_only_one_facet_dimension(db_session: Session) -> None:
+def test_catalog_filter_contract_rejects_only_one_facet_dimension(
+    db_session: Session,
+) -> None:
     user = User(
         id="smart-filter-validation-user",
         email="smart-filter-validation@example.com",

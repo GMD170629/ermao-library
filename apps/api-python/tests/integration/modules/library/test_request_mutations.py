@@ -11,6 +11,7 @@ from app.models import (
     LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
     LibrarySourceNode,
     ReaderResourceProgress,
 )
@@ -36,7 +37,7 @@ def _graph(db_session, book_id: str, resource_id: str, resource_format: str) -> 
         observed_at=datetime.now(UTC),
     )
     resource_node = LibrarySourceNode(
-        id=f"{resource_id}-node",
+        id=f"{resource_id}-resource-node",
         library_id="test-library",
         relative_path=resource_path,
         path_key="v1:" + hashlib.sha256(resource_path.encode()).hexdigest(),
@@ -46,30 +47,49 @@ def _graph(db_session, book_id: str, resource_id: str, resource_format: str) -> 
         observed_mtime_ns=0,
         observed_at=datetime.now(UTC),
     )
-    db_session.add_all(
-        [
-            book_node,
-            resource_node,
-            LibraryBook(id=book_id, library_id="test-library", source_node_id=book_node.id),
-            LibraryBookMetadata(
-                book_id=book_id,
-                title=book_id,
-                normalized_title=book_id,
-                author="Author",
-            ),
-            LibraryReadableResource(
-                id=resource_id,
-                library_id="test-library",
-                book_id=book_id,
-                source_node_id=resource_node.id,
-                adapter_id="audio-file" if resource_format == "AUDIO" else "epub-file",
-                adapter_version="1",
-                media_kind="AUDIOBOOK" if resource_format == "AUDIO" else "EBOOK",
-                format=resource_format,
-                import_state="READY",
-            ),
-            LibraryReadableResourceMetadata(resource_id=resource_id, title=resource_id),
-        ]
+    db_session.add_all([book_node, resource_node])
+    db_session.flush()
+    db_session.add(
+        LibraryBook(id=book_id, library_id="test-library", source_node_id=book_node.id)
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title=book_id,
+            normalized_title=book_id,
+            author="Author",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryReadableResource(
+            id=resource_id,
+            library_id="test-library",
+            book_id=book_id,
+            source_node_id=resource_node.id,
+            adapter_id="audio-file" if resource_format == "AUDIO" else "epub-file",
+            adapter_version="1",
+            media_kind="AUDIOBOOK" if resource_format == "AUDIO" else "EBOOK",
+            format=resource_format,
+            import_state="READY",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryReadableResourceMetadata(resource_id=resource_id, title=resource_id)
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryResourceAsset(
+            id=f"{resource_id}-asset",
+            library_id="test-library",
+            resource_id=resource_id,
+            source_node_id=resource_node.id,
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+        )
     )
     db_session.flush()
 

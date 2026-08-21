@@ -69,33 +69,40 @@ def _book_graph(db: Session, book_id: str, *, hidden: bool = False) -> LibraryBo
         format="EPUB",
         import_state="READY",
     )
-    db.add_all(
-        [
-            book_node,
-            resource_node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title=book_id.replace("-", " ").title(),
-                normalized_title=book_id,
-                author="Author",
-            ),
-            resource,
-            LibraryReadableResourceMetadata(
-                resource_id=resource.id,
-                title=resource.id,
-            ),
-            LibraryResourceAsset(
-                id=f"{book_id}-asset",
-                library_id="test-library",
-                resource_id=resource.id,
-                source_node_id=resource_node.id,
-                source_node_physical_kind="REGULAR_FILE",
-                role="PRIMARY",
-                import_state="READY",
-            ),
-        ]
+    db.add_all([book_node, resource_node])
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title=book_id.replace("-", " ").title(),
+            normalized_title=book_id,
+            author="Author",
+        )
     )
+    db.flush()
+    db.add(resource)
+    db.flush()
+    db.add(
+        LibraryReadableResourceMetadata(
+            resource_id=resource.id,
+            title=resource.id,
+        )
+    )
+    db.flush()
+    db.add(
+        LibraryResourceAsset(
+            id=f"{book_id}-asset",
+            library_id="test-library",
+            resource_id=resource.id,
+            source_node_id=resource_node.id,
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+        )
+    )
+    db.flush()
     return book
 
 
@@ -118,10 +125,16 @@ def test_catalog_shelves_are_owned_static_and_resource_graph_is_canonical(
     )
     _book_graph(db_session, "visible-book")
     _book_graph(db_session, "hidden-book", hidden=True)
-    owned = Shelf(id="owned-static", owner_user_id=owner.id, name="Owned", kind="STATIC")
+    owned = Shelf(
+        id="owned-static", owner_user_id=owner.id, name="Owned", kind="STATIC"
+    )
     smart = Shelf(id="owned-smart", owner_user_id=owner.id, name="Smart", kind="SMART")
-    foreign = Shelf(id="foreign-static", owner_user_id=other.id, name="Foreign", kind="STATIC")
-    db_session.add_all([owner, other, owned, smart, foreign])
+    foreign = Shelf(
+        id="foreign-static", owner_user_id=other.id, name="Foreign", kind="STATIC"
+    )
+    db_session.add_all([owner, other])
+    db_session.flush()
+    db_session.add_all([owned, smart, foreign])
     db_session.flush()
     db_session.add_all(
         [
@@ -137,9 +150,7 @@ def test_catalog_shelves_are_owned_static_and_resource_graph_is_canonical(
         smart_book_ids=lambda _rules, _user_id: ["visible-book"],
     )
     shelves = ListCatalogShelves(queries).execute(context=context)
-    books = ListCatalogShelfBookIds(queries).execute(
-        context=context, shelf_id=owned.id
-    )
+    books = ListCatalogShelfBookIds(queries).execute(context=context, shelf_id=owned.id)
 
     assert {shelf.id for shelf in shelves.shelves} == {owned.id, smart.id}
     assert books is not None
@@ -150,8 +161,6 @@ def test_catalog_shelves_are_owned_static_and_resource_graph_is_canonical(
     assert smart_books is not None
     assert smart_books.book_ids == ("visible-book",)
     assert (
-        ListCatalogShelfBookIds(queries).execute(
-            context=context, shelf_id=foreign.id
-        )
+        ListCatalogShelfBookIds(queries).execute(context=context, shelf_id=foreign.id)
         is None
     )

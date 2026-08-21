@@ -84,34 +84,41 @@ def _book_graph(
         format={"AUDIOBOOK": "AUDIO", "COMIC": "CBZ"}.get(media_kind, "EPUB"),
         import_state="READY",
     )
-    db.add_all(
-        [
-            book_node,
-            resource_node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title=title,
-                normalized_title=title.casefold(),
-                author=author,
-                normalized_author=author.casefold(),
-            ),
-            resource,
-            LibraryReadableResourceMetadata(resource_id=resource_id, title=title),
-            LibraryResourceAsset(
-                id=f"{resource_id}-asset",
-                library_id=library_id,
-                resource_id=resource_id,
-                source_node_id=resource_node.id,
-                source_node_physical_kind="REGULAR_FILE",
-                role="PRIMARY",
-                import_state="READY",
-            ),
-            LibraryResourceAssetMetadata(
-                asset_id=f"{resource_id}-asset",
-                mime_type="application/epub+zip",
-            ),
-        ]
+    db.add_all([book_node, resource_node])
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title=title,
+            normalized_title=title.casefold(),
+            author=author,
+            normalized_author=author.casefold(),
+        )
+    )
+    db.flush()
+    db.add(resource)
+    db.flush()
+    db.add(LibraryReadableResourceMetadata(resource_id=resource_id, title=title))
+    db.flush()
+    db.add(
+        LibraryResourceAsset(
+            id=f"{resource_id}-asset",
+            library_id=library_id,
+            resource_id=resource_id,
+            source_node_id=resource_node.id,
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+        )
+    )
+    db.flush()
+    db.add(
+        LibraryResourceAssetMetadata(
+            asset_id=f"{resource_id}-asset",
+            mime_type="application/epub+zip",
+        )
     )
     return book
 
@@ -134,10 +141,10 @@ def test_catalog_lists_authorized_books_resources_assets_and_facets(
         name="Catalog Author",
         normalized_name="catalog author",
     )
+    db_session.add_all([admin, facet])
+    db_session.flush()
     db_session.add_all(
         [
-            admin,
-            facet,
             LibraryBookFacet(facet_id=facet.id, book_id="ebook"),
             LibraryBookFacet(facet_id=facet.id, book_id="audio"),
         ]
@@ -179,10 +186,12 @@ def test_catalog_scope_is_applied_inside_book_queries(db_session: Session) -> No
         root_path="/other",
         organization_mode="FLAT",
     )
+    db_session.add(other_library)
+    db_session.flush()
     _book_graph(db_session, "member-book", "Member", library_id="test-library")
     _book_graph(db_session, "foreign-book", "Foreign", library_id="other-library")
     db_session.add_all(
-        [member, other_library, UserLibraryAccess(user_id=member.id, library_id="test-library")]
+        [member, UserLibraryAccess(user_id=member.id, library_id="test-library")]
     )
     db_session.commit()
 
@@ -191,12 +200,17 @@ def test_catalog_scope_is_applied_inside_book_queries(db_session: Session) -> No
         context=context, page=1, page_size=10
     )
     assert [book.id for book in result.books] == ["member-book"]
-    assert GetCatalogBook(SqlAlchemyCatalogQueries(db_session)).execute(
-        context=context, book_id="foreign-book"
-    ) is None
+    assert (
+        GetCatalogBook(SqlAlchemyCatalogQueries(db_session)).execute(
+            context=context, book_id="foreign-book"
+        )
+        is None
+    )
 
 
-def test_empty_book_id_filter_does_not_expand_to_every_book(db_session: Session) -> None:
+def test_empty_book_id_filter_does_not_expand_to_every_book(
+    db_session: Session,
+) -> None:
     admin = User(
         id="empty-filter-admin",
         email="empty-filter-admin@example.com",

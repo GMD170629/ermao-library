@@ -11,6 +11,7 @@ from app.models import (
     LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
     LibrarySourceNode,
     ReaderResourceProgress,
 )
@@ -87,22 +88,25 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
         created_at=now,
         updated_at=now,
     )
+    db_session.add_all([current_user, other_user])
+    db_session.flush()
+    db_session.add_all([book_node, first_node, second_node])
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(
+        LibraryBookMetadata(
+            book_id=book.id,
+            title="Bookshelf book",
+            normalized_title="bookshelf book",
+            author="Author",
+        )
+    )
+    db_session.flush()
+    db_session.add_all([first_resource, second_resource])
+    db_session.flush()
     db_session.add_all(
         [
-            current_user,
-            other_user,
-            book_node,
-            first_node,
-            second_node,
-            book,
-            LibraryBookMetadata(
-                book_id=book.id,
-                title="Bookshelf book",
-                normalized_title="bookshelf book",
-                author="Author",
-            ),
-            first_resource,
-            second_resource,
             LibraryReadableResourceMetadata(
                 resource_id=first_resource.id,
                 title="Resource one",
@@ -113,6 +117,34 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
                 title="Resource two",
                 resource_index=2,
             ),
+        ]
+    )
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryResourceAsset(
+                id="bookshelf-asset-1",
+                library_id="test-library",
+                resource_id=first_resource.id,
+                source_node_id=first_node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            ),
+            LibraryResourceAsset(
+                id="bookshelf-asset-2",
+                library_id="test-library",
+                resource_id=second_resource.id,
+                source_node_id=second_node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            ),
+        ]
+    )
+    db_session.flush()
+    db_session.add_all(
+        [
             ReaderResourceProgress(
                 id="bookshelf-progress-current-1",
                 user_id=current_user.id,
@@ -168,4 +200,4 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
     assert len(result) == 1
     assert result[0].id == book.id
     assert result[0].available_media_kinds == ("EBOOK",)
-    assert result[0].progress == 100
+    assert result[0].progress == 35.5

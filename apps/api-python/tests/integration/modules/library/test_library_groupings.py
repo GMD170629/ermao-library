@@ -21,7 +21,9 @@ from app.modules.library.infrastructure.groupings import (
 )
 
 
-def _node(node_id: str, path: str, library_id: str = "test-library") -> LibrarySourceNode:
+def _node(
+    node_id: str, path: str, library_id: str = "test-library"
+) -> LibrarySourceNode:
     return LibrarySourceNode(
         id=node_id,
         library_id=library_id,
@@ -51,19 +53,20 @@ def _book(
         source_node_id=node.id,
         visibility_state=visibility_state,
     )
-    db.add_all(
-        [
-            node,
-            book,
-            LibraryBookMetadata(
-                book_id=book_id,
-                title=title,
-                normalized_title=title.casefold(),
-                author=author,
-                normalized_author=author.casefold(),
-            ),
-        ]
+    db.add(node)
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(
+        LibraryBookMetadata(
+            book_id=book_id,
+            title=title,
+            normalized_title=title.casefold(),
+            author=author,
+            normalized_author=author.casefold(),
+        )
     )
+    db.flush()
     return book
 
 
@@ -75,10 +78,13 @@ def _facet(db: Session, facet_id: str, kind: str, name: str) -> LibraryFacet:
         normalized_name=name.casefold(),
     )
     db.add(facet)
+    db.flush()
     return facet
 
 
-def test_groupings_filter_visibility_search_and_stable_page(db_session: Session) -> None:
+def test_groupings_filter_visibility_search_and_stable_page(
+    db_session: Session,
+) -> None:
     user = User(
         id="library-groupings-user",
         email="library-groupings@example.com",
@@ -116,9 +122,9 @@ def test_groupings_filter_visibility_search_and_stable_page(db_session: Session)
     db_session.commit()
 
     context = authorization_context(db_session, user)
-    result = ListLibraryGroupings(
-        SqlAlchemyLibraryGroupingQueries(db_session)
-    ).execute(context=context, kind="AUTHOR", search="林", page=1, page_size=10)
+    result = ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db_session)).execute(
+        context=context, kind="AUTHOR", search="林", page=1, page_size=10
+    )
 
     assert result.total == 1
     assert [(group.name, group.book_count) for group in result.groups] == [("林川", 2)]
@@ -146,6 +152,7 @@ def test_grouping_representatives_are_limited_to_authorized_library_scope(
             organization_mode="FLAT",
         )
     )
+    db_session.flush()
     _book(db_session, book_id="allowed-book", title="Allowed", author="Author")
     _book(
         db_session,
@@ -166,9 +173,9 @@ def test_grouping_representatives_are_limited_to_authorized_library_scope(
     db_session.commit()
 
     context = authorization_context(db_session, member)
-    result = ListLibraryGroupings(
-        SqlAlchemyLibraryGroupingQueries(db_session)
-    ).execute(context=context, kind="AUTHOR", page=1, page_size=10)
+    result = ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db_session)).execute(
+        context=context, kind="AUTHOR", search="", page=1, page_size=10
+    )
 
     assert result.total == 1
     assert result.groups[0].book_count == 1

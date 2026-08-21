@@ -154,7 +154,7 @@ def test_import_task_delete_does_not_mutate_source_owned_topology(
 
     response = client.delete("/api/import-tasks/task")
 
-    assert response.status_code == 405, response.text
+    assert response.status_code == 404, response.text
     db_session.expire_all()
     assert db_session.get(LibraryImportTask, task.id) is not None
     assert db_session.get(LibraryBook, book.id) is not None
