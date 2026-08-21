@@ -32,42 +32,44 @@ def test_prepare_table_records_filters_unknown_fields_and_converts_timestamps() 
     )
 
 
-def test_prepare_table_records_rejects_invalid_scalar_type() -> None:
+def test_prepare_table_records_rejects_invalid_resource_asset_scalar_type() -> None:
     with pytest.raises(
         ValueError,
-        match="BACKUP_FIELD_TYPE_INVALID:LibraryWork.hidden",
+        match="BACKUP_FIELD_TYPE_INVALID:LibraryResourceAsset.sequenceIndex",
     ):
         prepare_table_records(
-            "LibraryWork",
-            [{"id": "work-invalid", "hidden": "not-a-boolean"}],
+            "LibraryResourceAsset",
+            [{"id": "asset-invalid", "sequenceIndex": "not-an-integer"}],
         )
 
 
-def test_validate_restore_relationships_rejects_dangling_foreign_key() -> None:
+def test_validate_restore_relationships_rejects_dangling_resource_book() -> None:
     records_by_table = {
-        "LibraryWork": ({"id": "work-a"},),
-        "LibraryVersion": (
-            {"id": "version-a", "workId": "missing-work", "sourceKey": "version:a"},
+        "Library": ({"id": "library-a"},),
+        "LibraryBook": ({"id": "book-a", "libraryId": "library-a"},),
+        "LibraryReadableResource": (
+            {
+                "id": "resource-a",
+                "bookId": "missing-book",
+                "libraryId": "library-a",
+            },
         ),
     }
 
     with pytest.raises(
         ValueError,
-        match="BACKUP_FOREIGN_KEY_INVALID:LibraryVersion.workId",
+        match="BACKUP_FOREIGN_KEY_INVALID:LibraryReadableResource.bookId",
     ):
         validate_restore_relationships(records_by_table)
 
 
-def test_validate_restore_relationships_ignores_unhashable_json_payloads() -> None:
+def test_validate_restore_relationships_ignores_unhashable_non_relationship_payloads() -> None:
     validate_restore_relationships(
         {
-            "ImportTask": (
+            "SystemSetting": (
                 {
-                    "id": "import-json",
-                    "recognizedMetadata": {
-                        "title": "JSON metadata",
-                        "subjects": ["one", "two"],
-                    },
+                    "key": "backup-json",
+                    "value": {"title": "JSON metadata", "subjects": ["one", "two"]},
                 },
             )
         }

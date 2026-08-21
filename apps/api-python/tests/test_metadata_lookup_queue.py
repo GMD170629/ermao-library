@@ -1,1028 +1,210 @@
+from __future__ import annotations
+
+import hashlib
 import json
-import os
+from datetime import UTC, datetime, timedelta
 
-import pytest
-from sqlalchemy import select, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import select, update
 
-from app import models as _models  # noqa: F401
-from app.bootstrap.metadata import (
-    prepare_metadata_source_seed_rows,
-    write_metadata_source_seed_rows,
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibrarySourceNode,
+    MetadataLookupTask,
 )
-from app.db.base import Base
-from app.models.import_pipeline import Source
-from app.models.organize import MetadataProviderPipeline, OrganizePolicy
-from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
+from app.models.organize import OrganizeJob
+from app.modules.imports.infrastructure.readable_resource_import_schema import (
+    LibraryImportTask,
+)
 from app.services import metadata_lookup_queue as queue
 from app.services.metadata_lookup_queue import (
     process_metadata_lookup_task,
     recover_stale_metadata_lookup_tasks,
 )
-from app.services.metadata_provider_registry import search_with_metadata_provider
-from app.services.organize_service import (
-    external_metadata_cache_get,
-    external_metadata_cache_put,
-    metadata_candidate_title_exact_match,
-    metadata_search_candidates,
-)
 
 
-def create_worker_tables(db) -> None:
-    Base.metadata.create_all(bind=db.get_bind())
-    db.commit()
+def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=path,
+        path_key="v1:" + hashlib.sha256(path.encode()).hexdigest(),
+        name=path.rsplit("/", 1)[-1] or node_id,
+        physical_kind="DIRECTORY" if directory else "REGULAR_FILE",
+        observed_size_bytes=None if directory else 10,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
+    )
 
 
-def _disable_all_metadata_providers(db) -> None:
-    rows = prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS)
-    write_metadata_source_seed_rows(db, rows)
-    for source in db.scalars(select(Source).where(Source.kind == "metadata")):
-        source.enabled = False
-    for pipeline in db.scalars(select(MetadataProviderPipeline)):
-        pipeline.enabled = False
-    db.commit()
+def _seed_lookup_graph(db_session) -> tuple[LibraryBook, LibraryReadableResource]:
+    book_node = _node("lookup-book-node", "lookup-book", directory=True)
+    resource_node = _node("lookup-resource-node", "lookup-book/book.txt")
+    book = LibraryBook(
+        id="lookup-book",
+        library_id="test-library",
+        source_node_id=book_node.id,
+    )
+    resource = LibraryReadableResource(
+        id="lookup-resource",
+        library_id="test-library",
+        book_id=book.id,
+        source_node_id=resource_node.id,
+        adapter_id="txt",
+        adapter_version="1",
+        media_kind="EBOOK",
+        format="TXT",
+        enablement_state="ENABLED",
+        import_state="READY",
+    )
+    db_session.add_all([book_node, resource_node, book])
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryBookMetadata(
+                book_id=book.id,
+                title="黑暗坡食人树",
+                normalized_title="黑暗坡食人树",
+                author="岛田庄司",
+                normalized_author="岛田庄司",
+            ),
+            resource,
+        ]
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryReadableResourceMetadata(
+            resource_id=resource.id,
+            title="黑暗坡食人树",
+        )
+    )
+    db_session.commit()
+    return book, resource
 
 
-def _insert_lookup_fixture(
-    db,
+def _lookup_task(
+    db_session,
+    book: LibraryBook,
+    resource: LibraryReadableResource,
     *,
-    title="黑暗坡食人树",
-    author="岛田庄司",
-    provider_order=None,
-    local_cover="covers/local.jpg",
-    trigger="SCHEDULE",
-):
-    for statement in (
-        "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
-        "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL",
-        "ALTER TABLE OrganizeJob ADD COLUMN startedAt TEXT",
-        "ALTER TABLE OrganizeJob ADD COLUMN finishedAt TEXT",
-    ):
-        try:
-            db.execute(text(statement))
-        except OperationalError:
-            pass
-    db.execute(
-        text(
-            """
-            INSERT INTO LibraryWork (
-                id, libraryId, origin, title, normalizedTitle, author, normalizedAuthor,
-                publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverPath,
-                coverStatus, hidden, organized, createdAt, updatedAt
-            ) VALUES (
-                'work-lookup', 'test-library', 'MANUAL', :title, :title, :author, :author,
-                'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
-                :cover_path, :cover_status, 0, 0, 'now', 'now'
-            )
-            """
-        ),
-        {
-            "title": title,
-            "author": author,
-            "cover_path": local_cover,
-            "cover_status": "READY" if local_cover else "PENDING",
-        },
+    task_id: str = "lookup-task",
+    status: str = "PENDING",
+    import_task_id: str | None = None,
+) -> MetadataLookupTask:
+    task = MetadataLookupTask(
+        id=task_id,
+        book_id=book.id,
+        resource_id=resource.id,
+        import_task_id=import_task_id,
+        status=status,
+        provider_order=json.dumps(["douban", "bangumi"]),
+        attempts=0,
     )
-    db.execute(
-        text(
-            """
-            INSERT INTO LibraryVersion (
-                id, workId, sourceKey, createdAt, updatedAt
-            ) VALUES (
-                'version-default', 'work-lookup', '__implicit__', 'now', 'now'
-            )
-            """
-        )
-    )
-    db.execute(
-        text(
-            """
-            INSERT INTO LibraryVolume (
-                id, versionId, origin, title, sortOrder, format, resourceKey, publisher,
-                importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
-            ) VALUES (
-                'volume-lookup', 'version-default', 'MANUAL', 'EPUB', 0, 'EPUB', 'epub:test', NULL,
-                'COMPLETED', 1, 'PENDING', 0, 'now', 'now'
-            )
-            """
-        )
-    )
-    db.execute(
-        text(
-            """
-            INSERT INTO ImportTask (
-                id, workId, volumeId, origin, status, sourcePath, progress, duplicate, duration,
-                createdAt, updatedAt
-            ) VALUES (
-                'import-lookup', 'work-lookup', 'volume-lookup', 'MANUAL', 'COMPLETED', '/book.epub',
-                100, 0, 1, 'now', 'now'
-            )
-            """
-        )
-    )
-    db.execute(
-        text(
-            """
-            INSERT INTO OrganizeJob (
-                id, workId, volumeId, importTaskId, trigger, status, issueCodes, summary, createdAt, updatedAt
-            ) VALUES (
-                'job-lookup', 'work-lookup', 'volume-lookup', 'import-lookup', :trigger, 'LOOKUP_PENDING', '[]',
-                '等待元数据', 'now', 'now'
-            )
-            """
-        ),
-        {"trigger": trigger},
-    )
-    db.execute(
-        text(
-            """
-            INSERT INTO MetadataLookupTask (
-                id, workId, volumeId, importTaskId, organizeJobId, status, providerOrder, attempts,
-                nextAttemptAt, startedAt, createdAt, updatedAt
-            ) VALUES (
-                'lookup-1', 'work-lookup', 'volume-lookup', 'import-lookup', 'job-lookup', 'RUNNING',
-                :provider_order, 0, 'now', 'now', 'now', 'now'
-            )
-            """
-        ),
-        {"provider_order": json.dumps(provider_order or ["douban", "bangumi"])},
-    )
-    db.commit()
-    return dict(
-        db.execute(text("SELECT * FROM MetadataLookupTask WHERE id = 'lookup-1'"))
-        .mappings()
-        .first()
-    )
-
-
-def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_cover(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(db_session)
-    candidate = {
-        "id": "douban-1",
-        "source": "douban",
-        "title": "黑暗坡食人树",
-        "author": "岛田庄司",
-        "description": "外部简介",
-        "tags": ["推理", "本格"],
-        "seriesName": "午夜文库",
-        "volumeMetadata": {
-            "publishedAt": "2024-01-01T00:00:00+00:00",
-            "language": "zh-CN",
-            "isbn": "9787513340000",
-        },
-        "coverUrl": "https://example.invalid/cover.jpg",
-    }
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: {
-            "enabled": True,
-            "cacheHit": False,
-            "candidates": [candidate],
-        },
-    )
-    monkeypatch.setattr(
-        queue,
-        "_download_remote_cover",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("local cover must win")
-        ),
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
-
-    work = (
-        db_session.execute(text("SELECT * FROM LibraryWork WHERE id = 'work-lookup'"))
-        .mappings()
-        .first()
-    )
-    assert work["title"] == "黑暗坡食人树"
-    assert work["author"] == "岛田庄司"
-    assert work["description"] == "外部简介"
-    assert work["coverPath"] == "covers/local.jpg"
-    assert json.loads(work["tags"]) == ["epub"]
-    assert work["seriesName"] == "午夜文库"
-    assert work["organized"] == 1
-    assert work["organizeStatus"] == "APPLIED"
-    assert (
-        db_session.execute(
-            text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-        ).scalar()
-        == "APPLIED"
-    )
-    volume = (
-        db_session.execute(
-            text(
-                "SELECT publisher, publishedAt, language, isbn FROM LibraryVolume "
-                "WHERE id = 'volume-lookup'"
-            )
-        )
-        .mappings()
-        .one()
-    )
-    assert volume["publisher"] is None
-    assert volume["publishedAt"] is not None
-    assert volume["language"] == "zh-CN"
-    assert volume["isbn"] == "9787513340000"
-    lookup = (
-        db_session.execute(
-            text(
-                "SELECT status, resultSource, appliedFields FROM MetadataLookupTask WHERE id = 'lookup-1'"
-            )
-        )
-        .mappings()
-        .first()
-    )
-    assert lookup["status"] == "COMPLETED"
-    assert lookup["resultSource"] == "douban"
-    assert {"publishedAt", "language", "isbn"} <= set(
-        json.loads(lookup["appliedFields"])
-    )
-    assert (
-        db_session.execute(
-            text(
-                "SELECT source FROM LibraryMetadata WHERE volumeId = 'volume-lookup' ORDER BY createdAt DESC LIMIT 1"
-            )
-        ).scalar()
-        == "douban"
-    )
-
-
-def test_single_exact_title_match_completes_organizing_with_unknown_author(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(db_session, author="未知作者")
-    candidate = {
-        "id": "douban-unknown-author",
-        "source": "douban",
-        "title": "黑暗坡食人树",
-        "author": "岛田庄司",
-    }
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]},
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
-    state = (
-        db_session.execute(
-            text(
-                "SELECT author, organized, organizeStatus FROM LibraryWork WHERE id = 'work-lookup'"
-            )
-        )
-        .mappings()
-        .one()
-    )
-    assert state["author"] == "岛田庄司"
-    assert state["organized"] == 1
-    assert state["organizeStatus"] == "APPLIED"
-    assert (
-        db_session.execute(
-            text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-        ).scalar()
-        == "APPLIED"
-    )
-
-
-def test_lookup_applies_bangumi_candidate_when_local_title_is_an_exact_alias(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(
-        db_session, title="鹰峰同学请穿上衣服", author="柊裕一"
-    )
-    candidate = {
-        "id": "272395",
-        "source": "bangumi",
-        "title": "拜托请穿上，鹰峰同学",
-        "author": "柊裕一",
-        "description": "Bangumi 条目简介",
-        "raw": {
-            "name": "履いてください、鷹峰さん",
-            "name_cn": "拜托请穿上，鹰峰同学",
-            "infobox": [
-                {"key": "别名", "value": [{"k": "非官方", "v": "鹰峰同学请穿上衣服"}]}
-            ],
-        },
-    }
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]},
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
-    work = (
-        db_session.execute(
-            text(
-                "SELECT title, description, organized, organizeStatus FROM LibraryWork WHERE id = 'work-lookup'"
-            )
-        )
-        .mappings()
-        .one()
-    )
-    assert dict(work) == {
-        "title": "鹰峰同学请穿上衣服",
-        "description": "Bangumi 条目简介",
-        "organized": 1,
-        "organizeStatus": "APPLIED",
-    }
-    assert (
-        db_session.execute(
-            text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-        ).scalar()
-        == "APPLIED"
-    )
-
-
-def test_cached_bangumi_candidate_matches_alias_from_raw_infobox():
-    candidate = {
-        "title": "拜托请穿上，鹰峰同学",
-        "raw": {
-            "infobox": [
-                {"key": "别名", "value": [{"k": "非官方", "v": "鹰峰同学请穿上衣服"}]}
-            ]
-        },
-    }
-
-    assert metadata_candidate_title_exact_match("鹰峰同学请穿上衣服", candidate) is True
-    assert (
-        metadata_candidate_title_exact_match("鹰峰同学请穿上衣服 第二季", candidate)
-        is False
-    )
-
-
-def test_lookup_uses_provider_order_and_author_to_disambiguate(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(db_session, local_cover=None)
-    calls = []
-
-    def search(_db, _context, provider, *_args, **_kwargs):
-        calls.append(provider)
-        if provider == "douban":
-            return {
-                "enabled": True,
-                "candidates": [{"title": "近似标题", "author": "岛田庄司"}],
-            }
-        return {
-            "enabled": True,
-            "candidates": [
-                {
-                    "id": "wrong",
-                    "title": "黑暗坡食人树",
-                    "author": "他人",
-                    "description": "错误",
-                },
-                {
-                    "id": "right",
-                    "title": "黑暗坡食人树",
-                    "author": "岛田庄司",
-                    "description": "正确",
-                },
-            ],
-        }
-
-    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
-    assert calls == ["douban", "bangumi"]
-    assert (
-        db_session.execute(
-            text("SELECT description FROM LibraryWork WHERE id = 'work-lookup'")
-        ).scalar()
-        == "正确"
-    )
-    assert (
-        db_session.execute(
-            text("SELECT resultSource FROM MetadataLookupTask WHERE id = 'lookup-1'")
-        ).scalar()
-        == "bangumi"
-    )
-
-
-def test_automatic_lookup_passes_request_gate_to_builtin_provider(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(db_session, provider_order=["douban"])
-    gate = object()
-    received_gates: list[object | None] = []
-
-    def search(_db, _context, _provider, *_args, **kwargs):
-        received_gates.append(kwargs.get("automatic_request_gate"))
-        return {"enabled": True, "candidates": []}
-
-    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
-
-    assert (
-        process_metadata_lookup_task(
-            db_session, test_settings, task, automatic_request_gate=gate
-        )
-        == "NO_MATCH"
-    )
-    assert received_gates == [gate]
-
-
-def test_manual_rerecognition_does_not_pass_automatic_request_gate(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(
-        db_session, provider_order=["douban"], trigger="MANUAL"
-    )
-    gate = object()
-    received_gates: list[object | None] = []
-
-    def search(_db, _context, _provider, *_args, **kwargs):
-        received_gates.append(kwargs.get("automatic_request_gate"))
-        return {"enabled": True, "candidates": []}
-
-    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
-
-    assert (
-        process_metadata_lookup_task(
-            db_session, test_settings, task, automatic_request_gate=gate
-        )
-        == "NO_MATCH"
-    )
-    assert received_gates == [None]
-
-
-def test_lookup_keeps_ambiguous_exact_candidates_for_review(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(db_session)
-    ambiguous = [
-        {"id": "a", "title": "黑暗坡食人树", "author": "甲"},
-        {"id": "b", "title": "黑暗坡食人树", "author": "乙"},
-    ]
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: {"enabled": True, "candidates": ambiguous},
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "NO_MATCH"
-    assert (
-        db_session.execute(
-            text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")
-        ).scalar()
-        == "NO_MATCH"
-    )
-    assert (
-        db_session.execute(
-            text("SELECT organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")
-        ).scalar()
-        == "REVIEWING"
-    )
-    assert (
-        db_session.execute(
-            text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-        ).scalar()
-        == "FAILED"
-    )
-
-
-def test_lookup_returns_no_provider_when_all_sources_are_disabled(
-    db_session, test_settings
-):
-    create_worker_tables(db_session)
-    _disable_all_metadata_providers(db_session)
-    task = _insert_lookup_fixture(db_session)
-
-    assert (
-        process_metadata_lookup_task(db_session, test_settings, task) == "NO_PROVIDER"
-    )
-    row = (
-        db_session.execute(
-            text(
-                "SELECT status, errorSummary FROM MetadataLookupTask WHERE id = 'lookup-1'"
-            )
-        )
-        .mappings()
-        .first()
-    )
-    assert row["status"] == "NO_PROVIDER"
-    assert "均未启用" in row["errorSummary"]
-    assert (
-        db_session.execute(
-            text("SELECT organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")
-        ).scalar()
-        == "REVIEWING"
-    )
-    assert (
-        db_session.execute(
-            text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-        ).scalar()
-        == "FAILED"
-    )
-
-
-def test_lookup_uses_enabled_source_without_legacy_system_settings(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    rows = prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS)
-    write_metadata_source_seed_rows(db_session, rows)
-    pipeline = db_session.get(MetadataProviderPipeline, ("EBOOK", "bangumi"))
-    assert pipeline is not None
-    pipeline.enabled = True
-    source = db_session.scalar(
-        select(Source).where(
-            Source.kind == "metadata", Source.provider_type == "bangumi"
-        )
-    )
-    assert source is not None
-    source.enabled = True
+    db_session.add(task)
     db_session.commit()
-    task = _insert_lookup_fixture(
-        db_session,
-        provider_order=["bangumi"],
-        local_cover=None,
-    )
-    candidate = {
-        "id": "bangumi-source-config",
-        "source": "bangumi",
-        "title": "黑暗坡食人树",
-        "author": "岛田庄司",
-        "description": "来自已启用数据源",
-        "confidence": 0.9,
-    }
-    calls: list[dict[str, object]] = []
-
-    def search_with_source_config(
-        _context, config, force=True, query=None, match_title=None
-    ):
-        calls.append(config)
-        return {
-            "provider": "bangumi",
-            "enabled": True,
-            "cacheHit": False,
-            "candidates": [candidate],
-            "suggestions": [],
-        }
-
-    monkeypatch.setattr(
-        "app.services.organize_service.run_bangumi_metadata_provider",
-        search_with_source_config,
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
-    assert calls == [
-        {
-            "baseUrl": "https://api.bgm.tv",
-            "userAgent": "ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)",
-        }
-    ]
+    return task
 
 
-def test_cancelled_lookup_and_parent_cannot_be_reopened_by_stale_worker(
-    db_session, test_settings
-):
-    create_worker_tables(db_session)
-    stale_task = _insert_lookup_fixture(db_session)
+def test_lookup_claim_and_stale_recovery_preserve_book_resource_scope(db_session) -> None:
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource)
+
+    claimed = queue.claim_next_metadata_lookup_task(db_session, owner_id="worker-a")
+
+    assert claimed is not None
+    assert claimed["id"] == task.id
+    assert claimed["bookId"] == book.id
+    assert claimed["resourceId"] == resource.id
+    assert claimed["leaseOwnerId"] == "worker-a"
+
     db_session.execute(
-        text(
-            "UPDATE MetadataLookupTask SET status = 'CANCELLED', finishedAt = 'now' WHERE id = 'lookup-1'"
-        )
-    )
-    db_session.execute(
-        text(
-            "UPDATE OrganizeJob SET status = 'CANCELLED', summary = '已取消' WHERE id = 'job-lookup'"
-        )
-    )
-    db_session.commit()
-
-    assert (
-        process_metadata_lookup_task(db_session, test_settings, stale_task)
-        == "CANCELLED"
-    )
-    assert (
-        db_session.execute(
-            text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")
-        ).scalar()
-        == "CANCELLED"
-    )
-    job = (
-        db_session.execute(
-            text("SELECT status, summary FROM OrganizeJob WHERE id = 'job-lookup'")
-        )
-        .mappings()
-        .one()
-    )
-    assert dict(job) == {"status": "CANCELLED", "summary": "已取消"}
-
-
-def test_lookup_uses_three_retry_delays_then_fails(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(db_session)
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            TimeoutError("gateway timeout")
-        ),
-    )
-
-    expected = ["PENDING", "PENDING", "PENDING", "FAILED"]
-    for expected_status in expected:
-        assert (
-            process_metadata_lookup_task(db_session, test_settings, task)
-            == expected_status
-        )
-        task = dict(
-            db_session.execute(
-                text("SELECT * FROM MetadataLookupTask WHERE id = 'lookup-1'")
-            )
-            .mappings()
-            .first()
-        )
-        expected_organize_status = (
-            "FAILED" if expected_status == "FAILED" else "LOOKUP_PENDING"
-        )
-        assert (
-            db_session.execute(
-                text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-            ).scalar()
-            == expected_organize_status
-        )
-
-    assert task["attempts"] == 4
-    assert task["nextAttemptAt"] is None
-    assert "gateway timeout" in task["errorSummary"]
-    assert (
-        db_session.execute(
-            text("SELECT organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")
-        ).scalar()
-        == "REVIEWING"
-    )
-
-
-def test_lookup_updates_identity_and_fills_other_gaps(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    policy = db_session.get(OrganizePolicy, "default")
-    if policy is None:
-        policy = OrganizePolicy(id="default", prefer_local_metadata=False)
-        db_session.add(policy)
-    else:
-        policy.prefer_local_metadata = False
-    db_session.commit()
-    task = _insert_lookup_fixture(
-        db_session, title="鹰峰同学请穿上衣服", author="柊裕一"
-    )
-    candidate = {
-        "id": "douban-auto-apply-off",
-        "source": "douban",
-        "title": "拜托请穿上，鹰峰同学",
-        "author": "柊裕二",
-        "description": "应自动补全的简介",
-        "tags": ["推理"],
-        "raw": {
-            "infobox": [
-                {"key": "别名", "value": [{"k": "非官方", "v": "鹰峰同学请穿上衣服"}]}
-            ],
-        },
-    }
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]},
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
-
-    work = (
-        db_session.execute(
-            text(
-                "SELECT title, author, description, tags, organized FROM LibraryWork WHERE id = 'work-lookup'"
-            )
-        )
-        .mappings()
-        .one()
-    )
-    assert dict(work) == {
-        "title": "拜托请穿上，鹰峰同学",
-        "author": "柊裕二",
-        "description": "应自动补全的简介",
-        "tags": '["推理"]',
-        "organized": 1,
-    }
-    facets = {
-        (str(row.kind), str(row.name))
-        for row in db_session.execute(
-            text(
-                "SELECT f.kind, f.name FROM LibraryFacet f "
-                "JOIN LibraryWorkFacet wf ON wf.facetId = f.id "
-                "WHERE wf.workId = 'work-lookup'"
-            )
-        )
-    }
-    assert facets == {("AUTHOR", "柊裕二"), ("TAG", "推理")}
-    lookup = db_session.execute(
-        text("SELECT appliedFields FROM MetadataLookupTask WHERE id = 'lookup-1'")
-    ).scalar()
-    assert json.loads(lookup) == ["title", "author", "description", "tags"]
-    assert (
-        db_session.execute(
-            text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
-        ).scalar()
-        == "APPLIED"
-    )
-    assert (
-        db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM LibraryMetadata WHERE volumeId = 'volume-lookup'"
-            )
-        ).scalar()
-        == 1
-    )
-
-
-def test_remote_cover_publish_failure_compensates_and_retries(
-    db_session, test_settings, monkeypatch
-):
-    create_worker_tables(db_session)
-    task = _insert_lookup_fixture(
-        db_session,
-        provider_order=["douban"],
-        local_cover=None,
-    )
-    candidate = {
-        "id": "douban-cover-retry",
-        "source": "douban",
-        "title": "黑暗坡食人树",
-        "author": "岛田庄司",
-        "coverUrl": "https://example.invalid/cover.jpg",
-    }
-    monkeypatch.setattr(
-        queue,
-        "search_with_metadata_provider",
-        lambda *_args, **_kwargs: {
-            "enabled": True,
-            "cacheHit": False,
-            "candidates": [candidate],
-        },
-    )
-    cover_dir = test_settings.resolved_storage_root / "covers"
-    cover_dir.mkdir(parents=True, exist_ok=True)
-    temporary_path = cover_dir / ".work-lookup-remote-test.jpg.part"
-    final_path = cover_dir / "work-lookup-remote-test.jpg"
-    temporary_path.write_bytes(b"temporary cover")
-    prepared_cover = queue._PreparedRemoteCover(
-        temporary_path=temporary_path,
-        final_path=final_path,
-        relative_final_path=str(
-            final_path.relative_to(test_settings.resolved_storage_root)
-        ),
-    )
-    monkeypatch.setattr(queue, "_download_remote_cover", lambda *_args: prepared_cover)
-    monkeypatch.setattr(
-        queue,
-        "_publish_remote_cover",
-        lambda *_args: (_ for _ in ()).throw(OSError("publish failed")),
-    )
-
-    assert process_metadata_lookup_task(db_session, test_settings, task) == "PENDING"
-
-    work = (
-        db_session.execute(
-            text(
-                "SELECT coverPath, coverStatus FROM LibraryWork "
-                "WHERE id = 'work-lookup'"
-            )
-        )
-        .mappings()
-        .one()
-    )
-    assert work["coverPath"] is None
-    assert work["coverStatus"] == "PENDING"
-    assert temporary_path.exists() is False
-    assert final_path.exists() is False
-    assert (
-        db_session.execute(
-            text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")
-        ).scalar()
-        == "PENDING"
-    )
-
-
-def test_old_orphan_remote_cover_parts_are_cleaned(tmp_path):
-    cover_dir = tmp_path / "covers"
-    cover_dir.mkdir()
-    orphan = cover_dir / ".work-1-remote-old.jpg.part"
-    recent = cover_dir / ".work-1-remote-recent.jpg.part"
-    another_work = cover_dir / ".work-2-remote-old.jpg.part"
-    for path in (orphan, recent, another_work):
-        path.write_bytes(b"part")
-    current_time = 2 * queue.ORPHAN_COVER_PART_MAX_AGE_SECONDS
-    os.utime(orphan, (0, 0))
-    os.utime(another_work, (0, 0))
-    os.utime(recent, (current_time, current_time))
-
-    removed = queue._cleanup_orphan_remote_cover_parts(
-        cover_dir,
-        work_id="work-1",
-        current_time=current_time,
-    )
-
-    assert removed == 1
-    assert orphan.exists() is False
-    assert recent.exists() is True
-    assert another_work.exists() is True
-
-
-def test_stale_running_lookup_is_recovered(db_session):
-    create_worker_tables(db_session)
-    _insert_lookup_fixture(db_session)
-    db_session.execute(
-        text(
-            "UPDATE MetadataLookupTask SET startedAt = 946684800000, "
-            "leaseExpiresAt = 946684800000 WHERE id = 'lookup-1'"
-        )
+        update(MetadataLookupTask)
+        .where(MetadataLookupTask.id == task.id)
+        .values(lease_expires_at=datetime.now(UTC) - timedelta(seconds=1))
     )
     db_session.commit()
 
     assert recover_stale_metadata_lookup_tasks(db_session) == 1
-    row = (
-        db_session.execute(
-            text(
-                "SELECT status, startedAt FROM MetadataLookupTask WHERE id = 'lookup-1'"
-            )
-        )
-        .mappings()
-        .first()
+    recovered = db_session.get(MetadataLookupTask, task.id)
+    assert recovered is not None
+    assert recovered.status == "PENDING"
+    assert recovered.lease_owner_id is None
+    assert recovered.resource_id == resource.id
+
+
+def test_lookup_waits_for_resource_import_and_schedules_retry(
+    db_session,
+    test_settings,
+) -> None:
+    book, resource = _seed_lookup_graph(db_session)
+    import_task = LibraryImportTask(
+        id="lookup-import",
+        kind="IMPORT_ASSET",
+        library_id="test-library",
+        resource_id=resource.id,
+        source_node_id=resource.source_node_id,
+        role="PRIMARY",
+        state="QUEUED",
     )
-    assert row["status"] == "PENDING"
-    assert row["startedAt"] is None
-
-
-def test_provider_enabled_flags_cannot_be_bypassed_with_force(db_session):
-    create_worker_tables(db_session)
-    _disable_all_metadata_providers(db_session)
-    context = {
-        "work": {"title": "测试图书"},
-        "volumes": [{"format": "EPUB", "classificationSource": "AUTO"}],
-        "files": [],
-        "metadata": [],
-    }
-
-    douban = search_with_metadata_provider(
-        db_session, context, "douban", "测试图书", force=True
-    )
-    bangumi = search_with_metadata_provider(
-        db_session, context, "bangumi", "测试图书", force=True
-    )
-
-    assert douban["enabled"] is False
-    assert bangumi["enabled"] is False
-
-
-@pytest.mark.parametrize("provider", ["douban", "bangumi"])
-def test_external_metadata_cache_only_saves_successful_non_empty_results(
-    db_session, provider
-):
-    db_session.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS ExternalMetadataCache (
-                id TEXT PRIMARY KEY, provider TEXT, queryKey TEXT, rawJson TEXT, expiresAt TEXT,
-                createdAt TEXT, updatedAt TEXT, UNIQUE(provider, queryKey)
-            )
-            """
-        )
-    )
+    db_session.add(import_task)
     db_session.commit()
-
-    external_metadata_cache_put(
+    task = _lookup_task(
         db_session,
-        provider,
-        "活着",
-        {"candidates": [{"title": "活着"}], "message": None},
-    )
-    success_hours = db_session.execute(
-        text(
-            "SELECT (CAST(expiresAt AS INTEGER) - CAST(updatedAt AS INTEGER)) / 3600000.0 FROM ExternalMetadataCache"
-        )
-    ).scalar()
-    assert 23.9 < success_hours < 24.1
-    assert (
-        external_metadata_cache_get(db_session, provider, "活着")["candidates"][0][
-            "title"
-        ]
-        == "活着"
+        book,
+        resource,
+        import_task_id=import_task.id,
+        status="RUNNING",
     )
 
-    external_metadata_cache_put(
-        db_session, provider, "活着", {"candidates": [], "message": "empty"}
-    )
-    external_metadata_cache_put(
+    result = process_metadata_lookup_task(
         db_session,
-        provider,
-        "活着",
-        {"candidates": [{"id": "empty"}], "error": "timeout"},
-    )
-    assert (
-        external_metadata_cache_get(db_session, provider, "活着")["candidates"][0][
-            "title"
-        ]
-        == "活着"
-    )
-    assert (
-        db_session.execute(text("SELECT COUNT(*) FROM ExternalMetadataCache")).scalar()
-        == 1
-    )
-
-    db_session.execute(
-        text(
-            "UPDATE ExternalMetadataCache SET rawJson = :raw_json WHERE provider = :provider AND queryKey = '活着'"
-        ),
+        test_settings,
         {
-            "provider": provider,
-            "raw_json": json.dumps({"candidates": [], "message": "legacy empty cache"}),
+            "id": task.id,
+            "bookId": book.id,
+            "resourceId": resource.id,
+            "importTaskId": import_task.id,
+            "status": "RUNNING",
+            "attempts": 0,
         },
     )
+
+    assert result == "PENDING"
+    db_session.expire_all()
+    refreshed = db_session.get(MetadataLookupTask, task.id)
+    assert refreshed is not None
+    assert refreshed.status == "PENDING"
+    assert refreshed.attempts == 1
+    assert refreshed.next_attempt_at is not None
+
+
+def test_exact_candidate_selection_requires_one_title_match_and_can_use_author() -> None:
+    candidates = [
+        {"title": "黑暗坡食人树", "author": "岛田庄司", "source": "douban"},
+        {"title": "黑暗坡食人树", "author": "其他作者", "source": "bangumi"},
+    ]
+
+    selected, exact = queue._choose_exact_candidate(
+        candidates, "黑暗坡食人树", "岛田庄司"
+    )
+
+    assert selected == candidates[0]
+    assert exact == candidates
+
+
+def test_cancelled_lookup_cannot_be_reopened_by_a_stale_worker(db_session) -> None:
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource, status="CANCELLED")
+    task.lease_owner_id = "old-worker"
+    task.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
-    assert external_metadata_cache_get(db_session, provider, "活着") is None
 
-
-def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypatch):
-    db_session.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS ExternalMetadataCache (
-                id TEXT PRIMARY KEY, provider TEXT, queryKey TEXT, rawJson TEXT, expiresAt TEXT,
-                createdAt TEXT, updatedAt TEXT, UNIQUE(provider, queryKey)
-            )
-            """
-        )
-    )
-    db_session.commit()
-    context = {
-        "work": {"title": "AI 测试图书"},
-        "volumes": [{"format": "EPUB", "classificationSource": "AUTO"}],
-        "files": [],
-        "metadata": [],
-    }
-    calls = []
-
-    def successful_ai(*_args, **_kwargs):
-        assert not db_session.in_transaction()
-        calls.append("success")
-        return {
-            "provider": "ai",
-            "enabled": True,
-            "cacheHit": False,
-            "suggestions": [
-                {"field": "title", "suggestedValue": "AI 规范书名", "confidence": 0.9}
-            ],
-        }
-
-    monkeypatch.setattr(
-        "app.services.organize_service.run_ai_metadata_provider", successful_ai
-    )
-    first = metadata_search_candidates(db_session, context, "ai", config={})
-    second = metadata_search_candidates(db_session, context, "ai", config={})
-
-    assert first["cacheHit"] is False
-    assert second["cacheHit"] is True
-    assert second["candidates"][0]["title"] == "AI 规范书名"
-    assert calls == ["success"]
-
-    db_session.execute(text("DELETE FROM ExternalMetadataCache"))
-    db_session.commit()
-    monkeypatch.setattr(
-        "app.services.organize_service.run_ai_metadata_provider",
-        lambda *_args, **_kwargs: {
-            "provider": "ai",
-            "enabled": True,
-            "cacheHit": False,
-            "suggestions": [],
-        },
-    )
-    assert (
-        metadata_search_candidates(db_session, context, "ai", config={})["candidates"]
-        == []
-    )
-    assert external_metadata_cache_get(db_session, "ai", "ai测试图书") is None
-
-    monkeypatch.setattr(
-        "app.services.organize_service.run_ai_metadata_provider",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            TimeoutError("AI gateway timeout")
-        ),
-    )
-    with pytest.raises(TimeoutError, match="AI gateway timeout"):
-        metadata_search_candidates(db_session, context, "ai", config={})
-    assert external_metadata_cache_get(db_session, "ai", "ai测试图书") is None
+    assert recover_stale_metadata_lookup_tasks(db_session) == 0
+    assert db_session.scalar(
+        select(MetadataLookupTask.status).where(MetadataLookupTask.id == task.id)
+    ) == "CANCELLED"
+    assert db_session.scalar(
+        select(OrganizeJob.id).where(OrganizeJob.book_id == book.id)
+    ) is None

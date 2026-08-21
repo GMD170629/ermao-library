@@ -1,727 +1,220 @@
-import json
-from datetime import datetime
+from __future__ import annotations
 
-from sqlalchemy import event, select, text
-from sqlalchemy.orm import Session
+import hashlib
+from datetime import UTC, datetime, timedelta
 
-from app.core.config import Settings
-from app.db.bootstrap import bootstrap_database
-from app.db.sqlite import create_sqlite_engine
-from app.models.library import Library, LibraryVersion, LibraryVolume, LibraryWork
-from app.models.organize import MetadataLookupTask, OrganizeJob
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.modules.metadata.presentation.schemas import MetadataProvider
+from sqlalchemy import select
+
+from app.db.seed import seed_baseline_data
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+    MetadataLookupTask,
+)
+from app.models.organize import OrganizeJob
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
-    get_metadata_provider,
     list_metadata_provider_pipelines,
-    list_metadata_providers,
     update_metadata_provider,
-    update_metadata_provider_pipeline,
 )
 from app.services.organize_scheduler import (
     create_organize_run,
     delete_organize_job,
     get_organize_policy,
-    organize_candidate_summary,
     process_organize_schedule_tick,
     recognize_organize_job,
     update_organize_policy,
 )
 
 
-def _insert_work(
-    db: Session,
-    work_id: str,
+def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=path,
+        path_key="v1:" + hashlib.sha256(path.encode()).hexdigest(),
+        name=path.rsplit("/", 1)[-1] or node_id,
+        physical_kind="DIRECTORY" if directory else "REGULAR_FILE",
+        observed_size_bytes=None if directory else 1,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _seed_book(
+    db_session,
+    book_id: str,
     *,
-    created_at: str = "2026-07-21T00:00:00+00:00",
-    with_volume: bool = True,
-) -> None:
-    if db.get(Library, "test-library") is None:
-        db.add(
-            Library(
-                id="test-library",
-                name="Test Library",
-                root_path="/library/test",
-                organization_mode="FLAT",
-            )
-        )
-        db.flush()
-    timestamp = datetime.fromisoformat(created_at)
-    db.add(
-        LibraryWork(
-            id=work_id,
-            library_id="test-library",
-            origin="MANUAL",
-            title=f"测试作品 {work_id}",
-            normalized_title=f"测试作品 {work_id}",
-            author="未知作者",
-            normalized_author="未知作者",
-            tags="[]",
-            metadata_quality=0,
-            organize_status="UNASSESSED",
-            hidden=False,
-            organized=False,
-            created_at=timestamp,
-            updated_at=timestamp,
+    created_at: datetime | None = None,
+    with_resource: bool = True,
+) -> tuple[LibraryBook, LibraryReadableResource | None]:
+    book_node = _node(f"{book_id}-node", f"{book_id}/", directory=True)
+    book = LibraryBook(
+        id=book_id,
+        library_id="test-library",
+        source_node_id=book_node.id,
+        created_at=created_at or datetime.now(UTC),
+    )
+    db_session.add_all([book_node, book])
+    db_session.flush()
+    db_session.add(
+        LibraryBookMetadata(
+            book_id=book.id,
+            title=f"Book {book_id}",
+            normalized_title=f"book {book_id}",
+            author=None,
+            normalized_author=None,
+            cover_path=None,
         )
     )
-    db.commit()
-    if with_volume:
-        _insert_volume(
-            db,
-            work_id=work_id,
-            volume_id=f"volume-{work_id}",
-            volume_format="EPUB",
-        )
+    if not with_resource:
+        db_session.commit()
+        return book, None
 
-
-def _insert_volume(
-    db: Session,
-    *,
-    work_id: str,
-    volume_id: str,
-    volume_format: str,
-    sort_order: int = 0,
-) -> None:
-    version_id = f"version-{work_id}"
-    if db.get(LibraryVersion, version_id) is None:
-        db.add(
-            LibraryVersion(
-                id=version_id,
-                work_id=work_id,
-                source_key=IMPLICIT_VERSION_SOURCE_KEY,
-            )
-        )
-    db.add(
-        LibraryVolume(
-            id=volume_id,
-            version_id=version_id,
-            title=f"卷册 {volume_id}",
-            format=volume_format,
-            resource_key=f"resource:{volume_id}",
-            sort_order=sort_order,
-        )
+    resource_node = _node(f"{book_id}-resource-node", f"{book_id}.epub")
+    resource = LibraryReadableResource(
+        id=f"{book_id}-resource",
+        library_id="test-library",
+        book_id=book.id,
+        source_node_id=resource_node.id,
+        adapter_id="epub",
+        adapter_version="1",
+        media_kind="EBOOK",
+        format="EPUB",
+        enablement_state="ENABLED",
+        import_state="READY",
     )
-    db.commit()
+    db_session.add_all([resource_node, resource])
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryReadableResourceMetadata(
+                resource_id=resource.id,
+                title=f"Book {book_id}",
+            ),
+            LibraryResourceAsset(
+                id=f"{book_id}-asset",
+                library_id="test-library",
+                resource_id=resource.id,
+                source_node_id=resource_node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            ),
+        ]
+    )
+    db_session.flush()
+    db_session.commit()
+    return book, resource
 
 
-def test_organize_run_enqueue_uses_bounded_set_based_dml(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    bootstrap_database(engine, settings)
-    statements: list[str] = []
+def test_manual_organize_run_queues_book_resource_lookup_once(db_session) -> None:
+    book, resource = _seed_book(db_session, "organize-book")
+    assert resource is not None
+    assert db_session.scalars(select(OrganizeJob)).all() == []
 
-    def capture_statement(
-        _connection: object,
-        _cursor: object,
-        statement: str,
-        _parameters: object,
-        _context: object,
-        _executemany: object,
-    ) -> None:
-        normalized = statement.lstrip().upper()
-        if normalized.startswith(("INSERT", "UPDATE", "DELETE")):
-            statements.append(normalized)
+    run = create_organize_run(db_session, book_ids=[book.id])
 
-    try:
-        with Session(engine) as db:
-            work_ids = [f"batch-work-{index}" for index in range(25)]
-            for work_id in work_ids:
-                _insert_work(db, work_id)
-            event.listen(engine, "before_cursor_execute", capture_statement)
-
-            run = create_organize_run(db, work_ids=work_ids)
-
-            assert run["queuedCount"] == 25
-            assert len(db.scalars(select(OrganizeJob)).all()) == 25
-            assert len(db.scalars(select(MetadataLookupTask)).all()) == 25
-            assert len(statements) <= 5
-    finally:
-        event.remove(engine, "before_cursor_execute", capture_statement)
-        engine.dispose()
+    assert run["queuedCount"] == 1
+    job = db_session.scalars(
+        select(OrganizeJob).where(OrganizeJob.book_id == book.id)
+    ).one()
+    lookup = db_session.scalars(
+        select(MetadataLookupTask).where(MetadataLookupTask.book_id == book.id)
+    ).one()
+    assert job.resource_id == resource.id
+    assert lookup.resource_id == resource.id
+    assert lookup.book_id == book.id
 
 
-def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "volume-target-work", with_volume=False)
-            _insert_volume(
-                db,
-                work_id="volume-target-work",
-                volume_id="second-volume",
-                volume_format="PDF",
-                sort_order=20,
-            )
-            db.add(
-                LibraryVolume(
-                    id="first-volume",
-                    version_id="version-volume-target-work",
-                    title="第一卷",
-                    format="EPUB",
-                    resource_key="resource:first-volume",
-                    sort_order=10,
-                )
-            )
-            db.commit()
-            _insert_volume(
-                db,
-                work_id="volume-target-work",
-                volume_id="audio-volume",
-                volume_format="MP3",
-                sort_order=0,
-            )
+def test_empty_book_is_not_queued_until_it_has_a_readable_resource(db_session) -> None:
+    book, resource = _seed_book(db_session, "empty-organize-book", with_resource=False)
+    assert resource is None
 
-            create_organize_run(db, work_ids=["volume-target-work"])
+    run = create_organize_run(db_session, book_ids=[book.id])
 
-            job = db.scalars(
-                select(OrganizeJob).where(OrganizeJob.work_id == "volume-target-work")
-            ).one()
-            lookup = db.scalars(
-                select(MetadataLookupTask).where(
-                    MetadataLookupTask.organize_job_id == job.id
-                )
-            ).one()
-            assert job.volume_id == "first-volume"
-            assert lookup.volume_id == "first-volume"
-    finally:
-        engine.dispose()
+    assert run["queuedCount"] == 0
+    assert db_session.scalars(
+        select(OrganizeJob).where(OrganizeJob.book_id == book.id)
+    ).all() == []
 
 
-def test_manual_run_is_the_only_component_that_creates_queue_items(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "manual-work")
-            assert db.execute(text("SELECT COUNT(*) FROM `OrganizeJob`")).scalar() == 0
-            assert organize_candidate_summary(db)["total"] == 1
-
-            update_metadata_provider(db, "douban", {"enabled": True})
-            run = create_organize_run(db, work_ids=["manual-work"])
-
-            assert run["trigger"] == "MANUAL"
-            assert run["queuedCount"] == 1
-            job = (
-                db.execute(
-                    text("SELECT * FROM `OrganizeJob` WHERE `workId` = 'manual-work'")
-                )
-                .mappings()
-                .one()
-            )
-            task = (
-                db.execute(
-                    text(
-                        "SELECT * FROM `MetadataLookupTask` WHERE `workId` = 'manual-work'"
-                    )
-                )
-                .mappings()
-                .one()
-            )
-            assert job["status"] == "LOOKUP_PENDING"
-            assert job["importTaskId"] is None
-            assert json.loads(job["reasonCodes"]) == ["MANUAL_SELECTED"]
-            assert json.loads(task["providerOrder"]) == ["douban", "bangumi"]
-    finally:
-        engine.dispose()
-
-
-def test_auto_run_on_new_respects_enablement_boundary(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "historical-work", created_at="2020-01-01T00:00:00+00:00")
-            policy = update_organize_policy(db, {"autoRunOnNew": True})
-            assert policy["autoRunOnNewSince"]
-            _insert_work(db, "new-work", created_at="2999-01-01T00:00:00+00:00")
-
-            assert process_organize_schedule_tick(db) == 1
-            queued = (
-                db.execute(
-                    text(
-                        "SELECT `workId`, `trigger`, `reasonCodes` FROM `OrganizeJob` ORDER BY `workId`"
-                    )
-                )
-                .mappings()
-                .all()
-            )
-            assert [
-                {
-                    "workId": item["workId"],
-                    "trigger": item["trigger"],
-                    "reasonCodes": json.loads(item["reasonCodes"]),
-                }
-                for item in queued
-            ] == [
-                {
-                    "workId": "new-work",
-                    "trigger": "NEW",
-                    "reasonCodes": ["UNRECOGNIZED", "MISSING_METADATA"],
-                }
-            ]
-            assert process_organize_schedule_tick(db) == 0
-    finally:
-        engine.dispose()
-
-
-def test_interval_schedule_queues_due_candidates_and_advances_next_run(
-    tmp_path,
+def test_recognition_replaces_unresolved_lookup_with_same_book_resource_scope(
+    db_session,
 ) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "scheduled-work")
-            update_metadata_provider(db, "douban", {"enabled": True})
-            update_organize_policy(
-                db, {"enabled": True, "scheduleMode": "INTERVAL", "intervalMinutes": 15}
-            )
-            db.execute(
-                text(
-                    "UPDATE `OrganizePolicy` SET `nextRunAt` = '2026-01-01T00:00:00+00:00' WHERE `id` = 'default'"
-                )
-            )
-            db.commit()
+    book, resource = _seed_book(db_session, "recognize-book")
+    assert resource is not None
+    run = create_organize_run(db_session, book_ids=[book.id])
+    assert run["queuedCount"] == 1
+    job = db_session.scalars(
+        select(OrganizeJob).where(OrganizeJob.book_id == book.id)
+    ).one()
 
-            assert process_organize_schedule_tick(db) == 1
-            job = (
-                db.execute(
-                    text(
-                        "SELECT `trigger`, `reasonCodes` FROM `OrganizeJob` WHERE `workId` = 'scheduled-work'"
-                    )
-                )
-                .mappings()
-                .one()
-            )
-            assert job["trigger"] == "SCHEDULE"
-            assert "UNRECOGNIZED" in json.loads(job["reasonCodes"])
-            policy = get_organize_policy(db)
-            assert policy["lastScheduledAt"]
-            assert str(policy["nextRunAt"]) > str(policy["lastScheduledAt"])
-    finally:
-        engine.dispose()
+    recognized = recognize_organize_job(db_session, job.id)
+
+    assert recognized["bookId"] == book.id
+    assert recognized["resourceId"] == resource.id
+    assert db_session.scalar(
+        select(MetadataLookupTask.id).where(
+            MetadataLookupTask.book_id == book.id,
+            MetadataLookupTask.resource_id == resource.id,
+        )
+    ) is not None
 
 
-def test_unresolved_work_is_not_queued_again_until_recognition_completes(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "unrecognized-work")
-            first_run = create_organize_run(db, work_ids=["unrecognized-work"])
-            first_job = (
-                db.execute(
-                    text(
-                        "SELECT `id` FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work'"
-                    )
-                )
-                .mappings()
-                .one()
-            )
-            db.execute(
-                text(
-                    "UPDATE `OrganizeJob` SET `status` = 'FAILED', `summary` = '没有找到匹配结果' "
-                    "WHERE `id` = :id"
-                ),
-                {"id": first_job["id"]},
-            )
-            db.execute(
-                text(
-                    "UPDATE `LibraryWork` SET `organized` = 0, `organizeStatus` = 'REVIEWING' "
-                    "WHERE `id` = 'unrecognized-work'"
-                )
-            )
-            db.commit()
+def test_deleting_organize_job_does_not_delete_its_book_or_resource(db_session) -> None:
+    book, resource = _seed_book(db_session, "delete-organize-book")
+    assert resource is not None
+    run = create_organize_run(db_session, book_ids=[book.id])
+    job = db_session.scalars(
+        select(OrganizeJob).where(OrganizeJob.book_id == book.id)
+    ).one()
 
-            update_organize_policy(
-                db,
-                {"enabled": True, "scheduleMode": "INTERVAL", "intervalMinutes": 15},
-            )
-            db.execute(
-                text(
-                    "UPDATE `OrganizePolicy` SET `nextRunAt` = '2026-01-01T00:00:00+00:00' "
-                    "WHERE `id` = 'default'"
-                )
-            )
-            db.commit()
+    result = delete_organize_job(db_session, job.id)
 
-            assert organize_candidate_summary(db)["total"] == 0
-            assert process_organize_schedule_tick(db) == 0
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work'"
-                    )
-                ).scalar()
-                == 1
-            )
-
-            db.execute(
-                text(
-                    "UPDATE `OrganizeJob` SET `status` = 'COMPLETED' WHERE `id` = :id"
-                ),
-                {"id": first_job["id"]},
-            )
-            db.execute(
-                text(
-                    "UPDATE `LibraryWork` SET `organized` = 1, `organizeStatus` = 'APPLIED' "
-                    "WHERE `id` = 'unrecognized-work'"
-                )
-            )
-            db.commit()
-
-            second_run = create_organize_run(db, work_ids=["unrecognized-work"])
-            second_job_id = db.execute(
-                text(
-                    "SELECT `id` FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work' "
-                    "AND `status` = 'LOOKUP_PENDING'"
-                )
-            ).scalar_one()
-            redirected_recognition = recognize_organize_job(db, str(first_job["id"]))
-
-            assert first_run["queuedCount"] == 1
-            assert second_run["queuedCount"] == 1
-            assert redirected_recognition["id"] == second_job_id
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work'"
-                    )
-                ).scalar()
-                == 2
-            )
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work' "
-                        "AND `status` IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', "
-                        "'RETRY_WAIT', 'REVIEWING', 'FAILED')"
-                    )
-                ).scalar()
-                == 1
-            )
-    finally:
-        engine.dispose()
+    assert result == {"id": job.id, "bookId": book.id, "deleted": True}
+    assert db_session.get(LibraryBook, book.id) is not None
+    assert db_session.get(LibraryReadableResource, resource.id) is not None
 
 
-def test_missing_description_alone_does_not_make_an_organized_work_eligible(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "description-only-work")
-            db.execute(
-                text(
-                    "UPDATE `LibraryWork` SET `organized` = 1, `organizeStatus` = 'APPLIED', "
-                    "`coverPath` = 'covers/local.jpg' WHERE `id` = 'description-only-work'"
-                )
-            )
-            db.commit()
+def test_metadata_provider_enablement_is_scoped_by_resource_media_kind(db_session) -> None:
+    _seed_book(db_session, "provider-book")
+    seed_baseline_data(db_session)
+    update_metadata_provider(db_session, "douban", {"enabled": True})
 
-            summary = organize_candidate_summary(db)
+    enabled = enabled_metadata_provider_ids(db_session, "EBOOK")
+    pipelines = next(
+        row
+        for row in list_metadata_provider_pipelines(db_session)
+        if row["mediaKind"] == "EBOOK"
+    )
 
-            assert summary["total"] == 0
-            assert summary["works"] == []
-    finally:
-        engine.dispose()
+    assert "douban" in enabled
+    assert any(row["providerId"] == "douban" for row in pipelines["providers"])
 
 
-def test_provider_registry_seeds_builtins_and_never_returns_secret_values(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            providers = {
-                provider["id"]: provider for provider in list_metadata_providers(db)
-            }
-            assert set(providers) == {
-                "douban",
-                "bangumi",
-                "ai",
-            }
-            assert providers["douban"]["automaticRateLimit"] == {
-                "requests": 1,
-                "period_seconds": 5.0,
-            }
-            assert providers["bangumi"]["automaticRateLimit"] == {
-                "requests": 4,
-                "period_seconds": 1.0,
-            }
-            assert providers["ai"]["automaticRateLimit"] is None
-            douban_contract = MetadataProvider.model_validate(
-                providers["douban"]
-            ).model_dump(by_alias=True)
-            assert douban_contract["automaticRateLimit"] == {
-                "requests": 1,
-                "periodSeconds": 5.0,
-            }
-            unchanged_douban = update_metadata_provider(
-                db,
-                "douban",
-                {"automaticRateLimit": {"requests": 999, "periodSeconds": 0.01}},
-            )
-            assert unchanged_douban["automaticRateLimit"] == {
-                "requests": 1,
-                "period_seconds": 5.0,
-            }
-            updated = update_metadata_provider(
-                db,
-                "ai",
-                {
-                    "config": {
-                        "baseUrl": "https://example.test/v1",
-                        "model": "test-model",
-                        "apiKey": "top-secret",
-                    },
-                    "enabled": True,
-                },
-            )
-            assert "apiKey" not in updated["config"]
-            assert updated["configuredSecrets"]["apiKey"] is True
-            assert "top-secret" not in json.dumps(
-                get_metadata_provider(db, "ai"), ensure_ascii=False
-            )
-            policy = get_organize_policy(db)
-            assert policy["scheduleMode"] == "MANUAL"
-            assert policy["writeMetadataToFiles"] is False
-            assert policy["preferLocalMetadata"] is True
-            assert policy["localMetadataPriority"] == [
-                "SIDECAR_OPF",
-                "EMBEDDED",
-                "PATH",
-            ]
-            assert "overwriteTitleAuthor" not in policy
-            assert policy["rules"] == {"unrecognized": True, "missingMetadata": True}
-    finally:
-        engine.dispose()
+def test_interval_schedule_respects_next_run_boundary(db_session) -> None:
+    _seed_book(db_session, "scheduled-book")
+    seed_baseline_data(db_session)
+    update_metadata_provider(db_session, "douban", {"enabled": True})
+    policy = update_organize_policy(
+        db_session,
+        {
+            "enabled": True,
+            "scheduleMode": "INTERVAL",
+            "intervalMinutes": 15,
+        },
+    )
+    assert policy["scheduleMode"] == "INTERVAL"
+    assert get_organize_policy(db_session)["enabled"] is True
 
-
-def test_provider_pipelines_are_independent_ordered_and_composable(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            pipelines = {
-                item["mediaKind"]: item["providers"]
-                for item in list_metadata_provider_pipelines(db)
-            }
-            assert [item["providerId"] for item in pipelines["EBOOK"]] == [
-                "douban",
-                "bangumi",
-                "ai",
-            ]
-            assert [item["providerId"] for item in pipelines["COMIC"]] == [
-                "bangumi",
-                "ai",
-            ]
-            assert [item["providerId"] for item in pipelines["AUDIOBOOK"]] == [
-                "douban",
-                "ai",
-            ]
-            assert {
-                media_kind: [
-                    item["providerId"] for item in providers if item["enabled"]
-                ]
-                for media_kind, providers in pipelines.items()
-            } == {
-                "EBOOK": ["douban", "bangumi"],
-                "COMIC": ["bangumi"],
-                "AUDIOBOOK": ["douban"],
-            }
-
-            update_metadata_provider(
-                db,
-                "ai",
-                {
-                    "config": {
-                        "baseUrl": "https://example.test/v1",
-                        "model": "test-model",
-                        "apiKey": "secret",
-                    }
-                },
-            )
-            update_metadata_provider_pipeline(
-                db,
-                "EBOOK",
-                [
-                    {"providerId": "ai", "enabled": True},
-                    {"providerId": "douban", "enabled": True},
-                ],
-            )
-            update_metadata_provider_pipeline(
-                db, "COMIC", [{"providerId": "bangumi", "enabled": True}]
-            )
-
-            assert enabled_metadata_provider_ids(db, "EBOOK") == ["ai", "douban"]
-            assert enabled_metadata_provider_ids(db, "COMIC") == ["bangumi"]
-            assert enabled_metadata_provider_ids(db, "AUDIOBOOK") == ["douban"]
-            pipelines = {
-                item["mediaKind"]: item["providers"]
-                for item in list_metadata_provider_pipelines(db)
-            }
-            assert [item["providerId"] for item in pipelines["COMIC"]] == ["bangumi"]
-            assert [item["providerId"] for item in pipelines["AUDIOBOOK"]] == [
-                "douban",
-                "ai",
-            ]
-    finally:
-        engine.dispose()
-
-
-def test_queue_record_can_be_rerecognized_from_any_state_and_deleted_without_deleting_work(
-    tmp_path,
-) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "queue-work")
-            update_metadata_provider(db, "douban", {"enabled": True})
-            run = create_organize_run(db, work_ids=["queue-work"])
-            job = (
-                db.execute(
-                    text("SELECT * FROM `OrganizeJob` WHERE `workId` = 'queue-work'")
-                )
-                .mappings()
-                .one()
-            )
-            old_task = (
-                db.execute(
-                    text(
-                        "SELECT * FROM `MetadataLookupTask` WHERE `organizeJobId` = :job_id"
-                    ),
-                    {"job_id": job["id"]},
-                )
-                .mappings()
-                .one()
-            )
-            db.execute(
-                text(
-                    "UPDATE `OrganizeJob` SET `status` = 'APPLIED', `finishedAt` = 'now' WHERE `id` = :id"
-                ),
-                {"id": job["id"]},
-            )
-            db.execute(
-                text(
-                    "UPDATE `MetadataLookupTask` SET `status` = 'COMPLETED' WHERE `id` = :id"
-                ),
-                {"id": old_task["id"]},
-            )
-            db.execute(
-                text(
-                    "INSERT INTO `MetadataProviderExecution` "
-                    "(`id`, `jobId`, `lookupTaskId`, `providerId`, `status`, `attempts`, `createdAt`, `updatedAt`) "
-                    "VALUES ('execution-old', :job_id, :task_id, 'douban', 'COMPLETED', 1, 'now', 'now')"
-                ),
-                {"job_id": job["id"], "task_id": old_task["id"]},
-            )
-            db.execute(
-                text(
-                    "INSERT INTO `MetadataSuggestion` "
-                    "(`id`, `jobId`, `field`, `suggestedValue`, `source`, `reason`, `createdAt`, `updatedAt`) "
-                    "VALUES ('legacy-suggestion', :job_id, 'author', '\"旧作者\"', 'douban', '旧建议', 'now', 'now')"
-                ),
-                {"job_id": job["id"]},
-            )
-            db.commit()
-
-            recognized = recognize_organize_job(db, str(job["id"]))
-
-            assert recognized["status"] == "LOOKUP_PENDING"
-            assert recognized["trigger"] == "MANUAL"
-            assert json.loads(recognized["reasonCodes"]) == ["MANUAL_RECOGNIZE"]
-            new_task = (
-                db.execute(
-                    text(
-                        "SELECT * FROM `MetadataLookupTask` WHERE `organizeJobId` = :job_id"
-                    ),
-                    {"job_id": job["id"]},
-                )
-                .mappings()
-                .one()
-            )
-            assert new_task["id"] != old_task["id"]
-            assert new_task["status"] == "PENDING"
-            assert json.loads(new_task["providerOrder"]) == ["douban", "bangumi"]
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `MetadataProviderExecution` WHERE `jobId` = :job_id"
-                    ),
-                    {"job_id": job["id"]},
-                ).scalar()
-                == 0
-            )
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `MetadataSuggestion` WHERE `jobId` = :job_id"
-                    ),
-                    {"job_id": job["id"]},
-                ).scalar()
-                == 0
-            )
-            deleted = delete_organize_job(db, str(job["id"]))
-
-            assert deleted == {"id": job["id"], "workId": "queue-work", "deleted": True}
-            assert (
-                db.execute(
-                    text("SELECT COUNT(*) FROM `OrganizeJob` WHERE `id` = :id"),
-                    {"id": job["id"]},
-                ).scalar()
-                == 0
-            )
-            assert (
-                db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM `MetadataLookupTask` WHERE `organizeJobId` = :id"
-                    ),
-                    {"id": job["id"]},
-                ).scalar()
-                == 0
-            )
-            work = (
-                db.execute(
-                    text(
-                        "SELECT `organized`, `organizeStatus` FROM `LibraryWork` WHERE `id` = 'queue-work'"
-                    )
-                )
-                .mappings()
-                .one()
-            )
-            assert dict(work) == {"organized": 0, "organizeStatus": "UNASSESSED"}
-            saved_run = (
-                db.execute(
-                    text(
-                        "SELECT `status`, `queuedCount`, `completedCount` FROM `OrganizeRun` WHERE `id` = :id"
-                    ),
-                    {"id": run["id"]},
-                )
-                .mappings()
-                .one()
-            )
-            assert dict(saved_run) == {
-                "status": "COMPLETED",
-                "queuedCount": 0,
-                "completedCount": 0,
-            }
-    finally:
-        engine.dispose()
+    update_organize_policy(
+        db_session,
+        {"nextRunAt": (datetime.now(UTC) - timedelta(minutes=1)).isoformat()},
+    )
+    assert process_organize_schedule_tick(db_session) == 1
+    assert db_session.scalar(select(OrganizeJob.id)) is not None

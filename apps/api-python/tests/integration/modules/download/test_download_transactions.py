@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import app.bootstrap.download as download_bootstrap
+from datetime import UTC, datetime
+
 import pytest
+from sqlalchemy import select
+
+import app.bootstrap.download as download_bootstrap
 from app.bootstrap.system import prepare_system_event
-from tests.conftest import recreate_application_schema
+from app.models import LibraryBook, LibrarySourceNode
 from app.models.import_pipeline import DownloadTask
 from app.models.settings import SystemEvent, SystemSetting
 from app.modules.download.application.dto import CreateDownloadTask
-from sqlalchemy import select
+from tests.conftest import recreate_application_schema
 from tests.support.sqlalchemy import StatementRecorder
 
 
@@ -16,12 +20,36 @@ def _prepare_schema(db_session) -> None:
     recreate_application_schema(db_session.get_bind())
 
 
+def _seed_book(db_session) -> None:
+    node = LibrarySourceNode(
+        id="download-book-node",
+        library_id="test-library",
+        relative_path="download-book",
+        path_key="v1:" + "a" * 64,
+        name="download-book",
+        physical_kind="DIRECTORY",
+        observed_size_bytes=None,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
+    )
+    db_session.add(node)
+    db_session.flush()
+    db_session.add(
+        LibraryBook(
+            id="download-book",
+            library_id="test-library",
+            source_node_id=node.id,
+        )
+    )
+    db_session.commit()
+
+
 def _command(task_id: str) -> CreateDownloadTask:
     return CreateDownloadTask(
         id=task_id,
         source_id=None,
         search_record_id=None,
-        book_id=None,
+        book_id="download-book",
         task_type="http",
         status="queued",
         display_name="Prepared download",
@@ -45,6 +73,7 @@ def _event(task_id: str):
 
 def test_create_download_task_is_three_set_based_writes(db_session) -> None:
     _prepare_schema(db_session)
+    _seed_book(db_session)
     command = _command("download-set-write")
 
     with StatementRecorder(db_session.get_bind()) as recorder:
@@ -58,7 +87,9 @@ def test_create_download_task_is_three_set_based_writes(db_session) -> None:
 
     assert result.id == command.id
     assert recorder.dml_count == 3
-    assert db_session.get(DownloadTask, command.id) is not None
+    task = db_session.get(DownloadTask, command.id)
+    assert task is not None
+    assert task.book_id == "download-book"
     assert (
         db_session.scalar(
             select(SystemSetting.value).where(
@@ -77,6 +108,7 @@ def test_create_download_task_rolls_back_state_when_event_write_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepare_schema(db_session)
+    _seed_book(db_session)
     command = _command("download-atomic-rollback")
 
     def fail_event_write(*_args: object, **_kwargs: object) -> None:
