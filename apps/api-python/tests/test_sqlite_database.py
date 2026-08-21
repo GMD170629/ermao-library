@@ -146,8 +146,8 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             str(constraint["sqltext"])
             for constraint in inspector.get_check_constraints("Library")
         )
-        assert '"FLAT"' in library_checks
-        assert '"VOLUMES"' in library_checks
+        assert "'FLAT'" in library_checks
+        assert "'VOLUMES'" in library_checks
         assert "AUDIOBOOK" not in library_checks
 
         book_columns = {

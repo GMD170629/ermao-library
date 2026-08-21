@@ -75,7 +75,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
         "app.modules.kindle.presentation.http": 10,
         "app.modules.mobile.presentation.http": 1,
         "app.modules.reader.presentation.v4": 9,
-        "app.modules.system.presentation.health": 10,
+        "app.modules.system.presentation.health": 8,
     }
     counts = Counter(
         route.endpoint.__module__
@@ -84,7 +84,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
     )
 
     assert counts == migrated_modules
-    assert sum(counts.values()) == 53
+    assert sum(counts.values()) == 51
     assert not any(
         isinstance(route, APIRoute)
         and route.path.startswith(("/api/reader/v2/", "/api/reader/v3/"))

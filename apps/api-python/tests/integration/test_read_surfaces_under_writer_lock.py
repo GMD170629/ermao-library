@@ -178,7 +178,7 @@ def test_get_surfaces_remain_read_only_while_writer_slot_is_held(
                 recorder.reset_after_warmup()
                 for path in (
                     "/api/auth/me",
-                    "/api/sources",
+                    "/api/libraries",
                     "/api/books",
                     "/api/reader/v4/resources/writer-lock-resource/bootstrap",
                 ):

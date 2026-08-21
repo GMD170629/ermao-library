@@ -144,19 +144,20 @@ def _seed_comic(engine: Engine, settings: Settings) -> tuple[datetime, str]:
             asset_id=asset_id,
             mime_type="application/vnd.comicbook+zip",
         )
-        db.add_all(
-            [
-                user,
-                book_node,
-                source_node,
-                book,
-                book_metadata,
-                resource,
-                resource_metadata,
-                asset,
-                asset_metadata,
-            ]
-        )
+        book.source_node = book_node
+        resource.book = book
+        resource.source_node = source_node
+        asset.resource = resource
+        asset.source_node = source_node
+        db.add_all([user, book_node, source_node])
+        db.flush()
+        db.add(book)
+        db.flush()
+        db.add_all([book_metadata, resource])
+        db.flush()
+        db.add_all([resource_metadata, asset])
+        db.flush()
+        db.add(asset_metadata)
         db.commit()
     return preserved_updated_at, resource_id
 

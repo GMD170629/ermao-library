@@ -34,9 +34,9 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
         )
 
     context = {
-        "work": {"title": "Short transaction search"},
-        "volumes": [{"format": "EPUB", "classificationSource": "AUTO"}],
-        "files": [],
+        "book": {"title": "Short transaction search"},
+        "resources": [{"format": "EPUB", "classificationSource": "AUTO"}],
+        "assets": [],
         "metadata": [],
     }
     source = Session(source_engine, autoflush=False, expire_on_commit=False)

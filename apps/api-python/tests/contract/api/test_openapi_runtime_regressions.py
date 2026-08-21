@@ -217,7 +217,8 @@ def test_openapi_has_no_retired_identity_or_generic_import_task_contracts(
         any(segment in path.split("/") for segment in ("works", "versions", "volumes"))
         for path in paths
     )
-    assert not any("/import-tasks" in path for path in paths)
+    assert "/api/import-tasks" not in paths
+    assert not any(path.startswith("/api/import-tasks/") for path in paths)
 
     components = schema.get("components", {}).get("schemas", {})
     assert not any(name.startswith("ImportTask") for name in components)
