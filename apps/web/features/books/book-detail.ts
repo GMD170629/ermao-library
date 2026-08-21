@@ -44,7 +44,7 @@ export function selectedResourceForBook(book: BookView, requestedResourceId?: st
   const resources = allVisibleResources(book);
   return resources.find((resource) => resource.id === requestedResourceId)
     ?? resources.find((resource) => resource.id === book.continueResourceId)
-    ?? resources.find((resource) => resource.progress < 100)
+    ?? resources.find((resource) => resource.progress <= 0)
     ?? resources[0]
     ?? null;
 }

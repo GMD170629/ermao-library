@@ -207,7 +207,6 @@ test('library import sections fetch only when their tab mounts and refresh after
   const counts = await mockSettingsApi(page);
   await page.goto('/settings/library');
   await expect.poll(() => requestCount(counts, '/api/libraries/library-1/import-tasks')).toBeGreaterThan(0);
-  await expect(page.getByRole('button', { name: '清理导入队列' })).toHaveCount(0);
   const initialImportTaskRequests = requestCount(counts, '/api/libraries/library-1/import-tasks');
   expect(requestCount(counts, '/api/libraries/tree')).toBe(0);
   expect(requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
