@@ -505,3 +505,34 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 代价是旧路径可能长期保留，并在实际打开时才报告不存在或不可读；目录类型也受文件系统
 枚举顺序和有限样本影响。系统通过保存判断证据、禁止隐式重判以及提供显式重新导入，让
 这些取舍保持简单且可解释。
+
+## 实施进度
+
+非规范性实施台账。本节不改变上文规范；第 12 节“领域与 schema”整体仍未完成。
+
+### 阶段 1A：SourceNode 纯领域基础 — 已完成
+
+- 实现：`apps/api-python/app/modules/library/domain/source_nodes.py`
+  - `SourceNodePhysicalKind`：`REGULAR_FILE | DIRECTORY | SYMLINK | OTHER`
+  - `SourceNodeRelativePath` 与 `pathKey = v1:SHA-256(UTF-8(relativePath))`
+  - 相对路径校验：保留大小写与 Unicode 拼写；不把 `\` 转为 `/`；拒绝空串、绝对路径、空段、`.`、`..`、NUL、Windows drive/UNC
+  - 直接父子树不变量与 `PATH_KEY_COLLISION` 占用规则
+  - 违规码：`INVALID_RELATIVE_PATH`、`PATH_KEY_COLLISION`、`CROSS_LIBRARY_PARENT`、`PARENT_NOT_DIRECTORY`、`PARENT_PATH_MISMATCH`、`SELF_PARENT`
+- 测试：`apps/api-python/tests/unit/modules/library/test_source_nodes.py`
+- 验证（于 `apps/api-python`）：
+  - `uv run --no-sync pytest -q tests/unit/modules/library/test_source_nodes.py`
+  - `uv run --no-sync pytest -q tests/test_capability_architecture.py`
+  - `uv run --no-sync ruff format --check app/modules/library/domain tests/unit/modules/library/test_source_nodes.py`
+  - `uv run --no-sync ruff check app/modules/library/domain tests/unit/modules/library/test_source_nodes.py`
+  - `uv run --no-sync pytest -q`
+- 明确未接入：ORM、迁移、扫描、导入、API、Web 或运行时 composition root；本批不激活任何新运行时路径。
+
+### 后续阶段 — 未完成
+
+- 阶段 1B：SourceNode / Interpretation / Book / Resource / Asset / ImportRun / candidate / Task 的 ORM schema 与约束
+- 阶段 2：扫描与分类
+- 阶段 3：首个单文件闭环
+- 阶段 4：首个目录闭环
+- 阶段 5：其余格式
+- 阶段 6：重新导入和管理操作
+- 阶段 7：规模与最终验收
