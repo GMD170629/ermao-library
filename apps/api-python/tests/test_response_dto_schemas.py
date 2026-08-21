@@ -154,19 +154,64 @@ def test_datetime_serializes_as_utc_z() -> None:
     assert '"createdAt":"2026-07-28T03:04:05Z"' in event.model_dump_json(by_alias=True)
 
 
-def test_library_reading_unit_metadata_accepts_comic_page_fields() -> None:
-    metadata = library_schemas.ReadingUnitMetadata.model_validate(
+def test_response_dto_wire_schemas_have_no_retired_identity_fields() -> None:
+    retired = {
+        "workId",
+        "versionId",
+        "volumeId",
+        "fileId",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }
+
+    def property_names(value: Any) -> set[str]:
+        if isinstance(value, dict):
+            properties = value.get("properties")
+            names = set(properties) if isinstance(properties, dict) else set()
+            return names | {
+                name
+                for child in value.values()
+                for name in property_names(child)
+            }
+        if isinstance(value, list):
+            return {name for child in value for name in property_names(child)}
+        return set()
+
+    for name, model in _response_contracts().items():
+        assert retired.isdisjoint(property_names(TypeAdapter(model).json_schema())), name
+
+
+def test_library_resource_asset_schema_accepts_comic_page_fields() -> None:
+    asset = library_schemas.ResourceAssetView.model_validate(
         {
-            "zipEntryName": "volume/001.jpg",
-            "originalName": "001.jpg",
-            "pageInVolume": 1,
-            "pageInSection": 1,
+            "id": "asset-1",
+            "resourceId": "resource-1",
+            "sourceNodeId": "source-1",
+            "role": "PAGE",
+            "mimeType": "image/jpeg",
+            "path": "pages/001.jpg",
+            "kind": "PAGE",
+            "sizeBytes": 1024,
+            "size": "1 KB",
+            "mtimeMs": 0,
+            "sortOrder": 1,
+            "url": "/api/assets/asset-1",
         }
     )
 
-    assert metadata.model_dump(by_alias=True, exclude_none=True) == {
-        "zipEntryName": "volume/001.jpg",
-        "originalName": "001.jpg",
-        "pageInVolume": 1,
-        "pageInSection": 1,
+    assert asset.model_dump(by_alias=True, exclude_none=True) == {
+        "id": "asset-1",
+        "resourceId": "resource-1",
+        "sourceNodeId": "source-1",
+        "role": "PAGE",
+        "mimeType": "image/jpeg",
+        "path": "pages/001.jpg",
+        "kind": "PAGE",
+        "sizeBytes": 1024,
+        "size": "1 KB",
+        "mtimeMs": 0,
+        "sortOrder": 1,
+        "url": "/api/assets/asset-1",
     }

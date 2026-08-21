@@ -1,6 +1,10 @@
+from __future__ import annotations
+
+import ast
 from pathlib import Path
 
 APP_ROOT = Path(__file__).parents[1] / "app"
+API_ROOT = APP_ROOT.parent
 CAPABILITIES = (
     "auth",
     "download",
@@ -34,7 +38,7 @@ def test_new_library_query_path_contains_no_textual_sql() -> None:
     paths = (
         APP_ROOT / "modules" / "library" / "infrastructure" / "queries.py",
         APP_ROOT / "modules" / "library" / "infrastructure" / "filter_query.py",
-        APP_ROOT / "modules" / "library" / "infrastructure" / "work_list.py",
+        APP_ROOT / "modules" / "library" / "infrastructure" / "book_list.py",
         APP_ROOT / "bootstrap" / "library.py",
     )
     forbidden = (
@@ -292,21 +296,9 @@ def test_import_legacy_persistence_and_schema_adapters_have_been_removed() -> No
                 assert token not in source, f"{path}: {token}"
 
 
-def test_persistent_import_worker_does_not_touch_session_orm_or_field_dicts() -> None:
+def test_legacy_persistent_import_worker_has_been_removed() -> None:
     path = APP_ROOT / "worker" / "persistent_import_queue.py"
-    source = path.read_text(encoding="utf-8")
-    forbidden = (
-        "sqlalchemy",
-        "from sqlalchemy",
-        "orm.Session",
-        "dict[str, Any]",
-        "task_repository",
-        "library_repository",
-        "import_records",
-        ".infrastructure",
-    )
-    for token in forbidden:
-        assert token not in source, f"{path.name}: {token}"
+    assert not path.exists()
 
 
 def test_worker_importer_compatibility_shim_has_been_removed() -> None:
@@ -338,15 +330,17 @@ def test_import_legacy_query_and_task_compatibility_are_removed() -> None:
 
     query_port = (
         APP_ROOT / "modules" / "imports" / "application" / "query_ports.py"
-    ).read_text(encoding="utf-8")
-    assert "__getattr__" not in query_port
-    assert "Callable[..., Any]" not in query_port
-
-    dto = (APP_ROOT / "modules" / "imports" / "application" / "dto.py").read_text(
-        encoding="utf-8"
     )
-    for token in ("to_legacy_dict", "def __getitem__", "def get("):
-        assert token not in dto
+    if query_port.exists():
+        source = query_port.read_text(encoding="utf-8")
+        assert "__getattr__" not in source
+        assert "Callable[..., Any]" not in source
+
+    dto_path = APP_ROOT / "modules" / "imports" / "application" / "dto.py"
+    if dto_path.exists():
+        dto = dto_path.read_text(encoding="utf-8")
+        for token in ("to_legacy_dict", "def __getitem__", "def get("):
+            assert token not in dto
 
     bootstrap = (APP_ROOT / "bootstrap" / "imports.py").read_text(encoding="utf-8")
     assert "_coerce_import_task" not in bootstrap
@@ -354,18 +348,7 @@ def test_import_legacy_query_and_task_compatibility_are_removed() -> None:
 
 
 def test_persistent_import_worker_does_not_reexport_commands() -> None:
-    source = (
-        APP_ROOT / "worker" / "persistent_import_queue.py"
-    ).read_text(encoding="utf-8")
-    for command in (
-        "claim_next_import_task",
-        "enqueue_import_task",
-        "fail_claimed_import_task",
-        "process_import_task",
-        "recover_stale_import_tasks",
-        "stage_import_task",
-    ):
-        assert command not in source
+    assert not (APP_ROOT / "worker" / "persistent_import_queue.py").exists()
 
 
 def test_retired_source_http_persistence_has_been_removed() -> None:
@@ -378,7 +361,6 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
     paths = (
         APP_ROOT / "modules" / "library" / "infrastructure" / "projections.py",
         APP_ROOT / "modules" / "library" / "infrastructure" / "storage.py",
-        APP_ROOT / "modules" / "imports" / "infrastructure" / "import_http.py",
         APP_ROOT / "modules" / "download" / "infrastructure" / "download_http.py",
     )
     forbidden = (
@@ -612,7 +594,7 @@ def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
             assert "heartbeat" not in source
         for token in forbidden:
             assert token not in source, f"{path}: forbidden {token}"
-        if path.name in {"work_queue.py", "worker.py", "ports.py"}:
+        if path.name in {"task_queue.py", "worker.py", "ports.py"}:
             for token in heartbeat_paths_extra:
                 assert token not in source, f"{path}: forbidden {token}"
 
@@ -699,3 +681,215 @@ def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:
         source = path.read_text(encoding="utf-8")
         for token in imports_forbidden:
             assert token not in source, f"{path}: {token}"
+
+
+_LEGACY_IDENTITY_NAMES = frozenset(
+    {
+        "LibraryWork",
+        "LibraryVersion",
+        "LibraryVolume",
+        "LibraryFile",
+        "LibraryReadingUnit",
+        "LibraryReadingProgress",
+        "WorkQueuePort",
+        "SqlAlchemyReadableResourceWorkQueue",
+        "WorkRecordMutation",
+        "UpdateWorkRecord",
+        "ApplyWorkMetadata",
+        "VolumeMediaKindSource",
+        "IMPLICIT_VERSION_SOURCE_KEY",
+        "sync_work_facets",
+        "metadata_context_for_work",
+        "update_work",
+        "get_work",
+        "work_entity_record",
+        "for_visible_work",
+        "mark_work_organize_status",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }
+)
+
+_LEGACY_IDENTITY_WIRE_KEYS = frozenset(
+    {
+        "workId",
+        "versionId",
+        "volumeId",
+        "fileId",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }
+)
+
+
+def _runtime_python_files() -> tuple[Path, ...]:
+    return tuple(
+        path
+        for path in APP_ROOT.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and not (
+            "modules" in path.parts and path.parts[path.parts.index("modules") + 1] == "mobile"
+        )
+    )
+
+
+def _legacy_identity_hits(
+    path: Path,
+    *,
+    include_string_literals: bool = True,
+) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        value: str | None = None
+        if isinstance(node, (ast.Name, ast.Attribute)):
+            value = node.id if isinstance(node, ast.Name) else node.attr
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            value = node.name
+        elif include_string_literals and isinstance(node, ast.Constant):
+            value = node.value if isinstance(node.value, str) else None
+        if value in _LEGACY_IDENTITY_NAMES or value in _LEGACY_IDENTITY_WIRE_KEYS:
+            hits.append(f"{path}:{getattr(node, 'lineno', 0)}:{value}")
+    return hits
+
+
+def test_runtime_and_target_fixture_have_no_legacy_identity_references() -> None:
+    hits = [
+        hit
+        for path in _runtime_python_files()
+        for hit in _legacy_identity_hits(path)
+    ]
+    fixture = (
+        API_ROOT
+        / "tests"
+        / "contract"
+        / "api"
+        / "test_openapi_runtime_regressions.py"
+    )
+    hits.extend(_legacy_identity_hits(fixture, include_string_literals=False))
+    assert hits == [], "legacy identity references:\n" + "\n".join(hits)
+
+
+def test_runtime_has_no_dynamic_table_presence_detection() -> None:
+    hits: list[str] = []
+    for path in _runtime_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_has_table":
+                hits.append(f"{path}:{node.lineno}:_has_table")
+            if isinstance(node, ast.Attribute) and node.attr == "has_table":
+                hits.append(f"{path}:{node.lineno}:has_table")
+    assert hits == [], "dynamic table detection remains:\n" + "\n".join(hits)
+
+
+def test_target_import_pipeline_has_one_queue_and_no_legacy_controls() -> None:
+    queue_directory = (
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource"
+    )
+    assert (queue_directory / "task_queue.py").exists()
+    assert not (queue_directory / "work_queue.py").exists()
+
+    forbidden_files = {
+        "legacy_persistence.py",
+        "import_records.py",
+        "queue_maintenance.py",
+        "maintenance_write.py",
+        "library_import_store.py",
+        "managed_pipeline.py",
+        "orchestration_services.py",
+    }
+    import_root = APP_ROOT / "modules" / "imports"
+    assert not {
+        path.name for path in import_root.rglob("*.py") if path.name in forbidden_files
+    }
+
+    forbidden_tokens = (
+        "WorkQueuePort",
+        "work_queue",
+        "SqlAlchemyReadableResourceWorkQueue",
+        "ImportTaskDTO",
+        "ImportTaskPayload",
+        "claim_next_import_task",
+        "cancel_import_task",
+        "retry_import_task",
+        "clear_import_tasks",
+        "leaseOwner",
+        "leaseExpiresAt",
+        "fencing",
+        "fence_claim",
+        "heartbeat",
+        "candidateRawJson",
+        "ImportWorkItem",
+        "ResourceCandidate",
+        "AssetCandidate",
+    )
+    files = (
+        APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
+        APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "presentation",
+    )
+    paths = [
+        path
+        for root in files
+        for path in (root.rglob("*.py") if root.is_dir() else (root,))
+        if "__pycache__" not in path.parts
+    ]
+    hits = [
+        f"{path}:{token}"
+        for path in paths
+        for token in forbidden_tokens
+        if token in path.read_text(encoding="utf-8")
+    ]
+    assert hits == [], "legacy importer controls remain:\n" + "\n".join(hits)
+
+
+def test_mobile_is_excluded_from_target_backend_capability_changes() -> None:
+    roots = (
+        APP_ROOT / "bootstrap",
+        APP_ROOT / "worker",
+        APP_ROOT / "modules" / "imports",
+        APP_ROOT / "modules" / "library",
+        APP_ROOT / "modules" / "metadata",
+        APP_ROOT / "modules" / "organize",
+    )
+    hits = [
+        path
+        for root in roots
+        for path in root.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and "app.modules.mobile" in path.read_text(encoding="utf-8")
+    ]
+    assert hits == [], "target backend imports a Mobile compatibility shim: " + ", ".join(
+        str(path) for path in hits
+    )
+
+
+def test_fresh_runtime_metadata_matches_the_single_baseline(tmp_path: Path) -> None:
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from app.core.config import Settings
+    from app.db.base import Base
+    from app.db.bootstrap import bootstrap_database
+    from app.db.sqlite import create_sqlite_engine
+
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with engine.connect() as connection:
+            context = MigrationContext.configure(
+                connection,
+                opts={"compare_type": True, "compare_server_default": True},
+            )
+            assert compare_metadata(context, Base.metadata) == []
+    finally:
+        engine.dispose()

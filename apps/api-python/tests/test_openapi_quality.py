@@ -171,3 +171,44 @@ def test_generated_openapi_contains_no_free_form_response_schema(
     assert failures == [], "Unconstrained OpenAPI response schemas:\n" + "\n".join(
         failures
     )
+
+
+def test_generated_openapi_contains_only_target_identity_and_import_surfaces(
+    test_settings: Settings,
+) -> None:
+    schema = create_app(test_settings).openapi()
+    paths = schema.get("paths", {})
+    assert not any(
+        any(segment in path.split("/") for segment in ("works", "versions", "volumes"))
+        for path in paths
+    )
+    assert not any("/import-tasks" in path for path in paths)
+
+    components = schema.get("components", {}).get("schemas", {})
+    assert not any(name.startswith("ImportTask") for name in components)
+
+    retired_wire_keys = {
+        "workId",
+        "versionId",
+        "volumeId",
+        "fileId",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }
+
+    def property_names(value: object) -> set[str]:
+        if isinstance(value, dict):
+            properties = value.get("properties")
+            names = set(properties) if isinstance(properties, dict) else set()
+            return names | {
+                name
+                for child in value.values()
+                for name in property_names(child)
+            }
+        if isinstance(value, list):
+            return {name for child in value for name in property_names(child)}
+        return set()
+
+    assert retired_wire_keys.isdisjoint(property_names(schema))

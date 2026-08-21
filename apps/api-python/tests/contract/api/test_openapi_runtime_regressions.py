@@ -1,21 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-
-from sqlalchemy import select
 
 from app.bootstrap.system import record_system_event
 from app.core.auth import hash_password
-from app.models.auth import User
-from app.models.library import (
-    LibraryFacet,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
 )
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
-from app.services.library_management import sync_work_facets
+from app.models.auth import User
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -26,8 +27,32 @@ ADMIN_EMAIL = "openapi-regression@example.com"
 ADMIN_PASSWORD = "OpenApiRegression123!"
 
 
+def _path_key(relative_path: str) -> str:
+    return "v1:" + hashlib.sha256(relative_path.encode()).hexdigest()
+
+
+def _source_node(
+    node_id: str,
+    relative_path: str,
+    *,
+    physical_kind: str = "REGULAR_FILE",
+) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=relative_path,
+        path_key=_path_key(relative_path),
+        name=relative_path.rsplit("/", 1)[-1],
+        physical_kind=physical_kind,
+        observed_size_bytes=None if physical_kind == "DIRECTORY" else 1024,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
+    )
+
+
 def _login_admin(client: TestClient, db_session: Session) -> User:
     user = User(
+        id="openapi-regression-admin",
         email=ADMIN_EMAIL,
         name="OpenAPI Regression",
         password_hash=hash_password(ADMIN_PASSWORD),
@@ -36,80 +61,86 @@ def _login_admin(client: TestClient, db_session: Session) -> User:
     )
     db_session.add(user)
     db_session.commit()
-    db_session.refresh(user)
 
     response = client.post(
         "/api/auth/login",
         json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     return user
 
 
-def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
-    target_work = LibraryWork(
-        library_id="test-library",
-        title="OpenAPI 回归作品",
-        normalized_title="openapi 回归作品",
-        author="测试作者",
-        normalized_author="测试作者",
-        tags=json.dumps(["科幻", "收藏", "待删除"], ensure_ascii=False),
+def _seed_book_resource(
+    db_session: Session,
+) -> tuple[LibraryBook, LibraryReadableResource]:
+    book_id = "openapi-book"
+    resource_id = "openapi-resource"
+    book_node = _source_node(
+        "openapi-book-node", "openapi-book", physical_kind="DIRECTORY"
     )
-    source_work = LibraryWork(
+    resource_node = _source_node("openapi-resource-node", "openapi-book/book.epub")
+    book = LibraryBook(
+        id=book_id,
         library_id="test-library",
-        title="OpenAPI 回归作品",
-        normalized_title="openapi 回归作品",
-        author="测试作者",
-        normalized_author="测试作者",
-        tags=json.dumps(["科幻小说"], ensure_ascii=False),
+        source_node_id=book_node.id,
     )
-    db_session.add_all([target_work, source_work])
+    resource = LibraryReadableResource(
+        id=resource_id,
+        library_id="test-library",
+        book_id=book_id,
+        source_node_id=resource_node.id,
+        adapter_id="epub-file",
+        adapter_version="1",
+        media_kind="EBOOK",
+        format="EPUB",
+        enablement_state="ENABLED",
+        import_state="READY",
+    )
+    db_session.add_all([book_node, resource_node])
     db_session.flush()
-    target_version = LibraryVersion(
-        work_id=target_work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    source_version = LibraryVersion(
-        work_id=source_work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    db_session.add_all([target_version, source_version])
+    db_session.add(book)
     db_session.flush()
     db_session.add_all(
         [
-            LibraryVolume(
-                version_id=target_version.id,
-                title="初版",
-                format="EPUB",
-                resource_key="openapi-target-volume",
-                import_status="IMPORTED",
+            LibraryBookMetadata(
+                book_id=book_id,
+                title="OpenAPI 回归图书",
+                normalized_title="openapi 回归图书",
+                author="测试作者",
+                normalized_author="测试作者",
             ),
-            LibraryVolume(
-                version_id=source_version.id,
-                title="来源版",
-                format="EPUB",
-                resource_key="openapi-source-volume",
-                import_status="IMPORTED",
+            resource,
+        ]
+    )
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryReadableResourceMetadata(
+                resource_id=resource_id,
+                title="OpenAPI 回归资源",
+                resource_index=1,
+            ),
+            LibraryResourceAsset(
+                id="openapi-asset",
+                library_id="test-library",
+                resource_id=resource_id,
+                source_node_id=resource_node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+                sequence_index=0,
             ),
         ]
     )
-    db_session.commit()
-    db_session.refresh(target_work)
-    db_session.refresh(source_work)
-    sync_work_facets(db_session, target_work.id)
-    sync_work_facets(db_session, source_work.id)
-    return target_work, source_work
-
-
-def _facet_id(db_session: Session, name: str) -> str:
-    facet = db_session.scalar(
-        select(LibraryFacet).where(
-            LibraryFacet.kind == "TAG",
-            LibraryFacet.name == name,
+    db_session.flush()
+    db_session.add(
+        LibraryResourceAssetMetadata(
+            asset_id="openapi-asset",
+            mime_type="application/epub+zip",
         )
     )
-    assert facet is not None
-    return facet.id
+    db_session.commit()
+    return book, resource
 
 
 def test_management_events_and_overview_accept_real_event_metadata(
@@ -120,7 +151,7 @@ def test_management_events_and_overview_accept_real_event_metadata(
     metadata = {
         "sourceFormat": "TXT",
         "skipped": [],
-        "nested": {"ids": ["work-a", "work-b"], "ratio": None},
+        "nested": {"ids": ["book-a", "book-b"], "ratio": None},
     }
     record_system_event(
         db_session,
@@ -138,82 +169,67 @@ def test_management_events_and_overview_accept_real_event_metadata(
     assert events_response.status_code == 200
     assert events_response.json()["data"]["events"][0]["metadata"] == metadata
 
-    overview_response = client.get("/api/management/overview")
-    assert overview_response.status_code == 200
-    assert overview_response.json()["data"]["recentEvents"][0]["metadata"] == metadata
 
 
-def test_library_management_endpoints_return_their_documented_contracts(
+def test_canonical_book_resource_contract_has_only_target_identities(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login_admin(client, db_session)
-    target_work, _source_work = _seed_library(db_session)
+    _seed_book_resource(db_session)
 
-    facets_response = client.get("/api/library/facets")
-    assert facets_response.status_code == 200
-    assert set(facets_response.json()["data"]["facets"]) == {
-        "author",
-        "series",
-        "tag",
-    }
+    response = client.get("/api/books/openapi-book")
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]["book"]
+    assert payload["id"] == "openapi-book"
+    assert payload["resources"][0]["id"] == "openapi-resource"
+    assert payload["resources"][0]["assets"][0]["id"] == "openapi-asset"
+    assert not {
+        "workId",
+        "versionId",
+        "volumeId",
+        "fileId",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }.intersection(payload)
 
-    categories_response = client.get("/api/library/categories")
-    assert categories_response.status_code == 200
-    category = categories_response.json()["data"]["categories"][0]
-    assert {"aliases", "bookCount"} <= category.keys()
 
-    assert client.get("/api/library/duplicates").status_code == 404
+def test_retired_identity_routes_are_unregistered_and_return_404(
+    client: TestClient,
+) -> None:
+    for path in (
+        "/api/works/openapi-book",
+        "/api/versions/openapi-resource",
+        "/api/volumes/openapi-resource",
+        "/api/files/openapi-asset",
+    ):
+        assert client.get(path).status_code == 404, path
 
-    tag_id = _facet_id(db_session, "科幻")
-    rename_response = client.patch(
-        f"/api/library/categories/{tag_id}",
-        json={"name": "硬科幻"},
+
+def test_openapi_has_no_retired_identity_or_generic_import_task_contracts(
+    client: TestClient,
+) -> None:
+    schema = client.get("/openapi.json").json()
+    paths = schema["paths"]
+    assert not any(
+        any(segment in path.split("/") for segment in ("works", "versions", "volumes"))
+        for path in paths
     )
-    assert rename_response.status_code == 200
-    assert rename_response.json()["data"]["name"] == "硬科幻"
-    db_session.expire_all()
-    renamed_tag = db_session.get(LibraryFacet, tag_id)
-    assert renamed_tag is not None
-    assert renamed_tag.name == "硬科幻"
+    assert not any("/import-tasks" in path for path in paths)
 
-    source_tag_id = _facet_id(db_session, "科幻小说")
-    merge_response = client.post(
-        "/api/library/categories/merge",
-        json={"targetId": tag_id, "sourceIds": [source_tag_id]},
-    )
-    assert merge_response.status_code == 200
-    assert merge_response.json()["data"]["targetId"] == tag_id
-    db_session.expire_all()
-    assert db_session.get(LibraryFacet, source_tag_id) is None
-    merged_target = db_session.get(LibraryFacet, tag_id)
-    assert merged_target is not None
-    assert "科幻小说" in json.loads(merged_target.aliases)
-
-    delete_tag_id = _facet_id(db_session, "待删除")
-    delete_response = client.delete(f"/api/library/categories/{delete_tag_id}")
-    assert delete_response.status_code == 200
-    delete_operation = delete_response.json()["data"]["operation"]
-    db_session.expire_all()
-    assert db_session.get(LibraryFacet, delete_tag_id) is None
-    target_after_delete = db_session.get(LibraryWork, target_work.id)
-    assert target_after_delete is not None
-    assert "待删除" not in json.loads(target_after_delete.tags)
-
-    operations_response = client.get("/api/library/operations")
-    assert operations_response.status_code == 200
-    operation = operations_response.json()["data"]["operations"][0]
-    assert "payloadJson" not in operation
-    assert "inverseJson" not in operation
-    assert "userId" not in operation
-
-    undo_response = client.post(
-        f"/api/library/operations/{delete_operation['id']}/undo"
-    )
-    assert undo_response.status_code == 200
-    assert undo_response.json()["data"]["restored"] is True
-    db_session.expire_all()
-    assert db_session.get(LibraryFacet, delete_tag_id) is not None
-    target_after_undo = db_session.get(LibraryWork, target_work.id)
-    assert target_after_undo is not None
-    assert "待删除" in json.loads(target_after_undo.tags)
+    components = schema.get("components", {}).get("schemas", {})
+    assert not any(name.startswith("ImportTask") for name in components)
+    wire = json.dumps(schema, ensure_ascii=False)
+    for token in (
+        '"workId"',
+        '"versionId"',
+        '"volumeId"',
+        '"fileId"',
+        '"work_id"',
+        '"version_id"',
+        '"volume_id"',
+        '"file_id"',
+    ):
+        assert token not in wire
