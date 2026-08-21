@@ -128,12 +128,12 @@ def _prepared_event(
     )
 
 
-@router.get("/email-settings")
+@router.get("/email-settings", response_model=EmailSettingsResponse)
 def read_email_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> EmailSettingsResponse:
+) -> EmailSettingsResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -145,16 +145,18 @@ def read_email_settings(
         return fail(str(exc), status_code=400)
 
 
-@router.put("/email-settings")
+@router.put("/email-settings", response_model=EmailSettingsResponse)
 def update_email_settings(
     request: Request,
     payload: Annotated[UpdateEmailSettingsRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> EmailSettingsResponse:
+) -> EmailSettingsResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     actor_id = user.id
     db.close()
     if payload is None:
@@ -179,13 +181,13 @@ def update_email_settings(
     return ok(public_email_settings(db))
 
 
-@router.post("/email-settings/smtp-test")
+@router.post("/email-settings/smtp-test", response_model=SmtpTestResponse)
 def smtp_test(
     request: Request,
     payload: Annotated[UpdateEmailSettingsRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> SmtpTestResponse:
+) -> SmtpTestResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -208,15 +210,17 @@ def smtp_test(
     return ok({"connected": True, "message": "SMTP 连接、加密与认证均正常"})
 
 
-@router.get("/kindle-settings")
+@router.get("/kindle-settings", response_model=KindleSettingsResponse)
 def read_kindle_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> KindleSettingsResponse:
+) -> KindleSettingsResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     try:
         email_values = get_email_settings(db, include_password=False)
     except EmailSettingsError as exc:
@@ -237,16 +241,18 @@ def read_kindle_settings(
     )
 
 
-@router.put("/kindle-settings")
+@router.put("/kindle-settings", response_model=KindleSettingsResponse)
 def update_kindle_settings(
     request: Request,
     payload: Annotated[UpdateKindleSettingsRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> KindleSettingsResponse:
+) -> KindleSettingsResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     user_id = user.id
     db.close()
     if payload is None:
@@ -264,7 +270,7 @@ def update_kindle_settings(
     return ok({"kindle": {"email": email}})
 
 
-@router.get("/kindle-send-tasks")
+@router.get("/kindle-send-tasks", response_model=KindleTasksResponse)
 def list_kindle_send_tasks(
     request: Request,
     status: str | None = None,
@@ -272,10 +278,12 @@ def list_kindle_send_tasks(
     pageSize: int = 100,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> KindleTasksResponse:
+) -> KindleTasksResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     page = max(1, page)
     page_size = min(200, max(1, pageSize))
     allowed_statuses = {"queued", "sending", "sent", "failed", "cancelled", "unknown"}
@@ -310,16 +318,18 @@ def list_kindle_send_tasks(
     )
 
 
-@router.post("/kindle-send-tasks")
+@router.post("/kindle-send-tasks", response_model=KindleTaskResponse)
 def create_kindle_send_task(
     request: Request,
     payload: Annotated[CreateKindleTaskRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> KindleTaskResponse:
+) -> KindleTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     if payload is None:
         return fail("发送参数格式不正确", status_code=400)
     asset_id = str(payload.asset_id or "").strip()
@@ -438,16 +448,18 @@ def create_kindle_send_task(
     return ok({"task": _task_view(task), "alreadyQueued": False}, status_code=201)
 
 
-@router.post("/kindle-send-tasks/{task_id}/cancel")
+@router.post("/kindle-send-tasks/{task_id}/cancel", response_model=KindleTaskResponse)
 def cancel_kindle_send_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> KindleTaskResponse:
+) -> KindleTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     task = _task(db, task_id)
     db.close()
     if not task:
@@ -476,16 +488,18 @@ def cancel_kindle_send_task(
     return ok({"task": _task_view(cancelled_task)})
 
 
-@router.post("/kindle-send-tasks/{task_id}/retry")
+@router.post("/kindle-send-tasks/{task_id}/retry", response_model=KindleTaskResponse)
 def retry_kindle_send_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> KindleTaskResponse:
+) -> KindleTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     task = _task(db, task_id)
     db.close()
     if not task:
@@ -520,16 +534,18 @@ def retry_kindle_send_task(
     return ok({"task": _task_view(retried_task)})
 
 
-@router.delete("/kindle-send-tasks/{task_id}")
+@router.delete("/kindle-send-tasks/{task_id}", response_model=DeletedKindleTaskResponse)
 def delete_kindle_send_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedKindleTaskResponse:
+) -> DeletedKindleTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
     task = _task(db, task_id)
     db.close()
     if not task:

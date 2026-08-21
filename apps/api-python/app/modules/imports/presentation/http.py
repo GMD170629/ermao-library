@@ -90,13 +90,13 @@ def _system_setting_value(db: Session, key: str) -> str | None:
     return str(parsed).strip() if parsed is not None and str(parsed).strip() else None
 
 
-@router.get("/libraries")
+@router.get("/libraries", response_model=LibrariesResponse)
 def list_library_roots(
     request: Request,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> LibrariesResponse:
+) -> LibrariesResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -123,7 +123,9 @@ def list_library_roots(
     )
 
 
-@router.get("/libraries/{library_id}/import-tasks")
+@router.get(
+    "/libraries/{library_id}/import-tasks", response_model=LibraryImportTaskListResponse
+)
 def list_library_import_tasks(
     library_id: str,
     request: Request,
@@ -134,7 +136,7 @@ def list_library_import_tasks(
     ),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> LibraryImportTaskListResponse:
+) -> LibraryImportTaskListResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -169,13 +171,15 @@ def list_library_import_tasks(
     )
 
 
-@router.get("/library-import-tasks/{task_id}")
+@router.get(
+    "/library-import-tasks/{task_id}", response_model=LibraryImportTaskDetailResponse
+)
 def get_library_import_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> LibraryImportTaskDetailResponse:
+) -> LibraryImportTaskDetailResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -188,14 +192,14 @@ def get_library_import_task(
     return ok({"task": task})
 
 
-@router.get("/libraries/tree")
+@router.get("/libraries/tree", response_model=LibraryDirectoryResponse)
 def library_tree(
     request: Request,
     path: str | None = None,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> LibraryDirectoryResponse:
+) -> LibraryDirectoryResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -218,14 +222,14 @@ def library_tree(
     return ok({"node": node})
 
 
-@router.post("/libraries")
+@router.post("/libraries", response_model=LibraryResponse)
 def create_library(
     payload: CreateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    LibraryResponse,
+    LibraryResponse | Response,
     ErrorResponses(
         ImportBadRequestError,
         ImportConflictError,
@@ -283,7 +287,7 @@ def create_library(
     return ok({"library": get_library(db, library_id) or library}, status_code=201)
 
 
-@router.patch("/libraries/{library_id}")
+@router.patch("/libraries/{library_id}", response_model=LibraryResponse)
 def update_library(
     library_id: str,
     payload: UpdateLibraryRequest,
@@ -291,7 +295,7 @@ def update_library(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    LibraryResponse,
+    LibraryResponse | Response,
     ErrorResponses(
         ImportBadRequestError,
         ImportConflictError,
@@ -367,13 +371,13 @@ def update_library(
     return ok({"library": updated})
 
 
-@router.delete("/libraries/{library_id}")
+@router.delete("/libraries/{library_id}", response_model=DeletedLibraryResponse)
 def delete_library(
     library_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedLibraryResponse:
+) -> DeletedLibraryResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -426,26 +430,28 @@ def _parsed_release_title(title: str) -> dict[str, object]:
     }
 
 
-@router.get("/tracking/release-title-parser")
+@router.get("/tracking/release-title-parser", response_model=ParsedReleaseTitleResponse)
 def release_title_parser_get(
     request: Request,
     title: str = "",
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ParsedReleaseTitleResponse:
+) -> ParsedReleaseTitleResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     return ok(_parsed_release_title(title))
 
 
-@router.post("/tracking/release-title-parser")
+@router.post(
+    "/tracking/release-title-parser", response_model=ParsedReleaseTitleResponse
+)
 def release_title_parser(
     request: Request,
     payload: Annotated[ParseReleaseTitleRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ParsedReleaseTitleResponse:
+) -> ParsedReleaseTitleResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error

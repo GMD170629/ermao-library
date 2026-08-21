@@ -28,7 +28,7 @@ class FilterFieldDefinition(HttpContractModel):
     option_source: str | None = Field(default=None, alias="optionSource")
     allow_custom: bool = Field(default=False, alias="allowCustom")
     unit: str | None = None
-    value_scale: str | None = Field(default=None, alias="valueScale")
+    value_scale: int | None = Field(default=None, alias="valueScale")
     options: list[FilterOption] = Field(default_factory=list)
 
 

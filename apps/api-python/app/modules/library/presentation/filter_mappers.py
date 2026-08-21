@@ -39,7 +39,7 @@ def filter_schema_payload(schema: ApplicationFilterSchema) -> FilterSchemaPayloa
                 type=field.field_type,
                 operators=list(field.operators),
                 optionSource=field.option_source,
-                allowCustom=field.allow_custom,
+                allowCustom=bool(field.allow_custom),
                 unit=field.unit,
                 valueScale=field.value_scale,
                 options=[_filter_option(option) for option in options],

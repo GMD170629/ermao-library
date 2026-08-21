@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import types
 from collections import defaultdict
-from typing import Any, Never, NoReturn
+from typing import Any, Never, NoReturn, Union, cast, get_args, get_origin
 
 from fastapi import Request
+from fastapi.datastructures import DefaultPlaceholder
 from fastapi.routing import APIRoute
 from pydantic import TypeAdapter
 from starlette.responses import Response
@@ -27,7 +29,10 @@ class TypedContractRoute(APIRoute):
         error_models_by_status: dict[int, list[type[Any]]] = defaultdict(list)
         for error_type in declared_error_responses(endpoint):
             error_models_by_status[error_type.status_code].append(
-                ErrorEnvelope[error_type.body_model]
+                cast(
+                    type[Any],
+                    ErrorEnvelope.__class_getitem__(error_type.body_model),
+                )
             )
 
         generated_responses: dict[int | str, dict[str, Any]] = dict(
@@ -53,8 +58,10 @@ class TypedContractRoute(APIRoute):
                 "description": "Typed error response",
             }
         return_annotation = return_contract_type(endpoint)
-        if isinstance(return_annotation, type) and issubclass(
-            return_annotation, Response
+        if (
+            isinstance(return_annotation, type)
+            and issubclass(return_annotation, Response)
+            and isinstance(kwargs.get("response_model"), DefaultPlaceholder)
         ):
             kwargs["response_model"] = None
         if return_annotation in {Never, NoReturn}:
@@ -69,17 +76,12 @@ class TypedContractRoute(APIRoute):
             }
         kwargs["responses"] = generated_responses
         super().__init__(path, endpoint, **kwargs)
-        success_model = (
-            return_annotation if return_annotation is not None else self.response_model
-        )
+        success_model = _success_model(return_annotation, self.response_model)
         self._success_contract = (
             None
             if self.response_field is None
             or return_annotation in {Never, NoReturn}
-            or (
-                isinstance(return_annotation, type)
-                and issubclass(return_annotation, Response)
-            )
+            or success_model is None
             else TypeAdapter(success_model)
         )
         self._error_contracts = {
@@ -115,3 +117,20 @@ def _union_models(models: list[type[Any]]) -> Any:
     for model in models[1:]:
         result |= model
     return result
+
+
+def _success_model(annotation: object | None, response_model: Any) -> Any:
+    """Return the JSON success branch of a response-capable route contract."""
+
+    if isinstance(annotation, type) and issubclass(annotation, Response):
+        return response_model
+    origin = get_origin(annotation)
+    if origin in {Union, types.UnionType}:
+        candidates = tuple(
+            candidate
+            for candidate in get_args(annotation)
+            if not (isinstance(candidate, type) and issubclass(candidate, Response))
+        )
+        if len(candidates) == 1:
+            return candidates[0]
+    return annotation if annotation is not None else response_model

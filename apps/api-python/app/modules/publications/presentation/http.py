@@ -142,34 +142,36 @@ def _manifest(publication: NormalizedPublication) -> PublicationManifest:
             children=[toc(child) for child in value.children] or None,
         )
 
-    return PublicationManifest(
-        metadata=PublicationMetadata(
-            identifier=publication.identifier,
-            title=publication.title,
-            author=publication.author,
-            language=publication.language,
-            conformsTo=[_EPUB_PROFILE],
-            readingProgression=cast(
-                Literal["ltr", "rtl"], publication.reading_progression
+    return PublicationManifest.model_validate(
+        {
+            "metadata": PublicationMetadata(
+                identifier=publication.identifier,
+                title=publication.title,
+                author=publication.author,
+                language=publication.language,
+                conformsTo=[_EPUB_PROFILE],
+                readingProgression=cast(
+                    Literal["ltr", "rtl"], publication.reading_progression
+                ),
             ),
-        ),
-        links=[
-            PublicationLink(
-                href="manifest.json", type=_MANIFEST_MEDIA_TYPE, rel=["self"]
+            "links": [
+                PublicationLink(
+                    href="manifest.json", type=_MANIFEST_MEDIA_TYPE, rel=["self"]
+                ),
+                PublicationLink(
+                    href="positions.json", type=_POSITIONS_MEDIA_TYPE, rel=["positions"]
+                ),
+            ],
+            "readingOrder": [link(value) for value in publication.reading_order],
+            "resources": [link(value) for value in publication.resources],
+            "toc": [toc(value) for value in publication.toc],
+            "runtime": PublicationRuntimeMetadata(
+                sourceSizeBytes=publication.revision.source_size_bytes,
+                sourceMtimeMs=publication.revision.source_mtime_ms,
+                parser=publication.revision.parser,
+                normalization=publication.revision.normalization,
             ),
-            PublicationLink(
-                href="positions.json", type=_POSITIONS_MEDIA_TYPE, rel=["positions"]
-            ),
-        ],
-        readingOrder=[link(value) for value in publication.reading_order],
-        resources=[link(value) for value in publication.resources],
-        toc=[toc(value) for value in publication.toc],
-        runtime=PublicationRuntimeMetadata(
-            sourceSizeBytes=publication.revision.source_size_bytes,
-            sourceMtimeMs=publication.revision.source_mtime_ms,
-            parser=publication.revision.parser,
-            normalization=publication.revision.normalization,
-        ),
+        }
     )
 
 

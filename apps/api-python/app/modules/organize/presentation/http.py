@@ -6,6 +6,7 @@ import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
@@ -18,15 +19,22 @@ from app.db.session import get_db
 from app.modules.library.public import book_view, get_book
 from app.modules.organize.application.dto import OrganizeJobListItem
 from app.modules.organize.presentation.schemas import (
+    DeletedOrganizeJobPayload,
     DeletedOrganizeJobResponse,
     OrganizeBadRequestError,
+    OrganizeCandidatesPayload,
     OrganizeCandidatesResponse,
     OrganizeErrorBody,
+    OrganizeJobPayload,
     OrganizeJobResponse,
+    OrganizeJobsPayload,
     OrganizeJobsResponse,
     OrganizeNotFoundError,
+    OrganizePolicyPayload,
     OrganizePolicyResponse,
+    OrganizeRunsPayload,
     OrganizeRunsResponse,
+    PendingOrganizeJobsPayload,
     PendingOrganizeJobsResponse,
     UpdateOrganizePolicyRequest,
 )
@@ -175,28 +183,32 @@ def _organize_job_view(
     }
 
 
-@router.get("/organize/policy")
+@router.get("/organize/policy", response_model=OrganizePolicyResponse)
 def get_organize_policy_route(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OrganizePolicyResponse:
+) -> OrganizePolicyResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     try:
-        return OrganizePolicyResponse(data={"policy": get_organize_policy(db)})
+        return OrganizePolicyResponse(
+            data=OrganizePolicyPayload.model_validate(
+                {"policy": get_organize_policy(db)}
+            )
+        )
     except ValueError as exc:
         return fail(str(exc), status_code=503)
 
 
-@router.put("/organize/policy")
+@router.put("/organize/policy", response_model=OrganizePolicyResponse)
 async def update_organize_policy_route(
     payload: UpdateOrganizePolicyRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OrganizePolicyResponse:
+) -> OrganizePolicyResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -205,47 +217,53 @@ async def update_organize_policy_route(
             db,
             payload.model_dump(by_alias=True, exclude_unset=True),
         )
-        return OrganizePolicyResponse(data={"policy": policy})
+        return OrganizePolicyResponse(
+            data=OrganizePolicyPayload.model_validate({"policy": policy})
+        )
     except (TypeError, ValueError) as exc:
         return fail(str(exc), status_code=400)
 
 
-@router.get("/organize/candidates")
+@router.get("/organize/candidates", response_model=OrganizeCandidatesResponse)
 def get_organize_candidates_route(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OrganizeCandidatesResponse:
+) -> OrganizeCandidatesResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     try:
         return OrganizeCandidatesResponse(
-            data={"candidates": organize_candidate_summary(db)}
+            data=OrganizeCandidatesPayload.model_validate(
+                {"candidates": organize_candidate_summary(db)}
+            )
         )
     except ValueError as exc:
         return fail(str(exc), status_code=503)
 
 
-@router.get("/organize/runs")
+@router.get("/organize/runs", response_model=OrganizeRunsResponse)
 def list_organize_runs_route(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OrganizeRunsResponse:
+) -> OrganizeRunsResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     limit = _positive_int(request.query_params.get("limit"), 20, 100)
-    return OrganizeRunsResponse(data={"runs": list_organize_runs(db, limit)})
+    return OrganizeRunsResponse(
+        data=OrganizeRunsPayload.model_validate({"runs": list_organize_runs(db, limit)})
+    )
 
 
-@router.get("/organize/jobs")
+@router.get("/organize/jobs", response_model=OrganizeJobsResponse)
 def list_organize_jobs(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OrganizeJobsResponse:
+) -> OrganizeJobsResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -279,24 +297,26 @@ def list_organize_jobs(
         and provider.get("name")
     }
     return OrganizeJobsResponse(
-        data={
-            "jobs": jobs,
-            "page": page_result.page,
-            "pageSize": page_result.page_size,
-            "total": page_result.total,
-            "totalPages": page_result.total_pages,
-            "statusCounts": page_result.status_counts,
-            "providerNames": provider_names,
-        }
+        data=OrganizeJobsPayload.model_validate(
+            {
+                "jobs": jobs,
+                "page": page_result.page,
+                "pageSize": page_result.page_size,
+                "total": page_result.total,
+                "totalPages": page_result.total_pages,
+                "statusCounts": page_result.status_counts,
+                "providerNames": provider_names,
+            }
+        )
     )
 
 
-@router.get("/organize/pending")
+@router.get("/organize/pending", response_model=PendingOrganizeJobsResponse)
 def list_pending_organize(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> PendingOrganizeJobsResponse:
+) -> PendingOrganizeJobsResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -321,17 +341,19 @@ def list_pending_organize(
         is not None
     ]
     return PendingOrganizeJobsResponse(
-        data={"jobs": jobs, "books": [job["book"] for job in jobs], "total": len(jobs)}
+        data=PendingOrganizeJobsPayload.model_validate(
+            {"jobs": jobs, "books": [job["book"] for job in jobs], "total": len(jobs)}
+        )
     )
 
 
-@router.get("/organize/jobs/{job_id}")
+@router.get("/organize/jobs/{job_id}", response_model=OrganizeJobResponse)
 def get_organize_job(
     job_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[OrganizeJobResponse, ErrorResponses(OrganizeNotFoundError)]:
+) -> Annotated[OrganizeJobResponse | Response, ErrorResponses(OrganizeNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -341,17 +363,18 @@ def get_organize_job(
     view = _organize_job_view(db, job, getattr(user, "id", None))
     if not view:
         raise OrganizeNotFoundError(OrganizeErrorBody(message="整理任务不存在"))
-    return OrganizeJobResponse(data={"job": view})
+    return OrganizeJobResponse(data=OrganizeJobPayload.model_validate({"job": view}))
 
 
-@router.post("/organize/jobs/{job_id}/recognize")
+@router.post("/organize/jobs/{job_id}/recognize", response_model=OrganizeJobResponse)
 def recognize_organize_job_route(
     job_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    OrganizeJobResponse, ErrorResponses(OrganizeBadRequestError, OrganizeNotFoundError)
+    OrganizeJobResponse | Response,
+    ErrorResponses(OrganizeBadRequestError, OrganizeNotFoundError),
 ]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
@@ -360,7 +383,9 @@ def recognize_organize_job_route(
         recognize_organize_job(db, job_id)
         job = organize_runs.get_job_row(db, job_id) or {}
         return OrganizeJobResponse(
-            data={"job": _organize_job_view(db, job, getattr(user, "id", None))}
+            data=OrganizeJobPayload.model_validate(
+                {"job": _organize_job_view(db, job, getattr(user, "id", None))}
+            )
         )
     except ValueError as exc:
         body = OrganizeErrorBody(message=str(exc))
@@ -369,21 +394,25 @@ def recognize_organize_job_route(
         raise OrganizeBadRequestError(body) from exc
 
 
-@router.delete("/organize/jobs/{job_id}")
+@router.delete("/organize/jobs/{job_id}", response_model=DeletedOrganizeJobResponse)
 def delete_organize_job_route(
     job_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    DeletedOrganizeJobResponse,
+    DeletedOrganizeJobResponse | Response,
     ErrorResponses(OrganizeBadRequestError, OrganizeNotFoundError),
 ]:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     try:
-        return DeletedOrganizeJobResponse(data=delete_organize_job(db, job_id))
+        return DeletedOrganizeJobResponse(
+            data=DeletedOrganizeJobPayload.model_validate(
+                delete_organize_job(db, job_id)
+            )
+        )
     except ValueError as exc:
         body = OrganizeErrorBody(message=str(exc))
         if "不存在" in str(exc):

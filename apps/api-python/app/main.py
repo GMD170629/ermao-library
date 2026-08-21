@@ -1,11 +1,13 @@
 import logging
 from collections.abc import Callable, Generator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.types import ExceptionHandler
 
 from app.api.error_handlers import (
     request_validation_error_handler,
@@ -163,8 +165,16 @@ def create_app(
     app = FastAPI(
         title=settings.app_name, version=settings.app_version, lifespan=lifespan
     )
-    app.add_exception_handler(HttpContractError, typed_http_error_handler)
-    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+    # Starlette types handlers against ``Exception`` while dispatching the
+    # registered exception class guarantees the narrower concrete type.
+    app.add_exception_handler(
+        HttpContractError,
+        cast(ExceptionHandler, typed_http_error_handler),
+    )
+    app.add_exception_handler(
+        RequestValidationError,
+        cast(ExceptionHandler, request_validation_error_handler),
+    )
     app.state.session_factory = runtime_factory
     app.state.close_factory_sessions = True
     if session_factory is not None:

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.contracts.http import ErrorEnvelope
 from app.contracts.http_errors import HttpContractError
@@ -20,9 +23,12 @@ from app.core.config import get_settings
 
 async def typed_http_error_handler(
     _request: Request,
-    error: HttpContractError,
+    error: HttpContractError[BaseModel],
 ) -> JSONResponse:
-    envelope_type = ErrorEnvelope[error.body_model]
+    envelope_type = cast(
+        type[ErrorEnvelope[BaseModel]],
+        ErrorEnvelope.__class_getitem__(error.body_model),
+    )
     envelope = envelope_type(error=error.body)
     response = JSONResponse(
         status_code=error.status_code,

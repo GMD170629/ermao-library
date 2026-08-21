@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Generic, TypeVar, get_args, get_origin, get_type_hints
+from typing import (
+    Annotated,
+    Generic,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from pydantic import BaseModel
 
@@ -25,7 +33,10 @@ class HttpContractError(Exception, Generic[ErrorBodyT]):
 
     @property
     def response_model(self) -> type[ErrorEnvelope[ErrorBodyT]]:
-        return ErrorEnvelope[self.body_model]
+        return cast(
+            type[ErrorEnvelope[ErrorBodyT]],
+            ErrorEnvelope.__class_getitem__(self.body_model),
+        )
 
 
 class BasicBadRequestError(HttpContractError[MessageError]):
@@ -71,9 +82,12 @@ class BasicInternalError(HttpContractError[MessageError]):
 class ErrorResponses:
     """Return-annotation metadata listing the expected HTTP errors."""
 
-    errors: tuple[type[HttpContractError[BaseModel]], ...]
+    # This metadata is intentionally body-type agnostic: a route may declare
+    # errors whose public bodies are capability-specific models.  The handler
+    # still validates each body through the concrete error class at runtime.
+    errors: tuple[type[HttpContractError], ...]
 
-    def __init__(self, *errors: type[HttpContractError[BaseModel]]):
+    def __init__(self, *errors: type[HttpContractError]):
         object.__setattr__(self, "errors", errors)
 
 

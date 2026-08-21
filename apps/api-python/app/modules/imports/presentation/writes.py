@@ -33,6 +33,7 @@ from app.modules.imports.application.readable_resource.continue_import import (
 )
 from app.modules.imports.presentation.path_helpers import enabled_library_for_path
 from app.modules.imports.presentation.schemas import (
+    ContinueImportPayload,
     ContinueImportResponse,
     ImportBadRequestError,
     ImportErrorBody,
@@ -40,6 +41,7 @@ from app.modules.imports.presentation.schemas import (
     ImportForbiddenError,
     ImportInternalError,
     ImportNotFoundError,
+    ImportUploadPayload,
     ImportUploadResponse,
 )
 from app.modules.imports.public import (
@@ -96,7 +98,7 @@ def _continue_payload(result: ContinueImportResult) -> dict[str, object]:
     }
 
 
-@router.post("/books/import", status_code=202)
+@router.post("/books/import", status_code=202, response_model=ImportUploadResponse)
 def import_book_files(
     request: Request,
     file: Annotated[list[UploadFile] | None, File()] = None,
@@ -105,7 +107,7 @@ def import_book_files(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    ImportUploadResponse,
+    ImportUploadResponse | Response,
     ErrorResponses(
         ImportBadRequestError,
         ImportForbiddenError,
@@ -236,29 +238,35 @@ def import_book_files(
         },
     )
     return ImportUploadResponse(
-        data={
-            "results": [
-                {
-                    "sourcePath": str(saved.path),
-                    "file": saved.filename,
-                    "sizeBytes": saved.size_bytes,
-                }
-                for saved in saved_uploads
-            ],
-            "saved": len(saved_uploads),
-            "taskId": result.task_id,
-        }
+        data=ImportUploadPayload.model_validate(
+            {
+                "results": [
+                    {
+                        "sourcePath": str(saved.path),
+                        "file": saved.filename,
+                        "sizeBytes": saved.size_bytes,
+                    }
+                    for saved in saved_uploads
+                ],
+                "saved": len(saved_uploads),
+                "taskId": result.task_id,
+            }
+        )
     )
 
 
-@router.post("/libraries/{library_id}/scan", status_code=202)
+@router.post(
+    "/libraries/{library_id}/scan",
+    status_code=202,
+    response_model=ContinueImportResponse,
+)
 def continue_library(
     library_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    ContinueImportResponse,
+    ContinueImportResponse | Response,
     ErrorResponses(ImportForbiddenError, ImportNotFoundError),
 ]:
     user, auth_error = _auth(db, request, settings)
@@ -276,17 +284,23 @@ def continue_library(
         result = continue_library_import(db, library_id)
     except LookupError:
         _raise_import_error("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
-    return ContinueImportResponse(data=_continue_payload(result))
+    return ContinueImportResponse(
+        data=ContinueImportPayload.model_validate(_continue_payload(result))
+    )
 
 
-@router.post("/source-nodes/{source_node_id}/continue", status_code=202)
+@router.post(
+    "/source-nodes/{source_node_id}/continue",
+    status_code=202,
+    response_model=ContinueImportResponse,
+)
 def continue_source_node(
     source_node_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    ContinueImportResponse,
+    ContinueImportResponse | Response,
     ErrorResponses(ImportForbiddenError, ImportNotFoundError),
 ]:
     user, auth_error = _auth(db, request, settings)
@@ -307,7 +321,9 @@ def continue_source_node(
         result = continue_source_import(db, source_node_id)
     except LookupError:
         _raise_import_error("目录不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
-    return ContinueImportResponse(data=_continue_payload(result))
+    return ContinueImportResponse(
+        data=ContinueImportPayload.model_validate(_continue_payload(result))
+    )
 
 
 __all__ = ["router"]

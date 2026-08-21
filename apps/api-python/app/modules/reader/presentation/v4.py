@@ -122,7 +122,10 @@ ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 _PUBLICATION_SERVER_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt"})
 LOGGER = logging.getLogger(__name__)
 _COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar"})
-_COMIC_IMAGE_VARIANTS = ["original", "data-saver"]
+_COMIC_IMAGE_VARIANTS: list[Literal["original", "data-saver"]] = [
+    "original",
+    "data-saver",
+]
 _COMIC_ARCHIVE_MIME_TYPES = {
     "cbz": "application/vnd.comicbook+zip",
     "zip": "application/zip",
@@ -730,7 +733,7 @@ def get_comic_page_v4(
         )
     page = index.pages[page_index]
     source = index.source_for(page.asset_id)
-    if source is None or source.kind != "COMIC":
+    if source is None or source.role != "PRIMARY":
         raise _not_found()
     _ = image_variant
     page_response = media_streaming.send_comic_page_zip_entry(

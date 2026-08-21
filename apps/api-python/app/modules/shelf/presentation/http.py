@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from time import time_ns
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
@@ -29,6 +29,7 @@ from app.modules.shelf.application import (
     validate_collection_replacement,
     validate_member_replacement,
 )
+from app.modules.shelf.application.commands import ShelfWriteStore
 from app.modules.shelf.domain import (
     ShelfCollectionPolicyError,
     ShelfKind,
@@ -101,16 +102,22 @@ def _validated_shelf_payload(payload: ShelfWriteRequest) -> dict[str, Any]:
     )
 
 
+def _shelf_write_store() -> ShelfWriteStore:
+    """Adapt the concrete persistence module to the application port."""
+
+    return cast(ShelfWriteStore, shelf_store)
+
+
 def _get_book(db: Session, book_id: str) -> dict[str, Any] | None:
     return get_book(db, book_id)
 
 
-@router.get("/shelves")
+@router.get("/shelves", response_model=ShelvesResponse)
 def list_shelves(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelvesResponse:
+) -> ShelvesResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -560,7 +567,7 @@ def _collection_policy_response(
     )
 
 
-@router.get("/shelves/{shelf_id}")
+@router.get("/shelves/{shelf_id}", response_model=ShelfResponse)
 def get_shelf(
     shelf_id: str,
     request: Request,
@@ -569,7 +576,7 @@ def get_shelf(
     includeBookIds: bool = True,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelfResponse:
+) -> ShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -590,13 +597,13 @@ def get_shelf(
     )
 
 
-@router.post("/shelves", status_code=201)
+@router.post("/shelves", status_code=201, response_model=ShelfResponse)
 def create_shelf(
     request_payload: ShelfWriteRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelfResponse:
+) -> ShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -666,7 +673,7 @@ def create_shelf(
         return _collection_policy_response(error)
 
     now = _now()
-    shelf = CreateShelf(shelf_store, db).execute(
+    shelf = CreateShelf(_shelf_write_store(), db).execute(
         CreateShelfCommand(
             values={
                 "id": f"py_{time_ns()}",
@@ -689,19 +696,19 @@ def create_shelf(
     return ok({"shelf": _shelf_detail_view(db, shelf, user)}, status_code=201)
 
 
-@router.patch("/shelves/{shelf_id}")
+@router.patch("/shelves/{shelf_id}", response_model=ShelfResponse)
 def update_shelf(
     shelf_id: str,
     request_payload: ShelfWriteRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelfResponse:
+) -> ShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     payload = _validated_shelf_payload(request_payload)
-    values = {
+    values: dict[str, Any] = {
         key: payload[key] for key in ("name", "description", "pinned") if key in payload
     }
     if "name" in values:
@@ -808,7 +815,7 @@ def update_shelf(
         else []
     )
 
-    shelf = UpdateShelf(shelf_store, db).execute(
+    shelf = UpdateShelf(_shelf_write_store(), db).execute(
         UpdateShelfCommand(
             shelf_id=shelf_id,
             values=values,
@@ -831,13 +838,13 @@ def update_shelf(
     return ok({"shelf": _shelf_detail_view(db, shelf, user)})
 
 
-@router.delete("/shelves/{shelf_id}")
+@router.delete("/shelves/{shelf_id}", response_model=DeletedShelfResponse)
 def delete_shelf(
     shelf_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedShelfResponse:
+) -> DeletedShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -853,7 +860,7 @@ def delete_shelf(
         )
 
     try:
-        deleted = DeleteShelf(shelf_store, db).execute(
+        deleted = DeleteShelf(_shelf_write_store(), db).execute(
             DeleteShelfCommand(
                 shelf_id=shelf_id,
                 is_collection=(

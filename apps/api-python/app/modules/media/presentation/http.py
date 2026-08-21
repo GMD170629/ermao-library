@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from http.client import HTTPMessage, HTTPResponse
+from http.client import HTTPMessage
 from pathlib import Path
-from typing import Annotated, Any
+from typing import IO, Annotated, Any
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, build_opener
 from urllib.request import Request as UrlRequest
@@ -59,7 +59,9 @@ router = APIRouter(tags=["media"], route_class=TypedContractRoute)
 logger = logging.getLogger(__name__)
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
-PARTIAL_CONTENT_RESPONSE = {206: {"description": "Partial content"}}
+PARTIAL_CONTENT_RESPONSE: dict[int | str, dict[str, Any]] = {
+    206: {"description": "Partial content"}
+}
 
 
 class _SafeCoverRedirectHandler(HTTPRedirectHandler):
@@ -70,7 +72,7 @@ class _SafeCoverRedirectHandler(HTTPRedirectHandler):
     def redirect_request(
         self,
         req: UrlRequest,
-        fp: HTTPResponse,
+        fp: IO[bytes],
         code: int,
         msg: str,
         headers: HTTPMessage,
@@ -187,7 +189,7 @@ def download_resource(
     db: DatabaseSession,
     settings: ApplicationSettings,
 ) -> Annotated[
-    ResourceDownloadResponse,
+    ResourceDownloadResponse | Response,
     ErrorResponses(
         BasicBadRequestError,
         BasicUnauthorizedError,
@@ -316,14 +318,14 @@ def metadata_cover_proxy(
     )
 
 
-@router.get("/resources/{resource_id}/pages")
+@router.get("/resources/{resource_id}/pages", response_model=ResourcePagesResponse)
 def list_resource_pages(
     resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
 ) -> Annotated[
-    ResourcePagesResponse,
+    ResourcePagesResponse | Response,
     ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
 ]:
     user, auth_error = _auth(db, request, settings)

@@ -313,12 +313,12 @@ def create_user(
         raise UserConflictError(
             CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
-    user = db.get(User, user.id)
-    if user is None:
+    persisted_user = db.get(User, user.id)
+    if persisted_user is None:
         raise RuntimeError("created user was not persisted")
     return AdminUserResponse(
         data=AdminUserPayload(
-            user=AdminUser.model_validate(_user_view(db, user)),
+            user=AdminUser.model_validate(_user_view(db, persisted_user)),
             createdBy=actor.id,
         )
     )

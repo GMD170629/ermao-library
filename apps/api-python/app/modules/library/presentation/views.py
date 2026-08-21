@@ -32,19 +32,6 @@ def _dt(value: object) -> datetime | None:
     return value if isinstance(value, datetime) else None
 
 
-def _format_bytes(value: int | None) -> str:
-    size = max(0, int(value or 0))
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
-            return (
-                f"{size:.0f} {unit}"
-                if unit == "B"
-                else f"{size / (1 if unit == 'KB' else 1024):.1f} {unit}"
-            )
-        size /= 1024
-    return "0 B"
-
-
 def _parse_json(value: object, fallback: object) -> object:
     if value is None:
         return fallback
@@ -75,8 +62,9 @@ def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
 def _resource_rows(
     db: Session, book_id: str
 ) -> list[tuple[LibraryReadableResource, LibraryReadableResourceMetadata | None]]:
-    return list(
-        db.execute(
+    return [
+        (row[0], row[1])
+        for row in db.execute(
             select(LibraryReadableResource, LibraryReadableResourceMetadata)
             .outerjoin(
                 LibraryReadableResourceMetadata,
@@ -93,7 +81,7 @@ def _resource_rows(
                 LibraryReadableResource.id.asc(),
             )
         ).all()
-    )
+    ]
 
 
 def _asset_rows(
@@ -106,8 +94,9 @@ def _asset_rows(
         Library,
     ]
 ]:
-    return list(
-        db.execute(
+    return [
+        (row[0], row[1], row[2], row[3])
+        for row in db.execute(
             select(
                 LibraryResourceAsset,
                 LibraryResourceAssetMetadata,
@@ -130,7 +119,7 @@ def _asset_rows(
             )
             .order_by(LibraryResourceAsset.sequence_index, LibraryResourceAsset.id)
         ).all()
-    )
+    ]
 
 
 def _resource_view(
@@ -145,7 +134,7 @@ def _resource_view(
     format_value = str(resource.format)
     reader_type = reader_type_for_format(format_value)
     assets = _asset_rows(db, resource.id) if include_assets else []
-    asset_views = [
+    asset_views: list[dict[str, Any]] = [
         {
             "id": asset.id,
             "resourceId": asset.resource_id,
@@ -168,7 +157,11 @@ def _resource_view(
         }
         for asset, asset_metadata, source, library in assets
     ]
-    total_size = sum(int(item["sizeBytes"]) for item in asset_views)
+    total_size = sum(
+        int(item["sizeBytes"])
+        for item in asset_views
+        if isinstance(item.get("sizeBytes"), (int, float, str))
+    )
     media_kind = str(resource.media_kind)
     return {
         "id": resource.id,
