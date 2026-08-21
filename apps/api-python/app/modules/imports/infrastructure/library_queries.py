@@ -1,280 +1,231 @@
-"""Focused ORM projections for scanner-owned imports and queue bookkeeping."""
+"""ORM projections used by the import HTTP and composition boundaries.
+
+The import capability owns the library-root commands because enabling a root is
+also an import decision.  This module deliberately exposes projections rather
+than ORM entities to presentation code and contains no queue compatibility
+queries.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from sqlalchemy import case, select, update
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
-from app.models.import_pipeline import DownloadTask, ImportAsset, ImportTask
-from app.models.library import (
-    LibraryFile,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    Library,
+    LibraryImportTask,
+    LibrarySourceNode,
+    UserLibraryAccess,
 )
-from app.modules.library.infrastructure.media_kind_sql import (
-    volume_effective_media_kind,
+from app.core.authorization import (
+    AuthorizationContext,
+    library_visibility_predicate,
 )
 
 
-def _first_record(db: Session, statement: Any) -> dict[str, Any] | None:
-    row = db.execute(statement.limit(1)).mappings().first()
-    return dict(row) if row is not None else None
+def _library_view(row: Library) -> dict[str, object]:
+    return {
+        "id": row.id,
+        "name": row.name,
+        "rootPath": row.root_path,
+        "organizationMode": row.organization_mode,
+        "enabled": bool(row.enabled),
+        "ignorePatterns": row.ignore_patterns,
+        "ignoreHidden": bool(row.ignore_hidden),
+        "minFileSizeBytes": row.min_file_size_bytes,
+        "description": row.description,
+        "createdAt": row.created_at,
+        "updatedAt": row.updated_at,
+    }
 
 
-def _import_task(
+def list_libraries(db: Session) -> list[dict[str, object]]:
+    rows = db.scalars(
+        select(Library).order_by(Library.created_at.desc(), Library.id.desc())
+    ).all()
+    return [_library_view(row) for row in rows]
+
+
+def list_enabled_library_rows(db: Session) -> list[dict[str, object]]:
+    rows = db.scalars(
+        select(Library)
+        .where(Library.enabled.is_(True))
+        .order_by(Library.created_at.desc(), Library.id.desc())
+    ).all()
+    return [_library_view(row) for row in rows]
+
+
+def list_library_root_paths(db: Session) -> tuple[str, ...]:
+    rows = db.scalars(
+        select(Library.root_path)
+        .where(Library.root_path.is_not(None))
+        .order_by(Library.created_at.desc(), Library.id.desc())
+    ).all()
+    return tuple(str(path) for path in rows if path)
+
+
+def get_library(db: Session, library_id: str) -> dict[str, object] | None:
+    row = db.get(Library, library_id)
+    return None if row is None else _library_view(row)
+
+
+def get_library_by_root_path(
     db: Session,
-    *filters: Any,
-    order_by: tuple[Any, ...] = (),
-) -> dict[str, Any] | None:
-    statement = select(ImportTask.__table__).where(*filters)
-    if order_by:
-        statement = statement.order_by(*order_by)
-    return _first_record(db, statement)
-
-
-def get_import_task_by_id(db: Session, task_id: str) -> dict[str, Any] | None:
-    return _import_task(db, ImportTask.id == task_id)
-
-
-def get_completed_import_task_for_source(
-    db: Session, source_path: str
-) -> dict[str, Any] | None:
-    return _import_task(
-        db,
-        ImportTask.source_path == source_path,
-        ImportTask.status == "COMPLETED",
-    )
-
-
-def get_work_by_id(db: Session, work_id: str) -> dict[str, Any] | None:
-    return _first_record(
-        db,
-        select(LibraryWork.__table__).where(LibraryWork.id == work_id),
-    )
-
-
-def get_import_asset_by_task_and_path(
-    db: Session,
-    task_id: str,
-    source_path: str,
-) -> dict[str, Any] | None:
-    return _first_record(
-        db,
-        select(ImportAsset.__table__).where(
-            ImportAsset.import_task_id == task_id,
-            ImportAsset.source_path == source_path,
-        ),
-    )
-
-
-def fail_import_assets_for_task(
-    db: Session,
+    root_path: str,
     *,
-    task_id: str,
-    error_code: str,
-    error_summary: str,
-    updated_at: object,
-) -> None:
-    db.execute(
-        update(ImportAsset)
-        .where(
-            ImportAsset.import_task_id == task_id,
-            ImportAsset.status != "COMPLETED",
-        )
-        .values(
-            status="FAILED",
-            error_code=error_code,
-            error_summary=error_summary,
-            updated_at=updated_at,
-        )
-    )
+    exclude_id: str | None = None,
+) -> dict[str, object] | None:
+    filters = [Library.root_path == root_path]
+    if exclude_id is not None:
+        filters.append(Library.id != exclude_id)
+    row = db.scalar(select(Library).where(*filters).limit(1))
+    return None if row is None else _library_view(row)
 
 
-def get_volume_context_by_id(db: Session, volume_id: str) -> dict[str, Any] | None:
-    return _first_record(
-        db,
-        select(
-            LibraryVolume.__table__,
-            LibraryVersion.work_id.label("workId"),
-            volume_effective_media_kind(LibraryVolume).label("mediaKind"),
-        )
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .where(LibraryVolume.id == volume_id),
-    )
-
-
-def list_volume_cover_paths_for_version(
-    db: Session, version_id: str
-) -> list[dict[str, Any]]:
-    rows = (
-        db.execute(
-            select(LibraryVolume.__table__)
-            .where(
-                LibraryVolume.version_id == version_id,
-                LibraryVolume.cover_path.is_not(None),
-                LibraryVolume.cover_path != "",
-            )
-            .order_by(
-                case((LibraryVolume.volume_index.is_(None), 1), else_=0),
-                LibraryVolume.volume_index,
-                LibraryVolume.sort_order,
-                LibraryVolume.created_at,
-                LibraryVolume.id,
-            )
-        )
-        .mappings()
-        .all()
-    )
-    return [dict(row) for row in rows]
-
-
-def find_work_cover_volume(db: Session, work_id: str) -> dict[str, Any] | None:
-    volume = db.scalars(
-        select(LibraryVolume)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .where(
-            LibraryVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-            LibraryVolume.cover_path.is_not(None),
-            LibraryVolume.cover_path != "",
-        )
-        .order_by(
-            case(
-                (volume_effective_media_kind(LibraryVolume) == "EBOOK", 0),
-                (volume_effective_media_kind(LibraryVolume) == "COMIC", 1),
-                else_=2,
-            ),
-            LibraryVolume.sort_order,
-            LibraryVolume.created_at,
-            LibraryVolume.id,
-        )
-        .limit(1)
-    ).first()
-    return {"coverPath": volume.cover_path} if volume is not None else None
-
-
-def has_generated_cover_path(db: Session, work_id: str, cover_path: str) -> bool:
-    return (
+def library_has_topology(db: Session, library_id: str) -> bool:
+    return bool(
         db.scalar(
-            select(LibraryVolume.id)
-            .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-            .where(
-                LibraryVersion.work_id == work_id,
-                LibraryVolume.cover_path == cover_path,
+            select(exists().where(LibrarySourceNode.library_id == library_id))
+        )
+    )
+
+
+def list_library_access_user_ids(db: Session, library_id: str) -> tuple[str, ...]:
+    return tuple(
+        str(user_id)
+        for user_id in db.scalars(
+            select(UserLibraryAccess.user_id).where(
+                UserLibraryAccess.library_id == library_id
             )
-            .limit(1)
-        )
-        is not None
+        ).all()
     )
 
 
-def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | None:
-    return _first_record(
-        db,
-        select(
-            LibraryFile.volume_id.label("volumeId"),
-            LibraryVersion.id.label("versionId"),
-            LibraryVolume.format,
-            LibraryVolume.page_count,
-            LibraryVolume.chapter_count,
-            LibraryWork.id.label("workId"),
-            LibraryWork.title,
-        )
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .join(LibraryVersion, LibraryVersion.id == LibraryVolume.version_id)
-        .join(LibraryWork, LibraryWork.id == LibraryVersion.work_id)
-        .where(
-            LibraryFile.path == str(path.resolve()),
-            LibraryVolume.import_status.in_(("COMPLETED", "IMPORTED", "READY")),
-        ),
-    )
-
-
-def list_file_volumes_by_paths(db: Session, paths: list[str]) -> list[dict[str, Any]]:
-    if not paths:
-        return []
-    expanded: list[str] = []
-    for path in paths:
-        expanded.append(path)
+def library_id_for_path(db: Session, target: Path) -> str | None:
+    try:
+        resolved_target = target.expanduser().resolve()
+    except OSError:
+        return None
+    for row in db.scalars(
+        select(Library).where(Library.enabled.is_(True))
+    ).all():
         try:
-            expanded.append(str(Path(path).resolve()))
-        except OSError:
-            pass
-    rows = db.execute(
-        select(LibraryFile.path, LibraryFile.volume_id).where(
-            LibraryFile.path.in_(tuple(dict.fromkeys(expanded))),
-            LibraryFile.volume_id.in_(
-                select(LibraryVolume.id).where(
-                    LibraryVolume.import_status.in_(
-                        ("COMPLETED", "IMPORTED", "READY")
-                    )
-                )
-            ),
-        )
-    ).all()
-    return [{"path": row.path, "volumeId": row.volume_id} for row in rows]
+            root = Path(row.root_path).expanduser().resolve()
+            resolved_target.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        return row.id
+    return None
 
 
-def list_audio_volume_files(db: Session, volume_id: str) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(
-            LibraryFile.id,
-            LibraryFile.path,
-            LibraryFile.size_bytes.label("sizeBytes"),
-            LibraryFile.duration_ms.label("durationMs"),
-        ).where(
-            LibraryFile.volume_id == volume_id,
-            LibraryFile.kind == "AUDIO",
-        )
-    ).mappings()
-    return [dict(row) for row in rows]
-
-
-def list_audio_volume_units(db: Session, volume_id: str) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(
-            LibraryReadingUnit.id,
-            LibraryReadingUnit.file_id.label("fileId"),
-            LibraryReadingUnit.start_ms.label("startMs"),
-        ).where(LibraryReadingUnit.volume_id == volume_id)
-    ).mappings()
-    return [dict(row) for row in rows]
-
-
-def audio_bundle_fully_imported(db: Session, paths: list[str]) -> bool:
-    if not paths:
-        return False
-    rows = db.execute(
-        select(LibraryFile.volume_id)
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .where(
-            LibraryFile.path.in_(paths),
-            LibraryVolume.hidden.is_(False),
-        )
-    ).all()
-    volume_ids = {str(row.volume_id or "") for row in rows}
-    return len(rows) == len(paths) and len(volume_ids) == 1
-
-
-def complete_download_task_for_source(
-    db: Session,
-    *,
-    source_path: str,
-    book_id: str,
-    updated_at: object,
-) -> None:
-    db.execute(
-        update(DownloadTask)
-        .where(DownloadTask.file_path == source_path)
-        .values(
-            book_id=book_id,
-            status="completed",
-            progress=100,
-            updated_at=updated_at,
+def source_node_library_id(db: Session, source_node_id: str) -> str | None:
+    return db.scalar(
+        select(LibrarySourceNode.library_id).where(
+            LibrarySourceNode.id == source_node_id
         )
     )
+
+
+def _task_view(row: LibraryImportTask) -> dict[str, object]:
+    return {
+        "id": row.id,
+        "kind": row.kind,
+        "libraryId": row.library_id,
+        "resourceId": row.resource_id,
+        "sourceNodeId": row.source_node_id,
+        "role": row.role,
+        "state": row.state,
+        "errorSummary": row.error_summary,
+        "createdAt": row.created_at,
+        "startedAt": row.started_at,
+        "finishedAt": row.finished_at,
+    }
+
+
+def get_import_task(
+    db: Session,
+    task_id: str,
+    context: AuthorizationContext | None = None,
+) -> dict[str, object] | None:
+    row = db.get(LibraryImportTask, task_id)
+    if row is None:
+        return None
+    if context is not None:
+        visible = db.scalar(
+            select(LibraryImportTask.id)
+            .where(
+                LibraryImportTask.id == task_id,
+                library_visibility_predicate(context, LibraryImportTask.library_id),
+            )
+        )
+        if visible is None:
+            return None
+    return _task_view(row)
+
+
+def list_import_tasks_page(
+    db: Session,
+    context: AuthorizationContext,
+    *,
+    page: int,
+    page_size: int,
+    state: str | None = None,
+) -> tuple[list[dict[str, object]], int, dict[str, int]]:
+    scope = library_visibility_predicate(context, LibraryImportTask.library_id)
+    filters = [scope]
+    normalized_state = str(state or "").strip().upper()
+    if normalized_state and normalized_state != "ALL":
+        filters.append(LibraryImportTask.state == normalized_state)
+    total = int(
+        db.scalar(
+            select(func.count()).select_from(LibraryImportTask).where(*filters)
+        )
+        or 0
+    )
+    completed = int(
+        db.scalar(
+            select(func.count())
+            .select_from(LibraryImportTask)
+            .where(*filters, LibraryImportTask.state == "SUCCEEDED")
+        )
+        or 0
+    )
+    failed = int(
+        db.scalar(
+            select(func.count())
+            .select_from(LibraryImportTask)
+            .where(*filters, LibraryImportTask.state == "FAILED")
+        )
+        or 0
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    normalized_page = min(max(1, page), total_pages)
+    rows = db.scalars(
+        select(LibraryImportTask)
+        .where(*filters)
+        .order_by(LibraryImportTask.created_at.desc(), LibraryImportTask.id.desc())
+        .limit(page_size)
+        .offset((normalized_page - 1) * page_size)
+    ).all()
+    return (
+        [_task_view(row) for row in rows],
+        total,
+        {"completed": completed, "failed": failed},
+    )
+
+
+__all__ = [
+    "get_import_task",
+    "get_library",
+    "get_library_by_root_path",
+    "library_has_topology",
+    "library_id_for_path",
+    "list_enabled_library_rows",
+    "list_import_tasks_page",
+    "list_libraries",
+    "list_library_access_user_ids",
+    "list_library_root_paths",
+    "source_node_library_id",
+]

@@ -1,13 +1,11 @@
-"""Imports HTTP surface: libraries and import-task reads."""
+"""Read HTTP adapters for libraries and the target import queue."""
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from time import perf_counter, time_ns
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import Response
@@ -17,35 +15,50 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
-    import_http_store,
+    continue_library_import,
     persist_import_library_create,
     persist_import_library_delete,
     persist_import_library_update,
 )
 from app.bootstrap.system import get_setting
-from app.core.authorization import authorization_context, can_access_library
+from app.contracts.http_errors import ErrorResponses
+from app.core.authorization import (
+    authorization_context,
+    can_access_library,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.models.common import cuid
 from app.modules.imports.application.library_commands import (
     PreparedLibraryCreate,
     PreparedLibraryDelete,
     PreparedLibraryUpdate,
     prepare_library_update_values,
 )
-from app.modules.imports.presentation.mappers import (
+from app.modules.imports.application.library_paths import (
     LibraryPathError,
-    import_task_view,
     library_directory_tree_node,
     resolve_library_root_path,
 )
-from app.modules.imports.presentation.path_helpers import (
-    enabled_library_for_path,
+from app.modules.imports.infrastructure.library_queries import (
+    get_import_task as get_import_task_projection,
+    get_library,
+    get_library_by_root_path,
+    library_has_topology,
+    list_import_tasks_page,
+    list_libraries,
+    list_library_access_user_ids,
 )
+from app.modules.imports.presentation.mappers import import_task_view
+from app.modules.imports.presentation.path_helpers import enabled_library_for_path
 from app.modules.imports.presentation.schemas import (
     CreateLibraryRequest,
     DeletedLibraryResponse,
-    ImportLogsResponse,
+    ImportBadRequestError,
+    ImportConflictError,
+    ImportForbiddenError,
+    ImportNotFoundError,
     ImportTaskResponse,
     ImportTasksResponse,
     LibrariesResponse,
@@ -59,13 +72,10 @@ from app.modules.imports.presentation.writes import router as writes_router
 from app.modules.imports.public import parse_release_title
 from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.schemas.responses import fail, ok
-from app.services.system_events import (
-    prepare_system_event,
-)
+from app.services.system_events import prepare_system_event
 
 router = APIRouter(tags=["imports"], route_class=TypedContractRoute)
 router.include_router(writes_router)
-logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -83,17 +93,8 @@ def _system_setting_value(db: Session, key: str) -> str | None:
     return str(parsed).strip() if parsed is not None and str(parsed).strip() else None
 
 
-def _visible_import_task_or_none(
-    db: Session, user: User, task_id: str
-) -> dict[str, Any] | None:
-    task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_library(db, user, task.get("libraryId")):
-        return None
-    return task
-
-
 @router.get("/libraries")
-def list_libraries(
+def list_library_roots(
     request: Request,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
@@ -102,7 +103,7 @@ def list_libraries(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    folders = import_http_store.list_libraries(db)
+    folders = list_libraries(db)
     if purpose == "upload" and user is not None:
         context = authorization_context(db, user)
         allowed_library_ids = set(context.library_ids)
@@ -149,37 +150,40 @@ def library_tree(
                 status_code=404,
                 code="LIBRARY_NOT_FOUND",
             )
-    db.close()
     node, error, status_code = library_directory_tree_node(path)
     if error:
         return fail(error, status_code=status_code)
-    return ok(
-        {
-            "node": node,
-        }
-    )
+    return ok({"node": node})
 
 
 @router.post("/libraries")
-async def create_library(
+def create_library(
     payload: CreateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> LibraryResponse:
+) -> Annotated[
+    LibraryResponse,
+    ErrorResponses(
+        ImportBadRequestError,
+        ImportConflictError,
+        ImportForbiddenError,
+        ImportNotFoundError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
     try:
         root_path = str(resolve_library_root_path(payload.root_path))
     except LibraryPathError as exc:
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
-    existing_library = import_http_store.get_library_by_root_path(db, root_path)
-    db.close()
-    if existing_library:
+    if get_library_by_root_path(db, root_path) is not None:
         return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
-    library_id = f"py_{time_ns()}"
+
+    library_id = cuid()
     checkpoint_at = _now()
     library: dict[str, object] = {
         "id": library_id,
@@ -212,35 +216,48 @@ async def create_library(
         )
     except IntegrityError:
         return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
-    return ok({"library": library}, status_code=201)
+    if payload.enabled:
+        continue_library_import(db, library_id)
+    return ok({"library": get_library(db, library_id) or library}, status_code=201)
 
 
 @router.patch("/libraries/{library_id}")
-async def update_library(
+def update_library(
     library_id: str,
     payload: UpdateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> LibraryResponse:
+) -> Annotated[
+    LibraryResponse,
+    ErrorResponses(
+        ImportBadRequestError,
+        ImportConflictError,
+        ImportForbiddenError,
+        ImportNotFoundError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
+
+    existing = get_library(db, library_id)
+    if existing is None:
+        return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
     values = payload.model_dump(by_alias=True, exclude_unset=True)
     if "organizationMode" in values and values["organizationMode"] is not None:
         values["organizationMode"] = LibraryOrganizationMode(
             values["organizationMode"]
         ).value
-    existing = import_http_store.get_library(db, library_id)
-    if not existing:
-        return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
     structural_change = (
         "rootPath" in values and values["rootPath"] != existing.get("rootPath")
     ) or (
         "organizationMode" in values
         and values["organizationMode"] != existing.get("organizationMode")
     )
-    if structural_change and import_http_store.library_has_topology(db, library_id):
+    if structural_change and library_has_topology(db, library_id):
         return fail(
             "书库已有目录拓扑，不能修改根路径或组织方式",
             status_code=409,
@@ -251,14 +268,10 @@ async def update_library(
             root_path = str(resolve_library_root_path(values["rootPath"]))
         except LibraryPathError as exc:
             return fail(str(exc), status_code=exc.status_code, code=exc.code)
-        if import_http_store.get_library_by_root_path(
-            db, root_path, exclude_id=library_id
-        ):
-            return fail(
-                "书库路径已存在", status_code=409, details={"rootPath": root_path}
-            )
+        if get_library_by_root_path(db, root_path, exclude_id=library_id) is not None:
+            return fail("书库路径已存在", status_code=409)
         values["rootPath"] = root_path
-    db.close()
+    was_enabled = bool(existing.get("enabled"))
     if values:
         values["updatedAt"] = _now()
         prepared_event = prepare_system_event(
@@ -275,26 +288,21 @@ async def update_library(
                 "rootPath": values.get("rootPath") or existing.get("rootPath"),
             },
         )
-        prepared_values = prepare_library_update_values(values)
         try:
             persist_import_library_update(
                 db,
                 PreparedLibraryUpdate(
                     library_id,
-                    prepared_values,
+                    prepare_library_update_values(values),
                     prepared_event,
                 ),
             )
         except IntegrityError:
-            return fail(
-                "书库路径已存在",
-                status_code=409,
-                details={"rootPath": values.get("rootPath")},
-            )
-        library = import_http_store.get_library(db, library_id)
-    else:
-        library = existing
-    return ok({"library": library})
+            return fail("书库路径已存在", status_code=409)
+    updated = get_library(db, library_id) or existing
+    if bool(updated.get("enabled")) and not was_enabled:
+        continue_library_import(db, library_id)
+    return ok({"library": updated})
 
 
 @router.delete("/libraries/{library_id}")
@@ -307,12 +315,12 @@ def delete_library(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    existing = import_http_store.get_library(db, library_id)
-    affected_user_ids = import_http_store.list_library_access_user_ids(
-        db,
-        library_id,
-    )
-    db.close()
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
+    existing = get_library(db, library_id)
+    if existing is None:
+        return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
+    affected_user_ids = list_library_access_user_ids(db, library_id)
     checkpoint_at = _now()
     prepared_event = prepare_system_event(
         level="warning",
@@ -322,9 +330,9 @@ def delete_library(
         action="deleted",
         target_type="library",
         target_id=library_id,
-        message=f"删除书库：{(existing or {}).get('name') or library_id}",
+        message=f"删除书库：{existing.get('name') or library_id}",
         metadata={
-            "rootPath": (existing or {}).get("rootPath"),
+            "rootPath": existing.get("rootPath"),
             "authorizationInvalidatedFor": len(affected_user_ids),
         },
     )
@@ -343,59 +351,40 @@ def delete_library(
 @router.get("/import-tasks")
 def list_import_tasks(
     request: Request,
-    page: int = 1,
-    pageSize: int = 10,
-    status: str | None = None,
-    keyword: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=50, alias="pageSize"),
+    state: str | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ImportTasksResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    page = max(1, page)
-    page_size = min(50, max(1, pageSize))
+    if user is None:
+        return fail("当前用户无权查看导入任务", status_code=403)
     context = authorization_context(db, user)
-    normalized_status = str(status or "").strip().upper()
-    if normalized_status and normalized_status != "ALL":
-        if normalized_status not in {"PENDING", "PARSING", "COMPLETED", "FAILED"}:
-            return fail("导入状态无效", status_code=400)
-    started_at = perf_counter()
-    tasks, total, summary = import_http_store.list_import_tasks_page(
+    normalized_state = str(state or "").strip().upper()
+    if normalized_state and normalized_state != "ALL" and normalized_state not in {
+        "QUEUED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+    }:
+        return fail("导入状态无效", status_code=400)
+    tasks, total, summary = list_import_tasks_page(
         db,
         context,
         page=page,
         page_size=page_size,
-        status=normalized_status or None,
-        keyword=keyword,
+        state=normalized_state or None,
     )
-    queried_at = perf_counter()
-    tasks = import_http_store.hydrate_import_task_page(db, tasks, log_limit=20)
-    hydrated_at = perf_counter()
-    db.close()
     total_pages = max(1, (total + page_size - 1) // page_size)
-    page = min(page, total_pages)
-    views = [import_task_view(db, task, log_limit=20) for task in tasks]
-    mapped_at = perf_counter()
-    logger.info(
-        "import_tasks.page.loaded",
-        extra={
-            "event": "import_tasks.page.loaded",
-            "actorId": user.id,
-            "page": page,
-            "pageSize": page_size,
-            "resultCount": len(views),
-            "queryElapsedMs": round((queried_at - started_at) * 1000, 2),
-            "hydrateElapsedMs": round((hydrated_at - queried_at) * 1000, 2),
-            "mapElapsedMs": round((mapped_at - hydrated_at) * 1000, 2),
-            "elapsedMs": round((mapped_at - started_at) * 1000, 2),
-        },
-    )
+    normalized_page = min(max(1, page), total_pages)
     return ok(
         {
-            "tasks": views,
+            "tasks": [import_task_view(task) for task in tasks],
             "summary": summary,
-            "page": page,
+            "page": normalized_page,
             "pageSize": page_size,
             "total": total,
             "totalPages": total_pages,
@@ -409,54 +398,36 @@ def get_import_task(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ImportTaskResponse:
+) -> Annotated[ImportTaskResponse, ErrorResponses(ImportNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    task = _visible_import_task_or_none(db, user, task_id)
-    if not task:
+    if user is None:
         return fail("导入任务不存在", status_code=404)
-    task = import_http_store.hydrate_import_task_page(db, [task], log_limit=100)[0]
-    db.close()
-    return ok({"task": import_task_view(db, task, log_limit=100)})
-
-
-@router.get("/import-tasks/{task_id}/logs")
-def get_import_logs(
-    task_id: str,
-    request: Request,
-    page: int = 1,
-    pageSize: int = 100,
-    level: str | None = None,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> ImportLogsResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if _visible_import_task_or_none(db, user, task_id) is None:
-        return fail("导入任务不存在", status_code=404)
-    page = max(1, page)
-    page_size = min(200, max(1, pageSize))
-    logs, total = import_http_store.list_import_logs(
+    task = get_import_task_projection(
         db,
         task_id,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-        level=level,
+        authorization_context(db, user),
     )
-    db.close()
-    from app.modules.imports.presentation.mappers import serialize_import_log
+    if task is None:
+        return fail("导入任务不存在", status_code=404)
+    return ok({"task": import_task_view(task)})
 
-    return ok(
-        {
-            "logs": [serialize_import_log(log) for log in logs],
-            "page": page,
-            "pageSize": page_size,
-            "total": total,
-            "totalPages": max(1, (total + page_size - 1) // page_size),
-        }
+
+def _parsed_release_title(title: str) -> dict[str, object]:
+    volume_info = parse_release_title(title)
+    chapter = re.search(
+        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
+        title,
+        flags=re.IGNORECASE,
     )
+    return {
+        "parsed": {
+            "title": title,
+            "volume": volume_info.volume_index if volume_info else None,
+            "chapter": float(chapter.group(1)) if chapter else None,
+        }
+    }
 
 
 @router.get("/tracking/release-title-parser")
@@ -469,22 +440,7 @@ def release_title_parser_get(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
-    volume_info = parse_release_title(title)
-    chapter = re.search(
-        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
-        title,
-        flags=re.IGNORECASE,
-    )
-    return ok(
-        {
-            "parsed": {
-                "title": title,
-                "volume": volume_info.volume_index if volume_info else None,
-                "chapter": float(chapter.group(1)) if chapter else None,
-            }
-        }
-    )
+    return ok(_parsed_release_title(title))
 
 
 @router.post("/tracking/release-title-parser")
@@ -497,20 +453,7 @@ def release_title_parser(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
-    title = payload.title if payload is not None else ""
-    volume_info = parse_release_title(title)
-    chapter = re.search(
-        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
-        title,
-        flags=re.IGNORECASE,
-    )
-    return ok(
-        {
-            "parsed": {
-                "title": title,
-                "volume": volume_info.volume_index if volume_info else None,
-                "chapter": float(chapter.group(1)) if chapter else None,
-            }
-        }
-    )
+    return ok(_parsed_release_title(payload.title if payload is not None else ""))
+
+
+__all__ = ["router"]

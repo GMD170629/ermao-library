@@ -1,7 +1,8 @@
-"""Inactive target composition root for ADR 0018 ContinueImport pipeline.
+"""Composition root for the production ContinueImport pipeline.
 
-This module is intentionally not imported by production API/router/worker
-startup. Final baseline decides when to activate it.
+The API and the dedicated import worker construct this graph for their own
+short-lived SQLAlchemy session.  The graph contains the only import queue and
+does not expose a legacy importer or queue-control runtime.
 """
 
 from __future__ import annotations
@@ -12,6 +13,9 @@ from sqlalchemy.orm import Session
 
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
+    ContinueImportResult,
+    ContinueLibraryImport,
+    ContinueSourceImport,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
@@ -55,12 +59,14 @@ __all__ = [
     "ReadableResourceWorkerProcessor",
     "build_readable_resource_pipeline",
     "build_readable_resource_worker",
+    "continue_library_import",
+    "continue_source_import",
 ]
 
 
 @dataclass(frozen=True, slots=True)
 class ReadableResourcePipeline:
-    """Fully wired target use cases; not registered on production entrypoints."""
+    """Fully wired ContinueImport use cases and their target adapters."""
 
     continue_import: ContinueImport
     scan_library_source_tree: ScanLibrarySourceTree
@@ -160,6 +166,24 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
         uow=uow,
         clock=clock,
     )
+
+
+def continue_library_import(
+    session: Session, library_id: str
+) -> ContinueImportResult:
+    """Enqueue one library ContinueImport command in the caller session."""
+
+    pipeline = build_readable_resource_pipeline(session)
+    return pipeline.continue_import.execute(ContinueLibraryImport(library_id))
+
+
+def continue_source_import(
+    session: Session, source_node_id: str
+) -> ContinueImportResult:
+    """Enqueue one source-node ContinueImport command in the caller session."""
+
+    pipeline = build_readable_resource_pipeline(session)
+    return pipeline.continue_import.execute(ContinueSourceImport(source_node_id))
 
 
 def build_readable_resource_worker(

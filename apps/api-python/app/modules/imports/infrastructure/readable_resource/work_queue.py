@@ -106,7 +106,10 @@ class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
         row = self._session.scalar(
             select(LibraryImportTask)
             .where(LibraryImportTask.state == "QUEUED")
-            .order_by(LibraryImportTask.created_at.asc())
+            .order_by(
+                LibraryImportTask.created_at.asc(),
+                LibraryImportTask.id.asc(),
+            )
             .limit(1)
         )
         return None if row is None else self._to_record(row)

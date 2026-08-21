@@ -29,7 +29,7 @@ from app.modules.imports.domain.resource_adapters import (
 )
 from app.modules.library.domain.book_placement import (
     decide_book_anchor_for_resource,
-    volumes_root_folder_creates_empty_book_on_discovery,
+    resource_root_folder_creates_empty_book_on_discovery,
 )
 from app.modules.library.domain.source_nodes import (
     SourceNodePhysicalKind,
@@ -50,7 +50,7 @@ class ScanLibrarySourceTreeResult:
 
 
 class ScanLibrarySourceTree:
-    """Execute SCAN_LIBRARY / CONTINUE_SOURCE work (single consumer, no lease)."""
+    """Execute SCAN_LIBRARY / CONTINUE_SOURCE work for one consumer."""
 
     def __init__(
         self,
@@ -237,7 +237,7 @@ class ScanLibrarySourceTree:
 
                     if kind is SourceNodePhysicalKind.DIRECTORY:
                         if (
-                            volumes_root_folder_creates_empty_book_on_discovery(
+                            resource_root_folder_creates_empty_book_on_discovery(
                                 config.organization_mode,
                                 is_root_child_directory=parsed.is_root_child,
                             )

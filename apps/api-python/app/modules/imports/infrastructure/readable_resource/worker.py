@@ -20,7 +20,7 @@ logger = logging.getLogger("ermao.readable_resource_pipeline")
 
 
 class ReadableResourceWorkerProcessor:
-    """Strict single-consumer loop: next QUEUED by createdAt, no lease/fencing."""
+    """Strict single-consumer loop with deterministic FIFO ordering."""
 
     def __init__(
         self,

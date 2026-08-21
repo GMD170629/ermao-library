@@ -3,15 +3,6 @@
 from __future__ import annotations
 
 
-class ImportExecutionError(RuntimeError):
-    """Stable application failure translated from an import infrastructure adapter."""
-
-    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
-        super().__init__(message)
-        self.code = code
-        self.retryable = retryable
-
-
 class AudioInspectionError(ValueError):
     """A source cannot satisfy the audiobook media-inspection contract."""
 
@@ -56,10 +47,3 @@ class ComicArchiveBackendUnavailableError(ComicArchiveError):
 
 class ComicArchiveInvalidError(ComicArchiveError):
     """A comic archive is malformed or unsupported."""
-
-
-class LibraryDeletedDuringImportError(RuntimeError):
-    """The library configuration disappeared while its task was running."""
-
-    def __init__(self) -> None:
-        super().__init__("书库已在导入期间被删除")

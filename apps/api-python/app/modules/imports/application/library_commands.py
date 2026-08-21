@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
-from app.modules.imports.application.ports import ImportUnitOfWork
 from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.modules.system.public import PreparedSystemEvent
 
@@ -32,14 +30,6 @@ class PreparedLibraryDelete:
     event: PreparedSystemEvent
 
 
-class LibraryWriteStore(Protocol):
-    def create(self, prepared: PreparedLibraryCreate) -> None: ...
-
-    def update(self, prepared: PreparedLibraryUpdate) -> None: ...
-
-    def delete(self, prepared: PreparedLibraryDelete) -> bool: ...
-
-
 def prepare_library_update_values(
     values: dict[str, object],
 ) -> dict[str, object]:
@@ -63,43 +53,3 @@ def prepare_library_update_values(
     if mode is not None:
         prepared["organization_mode"] = LibraryOrganizationMode(mode).value
     return prepared
-
-
-def persist_library_create(
-    store: LibraryWriteStore,
-    unit_of_work: ImportUnitOfWork,
-    prepared: PreparedLibraryCreate,
-) -> None:
-    try:
-        store.create(prepared)
-        unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def persist_library_update(
-    store: LibraryWriteStore,
-    unit_of_work: ImportUnitOfWork,
-    prepared: PreparedLibraryUpdate,
-) -> None:
-    try:
-        store.update(prepared)
-        unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def persist_library_delete(
-    store: LibraryWriteStore,
-    unit_of_work: ImportUnitOfWork,
-    prepared: PreparedLibraryDelete,
-) -> bool:
-    try:
-        deleted = store.delete(prepared)
-        unit_of_work.commit()
-        return deleted
-    except Exception:
-        unit_of_work.rollback()
-        raise

@@ -1,3 +1,5 @@
+"""Validated HTTP contracts for library management and ContinueImport."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,7 +9,6 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
-from app.modules.imports.application.dto import ImportOrigin
 from app.modules.library.domain.layout import LibraryOrganizationMode
 
 
@@ -53,10 +54,6 @@ class UpdateLibraryRequest(HttpContractModel):
 
 class ParseReleaseTitleRequest(HttpContractModel):
     title: str = ""
-
-
-class ScanImportDirectoryRequest(HttpContractModel):
-    path: str = ""
 
 
 class LibrariesPayload(HttpContractModel):
@@ -106,82 +103,33 @@ DeletedLibraryResponse = SuccessEnvelope[DeletedLibraryPayload]
 ParsedReleaseTitleResponse = SuccessEnvelope[ParsedReleaseTitlePayload]
 
 
-class ImportLog(HttpContractModel):
+ImportTaskKind = Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
+ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
+ImportTaskRole = Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"]
+
+
+class LibraryImportTaskContract(HttpContractModel):
     id: str
-    level: str
-    message: str
-    created_at: datetime | None = Field(alias="createdAt")
+    kind: ImportTaskKind
+    library_id: str = Field(alias="libraryId")
+    resource_id: str | None = Field(default=None, alias="resourceId")
+    source_node_id: str | None = Field(default=None, alias="sourceNodeId")
+    role: ImportTaskRole | None = None
+    state: ImportTaskState
+    error_summary: str | None = Field(default=None, alias="errorSummary")
+    created_at: datetime | str = Field(alias="createdAt")
+    started_at: datetime | str | None = Field(default=None, alias="startedAt")
+    finished_at: datetime | str | None = Field(default=None, alias="finishedAt")
 
 
-class ImportedBook(HttpContractModel):
-    id: str
-    title: str
-
-
-class RecognizedImportMetadata(HttpContractModel):
-    title: str
-    volume_title: str = Field(alias="volumeTitle")
-    author: str | None
-    volume_index: float | None = Field(alias="volumeIndex")
-    fields: list[str]
-    field_sources: dict[
-        str, Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]
-    ] = Field(alias="fieldSources")
-    source_order: list[Literal["SIDECAR_OPF", "EMBEDDED", "PATH"]] = Field(
-        alias="sourceOrder"
-    )
-    source: Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]
-
-
-class ImportTask(HttpContractModel):
-    id: str
-    library_id: str | None = Field(alias="libraryId")
-    work_id: str | None = Field(alias="workId")
-    volume_id: str | None = Field(alias="volumeId")
-    origin: ImportOrigin
-    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
-        alias="mediaKindPolicy"
-    )
-    status: str
-    original_name: str | None = Field(alias="originalName")
-    requested_title: str | None = Field(alias="requestedTitle")
-    requested_author: str | None = Field(alias="requestedAuthor")
-    recognized_metadata: RecognizedImportMetadata | None = Field(
-        alias="recognizedMetadata"
-    )
-    source_path: str = Field(alias="sourcePath")
-    task_kind: str = Field(alias="taskKind")
-    bundle_key: str | None = Field(alias="bundleKey")
-    asset_count: int = Field(alias="assetCount")
-    processed_asset_count: int = Field(alias="processedAssetCount")
-    progress: int
-    duration: int
-    error_summary: str | None = Field(alias="errorSummary")
-    error_code: str | None = Field(alias="errorCode")
-    retryable: bool
-    attempts: int
-    lease_owner: str | None = Field(alias="leaseOwner")
-    lease_expires_at: datetime | None = Field(alias="leaseExpiresAt")
-    message: str | None
-    started_at: datetime | None = Field(alias="startedAt")
-    finished_at: datetime | None = Field(alias="finishedAt")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    source_file_exists: bool = Field(alias="sourceFileExists")
-    friendly_error: str | None = Field(alias="friendlyError")
-    library: Library | None = Field(alias="library")
-    book: ImportedBook | None
-    logs: list[ImportLog]
-
-
-class ImportTaskSummary(HttpContractModel):
+class ImportTasksSummary(HttpContractModel):
     completed: int
     failed: int
 
 
 class ImportTasksPayload(HttpContractModel):
-    tasks: list[ImportTask]
-    summary: ImportTaskSummary
+    tasks: list[LibraryImportTaskContract]
+    summary: ImportTasksSummary
     page: int
     page_size: int = Field(alias="pageSize")
     total: int
@@ -189,95 +137,20 @@ class ImportTasksPayload(HttpContractModel):
 
 
 class ImportTaskPayload(HttpContractModel):
-    task: ImportTask
+    task: LibraryImportTaskContract
 
 
-class ImportLogsPayload(HttpContractModel):
-    logs: list[ImportLog]
-    page: int
-    page_size: int = Field(alias="pageSize")
-    total: int
-    total_pages: int = Field(alias="totalPages")
-
-
-class ScanError(HttpContractModel):
-    path: str
-    error: str
-    code: str | None = None
-    limit: int | None = None
-    observed_count: int | None = Field(default=None, alias="observedCount")
-
-
-class ImportScanJob(HttpContractModel):
-    id: str
-    library_id: str | None = Field(alias="libraryId")
-    root_path: str = Field(alias="rootPath")
-    trigger: str
-    status: Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
-    directories_scanned: int = Field(alias="directoriesScanned")
-    files_scanned: int = Field(alias="filesScanned")
-    candidates_found: int = Field(alias="candidatesFound")
-    queued_count: int = Field(alias="queuedCount")
-    skipped_count: int = Field(alias="skippedCount")
-    error_count: int = Field(alias="errorCount")
-    ignored_reason_counts: dict[str, int] = Field(alias="ignoredReasonCounts")
-    error_samples: list[ScanError] = Field(alias="errorSamples")
-    restart_count: int = Field(alias="restartCount")
-    started_at: datetime | None = Field(alias="startedAt")
-    heartbeat_at: datetime | None = Field(alias="heartbeatAt")
-    finished_at: datetime | None = Field(alias="finishedAt")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
-
-
-class ImportScanJobPayload(HttpContractModel):
-    job: ImportScanJob
-
-
-class ImportScanJobMutationPayload(ImportScanJobPayload):
-    created: bool
-
-
-class ImportScanJobsPayload(HttpContractModel):
-    jobs: list[ImportScanJob]
-
-
-class DeletedImportTasksPayload(HttpContractModel):
-    deleted: int
-
-
-class ImportQueueClearOperation(HttpContractModel):
-    id: str
-    queue_name: Literal["import"] = Field(alias="queueName")
-    action: Literal["clear"]
-    status: Literal["requested", "waiting", "running", "completed", "failed"]
-    actor_user_id: str = Field(alias="actorUserId")
-    message_code: str = Field(alias="messageCode")
-    requested_at: datetime = Field(alias="requestedAt")
-    started_at: datetime | None = Field(alias="startedAt")
-    finished_at: datetime | None = Field(alias="finishedAt")
-    updated_at: datetime = Field(alias="updatedAt")
-
-
-class ImportQueueClearPayload(HttpContractModel):
-    operation: ImportQueueClearOperation
-    created: bool
-
-
-class RescanImportTasksPayload(HttpContractModel):
-    requested_at: datetime = Field(alias="requestedAt")
-    jobs: list[ImportScanJob]
+class ContinueImportPayload(HttpContractModel):
+    task_id: str | None = Field(default=None, alias="taskId")
+    library_id: str = Field(alias="libraryId")
+    source_node_id: str | None = Field(default=None, alias="sourceNodeId")
+    requeued_failed: int = Field(alias="requeuedFailed")
+    enqueued: bool
 
 
 ImportTasksResponse = SuccessEnvelope[ImportTasksPayload]
 ImportTaskResponse = SuccessEnvelope[ImportTaskPayload]
-ImportLogsResponse = SuccessEnvelope[ImportLogsPayload]
-ImportDirectoryScanResponse = SuccessEnvelope[ImportScanJobMutationPayload]
-ImportScanJobResponse = SuccessEnvelope[ImportScanJobPayload]
-ImportScanJobsResponse = SuccessEnvelope[ImportScanJobsPayload]
-DeletedImportTasksResponse = SuccessEnvelope[DeletedImportTasksPayload]
-ImportQueueClearResponse = SuccessEnvelope[ImportQueueClearPayload]
-RescanImportTasksResponse = SuccessEnvelope[RescanImportTasksPayload]
+ContinueImportResponse = SuccessEnvelope[ContinueImportPayload]
 
 
 class SavedUploadResult(HttpContractModel):
@@ -289,15 +162,10 @@ class SavedUploadResult(HttpContractModel):
 class ImportUploadPayload(HttpContractModel):
     results: list[SavedUploadResult]
     saved: int
-
-
-class ImportDeletionPayload(HttpContractModel):
-    deleted: bool
-    id: str
+    task_id: str | None = Field(default=None, alias="taskId")
 
 
 ImportUploadResponse = SuccessEnvelope[ImportUploadPayload]
-ImportDeletionResponse = SuccessEnvelope[ImportDeletionPayload]
 
 
 class ImportFileListDetails(HttpContractModel):
@@ -333,3 +201,6 @@ class ImportConflictError(HttpContractError[ImportErrorBody]):
 class ImportInternalError(HttpContractError[ImportErrorBody]):
     status_code = 500
     body_model = ImportErrorBody
+
+
+__all__ = [name for name in globals() if not name.startswith("_")]
