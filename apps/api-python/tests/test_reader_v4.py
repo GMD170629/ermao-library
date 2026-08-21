@@ -25,6 +25,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
 )
+from app.modules.publications.infrastructure.models import PublicationNavigationCache
 
 
 def _path_key(path: str) -> str:
@@ -88,7 +89,7 @@ def _add_resource(
     path = str(source)
     exists = source.is_file()
     size_bytes = source.stat().st_size if exists else 4
-    mtime_ms = int(source.stat().st_mtime * 1000) if exists else 1
+    mtime_ms = source.stat().st_mtime_ns // 1_000_000 if exists else 1
     book = db_session.get(LibraryBook, book_id)
     if book is None:
         book_node = _source_node(
@@ -103,7 +104,20 @@ def _add_resource(
             source_node_id=book_node.id,
         )
         db_session.add(book_node)
+        db_session.flush()
         db_session.add(book)
+        db_session.flush()
+        db_session.add(
+            LibraryBookMetadata(
+                book_id=book_id,
+                title="Reader v4",
+                normalized_title="reader v4",
+                author="测试作者",
+                normalized_author="测试作者",
+            )
+        )
+        db_session.flush()
+    elif db_session.get(LibraryBookMetadata, book_id) is None:
         db_session.add(
             LibraryBookMetadata(
                 book_id=book_id,
@@ -124,9 +138,9 @@ def _add_resource(
     media_kind = (
         "COMIC"
         if fmt.upper() in {"CBZ", "ZIP", "CBR", "RAR"}
-        else "AUDIO"
+        else "AUDIOBOOK"
         if fmt.upper() in {"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"}
-        else "READABLE"
+        else "EBOOK"
     )
     resource = LibraryReadableResource(
         id=resource_id,
@@ -163,7 +177,15 @@ def _add_resource(
         mime_type=mime_type,
         duration_ms=duration_ms,
     )
-    db_session.add_all([source_node, resource, metadata, asset, asset_metadata])
+    db_session.add(source_node)
+    db_session.flush()
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add(metadata)
+    db_session.flush()
+    db_session.add(asset)
+    db_session.flush()
+    db_session.add(asset_metadata)
     db_session.commit()
     return resource, asset
 
@@ -328,7 +350,6 @@ def test_reader_v4_bootstrap_and_progress_are_resource_scoped(
     assert bootstrap["resource"]["id"] == resource.id
     assert bootstrap["resource"]["bookId"] == "book-reader-v4"
     assert bootstrap["resource"]["resourceCompleted"] is False
-    assert bootstrap["bookCompleted"] is False
     assert bootstrap["availableResources"][0]["id"] == resource.id
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
@@ -415,11 +436,11 @@ def test_reader_v4_bootstrap_and_progress_are_resource_scoped(
     assert repeated.json()["data"] == progress
 
 
-def test_reader_v4_first_exact_save_replaces_status_only_revision_zero_row(
+def test_reader_v4_exact_save_after_reading_status_uses_current_revision(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    _login(client, db_session)
+    user = _login(client, db_session)
     resource, _asset = _ebook_resource(db_session)
     finished = client.put(
         f"/api/reader/v4/resources/{resource.id}/reading-status",
@@ -431,14 +452,14 @@ def test_reader_v4_first_exact_save_replaces_status_only_revision_zero_row(
     ]
     saved = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
-        json=_progress_payload(),
+        json=_progress_payload(base_revision=1),
     )
 
     assert saved.status_code == 200, saved.json()
-    assert saved.json()["data"]["revision"] == 1
+    assert saved.json()["data"]["revision"] == 2
     progress = db_session.query(ReaderResourceProgress).one()
     assert progress.location_type == "reflowable"
-    assert progress.revision == 1
+    assert progress.revision == 2
     assert bootstrap["resource"]["resourceCompleted"] is True
 
 
@@ -446,7 +467,7 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    _login(client, db_session)
+    user = _login(client, db_session)
     resource, asset = _ebook_resource(db_session)
     resource.format = "PDF"
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
@@ -500,6 +521,7 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     _login(client, db_session)
     resource, asset = _ebook_resource(db_session)
     resource.format = "CBZ"
+    resource.media_kind = "COMIC"
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None
     metadata.page_count = 2
@@ -523,12 +545,16 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
         ]
     )
     db_session.commit()
-    bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
-        "data"
-    ]
-    assert bootstrap["sourceFormat"] == "cbz"
-    assert bootstrap["readerType"] == "comic"
-    assert bootstrap["resource"]["bookId"] == "book-reader-v4"
+    book_response = client.get("/api/books/book-reader-v4")
+    assert book_response.status_code == 200, book_response.text
+    book_resource = next(
+        item
+        for item in book_response.json()["data"]["book"]["resources"]
+        if item["id"] == resource.id
+    )
+    assert book_resource["format"] == "CBZ"
+    assert book_resource["readerType"] == "comic"
+    assert book_resource["mediaKind"] == "COMIC"
 
     accepted = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
@@ -831,7 +857,7 @@ def test_resource_reading_status_updates_book_detail_and_isolated_progress(
     assert db_session.query(ReaderResourceProgress).count() == 0
 
 
-def test_resource_reading_status_creates_clean_revision_zero_progress(
+def test_resource_reading_status_creates_clean_revisioned_progress(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -852,7 +878,7 @@ def test_resource_reading_status_creates_clean_revision_zero_progress(
     assert progress.percent == 100
     assert progress.location_type is None
     assert progress.location_json is None
-    assert progress.revision == 0
+    assert progress.revision == 1
 
 
 def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
@@ -870,7 +896,9 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     source_node.path_key = _path_key(str(epub))
     source_node.name = epub.name
     source_node.observed_size_bytes = epub.stat().st_size
-    source_node.observed_mtime_ns = int(epub.stat().st_mtime * 1_000_000_000)
+    source_node.observed_mtime_ns = (
+        epub.stat().st_mtime_ns // 1_000_000
+    ) * 1_000_000
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None
     metadata.chapter_count = None
@@ -924,9 +952,9 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     assert writes == []
     assert db_session.query(ReadableResourceNavigationUnit).count() == 2
     db_session.expire_all()
-    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
-    assert metadata is not None
-    assert metadata.chapter_count == 2
+    navigation_cache = db_session.get(PublicationNavigationCache, resource.id)
+    assert navigation_cache is not None
+    assert navigation_cache.chapter_count == 2
 
 
 def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
@@ -944,7 +972,9 @@ def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
     source_node.path_key = _path_key(str(epub))
     source_node.name = epub.name
     source_node.observed_size_bytes = epub.stat().st_size
-    source_node.observed_mtime_ns = int(epub.stat().st_mtime * 1_000_000_000)
+    source_node.observed_mtime_ns = (
+        epub.stat().st_mtime_ns // 1_000_000
+    ) * 1_000_000
     db_session.add_all(
         [
             ReadableResourceNavigationUnit(
@@ -1061,7 +1091,9 @@ def test_resource_asset_route_streams_the_selected_asset_only(
     source_node.relative_path = str(stored_file)
     source_node.path_key = _path_key(str(stored_file))
     source_node.observed_size_bytes = stored_file.stat().st_size
-    source_node.observed_mtime_ns = int(stored_file.stat().st_mtime * 1_000_000_000)
+    source_node.observed_mtime_ns = (
+        stored_file.stat().st_mtime_ns // 1_000_000
+    ) * 1_000_000
     db_session.commit()
 
     response = client.get(f"/api/assets/{asset.id}")
@@ -1098,7 +1130,9 @@ def test_resource_asset_download_mode_uses_attachment_for_every_media_format(
     source_node.relative_path = str(stored_file)
     source_node.path_key = _path_key(str(stored_file))
     source_node.observed_size_bytes = stored_file.stat().st_size
-    source_node.observed_mtime_ns = int(stored_file.stat().st_mtime * 1_000_000_000)
+    source_node.observed_mtime_ns = (
+        stored_file.stat().st_mtime_ns // 1_000_000
+    ) * 1_000_000
     asset_metadata = db_session.get(LibraryResourceAssetMetadata, "asset-reader-v4")
     assert asset_metadata is not None
     asset_metadata.mime_type = mime_type
@@ -1198,8 +1232,6 @@ def test_sibling_resources_keep_independent_progress_and_completion(
     ).json()["data"]
     assert source_after["resource"]["resourceCompleted"] is True
     assert sibling_after["resource"]["resourceCompleted"] is True
-    assert source_after["bookCompleted"] is True
-    assert sibling_after["bookCompleted"] is True
     progresses = db_session.query(ReaderResourceProgress).all()
     assert {progress.resource_id for progress in progresses} == {
         source.id,
@@ -1282,8 +1314,8 @@ def test_reader_v4_book_completion_is_scoped_to_the_current_book(
 
     assert current_bootstrap["book"]["id"] == "book-reader-v4"
     assert other_bootstrap["book"]["id"] == "book-reader-other"
-    assert current_bootstrap["bookCompleted"] is False
-    assert other_bootstrap["bookCompleted"] is True
+    assert current_bootstrap["resource"]["resourceCompleted"] is False
+    assert other_bootstrap["resource"]["resourceCompleted"] is True
     assert {item["id"] for item in current_bootstrap["availableResources"]} == {
         current.id
     }

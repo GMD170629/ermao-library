@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
+from app.models import LibraryBook, LibraryBookFacet, LibraryFacet, LibrarySourceNode
 from app.modules.library.infrastructure.facets import list_categories_page
 
 
@@ -29,31 +29,23 @@ def test_categories_remain_page_bounded(
             for index in range(facet_count)
         ],
     )
-    work_count = 100_000
-    duplicate_work_count = 10_000
-    for start in range(0, work_count, 1_000):
-        stop = min(work_count, start + 1_000)
+    book_count = 100_000
+    duplicate_book_count = 10_000
+    for start in range(0, book_count, 1_000):
+        stop = min(book_count, start + 1_000)
         db_session.execute(
-            insert(LibraryWork),
+            insert(LibrarySourceNode),
             [
                 {
-                    "id": f"management-work-{index:06d}",
+                    "id": f"management-book-node-{index:06d}",
                     "library_id": "test-library",
-                    "origin": "MANUAL",
-                    "title": (
-                        f"Duplicate {index // 2:04d}"
-                        if index < duplicate_work_count
-                        else f"Unique {index:06d}"
-                    ),
-                    "normalized_title": (
-                        f"duplicate{index // 2:04d}"
-                        if index < duplicate_work_count
-                        else f"unique{index:06d}"
-                    ),
-                    "author": "Scale author",
-                    "normalized_author": "scaleauthor",
-                    "tags": "[]",
-                    "hidden": False,
+                    "relative_path": f"management-book-{index:06d}/",
+                    "path_key": f"v1:{index:064x}",
+                    "name": f"management-book-{index:06d}",
+                    "physical_kind": "DIRECTORY",
+                    "observed_size_bytes": None,
+                    "observed_mtime_ns": 0,
+                    "observed_at": now,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -61,11 +53,26 @@ def test_categories_remain_page_bounded(
             ],
         )
         db_session.execute(
-            insert(LibraryWorkFacet),
+            insert(LibraryBook),
+            [
+                {
+                    "id": f"management-book-{index:06d}",
+                    "library_id": "test-library",
+                    "source_node_id": f"management-book-node-{index:06d}",
+                    "visibility_state": "VISIBLE",
+                    "curation_state": "PENDING",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db_session.execute(
+            insert(LibraryBookFacet),
             [
                 {
                     "facet_id": f"management-author-{index % facet_count:04d}",
-                    "work_id": f"management-work-{index:06d}",
+                    "book_id": f"management-book-{index:06d}",
                     "sort_order": 0,
                     "created_at": now,
                 }

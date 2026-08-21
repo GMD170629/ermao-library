@@ -4,6 +4,9 @@ import pytest
 
 from app.modules.imports.application.identity_policy import (
     explicit_volume_range_start,
+    normalize_identity_part,
+    parse_bracketed_series_identity,
+    split_numeric_volume_fallback,
     split_explicit_volume,
 )
 
@@ -67,3 +70,56 @@ def test_explicit_volume_range_returns_first_publication_number(
 @pytest.mark.parametrize("publication_title", ["2020-2024年", "版本 1-2", "作品名"])
 def test_volume_range_requires_a_publication_marker(publication_title: str) -> None:
     assert explicit_volume_range_start(publication_title) is None
+
+
+@pytest.mark.parametrize(
+    ("folder_name", "filename", "expected"),
+    [
+        ("[活着][余华]", "活着.epub", ("活着", "余华")),
+        (
+            "[辣妹因为惩罚游戏才向我这个边缘人告白][結石][Vol.01-Vol.10]",
+            "辣妹因为惩罚游戏才向我这个边缘人告白 09.epub",
+            ("辣妹因为惩罚游戏才向我这个边缘人告白", "結石"),
+        ),
+        (
+            "[Chainsaw Man][电锯人][藤本タツキ][Vol.01-Vol.11]",
+            "VOL11.zip",
+            ("电锯人", "藤本タツキ"),
+        ),
+    ],
+)
+def test_bracketed_series_identity_selects_title_and_author(
+    folder_name: str,
+    filename: str,
+    expected: tuple[str, str],
+) -> None:
+    assert parse_bracketed_series_identity(folder_name, filename) == expected
+
+
+def test_bracketed_series_identity_rejects_non_series_folder_names() -> None:
+    assert parse_bracketed_series_identity("[Title] extra [Author]") is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("FX戦士久留美 (1)", ("FX戦士久留美", 1)),
+        ("FX戦士久留美 [02]", ("FX戦士久留美", 2)),
+        ("FX戦士久留美_003", ("FX戦士久留美", 3)),
+        ("004 FX戦士久留美", ("FX戦士久留美", 4)),
+    ],
+)
+def test_numeric_volume_fallback_accepts_short_standalone_numbers(
+    value: str,
+    expected: tuple[str, float],
+) -> None:
+    assert split_numeric_volume_fallback(value) == expected
+
+
+@pytest.mark.parametrize("value", ["作品2024版", "作品123456特别篇"])
+def test_numeric_volume_fallback_ignores_long_attached_numbers(value: str) -> None:
+    assert split_numeric_volume_fallback(value) is None
+
+
+def test_identity_normalization_is_unicode_and_separator_insensitive() -> None:
+    assert normalize_identity_part("  Ａuthor - Name（特别） ") == "authorname特别"
