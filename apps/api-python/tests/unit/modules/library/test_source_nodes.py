@@ -253,3 +253,7 @@ def test_physical_kind_values_match_adr() -> None:
     assert SourceNodePhysicalKind.DIRECTORY.value == "DIRECTORY"
     assert SourceNodePhysicalKind.SYMLINK.value == "SYMLINK"
     assert SourceNodePhysicalKind.OTHER.value == "OTHER"
+
+
+def test_parent_not_found_code_is_stable() -> None:
+    assert SourceNodeViolationCode.PARENT_NOT_FOUND.value == "PARENT_NOT_FOUND"

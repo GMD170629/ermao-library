@@ -26,6 +26,12 @@ from app.modules.library.domain.organization_modes import (
     TargetLibraryOrganizationMode,
     parse_target_organization_mode,
 )
+from app.modules.library.domain.readable_resource_anchors import (
+    ReadableResourceAnchorViolationCode,
+    ReadableResourceTopologyError,
+    is_asset_path_within_resource_scope,
+    is_resource_anchor_within_book_scope,
+)
 from app.modules.library.domain.readable_resource_states import (
     AssetImportState,
     AssetRole,
@@ -35,6 +41,11 @@ from app.modules.library.domain.readable_resource_states import (
 from app.modules.library.domain.source_nodes import (
     SourceNodePhysicalKind,
     SourceNodeRelativePath,
+    SourceNodeTopologyError,
+    SourceNodeTreeNode,
+    SourceNodeViolationCode,
+    evaluate_path_key_occupancy,
+    validate_source_node_direct_parent,
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
@@ -141,7 +152,45 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
     ) -> tuple[SourceNodeRecord, bool]:
         existing = self.get_by_path_key(library_id, entry.relative_path.path_key)
         if existing is not None:
+            collision = evaluate_path_key_occupancy(
+                occupied_relative_path=SourceNodeRelativePath(existing.relative_path),
+                candidate_relative_path=entry.relative_path,
+            )
+            if collision is not None:
+                raise SourceNodeTopologyError(
+                    collision.code,
+                    relative_path=collision.relative_path,
+                )
             return existing, False
+
+        parent_tree: SourceNodeTreeNode | None = None
+        if parent_id is not None:
+            parent_record = self.get(parent_id)
+            if parent_record is None:
+                raise SourceNodeTopologyError(
+                    SourceNodeViolationCode.PARENT_NOT_FOUND,
+                    relative_path=entry.relative_path.value,
+                )
+            parent_tree = SourceNodeTreeNode(
+                library_id=parent_record.library_id,
+                relative_path=SourceNodeRelativePath(parent_record.relative_path),
+                physical_kind=parent_record.physical_kind,
+            )
+
+        child = SourceNodeTreeNode(
+            library_id=library_id,
+            relative_path=entry.relative_path,
+            physical_kind=entry.physical_kind,
+        )
+        violations = validate_source_node_direct_parent(
+            node=child, parent=parent_tree
+        )
+        if violations:
+            raise SourceNodeTopologyError(
+                violations[0].code,
+                relative_path=violations[0].relative_path,
+            )
+
         row = LibrarySourceNode(
             id=cuid(),
             library_id=library_id,
@@ -261,9 +310,27 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         source_node_id: str,
         title: str,
     ) -> str:
-        existing = self.get_book_id_for_source_node(source_node_id)
+        source_node = self._session.get(LibrarySourceNode, source_node_id)
+        if source_node is None:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.SOURCE_NODE_NOT_FOUND,
+                detail=source_node_id,
+            )
+        if source_node.library_id != library_id:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.CROSS_LIBRARY,
+                detail=source_node_id,
+            )
+        existing = self._session.scalar(
+            select(LibraryBook).where(LibraryBook.source_node_id == source_node_id)
+        )
         if existing is not None:
-            return existing
+            if existing.library_id != library_id:
+                raise ReadableResourceTopologyError(
+                    ReadableResourceAnchorViolationCode.CROSS_LIBRARY,
+                    detail=existing.id,
+                )
+            return existing.id
         book_id = cuid()
         self._session.add(
             LibraryBook(
@@ -309,6 +376,51 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         source_node_id: str,
         adapter: AdapterIdentity,
     ) -> ReadableResourceRecord:
+        existing = self.get_resource_by_source_node(source_node_id)
+        if existing is not None:
+            if existing.library_id != library_id or existing.book_id != book_id:
+                raise ReadableResourceTopologyError(
+                    ReadableResourceAnchorViolationCode.RESOURCE_ALREADY_ANCHORED,
+                    detail=source_node_id,
+                )
+            return existing
+
+        book = self._session.get(LibraryBook, book_id)
+        if book is None:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.BOOK_NOT_FOUND,
+                detail=book_id,
+            )
+        if book.library_id != library_id:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.CROSS_LIBRARY,
+                detail=book_id,
+            )
+        book_anchor = self._session.get(LibrarySourceNode, book.source_node_id)
+        resource_anchor = self._session.get(LibrarySourceNode, source_node_id)
+        if book_anchor is None or resource_anchor is None:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.SOURCE_NODE_NOT_FOUND,
+                detail=source_node_id if resource_anchor is None else book.source_node_id,
+            )
+        if (
+            book_anchor.library_id != library_id
+            or resource_anchor.library_id != library_id
+        ):
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.CROSS_LIBRARY,
+                detail=source_node_id,
+            )
+        if not is_resource_anchor_within_book_scope(
+            book_anchor=SourceNodeRelativePath(book_anchor.relative_path),
+            book_anchor_kind=SourceNodePhysicalKind(book_anchor.physical_kind),
+            resource_anchor=SourceNodeRelativePath(resource_anchor.relative_path),
+        ):
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.RESOURCE_OUT_OF_BOOK_SCOPE,
+                detail=source_node_id,
+            )
+
         row = LibraryReadableResource(
             id=cuid(),
             library_id=library_id,
@@ -377,6 +489,44 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         sort_key: str | None,
         failure_reason: str | None,
     ) -> str:
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if resource is None:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.RESOURCE_NOT_FOUND,
+                detail=resource_id,
+            )
+        if resource.library_id != library_id:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.CROSS_LIBRARY,
+                detail=resource_id,
+            )
+        asset_node = self._session.get(LibrarySourceNode, source_node_id)
+        resource_anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
+        if asset_node is None or resource_anchor is None:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.SOURCE_NODE_NOT_FOUND,
+                detail=source_node_id if asset_node is None else resource.source_node_id,
+            )
+        if asset_node.library_id != library_id:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.CROSS_LIBRARY,
+                detail=source_node_id,
+            )
+        if asset_node.physical_kind != SourceNodePhysicalKind.REGULAR_FILE.value:
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.ASSET_SOURCE_NOT_REGULAR_FILE,
+                detail=source_node_id,
+            )
+        if not is_asset_path_within_resource_scope(
+            resource_anchor=SourceNodeRelativePath(resource_anchor.relative_path),
+            resource_anchor_kind=SourceNodePhysicalKind(resource_anchor.physical_kind),
+            asset_path=SourceNodeRelativePath(asset_node.relative_path),
+        ):
+            raise ReadableResourceTopologyError(
+                ReadableResourceAnchorViolationCode.ASSET_OUT_OF_RESOURCE_SCOPE,
+                detail=source_node_id,
+            )
+
         row = self._session.scalar(
             select(LibraryResourceAsset).where(
                 LibraryResourceAsset.resource_id == resource_id,

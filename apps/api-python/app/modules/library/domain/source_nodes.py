@@ -24,6 +24,7 @@ class SourceNodeViolationCode(str, Enum):
     CROSS_LIBRARY_PARENT = "CROSS_LIBRARY_PARENT"
     PARENT_NOT_DIRECTORY = "PARENT_NOT_DIRECTORY"
     PARENT_PATH_MISMATCH = "PARENT_PATH_MISMATCH"
+    PARENT_NOT_FOUND = "PARENT_NOT_FOUND"
     SELF_PARENT = "SELF_PARENT"
 
 
@@ -36,6 +37,20 @@ class InvalidSourceNodeRelativePathError(Exception):
         super().__init__(
             f"invalid library-relative path: {relative_path!r}"
         )
+
+
+class SourceNodeTopologyError(Exception):
+    """Stable repository-boundary rejection for SourceNode tree writes."""
+
+    def __init__(
+        self,
+        code: SourceNodeViolationCode,
+        *,
+        relative_path: str,
+    ) -> None:
+        self.code = code
+        self.relative_path = relative_path
+        super().__init__(code.value)
 
 
 @dataclass(frozen=True, slots=True)
