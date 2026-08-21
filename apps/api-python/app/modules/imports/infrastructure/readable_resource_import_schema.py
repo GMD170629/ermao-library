@@ -33,13 +33,20 @@ class LibraryImportRun(Base):
     __tablename__ = "LibraryImportRun"
     __table_args__ = (
         CheckConstraint(
-            "\"kind\" IN ('INITIAL', 'RETRY', 'REIMPORT', 'RECOVERY')",
+            column("kind").in_(("INITIAL", "RETRY", "REIMPORT", "RECOVERY")),
             name="LibraryImportRun_kind_check",
         ),
         CheckConstraint(
-            "\"state\" IN ("
-            "'PENDING', 'RUNNING', 'COMPLETED', "
-            "'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED')",
+            column("state").in_(
+                (
+                    "PENDING",
+                    "RUNNING",
+                    "COMPLETED",
+                    "COMPLETED_WITH_ERRORS",
+                    "FAILED",
+                    "CANCELLED",
+                )
+            ),
             name="LibraryImportRun_state_check",
         ),
         ForeignKeyConstraint(
@@ -122,11 +129,11 @@ class ResourceCandidate(Base):
     __tablename__ = "ResourceCandidate"
     __table_args__ = (
         CheckConstraint(
-            "\"enablementState\" IN ('ENABLED', 'DISABLED')",
+            column("enablementState").in_(("ENABLED", "DISABLED")),
             name="ResourceCandidate_enablementState_check",
         ),
         CheckConstraint(
-            "\"importState\" IN ('PENDING', 'READY', 'FAILED')",
+            column("importState").in_(("PENDING", "READY", "FAILED")),
             name="ResourceCandidate_importState_check",
         ),
         UniqueConstraint("importRunId", name="ResourceCandidate_importRunId_key"),
@@ -199,12 +206,13 @@ class AssetCandidate(Base):
     __tablename__ = "AssetCandidate"
     __table_args__ = (
         CheckConstraint(
-            "\"role\" IN "
-            "('PRIMARY', 'TRACK', 'PAGE', 'SIDECAR', 'SUPPLEMENT')",
+            column("role").in_(
+                ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
+            ),
             name="AssetCandidate_role_check",
         ),
         CheckConstraint(
-            "\"importState\" IN ('PENDING', 'READY', 'FAILED')",
+            column("importState").in_(("PENDING", "READY", "FAILED")),
             name="AssetCandidate_importState_check",
         ),
         UniqueConstraint(
@@ -274,13 +282,15 @@ class LibraryImportTask(Base):
     __tablename__ = "LibraryImportTask"
     __table_args__ = (
         CheckConstraint(
-            "\"state\" IN "
-            "('QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')",
+            column("state").in_(
+                ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED")
+            ),
             name="LibraryImportTask_state_check",
         ),
         CheckConstraint(
-            "\"role\" IN "
-            "('PRIMARY', 'TRACK', 'PAGE', 'SIDECAR', 'SUPPLEMENT')",
+            column("role").in_(
+                ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
+            ),
             name="LibraryImportTask_role_check",
         ),
         ForeignKeyConstraint(

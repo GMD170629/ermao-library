@@ -543,7 +543,7 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
   - `uv run --no-sync pytest -q` → **6 failed, 942 passed**（同既有 6 失败；通过数含新增单测）
   - `uv run --no-sync ruff format --check …` / `ruff check …` → **不可用**（`Failed to spawn: ruff`；未安装依赖）
 
-### 阶段 1B：目标 ORM schema — 已完成（速度优先，未跑测试）
+### 阶段 1B：目标 ORM schema — 已完成结构修复，等待最终统一验证
 
 - 实现（未接入运行时读写）：
   - `apps/api-python/app/modules/library/infrastructure/readable_resource_schema.py`
@@ -555,6 +555,10 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
   - 注册：`apps/api-python/app/models/__init__.py`（仅 import 注册，无双写/兼容服务）
   - 迁移：`apps/api-python/app/db/alembic/versions/0003_readable_resource_overlay_schema.py`
     - `down_revision = "0002_version_covers"`；临时增量 revision，目标导入流稳定后才压平 fresh baseline
+    - **结构修复**：0003 改为 migration-local immutable schema（本地 `MetaData`/`Table` + typed CHECK；
+      逐表 `Table.create` / 逆序 `drop`）；禁止依赖运行期模型包或 declarative registry
+  - ORM：全部 20 个 `CheckConstraint` 已改为 typed SQLAlchemy expressions（`column`/`and_`/`or_`/`func`/`in_` 等）
+  - 防回归：`tests/test_capability_architecture.py` 增加 0003 自包含与 typed CHECK 静态守卫
 - 关键约束（库可表达部分）：
   - SourceNode `(libraryId, pathKey)` 唯一；`pathKey` 长度 67 且 `v1:` 前缀；`physicalKind` CHECK
   - 同 Library 父子复合 FK；`parentPhysicalKind` shadow + DIRECTORY 复合 FK；parent 成对 CHECK；禁止直接 self-parent
@@ -568,10 +572,10 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 - Shadow 列理由：`parentPhysicalKind`、`sourceNodePhysicalKind`（及实体上的 `libraryId`）仅服务 SQLite 复合 FK/CHECK，不进入领域/API DTO
 - 应用层保留：父路径一致性、跨层级子树范围、无环（超出直接 self-parent）
 - Legacy：`LibraryWork` / `LibraryVersion` / `LibraryVolume` / `LibraryFile` 暂时保留，无双写
-- 测试代码已写、**本批未执行**：
+- 测试代码已写、**本批未执行 pytest / Ruff / smoke**（速度优先，等待阶段 7 统一验证）：
   - `tests/integration/modules/library/test_readable_resource_schema.py`
-  - `tests/test_sqlite_database.py`（断言 fresh schema 含新表）
-- 按速度优先策略，本批未运行 pytest / Ruff / 全量门禁，等待阶段 7 统一验证；仅做 `compileall` 语法检查
+  - `tests/test_sqlite_database.py`
+  - `tests/test_capability_architecture.py`（新增守卫）
 - 明确未接入：API、scanner、worker、composition root 读写路径
 
 ### 后续阶段 — 未完成

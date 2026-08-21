@@ -391,3 +391,81 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
         source = path.read_text(encoding="utf-8")
         for token in forbidden:
             assert token not in source, f"{path.name}: {token}"
+
+
+def test_readable_resource_overlay_migration_is_immutable_and_self_contained() -> None:
+    path = (
+        APP_ROOT
+        / "db"
+        / "alembic"
+        / "versions"
+        / "0003_readable_resource_overlay_schema.py"
+    )
+    source = path.read_text(encoding="utf-8")
+    forbidden = (
+        "app.models",
+        "app.db.base",
+        "Base.metadata",
+        "create_all",
+        "sqlalchemy.text",
+        "from sqlalchemy import text",
+        "importlib",
+        "__import__",
+    )
+    for token in forbidden:
+        assert token not in source, token
+
+
+def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None:
+    import ast
+
+    paths = (
+        APP_ROOT
+        / "modules"
+        / "library"
+        / "infrastructure"
+        / "readable_resource_schema.py",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource_import_schema.py",
+    )
+
+    def _is_check_constraint_call(node: ast.Call) -> bool:
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == "CheckConstraint"
+        if isinstance(func, ast.Attribute):
+            return func.attr == "CheckConstraint"
+        return False
+
+    def _is_string_expression(node: ast.AST | None) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return _is_string_expression(node.left) or _is_string_expression(
+                node.right
+            )
+        return False
+
+    check_count = 0
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not _is_check_constraint_call(node):
+                continue
+            check_count += 1
+            expression: ast.AST | None = node.args[0] if node.args else None
+            for keyword in node.keywords:
+                if keyword.arg == "sqltext":
+                    expression = keyword.value
+            assert not _is_string_expression(expression), (
+                f"{path.name}: CheckConstraint must use typed SQLAlchemy "
+                f"expressions, not string SQL (line {node.lineno})"
+            )
+    assert check_count == 20

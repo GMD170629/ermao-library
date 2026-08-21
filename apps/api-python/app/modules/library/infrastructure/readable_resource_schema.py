@@ -21,7 +21,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
     column,
+    func,
+    or_,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,28 +39,50 @@ class LibrarySourceNode(Base):
     __tablename__ = "LibrarySourceNode"
     __table_args__ = (
         CheckConstraint(
-            "\"physicalKind\" IN "
-            "('REGULAR_FILE', 'DIRECTORY', 'SYMLINK', 'OTHER')",
+            column("physicalKind").in_(
+                ("REGULAR_FILE", "DIRECTORY", "SYMLINK", "OTHER")
+            ),
             name="LibrarySourceNode_physicalKind_check",
         ),
         CheckConstraint(
-            f'length("pathKey") = {_PATH_KEY_LENGTH} '
-            "AND substr(\"pathKey\", 1, 3) = 'v1:'",
+            and_(
+                func.length(column("pathKey")) == _PATH_KEY_LENGTH,
+                func.substr(column("pathKey"), 1, 3) == "v1:",
+            ),
             name="LibrarySourceNode_pathKey_format_check",
         ),
         CheckConstraint(
-            '("parentId" IS NULL AND "parentPhysicalKind" IS NULL) OR '
-            '("parentId" IS NOT NULL AND "parentPhysicalKind" = \'DIRECTORY\')',
+            or_(
+                and_(
+                    column("parentId").is_(None),
+                    column("parentPhysicalKind").is_(None),
+                ),
+                and_(
+                    column("parentId").is_not(None),
+                    column("parentPhysicalKind") == "DIRECTORY",
+                ),
+            ),
             name="LibrarySourceNode_parent_pair_check",
         ),
         CheckConstraint(
-            '"parentId" IS NULL OR "parentId" != "id"',
+            or_(
+                column("parentId").is_(None),
+                column("parentId") != column("id"),
+            ),
             name="LibrarySourceNode_no_self_parent_check",
         ),
         CheckConstraint(
-            '("physicalKind" = \'DIRECTORY\' AND "observedSizeBytes" IS NULL) OR '
-            '("physicalKind" != \'DIRECTORY\' AND '
-            '"observedSizeBytes" IS NOT NULL AND "observedSizeBytes" >= 0)',
+            or_(
+                and_(
+                    column("physicalKind") == "DIRECTORY",
+                    column("observedSizeBytes").is_(None),
+                ),
+                and_(
+                    column("physicalKind") != "DIRECTORY",
+                    column("observedSizeBytes").is_not(None),
+                    column("observedSizeBytes") >= 0,
+                ),
+            ),
             name="LibrarySourceNode_observedSizeBytes_check",
         ),
         UniqueConstraint(
@@ -173,11 +198,11 @@ class LibrarySourceNodeInterpretation(Base):
     __tablename__ = "LibrarySourceNodeInterpretation"
     __table_args__ = (
         CheckConstraint(
-            "\"result\" IN ('NODE_ONLY', 'RESOURCE')",
+            column("result").in_(("NODE_ONLY", "RESOURCE")),
             name="LibrarySourceNodeInterpretation_result_check",
         ),
         CheckConstraint(
-            "\"source\" IN ('AUTO', 'USER')",
+            column("source").in_(("AUTO", "USER")),
             name="LibrarySourceNodeInterpretation_source_check",
         ),
     )
@@ -337,11 +362,11 @@ class LibraryReadableResource(Base):
     __tablename__ = "LibraryReadableResource"
     __table_args__ = (
         CheckConstraint(
-            "\"enablementState\" IN ('ENABLED', 'DISABLED')",
+            column("enablementState").in_(("ENABLED", "DISABLED")),
             name="LibraryReadableResource_enablementState_check",
         ),
         CheckConstraint(
-            "\"importState\" IN ('PENDING', 'READY', 'FAILED')",
+            column("importState").in_(("PENDING", "READY", "FAILED")),
             name="LibraryReadableResource_importState_check",
         ),
         UniqueConstraint("sourceNodeId", name="LibraryReadableResource_sourceNodeId_key"),
@@ -504,16 +529,17 @@ class LibraryResourceAsset(Base):
     __tablename__ = "LibraryResourceAsset"
     __table_args__ = (
         CheckConstraint(
-            "\"role\" IN "
-            "('PRIMARY', 'TRACK', 'PAGE', 'SIDECAR', 'SUPPLEMENT')",
+            column("role").in_(
+                ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
+            ),
             name="LibraryResourceAsset_role_check",
         ),
         CheckConstraint(
-            "\"importState\" IN ('PENDING', 'READY', 'FAILED')",
+            column("importState").in_(("PENDING", "READY", "FAILED")),
             name="LibraryResourceAsset_importState_check",
         ),
         CheckConstraint(
-            "\"sourceNodePhysicalKind\" = 'REGULAR_FILE'",
+            column("sourceNodePhysicalKind") == "REGULAR_FILE",
             name="LibraryResourceAsset_sourceNodePhysicalKind_check",
         ),
         UniqueConstraint(
