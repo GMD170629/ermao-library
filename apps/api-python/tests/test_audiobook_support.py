@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
 
-import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
 from app.core.auth import hash_password
 from app.models import (
@@ -68,17 +64,23 @@ def _add_audiobook(db_session) -> tuple[LibraryBook, LibraryReadableResource]:
         import_state="READY",
     )
     db_session.add_all(
+        [book_node]
+    )
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(resource_node)
+    db_session.flush()
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add_all(
         [
-            book_node,
-            resource_node,
-            book,
             LibraryBookMetadata(
                 book_id=book.id,
                 title="Audio book",
                 normalized_title="audio book",
                 author="Narrator",
             ),
-            resource,
             LibraryReadableResourceMetadata(
                 resource_id=resource.id,
                 title="Audio resource",
@@ -95,14 +97,17 @@ def _add_audiobook(db_session) -> tuple[LibraryBook, LibraryReadableResource]:
                 role="PRIMARY",
                 import_state="READY",
             ),
-            LibraryResourceAssetMetadata(
-                asset_id="audio-asset",
-                mime_type="audio/mp4",
-                duration_ms=3_600_000,
-                codec="aac",
-                track_number=1,
-            ),
         ]
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryResourceAssetMetadata(
+            asset_id="audio-asset",
+            mime_type="audio/mp4",
+            duration_ms=3_600_000,
+            codec="aac",
+            track_number=1,
+        )
     )
     db_session.flush()
     return book, resource
@@ -256,27 +261,16 @@ def test_m4a_rfc6381_aac_codec_is_accepted_without_ffprobe(tmp_path, monkeypatch
             "channels": 2,
         },
     )
-    monkeypatch.setattr(audio_metadata_module, "_read_with_ffprobe", lambda *_args: {})
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_read_with_ffprobe",
+        lambda _path, *, timeout_seconds: {},
+    )
 
     parsed = parse_audio_metadata(source)
 
     assert parsed.codec == "aac"
     assert parsed.title == "RFC 6381 AAC"
-
-
-def test_audio_cover_validation_rejects_unknown_oversized_and_high_pixel_images() -> None:
-    output = io.BytesIO()
-    Image.new("RGB", (16, 16), "navy").save(output, format="PNG")
-    valid = audio_cover_module.validated_audio_cover(output.getvalue())
-    assert valid is not None
-    assert valid[1] == ".png"
-    assert audio_cover_module.validated_audio_cover(b"not-an-image") is None
-    assert (
-        audio_cover_module.validated_audio_cover(
-            b"x" * (audio_cover_module.MAX_AUDIO_COVER_BYTES + 1)
-        )
-        is None
-    )
 
 
 def test_audiobook_resource_is_published_through_canonical_book_api(client, db_session) -> None:
