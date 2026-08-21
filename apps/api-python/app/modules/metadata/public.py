@@ -11,10 +11,10 @@ from app.modules.metadata.application.opf import (
 )
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.application.writeback import (
-    MetadataWritebackFileProjection,
+    MetadataWritebackAssetProjection,
     MetadataWritebackImportProjection,
     MetadataWritebackProjection,
-    MetadataWritebackVolumeProjection,
+    MetadataWritebackResourceProjection,
     PreparedWritebackIntent,
     prepare_metadata_writeback_intents,
 )
@@ -35,10 +35,10 @@ __all__ = [
     "OPF_NAMESPACE",
     "AutomaticMetadataRequestGate",
     "AutomaticRateLimit",
-    "MetadataWritebackFileProjection",
+    "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
-    "MetadataWritebackVolumeProjection",
+    "MetadataWritebackResourceProjection",
     "OpfMetadataError",
     "PreparedWritebackIntent",
     "ProviderConfigField",

@@ -14,7 +14,7 @@ from app.modules.imports.application.readable_resource.ports import (
     SourceNodeRepositoryPort,
     SourceTreeFilesystemPort,
     UnitOfWorkPort,
-    WorkQueuePort,
+    LibraryImportTaskQueuePort,
 )
 from app.modules.imports.domain.resource_adapters import ADAPTER_SPECS, ResourceAdapterSpec
 from app.modules.library.domain.readable_resource_states import AssetImportState
@@ -35,7 +35,7 @@ class ProcessReadableResourceImportTask:
         source_nodes: SourceNodeRepositoryPort,
         books_resources: BookResourceRepositoryPort,
         adapters: ResourceAdapterExecutorPort,
-        queue: WorkQueuePort,
+        queue: LibraryImportTaskQueuePort,
         uow: UnitOfWorkPort,
         clock: ClockPort,
         log: PipelineLogPort,

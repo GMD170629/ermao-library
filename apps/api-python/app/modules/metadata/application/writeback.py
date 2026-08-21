@@ -11,10 +11,10 @@ NULL_SOURCE_REVISION = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
-class MetadataWritebackFileProjection:
+class MetadataWritebackAssetProjection:
     id: str
     resource_id: str
-    path: str
+    relative_path: str
     size_bytes: int
     mtime_ms: int
 
@@ -27,12 +27,12 @@ class MetadataWritebackImportProjection:
 
 
 @dataclass(frozen=True, slots=True)
-class MetadataWritebackVolumeProjection:
+class MetadataWritebackResourceProjection:
     id: str
     resource_id: str
     title: str
     description: str | None
-    volume_index: float | None
+    resource_index: float | None
     narrator: str | None
     abridged: bool | None
     language: str | None
@@ -55,8 +55,8 @@ class MetadataWritebackProjection:
     cover_path: str | None
     source_revision: datetime | None
     resource_ids: tuple[str, ...]
-    volumes: tuple[MetadataWritebackVolumeProjection, ...]
-    files: tuple[MetadataWritebackFileProjection, ...]
+    resources: tuple[MetadataWritebackResourceProjection, ...]
+    assets: tuple[MetadataWritebackAssetProjection, ...]
     imports: tuple[MetadataWritebackImportProjection, ...]
 
 
@@ -99,53 +99,53 @@ def prepare_metadata_writeback_intents(
 ) -> tuple[PreparedWritebackIntent, ...]:
     """Purely normalize one immutable projection into durable queue intents."""
 
-    files_by_volume: dict[str, list[dict[str, object]]] = {}
-    for file in projection.files:
-        files_by_volume.setdefault(file.resource_id, []).append(
+    assets_by_resource: dict[str, list[dict[str, object]]] = {}
+    for asset in projection.assets:
+        assets_by_resource.setdefault(asset.resource_id, []).append(
             {
-                "id": file.id,
-                "path": file.path,
-                "size": file.size_bytes,
-                "mtimeMs": file.mtime_ms,
+                "id": asset.id,
+                "relativePath": asset.relative_path,
+                "size": asset.size_bytes,
+                "mtimeMs": asset.mtime_ms,
             }
         )
-    imports_by_volume: dict[str, list[dict[str, object]]] = {}
+    imports_by_resource: dict[str, list[dict[str, object]]] = {}
     for imported in projection.imports:
-        imports_by_volume.setdefault(imported.resource_id, []).append(
+        imports_by_resource.setdefault(imported.resource_id, []).append(
             {
                 "sourcePath": imported.source_path,
                 "assetPaths": list(imported.asset_paths),
             }
         )
-    volumes_by_version: dict[str, list[dict[str, object]]] = {}
-    for volume in projection.volumes:
-        volumes_by_version.setdefault(volume.resource_id, []).append(
+    resources_by_book: dict[str, list[dict[str, object]]] = {}
+    for resource in projection.resources:
+        resources_by_book.setdefault(resource.resource_id, []).append(
             {
-                "resourceId": volume.id,
+                "resourceId": resource.id,
                 "payload": {
                     "title": projection.title,
-                    "volumeTitle": volume.title,
+                    "resourceTitle": resource.title,
                     "authors": _authors(projection.author),
-                    "description": projection.description or volume.description,
+                    "description": projection.description or resource.description,
                     "subjects": _tags(projection.tags_json),
                     "seriesName": projection.series_name,
                     "seriesIndex": projection.series_index,
-                    "volumeIndex": volume.volume_index,
-                    "narrators": _authors(volume.narrator),
-                    "abridged": volume.abridged,
-                    "language": volume.language,
-                    "publisher": volume.publisher,
+                    "resourceIndex": resource.resource_index,
+                    "narrators": _authors(resource.narrator),
+                    "abridged": resource.abridged,
+                    "language": resource.language,
+                    "publisher": resource.publisher,
                     "publishedAt": (
-                        volume.published_at.isoformat()
-                        if volume.published_at
+                        resource.published_at.isoformat()
+                        if resource.published_at
                         else None
                     ),
-                    "identifier": volume.identifier,
-                    "isbn": volume.isbn,
-                    "coverPath": volume.cover_path or projection.cover_path,
+                    "identifier": resource.identifier,
+                    "isbn": resource.isbn,
+                    "coverPath": resource.cover_path or projection.cover_path,
                 },
-                "files": files_by_volume.get(volume.id, []),
-                "importTasks": imports_by_volume.get(volume.id, []),
+                "assets": assets_by_resource.get(resource.id, []),
+                "importTasks": imports_by_resource.get(resource.id, []),
             }
         )
 
@@ -153,7 +153,7 @@ def prepare_metadata_writeback_intents(
     intents: list[PreparedWritebackIntent] = []
     for resource_id in projection.resource_ids:
         snapshot_json = json.dumps(
-            {"volumes": volumes_by_version.get(resource_id, [])},
+            {"resources": resources_by_book.get(resource_id, [])},
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -188,10 +188,10 @@ def prepare_metadata_writeback_intents(
 
 
 __all__ = [
-    "MetadataWritebackFileProjection",
+    "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
-    "MetadataWritebackVolumeProjection",
+    "MetadataWritebackResourceProjection",
     "PreparedWritebackIntent",
     "prepare_metadata_writeback_intents",
 ]

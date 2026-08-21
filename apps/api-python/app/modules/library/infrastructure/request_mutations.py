@@ -15,7 +15,6 @@ from app.models.common import cuid
 from app.models import (
     ReaderResourceProgress,
     LibraryReadableResource,
-    LibraryReadableResource,
     LibraryBook,
 )
 from app.models.organize import OrganizeJob
@@ -28,7 +27,7 @@ from app.modules.library.application.request_mutations import (
     DetailPreferenceMutation,
     MetadataApplyMutation,
     MetadataApplyResult,
-    WorkRecordMutation,
+    BookRecordMutation,
 )
 from app.modules.library.infrastructure import projections, storage, books
 from app.modules.library.infrastructure.facet_sync import (
@@ -82,7 +81,7 @@ class SqlAlchemyLibraryRequestMutations:
             now=command.now,
         )
 
-    def update_work(self, command: WorkRecordMutation) -> dict[str, object] | None:
+    def update_book(self, command: BookRecordMutation) -> dict[str, object] | None:
         facet_write = _prepared_facets(command.facet_write)
         updated = books.update_book_fields(
             self._db, command.book_id, dict(command.values)
@@ -214,7 +213,7 @@ class SqlAlchemyLibraryRequestMutations:
             }
             for record in command.records
         )
-        updated = storage.update_work_covers(self._db, cover_rows)
+        updated = storage.update_book_covers(self._db, cover_rows)
         self._write_metadata(self._db, command.writeback_intents)
         if updated and command.events:
             self._write_events(self._db, list(command.events))
@@ -234,19 +233,19 @@ class SqlAlchemyLibraryRequestMutations:
             if command.finished_job_ids
             else None
         )
-        volume_rows = tuple(dict(row) for row in command.volume_rows)
-        work = books.update_book_fields(
-            self._db, command.book_id, dict(command.work_values)
+        resource_rows = tuple(dict(row) for row in command.resource_rows)
+        book = books.update_book_fields(
+            self._db, command.book_id, dict(command.book_values)
         )
-        if volume_rows:
-            self._db.execute(update(LibraryReadableResource), list(volume_rows))
+        if resource_rows:
+            self._db.execute(update(LibraryReadableResource), list(resource_rows))
         if facet_write is not None:
             execute_book_facet_write(self._db, facet_write)
         if finish_jobs_statement is not None:
             self._db.execute(finish_jobs_statement)
         operation_ids = self._write_metadata(self._db, command.writeback_intents)
         return MetadataApplyResult(
-            work=work,
+            book=book,
             finished_job_ids=command.finished_job_ids,
             writeback_operation_ids=tuple(str(value) for value in operation_ids),
         )

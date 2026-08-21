@@ -14,7 +14,7 @@ from app.models import (
     LibraryBook,
 )
 from app.models.organize import OrganizeJob
-from app.modules.library.domain.resource_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.library.domain.resource_identity import IMPLICIT_RESOURCE_SOURCE_KEY
 from app.modules.organize.infrastructure.eligibility import work_entity_record
 from app.modules.organize.infrastructure.runs import job_entity_record
 
@@ -108,7 +108,7 @@ def _volumes_belonging_to_work(
         db.scalars(
             query.order_by(
                 case(
-                    (LibraryReadableResource.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
+                    (LibraryReadableResource.source_key == IMPLICIT_RESOURCE_SOURCE_KEY, 0),
                     else_=1,
                 ),
                 func.coalesce(LibraryReadableResource.source_name, ""),
@@ -175,7 +175,7 @@ def write_prepared_job_updates(db: Session, rows: tuple[dict[str, Any], ...]) ->
         db.execute(update(OrganizeJob), list(rows))
 
 
-def update_work(
+def update_book(
     db: Session, book_id: str, values: dict[str, Any]
 ) -> dict[str, Any] | None:
     if not _has_table(db, "LibraryBook"):

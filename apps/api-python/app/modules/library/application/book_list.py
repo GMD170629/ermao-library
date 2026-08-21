@@ -1,4 +1,4 @@
-"""Application contracts for library work listing."""
+"""Application contracts for library Book listing."""
 
 from __future__ import annotations
 

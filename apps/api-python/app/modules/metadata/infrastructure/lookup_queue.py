@@ -10,7 +10,13 @@ from sqlalchemy import and_, func, insert, inspect, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.models import LibraryBookMetadata, LibraryImportTask, LibraryReadableResource, LibraryBook
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryImportTask,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+)
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -37,11 +43,10 @@ _LOOKUP_TASK_CAMEL_TO_SNAKE: dict[str, str] = {
     "leaseExpiresAt": "lease_expires_at",
 }
 
-_WORK_CAMEL_TO_SNAKE: dict[str, str] = {
+_BOOK_METADATA_CAMEL_TO_SNAKE: dict[str, str] = {
     "title": "title",
     "author": "author",
     "description": "description",
-    "tags": "tags",
     "seriesName": "series_name",
     "seriesIndex": "series_index",
     "coverPath": "cover_path",
@@ -49,12 +54,10 @@ _WORK_CAMEL_TO_SNAKE: dict[str, str] = {
     "normalizedTitle": "normalized_title",
     "normalizedAuthor": "normalized_author",
     "metadataQuality": "metadata_quality",
-    "organized": "organized",
-    "organizeStatus": "organize_status",
     "updatedAt": "updated_at",
 }
 
-_VOLUME_CAMEL_TO_SNAKE: dict[str, str] = {
+_RESOURCE_METADATA_CAMEL_TO_SNAKE: dict[str, str] = {
     "publisher": "publisher",
     "publishedAt": "published_at",
     "language": "language",
@@ -118,7 +121,7 @@ def automatic_rate_limit_applies(db: Session, task: dict[str, Any]) -> bool:
     return str(trigger or "SCHEDULE").upper() != "MANUAL"
 
 
-def work_row_to_dict(row: Any) -> dict[str, Any]:
+def book_row_to_dict(row: Any) -> dict[str, Any]:
     mapping = getattr(row, "_mapping", None)
     if mapping is not None:
         data = dict(mapping)
@@ -131,20 +134,20 @@ def work_row_to_dict(row: Any) -> dict[str, Any]:
         "title": data.get("title"),
         "author": data.get("author"),
         "description": data.get("description"),
-        "tags": data.get("tags"),
+        "tags": data.get("tags", "[]"),
         "seriesName": data.get("series_name", data.get("seriesName")),
         "seriesIndex": data.get("series_index", data.get("seriesIndex")),
         "coverPath": data.get("cover_path", data.get("coverPath")),
         "coverStatus": data.get("cover_status", data.get("coverStatus")),
         "metadataQuality": data.get("metadata_quality", data.get("metadataQuality")),
-        "organized": data.get("organized"),
+        "organized": data.get("organized", False),
         "organizeStatus": data.get("organize_status", data.get("organizeStatus")),
         "normalizedTitle": data.get("normalized_title", data.get("normalizedTitle")),
         "normalizedAuthor": data.get("normalized_author", data.get("normalizedAuthor")),
     }
 
 
-def volume_row_to_dict(row: Any) -> dict[str, Any]:
+def resource_row_to_dict(row: Any) -> dict[str, Any]:
     mapping = getattr(row, "_mapping", None)
     data = (
         dict(mapping)
@@ -385,69 +388,90 @@ def write_prepared_provider_execution(
     return prepared.execution_id
 
 
-def get_work(db: Session, book_id: str | None) -> dict[str, Any] | None:
+def get_book(db: Session, book_id: str | None) -> dict[str, Any] | None:
     if not book_id:
         return None
     row = db.execute(
-        select(
-            LibraryBook.id,
-            LibraryBook.title,
-            LibraryBook.author,
-            LibraryBook.description,
-            LibraryBook.tags,
-            LibraryBook.series_name,
-            LibraryBook.series_index,
-            LibraryBook.cover_path,
-            LibraryBook.cover_status,
-            LibraryBook.metadata_quality,
-            LibraryBook.organized,
-            LibraryBook.organize_status,
-            LibraryBook.normalized_title,
-            LibraryBook.normalized_author,
-        ).where(LibraryBook.id == book_id)
-    ).one_or_none()
-    return work_row_to_dict(row) if row else None
-
-
-def get_work_organize_state(db: Session, book_id: str | None) -> dict[str, Any] | None:
-    if not book_id:
-        return None
-    row = db.execute(
-        select(LibraryBook.organized, LibraryBook.organize_status).where(
-            LibraryBook.id == book_id
+        select(LibraryBook, LibraryBookMetadata)
+        .outerjoin(
+            LibraryBookMetadata,
+            LibraryBookMetadata.book_id == LibraryBook.id,
         )
+        .where(LibraryBook.id == book_id)
+    ).one_or_none()
+    if row is None:
+        return None
+    book, metadata = row
+    return {
+        "id": book.id,
+        "libraryId": book.library_id,
+        "title": metadata.title if metadata else "",
+        "author": metadata.author if metadata else None,
+        "description": metadata.description if metadata else None,
+        "tags": "[]",
+        "seriesName": metadata.series_name if metadata else None,
+        "seriesIndex": metadata.series_index if metadata else None,
+        "coverPath": metadata.cover_path if metadata else None,
+        "coverStatus": metadata.cover_status if metadata else "PENDING",
+        "metadataQuality": metadata.metadata_quality if metadata else 0,
+        "normalizedTitle": metadata.normalized_title if metadata else "",
+        "normalizedAuthor": metadata.normalized_author if metadata else None,
+        "organized": False,
+        "organizeStatus": None,
+    }
+
+
+def get_book_organize_state(db: Session, book_id: str | None) -> dict[str, Any] | None:
+    if not book_id:
+        return None
+    row = db.execute(
+        select(OrganizeJob.status)
+        .where(OrganizeJob.book_id == book_id)
+        .order_by(OrganizeJob.updated_at.desc(), OrganizeJob.id.desc())
+        .limit(1)
     ).one_or_none()
     if row is None:
         return None
     return {
-        "organized": row.organized,
-        "organizeStatus": row.organize_status,
+        "organized": row[0] == "APPLIED",
+        "organizeStatus": row[0],
     }
 
 
-def get_volume(db: Session, resource_id: str | None) -> dict[str, Any] | None:
+def get_resource(db: Session, resource_id: str | None) -> dict[str, Any] | None:
     if not resource_id:
         return None
     row = db.execute(
-        select(
-            LibraryReadableResource.id,
-            LibraryReadableResource.cover_path,
-            LibraryReadableResource.published_at,
-            LibraryReadableResource.language,
-            LibraryReadableResource.isbn,
-        ).where(LibraryReadableResource.id == resource_id)
+        select(LibraryReadableResource, LibraryReadableResourceMetadata)
+        .outerjoin(
+            LibraryReadableResourceMetadata,
+            LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+        )
+        .where(LibraryReadableResource.id == resource_id)
     ).one_or_none()
-    return volume_row_to_dict(row) if row else None
+    if row is None:
+        return None
+    resource, metadata = row
+    return {
+        "id": resource.id,
+        "format": resource.format,
+        "mediaKind": resource.media_kind,
+        "coverPath": metadata.cover_path if metadata else None,
+        "publishedAt": metadata.published_at if metadata else None,
+        "language": metadata.language if metadata else None,
+        "isbn": metadata.isbn if metadata else None,
+    }
 
 
-def volume_has_cover(db: Session, resource_id: str) -> bool:
+def resource_has_cover(db: Session, resource_id: str) -> bool:
     return (
         db.scalar(
-            select(LibraryReadableResource.id)
+            select(LibraryReadableResourceMetadata.resource_id)
+            .select_from(LibraryReadableResourceMetadata)
             .where(
-                LibraryReadableResource.id == resource_id,
-                LibraryReadableResource.cover_path.is_not(None),
-                LibraryReadableResource.cover_path != "",
+                LibraryReadableResourceMetadata.resource_id == resource_id,
+                LibraryReadableResourceMetadata.cover_path.is_not(None),
+                LibraryReadableResourceMetadata.cover_path != "",
             )
             .limit(1)
         )
@@ -458,7 +482,7 @@ def volume_has_cover(db: Session, resource_id: str) -> bool:
 def get_import_task_status(db: Session, import_task_id: str | None) -> str | None:
     if not import_task_id:
         return None
-    return db.scalar(select(LibraryImportTask.status).where(LibraryImportTask.id == import_task_id))
+    return db.scalar(select(LibraryImportTask.state).where(LibraryImportTask.id == import_task_id))
 
 
 def get_lookup_task_status(db: Session, task_id: str) -> str | None:
@@ -467,9 +491,19 @@ def get_lookup_task_status(db: Session, task_id: str) -> str | None:
     )
 
 
-def update_work(db: Session, book_id: str, patch: dict[str, Any]) -> None:
-    mapped = {_WORK_CAMEL_TO_SNAKE[key]: value for key, value in patch.items()}
-    db.execute(update(LibraryBook).where(LibraryBook.id == book_id).values(**mapped))
+def update_book(db: Session, book_id: str, patch: dict[str, Any]) -> None:
+    mapped = {
+        _BOOK_METADATA_CAMEL_TO_SNAKE[key]: value
+        for key, value in patch.items()
+        if key in _BOOK_METADATA_CAMEL_TO_SNAKE
+    }
+    if not mapped:
+        return
+    metadata = db.get(LibraryBookMetadata, book_id)
+    if metadata is None:
+        raise LookupError(book_id)
+    for key, value in mapped.items():
+        setattr(metadata, key, value)
 
 
 def clear_remote_cover_if_current(
@@ -480,10 +514,10 @@ def clear_remote_cover_if_current(
     now: datetime,
 ) -> None:
     db.execute(
-        update(LibraryBook)
+        update(LibraryBookMetadata)
         .where(
-            LibraryBook.id == book_id,
-            LibraryBook.cover_path == cover_path,
+            LibraryBookMetadata.book_id == book_id,
+            LibraryBookMetadata.cover_path == cover_path,
         )
         .values(
             cover_path=None,
@@ -494,17 +528,28 @@ def clear_remote_cover_if_current(
 
 
 def update_resource(db: Session, resource_id: str, patch: dict[str, Any]) -> None:
-    mapped = {_VOLUME_CAMEL_TO_SNAKE[key]: value for key, value in patch.items()}
+    values = {
+        _RESOURCE_METADATA_CAMEL_TO_SNAKE[key]: value
+        for key, value in patch.items()
+        if key in _RESOURCE_METADATA_CAMEL_TO_SNAKE
+    }
+    if not values:
+        return
     db.execute(
-        update(LibraryReadableResource).where(LibraryReadableResource.id == resource_id).values(**mapped)
+        update(LibraryReadableResourceMetadata)
+        .where(LibraryReadableResourceMetadata.resource_id == resource_id)
+        .values(**values)
     )
 
 
-def mark_work_reviewing(db: Session, book_id: str, *, now: datetime) -> None:
+def mark_book_reviewing(db: Session, book_id: str, *, now: datetime) -> None:
     db.execute(
-        update(LibraryBook)
-        .where(LibraryBook.id == book_id)
-        .values(organized=False, organize_status="REVIEWING", updated_at=now)
+        update(OrganizeJob)
+        .where(
+            OrganizeJob.book_id == book_id,
+            OrganizeJob.status.in_(("PENDING", "LOOKUP_PENDING", "FAILED")),
+        )
+        .values(status="REVIEWING", updated_at=now)
     )
 
 

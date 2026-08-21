@@ -15,7 +15,7 @@ from app.modules.imports.application.readable_resource.ports import (
     SourceNodeRepositoryPort,
     SourceTreeFilesystemPort,
     UnitOfWorkPort,
-    WorkQueuePort,
+    LibraryImportTaskQueuePort,
 )
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -59,7 +59,7 @@ class ScanLibrarySourceTree:
         filesystem: SourceTreeFilesystemPort,
         source_nodes: SourceNodeRepositoryPort,
         books_resources: BookResourceRepositoryPort,
-        queue: WorkQueuePort,
+        queue: LibraryImportTaskQueuePort,
         uow: UnitOfWorkPort,
         clock: ClockPort,
         log: PipelineLogPort,

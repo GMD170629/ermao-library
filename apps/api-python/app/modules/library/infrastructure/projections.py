@@ -1,4 +1,4 @@
-"""Typed volume-scoped projections for the library capability."""
+"""Typed ReadableResource-scoped projections for the library capability."""
 
 from __future__ import annotations
 
@@ -83,13 +83,16 @@ def get_reading_unit_title(db: Session, unit_id: str) -> str | None:
     )
 
 
-def list_files_for_volume(db: Session, resource_id: str) -> list[dict[str, object]]:
-    files = db.scalars(
+def list_assets_for_resource(db: Session, resource_id: str) -> list[dict[str, object]]:
+    assets = db.scalars(
         select(LibraryResourceAsset)
         .where(LibraryResourceAsset.resource_id == resource_id)
-        .order_by(LibraryResourceAsset.sort_order.asc(), LibraryResourceAsset.id.asc())
+        .order_by(
+            LibraryResourceAsset.sequence_index.asc(),
+            LibraryResourceAsset.id.asc(),
+        )
     ).all()
-    return [entity_record(file) for file in files]
+    return [entity_record(asset) for asset in assets]
 
 
 def list_reading_units(db: Session, *, resource_id: str) -> list[dict[str, object]]:
@@ -132,7 +135,7 @@ def reading_units_page(
     return [entity_record(unit) for unit in units], total
 
 
-def latest_metadata_lookup_for_work(
+def latest_metadata_lookup_for_book(
     db: Session, book_id: str
 ) -> dict[str, object] | None:
     task = db.scalar(

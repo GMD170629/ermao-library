@@ -1,4 +1,4 @@
-"""ORM persistence for library category merge and rename side effects."""
+"""ORM persistence for library facet merge and rename side effects."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     LibraryFacet,
     LibraryReadableResource,
-    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibraryReadableResourceFacet,
     LibraryBook,
     LibraryBookFacet,
@@ -63,7 +63,7 @@ def find_normalized_name_conflict(
     ).scalar_one_or_none()
 
 
-def list_work_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
+def list_book_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
     if not facet_ids:
         return []
     rows = (
@@ -76,7 +76,7 @@ def list_work_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, A
     return [entity_record(row) for row in rows]
 
 
-def list_volume_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
+def list_resource_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
     if not facet_ids:
         return []
     rows = (
@@ -90,24 +90,21 @@ def list_volume_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str,
 
 
 def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
-    work = db.get(LibraryBook, book_id)
-    return entity_record(work) if work is not None else None
+    book = db.get(LibraryBook, book_id)
+    return entity_record(book) if book is not None else None
 
 
-def get_volume(db: Session, resource_id: str) -> dict[str, Any] | None:
+def get_resource(db: Session, resource_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryReadableResource, LibraryReadableResource)
-        .join(
-            LibraryReadableResource,
-            LibraryReadableResource.id == LibraryReadableResource.resource_id,
-        )
+        select(LibraryReadableResource, LibraryBook)
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
         .where(LibraryReadableResource.id == resource_id)
     ).first()
     if row is None:
         return None
-    volume, version = row
-    result = entity_record(volume)
-    result["bookId"] = version.book_id
+    resource, book = row
+    result = entity_record(resource)
+    result["bookId"] = book.id
     return result
 
 
@@ -115,18 +112,15 @@ def list_resources_by_ids(db: Session, resource_ids: list[str]) -> list[dict[str
     if not resource_ids:
         return []
     rows = db.execute(
-        select(LibraryReadableResource, LibraryReadableResource)
-        .join(
-            LibraryReadableResource,
-            LibraryReadableResource.id == LibraryReadableResource.resource_id,
-        )
+        select(LibraryReadableResource, LibraryBook)
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
         .where(LibraryReadableResource.id.in_(resource_ids))
     ).all()
     by_id: dict[str, dict[str, Any]] = {}
-    for volume, version in rows:
-        result = entity_record(volume)
-        result["bookId"] = version.book_id
-        by_id[volume.id] = result
+    for resource, book in rows:
+        result = entity_record(resource)
+        result["bookId"] = book.id
+        by_id[resource.id] = result
     return [by_id[resource_id] for resource_id in resource_ids if resource_id in by_id]
 
 
@@ -157,48 +151,20 @@ def list_resource_ids_for_facet(db: Session, facet_id: str) -> list[str]:
     ]
 
 
-def update_work_tags(
-    db: Session, *, book_id: str, tags_json: str, now: datetime
-) -> None:
-    db.execute(
-        update(LibraryBook)
-        .where(LibraryBook.id == book_id)
-        .values(tags=tags_json, updated_at=now)
-    )
-
-
-def update_work_series_name(
-    db: Session, *, book_id: str, series_name: str, now: datetime
-) -> None:
-    db.execute(
-        update(LibraryBook)
-        .where(LibraryBook.id == book_id)
-        .values(series_name=series_name, updated_at=now)
-    )
-
-
-def clear_work_series(db: Session, *, book_id: str, now: datetime) -> None:
-    db.execute(
-        update(LibraryBook)
-        .where(LibraryBook.id == book_id)
-        .values(series_name=None, series_index=None, updated_at=now)
-    )
-
-
 def update_resource_publisher(
     db: Session, *, resource_id: str, publisher: str, now: datetime
 ) -> None:
     db.execute(
-        update(LibraryReadableResource)
-        .where(LibraryReadableResource.id == resource_id)
+        update(LibraryReadableResourceMetadata)
+        .where(LibraryReadableResourceMetadata.resource_id == resource_id)
         .values(publisher=publisher, updated_at=now)
     )
 
 
 def clear_resource_publisher(db: Session, *, resource_id: str, now: datetime) -> None:
     db.execute(
-        update(LibraryReadableResource)
-        .where(LibraryReadableResource.id == resource_id)
+        update(LibraryReadableResourceMetadata)
+        .where(LibraryReadableResourceMetadata.resource_id == resource_id)
         .values(publisher=None, updated_at=now)
     )
 

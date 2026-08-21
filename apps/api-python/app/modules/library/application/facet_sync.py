@@ -1,4 +1,4 @@
-"""Pure preparation contracts for synchronous work-facet replacement."""
+"""Pure preparation contracts for synchronous Book facet replacement."""
 
 from __future__ import annotations
 

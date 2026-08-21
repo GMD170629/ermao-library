@@ -9,7 +9,7 @@ from app.modules.imports.application.readable_resource.ports import (
     PipelineLogPort,
     SourceNodeRepositoryPort,
     UnitOfWorkPort,
-    WorkQueuePort,
+    LibraryImportTaskQueuePort,
 )
 
 
@@ -40,7 +40,7 @@ class ContinueImport:
         *,
         libraries: LibraryConfigPort,
         source_nodes: SourceNodeRepositoryPort,
-        queue: WorkQueuePort,
+        queue: LibraryImportTaskQueuePort,
         uow: UnitOfWorkPort,
         log: PipelineLogPort,
     ) -> None:

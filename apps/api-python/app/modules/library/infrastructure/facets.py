@@ -1,4 +1,4 @@
-"""ORM persistence for work and volume facets."""
+"""ORM persistence for Book and ReadableResource facets."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def split_authors(value: Any) -> list[str]:
     )
 
 
-def work_tags(value: Any) -> list[str]:
+def book_tags(value: Any) -> list[str]:
     parsed = parse_json(value, [])
     if isinstance(parsed, list):
         return unique_names(parsed)
@@ -125,14 +125,14 @@ def _facet_public_dict(facet: LibraryFacet, book_count: int) -> dict[str, Any]:
     }
 
 
-def sync_work_facets(db: Session, book_id: str) -> None:
-    """Synchronize persisted facets for one work after a runtime library change."""
+def sync_book_facets(db: Session, book_id: str) -> None:
+    """Synchronize persisted facets for one Book after a library change."""
 
     sync_books_facets(db, (book_id,))
 
 
 def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
-    """Synchronize facets for a prepared work set with bounded collection SQL."""
+    """Synchronize facets for a prepared Book set with bounded collection SQL."""
 
     unique_book_ids = tuple(dict.fromkeys(book_id for book_id in book_ids if book_id))
     if not unique_book_ids:
@@ -152,18 +152,18 @@ def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
     now = db_timestamp()
     prepared = tuple(
         (
-            str(work.id),
+            str(book.id),
             tuple(
                 (kind, name, normalized_name(name), sort_order)
                 for kind, names in (
-                    ("AUTHOR", split_authors(work.author)),
-                    ("TAG", work_tags(work.tags)),
-                    ("SERIES", unique_names([work.series_name])),
+                    ("AUTHOR", split_authors(book.author)),
+                    ("TAG", book_tags(book.tags)),
+                    ("SERIES", unique_names([book.series_name])),
                 )
                 for sort_order, name in enumerate(names)
             ),
         )
-        for work in books
+        for book in books
     )
     facets: dict[tuple[str, str], tuple[str, str]] = {}
     for _book_id, values in prepared:

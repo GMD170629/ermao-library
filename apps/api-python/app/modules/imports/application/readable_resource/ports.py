@@ -52,7 +52,7 @@ __all__ = [
     "SourceNodeRepositoryPort",
     "SourceTreeFilesystemPort",
     "UnitOfWorkPort",
-    "WorkQueuePort",
+    "LibraryImportTaskQueuePort",
     "WORKER_INTERRUPTED",
     "adapter_identity",
 ]
@@ -156,7 +156,7 @@ class SourceTreeFilesystemPort(Protocol):
     def path_is_readable_directory(self, path: Path) -> bool: ...
 
 
-class WorkQueuePort(Protocol):
+class LibraryImportTaskQueuePort(Protocol):
     def enqueue(
         self,
         *,

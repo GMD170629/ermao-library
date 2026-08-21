@@ -1,4 +1,4 @@
-"""Volume media-kind derivation that does not use LibraryReadableResource.sourceKey."""
+"""Resource media-kind derivation from format and classification metadata."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ _COMIC_FORMATS = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP"})
 _ASSIGNED_KINDS = frozenset({"EBOOK", "COMIC", "AUDIOBOOK"})
 
 
-class VolumeMediaKindSource(Protocol):
+class ResourceMediaKindSource(Protocol):
     format: str
     classification_source: str
     suggested_media_kind: str | None
@@ -36,9 +36,9 @@ def effective_media_kind(
     return media_kind_for_format(format)
 
 
-def media_kind_of(volume: VolumeMediaKindSource) -> str:
+def media_kind_of(resource: ResourceMediaKindSource) -> str:
     return effective_media_kind(
-        format=volume.format,
-        classification_source=volume.classification_source,
-        suggested_media_kind=volume.suggested_media_kind,
+        format=resource.format,
+        classification_source=resource.classification_source,
+        suggested_media_kind=resource.suggested_media_kind,
     )

@@ -14,7 +14,7 @@ from app.models import (
 )
 from app.models.organize import OrganizeJob
 from app.modules.library.domain.media_kinds import media_kind_of
-from app.modules.library.domain.resource_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.modules.library.domain.resource_identity import IMPLICIT_RESOURCE_SOURCE_KEY
 from app.modules.library.infrastructure.media_kind_sql import (
     resource_media_kind,
 )
@@ -198,7 +198,7 @@ def first_resource_selection_for_book(
                 else_=3,
             ),
             case(
-                (LibraryReadableResource.source_key == IMPLICIT_VERSION_SOURCE_KEY, 0),
+                (LibraryReadableResource.source_key == IMPLICIT_RESOURCE_SOURCE_KEY, 0),
                 else_=1,
             ),
             func.coalesce(LibraryReadableResource.source_name, ""),

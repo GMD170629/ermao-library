@@ -16,7 +16,7 @@ from app.modules.imports.application.readable_resource.ports import (
     ImportTaskState,
     LibraryImportTaskRecord,
     WORKER_INTERRUPTED,
-    WorkQueuePort,
+    LibraryImportTaskQueuePort,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
@@ -24,7 +24,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
 from app.modules.library.domain.readable_resource_states import AssetRole
 
 
-class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
+class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -233,4 +233,4 @@ class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
         )
 
 
-__all__ = ["SqlAlchemyReadableResourceWorkQueue"]
+__all__ = ["SqlAlchemyLibraryImportTaskQueue"]

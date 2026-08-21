@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 from app.models import (
     LibraryFacet,
     LibraryOperation,
+    LibraryBookMetadata,
     LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibraryReadableResourceFacet,
     LibraryBook,
     LibraryBookFacet,
@@ -220,16 +222,15 @@ def insert_snapshot(db: Session, table: str, row: dict[str, Any]) -> None:
     db.execute(statement)
 
 
-def restore_work_metadata(db: Session, row: dict[str, Any]) -> None:
+def restore_book_metadata(db: Session, row: dict[str, Any]) -> None:
     """Restore category-owned fields without touching directory topology identity."""
 
-    book_id = str(row.get("id") or "")
+    book_id = str(row.get("id") or row.get("bookId") or "")
     if not book_id:
-        raise ValueError("Work metadata snapshot is missing its id")
+        raise ValueError("Book metadata snapshot is missing its id")
     field_map = {
         "author": "author",
         "normalizedAuthor": "normalized_author",
-        "tags": "tags",
         "seriesName": "series_name",
         "seriesIndex": "series_index",
         "updatedAt": "updated_at",
@@ -240,23 +241,36 @@ def restore_work_metadata(db: Session, row: dict[str, Any]) -> None:
         if column in row
     }
     result = db.execute(
-        update(LibraryBook).where(LibraryBook.id == book_id).values(**values)
+        update(LibraryBookMetadata)
+        .where(LibraryBookMetadata.book_id == book_id)
+        .values(**values)
     )
     if result.rowcount != 1:
-        raise ValueError("Work metadata snapshot target does not exist")
+        raise ValueError("Book metadata snapshot target does not exist")
 
 
-def restore_volume_metadata(db: Session, row: dict[str, Any]) -> None:
-    """Restore category/classification fields without touching volume placement."""
+def restore_resource_metadata(db: Session, row: dict[str, Any]) -> None:
+    """Restore Resource metadata without touching source-tree identity."""
 
-    resource_id = str(row.get("id") or "")
+    resource_id = str(row.get("id") or row.get("resourceId") or "")
     if not resource_id:
         raise ValueError("Resource metadata snapshot is missing its id")
     field_map = {
         "publisher": "publisher",
-        "classificationSource": "classification_source",
-        "classificationReason": "classification_reason",
-        "suggestedMediaKind": "suggested_media_kind",
+        "language": "language",
+        "publisher": "publisher",
+        "publishedAt": "published_at",
+        "identifier": "identifier",
+        "isbn": "isbn",
+        "pageCount": "page_count",
+        "chapterCount": "chapter_count",
+        "durationMs": "duration_ms",
+        "trackCount": "track_count",
+        "narrator": "narrator",
+        "abridged": "abridged",
+        "resourceIndex": "resource_index",
+        "coverPath": "cover_path",
+        "coverStatus": "cover_status",
         "updatedAt": "updated_at",
     }
     values = {
@@ -265,7 +279,9 @@ def restore_volume_metadata(db: Session, row: dict[str, Any]) -> None:
         if column in row
     }
     result = db.execute(
-        update(LibraryReadableResource).where(LibraryReadableResource.id == resource_id).values(**values)
+        update(LibraryReadableResourceMetadata)
+        .where(LibraryReadableResourceMetadata.resource_id == resource_id)
+        .values(**values)
     )
     if result.rowcount != 1:
         raise ValueError("Resource metadata snapshot target does not exist")
@@ -276,11 +292,11 @@ def restore_facet_row(db: Session, facet_id: str, row: dict[str, Any]) -> None:
     insert_snapshot(db, "LibraryFacet", row)
 
 
-def delete_work_facets_for_work(db: Session, book_id: str) -> None:
+def delete_book_facets_for_book(db: Session, book_id: str) -> None:
     db.execute(delete(LibraryBookFacet).where(LibraryBookFacet.book_id == book_id))
 
 
-def delete_volume_facets_for_volume(db: Session, resource_id: str) -> None:
+def delete_resource_facets_for_resource(db: Session, resource_id: str) -> None:
     db.execute(
         delete(LibraryReadableResourceFacet).where(LibraryReadableResourceFacet.resource_id == resource_id)
     )

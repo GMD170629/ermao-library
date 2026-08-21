@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -12,7 +11,6 @@ from typing import Protocol
 
 from app.modules.imports.application.pdf_types import (
     PdfChapter,
-    PdfCoverPublication,
     PdfInspection,
 )
 from app.modules.imports.domain.pdf_content import (
@@ -154,47 +152,6 @@ def inspect_pdf(
         content_kind=content_kind,
         text_evidence=evidence,
     )
-
-
-def publish_pdf_cover(
-    storage_root: Path,
-    source_path: Path,
-    work_id: str,
-    version_id: str,
-    volume_id: str,
-) -> PdfCoverPublication:
-    target = (
-        storage_root / "books" / work_id / version_id / volume_id / "cover.jpg"
-    )
-    temporary = target.with_suffix(f"{target.suffix}.part")
-    try:
-        import pypdfium2 as pdfium
-
-        pdf = pdfium.PdfDocument(str(source_path))
-        try:
-            if len(pdf) < 1:
-                return PdfCoverPublication(path=None)
-            page = pdf[0]
-            try:
-                bitmap = page.render(scale=2)
-                try:
-                    image = bitmap.to_pil().copy()
-                finally:
-                    bitmap.close()
-            finally:
-                page.close()
-            if image.mode not in {"RGB", "L"}:
-                image = image.convert("RGB")
-            image.thumbnail((900, 1200))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            image.save(temporary, format="JPEG", quality=88, optimize=True)
-            os.replace(temporary, target)
-            return PdfCoverPublication(path=str(target), rendered_page=1)
-        finally:
-            pdf.close()
-    except Exception as exc:  # noqa: BLE001 - cover adapter contains backend failures
-        temporary.unlink(missing_ok=True)
-        return PdfCoverPublication(path=None, warning=str(exc))
 
 
 def _inspect_text_layer(

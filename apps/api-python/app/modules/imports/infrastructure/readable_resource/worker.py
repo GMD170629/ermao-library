@@ -7,7 +7,7 @@ import logging
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
     UnitOfWorkPort,
-    WorkQueuePort,
+    LibraryImportTaskQueuePort,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
@@ -25,7 +25,7 @@ class ReadableResourceWorkerProcessor:
     def __init__(
         self,
         *,
-        queue: WorkQueuePort,
+        queue: LibraryImportTaskQueuePort,
         scan: ScanLibrarySourceTree,
         process_import: ProcessReadableResourceImportTask,
         uow: UnitOfWorkPort,

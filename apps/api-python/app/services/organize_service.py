@@ -215,7 +215,7 @@ def first_exact_title_candidate(
     )
 
 
-def metadata_context_for_work(
+def metadata_context_for_book(
     db: Session, book_id: str
 ) -> dict[str, Any] | None:
     return organize_review.load_work_context(db, book_id)

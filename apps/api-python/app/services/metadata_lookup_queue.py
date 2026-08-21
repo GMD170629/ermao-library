@@ -18,15 +18,15 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.bootstrap.library import (
-    PreparedWorkFacetWrite,
-    execute_work_facet_write,
-    load_work_facet_projections,
-    prepare_work_facet_write,
+    PreparedBookFacetWrite,
+    execute_book_facet_write,
+    load_book_facet_projections,
+    prepare_book_facet_write,
 )
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
 from app.models.common import db_timestamp
-from app.modules.library.public import prepare_work_facet
+from app.modules.library.public import prepare_book_facet
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.application.writeback import (
@@ -48,7 +48,7 @@ from app.services.metadata_provider_registry import (
 )
 from app.services.organize_service import (
     metadata_candidate_title_exact_match,
-    metadata_context_for_work,
+    metadata_context_for_book,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
 
@@ -200,16 +200,16 @@ def _parse_tags(value: Any) -> list[str]:
 
 
 def _local_cover_exists(
-    db: Session, work: dict[str, Any], resource_id: str | None
+    db: Session, book: dict[str, Any], resource_id: str | None
 ) -> bool:
-    if str(work.get("coverPath") or "").strip():
+    if str(book.get("coverPath") or "").strip():
         return True
     if not resource_id:
         return False
-    volume = lookup_persist.get_volume(db, resource_id)
-    if str((volume or {}).get("coverPath") or "").strip():
+    resource = lookup_persist.get_resource(db, resource_id)
+    if str((resource or {}).get("coverPath") or "").strip():
         return True
-    return lookup_persist.volume_has_cover(db, resource_id)
+    return lookup_persist.resource_has_cover(db, resource_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,15 +300,15 @@ def _discard_remote_cover(prepared: _PreparedRemoteCover | None) -> None:
 class _PreparedCandidateApplication:
     book_id: str
     resource_id: str | None
-    work_patch: dict[str, Any]
-    volume_patch: dict[str, Any]
+    book_patch: dict[str, Any]
+    resource_patch: dict[str, Any]
     organize_job_id: str | None
     organize_job_status: str
     organize_job_summary: str
     library_metadata_json: str | None
     library_metadata_id: str | None
     now: datetime
-    facet_write: PreparedWorkFacetWrite
+    facet_write: PreparedBookFacetWrite
     remote_cover: _PreparedRemoteCover | None
     applied: tuple[str, ...]
 
@@ -320,35 +320,35 @@ def _prepare_candidate_application(
     provider: str,
     candidate: dict[str, Any],
 ) -> _PreparedCandidateApplication:
-    work = lookup_persist.get_work(db, str(task["bookId"]))
-    if not work:
-        raise ValueError("作品已不存在")
-    facet_projections = load_work_facet_projections(db, (str(work["id"]),))
+    book = lookup_persist.get_book(db, str(task["bookId"]))
+    if not book:
+        raise ValueError("图书已不存在")
+    facet_projections = load_book_facet_projections(db, (str(book["id"]),))
     if len(facet_projections) != 1:
         raise ValueError("WORK_FACET_PROJECTION_NOT_FOUND")
     resource_id = str(task.get("resourceId") or "") or None
-    volume = lookup_persist.get_volume(db, resource_id) if resource_id else None
+    resource = lookup_persist.get_resource(db, resource_id) if resource_id else None
     prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
-    local_cover_exists = _local_cover_exists(db, work, resource_id)
+    local_cover_exists = _local_cover_exists(db, book, resource_id)
 
     # End every projection read before parsing provider data, downloading a
     # cover or constructing the prepared SQL statements for the write phase.
     db.close()
-    work_patch: dict[str, Any] = {}
-    volume_patch: dict[str, Any] = {}
+    book_patch: dict[str, Any] = {}
+    resource_patch: dict[str, Any] = {}
     applied: list[str] = []
     remote_cover: _PreparedRemoteCover | None = None
 
     candidate_title = str(candidate.get("title") or "").strip()
     candidate_author = str(candidate.get("author") or "").strip()
-    current_title = str(work.get("title") or "").strip()
-    current_author = str(work.get("author") or "").strip()
+    current_title = str(book.get("title") or "").strip()
+    current_author = str(book.get("author") or "").strip()
     if (
         candidate_title
         and candidate_title != current_title
         and (not prefer_local or not current_title)
     ):
-        work_patch["title"] = candidate_title
+        book_patch["title"] = candidate_title
         applied.append("title")
     local_author_is_missing = not current_author or current_author in {
         UNKNOWN_AUTHOR,
@@ -360,68 +360,68 @@ def _prepare_candidate_application(
         and candidate_author != current_author
         and (not prefer_local or local_author_is_missing)
     ):
-        work_patch["author"] = candidate_author
+        book_patch["author"] = candidate_author
         applied.append("author")
-    if (not prefer_local or not str(work.get("description") or "").strip()) and str(
+    if (not prefer_local or not str(book.get("description") or "").strip()) and str(
         candidate.get("description") or ""
     ).strip():
-        work_patch["description"] = str(candidate["description"]).strip()
+        book_patch["description"] = str(candidate["description"]).strip()
         applied.append("description")
     candidate_tags = _parse_tags(candidate.get("tags"))
-    if candidate_tags and (not prefer_local or not _parse_tags(work.get("tags"))):
-        work_patch["tags"] = json.dumps(
+    if candidate_tags and (not prefer_local or not _parse_tags(book.get("tags"))):
+        book_patch["tags"] = json.dumps(
             list(dict.fromkeys(candidate_tags)), ensure_ascii=False
         )
         applied.append("tags")
-    if (not prefer_local or not str(work.get("seriesName") or "").strip()) and str(
+    if (not prefer_local or not str(book.get("seriesName") or "").strip()) and str(
         candidate.get("seriesName") or ""
     ).strip():
-        work_patch["seriesName"] = str(candidate["seriesName"]).strip()
+        book_patch["seriesName"] = str(candidate["seriesName"]).strip()
         applied.append("seriesName")
-    if (not prefer_local or work.get("seriesIndex") is None) and candidate.get(
+    if (not prefer_local or book.get("seriesIndex") is None) and candidate.get(
         "seriesIndex"
     ) is not None:
         try:
-            work_patch["seriesIndex"] = float(candidate["seriesIndex"])
+            book_patch["seriesIndex"] = float(candidate["seriesIndex"])
             applied.append("seriesIndex")
         except (TypeError, ValueError):
             pass
-    volume_metadata = candidate.get("volumeMetadata")
-    if not isinstance(volume_metadata, dict):
-        volume_metadata = {
+    resource_metadata = candidate.get("resourceMetadata")
+    if not isinstance(resource_metadata, dict):
+        resource_metadata = {
             key: candidate.get(key)
             for key in ("publisher", "publishedAt", "language", "isbn")
         }
-    if volume:
-        if (not prefer_local or volume.get("publishedAt") is None) and isinstance(
-            volume_metadata.get("publishedAt"), str
+    if resource:
+        if (not prefer_local or resource.get("publishedAt") is None) and isinstance(
+            resource_metadata.get("publishedAt"), str
         ):
             try:
                 published_at = datetime.fromisoformat(
-                    str(volume_metadata["publishedAt"])
+                    str(resource_metadata["publishedAt"])
                 )
             except ValueError:
                 published_at = None
             if published_at is not None:
-                volume_patch["publishedAt"] = published_at
+                resource_patch["publishedAt"] = published_at
                 applied.append("publishedAt")
         for field in ("publisher", "language", "isbn"):
-            value = str(volume_metadata.get(field) or "").strip()
-            if value and (not prefer_local or not str(volume.get(field) or "").strip()):
-                volume_patch[field] = value
+            value = str(resource_metadata.get(field) or "").strip()
+            if value and (not prefer_local or not str(resource.get(field) or "").strip()):
+                resource_patch[field] = value
                 applied.append(field)
     if (not prefer_local or not local_cover_exists) and str(
         candidate.get("coverUrl") or ""
     ).strip():
         try:
             remote_cover = _download_remote_cover(
-                str(work["id"]), str(candidate["coverUrl"]).strip(), settings
+                str(book["id"]), str(candidate["coverUrl"]).strip(), settings
             )
         except Exception as exc:  # noqa: BLE001 - optional cover failure is isolated.
-            LOGGER.warning("remote metadata cover skipped work=%s: %s", work["id"], exc)
+            LOGGER.warning("remote metadata cover skipped book=%s: %s", book["id"], exc)
         else:
             if remote_cover:
-                work_patch.update(
+                book_patch.update(
                     {
                         "coverPath": remote_cover.relative_final_path,
                         "coverStatus": "READY",
@@ -429,13 +429,13 @@ def _prepare_candidate_application(
                 )
                 applied.append("cover")
 
-    if "title" in work_patch or "author" in work_patch:
-        title = str(work_patch.get("title", work.get("title")) or "").strip()
+    if "title" in book_patch or "author" in book_patch:
+        title = str(book_patch.get("title", book.get("title")) or "").strip()
         author = (
-            str(work_patch.get("author", work.get("author")) or "").strip()
+            str(book_patch.get("author", book.get("author")) or "").strip()
             or UNKNOWN_AUTHOR
         )
-        work_patch.update(
+        book_patch.update(
             {
                 "normalizedTitle": normalize_identity_part(title),
                 "normalizedAuthor": normalize_identity_part(author),
@@ -443,18 +443,18 @@ def _prepare_candidate_application(
         )
 
     now = _now()
-    work_patch.update(
+    book_patch.update(
         {
             "metadataQuality": max(
-                int(work.get("metadataQuality") or 0), 85 if applied else 80
+                int(book.get("metadataQuality") or 0), 85 if applied else 80
             ),
             "organized": True,
             "organizeStatus": "APPLIED",
             "updatedAt": now,
         }
     )
-    if volume and volume_patch:
-        volume_patch["updatedAt"] = now
+    if resource and resource_patch:
+        resource_patch["updatedAt"] = now
 
     job_id = str(task.get("organizeJobId") or "") or None
     organize_job_summary = (
@@ -473,26 +473,26 @@ def _prepare_candidate_application(
     final_facet_projection = replace(
         facet_projections[0],
         author=(
-            str(work_patch.get("author"))
-            if work_patch.get("author") is not None
+            str(book_patch.get("author"))
+            if book_patch.get("author") is not None
             else facet_projections[0].author
         ),
-        tags_source=str(work_patch.get("tags", facet_projections[0].tags_source)),
+        tags_source=str(book_patch.get("tags", facet_projections[0].tags_source)),
         series_name=(
-            str(work_patch.get("seriesName"))
-            if work_patch.get("seriesName") is not None
+            str(book_patch.get("seriesName"))
+            if book_patch.get("seriesName") is not None
             else facet_projections[0].series_name
         ),
     )
-    facet_write = prepare_work_facet_write(
-        (prepare_work_facet(final_facet_projection),),
+    facet_write = prepare_book_facet_write(
+        (prepare_book_facet(final_facet_projection),),
         now=now,
     )
     return _PreparedCandidateApplication(
-        book_id=str(work["id"]),
+        book_id=str(book["id"]),
         resource_id=resource_id,
-        work_patch=work_patch,
-        volume_patch=volume_patch,
+        book_patch=book_patch,
+        resource_patch=resource_patch,
         organize_job_id=job_id,
         organize_job_status="APPLIED" if applied else "COMPLETED",
         organize_job_summary=organize_job_summary,
@@ -510,14 +510,14 @@ def _persist_candidate_application(
     prepared: _PreparedCandidateApplication,
     provider: str,
 ) -> None:
-    lookup_persist.update_work(db, prepared.book_id, prepared.work_patch)
-    if prepared.resource_id and prepared.volume_patch:
+    lookup_persist.update_book(db, prepared.book_id, prepared.book_patch)
+    if prepared.resource_id and prepared.resource_patch:
         lookup_persist.update_resource(
             db,
             prepared.resource_id,
-            prepared.volume_patch,
+            prepared.resource_patch,
         )
-    execute_work_facet_write(db, prepared.facet_write)
+    execute_book_facet_write(db, prepared.facet_write)
     if prepared.organize_job_id:
         lookup_persist.finish_organize_job(
             db,
@@ -572,16 +572,16 @@ class _PreparedUnresolvedOrganizeUpdate:
 def _prepare_unresolved_organize_update(
     db: Session, task: dict[str, Any], message: str, *, failed: bool, now: datetime
 ) -> _PreparedUnresolvedOrganizeUpdate:
-    work = lookup_persist.get_work_organize_state(db, task.get("bookId"))
+    book = lookup_persist.get_book_organize_state(db, task.get("bookId"))
     db.close()
     already_organized = (
-        bool((work or {}).get("organized"))
-        or (work or {}).get("organizeStatus") == "APPLIED"
+        bool((book or {}).get("organized"))
+        or (book or {}).get("organizeStatus") == "APPLIED"
     )
     return _PreparedUnresolvedOrganizeUpdate(
         book_id=(
             str(task["bookId"])
-            if work and not already_organized and task.get("bookId")
+            if book and not already_organized and task.get("bookId")
             else None
         ),
         organize_job_id=(
@@ -597,7 +597,7 @@ def _persist_unresolved_organize_update(
     db: Session, prepared: _PreparedUnresolvedOrganizeUpdate
 ) -> None:
     if prepared.book_id:
-        lookup_persist.mark_work_reviewing(db, prepared.book_id, now=prepared.now)
+        lookup_persist.mark_book_reviewing(db, prepared.book_id, now=prepared.now)
     if prepared.organize_job_id:
         lookup_persist.finish_organize_job(
             db,
@@ -735,11 +735,11 @@ def process_metadata_lookup_task(
     if import_status is not None and import_status != "COMPLETED":
         _schedule_retry(db, task, "等待本地导入任务完成", [])
         return "PENDING"
-    work = lookup_persist.get_work(db, task.get("bookId"))
-    if not work:
-        _finish_without_match(db, task, "FAILED", [], "作品已不存在")
+    book = lookup_persist.get_book(db, task.get("bookId"))
+    if not book:
+        _finish_without_match(db, task, "FAILED", [], "图书已不存在")
         return "FAILED"
-    context = metadata_context_for_work(db, str(work["id"]))
+    context = metadata_context_for_book(db, str(book["id"]))
     if not context:
         _finish_without_match(
             db,
@@ -765,7 +765,7 @@ def process_metadata_lookup_task(
                 db,
                 context,
                 provider,
-                str(work.get("title") or ""),
+                str(book.get("title") or ""),
                 effective_request_gate,
             )
         except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
@@ -787,8 +787,8 @@ def process_metadata_lookup_task(
         )
         candidate, exact = _choose_exact_candidate(
             candidates,
-            str(work.get("title") or ""),
-            str(work.get("author") or UNKNOWN_AUTHOR),
+            str(book.get("title") or ""),
+            str(book.get("author") or UNKNOWN_AUTHOR),
         )
         inspected.append(
             {
@@ -876,7 +876,7 @@ def process_metadata_lookup_task(
                 )
             projection = writeback_queue.load_metadata_writeback_projection(
                 db,
-                book_id=str(work["id"]),
+                book_id=str(book["id"]),
                 resource_id=(
                     str(task["resourceId"]) if task.get("resourceId") else None
                 ),

@@ -35,8 +35,8 @@ from app.modules.imports.infrastructure.readable_resource.support import (
     StructuredPipelineLog,
     UtcClock,
 )
-from app.modules.imports.infrastructure.readable_resource.work_queue import (
-    SqlAlchemyReadableResourceWorkQueue,
+from app.modules.imports.infrastructure.readable_resource.task_queue import (
+    SqlAlchemyLibraryImportTaskQueue,
 )
 from app.modules.imports.infrastructure.readable_resource.worker import (
     ReadableResourceWorkerProcessor,
@@ -76,7 +76,7 @@ class ReadableResourcePipeline:
     relocate_library_root: RelocateLibraryRoot
     enable_readable_resource: EnableReadableResource
     disable_readable_resource: DisableReadableResource
-    queue: SqlAlchemyReadableResourceWorkQueue
+    queue: SqlAlchemyLibraryImportTaskQueue
     filesystem: OsSourceTreeFilesystem
     adapters: RegistryResourceAdapterExecutor
     uow: SqlAlchemyUnitOfWork
@@ -88,7 +88,7 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(session)
     books_resources = SqlAlchemyBookResourceRepository(session)
-    queue = SqlAlchemyReadableResourceWorkQueue(session)
+    queue = SqlAlchemyLibraryImportTaskQueue(session)
     adapters = RegistryResourceAdapterExecutor()
     uow = SqlAlchemyUnitOfWork(session)
     clock = UtcClock()

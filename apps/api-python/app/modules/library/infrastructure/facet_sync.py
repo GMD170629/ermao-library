@@ -84,14 +84,14 @@ def prepare_book_facet_write(
     """Construct every bind row and typed statement before the first DML."""
 
     unique_books = tuple(
-        {work.book_id: work for work in prepared_books if work.book_id}.values()
+        {book.book_id: book for book in prepared_books if book.book_id}.values()
     )
     if not unique_books:
         return PreparedBookFacetWrite(())
 
     facets: dict[tuple[str, str], tuple[str, str]] = {}
-    for work in unique_books:
-        for facet in work.facets:
+    for book in unique_books:
+        for facet in book.facets:
             key = (facet.kind, facet.normalized_name)
             facets.setdefault(key, (facet.name, _facet_id(*key)))
 
@@ -116,20 +116,20 @@ def prepare_book_facet_write(
         for chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7)
     )
 
-    book_ids = tuple(work.book_id for work in unique_books)
+    book_ids = tuple(book.book_id for book in unique_books)
     delete_statement = delete(LibraryBookFacet).where(
         LibraryBookFacet.book_id.in_(book_ids)
     )
     link_rows = tuple(
         (
-            work.book_id,
+            book.book_id,
             facet.kind,
             facet.normalized_name,
             facet.sort_order,
             now,
         )
-        for work in unique_books
-        for facet in work.facets
+        for book in unique_books
+        for facet in book.facets
     )
     link_statements: list[Executable] = []
     for index, chunk in enumerate(

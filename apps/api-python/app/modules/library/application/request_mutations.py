@@ -25,7 +25,7 @@ class DetailPreferenceMutation:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkRecordMutation:
+class BookRecordMutation:
     book_id: str
     values: Mapping[str, object]
     facet_write: object
@@ -77,8 +77,8 @@ class CoverMutation:
 @dataclass(frozen=True, slots=True)
 class MetadataApplyMutation:
     book_id: str
-    work_values: Mapping[str, object]
-    volume_rows: tuple[Mapping[str, object], ...]
+    book_values: Mapping[str, object]
+    resource_rows: tuple[Mapping[str, object], ...]
     facet_write: object
     writeback_intents: tuple[object, ...]
     finished_job_ids: tuple[str, ...]
@@ -87,7 +87,7 @@ class MetadataApplyMutation:
 
 @dataclass(frozen=True, slots=True)
 class MetadataApplyResult:
-    work: Mapping[str, object] | None
+    book: Mapping[str, object] | None
     finished_job_ids: tuple[str, ...]
     writeback_operation_ids: tuple[str, ...]
 
@@ -104,8 +104,8 @@ class CoverPublicationFailure:
 class LibraryRequestMutationGateway(Protocol):
     def save_detail_preference(self, command: DetailPreferenceMutation) -> None: ...
 
-    def update_work(
-        self, command: WorkRecordMutation
+    def update_book(
+        self, command: BookRecordMutation
     ) -> Mapping[str, object] | None: ...
 
     def update_books(self, command: BulkBookMutation) -> int: ...
@@ -141,7 +141,7 @@ class SaveDetailPreference:
             raise
 
 
-class UpdateWorkRecord:
+class UpdateBookRecord:
     def __init__(
         self,
         gateway: LibraryRequestMutationGateway,
@@ -150,9 +150,9 @@ class UpdateWorkRecord:
         self._gateway = gateway
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: WorkRecordMutation) -> Mapping[str, object] | None:
+    def execute(self, command: BookRecordMutation) -> Mapping[str, object] | None:
         try:
-            result = self._gateway.update_work(command)
+            result = self._gateway.update_book(command)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
@@ -236,7 +236,7 @@ class UpdateCoverRecords:
         return updated
 
 
-class ApplyWorkMetadata:
+class ApplyBookMetadata:
     def __init__(
         self,
         gateway: LibraryRequestMutationGateway,
@@ -275,7 +275,7 @@ class CompensateCoverPublication:
 
 
 __all__ = [
-    "ApplyWorkMetadata",
+    "ApplyBookMetadata",
     "BulkReadingStatusMutation",
     "BulkShelfMembershipMutation",
     "BulkBookMutation",
@@ -293,6 +293,6 @@ __all__ = [
     "UpdateBulkShelfMembership",
     "UpdateBulkBooks",
     "UpdateCoverRecords",
-    "UpdateWorkRecord",
-    "WorkRecordMutation",
+    "UpdateBookRecord",
+    "BookRecordMutation",
 ]

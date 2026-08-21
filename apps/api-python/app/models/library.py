@@ -226,11 +226,12 @@ class ReadableResourceNavigationUnit(Base):
             "assetId",
             "sortOrder",
         ),
-        UniqueConstraint(
+        Index(
+            "ReadableResourceNavigationUnit_resourceId_unitType_sortOrder_key",
             "resourceId",
             "unitType",
             "sortOrder",
-            name="ReadableResourceNavigationUnit_resourceId_unitType_sortOrder_key",
+            unique=True,
         ),
     )
 
@@ -290,10 +291,11 @@ class ReaderResourceProgress(Base):
             "clientId",
             "clientSequence",
         ),
-        UniqueConstraint(
+        Index(
+            "ReaderResourceProgress_userId_resourceId_key",
             "userId",
             "resourceId",
-            name="ReaderResourceProgress_userId_resourceId_key",
+            unique=True,
         ),
         Index(
             "ReaderResourceProgress_userId_updatedAt_resourceId_idx",
