@@ -267,7 +267,7 @@ def list_categories(
         distinct(
             case(
                 (
-                    func.coalesce(LibraryBook.hidden, 0) == 0,
+                    LibraryBook.visibility_state == "VISIBLE",
                     LibraryBookFacet.book_id,
                 ),
             )
@@ -313,7 +313,7 @@ def list_categories_page(
     visible_book = exists(
         select(count_book.id).where(
             count_book.id == count_link.book_id,
-            func.coalesce(count_book.hidden, 0) == 0,
+            count_book.visibility_state == "VISIBLE",
         )
     )
     book_count = (
