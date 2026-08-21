@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.modules.system.public import PreparedSystemEvent
@@ -28,6 +29,75 @@ class PreparedLibraryDelete:
     affected_user_ids: tuple[str, ...]
     updated_at: datetime
     event: PreparedSystemEvent
+
+
+class LibraryWriteStorePort(Protocol):
+    def create(self, prepared: PreparedLibraryCreate) -> None: ...
+
+    def update(self, prepared: PreparedLibraryUpdate) -> None: ...
+
+    def delete(self, prepared: PreparedLibraryDelete) -> bool: ...
+
+
+class LibraryWriteUnitOfWork(Protocol):
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+
+class CreateLibrary:
+    def __init__(
+        self,
+        store: LibraryWriteStorePort,
+        unit_of_work: LibraryWriteUnitOfWork,
+    ) -> None:
+        self._store = store
+        self._unit_of_work = unit_of_work
+
+    def execute(self, prepared: PreparedLibraryCreate) -> None:
+        try:
+            self._store.create(prepared)
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+
+
+class UpdateLibrary:
+    def __init__(
+        self,
+        store: LibraryWriteStorePort,
+        unit_of_work: LibraryWriteUnitOfWork,
+    ) -> None:
+        self._store = store
+        self._unit_of_work = unit_of_work
+
+    def execute(self, prepared: PreparedLibraryUpdate) -> None:
+        try:
+            self._store.update(prepared)
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+
+
+class DeleteLibrary:
+    def __init__(
+        self,
+        store: LibraryWriteStorePort,
+        unit_of_work: LibraryWriteUnitOfWork,
+    ) -> None:
+        self._store = store
+        self._unit_of_work = unit_of_work
+
+    def execute(self, prepared: PreparedLibraryDelete) -> bool:
+        try:
+            deleted = self._store.delete(prepared)
+            self._unit_of_work.commit()
+            return deleted
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
 
 
 def prepare_library_update_values(

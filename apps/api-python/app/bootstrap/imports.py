@@ -18,9 +18,12 @@ from app.bootstrap.readable_resource_pipeline import (
     continue_source_import,
 )
 from app.modules.imports.application.library_commands import (
+    CreateLibrary,
+    DeleteLibrary,
     PreparedLibraryCreate,
     PreparedLibraryDelete,
     PreparedLibraryUpdate,
+    UpdateLibrary,
 )
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImportResult,
@@ -58,37 +61,21 @@ def persist_import_library_create(
 ) -> None:
     """Persist a library row and its event in one caller-visible transaction."""
 
-    try:
-        SqlAlchemyLibraryWriteStore(db).create(prepared)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    CreateLibrary(SqlAlchemyLibraryWriteStore(db), db).execute(prepared)
 
 
 def persist_import_library_update(
     db: Session,
     prepared: PreparedLibraryUpdate,
 ) -> None:
-    try:
-        SqlAlchemyLibraryWriteStore(db).update(prepared)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    UpdateLibrary(SqlAlchemyLibraryWriteStore(db), db).execute(prepared)
 
 
 def persist_import_library_delete(
     db: Session,
     prepared: PreparedLibraryDelete,
 ) -> bool:
-    try:
-        deleted = SqlAlchemyLibraryWriteStore(db).delete(prepared)
-        db.commit()
-        return deleted
-    except Exception:
-        db.rollback()
-        raise
+    return DeleteLibrary(SqlAlchemyLibraryWriteStore(db), db).execute(prepared)
 
 
 def save_uploaded_files(
