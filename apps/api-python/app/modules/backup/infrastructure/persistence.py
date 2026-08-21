@@ -106,7 +106,7 @@ def model_columns(model: type[Base]) -> set[str]:
 
 
 def _entity_to_export_record(entity: object) -> dict[str, Any]:
-    mapper = cast(Mapper[Any], sa_inspect(entity))
+    mapper = cast(Mapper[Any], sa_inspect(type(entity)))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
