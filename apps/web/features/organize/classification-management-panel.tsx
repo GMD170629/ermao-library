@@ -136,14 +136,14 @@ export function ClassificationManagementPanel() {
     if (item.kind === 'SERIES') {
       return i18nAttribute('将清除 {value0} 本图书的丛书“{value1}”及对应丛书序号。', { value0: item.bookCount, value1: item.name });
     }
-    return i18nAttribute('将从 {value0} 本图书的相关卷册中清除出版社“{value1}”。', { value0: item.bookCount, value1: item.name });
+    return i18nAttribute('将从 {value0} 本图书的相关资源中清除出版社“{value1}”。', { value0: item.bookCount, value1: item.name });
   }
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-5">
         <h2 className="text-base font-semibold text-[#2C2926]"><I18nText>分类治理</I18nText></h2>
-        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签、丛书和出版社命名。作品字段与卷册出版信息会按各自作用域更新。</I18nText></p>
+        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签、丛书和出版社命名。图书字段与资源出版信息会按各自作用域更新。</I18nText></p>
         <div className="mt-4 flex flex-wrap gap-2">
           {tabs.map((tab) => <button key={tab.key} type="button" onClick={() => changeKind(tab.key)} className={cn('rounded-xl px-4 py-2 text-sm transition', kind === tab.key ? 'bg-[#F9DED4] font-medium text-[#D7462B]' : 'bg-black/[0.035] text-[#6F6963] hover:bg-black/[0.06]')}>{i18nAttribute(tab.label)}</button>)}
         </div>
@@ -201,7 +201,7 @@ export function ClassificationManagementPanel() {
       </Modal> : null}
 
       {mergeOpen ? <Modal title={i18nAttribute("合并 {value0} 个分类", { value0: selectedItems.length })} onClose={() => setMergeOpen(false)}>
-        <p className="mb-4 text-sm leading-6 text-[#746E68]"><I18nText>选择保留的规范名称，其余名称会作为别名保留，关联作品不会丢失。</I18nText></p>
+        <p className="mb-4 text-sm leading-6 text-[#746E68]"><I18nText>选择保留的规范名称，其余名称会作为别名保留，关联图书不会丢失。</I18nText></p>
         <Select value={targetId} options={selectedItems.map((item) => ({ value: item.id, label: `${item.name}（${item.bookCount} 本）`, translate: false }))} onChange={setTargetId} ariaLabel={i18nAttribute("保留的分类名称")} className="w-full" />
         <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setMergeOpen(false)}><I18nText>取消</I18nText></Button><Button loading={saving} icon={GitMerge} onClick={() => void merge()}><I18nText>确认合并</I18nText></Button></div>
       </Modal> : null}

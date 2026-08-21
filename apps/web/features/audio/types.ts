@@ -1,5 +1,5 @@
 export type AudioTrack = {
-  fileId: string;
+  assetId: string;
   title: string;
   url: string;
   mimeType: string;
@@ -13,7 +13,7 @@ export type AudioTrack = {
 export type AudioChapter = {
   id: string;
   title: string;
-  fileId: string;
+  assetId: string;
   startMs: number;
   endMs: number;
   sortOrder: number;
@@ -21,8 +21,8 @@ export type AudioChapter = {
 
 export type AudioLocation = {
   type: 'audio';
-  volumeId: string;
-  fileId: string;
+  resourceId: string;
+  assetId: string;
   chapterId: string | null;
   positionMs: number;
 };
@@ -34,28 +34,22 @@ export type AudioBookSummary = {
   coverUrl: string | null;
 };
 
-export type AudioVersionSummary = {
+export type AudioResourceSummary = {
   id: string;
-  workId: string;
-  sourceKey: string;
-  sourceName: string | null;
-};
-
-export type AudioVolumeSummary = {
-  id: string;
+  bookId: string;
   title: string;
-  index: number;
+  sortOrder: number;
   chapterCount: number;
   durationMs: number;
 };
 
 export type AudioLaunchSummary = {
-  volumeId: string;
-  workId: string;
+  resourceId: string;
+  bookId: string;
   title: string;
   author: string | null;
   coverUrl: string | null;
-  volumeTitle: string | null;
+  resourceTitle: string | null;
   narrator: string | null;
   chapterTitle?: string | null;
 };
@@ -66,10 +60,9 @@ export type AudioBootstrap = {
   readerType: 'audio';
   progressRevision: number;
   book: AudioBookSummary;
-  version: AudioVersionSummary;
-  versionCompleted: boolean;
-  volume: AudioVolumeSummary;
-  availableVolumes: AudioVolumeSummary[];
+  resource: AudioResourceSummary;
+  resourceCompleted: boolean;
+  availableResources: AudioResourceSummary[];
   tracks: AudioTrack[];
   chapters: AudioChapter[];
   totalDurationMs: number;
@@ -90,11 +83,11 @@ export type AudioSleepTimerMode = 'timer' | 'chapter' | null;
 export type AudioPlaybackState = {
   lifecycle: AudioLifecycle;
   bootstrap: AudioBootstrap | null;
-  volumeId: string | null;
-  pendingVolumeId: string | null;
+  resourceId: string | null;
+  pendingResourceId: string | null;
   pendingSummary: AudioLaunchSummary | null;
   loadError: string | null;
-  workId: string | null;
+  bookId: string | null;
   trackIndex: number;
   track: AudioTrack | null;
   chapter: AudioChapter | null;
@@ -111,7 +104,7 @@ export type AudioPlaybackState = {
   error: string | null;
 };
 
-export type LoadAudioVolumeOptions = {
+export type LoadAudioResourceOptions = {
   autoplay?: boolean;
   force?: boolean;
   chapterId?: string;
@@ -119,9 +112,9 @@ export type LoadAudioVolumeOptions = {
 };
 
 export type AudioPlaybackContextValue = AudioPlaybackState & {
-  loadVolume: (volumeId: string, options?: LoadAudioVolumeOptions) => Promise<void>;
+  loadResource: (resourceId: string, options?: LoadAudioResourceOptions) => Promise<void>;
   retry: () => Promise<void>;
-  cancelVolumeSwitch: () => void;
+  cancelResourceSwitch: () => void;
   play: () => Promise<void>;
   pause: () => void;
   toggle: () => Promise<void>;

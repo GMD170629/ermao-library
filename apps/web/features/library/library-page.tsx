@@ -11,11 +11,11 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import {
-  fetchLibraryWorksPage,
-  type BookshelfWorkSummary,
-  type LibraryWorkSummary,
-  type ManagementWorkSummary
-} from './api/works';
+  fetchLibraryBooksPage,
+  type BookshelfBookSummary,
+  type LibraryBookSummary,
+  type ManagementBookSummary
+} from './api/books';
 import { fetchLibraryFilterSchema } from './api/filtering';
 import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
 import { canUseLibraryBatchAction } from './model/library-batch-action';
@@ -44,7 +44,7 @@ import {
   type LibrarySort,
   type LibrarySortDirection
 } from './model/library-sort-preference';
-import { workDetailHrefFromLibrary } from './model/library-navigation';
+import { bookDetailHrefFromLibrary } from './model/library-navigation';
 
 const formatOptions = [
   { value: '全部', label: '全部' },
@@ -103,7 +103,7 @@ export function LibraryPage() {
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
   const [filterSchemaLoading, setFilterSchemaLoading] = useState(false);
   const [filterSchemaLoaded, setFilterSchemaLoaded] = useState(false);
-  const [books, setBooks] = useState<LibraryWorkSummary[]>([]);
+  const [books, setBooks] = useState<LibraryBookSummary[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(String(DEFAULT_LIBRARY_PAGE_SIZE));
   const [meta, setMeta] = useState({ total: 0, pageSize: DEFAULT_LIBRARY_PAGE_SIZE, totalPages: 1 });
@@ -115,7 +115,7 @@ export function LibraryPage() {
   const [canManageSystem, setCanManageSystem] = useState(false);
   const [authorizationLoaded, setAuthorizationLoaded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [selectedWorkIds, setSelectedWorkIds] = useState<string[]>([]);
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [batchDialogAction, setBatchDialogAction] = useState<LibraryBatchAction | null>(null);
   const [batchContextPosition, setBatchContextPosition] = useState<{ x: number; y: number } | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -158,7 +158,7 @@ export function LibraryPage() {
     ? '0'
     : pageSize;
   const requestScope = `${queryBase}&pageSize=${requestPageSize}&view=${view}`;
-  const workDetailHref = (workId: string) => workDetailHrefFromLibrary(workId, searchParamString);
+  const bookDetailHref = (bookId: string) => bookDetailHrefFromLibrary(bookId, searchParamString);
 
   useEffect(() => {
     const debouncer = new LibraryQueryDebouncer(setSettledQuery);
@@ -265,7 +265,7 @@ export function LibraryPage() {
 
     const controller = new AbortController();
     setLoading(true);
-    fetchLibraryWorksPage(
+    fetchLibraryBooksPage(
       queryBase,
       requestedPage,
       requestPageSize,
@@ -316,7 +316,7 @@ export function LibraryPage() {
 
   useEffect(() => {
     const visibleIds = new Set(books.map((book) => book.id));
-    setSelectedWorkIds((current) => current.filter((id) => visibleIds.has(id)));
+    setSelectedBookIds((current) => current.filter((id) => visibleIds.has(id)));
   }, [books]);
 
   const advancedFilterCount = [statusFilter !== '全部', seriesNameFilter, facetIdFilter].filter(Boolean).length + smartFilterRules.conditions.length;
@@ -339,7 +339,7 @@ export function LibraryPage() {
     setView(nextView);
     if (nextView === 'grid') {
       setFiltersOpen(false);
-      setSelectedWorkIds([]);
+      setSelectedBookIds([]);
       setBatchContextPosition(null);
     }
     window.localStorage.setItem(userDevicePreferenceKey('shuku.library.view', currentUserId()), nextView);
@@ -418,11 +418,11 @@ export function LibraryPage() {
   }
 
   function toggleSelection(bookId: string) {
-    setSelectedWorkIds((current) => current.includes(bookId) ? current.filter((id) => id !== bookId) : [...current, bookId]);
+    setSelectedBookIds((current) => current.includes(bookId) ? current.filter((id) => id !== bookId) : [...current, bookId]);
   }
 
   function togglePageSelection(selected: boolean) {
-    setSelectedWorkIds(selected ? books.map((book) => book.id) : []);
+    setSelectedBookIds(selected ? books.map((book) => book.id) : []);
   }
 
   function openBatchAction(action: LibraryBatchAction) {
@@ -434,7 +434,7 @@ export function LibraryPage() {
   function finishBatchAction(nextMessage: string) {
     setMessage(nextMessage);
     setBatchDialogAction(null);
-    setSelectedWorkIds([]);
+    setSelectedBookIds([]);
     setReloadKey((key) => key + 1);
   }
 
@@ -574,9 +574,9 @@ export function LibraryPage() {
           {view === 'grid' ? (
             <div className="mt-8">
               <BookshelfCollection
-                books={books.filter((book): book is BookshelfWorkSummary => book.projection === 'bookshelf')}
+                books={books.filter((book): book is BookshelfBookSummary => book.projection === 'bookshelf')}
                 testId="library-book-bookshelves"
-                onOpen={(book) => router.push(workDetailHref(book.id))}
+                onOpen={(book) => router.push(bookDetailHref(book.id))}
               />
               <div ref={loadMoreRef} className="flex min-h-20 items-center justify-center py-5 text-xs tabular-nums text-[#8A847E]" role="status" aria-live="polite">
                 {loading && page > 1 ? <><Loader2 size={15} className="mr-2 animate-spin" /><I18nText>正在加载更多图书...</I18nText></> : i18nAttribute("已加载 {value0} / {value1} 本", { value0: books.length, value1: meta.total })}
@@ -585,7 +585,7 @@ export function LibraryPage() {
           ) : (
             <div data-testid="library-management-viewport" className={cn('mt-8 lg:flex lg:min-h-[26rem] lg:flex-col', !filtersOpen && 'lg:h-[calc(100dvh-15.75rem)] lg:overflow-hidden')}>
               <div className="lg:min-h-0 lg:flex-1">
-                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onOpen={(book) => router.push(workDetailHref(book.id))} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
+                <BookTable books={books.filter((book): book is ManagementBookSummary => book.projection === 'management')} onOpen={(book) => router.push(bookDetailHref(book.id))} selectable selectedIds={selectedBookIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedBookIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
               </div>
               <Pagination page={page} total={meta.total} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
             </div>
@@ -593,10 +593,10 @@ export function LibraryPage() {
         </>
       ) : null}
 
-      {selectedWorkIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold"><I18nText>已选择 </I18nText>{selectedWorkIds.length} <I18nText>本</I18nText></div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block"><I18nText>列表中右键可直接选择批量操作</I18nText></div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedWorkIds([]); setBatchContextPosition(null); }}><I18nText>清空</I18nText></Button><Button onClick={() => openBatchAction(canManageSystem ? 'metadata' : 'shelves')}><I18nText>批量操作</I18nText></Button></div></div> : null}
+      {selectedBookIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold"><I18nText>已选择 </I18nText>{selectedBookIds.length} <I18nText>本</I18nText></div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block"><I18nText>列表中右键可直接选择批量操作</I18nText></div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedBookIds([]); setBatchContextPosition(null); }}><I18nText>清空</I18nText></Button><Button onClick={() => openBatchAction(canManageSystem ? 'metadata' : 'shelves')}><I18nText>批量操作</I18nText></Button></div></div> : null}
 
-      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedWorkIds.length} canManageSystem={canManageSystem} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
-      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedWorkIds} canManageSystem={canManageSystem} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
+      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedBookIds.length} canManageSystem={canManageSystem} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
+      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedBookIds} canManageSystem={canManageSystem} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
     </div>
   );
 }

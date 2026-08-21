@@ -54,7 +54,7 @@ export function OrganizationModePicker({
             <span className="mt-1.5 block text-xs leading-5 text-[#606C38]/70">{t(option.description)}</span>
             {option.value === 'AUDIOBOOK' ? (
               <span className="mt-auto flex items-center gap-1.5 pt-3 text-xs font-semibold text-[#9E4D29]">
-                <FolderOpen size={13} /><I18nText>示例：书名 / 卷册 / 音轨</I18nText>
+                <FolderOpen size={13} /><I18nText>示例：图书 / 可读资源 / 音轨</I18nText>
               </span>
             ) : null}
           </button>

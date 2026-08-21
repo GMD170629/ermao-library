@@ -159,7 +159,7 @@ export function ShelvesPage() {
     let active = true;
     const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', view: 'search', search: search.trim() });
     setSearchLoading(true);
-    fetch(`/api/works?${params}`)
+    fetch(`/api/books?${params}`)
       .then((response) => readPayload<BooksPayload>(response, '搜索图书失败'))
       .then((payload) => {
         if (active) setSearchBooks(payload.data?.books ?? []);
@@ -216,7 +216,7 @@ export function ShelvesPage() {
       if (smartFilterQuery) params.set('filters', smartFilterQuery);
       setPreviewLoading(true);
       setPreviewError('');
-      fetch(`/api/works?${params}`, {
+      fetch(`/api/books?${params}`, {
         cache: 'no-store',
         credentials: 'same-origin',
         signal: controller.signal
@@ -927,7 +927,7 @@ export function ShelvesPage() {
               <BookshelfCollection
                 books={shelfBooks}
                 testId="shelf-book-bookshelves"
-                onOpen={(book) => router.push(`/works/${book.id}`)}
+                onOpen={(book) => router.push(`/books/${book.id}`)}
               />
               <ShelfLoadStatus
                 sentinelRef={loadMoreRef}

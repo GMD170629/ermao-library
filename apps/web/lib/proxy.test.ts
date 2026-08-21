@@ -33,16 +33,16 @@ test('proxy returns the stable unauthorized envelope for protected API routes', 
 });
 
 test('proxy redirects protected pages to login and preserves the requested URL', () => {
-  const response = proxy(createRequest('/works/book-1?volumeId=volume-1'));
+  const response = proxy(createRequest('/books/book-1?resourceId=resource-1'));
 
   assert.equal(response.status, 307);
   const location = new URL(response.headers.get('location') ?? '');
   assert.equal(location.pathname, '/login');
-  assert.equal(location.searchParams.get('next'), '/works/book-1?volumeId=volume-1');
+  assert.equal(location.searchParams.get('next'), '/books/book-1?resourceId=resource-1');
 });
 
 test('proxy allows protected routes with a session', () => {
-  const response = proxy(createRequest('/works/book-1', 'session-token'));
+  const response = proxy(createRequest('/books/book-1', 'session-token'));
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('x-middleware-next'), '1');
@@ -50,6 +50,6 @@ test('proxy allows protected routes with a session', () => {
 
 test('large import uploads bypass proxy request-body buffering', () => {
   assert.deepEqual(config.matcher, [
-    '/((?!api/works/import(?:/|$)|.*\\.).*)'
+    '/((?!api/books/import(?:/|$)|.*\\.).*)'
   ]);
 });

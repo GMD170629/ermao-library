@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
-import { mediaKindsLabel, type ManagementWorkSummary } from '../../features/library/public';
+import { mediaKindsLabel, type ManagementBookSummary } from '../../features/library/public';
 import { useI18n } from '../../i18n/provider';
 import { Badge } from '../ui/badge';
 import type { BadgeTone } from '../ui/badge';
@@ -33,14 +33,14 @@ export function BookTable({
   sortDirection = 'asc',
   onSort
 }: {
-  books: ManagementWorkSummary[];
-  onOpen?: (book: ManagementWorkSummary) => void;
+  books: ManagementBookSummary[];
+  onOpen?: (book: ManagementBookSummary) => void;
   selectable?: boolean;
   selectedIds?: string[];
-  onSelect?: (book: ManagementWorkSummary) => void;
+  onSelect?: (book: ManagementBookSummary) => void;
   onSelectAll?: (selected: boolean) => void;
   onSelectionChange?: (ids: string[]) => void;
-  onContextMenu?: (book: ManagementWorkSummary, position: { x: number; y: number }) => void;
+  onContextMenu?: (book: ManagementBookSummary, position: { x: number; y: number }) => void;
   sort?: string;
   sortDirection?: SortDirection;
   onSort?: (sort: string, direction: SortDirection) => void;
@@ -53,9 +53,9 @@ export function BookTable({
   const anchorIndexRef = useRef<number | null>(null);
   const dragRef = useRef<{ active: boolean; mode: 'select' | 'deselect'; visited: Set<string> }>({ active: false, mode: 'select', visited: new Set() });
 
-  function openBook(book: ManagementWorkSummary) {
+  function openBook(book: ManagementBookSummary) {
     if (onOpen) onOpen(book);
-    else router.push(`/works/${encodeURIComponent(book.id)}`);
+    else router.push(`/books/${encodeURIComponent(book.id)}`);
   }
 
   useEffect(() => {
@@ -93,7 +93,7 @@ export function BookTable({
     commitSelection(next);
   }
 
-  function beginRowSelection(event: ReactMouseEvent<HTMLTableRowElement>, book: ManagementWorkSummary, index: number) {
+  function beginRowSelection(event: ReactMouseEvent<HTMLTableRowElement>, book: ManagementBookSummary, index: number) {
     if (!selectable || event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest('button, a, input, select, textarea, [data-selection-ignore="true"]')) return;
@@ -113,23 +113,23 @@ export function BookTable({
     applyDragSelection(book.id);
   }
 
-  function openContextMenu(event: ReactMouseEvent<HTMLElement>, book: ManagementWorkSummary) {
+  function openContextMenu(event: ReactMouseEvent<HTMLElement>, book: ManagementBookSummary) {
     if (!selectable || !onContextMenu) return;
     event.preventDefault();
     if (!selectedRef.current.has(book.id)) commitSelection(new Set([book.id]));
     onContextMenu(book, { x: event.clientX, y: event.clientY });
   }
 
-  function openMobileBookDetails(event: ReactMouseEvent<HTMLButtonElement>, book: ManagementWorkSummary) {
+  function openMobileBookDetails(event: ReactMouseEvent<HTMLButtonElement>, book: ManagementBookSummary) {
     event.stopPropagation();
     openBook(book);
   }
 
-  function mediaLabel(book: ManagementWorkSummary) {
+  function mediaLabel(book: ManagementBookSummary) {
     return mediaKindsLabel(book.availableMediaKinds, locale) || '—';
   }
 
-  function statusLabel(book: ManagementWorkSummary) {
+  function statusLabel(book: ManagementBookSummary) {
     const kinds = book.availableMediaKinds;
     const status = book.statusValue;
     if (kinds.length !== 1) return status === 'FINISHED' ? '已完成' : status === 'READING' ? '进行中' : '未开始';
@@ -138,7 +138,7 @@ export function BookTable({
     return status === 'FINISHED' ? '已读' : status === 'READING' ? '在读' : '未读';
   }
 
-  function statusTone(book: ManagementWorkSummary): BadgeTone {
+  function statusTone(book: ManagementBookSummary): BadgeTone {
     if (book.statusValue === 'FINISHED') return 'green';
     return book.statusValue === 'READING' ? 'amber' : 'slate';
   }
@@ -220,7 +220,7 @@ export function BookTable({
             return (
               <tr
                 key={book.id}
-                data-work-id={book.id}
+                data-book-id={book.id}
                 aria-selected={selectedIds.includes(book.id)}
                 onMouseDown={(event) => beginRowSelection(event, book, index)}
                 onMouseEnter={() => applyDragSelection(book.id)}

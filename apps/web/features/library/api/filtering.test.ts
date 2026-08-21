@@ -11,7 +11,7 @@ test('parses filter schema option sources without unchecked casts', () => {
     fields: [{
       key: 'author',
       label: '作者',
-      group: '作品元数据',
+      group: '图书元数据',
       type: 'select',
       operators: ['equals'],
       optionSource: 'authors',

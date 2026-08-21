@@ -8,12 +8,12 @@ import { ReaderProgressSyncCoordinator } from './sync-coordinator';
 
 const locator = parsePublicationLocation(exactRequest.locator);
 if (!locator) throw new Error('invalid exact fixture');
-const input = { serverIdentity: 'https://library.example', userId: 'user-1', workId: 'work-1', volumeId: 'volume-1', baseRevision: 17, locator, displayPercent: 42 } as const;
+const input = { serverIdentity: 'https://library.example', userId: 'user-1', bookId: 'book-1', resourceId: 'resource-1', baseRevision: 17, locator, displayPercent: 42 } as const;
 
-test('migrates a fingerprint-keyed local record into the work and volume progress slot', async () => {
+test('migrates a fingerprint-keyed local record into the book and resource progress slot', async () => {
   const storage = new MemoryReaderStorage();
   const clientId = await storage.getClientId();
-  const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId };
+  const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, bookId: input.bookId, resourceId: input.resourceId };
   await storage.putExactProgress({
     ...identity,
     key: 'legacy-fingerprint-key',
@@ -27,7 +27,7 @@ test('migrates a fingerprint-keyed local record into the work and volume progres
   const migrated = await storage.getExactProgress(identity);
 
   assert.equal(migrated?.key, exactProgressKey(identity));
-  assert.equal(await storage.getExactProgress({ ...identity, workId: 'another-work' }), null);
+  assert.equal(await storage.getExactProgress({ ...identity, bookId: 'another-book' }), null);
 });
 
 test('atomically persists the latest exact locator before uploading the canonical request', async () => {
@@ -60,12 +60,12 @@ test('keeps network failures durable but drops a rejected mutation and raises a 
   const conflict = { clientId: 'ios-client', revision: 19, locator: remoteLocator, displayPercent: 44, receivedAtEpochMillis: 101 };
   const retry = new ReaderProgressSyncCoordinator(storage, async () => { throw new ReaderProgressConflictError(conflict); }, { debounceMs: 0 });
   const clientId = await storage.getClientId();
-  retry.beginSession('volume-1', clientId, { schemaVersion: 4, clientId: 'server-client', revision: 17, locator, displayPercent: 42, receivedAtEpochMillis: 90 }, locator);
+  retry.beginSession('resource-1', clientId, { schemaVersion: 4, clientId: 'server-client', revision: 17, locator, displayPercent: 42, receivedAtEpochMillis: 90 }, locator);
   retry.activateUser('user-1');
   await new Promise((resolve) => setTimeout(resolve, 0));
   await retry.flushNow();
   assert.equal(await storage.getPendingProgress(pending.key), null);
-  assert.equal(retry.getLatestServerSnapshot('volume-1')?.revision, 19);
+  assert.equal(retry.getLatestServerSnapshot('resource-1')?.revision, 19);
 });
 
 test('lifecycle checks ignore 304, same client, and the same exact anchor', async () => {
@@ -80,10 +80,10 @@ test('lifecycle checks ignore 304, same client, and the same exact anchor', asyn
     debounceMs: 0,
     queryTransport: async () => snapshots.shift() ?? { kind: 'unchanged', etag: null }
   });
-  coordinator.beginSession('volume-1', clientId, null, locator);
-  assert.equal(await coordinator.checkRemoteProgress('volume-1'), null);
-  assert.equal(await coordinator.checkRemoteProgress('volume-1'), null);
-  assert.equal(await coordinator.checkRemoteProgress('volume-1'), null);
+  coordinator.beginSession('resource-1', clientId, null, locator);
+  assert.equal(await coordinator.checkRemoteProgress('resource-1'), null);
+  assert.equal(await coordinator.checkRemoteProgress('resource-1'), null);
+  assert.equal(await coordinator.checkRemoteProgress('resource-1'), null);
 });
 
 test('the next genuinely different exact location rebases onto the remote revision', async () => {
@@ -117,8 +117,8 @@ test('the next genuinely different exact location rebases onto the remote revisi
   });
   const clientId = await storage.getClientId();
   coordinator.activateUser('user-1');
-  coordinator.beginSession('volume-1', clientId, { schemaVersion: 4, clientId: 'server', revision: 4, locator, displayPercent: 42, receivedAtEpochMillis: 90 }, locator);
-  await coordinator.checkRemoteProgress('volume-1');
+  coordinator.beginSession('resource-1', clientId, { schemaVersion: 4, clientId: 'server', revision: 4, locator, displayPercent: 42, receivedAtEpochMillis: 90 }, locator);
+  await coordinator.checkRemoteProgress('resource-1');
   await coordinator.enqueue({ ...input, locator: moved, baseRevision: 4 });
   await coordinator.flushNow();
   assert.deepEqual(sent, [{ baseRevision: 9 }]);

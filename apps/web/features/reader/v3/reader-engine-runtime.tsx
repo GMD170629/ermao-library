@@ -3,7 +3,7 @@
 import type { ReaderAdapter, ReaderCommand, ReaderPreferences } from '@shuku/reader-core';
 import { LoaderCircle, LockKeyhole, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type ReaderShellEvents, type ReaderVolumeNavigation } from '../reader-shell';
+import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type ReaderShellEvents, type ReaderResourceNavigation } from '../reader-shell';
 import { fetchReaderBookmarks, saveReaderBookmarks, type ReaderBootstrap } from './api';
 import { hasReaderBookmark, mergeReaderBookmarks, readReaderBookmarks, readerBookmarkId, readerBookmarkStorageKey, removeReaderBookmark, toggleReaderBookmark, type ReaderBookmark } from './bookmarks';
 import { resolveActiveEpubNavigationIndex } from './epub-navigation';
@@ -12,7 +12,7 @@ import { useReaderSession } from './use-reader-session';
 import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './adapters/reader-interaction';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-import type { ReaderBookCache } from '../../../lib/reader/book-cache';
+import type { ReaderResourceCache } from '../../../lib/reader/resource-cache';
 import { currentReaderServerIdentity } from '../../../lib/reader/model';
 import type { PdfRangeCache } from '../../../lib/reader/pdf-range-cache';
 import { currentAuthorizationVersion } from '../../../lib/user-preferences';
@@ -27,11 +27,11 @@ type ReaderEngineRuntimeProps = {
   onLocationChange: Parameters<typeof useReaderSession>[0]['onLocationChange'];
   onBack: () => void;
   onRetry: () => void;
-  onSelectVolume: (volumeId: string, pageIndex?: number) => void;
+  onSelectResource: (resourceId: string, pageIndex?: number) => void;
   onIndexProgress: (progress: { completed: number; total: number; percent: number } | null) => void;
   onDownloadProgress: (progress: { loadedBytes: number; totalBytes: number | null; percent: number | null } | null) => void;
   onReady: () => void;
-  bookCache: ReaderBookCache;
+  resourceCache: ReaderResourceCache;
   pdfRangeCache: PdfRangeCache;
   onStorageWarning: (message: string) => void;
   externalNavigation?: { id: number; location: import('@shuku/reader-core').ReaderLocation } | null;
@@ -72,7 +72,7 @@ function novelErrorMessage(code: string | undefined, translate: (source: string)
   if (code === 'NOVEL_ENCODING_UNCERTAIN') return translate('无法确定 TXT 文件的文字编码。');
   if (code === 'NOVEL_RESOURCE_FAILED') return translate('小说文件加载失败，请检查网络后重试。');
   if (code === 'NOVEL_SECURITY_REJECTED') return translate('文件包含不安全的内容，已停止打开。');
-  if (code === 'VOLUME_FORMAT_UNSUPPORTED') return translate('当前文件格式尚未开放阅读支持。');
+  if (code === 'RESOURCE_FORMAT_UNSUPPORTED') return translate('当前文件格式尚未开放阅读支持。');
   if (code === 'READER_FORMAT_MORPHOLOGY_MISMATCH') return translate('文件格式与阅读器类型不匹配。');
   if (code === 'PDF_ENCRYPTED' || code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
   if (code === 'PDF_INVALID') return translate('PDF 文件已损坏或格式无效。');
@@ -105,11 +105,11 @@ export function ReaderEngineRuntime({
   onLocationChange,
   onBack,
   onRetry,
-  onSelectVolume,
+  onSelectResource,
   onIndexProgress,
   onDownloadProgress,
   onReady,
-  bookCache,
+  resourceCache,
   pdfRangeCache,
   onStorageWarning,
   externalNavigation = null,
@@ -126,8 +126,8 @@ export function ReaderEngineRuntime({
   const executeRef = useRef<(command: ReaderCommand) => Promise<boolean>>(async () => false);
   const shellEventsRef = useRef<ReaderShellEvents | null>(null);
   const interactionBlockedRef = useRef(true);
-  const onSelectVolumeRef = useRef(onSelectVolume);
-  onSelectVolumeRef.current = onSelectVolume;
+  const onSelectResourceRef = useRef(onSelectResource);
+  onSelectResourceRef.current = onSelectResource;
   const runtimePreferences = useMemo(
     () => bootstrap.readerType === 'reflowable'
       ? projectReadiumEffectivePreferences(effectivePreferences)
@@ -144,11 +144,11 @@ export function ReaderEngineRuntime({
     container.replaceChildren();
 
     void (async () => {
-      const openNextVolume = async () => {
-        const currentIndex = bootstrap.availableVolumes.findIndex((volume) => volume.id === bootstrap.volume.id);
-        const nextVolume = currentIndex >= 0 ? bootstrap.availableVolumes[currentIndex + 1] : undefined;
-        if (!nextVolume) return false;
-        onSelectVolumeRef.current(nextVolume.id);
+      const openNextResource = async () => {
+        const currentIndex = bootstrap.availableResources.findIndex((resource) => resource.id === bootstrap.resource.id);
+        const nextResource = currentIndex >= 0 ? bootstrap.availableResources[currentIndex + 1] : undefined;
+        if (!nextResource) return false;
+        onSelectResourceRef.current(nextResource.id);
         return true;
       };
       const handleAdapterInputIntent = (intent: ReaderAdapterInputIntent) => {
@@ -170,14 +170,14 @@ export function ReaderEngineRuntime({
           container,
           initialHref: bootstrap.units[0]?.href ?? null,
           onInputIntent: handleAdapterInputIntent,
-          onEndOfVolume: openNextVolume
+          onEndOfResource: openNextResource
         });
       } else if (bootstrap.readerType === 'comic') {
         const adapterModule = await import('./adapters/comic-adapter');
         created = adapterModule.createComicAdapter({
           container,
           onInputIntent: handleAdapterInputIntent,
-          onEndOfVolume: openNextVolume,
+          onEndOfResource: openNextResource,
           initialPages: bootstrap.pages.map((page) => ({
             pageIndex: page.pageIndex,
             resourceHref: page.resourceHref,
@@ -190,18 +190,18 @@ export function ReaderEngineRuntime({
         });
       } else {
         const adapterModule = await import('./adapters/pdf-adapter');
-        const pdfFile = bootstrap.files.find((file) => file.mimeType.toLowerCase() === 'application/pdf') ?? bootstrap.files[0];
-        if (!pdfFile || pdfFile.sizeBytes <= 0) throw new Error('PDF_INVALID');
+        const pdfAsset = bootstrap.assets.find((asset) => asset.mimeType.toLowerCase() === 'application/pdf') ?? bootstrap.assets[0];
+        if (!pdfAsset || pdfAsset.sizeBytes <= 0) throw new Error('PDF_INVALID');
         created = adapterModule.createPdfAdapter({
           container,
           rangeAccess: {
-            url: pdfFile.url,
-            length: pdfFile.sizeBytes,
+            url: pdfAsset.url,
+            length: pdfAsset.sizeBytes,
             identity: {
               serverIdentity: currentReaderServerIdentity(),
               userId: bootstrap.userId,
               authorizationVersion: currentAuthorizationVersion(bootstrap.userId),
-              volumeId: bootstrap.volume.id
+              resourceId: bootstrap.resource.id
             },
             cache: pdfRangeCache
           }
@@ -224,7 +224,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bookCache, bootstrap.availableVolumes, bootstrap.book.title, bootstrap.files, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.volume.id, container, i18nAttribute, onStorageWarning, pdfRangeCache]);
+  }, [resourceCache, bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onStorageWarning, pdfRangeCache]);
 
   const session = useReaderSession({
     adapter,
@@ -285,15 +285,15 @@ export function ReaderEngineRuntime({
 
   const totalHint = bootstrap.readerType === 'reflowable'
     ? null
-    : (session.state.totalPages ?? bootstrap.volume.pageCount ?? bootstrap.pages.length) || null;
+    : (session.state.totalPages ?? bootstrap.resource.pageCount ?? bootstrap.pages.length) || null;
   const currentPercent = session.state.location ? session.state.percent : bootstrap.progressPercent;
   const progress = locationProgress(session.state.location ?? bootstrap.initialLocation, currentPercent, totalHint);
   const progressExtra = locationExtra(session.state.location ?? bootstrap.initialLocation);
   const currentLocation = session.state.location ?? bootstrap.initialLocation;
-  const currentVolumeIndex = bootstrap.availableVolumes.findIndex((volume) => volume.id === bootstrap.volume.id);
-  const hasNextVolume = currentVolumeIndex >= 0 && currentVolumeIndex < bootstrap.availableVolumes.length - 1;
+  const currentResourceIndex = bootstrap.availableResources.findIndex((resource) => resource.id === bootstrap.resource.id);
+  const hasNextResource = currentResourceIndex >= 0 && currentResourceIndex < bootstrap.availableResources.length - 1;
   const adapterCapabilities = session.state.capabilities ?? bootstrap.capabilities;
-  const effectiveCapabilities = hasNextVolume && !adapterCapabilities.canGoNext
+  const effectiveCapabilities = hasNextResource && !adapterCapabilities.canGoNext
     ? { ...adapterCapabilities, canGoNext: true }
     : adapterCapabilities;
   const settings = {
@@ -303,8 +303,8 @@ export function ReaderEngineRuntime({
   const items = useMemo(() => bootstrapNavigationItems(bootstrap), [bootstrap]);
   const bookmarkStorageKey = useMemo(() => readerBookmarkStorageKey(
     bootstrap.userId,
-    bootstrap.volume.id
-  ), [bootstrap.userId, bootstrap.volume.id]);
+    bootstrap.resource.id
+  ), [bootstrap.userId, bootstrap.resource.id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -318,7 +318,7 @@ export function ReaderEngineRuntime({
     } catch {
       setBookmarks([]);
     }
-    fetchReaderBookmarks(bootstrap.volume.id, format, controller.signal)
+    fetchReaderBookmarks(bootstrap.resource.id, format, controller.signal)
       .then((serverBookmarks) => {
         setBookmarks((current) => {
           const next = mergeReaderBookmarks(current, serverBookmarks);
@@ -329,7 +329,7 @@ export function ReaderEngineRuntime({
           }
           bookmarkSyncReadyRef.current = true;
           if (JSON.stringify(next) !== JSON.stringify(serverBookmarks)) {
-            void saveReaderBookmarks(bootstrap.volume.id, format, next).catch(() => undefined);
+            void saveReaderBookmarks(bootstrap.resource.id, format, next).catch(() => undefined);
           }
           return next;
         });
@@ -338,7 +338,7 @@ export function ReaderEngineRuntime({
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) bookmarkSyncReadyRef.current = true;
       });
     return () => controller.abort();
-  }, [bookmarkStorageKey, bootstrap.source, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.source, bootstrap.resource.id]);
 
   const persistBookmarks = useCallback((update: (current: ReaderBookmark[]) => ReaderBookmark[]) => {
     setBookmarks((current) => {
@@ -350,15 +350,15 @@ export function ReaderEngineRuntime({
       }
       if (bookmarkSyncReadyRef.current) {
         const format = bootstrap.source.kind === 'reflowable' ? bootstrap.source.sourceFormat : null;
-        void saveReaderBookmarks(bootstrap.volume.id, format, next).catch(() => undefined);
+        void saveReaderBookmarks(bootstrap.resource.id, format, next).catch(() => undefined);
       }
       return next;
     });
-  }, [bookmarkStorageKey, bootstrap.source, bootstrap.volume.id]);
+  }, [bookmarkStorageKey, bootstrap.source, bootstrap.resource.id]);
 
   const currentBookmarkLabel = useMemo(() => {
     if (currentLocation?.kind === 'comic') {
-      return bootstrap.volume.title ? `${bootstrap.volume.title} · ${progress.label}` : progress.label;
+      return bootstrap.resource.title ? `${bootstrap.resource.title} · ${progress.label}` : progress.label;
     }
     if (currentLocation?.kind !== 'reflowable' && currentLocation?.kind !== 'epub') return progress.label;
     const activeIndex = resolveActiveEpubNavigationIndex(
@@ -368,7 +368,7 @@ export function ReaderEngineRuntime({
     );
     const chapter = activeIndex === null ? null : items[activeIndex];
     return chapter ? `${chapter.title} · 全书 ${Math.round(progress.percent)}%` : progress.label;
-  }, [bootstrap.volume.title, currentLocation, items, progress.label, progress.percent]);
+  }, [bootstrap.resource.title, currentLocation, items, progress.label, progress.percent]);
 
   const toggleCurrentBookmark = useCallback(() => {
     if (!currentLocation) return;
@@ -385,12 +385,12 @@ export function ReaderEngineRuntime({
   }, [persistBookmarks]);
 
   const jumpToBookmark = useCallback(async (bookmark: ReaderBookmark) => {
-    if (bookmark.location.kind === 'comic' && bookmark.location.volumeId !== bootstrap.volume.id) {
-      onSelectVolume(bookmark.location.volumeId, bookmark.location.pageIndex);
+    if (bookmark.location.kind === 'comic' && bookmark.location.resourceId !== bootstrap.resource.id) {
+      onSelectResource(bookmark.location.resourceId, bookmark.location.pageIndex);
       return;
     }
     await sessionExecute({ type: 'go-to-location', location: bookmark.location });
-  }, [bootstrap.volume.id, onSelectVolume, sessionExecute]);
+  }, [bootstrap.resource.id, onSelectResource, sessionExecute]);
 
   const controls: ReaderControls = useMemo(() => ({
     next: () => sessionControls.next(),
@@ -400,23 +400,23 @@ export function ReaderEngineRuntime({
     jumpToIndex: (index) => sessionControls.jumpToIndex(index)
   }), [sessionControls]);
 
-  const volumeNavigation: ReaderVolumeNavigation = useMemo(() => ({
-    volumeSections: bootstrap.availableVolumes.map((volume) => ({
-      id: volume.id,
-      title: volume.title,
+  const resourceNavigation: ReaderResourceNavigation = useMemo(() => ({
+    resourceSections: bootstrap.availableResources.map((resource) => ({
+      id: resource.id,
+      title: resource.title,
       pageCount: bootstrap.readerType === 'reflowable'
-        ? volume.chapterCount ?? 0
-        : volume.pageCount ?? 0
+        ? resource.chapterCount ?? 0
+        : resource.pageCount ?? 0
     })),
     pages: items,
-    currentVolumeId: bootstrap.volume.id,
+    currentResourceId: bootstrap.resource.id,
     loading: false,
-    onSelectVolume,
+    onSelectResource,
     onSelectItem: (item) => {
       if (bootstrap.readerType === 'reflowable' && item.href) void sessionControls.jumpToHref(item.href);
       else void sessionControls.jumpToIndex(item.index);
     }
-  }), [bootstrap, items, onSelectVolume, sessionControls]);
+  }), [bootstrap, items, onSelectResource, sessionControls]);
 
   function submitPassword(event: FormEvent) {
     event.preventDefault();
@@ -448,7 +448,7 @@ export function ReaderEngineRuntime({
       interactionBlocked={interactionBlocked}
       horizontalPaging={horizontalPaging}
       navigationItems={items}
-      volumeNavigation={volumeNavigation}
+      resourceNavigation={resourceNavigation}
       bookmarkActive={hasReaderBookmark(bookmarks, currentLocation)}
       currentBookmarkId={readerBookmarkId(currentLocation)}
       bookmarks={bookmarks}

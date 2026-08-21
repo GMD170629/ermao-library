@@ -4,7 +4,7 @@ import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/r
 import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Highlighter, LayoutTemplate, ListTree, Minus, MousePointer2, NotebookPen, Palette, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, SlidersHorizontal, Sparkles, Trash2, Type, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { cn } from '../../components/ui/cn';
-import { VolumeSelect } from '../../components/ui/volume-select';
+import { ResourceSelect } from '../../components/ui/resource-select';
 import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
 import {
@@ -153,7 +153,7 @@ type ReaderShellProps = {
   interactionBlocked?: boolean;
   horizontalPaging?: ReaderInteractionPolicy['horizontalPaging'];
   navigationItems?: ReaderNavigationItem[];
-  volumeNavigation?: ReaderVolumeNavigation;
+  resourceNavigation?: ReaderResourceNavigation;
   bookmarkActive?: boolean;
   currentBookmarkId?: string | null;
   bookmarks?: ReaderBookmark[];
@@ -172,12 +172,12 @@ export type ReaderNavigationItem = {
   sectionIndex?: number;
 };
 
-export type ReaderVolumeNavigation = {
-  volumeSections: Array<{ id: string; title: string; pageCount: number }>;
+export type ReaderResourceNavigation = {
+  resourceSections: Array<{ id: string; title: string; pageCount: number }>;
   pages: ReaderNavigationItem[];
-  currentVolumeId: string;
+  currentResourceId: string;
   loading: boolean;
-  onSelectVolume: (volumeId: string) => void;
+  onSelectResource: (resourceId: string) => void;
   onSelectItem: (item: ReaderNavigationItem) => void;
 };
 
@@ -271,7 +271,7 @@ function remainingTimeLabel(seconds: number, locale: string) {
     : `${hours} hr${remainder ? ` ${remainder} min` : ''} left`;
 }
 
-export function ReaderShell({ readerType, progress, progressExtra = {}, controls, settings, capabilities = null, readingDirection, onBack, onSettingsChange, onResetSettings, interactionBlocked = false, horizontalPaging = 'shell-discrete', navigationItems, volumeNavigation, bookmarkActive = false, currentBookmarkId = null, bookmarks = [], canBookmark = false, onToggleBookmark, onJumpBookmark, onRemoveBookmark, children }: ReaderShellProps) {
+export function ReaderShell({ readerType, progress, progressExtra = {}, controls, settings, capabilities = null, readingDirection, onBack, onSettingsChange, onResetSettings, interactionBlocked = false, horizontalPaging = 'shell-discrete', navigationItems, resourceNavigation, bookmarkActive = false, currentBookmarkId = null, bookmarks = [], canBookmark = false, onToggleBookmark, onJumpBookmark, onRemoveBookmark, children }: ReaderShellProps) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
   const controlsVisibleRef = useRef(false);
@@ -307,7 +307,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const [progressScrubPercent, setProgressScrubPercent] = useState<number | null>(null);
   const dark = isDarkReaderTheme(settings.theme);
   const themeSurface = readerThemeSurfaces[settings.theme];
-  const availableNavigationItems = navItems.length > 0 ? navItems : volumeNavigation?.pages ?? [];
+  const availableNavigationItems = navItems.length > 0 ? navItems : resourceNavigation?.pages ?? [];
   const chapterNavigationItems = availableNavigationItems;
   const currentNavigationItem = activeNavigationItem(readerType, chapterNavigationItems, progress, progressExtra);
   const currentNavigationIndex = currentNavigationItem
@@ -945,9 +945,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 </button>
               </div>
 
-              {panel === 'toc' && volumeNavigation ? (
-                <VolumeNavigationPanel
-                  navigation={volumeNavigation}
+              {panel === 'toc' && resourceNavigation ? (
+                <ResourceNavigationPanel
+                  navigation={resourceNavigation}
                   readerType={readerType}
                   activeItemKey={currentNavigationItem ? navigationItemKey(currentNavigationItem) : null}
                   dark={dark}
@@ -957,7 +957,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 />
               ) : null}
 
-              {panel === 'toc' && !volumeNavigation ? (
+              {panel === 'toc' && !resourceNavigation ? (
                 <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
                   {navItems.length === 0 ? <div className="py-6 text-sm opacity-60"><I18nText>暂无可跳转条目</I18nText></div> : null}
                   <div className="space-y-1">
@@ -1073,7 +1073,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     <div className="mt-3 text-sm font-medium">{annotationTab === 'book' ? i18nAttribute("暂无可展示的书内注释") : i18nAttribute("还没有划线或批注")}</div>
                     <p className="mx-auto mt-2 max-w-xs text-xs leading-5 opacity-60">
                       {annotationTab === 'book'
-                        ? i18nAttribute("当前版本尚未建立注释索引；后续接入 EPUB 脚注与尾注解析后会集中显示在这里。")
+                        ? i18nAttribute("当前资源尚未建立注释索引；后续接入 EPUB 脚注与尾注解析后会集中显示在这里。")
                         : i18nAttribute("划线、批注与跨设备同步的数据层尚未接入；这里先保留统一入口与完整的响应式结构。")}
                     </p>
                   </div>
@@ -1327,7 +1327,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           </div>
 
           <div className="hidden h-full w-full items-stretch md:flex">
-            {readerType !== 'reflowable' || navItems.length > 0 || volumeNavigation ? (
+            {readerType !== 'reflowable' || navItems.length > 0 || resourceNavigation ? (
               <ReaderControlNavButton layout="dock" icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
             ) : null}
             <ReaderControlNavButton layout="dock" icon={NotebookPen} label={i18nAttribute("笔记")} active={bookmarkActive} selected={panel === 'notes'} expanded={panel === 'notes'} panelTrigger="notes" onClick={(event) => { setNotesTab('bookmarks'); togglePanel('notes', event.currentTarget); }} dark={dark} />
@@ -1540,52 +1540,52 @@ function ReaderToggleRow({ label, description, checked, disabled = false, onChan
   );
 }
 
-function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, onJumpItem }: { navigation: ReaderVolumeNavigation; readerType: ReaderKind; activeItemKey: string | null; dark: boolean; onJumpItem: (item: ReaderNavigationItem) => void }) {
+function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, onJumpItem }: { navigation: ReaderResourceNavigation; readerType: ReaderKind; activeItemKey: string | null; dark: boolean; onJumpItem: (item: ReaderNavigationItem) => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const showVolumes = navigation.volumeSections.length > 1;
+  const showResources = navigation.resourceSections.length > 1;
   const idleText = navigation.loading ? '正在切换...' : null;
   const isComic = readerType === 'comic';
 
   return (
     <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
       {idleText ? <div className="mb-3 rounded-xl bg-white/10 px-3 py-2 text-xs opacity-70">{idleText}</div> : null}
-      {showVolumes && !isComic ? (
-        <VolumeNavigationGroup title={i18nAttribute("卷册")}>
-          <VolumeSelect
-            items={navigation.volumeSections.map((volume, index) => ({
-              id: volume.id,
-              title: volume.title || i18nAttribute("第 {value0} 卷", { value0: index + 1 })
+      {showResources && !isComic ? (
+        <ResourceNavigationGroup title={i18nAttribute("资源")}>
+          <ResourceSelect
+            items={navigation.resourceSections.map((resource, index) => ({
+              id: resource.id,
+              title: resource.title || i18nAttribute("第 {value0} 卷", { value0: index + 1 })
             }))}
-            value={navigation.currentVolumeId}
-            onChange={navigation.onSelectVolume}
+            value={navigation.currentResourceId}
+            onChange={navigation.onSelectResource}
             disabled={navigation.loading}
             dark={dark}
             className="w-full"
           />
-        </VolumeNavigationGroup>
+        </ResourceNavigationGroup>
       ) : null}
 
-      {showVolumes && isComic ? (
-        <VolumeNavigationGroup title={isComic ? i18nAttribute("卷/话") : i18nAttribute("卷册")}>
-          {navigation.volumeSections.map((volume, index) => (
+      {showResources && isComic ? (
+        <ResourceNavigationGroup title={isComic ? i18nAttribute("资源/话") : i18nAttribute("资源")}>
+          {navigation.resourceSections.map((resource, index) => (
             <button
-              key={volume.id}
+              key={resource.id}
               type="button"
               disabled={navigation.loading}
-              onClick={() => navigation.onSelectVolume(volume.id)}
-              className={comicNavButtonClass(volume.id === navigation.currentVolumeId, dark)}
+              onClick={() => navigation.onSelectResource(resource.id)}
+              className={comicNavButtonClass(resource.id === navigation.currentResourceId, dark)}
             >
               <span className="w-8 shrink-0 tabular-nums opacity-60">{index + 1}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{volume.title || i18nAttribute("第 {value0} {value1}", { value0: index + 1, value1: isComic ? '话' : '卷' })}</span>
-                <span className="mt-0.5 block truncate text-xs opacity-65">{volume.pageCount || 0} {isComic ? i18nAttribute("页") : i18nAttribute("章")}</span>
+                <span className="block truncate font-medium">{resource.title || i18nAttribute("第 {value0} {value1}", { value0: index + 1, value1: isComic ? '话' : '卷' })}</span>
+                <span className="mt-0.5 block truncate text-xs opacity-65">{resource.pageCount || 0} {isComic ? i18nAttribute("页") : i18nAttribute("章")}</span>
               </span>
             </button>
           ))}
-        </VolumeNavigationGroup>
+        </ResourceNavigationGroup>
       ) : null}
 
-      <VolumeNavigationGroup title={isComic ? (showVolumes ? i18nAttribute("当前卷页码") : i18nAttribute("页码")) : (showVolumes ? i18nAttribute("当前卷章节") : i18nAttribute("章节"))}>
+      <ResourceNavigationGroup title={isComic ? (showResources ? i18nAttribute("当前卷页码") : i18nAttribute("页码")) : (showResources ? i18nAttribute("当前卷章节") : i18nAttribute("章节"))}>
         {navigation.pages.length === 0 ? <div className="py-6 text-sm opacity-60">{isComic ? i18nAttribute("暂无可跳转页码") : i18nAttribute("暂无可跳转章节")}</div> : null}
         <div className={isComic ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-3' : 'space-y-1'}>
           {navigation.pages.map((item, itemIndex) => (
@@ -1609,12 +1609,12 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
             </button>
           ))}
         </div>
-      </VolumeNavigationGroup>
+      </ResourceNavigationGroup>
     </div>
   );
 }
 
-function VolumeNavigationGroup({ title, children }: { title: string; children: ReactNode }) {
+function ResourceNavigationGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-5">
       <div className="mb-2 text-xs font-semibold uppercase opacity-50">{title}</div>

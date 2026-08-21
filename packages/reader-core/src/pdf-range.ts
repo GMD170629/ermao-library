@@ -21,7 +21,7 @@ export type PdfRangeCacheIdentity = Readonly<{
   serverIdentity: string;
   userId: string;
   authorizationVersion: number;
-  volumeId: string;
+  resourceId: string;
 }>;
 
 export type PdfByteRange = Readonly<{ begin: number; end: number }>;
@@ -30,7 +30,7 @@ function lengthPrefixed(value: string) {
   return `${value.length}:${value}`;
 }
 
-export function pdfRangeNamespaceKey(identity: Omit<PdfRangeCacheIdentity, 'volumeId'>) {
+export function pdfRangeNamespaceKey(identity: Omit<PdfRangeCacheIdentity, 'resourceId'>) {
   return [identity.serverIdentity, identity.userId, String(identity.authorizationVersion)]
     .map(lengthPrefixed).join('|');
 }
@@ -38,7 +38,7 @@ export function pdfRangeNamespaceKey(identity: Omit<PdfRangeCacheIdentity, 'volu
 export function pdfRangeDocumentKey(identity: PdfRangeCacheIdentity) {
   return [
     pdfRangeNamespaceKey(identity),
-    lengthPrefixed(identity.volumeId)
+    lengthPrefixed(identity.resourceId)
   ].join('|');
 }
 

@@ -1,5 +1,5 @@
 export * from './debug';
-export * from './book-cache';
+export * from './resource-cache';
 export * from './memory-storage';
 export * from './model';
 export * from './preferences';

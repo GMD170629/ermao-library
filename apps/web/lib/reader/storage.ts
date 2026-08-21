@@ -22,11 +22,11 @@ import {
   type ReaderSyncDiagnostic
 } from './model';
 import {
-  readerBookCacheKey,
-  type CachedReaderBookFile,
-  type ReaderBookCache,
-  type ReaderBookCacheIdentity
-} from './book-cache';
+  readerResourceCacheKey,
+  type CachedReaderResource,
+  type ReaderResourceCache,
+  type ReaderResourceCacheIdentity
+} from './resource-cache';
 import type { CachedPdfRangeChunk, PdfRangeCache } from './pdf-range-cache';
 
 const PREFERENCES_STORE = 'preferences';
@@ -34,12 +34,12 @@ const EXACT_PROGRESS_STORE = 'exact-progress';
 const PENDING_PROGRESS_STORE = 'pending-progress';
 const META_STORE = 'meta';
 const DIAGNOSTICS_STORE = 'diagnostics';
-const BOOK_FILES_STORE = 'book-files';
+const RESOURCE_CACHE_STORE = 'resource-cache';
 const PDF_RANGE_CHUNKS_STORE = 'pdf-range-chunks';
 
 type ReaderStoreName = typeof PREFERENCES_STORE | typeof EXACT_PROGRESS_STORE
   | typeof PENDING_PROGRESS_STORE | typeof META_STORE
-  | typeof DIAGNOSTICS_STORE | typeof BOOK_FILES_STORE | typeof PDF_RANGE_CHUNKS_STORE;
+  | typeof DIAGNOSTICS_STORE | typeof RESOURCE_CACHE_STORE | typeof PDF_RANGE_CHUNKS_STORE;
 type ClientMeta = { key: 'client'; clientId: string };
 type StoredPdfRangeChunk = {
   key: string;
@@ -52,9 +52,9 @@ type StoredPdfRangeChunk = {
 };
 
 export interface ReaderStorage {
-  getPreference(userId: string, workId: string): Promise<ReaderPreferenceSnapshot | null>;
-  putPreference(userId: string, workId: string, preferences: ReaderPreferences, updatedAt?: number): Promise<ReaderPreferenceSnapshot>;
-  deletePreference(userId: string, workId: string): Promise<void>;
+  getPreference(userId: string, bookId: string): Promise<ReaderPreferenceSnapshot | null>;
+  putPreference(userId: string, bookId: string, preferences: ReaderPreferences, updatedAt?: number): Promise<ReaderPreferenceSnapshot>;
+  deletePreference(userId: string, bookId: string): Promise<void>;
   getClientId(): Promise<string>;
   getExactProgress(identity: ExactProgressIdentity): Promise<ExactProgressRecord | null>;
   putExactProgress(progress: ExactProgressRecord): Promise<ExactProgressRecord>;
@@ -111,11 +111,12 @@ function openDatabase() {
         store.createIndex('by-user', 'userId', { unique: false });
       }
       if (database.objectStoreNames.contains('progress-conflicts')) database.deleteObjectStore('progress-conflicts');
+      if (database.objectStoreNames.contains('book-files')) database.deleteObjectStore('book-files');
       if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(DIAGNOSTICS_STORE)) database.createObjectStore(DIAGNOSTICS_STORE, { keyPath: 'id' });
-      if (!database.objectStoreNames.contains(BOOK_FILES_STORE)) {
-        const store = database.createObjectStore(BOOK_FILES_STORE, { keyPath: 'key' });
-        store.createIndex('by-user-volume', 'userVolumeKey', { unique: false });
+      if (!database.objectStoreNames.contains(RESOURCE_CACHE_STORE)) {
+        const store = database.createObjectStore(RESOURCE_CACHE_STORE, { keyPath: 'key' });
+        store.createIndex('by-user-resource', 'userResourceKey', { unique: false });
       }
       if (!database.objectStoreNames.contains(PDF_RANGE_CHUNKS_STORE)) {
         const store = database.createObjectStore(PDF_RANGE_CHUNKS_STORE, { keyPath: 'key' });
@@ -154,7 +155,7 @@ async function withTransaction<T>(stores: ReaderStoreName | ReaderStoreName[], m
   }
 }
 
-export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache, PdfRangeCache {
+export class IndexedDbReaderStorage implements ReaderStorage, ReaderResourceCache, PdfRangeCache {
   async getPdfRangeChunk(identity: PdfRangeCacheIdentity, chunkIndex: number): Promise<CachedPdfRangeChunk | null> {
     return withTransaction(PDF_RANGE_CHUNKS_STORE, 'readwrite', async (stores) => {
       const store = stores(PDF_RANGE_CHUNKS_STORE);
@@ -209,46 +210,46 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache, P
       }
     });
   }
-  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'volumeId'>) {
+  async deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'resourceId'>) {
     await withTransaction(PDF_RANGE_CHUNKS_STORE, 'readwrite', async (stores) => {
       const store = stores(PDF_RANGE_CHUNKS_STORE);
       const keys = await requestResult(store.index('by-namespace').getAllKeys(pdfRangeNamespaceKey(identity)));
       await Promise.all(keys.map((key) => requestResult(store.delete(key))));
     });
   }
-  async getBookFile(identity: ReaderBookCacheIdentity) {
-    return withTransaction(BOOK_FILES_STORE, 'readonly', async (stores) => {
-      const value = await requestResult(stores(BOOK_FILES_STORE).get(readerBookCacheKey(identity))) as CachedReaderBookFile | undefined;
+  async getResource(identity: ReaderResourceCacheIdentity) {
+    return withTransaction(RESOURCE_CACHE_STORE, 'readonly', async (stores) => {
+      const value = await requestResult(stores(RESOURCE_CACHE_STORE).get(readerResourceCacheKey(identity))) as CachedReaderResource | undefined;
       return value?.blob instanceof Blob && value.blob.size > 0 ? value : null;
     });
   }
-  async putBookFile(file: CachedReaderBookFile) {
-    await withTransaction(BOOK_FILES_STORE, 'readwrite', async (stores) => {
-      const store = stores(BOOK_FILES_STORE);
-      const keys = await requestResult(store.index('by-user-volume').getAllKeys(file.userVolumeKey));
-      await Promise.all(keys.filter((key) => key !== file.key).map((key) => requestResult(store.delete(key))));
-      await requestResult(store.put(file));
+  async putResource(resource: CachedReaderResource) {
+    await withTransaction(RESOURCE_CACHE_STORE, 'readwrite', async (stores) => {
+      const store = stores(RESOURCE_CACHE_STORE);
+      const keys = await requestResult(store.index('by-user-resource').getAllKeys(resource.userResourceKey));
+      await Promise.all(keys.filter((key) => key !== resource.key).map((key) => requestResult(store.delete(key))));
+      await requestResult(store.put(resource));
     });
   }
-  async deleteBookFile(identity: ReaderBookCacheIdentity) {
-    await withTransaction(BOOK_FILES_STORE, 'readwrite', async (stores) => { await requestResult(stores(BOOK_FILES_STORE).delete(readerBookCacheKey(identity))); });
+  async deleteResource(identity: ReaderResourceCacheIdentity) {
+    await withTransaction(RESOURCE_CACHE_STORE, 'readwrite', async (stores) => { await requestResult(stores(RESOURCE_CACHE_STORE).delete(readerResourceCacheKey(identity))); });
   }
-  async getPreference(userId: string, workId: string) {
+  async getPreference(userId: string, bookId: string) {
     return withTransaction(PREFERENCES_STORE, 'readonly', async (stores) => {
-      const stored = record(await requestResult(stores(PREFERENCES_STORE).get(preferenceKey(userId, workId))));
+      const stored = record(await requestResult(stores(PREFERENCES_STORE).get(preferenceKey(userId, bookId))));
       return stored.preferences ? {
-        key: preferenceKey(userId, workId), userId, workId, schemaVersion: READER_SCHEMA_VERSION,
+        key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_SCHEMA_VERSION,
         preferences: normalizeReaderPreferences(stored.preferences),
         updatedAt: typeof stored.updatedAt === 'number' ? stored.updatedAt : Date.now()
       } : null;
     });
   }
-  async putPreference(userId: string, workId: string, preferences: ReaderPreferences, updatedAt = Date.now()) {
-    const value = { key: preferenceKey(userId, workId), userId, workId, schemaVersion: READER_SCHEMA_VERSION, preferences, updatedAt };
+  async putPreference(userId: string, bookId: string, preferences: ReaderPreferences, updatedAt = Date.now()) {
+    const value = { key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_SCHEMA_VERSION, preferences, updatedAt };
     await withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => { await requestResult(stores(PREFERENCES_STORE).put(value)); });
     return value;
   }
-  async deletePreference(userId: string, workId: string) { await withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => { await requestResult(stores(PREFERENCES_STORE).delete(preferenceKey(userId, workId))); }); }
+  async deletePreference(userId: string, bookId: string) { await withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => { await requestResult(stores(PREFERENCES_STORE).delete(preferenceKey(userId, bookId))); }); }
   async getClientId() {
     return withTransaction(META_STORE, 'readwrite', async (stores) => {
       const store = stores(META_STORE); const current = record(await requestResult(store.get('client')));
@@ -267,8 +268,8 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache, P
         .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
           && candidate.userId === identity.userId
           && candidate.clientId === identity.clientId
-          && candidate.workId === identity.workId
-          && candidate.volumeId === identity.volumeId)
+          && candidate.bookId === identity.bookId
+          && candidate.resourceId === identity.resourceId)
         .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
       if (!legacy) return null;
       const migrated = { ...legacy, ...identity, key };
@@ -291,8 +292,8 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache, P
         .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
           && candidate.userId === identity.userId
           && candidate.clientId === identity.clientId
-          && candidate.workId === identity.workId
-          && candidate.volumeId === identity.volumeId)
+          && candidate.bookId === identity.bookId
+          && candidate.resourceId === identity.resourceId)
         .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
       if (!legacy) return null;
       const migrated = { ...legacy, key };
@@ -306,7 +307,7 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache, P
   async putExactAndDeletePending(progress: ExactProgressRecord, pendingKey: string) { await withTransaction([EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE], 'readwrite', async (stores) => { await requestResult(stores(EXACT_PROGRESS_STORE).put(progress)); await requestResult(stores(PENDING_PROGRESS_STORE).delete(pendingKey)); }); }
   async addDiagnostic(diagnostic: Omit<ReaderSyncDiagnostic, 'id' | 'createdAt'>, now = Date.now()) { const value = { ...diagnostic, id: createId('diagnostic'), createdAt: now }; await withTransaction(DIAGNOSTICS_STORE, 'readwrite', async (stores) => { await requestResult(stores(DIAGNOSTICS_STORE).put(value)); }); return value; }
   async listDiagnostics(limit = 100) { return withTransaction(DIAGNOSTICS_STORE, 'readonly', async (stores) => ((await requestResult(stores(DIAGNOSTICS_STORE).getAll())) as ReaderSyncDiagnostic[]).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)); }
-  async clearAll() { const names: ReaderStoreName[] = [PREFERENCES_STORE, EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, META_STORE, DIAGNOSTICS_STORE, BOOK_FILES_STORE, PDF_RANGE_CHUNKS_STORE]; await withTransaction(names, 'readwrite', async (stores) => { await Promise.all(names.map((name) => requestResult(stores(name).clear()))); }); }
+  async clearAll() { const names: ReaderStoreName[] = [PREFERENCES_STORE, EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE, META_STORE, DIAGNOSTICS_STORE, RESOURCE_CACHE_STORE, PDF_RANGE_CHUNKS_STORE]; await withTransaction(names, 'readwrite', async (stores) => { await Promise.all(names.map((name) => requestResult(stores(name).clear()))); }); }
 }
 
 export { syncStateKey };

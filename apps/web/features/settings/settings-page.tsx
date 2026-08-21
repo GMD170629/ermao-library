@@ -38,8 +38,8 @@ const ORGANIZATION_MODE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: 'FLAT', label: '平铺', description: '平铺：根目录文件各自作为独立作品' },
-  { value: 'VOLUMES', label: '卷册', description: '卷册：Work / Version / 文件' },
+  { value: 'FLAT', label: '平铺', description: '平铺：根目录文件各自作为独立图书' },
+  { value: 'VOLUMES', label: '按目录归组', description: '按目录归组：图书 / 可读资源 / 资产' },
   { value: 'AUDIOBOOK', label: '有声书', description: '有声书：按有声书目录组织' }
 ];
 
@@ -58,7 +58,7 @@ type BackupItem = {
   sizeBytes: number;
   createdAt: string;
   counts?: {
-    works: number;
+    books: number;
     readingProgresses: number;
     libraries: number;
   };
@@ -433,7 +433,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                       <div className="mt-1 text-sm text-slate-500">{new Date(backup.createdAt).toLocaleString(locale)} · {formatBytes(backup.sizeBytes)}</div>
                       {backup.counts ? (
                         <div className="mt-2 text-xs text-slate-500">
-                          {backup.counts.works} <I18nText>部作品 · </I18nText>{backup.counts.readingProgresses} <I18nText>条阅读进度 · </I18nText>{backup.counts.libraries} <I18nText>个书库</I18nText></div>
+                          {backup.counts.books} <I18nText>本图书 · </I18nText>{backup.counts.readingProgresses} <I18nText>条阅读进度 · </I18nText>{backup.counts.libraries} <I18nText>个书库</I18nText></div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">

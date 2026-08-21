@@ -1,4 +1,4 @@
-import type { MediaKind } from '../../../types/work';
+import type { MediaKind } from '../../../types/book';
 
 const MEDIA_KIND_ORDER: readonly MediaKind[] = ['EBOOK', 'COMIC', 'AUDIOBOOK'];
 

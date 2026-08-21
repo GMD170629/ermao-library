@@ -91,10 +91,10 @@ function isFrontendResourceCache(cacheName) {
 
 function isLargeReaderPayload(pathname) {
   pathname = withoutBasePath(pathname);
-  return /\/api\/volumes\/[^/]+\/file$/.test(pathname)
-    || /\/api\/files\/[^/]+(?:\/(stream|audio))?$/.test(pathname)
+  return /\/api\/resources\/[^/]+\/file$/.test(pathname)
+    || /\/api\/assets\/[^/]+(?:\/(stream|audio))?$/.test(pathname)
     || /\/api\/audio\/[^/]+/.test(pathname)
-    || /\/api\/volumes\/[^/]+\/pages\/[^/]+$/.test(pathname)
+    || /\/api\/resources\/[^/]+\/pages\/[^/]+$/.test(pathname)
     || /\.(cbz|zip|epub|pdf|m4b|m4a|mp3|aac|ogg|opus|flac|wav)$/i.test(pathname);
 }
 
@@ -112,8 +112,8 @@ function isReaderFont(pathname) {
 
 function isCoverRequest(pathname) {
   pathname = withoutBasePath(pathname);
-  return /\/api\/works\/[^/]+\/cover(\/|$)/.test(pathname)
-    || /\/api\/volumes\/[^/]+\/cover(\/|$)/.test(pathname);
+  return /\/api\/books\/[^/]+\/cover(\/|$)/.test(pathname)
+    || /\/api\/resources\/[^/]+\/cover(\/|$)/.test(pathname);
 }
 
 function shouldBypass(request) {

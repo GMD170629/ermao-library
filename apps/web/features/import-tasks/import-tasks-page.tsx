@@ -34,7 +34,7 @@ type ImportTask = {
   finishedAt?: string | null;
   recognizedMetadata?: {
     title: string;
-    volumeTitle: string;
+    resourceTitle: string;
     author?: string | null;
     fields: string[];
     source: 'REQUESTED' | 'SIDECAR_OPF' | 'EMBEDDED' | 'PATH';
@@ -476,7 +476,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 {task.recognizedMetadata ? (
                   <div className="mt-2 text-sm text-[#554F49]">
                     <span className="font-medium">{task.recognizedMetadata.title}</span>
-                    {task.recognizedMetadata.volumeTitle !== task.recognizedMetadata.title ? <span> · {task.recognizedMetadata.volumeTitle}</span> : null}
+                    {task.recognizedMetadata.resourceTitle !== task.recognizedMetadata.title ? <span> · {task.recognizedMetadata.resourceTitle}</span> : null}
                     {task.recognizedMetadata.author ? <span> · {task.recognizedMetadata.author}</span> : null}
                   </div>
                 ) : null}

@@ -20,7 +20,7 @@ test('reader fonts and large reader payloads bypass caches', () => {
   assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/reader\/'\)/);
   assert.match(source, /if \(isLocalDevelopmentHost\(url\.hostname\)\) return true/);
   assert.match(source, /m4b\|m4a\|mp3\|aac\|ogg\|opus\|flac\|wav/);
-  assert.match(source, /files\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);
+  assert.match(source, /assets\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);
 });
 
 test('PDF.js decoder WASM uses the versioned static resource cache', () => {

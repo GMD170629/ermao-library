@@ -1,18 +1,18 @@
-import type { MediaKind, ReaderType } from '../../../types/work';
+import type { MediaKind, ReaderType } from '../../../types/book';
 
 export type ContinueReadingItem = Readonly<{
-  workId: string;
+  bookId: string;
   title: string;
   author: string;
   coverUrl: string;
   mediaKind: MediaKind;
-  volumeFormat: string;
+  resourceFormat: string;
   readerType: ReaderType;
-  resumeVolumeId: string | null;
+  resumeResourceId: string | null;
   progress: number;
   lastReadAt: string | null;
   chapter: string | null;
-  volumeTitle: string | null;
+  resourceTitle: string | null;
   narrator: string | null;
 }>;
 
@@ -41,26 +41,26 @@ function readerType(value: unknown): ReaderType | null {
 export function mapContinueReadingItem(value: unknown): ContinueReadingItem | null {
   if (value === null) return null;
   const item = record(value);
-  const workId = stringValue(item.workId).trim();
+  const bookId = stringValue(item.bookId).trim();
   const kind = mediaKind(item.mediaKind);
   const reader = readerType(item.readerType);
-  if (!workId || !kind || !reader) return null;
+  if (!bookId || !kind || !reader) return null;
   const progress = typeof item.progress === 'number' && Number.isFinite(item.progress)
     ? Math.max(0, Math.min(100, item.progress))
     : 0;
   return {
-    workId,
+    bookId,
     title: stringValue(item.title),
     author: stringValue(item.author),
     coverUrl: stringValue(item.coverUrl),
     mediaKind: kind,
-    volumeFormat: stringValue(item.volumeFormat),
+    resourceFormat: stringValue(item.resourceFormat),
     readerType: reader,
-    resumeVolumeId: nullableString(item.resumeVolumeId),
+    resumeResourceId: nullableString(item.resumeResourceId),
     progress,
     lastReadAt: nullableString(item.lastReadAt),
     chapter: nullableString(item.chapter),
-    volumeTitle: nullableString(item.volumeTitle),
+    resourceTitle: nullableString(item.resourceTitle),
     narrator: nullableString(item.narrator)
   };
 }

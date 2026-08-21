@@ -12,14 +12,14 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type KindleSendTask = {
   id: string;
-  workId: string | null;
+  bookId: string | null;
   mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
-  volumeId: string;
-  fileId: string | null;
+  resourceId: string;
+  assetId: string | null;
   bookTitle: string;
-  volumeTitle: string | null;
-  fileName: string;
-  volumeFormat: string;
+  resourceTitle: string | null;
+  assetName: string;
+  resourceFormat: string;
   mimeType: string;
   sizeBytes: number;
   senderEmail: string | null;
@@ -185,12 +185,12 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
                         {task.status === 'sending' ? <Send size={18} className="text-[#ED4D2D]" /> : <Mail size={18} className="text-[#766F68]" />}
                         <h5 className="break-words font-semibold text-[#242220]">{task.bookTitle}</h5>
                         <Badge tone={statusTone(task.status)}>{statusLabels[task.status]}</Badge>
-                        <Badge>{task.volumeFormat}</Badge>
+                        <Badge>{task.resourceFormat}</Badge>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#6F6962]">
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.volumeTitle ?? task.fileName}</span>
+                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.resourceTitle ?? task.assetName}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.mediaKind}</span>
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.fileName}</span>
+                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.assetName}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{formatBytes(task.sizeBytes)}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1"><I18nText>尝试 </I18nText>{task.attemptCount} <I18nText>次</I18nText></span>
                       </div>
@@ -206,7 +206,7 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
                       {task.errorMessage ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span className="break-words">{task.errorMessage}</span></div> : null}
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
-                      {task.workId ? <Link href={`/works/${task.workId}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DED8D1] bg-white px-4 py-2.5 text-sm font-medium text-[#4F4B47] transition hover:border-[#F2B7A6] hover:bg-[#FFF5F1] hover:text-[#D94322]"><BookOpen size={16} /><I18nText>查看图书</I18nText></Link> : null}
+                      {task.bookId ? <Link href={`/books/${task.bookId}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DED8D1] bg-white px-4 py-2.5 text-sm font-medium text-[#4F4B47] transition hover:border-[#F2B7A6] hover:bg-[#FFF5F1] hover:text-[#D94322]"><BookOpen size={16} /><I18nText>查看图书</I18nText></Link> : null}
                       {task.canCancel ? <Button variant="secondary" icon={Ban} loading={busy === `cancel:${task.id}`} loadingText={i18nAttribute("取消中")} onClick={() => void mutate(task, 'cancel')}><I18nText>取消</I18nText></Button> : null}
                       {task.canRetry ? <Button variant="secondary" icon={RotateCcw} loading={busy === `retry:${task.id}`} loadingText={i18nAttribute("排队中")} onClick={() => void mutate(task, 'retry')}><I18nText>重试</I18nText></Button> : null}
                       {task.canDelete ? <Button variant="danger" icon={Trash2} loading={busy === `delete:${task.id}`} loadingText={i18nAttribute("删除中")} onClick={() => void mutate(task, 'delete')}><I18nText>删除</I18nText></Button> : null}

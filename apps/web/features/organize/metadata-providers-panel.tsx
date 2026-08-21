@@ -57,7 +57,7 @@ type ProvidersResponse = {
 const MEDIA_KIND_META: Record<MediaKind, { label: string; description: string; icon: LucideIcon }> = {
   EBOOK: { label: '电子书', description: 'EPUB、PDF 等文字读物的识别顺序', icon: BookOpen },
   COMIC: { label: '漫画', description: '漫画压缩包与条目的识别顺序', icon: Images },
-  AUDIOBOOK: { label: '有声书', description: '音频作品、演播者与封面的识别顺序', icon: Headphones }
+  AUDIOBOOK: { label: '有声书', description: '音频资源、演播者与封面的识别顺序', icon: Headphones }
 };
 
 function mediaKindLabel(value: MediaKind) {

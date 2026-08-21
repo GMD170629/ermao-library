@@ -9,7 +9,7 @@ test('maps the Reader v4 simplified reflow bookmark contract', () => {
     label: 'Chapter 1',
     percent: 10,
     createdAt: '2026-08-13T00:00:00Z'
-  }, 'volume-1', 'epub');
+  }, 'resource-1', 'epub');
 
   assert.ok(bookmark);
   assert.deepEqual(bookmark.location, {

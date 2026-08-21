@@ -42,7 +42,7 @@ export type ReflowableLocation = {
 
 export type ComicLocation = {
   kind: 'comic';
-  volumeId: string;
+  resourceId: string;
   pageIndex: number;
   resourceHref?: string;
 };
@@ -132,8 +132,8 @@ export type ReaderPreferences = {
 };
 
 type ReaderSourceBase = {
-  workId: string;
-  volumeId: string;
+  bookId: string;
+  resourceId: string;
   totalPages?: number | null;
 };
 

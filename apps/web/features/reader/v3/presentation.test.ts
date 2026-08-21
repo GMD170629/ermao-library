@@ -3,7 +3,7 @@ import test from 'node:test';
 import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
 import { locationProgress, preferencesToReaderSettings, readerSettingsToPreferences } from './presentation';
 
-test('round trips the complete work-scoped preference snapshot', () => {
+test('round trips the complete book-scoped preference snapshot', () => {
   const settings = preferencesToReaderSettings(DEFAULT_READER_PREFERENCES);
   assert.deepEqual(readerSettingsToPreferences(settings), DEFAULT_READER_PREFERENCES);
 });

@@ -171,6 +171,6 @@ export function locationExtra(location: ReaderLocation | null) {
       progression: location.progression
     };
   }
-  if (location.kind === 'comic') return { readerType: 'comic', volumeId: location.volumeId, pageIndex: location.pageIndex };
+  if (location.kind === 'comic') return { readerType: 'comic', resourceId: location.resourceId, pageIndex: location.pageIndex };
   return { readerType: 'pdf', pageIndex: location.pageIndex };
 }

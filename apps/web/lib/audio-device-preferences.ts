@@ -6,19 +6,19 @@ export type AudioDevicePreferences = {
   volume?: number;
 };
 
-export function audioDevicePreferenceKey(userId?: string, workId?: string) {
-  if (userId && workId) {
-    return `${AUDIO_DEVICE_PREFERENCES_KEY}:${encodeURIComponent(userId)}:${encodeURIComponent(workId)}`;
+export function audioDevicePreferenceKey(userId?: string, bookId?: string) {
+  if (userId && bookId) {
+    return `${AUDIO_DEVICE_PREFERENCES_KEY}:${encodeURIComponent(userId)}:${encodeURIComponent(bookId)}`;
   }
   if (userId) return `${AUDIO_DEVICE_PREFERENCES_KEY}:${encodeURIComponent(userId)}`;
   return AUDIO_DEVICE_PREFERENCES_KEY;
 }
 
-export function readAudioDevicePreferences(userId?: string, workId?: string): AudioDevicePreferences {
+export function readAudioDevicePreferences(userId?: string, bookId?: string): AudioDevicePreferences {
   if (typeof window === 'undefined') return {};
   try {
     const keys = [
-      userId && workId ? audioDevicePreferenceKey(userId, workId) : null,
+      userId && bookId ? audioDevicePreferenceKey(userId, bookId) : null,
       userId ? audioDevicePreferenceKey(userId) : null,
       AUDIO_DEVICE_PREFERENCES_KEY
     ].filter((key): key is string => Boolean(key));
@@ -33,11 +33,11 @@ export function readAudioDevicePreferences(userId?: string, workId?: string): Au
 export function writeAudioDevicePreferences(
   preferences: AudioDevicePreferences,
   userId?: string,
-  workId?: string
+  bookId?: string
 ) {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(audioDevicePreferenceKey(userId, workId), JSON.stringify(preferences));
+    window.localStorage.setItem(audioDevicePreferenceKey(userId, bookId), JSON.stringify(preferences));
   } catch {
     // Playback remains functional when local storage is unavailable.
   }

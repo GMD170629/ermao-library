@@ -92,7 +92,7 @@ export function ManagementOverviewPage() {
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
           { label: '失败导入', value: cards.failedImports ?? 0, href: '/import-tasks', icon: AlertTriangle, tone: (cards.failedImports ?? 0) > 0 ? 'red' : 'green' },
-          { label: '待整理作品', value: cards.pendingOrganize ?? 0, href: '/organize/pending', icon: Settings2, tone: (cards.pendingOrganize ?? 0) > 0 ? 'amber' : 'green' }
+          { label: '待整理图书', value: cards.pendingOrganize ?? 0, href: '/organize/pending', icon: Settings2, tone: (cards.pendingOrganize ?? 0) > 0 ? 'amber' : 'green' }
         ].map(({ label, value, href, icon: Icon, tone }) => (
           <Link key={label} href={href} className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-100 hover:bg-blue-50/30">
             <div className="flex items-center justify-between gap-3">

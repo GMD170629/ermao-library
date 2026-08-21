@@ -42,7 +42,7 @@ export type ComicPublicationLocation = Readonly<{
 
 export type AudioPublicationLocation = Readonly<{
   kind: 'audio';
-  fileId: string;
+  assetId: string;
   chapterId?: string;
   positionMillis: number;
   engineLocator?: EngineLocator;
@@ -162,13 +162,13 @@ export function parsePublicationLocation(value: unknown): PublicationLocation | 
     return { kind: 'comic', pageIndex: pageIndex as number, resourceHref, ...(engineLocator ? { engineLocator } : {}) };
   }
   if (item.kind === 'audio') {
-    const fileId = nonEmptyString(item.fileId);
+    const assetId = nonEmptyString(item.assetId);
     const chapterId = item.chapterId === undefined ? undefined : nonEmptyString(item.chapterId);
     const positionMillis = item.positionMillis;
-    if (!hasOnlyKeys(item, ['kind', 'fileId', 'chapterId', 'positionMillis', 'engineLocator'])
-      || !fileId || fileId.length > 191 || (item.chapterId !== undefined && (!chapterId || chapterId.length > 191))
+    if (!hasOnlyKeys(item, ['kind', 'assetId', 'chapterId', 'positionMillis', 'engineLocator'])
+      || !assetId || assetId.length > 191 || (item.chapterId !== undefined && (!chapterId || chapterId.length > 191))
       || !Number.isInteger(positionMillis) || (positionMillis as number) < 0) return null;
-    return { kind: 'audio', fileId, ...(chapterId ? { chapterId } : {}), positionMillis: positionMillis as number, ...(engineLocator ? { engineLocator } : {}) };
+    return { kind: 'audio', assetId, ...(chapterId ? { chapterId } : {}), positionMillis: positionMillis as number, ...(engineLocator ? { engineLocator } : {}) };
   }
   return null;
 }
@@ -225,7 +225,7 @@ export function comparePublicationLocations(
       : { precision: 'unverified', sameResource, reason: sameResource ? 'anchor_mismatch' : 'resource_mismatch' };
   }
   if (expected.kind === 'audio' && actual.kind === 'audio') {
-    const sameResource = expected.fileId === actual.fileId && expected.chapterId === actual.chapterId;
+    const sameResource = expected.assetId === actual.assetId && expected.chapterId === actual.chapterId;
     return sameResource && expected.positionMillis === actual.positionMillis
       ? { precision: 'exact', sameResource: true, reason: 'same_audio_position' }
       : { precision: 'unverified', sameResource, reason: sameResource ? 'anchor_mismatch' : 'resource_mismatch' };

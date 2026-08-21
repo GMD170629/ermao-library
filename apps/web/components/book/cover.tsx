@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { withBasePath } from '../../lib/base-path';
 import { cn } from '../ui/cn';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-import type { MediaKind } from '../../types/work';
+import type { MediaKind } from '../../types/book';
 
 export type CoverBook = {
   id?: string | number;
@@ -40,7 +40,7 @@ export function Cover({
   const responsiveSize = requestedSize === 'small' ? '48px' : requestedSize === 'large' ? '280px' : '180px';
   const coverUrl = useMemo(() => {
     if (book.coverUrl) return withBasePath(book.coverUrl.replace(/size=(small|medium|large)/, `size=${requestedSize}`));
-    return book.id ? withBasePath(`/api/works/${book.id}/cover?size=${requestedSize}`) : '';
+    return book.id ? withBasePath(`/api/books/${book.id}/cover?size=${requestedSize}`) : '';
   }, [book.coverUrl, book.id, requestedSize]);
   const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v1.png');
   const [imageFailed, setImageFailed] = useState(false);

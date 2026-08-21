@@ -41,14 +41,14 @@ type BulkResponse = {
   data?: {
     updated?: number;
     changedValues?: number;
-    skipped?: Array<{ workId: string; reason: string }>;
+    skipped?: Array<{ bookId: string; reason: string }>;
   };
   error?: { message?: string };
 };
 type FindReplacePreview = {
-  changedWorks: number;
+  changedBooks: number;
   changedValues: number;
-  items: Array<{ workId: string; title: string; before: string | string[]; after: string | string[] }>;
+  items: Array<{ bookId: string; title: string; before: string | string[]; after: string | string[] }>;
 };
 
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
@@ -184,12 +184,12 @@ export function LibraryBatchDialog({
   const previewCurrent = preview !== null && previewSignature === findReplaceSignature;
   const metadataReady = authorEnabled || seriesEnabled || splitValues(addTags).length > 0 || splitValues(removeTags).length > 0;
   const findFieldOptions: SelectOption[] = [
-    { value: 'title', label: '书名', group: '作品元数据' },
-    { value: 'author', label: '作者', group: '作品元数据' },
-    { value: 'description', label: '简介', group: '作品元数据' },
-    { value: 'seriesName', label: '系列', group: '作品元数据' },
-    { value: 'tags', label: '标签', group: '作品元数据' },
-    { value: 'volumeTitle', label: '卷册名称', group: '卷册资源' }
+    { value: 'title', label: '书名', group: '图书元数据' },
+    { value: 'author', label: '作者', group: '图书元数据' },
+    { value: 'description', label: '简介', group: '图书元数据' },
+    { value: 'seriesName', label: '系列', group: '图书元数据' },
+    { value: 'tags', label: '标签', group: '图书元数据' },
+    { value: 'resourceTitle', label: '资源名称', group: '可读资源' }
   ];
 
   useEffect(() => {
@@ -227,7 +227,7 @@ export function LibraryBatchDialog({
   if (!action || typeof document === 'undefined') return null;
 
   async function postJson(body: Record<string, unknown>) {
-    const response = await fetch('/api/works/bulk', {
+    const response = await fetch('/api/books/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: selectedIds, ...body })
@@ -261,7 +261,7 @@ export function LibraryBatchDialog({
     setPreviewing(true);
     try {
       const signature = findReplaceSignature;
-      const response = await fetch('/api/works/bulk/find-replace/preview', {
+      const response = await fetch('/api/books/bulk/find-replace/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: selectedIds, ...findReplaceBody() })
@@ -305,7 +305,7 @@ export function LibraryBatchDialog({
     form.append('quality', coverQuality);
     form.append('maxDimension', coverMaxDimension);
     if (coverFile) form.append('cover', coverFile);
-    const response = await fetch('/api/works/bulk/cover', { method: 'POST', body: form });
+    const response = await fetch('/api/books/bulk/cover', { method: 'POST', body: form });
     const payload = await response.json() as BulkResponse;
     if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量处理封面失败');
     const skipped = payload.data?.skipped?.length ?? 0;
@@ -337,7 +337,7 @@ export function LibraryBatchDialog({
 
   const disabled = selectedIds.length === 0
     || (action === 'metadata' && !metadataReady)
-    || (action === 'find_replace' && (!previewCurrent || (preview?.changedWorks ?? 0) === 0))
+    || (action === 'find_replace' && (!previewCurrent || (preview?.changedBooks ?? 0) === 0))
     || (action === 'shelves' && !shelfId)
     || (action === 'covers' && coverAction === 'replace' && !coverFile);
 
@@ -378,7 +378,7 @@ export function LibraryBatchDialog({
           {action === 'metadata' ? (
             <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
-                <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label={i18nAttribute("作者")} hint={i18nAttribute("统一覆盖作品作者")}>
+                <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label={i18nAttribute("作者")} hint={i18nAttribute("统一覆盖图书作者")}>
                   <input value={author} onChange={(event) => setAuthor(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：余华")} />
                 </FieldToggle>
                 <FieldToggle checked={seriesEnabled} onChange={setSeriesEnabled} icon={LibraryBig} label={i18nAttribute("系列")} hint={i18nAttribute("统一设置或留空清除")}>
@@ -431,12 +431,12 @@ export function LibraryBatchDialog({
                   <div><div className="text-sm font-semibold text-[#393531]"><I18nText>替换预览</I18nText></div><div className="mt-1 text-xs text-[#8A837C]"><I18nText>确认前最多展示 30 条实际变化。</I18nText></div></div>
                   <Button variant="secondary" icon={Eye} loading={previewing} loadingText={i18nAttribute("生成中")} disabled={!findText} onClick={() => void loadPreview()}><I18nText>生成预览</I18nText></Button>
                 </div>
-                {!previewCurrent ? <div className="mt-4 rounded-xl bg-[#F7F4F0] px-4 py-6 text-center text-xs text-[#918A83]"><I18nText>填写规则后生成预览，避免误改元数据。</I18nText></div> : preview && preview.changedWorks === 0 ? <div className="mt-4 rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-800"><I18nText>没有找到匹配内容，不会修改任何图书。</I18nText></div> : preview ? (
+                {!previewCurrent ? <div className="mt-4 rounded-xl bg-[#F7F4F0] px-4 py-6 text-center text-xs text-[#918A83]"><I18nText>填写规则后生成预览，避免误改元数据。</I18nText></div> : preview && preview.changedBooks === 0 ? <div className="mt-4 rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-800"><I18nText>没有找到匹配内容，不会修改任何图书。</I18nText></div> : preview ? (
                   <div className="mt-4">
-                    <div className="mb-2 text-xs font-medium text-[#777069]"><I18nText>将修改 </I18nText>{preview.changedWorks} <I18nText>本图书，共 </I18nText>{preview.changedValues} <I18nText>处</I18nText></div>
+                    <div className="mb-2 text-xs font-medium text-[#777069]"><I18nText>将修改 </I18nText>{preview.changedBooks} <I18nText>本图书，共 </I18nText>{preview.changedValues} <I18nText>处</I18nText></div>
                     <div className="max-h-64 space-y-2 overflow-auto pr-1">
                       {preview.items.map((item, index) => (
-                        <div key={`${item.workId}-${index}`} className="rounded-xl border border-black/[0.06] bg-[#FAF8F5] px-3 py-2.5">
+                        <div key={`${item.bookId}-${index}`} className="rounded-xl border border-black/[0.06] bg-[#FAF8F5] px-3 py-2.5">
                           <div className="truncate text-xs font-semibold text-[#45403C]">{item.title}</div>
                           <div className="mt-1 grid gap-1 text-xs sm:grid-cols-[1fr_auto_1fr] sm:items-center">
                             <span className="break-words text-[#918A83] line-through">{valueLabel(item.before)}</span>
@@ -476,7 +476,7 @@ export function LibraryBatchDialog({
               </button>
               <button type="button" onClick={() => setReadingStatus('FINISHED')} className={cn('rounded-2xl border p-5 text-left transition', readingStatus === 'FINISHED' ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
                 <span className="flex items-center justify-between text-base font-semibold text-[#37322F]"><I18nText>设为已读</I18nText>{readingStatus === 'FINISHED' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
-                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>将所有可见卷册的阅读进度更新为 100%；作品完成状态会据此动态计算。</I18nText></span>
+                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>将所有可见资源的阅读进度更新为 100%；图书完成状态会据此动态计算。</I18nText></span>
               </button>
             </div>
           ) : null}
@@ -486,7 +486,7 @@ export function LibraryBatchDialog({
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {([
                   ['crop', '封面裁剪', '按统一比例居中裁剪', Scissors],
-                  ['regenerate', '重新生成', '从卷册资源恢复封面', RotateCcw],
+                  ['regenerate', '重新生成', '从资源资产恢复封面', RotateCcw],
                   ['compress', '封面压缩', '降低尺寸和文件体积', Minimize2],
                   ['replace', '替换封面', '使用同一张新图片', ImagePlus]
                 ] as const).map(([value, label, description, Icon]) => (
@@ -518,7 +518,7 @@ export function LibraryBatchDialog({
                   </label>
                 </div>
               ) : null}
-              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按媒介优先级和卷册顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
+              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按媒介优先级和资源顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
             </div>
           ) : null}
 

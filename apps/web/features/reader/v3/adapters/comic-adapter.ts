@@ -67,7 +67,7 @@ export type ComicAdapterOptions = {
   pageUrl?: (context: ReaderAdapterOpenContext, pageIndex: number, preferences: ReaderPreferences, retry: number) => string;
   initialPages?: ComicPageMeta[];
   onViewModel?: (model: ComicViewModel) => void;
-  onEndOfVolume?: () => void;
+  onEndOfResource?: () => void;
 };
 
 function clampPage(page: number, pageCount: number) {
@@ -129,7 +129,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private readonly decodeImage: NonNullable<ComicAdapterOptions['decodeImage']>;
   private readonly pageUrl: NonNullable<ComicAdapterOptions['pageUrl']>;
   private readonly initialPages?: ComicPageMeta[];
-  private readonly onEndOfVolume?: ComicAdapterOptions['onEndOfVolume'];
+  private readonly onEndOfResource?: ComicAdapterOptions['onEndOfResource'];
   private readonly onInputIntent?: ComicAdapterOptions['onInputIntent'];
   private readonly track: ComicSpreadTrackDriver;
   private readonly continuous: ComicContinuousController;
@@ -213,7 +213,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.decodeImage = options.decodeImage ?? ((url, signal) => decodeComicImage(this.container.ownerDocument, url, signal));
     this.pageUrl = options.pageUrl ?? defaultPageUrl;
     this.initialPages = options.initialPages;
-    this.onEndOfVolume = options.onEndOfVolume;
+    this.onEndOfResource = options.onEndOfResource;
     this.onInputIntent = options.onInputIntent;
     this.track = new ComicSpreadTrackDriver(this.container, {
       getView: () => this.trackView(),
@@ -322,7 +322,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         pages.forEach((page) => this.pageMeta.set(page.pageIndex, page));
         pageCount = Math.max(pageCount, ...pages.map((page) => page.pageIndex + 1));
       }
-      if (pageCount <= 0) throw new Error('漫画卷没有可读取页面');
+      if (pageCount <= 0) throw new Error('漫画资源没有可读取页面');
       this.pages = comicOrderedPages(pageCount);
       const initialPage = context.initialLocation?.kind === 'comic' ? context.initialLocation.pageIndex : 0;
       this.currentPage = comicNormalizePage(this.pages, clampPage(initialPage, pageCount), this.comicMode(context.preferences), this.pairingPolicy(context.preferences));
@@ -406,8 +406,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     else if (command.type === 'go-to-index') nextPage = comicNormalizePage(this.pages, clampPage(command.index, this.pages.length), this.comicMode(), this.pairingPolicy());
     else if (command.type === 'go-to-location') {
       if (command.location.kind !== 'comic') return this.failOperation(context, 'location-kind-mismatch');
-      if (command.location.volumeId !== this.openContext.source.volumeId) {
-        return this.failOperation(context, 'volume-switch-requires-new-session');
+      if (command.location.resourceId !== this.openContext.source.resourceId) {
+        return this.failOperation(context, 'resource-switch-requires-new-session');
       }
       nextPage = comicNormalizePage(this.pages, clampPage(command.location.pageIndex, this.pages.length), this.comicMode(), this.pairingPolicy());
     } else if (command.type === 'retry') {
@@ -512,8 +512,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private async executeAdjacentStep(step: PageStep, context: ReaderAdapterOperationContext): Promise<ReaderCommandAck> {
     const target = comicAdjacentSpreadPage(this.pages, this.currentPage, this.comicMode(), step, this.pairingPolicy());
     if (target === this.currentPage) {
-      if (step === 1) this.onEndOfVolume?.();
-      return this.failOperation(context, step === 1 ? 'end-of-volume' : 'start-of-volume');
+      if (step === 1) this.onEndOfResource?.();
+      return this.failOperation(context, step === 1 ? 'end-of-resource' : 'start-of-resource');
     }
 
     this.emit({ type: 'activity' }, context.operation);
@@ -578,7 +578,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   ): Promise<ReaderCommandAck> {
     const target = comicAdjacentSpreadPage(this.pages, this.currentPage, 'single', step, this.pairingPolicy());
     if (target === this.currentPage) {
-      return this.failOperation(context, step === 1 ? 'end-of-volume' : 'start-of-volume');
+      return this.failOperation(context, step === 1 ? 'end-of-resource' : 'start-of-resource');
     }
     this.emit({ type: 'activity' }, context.operation);
     this.status = 'loading';
@@ -717,11 +717,11 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   }
 
   private location(): ComicLocation {
-    const volumeId = this.openContext?.source.volumeId;
-    if (!volumeId) throw new Error('comic-volume-id-missing');
+    const resourceId = this.openContext?.source.resourceId;
+    if (!resourceId) throw new Error('comic-resource-id-missing');
     return {
       kind: 'comic',
-      volumeId,
+      resourceId,
       pageIndex: this.currentPage,
       ...(this.pageMeta.get(this.currentPage)?.resourceHref
         ? { resourceHref: this.pageMeta.get(this.currentPage)?.resourceHref }
@@ -869,7 +869,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     const preferences = this.preferences;
     if (!preferences) throw new StaleReaderOperationError();
     const target = comicAdjacentSpreadPage(this.pages, this.currentPage, this.comicMode(preferences), step, this.pairingPolicy(preferences));
-    if (target === this.currentPage) throw new Error(step === 1 ? 'end-of-volume' : 'start-of-volume');
+    if (target === this.currentPage) throw new Error(step === 1 ? 'end-of-resource' : 'start-of-resource');
     this.currentPage = target;
     this.status = 'ready';
     this.error = undefined;

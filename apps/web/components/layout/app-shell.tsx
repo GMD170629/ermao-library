@@ -43,7 +43,7 @@ import { cn } from '../ui/cn';
 import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
 import { mediaKindsLabel } from '../../features/library/public';
-import type { MediaKind } from '../../types/work';
+import type { MediaKind } from '../../types/book';
 import {
   fetchShelves,
   topLevelShelves,
@@ -583,7 +583,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchLoading(true);
-      fetch(`/api/works?pageSize=5&visibility=active&sort=recent_read&view=search&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
+      fetch(`/api/books?pageSize=5&visibility=active&sort=recent_read&view=search&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
         .then((response) => response.json() as Promise<BooksPayload>)
         .then((payload) => {
           if (!payload.ok) throw new Error(payload.error?.message ?? '搜索书库失败');
@@ -621,7 +621,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const selectedBook = searchBooks[searchActiveIndex];
       if (selectedBook) {
         setSearchFocused(false);
-        router.push(`/works/${selectedBook.id}`);
+        router.push(`/books/${selectedBook.id}`);
         return;
       }
     }
@@ -647,7 +647,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const selectedBook = searchBooks[searchActiveIndex];
       if (searchFocused && selectedBook) {
         setSearchFocused(false);
-        router.push(`/works/${selectedBook.id}`);
+        router.push(`/books/${selectedBook.id}`);
       } else {
         openLibrarySearch();
       }
@@ -759,7 +759,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     onMouseEnter={() => setSearchActiveIndex(index)}
                     onClick={() => {
                       setSearchFocused(false);
-                      router.push(`/works/${book.id}`);
+                      router.push(`/books/${book.id}`);
                     }}
                     className={cn(
                       'flex w-full items-center gap-3 px-3 py-2.5 text-left outline-none transition',
@@ -931,7 +931,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main
         ref={appMainRef}
         data-testid="app-shell-main"
-        data-audio-mini-player={audioPlayback.bootstrap || audioPlayback.pendingVolumeId ? 'true' : undefined}
+        data-audio-mini-player={audioPlayback.bootstrap || audioPlayback.pendingResourceId ? 'true' : undefined}
         className="shuku-mobile-shell-main min-h-screen pb-8 lg:pl-[var(--shuku-sidebar-width)] lg:pb-0"
       >
         <div data-testid="app-shell-content" className="shuku-mobile-shell-content px-5 py-7 sm:px-7 lg:px-10 lg:py-10 xl:px-12 xl:py-12">

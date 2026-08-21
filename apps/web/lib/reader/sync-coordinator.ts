@@ -28,7 +28,7 @@ type SessionProgressState = {
   etag: string | null;
   notice: RemoteProgressNotice | null;
 };
-type NoticeListener = (volumeId: string, notice: RemoteProgressNotice | null) => void;
+type NoticeListener = (resourceId: string, notice: RemoteProgressNotice | null) => void;
 export const READER_PROGRESS_CHANGED_EVENT = 'shuku:reader-progress-changed';
 
 function id() {
@@ -84,42 +84,42 @@ export class ReaderProgressSyncCoordinator {
     if (options.timeoutMs === undefined) return this.uploadPromise;
     await Promise.race([this.uploadPromise, new Promise<void>((resolve) => setTimeout(resolve, options.timeoutMs))]);
   }
-  getLatestServerSnapshot(volumeId: string) { return this.latest.get(volumeId) ?? null; }
+  getLatestServerSnapshot(resourceId: string) { return this.latest.get(resourceId) ?? null; }
 
   subscribeRemoteProgress(listener: NoticeListener) {
     this.noticeListeners.add(listener);
     return () => { this.noticeListeners.delete(listener); };
   }
 
-  beginSession(volumeId: string, clientId: string, snapshot: ReaderProgressSnapshot | null, current: PublicationLocation | null) {
-    if (snapshot) this.latest.set(volumeId, snapshot);
-    this.sessions.set(volumeId, {
+  beginSession(resourceId: string, clientId: string, snapshot: ReaderProgressSnapshot | null, current: PublicationLocation | null) {
+    if (snapshot) this.latest.set(resourceId, snapshot);
+    this.sessions.set(resourceId, {
       revision: snapshot?.revision ?? 0,
       clientId,
       current,
       etag: snapshot ? `"reader-progress-${snapshot.revision}"` : '"reader-progress-0"',
       notice: null
     });
-    this.emitNotice(volumeId, null);
+    this.emitNotice(resourceId, null);
   }
 
-  endSession(volumeId: string) { this.sessions.delete(volumeId); }
+  endSession(resourceId: string) { this.sessions.delete(resourceId); }
 
-  dismissRemoteProgress(volumeId: string) {
-    const session = this.sessions.get(volumeId);
+  dismissRemoteProgress(resourceId: string) {
+    const session = this.sessions.get(resourceId);
     if (!session) return;
     session.notice = null;
-    this.emitNotice(volumeId, null);
+    this.emitNotice(resourceId, null);
   }
 
-  async checkRemoteProgress(volumeId: string) {
-    const session = this.sessions.get(volumeId);
+  async checkRemoteProgress(resourceId: string) {
+    const session = this.sessions.get(resourceId);
     if (!session || !this.queryTransport) return null;
     const controller = new AbortController();
-    const result = await this.queryTransport(volumeId, session.etag, controller.signal);
+    const result = await this.queryTransport(resourceId, session.etag, controller.signal);
     session.etag = result.etag ?? session.etag;
     if (result.kind === 'unchanged' || !result.snapshot) return session.notice;
-    return this.observeRemote(volumeId, result.snapshot);
+    return this.observeRemote(resourceId, result.snapshot);
   }
 
   async continueStartupWithLocal(pending: PendingProgressMutation, serverRevision: number) {
@@ -129,22 +129,22 @@ export class ReaderProgressSyncCoordinator {
   }
 
   async acceptVerifiedRemote(input: {
-    serverIdentity: string; userId: string; workId: string; volumeId: string;
+    serverIdentity: string; userId: string; bookId: string; resourceId: string;
     pendingKey: string; snapshot: ReaderProgressSnapshot;
   }) {
     const clientId = await this.storage.getClientId();
-    const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId } as const;
+    const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, bookId: input.bookId, resourceId: input.resourceId } as const;
     const exact: ExactProgressRecord = {
       ...identity,
       key: exactProgressKey(identity),
       schemaVersion: 1,
-      workId: input.workId,
+      bookId: input.bookId,
       locator: input.snapshot.locator,
       displayPercent: input.snapshot.displayPercent,
       revision: input.snapshot.revision,
       capturedAtEpochMillis: input.snapshot.capturedAtEpochMillis ?? input.snapshot.receivedAtEpochMillis
     };
-    const supersededWaiters = this.pendingInput?.volumeId === input.volumeId ? this.waiters : [];
+    const supersededWaiters = this.pendingInput?.resourceId === input.resourceId ? this.waiters : [];
     if (supersededWaiters.length > 0) {
       this.pendingInput = null;
       this.waiters = [];
@@ -154,13 +154,13 @@ export class ReaderProgressSyncCoordinator {
     if (this.activeUploadKey === input.pendingKey) this.abort?.abort();
     await this.storage.putExactAndDeletePending(exact, input.pendingKey);
     supersededWaiters.forEach(({ resolve }) => resolve(exact));
-    const session = this.sessions.get(input.volumeId);
+    const session = this.sessions.get(input.resourceId);
     if (session) {
       session.revision = input.snapshot.revision;
       session.current = input.snapshot.locator;
       session.notice = null;
     }
-    this.emitNotice(input.volumeId, null);
+    this.emitNotice(input.resourceId, null);
     return exact;
   }
 
@@ -175,15 +175,15 @@ export class ReaderProgressSyncCoordinator {
     if (!input) return Promise.resolve(null);
     const capturedAtEpochMillis = this.now();
     this.commitPromise = this.storage.getClientId().then(async (clientId) => {
-      const session = this.sessions.get(input.volumeId);
+      const session = this.sessions.get(input.resourceId);
       if (session?.notice && session.current
         && progressLocationsMatch(session.current, input.locator)) {
-        const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId } as const;
+        const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, bookId: input.bookId, resourceId: input.resourceId } as const;
         const unchanged: ExactProgressRecord = {
           ...identity,
           key: exactProgressKey(identity),
           schemaVersion: 1,
-          workId: input.workId,
+          bookId: input.bookId,
           locator: input.locator,
           displayPercent: normalizedPercent(input.displayPercent),
           revision: session.revision,
@@ -192,17 +192,17 @@ export class ReaderProgressSyncCoordinator {
         waiters.forEach(({ resolve }) => resolve(unchanged));
         return unchanged;
       }
-      const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, workId: input.workId, volumeId: input.volumeId };
+      const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, bookId: input.bookId, resourceId: input.resourceId };
       const key = syncStateKey(identity);
       const baseRevision = Math.max(input.baseRevision, session?.revision ?? 0);
-      const mutation: PendingProgressMutation = { key, schemaVersion: 1, serverIdentity: input.serverIdentity, userId: input.userId, workId: input.workId, volumeId: input.volumeId, clientId, mutationId: id(), baseRevision, capturedAtEpochMillis, locator: input.locator, displayPercent: normalizedPercent(input.displayPercent) };
-      const exact: ExactProgressRecord = { ...identity, key: exactProgressKey(identity), schemaVersion: 1, workId: input.workId, locator: input.locator, displayPercent: mutation.displayPercent, revision: baseRevision, capturedAtEpochMillis };
+      const mutation: PendingProgressMutation = { key, schemaVersion: 1, serverIdentity: input.serverIdentity, userId: input.userId, bookId: input.bookId, resourceId: input.resourceId, clientId, mutationId: id(), baseRevision, capturedAtEpochMillis, locator: input.locator, displayPercent: normalizedPercent(input.displayPercent) };
+      const exact: ExactProgressRecord = { ...identity, key: exactProgressKey(identity), schemaVersion: 1, bookId: input.bookId, locator: input.locator, displayPercent: mutation.displayPercent, revision: baseRevision, capturedAtEpochMillis };
       await this.storage.putExactAndPending(exact, mutation);
       if (session) {
         session.current = input.locator;
         if (session.notice) {
           session.notice = null;
-          this.emitNotice(input.volumeId, null);
+          this.emitNotice(input.resourceId, null);
         }
       }
       waiters.forEach(({ resolve }) => resolve(exact));
@@ -219,10 +219,10 @@ export class ReaderProgressSyncCoordinator {
       const mutation = [...this.uploadSlots.values()].sort((left, right) => left.capturedAtEpochMillis - right.capturedAtEpochMillis)[0];
       if (!mutation) return;
       this.uploadSlots.delete(mutation.key); const controller = new AbortController(); this.abort = controller; this.activeUploadKey = mutation.key;
-      const upload: ProgressUpload = { volumeId: mutation.volumeId, request: { schemaVersion: 4, clientId: mutation.clientId, mutationId: mutation.mutationId, baseRevision: mutation.baseRevision, capturedAtEpochMillis: mutation.capturedAtEpochMillis, locator: mutation.locator } };
+      const upload: ProgressUpload = { resourceId: mutation.resourceId, request: { schemaVersion: 4, clientId: mutation.clientId, mutationId: mutation.mutationId, baseRevision: mutation.baseRevision, capturedAtEpochMillis: mutation.capturedAtEpochMillis, locator: mutation.locator } };
       try {
-        const snapshot = await this.transport(upload, controller.signal); this.latest.set(mutation.volumeId, snapshot);
-        const session = this.sessions.get(mutation.volumeId);
+        const snapshot = await this.transport(upload, controller.signal); this.latest.set(mutation.resourceId, snapshot);
+        const session = this.sessions.get(mutation.resourceId);
         if (session) {
           session.revision = Math.max(session.revision, snapshot.revision);
           session.etag = `"reader-progress-${snapshot.revision}"`;
@@ -231,20 +231,20 @@ export class ReaderProgressSyncCoordinator {
       } catch (reason) {
         if (reason instanceof ReaderProgressConflictError) {
           await this.storage.deletePendingProgress(mutation.key, mutation.mutationId);
-          this.latest.set(mutation.volumeId, { schemaVersion: 4, ...reason.conflict });
-          this.observeRemote(mutation.volumeId, { schemaVersion: 4, ...reason.conflict }, mutation.locator);
-          emitReaderDebug('warning', '阅读进度存在跨设备冲突', { volumeId: mutation.volumeId, revision: reason.conflict.revision });
-        } else if (!controller.signal.aborted) emitReaderDebug('warning', '阅读进度已保留，将在联网后重试', { volumeId: mutation.volumeId });
+          this.latest.set(mutation.resourceId, { schemaVersion: 4, ...reason.conflict });
+          this.observeRemote(mutation.resourceId, { schemaVersion: 4, ...reason.conflict }, mutation.locator);
+          emitReaderDebug('warning', '阅读进度存在跨设备冲突', { resourceId: mutation.resourceId, revision: reason.conflict.revision });
+        } else if (!controller.signal.aborted) emitReaderDebug('warning', '阅读进度已保留，将在联网后重试', { resourceId: mutation.resourceId });
       } finally { if (this.abort === controller) this.abort = null; if (this.activeUploadKey === mutation.key) this.activeUploadKey = null; }
     }
   }
 
-  private observeRemote(volumeId: string, snapshot: ReaderProgressSnapshot, currentOverride?: PublicationLocation) {
-    const session = this.sessions.get(volumeId);
+  private observeRemote(resourceId: string, snapshot: ReaderProgressSnapshot, currentOverride?: PublicationLocation) {
+    const session = this.sessions.get(resourceId);
     if (!session || snapshot.revision <= session.revision) return session?.notice ?? null;
     session.revision = snapshot.revision;
     session.etag = `"reader-progress-${snapshot.revision}"`;
-    this.latest.set(volumeId, snapshot);
+    this.latest.set(resourceId, snapshot);
     const current = currentOverride ?? session.current;
     if (snapshot.clientId === session.clientId
       || (current && progressLocationsMatch(current, snapshot.locator))) {
@@ -258,12 +258,12 @@ export class ReaderProgressSyncCoordinator {
       receivedAtEpochMillis: snapshot.receivedAtEpochMillis,
       ...(snapshot.capturedAtEpochMillis === undefined ? {} : { capturedAtEpochMillis: snapshot.capturedAtEpochMillis })
     };
-    this.emitNotice(volumeId, session.notice);
+    this.emitNotice(resourceId, session.notice);
     return session.notice;
   }
 
-  private emitNotice(volumeId: string, notice: RemoteProgressNotice | null) {
-    this.noticeListeners.forEach((listener) => listener(volumeId, notice));
+  private emitNotice(resourceId: string, notice: RemoteProgressNotice | null) {
+    this.noticeListeners.forEach((listener) => listener(resourceId, notice));
   }
 }
 

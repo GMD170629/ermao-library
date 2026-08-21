@@ -8,13 +8,13 @@ export type ReaderBookmark = {
   createdAt: string;
 };
 
-export function readerBookmarkStorageKey(userId: string, volumeId: string) {
-  return ['shuku', 'reader-bookmarks', 'v4', userId, volumeId].join(':');
+export function readerBookmarkStorageKey(userId: string, resourceId: string) {
+  return ['shuku', 'reader-bookmarks', 'v4', userId, resourceId].join(':');
 }
 
 export function readerBookmarkId(location: ReaderLocation | null | undefined) {
   if (!location) return null;
-  if (location.kind === 'comic') return `comic:${location.volumeId}:${location.pageIndex}`;
+  if (location.kind === 'comic') return `comic:${location.resourceId}:${location.pageIndex}`;
   if (location.kind === 'pdf') return `pdf:${location.pageIndex}`;
   if (location.kind === 'reflowable') {
     if (location.cfi) return `reflowable:${location.format}:cfi:${location.cfi}`;

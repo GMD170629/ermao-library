@@ -67,7 +67,7 @@ export function parseSaveUploadedFilesResponse(payload: unknown): SaveUploadedFi
 
 export async function postUploadedFiles(form: FormData): Promise<SaveUploadedFilesResult> {
   try {
-    const response = await fetch('/api/works/import', { method: 'POST', body: form });
+    const response = await fetch('/api/books/import', { method: 'POST', body: form });
     const payload: unknown = await response.json();
     return parseSaveUploadedFilesResponse(payload);
   } catch {

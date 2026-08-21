@@ -55,7 +55,7 @@ function sourceLabel(source: string) {
 }
 
 function targetHref(event: SystemEvent) {
-  if (event.targetType === 'work' && event.targetId) return `/works/${event.targetId}`;
+  if (event.targetType === 'book' && event.targetId) return `/books/${event.targetId}`;
   if (event.targetType === 'kindleSendTask') return '/settings/email?tab=queue';
   if (event.targetType === 'importTask') return '/settings/library';
   if (event.targetType === 'library') return '/settings/library';

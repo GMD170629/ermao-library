@@ -28,20 +28,18 @@ function exactLocator(cssSelector: string, highlight: string, progression = 0, h
 }
 
 function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legacyPercent = 0) {
-  const volume = { id: 'epub-volume', versionId: 'epub-version', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
+  const resource = { id: 'epub-resource', bookId: 'book-epub', title: '全本', resourceIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
   return { ok: true, data: {
     schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
-    publication: { manifestUrl: '/api/reader/v4/volumes/epub-volume/publication/manifest.json', positionsUrl: '/api/reader/v4/volumes/epub-volume/publication/positions.json' },
-    book: { id: 'work-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
-    version: { id: 'epub-version', workId: 'work-epub', sourceKey: '__implicit__', sourceName: null },
-    versionCompleted: false,
-    volume, availableVolumes: [volume],
-    files: [{ id: 'epub-file', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/volumes/epub-volume/file' }],
+    publication: { manifestUrl: '/api/reader/v4/resources/epub-resource/publication/manifest.json', positionsUrl: '/api/reader/v4/resources/epub-resource/publication/positions.json' },
+    book: { id: 'book-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
+    resourceCompleted: false,
+    resource, availableResources: [resource],
+    assets: [{ id: 'epub-asset', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/assets/epub-asset' }],
     units: [
-      { id: 'unit-1', index: 0, title: '第一章', href: 'chapter1.xhtml', fileId: 'epub-file', startMs: null, endMs: null, durationMs: null, metadata: {} },
-      { id: 'unit-2', index: 1, title: '第二章', href: 'chapter2.xhtml', fileId: 'epub-file', startMs: null, endMs: null, durationMs: null, metadata: {} }
+      { id: 'unit-1', index: 0, title: '第一章', href: 'chapter1.xhtml', assetId: 'epub-asset', startMs: null, endMs: null, durationMs: null, metadata: {} },
+      { id: 'unit-2', index: 1, title: '第二章', href: 'chapter2.xhtml', assetId: 'epub-asset', startMs: null, endMs: null, durationMs: null, metadata: {} }
     ],
-    fileUrl: '/api/volumes/epub-volume/file',
     capabilities: { canGoNext: true, canGoPrevious: false, canJumpToProgress: false, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true },
     progressSnapshot, progressPercent: legacyPercent
   } };
@@ -96,7 +94,7 @@ async function visibleReadiumFrame(page: Page) {
 }
 
 test('Readium opens EPUB through RWPM and uploads an exact first-visible locator', async ({ page }) => {
-  const writes = await installReaderRoutes(page); await page.goto('/reader/epub-volume');
+  const writes = await installReaderRoutes(page); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
@@ -108,7 +106,7 @@ test('Readium opens EPUB through RWPM and uploads an exact first-visible locator
 
 test('Readium progress advances while paging inside the same chapter', async ({ page }) => {
   await installReaderRoutes(page);
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
   const bounds = await frame.boundingBox();
   if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
@@ -123,7 +121,7 @@ test('Readium progress advances while paging inside the same chapter', async ({ 
 
 test('Readium highlights the current chapter and enables adjacent chapter navigation', async ({ page }) => {
   await installReaderRoutes(page);
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
   const bounds = await frame.boundingBox();
   if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
@@ -178,7 +176,7 @@ test('Readium starts at the first reader navigation unit instead of blank front 
     body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
   }));
 
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
   await expect(frame.contentFrame().locator('#front-cover')).toHaveCount(0);
@@ -226,7 +224,7 @@ test('Readium applies block margins to every page viewport without special-casin
     body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1 id="chapter-title">第一章 Readium 验收</h1><p>短章正文。</p></body></html>')
   }));
 
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   let frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
   let bounds = await frame.boundingBox();
@@ -285,7 +283,7 @@ test('Readium iframe routes center and jittered edge mouse taps without leaving 
     contentType: 'application/xhtml+xml',
     body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>')
   }));
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
   const bounds = await frame.boundingBox();
   if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
@@ -334,7 +332,7 @@ test('Readium iframe routes center and jittered edge mouse taps without leaving 
 test('Readium centers a constrained paginated surface instead of pinning it to the start edge', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 937 });
   await installReaderRoutes(page);
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
 
   const geometry = await page.locator('[aria-label="Readium E2E 阅读内容"]').evaluate((container) => {
@@ -415,7 +413,7 @@ test('an exact paragraph restore stays non-fatal when a preceding block shares t
     receivedAtEpochMillis: 100
   });
 
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   let frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#target')).toBeVisible();
   await expect(page.getByText('无法精确恢复到另一设备的位置')).toHaveCount(0);
@@ -428,7 +426,7 @@ test('an exact paragraph restore stays non-fatal when a preceding block shares t
 test('Readium restore is accepted only after re-capturing the same exact DOM block', async ({ page }) => {
   const target = exactLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2);
   const writes = await installReaderRoutes(page, { schemaVersion: 4, clientId: 'android-e2e', revision: 7, locator: target, displayPercent: 70, receivedAtEpochMillis: 100 });
-  await page.goto('/reader/epub-volume'); const frame = await visibleReadiumFrame(page);
+  await page.goto('/reader/epub-resource'); const frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#chapter-two')).toBeVisible();
   await expect(page.locator('[data-reader-exact-restore="verified"]')).toHaveCount(1);
   expect(writes).toHaveLength(0);
@@ -439,7 +437,7 @@ test('an in-session remote update stays non-modal and jumps only after exact ver
   const writes: unknown[] = [];
   let currentSnapshot: Record<string, unknown> | null = null;
   await page.route('**/api/**', (route) => fulfillApi(route, currentSnapshot, 0, writes));
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
 
@@ -463,7 +461,7 @@ test('an in-session remote update stays non-modal and jumps only after exact ver
 });
 
 test('whole-publication percentage is display-only and never an automatic restore target', async ({ page }) => {
-  const writes = await installReaderRoutes(page, null, 88); await page.goto('/reader/epub-volume');
+  const writes = await installReaderRoutes(page, null, 88); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
@@ -473,7 +471,7 @@ test('whole-publication percentage is display-only and never an automatic restor
 
 test('Readium settings expose unsupported pagination controls without accepting ineffective choices', async ({ page }) => {
   await installReaderRoutes(page);
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
 
   await page.locator('[data-reader-shell="v3"] > div.relative').dispatchEvent('click', {
@@ -506,7 +504,7 @@ test('Readium settings expose unsupported pagination controls without accepting 
 
 test('Readium applies reader themes inside the publication without persisting a reflow as progress', async ({ page }) => {
   const writes = await installReaderRoutes(page);
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   await page.waitForTimeout(300);
@@ -530,7 +528,7 @@ test('Readium applies reader themes inside the publication without persisting a 
 
 test('Readium iframe keyboard input reaches first and last publication positions', async ({ page }) => {
   await installReaderRoutes(page);
-  await page.goto('/reader/epub-volume');
+  await page.goto('/reader/epub-resource');
   let frame = await visibleReadiumFrame(page);
 
   await frame.contentFrame().locator('body').evaluate((body) => {

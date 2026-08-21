@@ -10,8 +10,8 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
-import { mapWorkView } from '../works/public';
-import type { SeriesSummary, WorkView } from '../../types/work';
+import { mapBookView } from '../books/public';
+import type { SeriesSummary, BookView } from '../../types/book';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -58,7 +58,7 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
   const [seriesName, setSeriesName] = useState(initialName.trim());
   const [series, setSeries] = useState<SeriesSummary[]>([]);
   const [seriesTotal, setSeriesTotal] = useState(0);
-  const [books, setBooks] = useState<WorkView[]>([]);
+  const [books, setBooks] = useState<BookView[]>([]);
   const [bookTotal, setBookTotal] = useState(0);
   const [sort, setSort] = useState('series_index');
   const [search, setSearch] = useState('');
@@ -104,12 +104,12 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
       seriesName,
       sort
     });
-    fetch(`/api/works?${params}`)
+    fetch(`/api/books?${params}`)
       .then((response) => readApiJson<BooksPayload>(response, '读取系列图书失败'))
       .then((payload) => {
         if (!active) return;
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取系列图书失败');
-        setBooks((payload.data?.books ?? []).map(mapWorkView));
+        setBooks((payload.data?.books ?? []).map(mapBookView));
         setBookTotal(payload.data?.total ?? 0);
         setSeries([]);
         setSeriesTotal(0);
@@ -160,7 +160,7 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
         {!loading && !error && books.length > 0 ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,170px))] justify-start gap-4">
             {books.map((book) => (
-              <BookCard key={book.id} book={book} onClick={() => router.push(`/works/${book.id}`)} />
+              <BookCard key={book.id} book={book} onClick={() => router.push(`/books/${book.id}`)} />
             ))}
           </div>
         ) : null}

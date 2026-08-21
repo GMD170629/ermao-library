@@ -19,13 +19,13 @@ function fixtureBytes(chunkCount = 8) {
 
 function access(bytes: Uint8Array): PdfRangeAccess {
   return {
-    url: '/api/volumes/volume-1/file',
+    url: '/api/assets/asset-1',
     length: bytes.byteLength,
     identity: {
       serverIdentity: 'https://reader.test',
       userId: 'user-1',
       authorizationVersion: 3,
-      volumeId: 'volume-1'
+      resourceId: 'resource-1'
     },
     cache: new MemoryReaderStorage()
   };
