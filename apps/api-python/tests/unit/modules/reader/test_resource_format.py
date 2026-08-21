@@ -1,20 +1,20 @@
 import pytest
 
-from app.modules.reader.domain.volume_format import (
+from app.modules.reader.domain.resource_format import (
     ReaderType,
-    reader_type_for_volume_format,
+    reader_type_for_format,
 )
 
 
-@pytest.mark.parametrize("volume_format", ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"])
+@pytest.mark.parametrize("resource_format", ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"])
 def test_all_native_reflowable_formats_are_directly_readable(
-    volume_format: str,
+    resource_format: str,
 ) -> None:
-    assert reader_type_for_volume_format(volume_format) == ReaderType.REFLOWABLE
+    assert reader_type_for_format(resource_format) == ReaderType.REFLOWABLE
 
 
 @pytest.mark.parametrize(
-    ("volume_format", "reader_type"),
+    ("resource_format", "reader_type"),
     [
         ("PDF", ReaderType.PDF),
         ("CBZ", ReaderType.COMIC),
@@ -27,14 +27,14 @@ def test_all_native_reflowable_formats_are_directly_readable(
     ],
 )
 def test_fixed_layout_and_audio_formats_are_directly_readable(
-    volume_format: str,
+    resource_format: str,
     reader_type: ReaderType,
 ) -> None:
-    assert reader_type_for_volume_format(volume_format) == reader_type
+    assert reader_type_for_format(resource_format) == reader_type
 
 
-@pytest.mark.parametrize("volume_format", ["FB2", "COMIC"])
+@pytest.mark.parametrize("resource_format", ["FB2", "COMIC"])
 def test_formats_without_a_p2_native_adapter_are_not_advertised(
-    volume_format: str,
+    resource_format: str,
 ) -> None:
-    assert reader_type_for_volume_format(volume_format) is None
+    assert reader_type_for_format(resource_format) is None

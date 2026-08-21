@@ -7,13 +7,12 @@ from app.main import create_app
 from app.models.auth import User
 
 BODY_OPERATIONS = (
-    ("PATCH", "/api/works/work-id"),
-    ("POST", "/api/works/bulk"),
-    ("POST", "/api/works/bulk/find-replace/preview"),
-    ("POST", "/api/works/bulk/cover"),
-    ("PATCH", "/api/library/categories/facet-id"),
-    ("POST", "/api/library/categories/merge"),
-    ("POST", "/api/works/work-id/metadata/search"),
+    ("POST", "/api/books/import"),
+    ("PATCH", "/api/books/book-id"),
+    ("POST", "/api/books/book-id/resources/batch"),
+    ("PATCH", "/api/books/book-id/resources/resource-id"),
+    ("POST", "/api/books/book-id/resources/resource-id/reclassify"),
+    ("DELETE", "/api/books/book-id/resources/resource-id/source"),
     ("POST", "/api/shelves"),
     ("PATCH", "/api/shelves/shelf-id"),
 )
@@ -22,13 +21,12 @@ BODY_OPERATIONS = (
 def test_library_and_shelf_write_bodies_are_documented() -> None:
     schema = create_app().openapi()
     templated_operations = (
-        ("patch", "/api/works/{work_id}"),
-        ("post", "/api/works/bulk"),
-        ("post", "/api/works/bulk/find-replace/preview"),
-        ("post", "/api/works/bulk/cover"),
-        ("patch", "/api/library/categories/{facet_id}"),
-        ("post", "/api/library/categories/merge"),
-        ("post", "/api/works/{work_id}/metadata/search"),
+        ("post", "/api/books/import"),
+        ("patch", "/api/books/{book_id}"),
+        ("post", "/api/books/{book_id}/resources/batch"),
+        ("patch", "/api/books/{book_id}/resources/{resource_id}"),
+        ("post", "/api/books/{book_id}/resources/{resource_id}/reclassify"),
+        ("delete", "/api/books/{book_id}/resources/{resource_id}/source"),
         ("post", "/api/shelves"),
         ("patch", "/api/shelves/{shelf_id}"),
     )
@@ -37,10 +35,10 @@ def test_library_and_shelf_write_bodies_are_documented() -> None:
         assert "requestBody" in schema["paths"][path][method], (method, path)
 
     assert "201" in schema["paths"]["/api/shelves"]["post"]["responses"]
-    assert "206" in schema["paths"]["/api/files/{file_id}"]["get"]["responses"]
+    assert "206" in schema["paths"]["/api/resources/{resource_id}/asset"]["get"]["responses"]
     assert (
         "206"
-        in schema["paths"]["/api/volumes/{volume_id}/pages/{page_index}"]["get"][
+        in schema["paths"]["/api/resources/{resource_id}/pages/{page_index}"]["get"][
             "responses"
         ]
     )
@@ -74,4 +72,5 @@ def test_missing_request_body_is_a_validation_error(
 
     response = client.request(method, path)
 
-    assert response.status_code == 422, (method, path, response.text)
+    expected_status = 400 if path == "/api/books/import" else 422
+    assert response.status_code == expected_status, (method, path, response.text)

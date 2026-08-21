@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from time import monotonic
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -18,75 +20,120 @@ from app.db.maintenance import (
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
 from app.models.auth import User
-from app.models.library import (
-    Library,
-    LibraryFile,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
 )
+from app.models.library import Library
 from app.models.settings import SystemSetting
 from tests.support.sqlalchemy import StatementRecorder
 
 
 def _seed_read_surfaces(engine: Engine) -> None:
     with Session(engine) as db:
-        db.add(
-            Library(
-                id="test-library",
-                name="Test Library",
-                root_path="/test-library",
-                organization_mode="FLAT",
-            )
+        db.add_all(
+            [
+                Library(
+                    id="test-library",
+                    name="Test Library",
+                    root_path="/test-library",
+                    organization_mode="FLAT",
+                ),
+                User(
+                    id="writer-lock-admin",
+                    email="writer-lock@example.com",
+                    name="Writer lock admin",
+                    password_hash=hash_password("starshipnas"),
+                    role="admin",
+                ),
+            ]
         )
-        db.add(
-            User(
-                id="writer-lock-admin",
-                email="writer-lock@example.com",
-                name="Writer lock admin",
-                password_hash=hash_password("starshipnas"),
-                role="admin",
-            )
-        )
-        work = LibraryWork(
+        db.commit()
+        observed_at = datetime.now(UTC)
+        book_node = LibrarySourceNode(
+            id="writer-lock-book-node",
             library_id="test-library",
-            id="writer-lock-work",
-            origin="MANUAL",
+            relative_path="writer-lock/",
+            path_key="v1:" + hashlib.sha256(b"writer-lock/").hexdigest(),
+            name="writer-lock",
+            physical_kind="DIRECTORY",
+            observed_size_bytes=None,
+            observed_mtime_ns=1,
+            observed_at=observed_at,
+            updated_at=observed_at,
+        )
+        resource_node = LibrarySourceNode(
+            id="writer-lock-resource-node",
+            library_id="test-library",
+            relative_path="writer-lock.epub",
+            path_key="v1:" + hashlib.sha256(b"writer-lock.epub").hexdigest(),
+            name="writer-lock.epub",
+            physical_kind="REGULAR_FILE",
+            observed_size_bytes=10,
+            observed_mtime_ns=1,
+            observed_at=observed_at,
+            updated_at=observed_at,
+        )
+        book = LibraryBook(
+            library_id="test-library",
+            id="writer-lock-book",
+            source_node_id=book_node.id,
+        )
+        book_metadata = LibraryBookMetadata(
+            book_id=book.id,
             title="Writer lock reader",
             normalized_title="writer lock reader",
             author="作者",
             normalized_author="作者",
-            tags="[]",
         )
-        version = LibraryVersion(
-            id="writer-lock-version",
-            work_id=work.id,
-            source_key="writer-lock:version",
-        )
-        volume = LibraryVolume(
-            id="writer-lock-volume",
-            version_id=version.id,
-            title="电子书",
+        resource = LibraryReadableResource(
+            id="writer-lock-resource",
+            library_id="test-library",
+            book_id=book.id,
+            source_node_id=resource_node.id,
+            adapter_id="epub-file",
+            adapter_version="1",
+            media_kind="EBOOK",
             format="EPUB",
-            resource_key="manual:writer-lock",
-            import_status="COMPLETED",
+            enablement_state="ENABLED",
+            import_state="READY",
         )
-        file = LibraryFile(
-            id="writer-lock-file",
-            volume_id=volume.id,
-            path="library/writer-lock.epub",
-            mtime_ms=1,
-            kind="EPUB",
+        resource_metadata = LibraryReadableResourceMetadata(
+            resource_id=resource.id,
+            title="电子书",
+        )
+        asset = LibraryResourceAsset(
+            id="writer-lock-asset",
+            library_id="test-library",
+            resource_id=resource.id,
+            source_node_id=resource_node.id,
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+        )
+        asset_metadata = LibraryResourceAssetMetadata(
+            asset_id=asset.id,
             mime_type="application/epub+zip",
-            size_bytes=10,
         )
-        db.add(work)
-        db.commit()
-        db.add(version)
-        db.commit()
-        db.add(volume)
-        db.commit()
-        db.add(file)
+        book.source_node = book_node
+        resource.book = book
+        resource.source_node = resource_node
+        asset.resource = resource
+        asset.source_node = resource_node
+        db.add_all([book_node, resource_node])
+        db.flush()
+        db.add(book)
+        db.flush()
+        db.add(book_metadata)
+        db.add(resource)
+        db.flush()
+        db.add_all([resource_metadata, asset, asset_metadata])
+        db.flush()
         db.commit()
 
 
@@ -132,8 +179,8 @@ def test_get_surfaces_remain_read_only_while_writer_slot_is_held(
                 for path in (
                     "/api/auth/me",
                     "/api/sources",
-                    "/api/library/facets",
-                    "/api/reader/v4/volumes/writer-lock-volume/bootstrap",
+                    "/api/books",
+                    "/api/reader/v4/resources/writer-lock-resource/bootstrap",
                 ):
                     started_at = monotonic()
                     response = client.get(path)

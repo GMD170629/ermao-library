@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,20 +11,18 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.import_pipeline import (
+from app.models import (
     DownloadTask,
-    ImportScanJob,
-    ImportTask,
-    ImportWorkItem,
-)
-from app.models.library import (
-    Library,
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryImportTask,
     LibraryOperation,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
 )
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+from app.models.library import Library
 from app.services.download_executor import DownloadExecutionResult
 from app.services.download_queue import process_next_download_task
 from tests.support.import_fixtures import add_library
@@ -46,45 +46,122 @@ def _login_admin(client: TestClient, db_session: Session) -> User:
     return user
 
 
-def _work(
+def _path_key(value: str) -> str:
+    return "v1:" + hashlib.sha256(value.encode()).hexdigest()
+
+
+def _book_graph(
     *,
-    work_id: str,
+    book_id: str,
     library_id: str,
     title: str,
-) -> tuple[LibraryWork, LibraryVersion, LibraryVolume]:
-    work = LibraryWork(
-        id=work_id,
+) -> tuple[
+    LibrarySourceNode,
+    LibraryBook,
+    LibraryBookMetadata,
+    LibrarySourceNode,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+]:
+    observed_at = datetime.now(UTC)
+    book_source = LibrarySourceNode(
+        id=f"source-{book_id}",
         library_id=library_id,
-        origin="MANUAL",
+        relative_path=title,
+        path_key=_path_key(f"{library_id}/{title}"),
+        name=title,
+        physical_kind="DIRECTORY",
+        observed_size_bytes=None,
+        observed_mtime_ns=1,
+        observed_at=observed_at,
+        updated_at=observed_at,
+    )
+    resource_source = LibrarySourceNode(
+        id=f"source-{book_id}-resource",
+        library_id=library_id,
+        relative_path=f"{title}.epub",
+        path_key=_path_key(f"{library_id}/{title}.epub"),
+        name=f"{title}.epub",
+        physical_kind="REGULAR_FILE",
+        observed_size_bytes=5,
+        observed_mtime_ns=1,
+        observed_at=observed_at,
+        updated_at=observed_at,
+    )
+    book = LibraryBook(
+        id=book_id,
+        library_id=library_id,
+        source_node_id=book_source.id,
+    )
+    book_metadata = LibraryBookMetadata(
+        book_id=book.id,
         title=title,
         normalized_title=title.casefold().replace(" ", ""),
         author="刘慈欣",
         normalized_author="刘慈欣",
-        tags="[]",
     )
-    version = LibraryVersion(
-        id=f"version-{work_id}",
-        work_id=work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    volume = LibraryVolume(
-        id=f"volume-{work_id}",
-        version_id=version.id,
-        title=title,
-        sort_order=0,
+    resource = LibraryReadableResource(
+        id=f"resource-{book_id}",
+        library_id=library_id,
+        book_id=book.id,
+        source_node_id=resource_source.id,
+        adapter_id="epub",
+        adapter_version="1",
+        media_kind="EBOOK",
         format="EPUB",
-        resource_key=f"{work_id}:volume",
-        import_status="COMPLETED",
+        enablement_state="ENABLED",
+        import_state="READY",
     )
-    volume.version = version
-    return work, version, volume
+    resource_metadata = LibraryReadableResourceMetadata(
+        resource_id=resource.id,
+        title=title,
+        resource_index=0,
+    )
+    asset = LibraryResourceAsset(
+        id=f"asset-{book_id}",
+        library_id=library_id,
+        resource_id=resource.id,
+        source_node_id=resource_source.id,
+        source_node_physical_kind="REGULAR_FILE",
+        role="PRIMARY",
+        import_state="READY",
+    )
+    resource.book = book
+    book.source_node = book_source
+    resource.source_node = resource_source
+    asset.resource = resource
+    asset.source_node = resource_source
+    return (
+        book_source,
+        book,
+        book_metadata,
+        resource_source,
+        resource,
+        resource_metadata,
+        asset,
+    )
 
 
-def _seed_cross_library_volume_pair(
+def _add_book_graph(db_session: Session, graph: tuple[object, ...]) -> None:
+    book_source, book, book_metadata, resource_source, resource, resource_metadata, asset = graph
+    db_session.add_all([book_source, resource_source])
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(book_metadata)
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add(resource_metadata)
+    db_session.add(asset)
+    db_session.flush()
+
+
+def _seed_cross_library_book_pair(
     db_session: Session,
     *,
     prefix: str,
-) -> tuple[LibraryWork, LibraryVersion, LibraryVolume, LibraryWork]:
+) -> tuple[LibraryBook, LibraryReadableResource, LibraryBook]:
     library_a = Library(
         id=f"{prefix}-lib-a",
         name="A",
@@ -97,19 +174,18 @@ def _seed_cross_library_volume_pair(
         root_path=f"/{prefix}-b",
         organization_mode="FLAT",
     )
-    work_a, version_a, volume_a = _work(
-        work_id=f"{prefix}-work-a", library_id=library_a.id, title="三体"
+    graph_a = _book_graph(
+        book_id=f"{prefix}-book-a", library_id=library_a.id, title="三体"
     )
-    work_b, version_b, volume_b = _work(
-        work_id=f"{prefix}-work-b", library_id=library_b.id, title="地球往事"
+    graph_b = _book_graph(
+        book_id=f"{prefix}-book-b", library_id=library_b.id, title="地球往事"
     )
     db_session.add_all([library_a, library_b])
     db_session.flush()
-    db_session.add_all([work_a, work_b])
-    db_session.flush()
-    db_session.add_all([version_a, volume_a, version_b, volume_b])
+    _add_book_graph(db_session, graph_a)
+    _add_book_graph(db_session, graph_b)
     db_session.commit()
-    return work_a, version_a, volume_a, work_b
+    return graph_a[1], graph_a[4], graph_b[1]
 
 
 def test_patch_library_organization_mode_persists_enum_value(
@@ -154,15 +230,11 @@ def test_patch_library_organization_mode_persists_enum_value(
     assert stored.organization_mode == "VOLUMES"
     assert stored.organization_mode != "LibraryOrganizationMode.VOLUMES"
 
-    db_session.add(
-        LibraryWork(
-            id="mode-library-work",
-            library_id=library_id,
-            source_key="work:mode-library-work",
-            title="Mode Work",
-            normalized_title="modework",
-            tags="[]",
-        )
+    _add_book_graph(
+        db_session,
+        _book_graph(
+            book_id="mode-library-book", library_id=library_id, title="Mode Book"
+        ),
     )
     db_session.commit()
     locked = client.patch(
@@ -173,14 +245,14 @@ def test_patch_library_organization_mode_persists_enum_value(
     assert locked.json()["error"]["code"] == "LIBRARY_TOPOLOGY_LOCKED"
 
 
-def test_directory_scan_request_always_schedules_the_library_root(
+def test_library_scan_request_always_schedules_the_library_root(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
 ) -> None:
     _login_admin(client, db_session)
     root = tmp_path / "root-scan-library"
-    nested = root / "Work" / "Version"
+    nested = root / "Book" / "Resource"
     nested.mkdir(parents=True)
     library = Library(
         id="root-scan-library",
@@ -193,19 +265,18 @@ def test_directory_scan_request_always_schedules_the_library_root(
     db_session.add(library)
     db_session.commit()
 
-    response = client.post(
-        "/api/import-tasks/scan-directory",
-        json={"path": str(nested)},
-    )
+    response = client.post(f"/api/libraries/{library.id}/scan")
 
     assert response.status_code == 202, response.text
-    job_payload = response.json()["data"]["job"]
-    assert job_payload["libraryId"] == library.id
-    assert job_payload["rootPath"] == str(root.resolve())
-    assert job_payload["trigger"] == "MANUAL_ROOT_SCAN"
-    stored = db_session.get(ImportScanJob, job_payload["id"])
+    task_payload = response.json()["data"]
+    assert task_payload["libraryId"] == library.id
+    assert task_payload["enqueued"] is True
+    stored = db_session.get(LibraryImportTask, task_payload["taskId"])
     assert stored is not None
-    assert stored.root_path == str(root.resolve())
+    assert stored.library_id == library.id
+    assert stored.kind == "SCAN_LIBRARY"
+    assert stored.source_node_id is None
+    assert stored.resource_id is None
 
 
 def test_download_outside_enabled_library_does_not_enqueue_import(
@@ -246,21 +317,16 @@ def test_download_outside_enabled_library_does_not_enqueue_import(
             }
         ),
     )
-    scan_calls: list[object] = []
-    monkeypatch.setattr(
-        "app.services.download_queue.schedule_download_scan_command",
-        lambda *_args, **kwargs: scan_calls.append(kwargs),
-    )
-
     assert process_next_download_task(db_session, test_settings) is True
-    assert scan_calls == []
-    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
+    assert (
+        db_session.scalar(select(func.count()).select_from(LibraryImportTask)) or 0
+    ) == 0
     stored = db_session.get(DownloadTask, task.id)
     assert stored is not None
     assert stored.status == "downloaded"
 
 
-def test_download_inside_library_schedules_topology_scan_instead_of_import_task(
+def test_download_inside_library_schedules_library_scan_task(
     db_session: Session,
     test_settings,
     tmp_path: Path,
@@ -303,43 +369,42 @@ def test_download_inside_library_schedules_topology_scan_instead_of_import_task(
     stored = db_session.get(DownloadTask, task.id)
     assert stored is not None
     assert stored.status == "importing"
-    scan_job = db_session.scalar(
-        select(ImportScanJob).where(ImportScanJob.library_id == "download-scan-library")
+    scan_task = db_session.scalar(
+        select(LibraryImportTask).where(
+            LibraryImportTask.library_id == "download-scan-library"
+        )
     )
-    assert scan_job is not None
-    assert scan_job.root_path == str(library_root.resolve())
-    assert scan_job.trigger == "download_completed"
-    work_item = db_session.scalar(
-        select(ImportWorkItem).where(ImportWorkItem.scan_job_id == scan_job.id)
+    assert scan_task is not None
+    assert scan_task.kind == "SCAN_LIBRARY"
+    assert scan_task.state == "QUEUED"
+    assert (
+        db_session.scalar(select(func.count()).select_from(LibraryImportTask)) == 1
     )
-    assert work_item is not None
-    assert work_item.kind == "SCAN_DIRECTORY"
-    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
 
 
-def test_batch_transfer_is_rejected_without_mutation(
+def test_batch_resource_classification_rejects_cross_book_resource(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login_admin(client, db_session)
-    work_a, _version_a, volume_a, work_b = _seed_cross_library_volume_pair(
+    book_a, resource_a, book_b = _seed_cross_library_book_pair(
         db_session, prefix="batch-transfer"
     )
 
     transferred = client.post(
-        f"/api/works/{work_a.id}/volumes/batch",
+        f"/api/books/{book_a.id}/resources/batch",
         json={
-            "action": "TRANSFER",
-            "volumeIds": [volume_a.id],
-            "targetWorkId": work_b.id,
+            "action": "SET_MEDIA_KIND",
+            "resourceIds": [f"resource-{book_b.id}"],
+            "targetMediaKind": "COMIC",
         },
     )
-    assert transferred.status_code == 422
+    assert transferred.status_code == 404
 
     db_session.expire_all()
-    persisted = db_session.get(LibraryVolume, volume_a.id)
+    persisted = db_session.get(LibraryReadableResource, resource_a.id)
     assert persisted is not None
-    assert persisted.version_id == volume_a.version_id
-    assert db_session.get(LibraryWork, work_a.id) is not None
-    assert db_session.get(LibraryWork, work_b.id) is not None
+    assert persisted.media_kind == "EBOOK"
+    assert db_session.get(LibraryBook, book_a.id) is not None
+    assert db_session.get(LibraryBook, book_b.id) is not None
     assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0

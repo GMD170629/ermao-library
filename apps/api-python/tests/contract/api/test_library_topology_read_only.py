@@ -7,16 +7,17 @@ from app.main import create_app
 from app.models.auth import User
 
 
-def test_structural_library_mutations_are_absent_from_openapi() -> None:
+def test_structural_book_mutations_are_absent_from_openapi() -> None:
     paths = create_app().openapi()["paths"]
 
-    assert "delete" not in paths["/api/works/{work_id}"]
-    assert "/api/works/{work_id}/volumes/{volume_id}/move" not in paths
-    assert "/api/works/{work_id}/volumes/{volume_id}/split" not in paths
-    assert "delete" not in paths["/api/works/{work_id}/volumes/{volume_id}"]
+    assert "/api/works/{work_id}" not in paths
+    assert "/api/books/{book_id}/resources/{resource_id}/move" not in paths
+    assert "/api/books/{book_id}/resources/{resource_id}/split" not in paths
+    assert "delete" not in paths["/api/books/{book_id}"]
+    assert "delete" not in paths["/api/books/{book_id}/resources/{resource_id}"]
 
 
-def test_structural_volume_implementations_are_removed() -> None:
+def test_structural_resource_implementations_are_removed() -> None:
     infrastructure = (
         Path(__file__).parents[3]
         / "app"
@@ -26,23 +27,21 @@ def test_structural_volume_implementations_are_removed() -> None:
     )
 
     assert not (infrastructure / "structural_operations.py").exists()
-    assert not (infrastructure / "batch_volume_commands.py").exists()
+    assert not any(infrastructure.glob("batch_*_commands.py"))
 
 
-def test_volume_metadata_contract_excludes_directory_owned_fields() -> None:
+def test_resource_metadata_contract_excludes_directory_owned_fields() -> None:
     schema = create_app().openapi()
     components = schema["components"]["schemas"]
-    properties = components["UpdateVolumeRequest"]["properties"]
+    properties = components["UpdateResourceRequest"]["properties"]
 
-    assert "title" not in properties
-    assert "volumeIndex" not in properties
     assert "sortOrder" not in properties
     assert "hidden" not in properties
-    batch_schema = schema["paths"]["/api/works/{work_id}/volumes/batch"]["post"][
+    batch_schema = schema["paths"]["/api/books/{book_id}/resources/batch"]["post"][
         "requestBody"
     ]["content"]["application/json"]["schema"]
     assert batch_schema == {
-        "$ref": "#/components/schemas/BatchSetMediaKindRequest"
+        "$ref": "#/components/schemas/ResourceBatchRequest"
     }
 
 
@@ -69,10 +68,6 @@ def test_bulk_delete_is_rejected_as_directory_topology_mutation(
     )
     assert login.status_code == 200
 
-    response = client.post(
-        "/api/works/bulk",
-        json={"ids": [], "action": "delete_records"},
-    )
+    response = client.post("/api/works/bulk", json={"ids": [], "action": "delete_records"})
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "LIBRARY_TOPOLOGY_READ_ONLY"
+    assert response.status_code == 404

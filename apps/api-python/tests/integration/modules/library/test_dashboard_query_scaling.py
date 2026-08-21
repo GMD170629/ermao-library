@@ -9,16 +9,19 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext
 from app.models.auth import User, UserLibraryAccess
-from app.models.library import (
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
     LibraryFacet,
-    LibraryReadingProgress,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
-    LibraryWorkFacet,
+    LibraryBookFacet,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+    ReaderResourceProgress,
 )
 from app.modules.library.application.bookshelf import ListBookshelfItems
-from app.modules.library.application.work_list import WorkListQuery
+from app.modules.library.application.book_list import BookListQuery
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.dashboard import (
     continue_reading_progress,
@@ -27,29 +30,78 @@ from app.modules.library.infrastructure.dashboard import (
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
-from app.modules.library.infrastructure.work_list import list_works
+from app.modules.library.infrastructure.book_list import list_books
 
 _ResultT = TypeVar("_ResultT")
 
 
-def _seed_manual_library(db: Session, *, work_count: int) -> None:
+def _seed_manual_library(db: Session, *, book_count: int) -> None:
     now = datetime.now(UTC)
     chunk_size = 500
-    for start in range(0, work_count, chunk_size):
-        stop = min(work_count, start + chunk_size)
+    for start in range(0, book_count, chunk_size):
+        stop = min(book_count, start + chunk_size)
         db.execute(
-            insert(LibraryWork),
+            insert(LibrarySourceNode),
             [
                 {
-                    "id": f"scale-work-{index:06d}",
+                    "id": f"scale-book-node-{index:06d}",
                     "library_id": "test-library",
-                    "origin": "MANUAL",
+                    "relative_path": f"scale-book-{index:06d}/",
+                    "path_key": "v1:" + f"{index:064x}",
+                    "name": f"scale-book-{index:06d}",
+                    "physical_kind": "DIRECTORY",
+                    "observed_size_bytes": None,
+                    "observed_mtime_ns": 1,
+                    "observed_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db.execute(
+            insert(LibrarySourceNode),
+            [
+                {
+                    "id": f"scale-resource-node-{index:06d}",
+                    "library_id": "test-library",
+                    "relative_path": f"scale-book-{index:06d}.epub",
+                    "path_key": "v1:" + f"{book_count + index:064x}",
+                    "name": f"scale-book-{index:06d}.epub",
+                    "physical_kind": "REGULAR_FILE",
+                    "observed_size_bytes": 10,
+                    "observed_mtime_ns": 1,
+                    "observed_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db.execute(
+            insert(LibraryBook),
+            [
+                {
+                    "id": f"scale-book-{index:06d}",
+                    "library_id": "test-library",
+                    "source_node_id": f"scale-book-node-{index:06d}",
+                    "visibility_state": "VISIBLE",
+                    "curation_state": "PENDING",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db.execute(
+            insert(LibraryBookMetadata),
+            [
+                {
+                    "book_id": f"scale-book-{index:06d}",
                     "title": f"Scale book {index}",
                     "normalized_title": f"scalebook{index}",
                     "author": "Scale author",
                     "normalized_author": "scaleauthor",
-                    "tags": "[]",
-                    "hidden": False,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -57,30 +109,51 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
             ],
         )
         db.execute(
-            insert(LibraryVersion),
+            insert(LibraryReadableResource),
             [
                 {
-                    "id": f"scale-version-{index:06d}",
-                    "work_id": f"scale-work-{index:06d}",
-                    "source_key": "__implicit__",
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for index in range(start, stop)
-            ],
-        )
-        db.execute(
-            insert(LibraryVolume),
-            [
-                {
-                    "id": f"scale-volume-{index:06d}",
-                    "version_id": f"scale-version-{index:06d}",
-                    "origin": "MANUAL",
-                    "title": "Volume 1",
-                    "sort_order": 0,
+                    "id": f"scale-resource-{index:06d}",
+                    "library_id": "test-library",
+                    "book_id": f"scale-book-{index:06d}",
+                    "source_node_id": f"scale-resource-node-{index:06d}",
+                    "adapter_id": "epub-file",
+                    "adapter_version": "1",
+                    "media_kind": "EBOOK",
                     "format": "EPUB",
-                    "resource_key": f"scale:{index}",
-                    "hidden": False,
+                    "enablement_state": "ENABLED",
+                    "import_state": "READY",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db.execute(
+            insert(LibraryReadableResourceMetadata),
+            [
+                {
+                    "resource_id": f"scale-resource-{index:06d}",
+                    "title": f"Scale book {index}",
+                    "resource_index": 0,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for index in range(start, stop)
+            ],
+        )
+        db.execute(
+            insert(LibraryResourceAsset),
+            [
+                {
+                    "id": f"scale-asset-{index:06d}",
+                    "library_id": "test-library",
+                    "resource_id": f"scale-resource-{index:06d}",
+                    "source_node_id": f"scale-resource-node-{index:06d}",
+                    "source_node_physical_kind": "REGULAR_FILE",
+                    "role": "PRIMARY",
+                    "import_state": "READY",
+                    "sequence_index": 0,
+                    "sort_key": "0",
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -127,14 +200,14 @@ def test_member_recent_import_listing_has_bounded_query_work(
             UserLibraryAccess(user_id=user.id, library_id="test-library"),
         ]
     )
-    _seed_manual_library(db_session, work_count=2_000)
+    _seed_manual_library(db_session, book_count=2_000)
 
     result, vm_steps = _sqlite_vm_steps(
         db_session,
-        lambda: list_works(
+        lambda: list_books(
             db_session,
             user,
-            WorkListQuery(
+            BookListQuery(
                 page=1,
                 requested_page_size=50,
                 visibility="active",
@@ -145,7 +218,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
     )
 
     assert result.total == 2_000
-    assert len(result.works) == 50
+    assert len(result.books) == 50
     assert vm_steps < 1_000_000
 
     context = AuthorizationContext(
@@ -183,7 +256,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
     try:
         views = ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db_session)).execute(
             context=context,
-            work_ids=tuple(str(work["id"]) for work in recent),
+            book_ids=tuple(str(book["id"]) for book in recent),
         )
     finally:
         event.remove(engine, "before_cursor_execute", count_selects)
@@ -193,10 +266,10 @@ def test_member_recent_import_listing_has_bounded_query_work(
 
     filtered_result, filtered_vm_steps = _sqlite_vm_steps(
         db_session,
-        lambda: list_works(
+        lambda: list_books(
             db_session,
             user,
-            WorkListQuery(
+            BookListQuery(
                 page=1,
                 requested_page_size=50,
                 visibility="active",
@@ -209,7 +282,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
     )
 
     assert filtered_result.total == 2_000
-    assert len(filtered_result.works) == 50
+    assert len(filtered_result.books) == 50
     assert filtered_vm_steps < 1_500_000
 
     now = datetime.now(UTC)
@@ -230,11 +303,11 @@ def test_member_recent_import_listing_has_bounded_query_work(
         ],
     )
     db_session.execute(
-        insert(LibraryWorkFacet),
+        insert(LibraryBookFacet),
         [
             {
                 "facet_id": f"scale-author-{index % author_count:03d}",
-                "work_id": f"scale-work-{index:06d}",
+                "book_id": f"scale-book-{index:06d}",
                 "sort_order": 0,
                 "created_at": now,
             }
@@ -258,7 +331,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
     assert grouping_vm_steps < 2_000_000
 
 
-def test_continue_reading_does_not_scan_every_visible_volume(
+def test_continue_reading_does_not_scan_every_visible_resource(
     db_session: Session,
 ) -> None:
     user = User(
@@ -269,17 +342,18 @@ def test_continue_reading_does_not_scan_every_visible_volume(
         role="admin",
     )
     db_session.add(user)
-    _seed_manual_library(db_session, work_count=2_000)
+    _seed_manual_library(db_session, book_count=2_000)
     now = datetime.now(UTC)
     db_session.add(
-        LibraryReadingProgress(
+        ReaderResourceProgress(
             id="scale-reader-progress",
             user_id=user.id,
-            volume_id="scale-volume-001999",
+            resource_id="scale-resource-001999",
             reader_type="epub",
             position="1",
             percent=40,
             extra="{}",
+            progressed_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -300,5 +374,6 @@ def test_continue_reading_does_not_scan_every_visible_volume(
     )
 
     assert progress is not None
-    assert progress["workId"] == "scale-work-001999"
+    assert progress["bookId"] == "scale-book-001999"
+    assert progress["resourceId"] == "scale-resource-001999"
     assert vm_steps < 75_000
