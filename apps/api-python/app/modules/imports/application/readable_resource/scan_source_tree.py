@@ -166,7 +166,7 @@ class ScanLibrarySourceTree:
             )
             self._uow.release_before_io()
             try:
-                entries = list(self._filesystem.iter_directory_entries(absolute))
+                directory_entries = self._filesystem.iter_directory_entries(absolute)
             except OSError:
                 self._log.emit(
                     "source_tree.scan.directory_unreadable",
@@ -176,7 +176,20 @@ class ScanLibrarySourceTree:
                 )
                 continue
 
-            for name, kind, size, mtime_ns in entries:
+            while True:
+                try:
+                    name, kind, size, mtime_ns = next(directory_entries)
+                except StopIteration:
+                    break
+                except OSError:
+                    self._log.emit(
+                        "source_tree.scan.directory_unreadable",
+                        library_id=config.library_id,
+                        stage="scan",
+                        outcome="io_error",
+                    )
+                    break
+
                 if self._should_ignore(config, parent_rel, name):
                     continue
                 relative_str = name if parent_rel is None else f"{parent_rel}/{name}"
