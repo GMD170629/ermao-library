@@ -131,7 +131,7 @@ def _seed_catalog(
         source_node_id=file_nodes[0].id,
         adapter_id=fmt.lower(),
         adapter_version="1",
-        media_kind="AUDIO" if fmt == "AUDIO" else "READABLE",
+        media_kind="AUDIOBOOK" if fmt == "AUDIO" else "EBOOK",
         format=fmt,
         enablement_state="ENABLED",
         import_state="READY",
@@ -160,8 +160,19 @@ def _seed_catalog(
         LibraryResourceAssetMetadata(asset_id=asset_id, mime_type=mime_type)
         for asset_id, _path, _role, mime_type, _sort_order in assets
     ]
-    db.add_all([book_node, *file_nodes, book, book_metadata, resource, resource_metadata])
-    db.add_all([*asset_rows, *asset_metadata])
+    db.add_all([book_node, *file_nodes])
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(book_metadata)
+    db.flush()
+    db.add(resource)
+    db.flush()
+    db.add(resource_metadata)
+    db.flush()
+    db.add_all(asset_rows)
+    db.flush()
+    db.add_all(asset_metadata)
     db.commit()
     assert first_asset_id == asset_rows[0].id
     return resource

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import zipfile
 from datetime import UTC, datetime
@@ -110,7 +111,13 @@ def _seed_resource(
         source_node_id=source_node.id,
         adapter_id=fmt.lower(),
         adapter_version="1",
-        media_kind="READABLE",
+        media_kind=(
+            "COMIC"
+            if fmt.upper() in {"CBZ", "ZIP", "CBR", "RAR"}
+            else "AUDIOBOOK"
+            if fmt.upper() in {"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"}
+            else "EBOOK"
+        ),
         format=fmt,
         enablement_state="ENABLED",
         import_state="READY",
@@ -134,18 +141,19 @@ def _seed_resource(
         asset_id=asset.id,
         mime_type=mime_type,
     )
-    db.add_all(
-        [
-            book_node,
-            source_node,
-            book,
-            book_metadata,
-            resource,
-            resource_metadata,
-            asset,
-            asset_metadata,
-        ]
-    )
+    db.add_all([book_node, source_node])
+    db.flush()
+    db.add(book)
+    db.flush()
+    db.add(book_metadata)
+    db.flush()
+    db.add(resource)
+    db.flush()
+    db.add(resource_metadata)
+    db.flush()
+    db.add(asset)
+    db.flush()
+    db.add(asset_metadata)
     db.commit()
     return resource
 
@@ -357,7 +365,7 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
     source_node.observed_size_bytes = source_path.stat().st_size
-    source_node.observed_mtime_ns = int(source_path.stat().st_mtime * 1_000_000_000)
+    source_node.observed_mtime_ns = int(source_path.stat().st_mtime * 1000) * 1_000_000
     db_session.add(
         ReadableResourceNavigationUnit(
             id="stale-publication-chapter",
@@ -379,6 +387,7 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
     manifest_response = client.get(
         f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
+    db_session.expire_all()
     units_response = client.get(
         f"/api/books/book-publication/resources/{resource.id}/reading-units"
     )
@@ -406,7 +415,7 @@ def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
     source_node.observed_size_bytes = source_path.stat().st_size
-    source_node.observed_mtime_ns = int(source_path.stat().st_mtime * 1_000_000_000)
+    source_node.observed_mtime_ns = int(source_path.stat().st_mtime * 1000) * 1_000_000
     db_session.commit()
 
     response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
@@ -560,8 +569,13 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     assert [(unit["title"], unit["href"]) for unit in units] == [
         (entry["title"], entry["href"]) for entry in manifest["toc"]
     ]
-    assert all(unit["metadataJson"]["exactNavigation"] is True for unit in units)
-    assert all(unit["metadataJson"]["hrefBase"] == "publication-root" for unit in units)
+    assert all(
+        json.loads(unit["metadataJson"])["exactNavigation"] is True for unit in units
+    )
+    assert all(
+        json.loads(unit["metadataJson"])["hrefBase"] == "publication-root"
+        for unit in units
+    )
 
     resource_response = client.get(
         f"/api/reader/v4/resources/{resource.id}/publication/text/chapter-0002.xhtml"

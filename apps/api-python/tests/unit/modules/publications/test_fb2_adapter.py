@@ -14,8 +14,8 @@ from app.modules.publications.infrastructure.fb2_adapter import Fb2PublicationAd
 
 def _source(path: Path) -> PublicationSource:
     return PublicationSource(
-        volume_id="fb2-volume",
-        file_id="fb2-file",
+        resource_id="fb2-resource",
+        asset_id="fb2-asset",
         source_format="fb2",
         path=str(path),
         size_bytes=path.stat().st_size,

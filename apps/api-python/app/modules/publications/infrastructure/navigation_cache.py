@@ -168,7 +168,15 @@ class SqlAlchemyPublicationNavigationWriteRepository:
                 LibrarySourceNode.observed_mtime_ns == source.mtime_ms * 1_000_000,
             )
         )
-        return bool(self._session.scalar(select(current_source)))
+        if not self._session.scalar(select(current_source)):
+            return False
+        metadata = self._session.get(
+            LibraryReadableResourceMetadata,
+            source.resource_id,
+        )
+        if metadata is not None:
+            metadata.chapter_count = chapter_count
+        return True
 
     def _delete_projection(self, *, resource_id: str) -> None:
         self._session.execute(

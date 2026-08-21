@@ -45,11 +45,11 @@ def _publication() -> NormalizedPublication:
 
 def test_flatten_navigation_is_zero_based_preorder_with_stable_metadata() -> None:
     first = flatten_publication_navigation(
-        volume_id="volume-navigation",
+        resource_id="resource-navigation",
         publication=_publication(),
     )
     second = flatten_publication_navigation(
-        volume_id="volume-navigation",
+        resource_id="resource-navigation",
         publication=_publication(),
     )
 

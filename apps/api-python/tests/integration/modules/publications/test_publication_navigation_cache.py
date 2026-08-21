@@ -98,7 +98,7 @@ def _seed_resource(
         source_node_id=source_node.id,
         adapter_id="epub",
         adapter_version="1",
-        media_kind="READABLE",
+        media_kind="EBOOK",
         format="EPUB",
         enablement_state="ENABLED",
         import_state="READY",
@@ -122,18 +122,19 @@ def _seed_resource(
         asset_id=asset.id,
         mime_type="application/epub+zip",
     )
-    db_session.add_all(
-        [
-            book_node,
-            source_node,
-            book,
-            book_metadata,
-            resource,
-            resource_metadata,
-            asset,
-            asset_metadata,
-        ]
-    )
+    db_session.add_all([book_node, source_node])
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(book_metadata)
+    db_session.flush()
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add(resource_metadata)
+    db_session.flush()
+    db_session.add(asset)
+    db_session.flush()
+    db_session.add(asset_metadata)
     db_session.commit()
     return resource, asset
 

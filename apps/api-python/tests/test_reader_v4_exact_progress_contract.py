@@ -90,7 +90,7 @@ def _login_and_resource(client: TestClient, session: Session) -> LibraryReadable
         source_node_id=source_node.id,
         adapter_id="epub",
         adapter_version="1",
-        media_kind="READABLE",
+        media_kind="EBOOK",
         format="EPUB",
         enablement_state="ENABLED",
         import_state="READY",
@@ -114,19 +114,20 @@ def _login_and_resource(client: TestClient, session: Session) -> LibraryReadable
         asset_id=asset.id,
         mime_type="application/epub+zip",
     )
-    session.add_all(
-        [
-            user,
-            book_node,
-            source_node,
-            book,
-            book_metadata,
-            resource,
-            resource_metadata,
-            asset,
-            asset_metadata,
-        ]
-    )
+    session.add(user)
+    session.add_all([book_node, source_node])
+    session.flush()
+    session.add(book)
+    session.flush()
+    session.add(book_metadata)
+    session.flush()
+    session.add(resource)
+    session.flush()
+    session.add(resource_metadata)
+    session.flush()
+    session.add(asset)
+    session.flush()
+    session.add(asset_metadata)
     session.commit()
     login = client.post(
         "/api/auth/login",

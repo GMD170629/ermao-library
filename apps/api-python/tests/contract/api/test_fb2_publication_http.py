@@ -66,7 +66,7 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         name=relative_path.name,
         physical_kind="REGULAR_FILE",
         observed_size_bytes=source_path.stat().st_size,
-        observed_mtime_ns=int(source_path.stat().st_mtime * 1_000_000_000),
+        observed_mtime_ns=int(source_path.stat().st_mtime * 1000) * 1_000_000,
         observed_at=datetime.now(UTC),
     )
     book = LibraryBook(
@@ -86,7 +86,7 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         source_node_id=source_node.id,
         adapter_id="fb2",
         adapter_version="1",
-        media_kind="READABLE",
+        media_kind="EBOOK",
         format="FB2",
         enablement_state="ENABLED",
         import_state="READY",
@@ -110,19 +110,20 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         asset_id=asset.id,
         mime_type="application/x-fictionbook+xml",
     )
-    db_session.add_all(
-        [
-            user,
-            book_node,
-            source_node,
-            book,
-            book_metadata,
-            resource,
-            resource_metadata,
-            asset,
-            asset_metadata,
-        ]
-    )
+    db_session.add(user)
+    db_session.add_all([book_node, source_node])
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(book_metadata)
+    db_session.flush()
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add(resource_metadata)
+    db_session.flush()
+    db_session.add(asset)
+    db_session.flush()
+    db_session.add(asset_metadata)
     db_session.commit()
     login = client.post(
         "/api/auth/login",
