@@ -508,7 +508,8 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 
 ## 实施进度
 
-非规范性实施台账。本节不改变上文规范；第 12 节“领域与 schema”整体仍未完成。
+非规范性实施台账。本节不改变上文规范。阶段 1A/1B 与阶段 2～6 目标实现已落地；
+阶段 7（统一验证与激活）仍未完成。target composition root 可独立构造，但尚未接入生产启动路径。
 
 ### 阶段 1A：SourceNode 纯领域基础 — 已完成
 
@@ -578,11 +579,59 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
   - `tests/test_capability_architecture.py`（新增守卫）
 - 明确未接入：API、scanner、worker、composition root 读写路径
 
-### 后续阶段 — 未完成
+### 阶段 2：扫描与分类 — 实现完成，等待阶段 7 验证
 
-- 阶段 2：扫描与分类
-- 阶段 3：首个单文件闭环
-- 阶段 4：首个目录闭环
-- 阶段 5：其余格式
-- 阶段 6：重新导入和管理操作
-- 阶段 7：规模与最终验收
+- 实现：
+  - `app/modules/library/application/commands/scan_source_tree.py` — `ScanLibrarySourceTree`
+  - `app/modules/imports/infrastructure/readable_resource/filesystem.py` — `OsSourceTreeFilesystem`
+    （`os.scandir`、`follow_symlinks=False`、有界目录探测、路径防穿越/symlink escape）
+  - `app/modules/imports/domain/directory_probe.py` — 前 100 样本与终止原因决策
+  - `app/modules/library/domain/organization_modes.py` / `book_placement.py` — FLAT/VOLUMES（无 AUDIOBOOK）
+  - `app/modules/imports/domain/resource_adapters.py` — 后缀匹配（发现期不打开文件内容）
+- 行为覆盖：有界 DFS、insert-if-absent、`PATH_KEY_COLLISION`、终态解释不重判、空解释补完、
+  外层目录 Resource 截断、队列水位背压、探测证据落库
+- **本批未运行 pytest / Ruff / migration / smoke**；仅 `compileall` + `git diff --check`
+- target composition root **尚未激活**到生产 API/router/worker
+
+### 阶段 3：单文件导入闭环 — 实现完成，等待阶段 7 验证
+
+- 实现：
+  - `app/modules/imports/application/readable_resource/process_import_task.py`
+  - `app/modules/imports/domain/import_run_policies.py` — INITIAL/RETRY/REIMPORT/RECOVERY 与 CAS 提交规则
+  - `app/modules/imports/infrastructure/readable_resource/work_queue.py` — 与 ADR 0002 `ImportWorkItem` 协调
+  - `app/modules/library/infrastructure/persistence/source_tree_repository.py` — ORM 仓储（flush-only）
+- 行为覆盖：claim/lease/ack、事务外读文件、candidate、PRIMARY 发布、late worker 互斥、
+  业务结果与 WorkItem ack 同短事务、提交后 sidecar 调度钩子
+- Adapter：EPUB / PDF / TXT / Kindle / comic-archive / audio-file（经 adapter 端口包装既有解析器）
+
+### 阶段 4：目录有声书 / TRACK 闭环 — 实现完成，等待阶段 7 验证
+
+- Adapter：`audiobook-directory`（TRACK）；探测唯一音频后缀 → 目录 Resource；样本与后续兼容文件入队
+- 最小 READY 条件满足后发布；尾部 Asset 继续追加；个别失败不回滚 READY
+
+### 阶段 5：图片目录 / PAGE 与其余现有格式 — 实现完成，等待阶段 7 验证
+
+- Adapter：`image-directory`（PAGE）；文件侧 EPUB/PDF/TXT/Kindle/comic/audio 均已接入 registry
+- 约束：不创建派生 EPUB/ZIP/持久解包目录；压缩包内部对象不成 SourceNode/Asset
+
+### 阶段 6：重新导入与管理操作 — 实现完成，等待阶段 7 验证
+
+- 用例：
+  - `ReimportSourceNode` / `RetryReadableResourceImport`
+    （`app/modules/imports/application/readable_resource/reimport.py`）
+  - `DeleteSourceNode` / `ChangeLibraryOrganizationMode` / `RelocateLibraryRoot` /
+    `EnableReadableResource` / `DisableReadableResource`
+    （`app/modules/library/application/commands/manage_source_tree.py`）
+- 行为覆盖：activeImportRunId CAS、candidate 隔离、发布前失败保留旧结果、删除子树与跨 Resource Asset 清理、
+  模式切换先删目标关联再改模式、根路径仅更新 `rootPath`
+
+### Target composition root — 已构造，未激活
+
+- 入口：`apps/api-python/app/bootstrap/readable_resource_pipeline.py`
+  - `build_readable_resource_pipeline(session)`
+  - `ReadableResourceWorkerProcessor`
+- **未**注册到现有生产 API / router / worker 启动路径；阶段 7 验证后再决定激活
+
+### 阶段 7 — 未完成
+
+- 规模与最终验收；统一运行测试并修复问题；决定是否激活 target composition root
