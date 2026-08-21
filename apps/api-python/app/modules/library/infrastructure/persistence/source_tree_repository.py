@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models.common import cuid, db_timestamp
+from app.models.common import cuid
 from app.models.library import Library
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
@@ -324,7 +324,6 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         book_id: str,
         source_node_id: str,
         adapter: AdapterIdentity,
-        active_import_run_id: str,
     ) -> ReadableResourceRecord:
         row = LibraryReadableResource(
             id=cuid(),
@@ -337,27 +336,10 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             format=adapter.format_label,
             enablement_state=ResourceEnablementState.ENABLED.value,
             import_state=ResourceImportState.PENDING.value,
-            active_import_run_id=active_import_run_id,
         )
         self._session.add(row)
         self._session.flush()
         return self._to_resource(row)
-
-    def cas_set_active_import_run(
-        self,
-        resource_id: str,
-        *,
-        expected_active_run_id: str | None,
-        new_active_run_id: str | None,
-    ) -> bool:
-        row = self._session.get(LibraryReadableResource, resource_id)
-        if row is None:
-            return False
-        if row.active_import_run_id != expected_active_run_id:
-            return False
-        row.active_import_run_id = new_active_run_id
-        self._session.flush()
-        return True
 
     def set_enablement(
         self,
@@ -370,30 +352,26 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         row.enablement_state = state.value
         self._session.flush()
 
-    def publish_resource(
+    def mark_resource_ready(
         self,
         *,
         resource_id: str,
-        published_run_id: str,
-        adapter: AdapterIdentity,
-        title: str,
+        title: str | None = None,
     ) -> None:
         row = self._session.get(LibraryReadableResource, resource_id)
         if row is None:
             raise LookupError(resource_id)
-        row.published_run_id = published_run_id
         row.import_state = ResourceImportState.READY.value
-        row.adapter_id = adapter.adapter_id
-        row.adapter_version = adapter.adapter_version
-        row.media_kind = adapter.media_kind
-        row.format = adapter.format_label
-        metadata = self._session.get(LibraryReadableResourceMetadata, resource_id)
-        if metadata is None:
-            self._session.add(
-                LibraryReadableResourceMetadata(resource_id=resource_id, title=title)
-            )
-        else:
-            metadata.title = title
+        if title is not None:
+            metadata = self._session.get(LibraryReadableResourceMetadata, resource_id)
+            if metadata is None:
+                self._session.add(
+                    LibraryReadableResourceMetadata(
+                        resource_id=resource_id, title=title
+                    )
+                )
+            else:
+                metadata.title = title
         self._session.flush()
 
     def mark_resource_failed(self, resource_id: str) -> None:
@@ -403,27 +381,12 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         row.import_state = ResourceImportState.FAILED.value
         self._session.flush()
 
-    def clear_active_import_run(self, resource_id: str) -> None:
-        row = self._session.get(LibraryReadableResource, resource_id)
-        if row is None:
-            return
-        row.active_import_run_id = None
-        self._session.flush()
-
-    def touch_updated_at(self, resource_id: str) -> None:
-        row = self._session.get(LibraryReadableResource, resource_id)
-        if row is None:
-            return
-        row.updated_at = db_timestamp()
-        self._session.flush()
-
     def upsert_asset(
         self,
         *,
         library_id: str,
         resource_id: str,
         source_node_id: str,
-        published_run_id: str,
         role: AssetRole,
         import_state: AssetImportState,
         sequence_index: int | None,
@@ -445,7 +408,6 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 source_node_physical_kind="REGULAR_FILE",
             )
             self._session.add(row)
-        row.published_run_id = published_run_id
         row.role = role.value
         row.import_state = import_state.value
         row.sequence_index = sequence_index
@@ -454,18 +416,14 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         self._session.flush()
         return row.id
 
-    def count_ready_assets_for_published_run(
-        self, resource_id: str, published_run_id: str
-    ) -> int:
+    def count_ready_assets(self, resource_id: str) -> int:
         return int(
             self._session.scalar(
                 select(func.count())
                 .select_from(LibraryResourceAsset)
                 .where(
                     LibraryResourceAsset.resource_id == resource_id,
-                    LibraryResourceAsset.published_run_id == published_run_id,
-                    LibraryResourceAsset.import_state
-                    == AssetImportState.READY.value,
+                    LibraryResourceAsset.import_state == AssetImportState.READY.value,
                 )
             )
             or 0
@@ -532,25 +490,10 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
     ) -> None:
         for resource_id in resource_ids:
             resource = self.get_resource(resource_id)
-            if resource is None or resource.published_run_id is None:
+            if resource is None:
                 continue
-            ready = self.count_ready_assets_for_published_run(
-                resource_id, resource.published_run_id
-            )
-            if ready < 1:
+            if self.count_ready_assets(resource_id) < 1:
                 self.mark_resource_failed(resource_id)
-
-    def cleanup_stale_assets(
-        self, resource_id: str, published_run_id: str
-    ) -> None:
-        self._session.execute(
-            delete(LibraryResourceAsset).where(
-                LibraryResourceAsset.resource_id == resource_id,
-                LibraryResourceAsset.published_run_id.is_not(None),
-                LibraryResourceAsset.published_run_id != published_run_id,
-            )
-        )
-        self._session.flush()
 
     def _to_resource(self, row: LibraryReadableResource) -> ReadableResourceRecord:
         return ReadableResourceRecord(
@@ -564,6 +507,4 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             format=row.format,
             enablement_state=ResourceEnablementState(row.enablement_state),
             import_state=ResourceImportState(row.import_state),
-            published_run_id=row.published_run_id,
-            active_import_run_id=row.active_import_run_id,
         )

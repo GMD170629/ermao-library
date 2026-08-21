@@ -64,10 +64,7 @@ from app.models.settings import (
 )
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
-    AssetCandidate,
-    LibraryImportRun,
     LibraryImportTask,
-    ResourceCandidate,
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
@@ -86,7 +83,6 @@ from app.modules.publications.infrastructure.models import (
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
-    "AssetCandidate",
     "BookIdentityCache",
     "DownloadTask",
     "ExternalMetadataCache",
@@ -101,7 +97,6 @@ __all__ = [
     "LibraryBookMetadata",
     "LibraryFacet",
     "LibraryFile",
-    "LibraryImportRun",
     "LibraryImportTask",
     "LibraryMetadata",
     "LibraryOperation",
@@ -119,7 +114,6 @@ __all__ = [
     "LibraryVolumeFacet",
     "LibraryWork",
     "LibraryWorkFacet",
-    "ResourceCandidate",
     "MetadataLookupTask",
     "MetadataOpfQueueState",
     "MetadataProviderExecution",

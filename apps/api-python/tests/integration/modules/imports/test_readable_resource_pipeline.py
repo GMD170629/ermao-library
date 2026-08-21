@@ -1,23 +1,25 @@
-"""Integration coverage for ADR 0018 readable-resource pipeline (phase 7A)."""
+"""Integration coverage for ADR 0018 single-consumer ContinueImport."""
 
 from __future__ import annotations
 
-from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import (
     ReadableResourcePipeline,
     build_readable_resource_pipeline,
+    build_readable_resource_worker,
 )
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.common import db_timestamp
-from app.models.import_pipeline import ImportWorkItem
 from app.models.library import Library
+from app.modules.imports.application.readable_resource.continue_import import (
+    ContinueLibraryImport,
+    ContinueSourceImport,
+)
 from app.modules.imports.application.readable_resource.ports import (
     AssetTechnicalMetadata,
     FileParseResult,
@@ -31,9 +33,6 @@ from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
 )
-from app.modules.imports.infrastructure.readable_resource.import_run_repository import (
-    SqlAlchemyImportRunRepository,
-)
 from app.modules.imports.infrastructure.readable_resource.support import (
     InMemorySidecarWriteback,
     SqlAlchemyUnitOfWork,
@@ -44,9 +43,7 @@ from app.modules.imports.infrastructure.readable_resource.work_queue import (
     SqlAlchemyReadableResourceWorkQueue,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
-    AssetCandidate,
     LibraryImportTask,
-    ResourceCandidate,
 )
 from app.modules.library.domain.readable_resource_states import AssetRole
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
@@ -55,15 +52,15 @@ from app.modules.library.infrastructure.persistence.source_tree_repository impor
     SqlAlchemySourceNodeRepository,
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
     LibraryReadableResource,
     LibraryResourceAsset,
     LibrarySourceNode,
+    LibrarySourceNodeInterpretation,
 )
 
 
 class StubAlwaysOkAdapter(ResourceAdapterExecutorPort):
-    """Exercises DB/candidate/publish without real media parsers."""
-
     def parse_file(
         self,
         *,
@@ -90,6 +87,31 @@ class StubAlwaysOkAdapter(ResourceAdapterExecutorPort):
         )
 
 
+class StubFailOnceAdapter(StubAlwaysOkAdapter):
+    def __init__(self, fail_names: set[str]) -> None:
+        self._fail_names = fail_names
+
+    def parse_file(
+        self,
+        *,
+        absolute_path: Path,
+        adapter: ResourceAdapterSpec,
+        role: AssetRole,
+    ) -> FileParseResult:
+        if absolute_path.name in self._fail_names:
+            return FileParseResult(
+                ok=False,
+                adapter=adapter,
+                resource_title=None,
+                asset=None,
+                error_code="PARSE_FAILED",
+                error_summary="PARSE_FAILED",
+            )
+        return super().parse_file(
+            absolute_path=absolute_path, adapter=adapter, role=role
+        )
+
+
 def _bootstrap(tmp_path: Path):
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
@@ -110,14 +132,16 @@ def _add_library(db: Session, root: Path, library_id: str = "lib-1") -> None:
     )
 
 
-def _pipeline(db: Session) -> ReadableResourcePipeline:
-    """Composition root with stub adapter for DB-path integration."""
+def _pipeline(
+    db: Session,
+    *,
+    adapters: ResourceAdapterExecutorPort | None = None,
+) -> tuple[ReadableResourcePipeline, InMemorySidecarWriteback]:
     base = build_readable_resource_pipeline(db)
     libraries = SqlAlchemyLibraryConfigAdapter(db)
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(db)
     books_resources = SqlAlchemyBookResourceRepository(db)
-    import_runs = SqlAlchemyImportRunRepository(db)
     queue = SqlAlchemyReadableResourceWorkQueue(db)
     uow = SqlAlchemyUnitOfWork(db)
     clock = UtcClock()
@@ -128,19 +152,17 @@ def _pipeline(db: Session) -> ReadableResourcePipeline:
         filesystem=filesystem,
         source_nodes=source_nodes,
         books_resources=books_resources,
-        import_runs=import_runs,
-        adapters=StubAlwaysOkAdapter(),
+        adapters=adapters or StubAlwaysOkAdapter(),
         queue=queue,
         uow=uow,
         clock=clock,
         log=log,
         sidecar=sidecar,
     )
-    return ReadableResourcePipeline(
+    pipeline = ReadableResourcePipeline(
+        continue_import=base.continue_import,
         scan_library_source_tree=base.scan_library_source_tree,
         process_import_task=process,
-        reimport_source_node=base.reimport_source_node,
-        retry_readable_resource_import=base.retry_readable_resource_import,
         delete_source_node=base.delete_source_node,
         change_library_organization_mode=base.change_library_organization_mode,
         relocate_library_root=base.relocate_library_root,
@@ -150,226 +172,297 @@ def _pipeline(db: Session) -> ReadableResourcePipeline:
         filesystem=filesystem,
         adapters=base.adapters,
         uow=uow,
+        clock=clock,
         worker_id=base.worker_id,
     )
+    return pipeline, sidecar
 
 
-def test_single_file_txt_scan_claim_and_process(tmp_path: Path) -> None:
+def _drain(pipeline: ReadableResourcePipeline, *, limit: int = 200) -> list[str]:
+    worker = build_readable_resource_worker(pipeline)
+    outcomes: list[str] = []
+    for _ in range(limit):
+        outcome = worker.process_once()
+        if outcome == "idle":
+            break
+        outcomes.append(outcome)
+    return outcomes
+
+
+def test_single_consumer_processes_by_created_at_order(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            (root / "Novel.txt").write_text("hello world\n", encoding="utf-8")
             db.commit()
-
-        with Session(engine) as db:
-            pipeline = _pipeline(db)
-            result = pipeline.scan_library_source_tree.execute("lib-1")
-            assert result.nodes_inserted >= 1
-            assert result.resources_created == 1
-            assert result.tasks_enqueued == 1
-
-            claim = pipeline.queue.claim_next("worker-a", lease_seconds=120)
-            assert claim is not None
-            assert claim.work_kind == "import"
-            assert claim.lease_owner == "worker-a"
-            assert claim.bridge_import_task_id is not None
-
-            outcome = pipeline.process_import_task.execute(claim.target_id, claim)
-            assert outcome.outcome == "ok"
-
-            resource = db.scalar(select(LibraryReadableResource).limit(1))
-            assert resource is not None
-            assert resource.import_state == "READY"
-            assert resource.published_run_id is not None
-            assets = db.scalars(select(LibraryResourceAsset)).all()
-            assert len(assets) == 1
-            assert assets[0].import_state == "READY"
+            pipeline, _ = _pipeline(db)
+            (root / "a.epub").write_bytes(b"epub")
+            (root / "b.epub").write_bytes(b"epub")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            outcomes = _drain(pipeline)
+            assert "scan" in outcomes
+            assert outcomes.count("ok") >= 2
+            tasks = db.scalars(
+                select(LibraryImportTask)
+                .where(LibraryImportTask.kind == "IMPORT_ASSET")
+                .order_by(LibraryImportTask.created_at.asc())
+            ).all()
+            assert [t.state for t in tasks] == ["SUCCEEDED", "SUCCEEDED"]
+            assert tasks[0].created_at <= tasks[1].created_at
     finally:
         engine.dispose()
 
 
-def test_late_lease_second_worker_does_not_overwrite(tmp_path: Path) -> None:
+def test_startup_marks_running_as_worker_interrupted(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            (root / "Story.txt").write_text("chapter\n", encoding="utf-8")
             db.commit()
-
-        with Session(engine) as db:
-            pipeline = _pipeline(db)
-            pipeline.scan_library_source_tree.execute("lib-1")
-
-            claim_a = pipeline.queue.claim_next("worker-a", lease_seconds=120)
-            assert claim_a is not None
-            work_id = claim_a.work_item_id
-
-            past = db_timestamp() - timedelta(seconds=5)
-            db.execute(
-                update(ImportWorkItem)
-                .where(ImportWorkItem.id == work_id)
-                .values(lease_expires_at=past)
-            )
+            pipeline, _ = _pipeline(db)
+            task = pipeline.queue.enqueue(kind="SCAN_LIBRARY", library_id="lib-1")
+            pipeline.queue.mark_running(task.id, started_at=pipeline.clock.now())
             db.commit()
-
-            claim_b = pipeline.queue.claim_next("worker-b", lease_seconds=120)
-            assert claim_b is not None
-            assert claim_b.work_item_id == work_id
-            assert claim_b.lease_owner == "worker-b"
-
-            stale = pipeline.process_import_task.execute(claim_a.target_id, claim_a)
-            assert stale.outcome == "late_lease"
-            assert db.scalar(select(LibraryResourceAsset).limit(1)) is None
-
-            live = pipeline.process_import_task.execute(claim_b.target_id, claim_b)
-            assert live.outcome == "ok"
-            resource = db.scalar(select(LibraryReadableResource).limit(1))
-            assert resource is not None
-            assert resource.import_state == "READY"
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.startup() == 1
+            db.refresh(db.get(LibraryImportTask, task.id))
+            row = db.get(LibraryImportTask, task.id)
+            assert row is not None
+            assert row.state == "FAILED"
+            assert row.error_summary == "WORKER_INTERRUPTED"
+            assert worker.process_once() == "idle"
     finally:
         engine.dispose()
 
 
-def test_audiobook_directory_queues_track_candidates(tmp_path: Path) -> None:
+def test_failure_does_not_auto_retry_until_continue_import(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
-    audio_dir = root / "MyAudiobook"
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            audio_dir.mkdir(parents=True)
-            for name in ("01.mp3", "02.mp3", "03.mp3"):
-                (audio_dir / name).write_bytes(b"")
             db.commit()
+            pipeline, _ = _pipeline(db, adapters=StubFailOnceAdapter({"bad.epub"}))
+            (root / "bad.epub").write_bytes(b"x")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            failed = db.scalars(
+                select(LibraryImportTask).where(LibraryImportTask.state == "FAILED")
+            ).all()
+            assert len(failed) == 1
+            assert _drain(pipeline) == []
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            requeued = db.scalars(
+                select(LibraryImportTask).where(LibraryImportTask.state == "QUEUED")
+            ).all()
+            assert any(t.kind == "IMPORT_ASSET" for t in requeued)
+    finally:
+        engine.dispose()
 
+
+def test_succeeded_not_reexecuted_and_no_duplicate_entities(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
         with Session(engine) as db:
-            pipeline = _pipeline(db)
-            result = pipeline.scan_library_source_tree.execute("lib-1")
-            assert result.resources_created >= 1
-
-            resource = db.scalar(
-                select(LibraryReadableResource).where(
-                    LibraryReadableResource.adapter_id == "audiobook-directory"
-                )
-            )
-            assert resource is not None
-            assert resource.format == "AUDIOBOOK_DIR"
-
-            tasks = db.scalars(select(LibraryImportTask)).all()
-            assert len(tasks) >= 1
-            assert all(task.role == "TRACK" for task in tasks)
-
-            processed = 0
-            while True:
-                claim = pipeline.queue.claim_next(
-                    f"worker-audio-{processed}", lease_seconds=120
-                )
-                if claim is None:
-                    break
-                if claim.work_kind != "import":
-                    with pipeline.uow.transaction():
-                        pipeline.queue.complete(claim)
-                    continue
-                outcome = pipeline.process_import_task.execute(claim.target_id, claim)
-                assert outcome.outcome in {"ok", "failed", "deferred_active_run"}
-                processed += 1
-                if processed > 10:
-                    break
-
-            candidates = db.scalars(select(AssetCandidate)).all()
-            published = db.scalars(
-                select(LibraryResourceAsset).where(
-                    LibraryResourceAsset.resource_id == resource.id
+            _add_library(db, root)
+            db.commit()
+            pipeline, sidecar = _pipeline(db)
+            (root / "one.epub").write_bytes(b"epub")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            books1 = db.scalars(select(LibraryBook)).all()
+            resources1 = db.scalars(select(LibraryReadableResource)).all()
+            assets1 = db.scalars(select(LibraryResourceAsset)).all()
+            assert len(books1) == 1
+            assert len(resources1) == 1
+            assert len(assets1) == 1
+            assert assets1[0].import_state == "READY"
+            assert resources1[0].import_state == "READY"
+            assert sidecar.scheduled
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            assert len(db.scalars(select(LibraryBook)).all()) == 1
+            assert len(db.scalars(select(LibraryReadableResource)).all()) == 1
+            assert len(db.scalars(select(LibraryResourceAsset)).all()) == 1
+            asset_tasks = db.scalars(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET"
                 )
             ).all()
-            assert processed >= 1
-            assert len(published) >= 1 or len(candidates) >= 1
-            assert resource.import_state in {"READY", "PENDING"}
-            if published:
-                assert all(asset.role == "TRACK" for asset in published)
-                assert all(
-                    asset.published_run_id == resource.published_run_id
-                    for asset in published
-                )
+            assert len(asset_tasks) == 1
+            assert asset_tasks[0].state == "SUCCEEDED"
     finally:
         engine.dispose()
 
 
-def test_image_directory_queues_page_path(tmp_path: Path) -> None:
+def test_node_only_then_compatible_files_become_resource(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
-    comic_dir = root / "ComicPages"
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            comic_dir.mkdir(parents=True)
-            for name in ("001.png", "002.jpg"):
-                (comic_dir / name).write_bytes(b"")
             db.commit()
-
-        with Session(engine) as db:
-            pipeline = _pipeline(db)
-            result = pipeline.scan_library_source_tree.execute("lib-1")
-            assert result.resources_created >= 1
-
-            resource = db.scalar(
-                select(LibraryReadableResource).where(
-                    LibraryReadableResource.adapter_id == "image-directory"
-                )
+            pipeline, _ = _pipeline(db)
+            empty = root / "mixed"
+            empty.mkdir()
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            interp = db.scalar(
+                select(LibrarySourceNodeInterpretation).join(
+                    LibrarySourceNode,
+                    LibrarySourceNode.id
+                    == LibrarySourceNodeInterpretation.source_node_id,
+                ).where(LibrarySourceNode.relative_path == "mixed")
             )
-            assert resource is not None
-            assert resource.format == "IMAGE_DIR"
-
-            nodes = db.scalars(
+            assert interp is not None
+            assert interp.result == "NODE_ONLY"
+            (empty / "a.mp3").write_bytes(b"audio")
+            (empty / "b.mp3").write_bytes(b"audio")
+            node = db.scalar(
                 select(LibrarySourceNode).where(
-                    LibrarySourceNode.physical_kind == "REGULAR_FILE"
+                    LibrarySourceNode.relative_path == "mixed"
                 )
-            ).all()
-            assert len(nodes) >= 2
-
-            tasks = db.scalars(select(LibraryImportTask)).all()
-            assert len(tasks) >= 1
-            assert all(task.role == "PAGE" for task in tasks)
-
-            claim = pipeline.queue.claim_next("worker-page", lease_seconds=120)
-            assert claim is not None
-            assert claim.work_kind == "import"
-            outcome = pipeline.process_import_task.execute(claim.target_id, claim)
-            assert outcome.outcome == "ok"
-            db.refresh(resource)
-            assert resource.import_state == "READY"
-            assert resource.published_run_id is not None
-            pages = db.scalars(
-                select(LibraryResourceAsset).where(
-                    LibraryResourceAsset.resource_id == resource.id
+            )
+            assert node is not None
+            pipeline.continue_import.execute(ContinueSourceImport(node.id))
+            _drain(pipeline)
+            resource = db.scalar(
+                select(LibraryReadableResource).where(
+                    LibraryReadableResource.source_node_id == node.id
                 )
-            ).all()
-            assert len(pages) >= 1
-            assert all(asset.role == "PAGE" for asset in pages)
+            )
+            assert resource is not None
+            assert resource.adapter_id == "audiobook-directory"
     finally:
         engine.dispose()
 
 
-def test_resource_candidate_exists_after_scan_before_process(tmp_path: Path) -> None:
+def test_directory_file_101_filled_on_continue(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            (root / "Draft.txt").write_text("draft\n", encoding="utf-8")
+            db.commit()
+            pipeline, _ = _pipeline(db)
+            album = root / "album"
+            album.mkdir()
+            for i in range(100):
+                (album / f"t{i:03d}.mp3").write_bytes(b"a")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline, limit=500)
+            (album / "t100.mp3").write_bytes(b"a")
+            node = db.scalar(
+                select(LibrarySourceNode).where(
+                    LibrarySourceNode.relative_path == "album"
+                )
+            )
+            assert node is not None
+            pipeline.continue_import.execute(ContinueSourceImport(node.id))
+            _drain(pipeline, limit=500)
+            resource = db.scalar(
+                select(LibraryReadableResource).where(
+                    LibraryReadableResource.source_node_id == node.id
+                )
+            )
+            assert resource is not None
+            assets = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.resource_id == resource.id,
+                    LibraryResourceAsset.import_state == "READY",
+                )
+            ).all()
+            assert len(assets) == 101
+    finally:
+        engine.dispose()
+
+
+def test_partial_asset_failure_keeps_ready_resource(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            album = root / "album"
+            album.mkdir()
+            (album / "ok.mp3").write_bytes(b"a")
+            (album / "bad.mp3").write_bytes(b"a")
+            pipeline, _ = _pipeline(
+                db, adapters=StubFailOnceAdapter({"bad.mp3"})
+            )
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            resource = db.scalar(select(LibraryReadableResource))
+            assert resource is not None
+            assert resource.import_state == "READY"
+            ready = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.import_state == "READY"
+                )
+            ).all()
+            failed = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.import_state == "FAILED"
+                )
+            ).all()
+            assert len(ready) == 1
+            assert len(failed) == 1
+    finally:
+        engine.dispose()
+
+
+def test_no_db_transaction_during_file_parse(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
             db.commit()
 
-        with Session(engine) as db:
-            pipeline = _pipeline(db)
-            pipeline.scan_library_source_tree.execute("lib-1")
-            candidates = db.scalars(select(ResourceCandidate)).all()
-            assert len(candidates) == 1
-            resource = db.scalar(select(LibraryReadableResource).limit(1))
+            class AssertNoTxnAdapter(StubAlwaysOkAdapter):
+                def __init__(self, session: Session) -> None:
+                    self._session = session
+
+                def parse_file(self, **kwargs):  # type: ignore[no-untyped-def]
+                    assert not self._session.in_transaction()
+                    return super().parse_file(**kwargs)
+
+            pipeline, _ = _pipeline(db, adapters=AssertNoTxnAdapter(db))
+            (root / "book.epub").write_bytes(b"epub")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            resource = db.scalar(select(LibraryReadableResource))
             assert resource is not None
-            assert resource.import_state == "PENDING"
-            assert resource.active_import_run_id is not None
+            assert resource.import_state == "READY"
+    finally:
+        engine.dispose()
+
+
+def test_epub_and_image_directory_adapters(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db)
+            (root / "novel.epub").write_bytes(b"epub")
+            comic = root / "comic"
+            comic.mkdir()
+            (comic / "01.png").write_bytes(b"png")
+            (comic / "02.png").write_bytes(b"png")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            adapters = {
+                r.adapter_id for r in db.scalars(select(LibraryReadableResource)).all()
+            }
+            assert "epub" in adapters
+            assert "image-directory" in adapters
+            interpretations = db.scalars(select(LibrarySourceNodeInterpretation)).all()
+            assert interpretations
     finally:
         engine.dispose()

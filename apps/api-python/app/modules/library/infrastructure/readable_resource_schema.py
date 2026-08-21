@@ -184,14 +184,6 @@ class LibrarySourceNode(Base):
             "LibrarySourceNode.library_id==LibraryResourceAsset.library_id)"
         ),
     )
-    import_runs: Mapped[list["LibraryImportRun"]] = relationship(
-        back_populates="source_node",
-        foreign_keys="LibraryImportRun.source_node_id",
-        primaryjoin=(
-            "and_(LibrarySourceNode.id==LibraryImportRun.source_node_id,"
-            "LibrarySourceNode.library_id==LibraryImportRun.library_id)"
-        ),
-    )
 
 
 class LibrarySourceNodeMetadata(Base):
@@ -442,12 +434,6 @@ class LibraryReadableResource(Base):
         ),
         Index("LibraryReadableResource_bookId_idx", "bookId"),
         Index("LibraryReadableResource_libraryId_idx", "libraryId"),
-        Index(
-            "LibraryReadableResource_activeImportRunId_key",
-            "activeImportRunId",
-            unique=True,
-            sqlite_where=column("activeImportRunId").is_not(None),
-        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -480,30 +466,6 @@ class LibraryReadableResource(Base):
         nullable=False,
         default="PENDING",
         server_default="PENDING",
-    )
-    published_run_id: Mapped[str | None] = mapped_column(
-        "publishedRunId",
-        String(191),
-        ForeignKey(
-            "LibraryImportRun.id",
-            ondelete="SET NULL",
-            onupdate="CASCADE",
-            use_alter=True,
-            name="fk_LibraryReadableResource_publishedRunId",
-        ),
-        nullable=True,
-    )
-    active_import_run_id: Mapped[str | None] = mapped_column(
-        "activeImportRunId",
-        String(191),
-        ForeignKey(
-            "LibraryImportRun.id",
-            ondelete="SET NULL",
-            onupdate="CASCADE",
-            use_alter=True,
-            name="fk_LibraryReadableResource_activeImportRunId",
-        ),
-        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
@@ -543,16 +505,6 @@ class LibraryReadableResource(Base):
             "and_(LibraryReadableResource.id==LibraryResourceAsset.resource_id,"
             "LibraryReadableResource.library_id==LibraryResourceAsset.library_id)"
         ),
-    )
-    active_import_run: Mapped["LibraryImportRun | None"] = relationship(
-        foreign_keys=[active_import_run_id],
-        post_update=True,
-        primaryjoin="LibraryReadableResource.active_import_run_id==LibraryImportRun.id",
-    )
-    published_import_run: Mapped["LibraryImportRun | None"] = relationship(
-        foreign_keys=[published_run_id],
-        post_update=True,
-        primaryjoin="LibraryReadableResource.published_run_id==LibraryImportRun.id",
     )
 
 
@@ -655,9 +607,8 @@ class LibraryResourceAsset(Base):
             name="fk_LibraryResourceAsset_sourceNode_file",
         ),
         Index(
-            "LibraryResourceAsset_current_published_idx",
+            "LibraryResourceAsset_resourceId_importState_idx",
             "resourceId",
-            "publishedRunId",
             "importState",
         ),
         Index("LibraryResourceAsset_sourceNodeId_idx", "sourceNodeId"),
@@ -681,18 +632,6 @@ class LibraryResourceAsset(Base):
         nullable=False,
         default="REGULAR_FILE",
         server_default="REGULAR_FILE",
-    )
-    published_run_id: Mapped[str | None] = mapped_column(
-        "publishedRunId",
-        String(191),
-        ForeignKey(
-            "LibraryImportRun.id",
-            ondelete="SET NULL",
-            onupdate="CASCADE",
-            use_alter=True,
-            name="fk_LibraryResourceAsset_publishedRunId",
-        ),
-        nullable=True,
     )
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     import_state: Mapped[str] = mapped_column(
@@ -739,11 +678,6 @@ class LibraryResourceAsset(Base):
             "LibraryResourceAsset.library_id==LibrarySourceNode.library_id)"
         ),
         overlaps="resource",
-    )
-    published_import_run: Mapped["LibraryImportRun | None"] = relationship(
-        foreign_keys=[published_run_id],
-        post_update=True,
-        primaryjoin="LibraryResourceAsset.published_run_id==LibraryImportRun.id",
     )
 
 

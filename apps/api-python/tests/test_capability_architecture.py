@@ -468,7 +468,67 @@ def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None
                 f"{path.name}: CheckConstraint must use typed SQLAlchemy "
                 f"expressions, not string SQL (line {node.lineno})"
             )
-    assert check_count == 20
+    assert check_count == 16
+
+
+def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
+    """Target overlay must not reintroduce Run/candidate/lease/WorkItem bridge."""
+
+    forbidden = (
+        "LibraryImportRun",
+        "ResourceCandidate",
+        "AssetCandidate",
+        "ClaimedWork",
+        "activeImportRunId",
+        "publishedRunId",
+        "ownerImportRunId",
+        "leaseOwner",
+        "leaseExpiresAt",
+        "fence_claim",
+        "ImportWorkItem",
+        "DurableSidecarWriteback",
+        "ReimportSourceNode",
+        "RetryReadableResourceImport",
+    )
+    # heartbeat as a method name is also banned in target queue code
+    heartbeat_paths_extra = ("heartbeat",)
+
+    roots = (
+        APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
+        APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource_import_schema.py",
+        APP_ROOT
+        / "modules"
+        / "library"
+        / "infrastructure"
+        / "readable_resource_schema.py",
+        APP_ROOT
+        / "db"
+        / "alembic"
+        / "versions"
+        / "0003_readable_resource_overlay_schema.py",
+    )
+    files: list[Path] = []
+    for root in roots:
+        if root.is_file():
+            files.append(root)
+        else:
+            files.extend(root.rglob("*.py"))
+
+    for path in files:
+        if path.name == "__init__.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            assert token not in source, f"{path}: forbidden {token}"
+        if path.name in {"work_queue.py", "worker.py", "ports.py"}:
+            for token in heartbeat_paths_extra:
+                assert token not in source, f"{path}: forbidden {token}"
 
 
 def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:

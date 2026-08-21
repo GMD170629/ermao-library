@@ -1,272 +1,214 @@
-"""Bridge LibraryImportTask onto the ADR 0002 ImportWorkItem queue."""
+"""Single-consumer LibraryImportTask queue for ADR 0018 ContinueImport."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime
 
-from sqlalchemy import and_, exists, func, or_, select, update
+from typing import cast
+
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models.common import cuid, db_timestamp
-from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
+from app.models.common import cuid
 from app.modules.imports.application.readable_resource.ports import (
-    ClaimedWork,
+    ImportTaskKind,
+    ImportTaskState,
+    LibraryImportTaskRecord,
+    WORKER_INTERRUPTED,
     WorkQueuePort,
 )
-from app.modules.imports.infrastructure.work_queue import (
-    complete_work_item,
-    ensure_import_work_item,
+from app.modules.imports.infrastructure.readable_resource_import_schema import (
+    LibraryImportTask,
 )
-
-OVERLAY_IMPORT_ORIGIN = "READABLE_RESOURCE_OVERLAY"
-OVERLAY_SCAN_TRIGGER = "READABLE_RESOURCE_SCAN"
+from app.modules.library.domain.readable_resource_states import AssetRole
 
 
 class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def queued_item_count(self) -> int:
-        return int(
-            self._session.scalar(
-                select(func.count())
-                .select_from(ImportWorkItem)
-                .where(
-                    ImportWorkItem.status.in_(("PENDING", "LEASED")),
-                    or_(self._overlay_scan_predicate(), self._overlay_import_predicate()),
-                )
-            )
-            or 0
-        )
-
-    def enqueue_library_import_task(self, task_id: str) -> None:
-        bridge = self._session.scalar(
-            select(ImportTask).where(
-                ImportTask.origin == OVERLAY_IMPORT_ORIGIN,
-                ImportTask.source_path == task_id,
-            )
-        )
-        if bridge is None:
-            bridge = ImportTask(
-                id=cuid(),
-                library_id=None,
-                origin=OVERLAY_IMPORT_ORIGIN,
-                status="PENDING",
-                source_path=task_id,
-                source_key=f"overlay-task:{task_id}",
-                task_kind="READABLE_RESOURCE",
-            )
-            self._session.add(bridge)
-            self._session.flush()
-        ensure_import_work_item(self._session, bridge, priority=20)
-        self._session.flush()
-
-    def enqueue_library_scan(self, library_id: str) -> None:
-        job = ImportScanJob(
+    def enqueue(
+        self,
+        *,
+        kind: ImportTaskKind,
+        library_id: str,
+        resource_id: str | None = None,
+        source_node_id: str | None = None,
+        role: AssetRole | None = None,
+    ) -> LibraryImportTaskRecord:
+        row = LibraryImportTask(
             id=cuid(),
+            kind=kind,
             library_id=library_id,
-            actor_user_id=None,
-            root_path="",
-            trigger=OVERLAY_SCAN_TRIGGER,
-            status="PENDING",
+            resource_id=resource_id,
+            source_node_id=source_node_id,
+            role=None if role is None else role.value,
+            state="QUEUED",
         )
-        self._session.add(job)
+        self._session.add(row)
         self._session.flush()
-        work = ImportWorkItem(
-            id=f"work_{cuid()}",
-            kind="SCAN_DIRECTORY",
-            scan_job_id=job.id,
-            import_task_id=None,
-            dedupe_key=f"overlay-scan:{library_id}:{job.id}",
-            status="PENDING",
-            priority=50,
-        )
-        self._session.add(work)
-        self._session.flush()
+        return self._to_record(row)
 
-    def claim_next(self, worker_id: str, *, lease_seconds: int) -> ClaimedWork | None:
-        now = db_timestamp()
-        claimable = or_(
-            ImportWorkItem.status == "PENDING",
-            and_(
-                ImportWorkItem.status == "LEASED",
-                ImportWorkItem.lease_expires_at.is_not(None),
-                ImportWorkItem.lease_expires_at <= now,
-            ),
-        )
+    def ensure_import_asset_task(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        role: AssetRole,
+    ) -> LibraryImportTaskRecord | None:
         row = self._session.scalar(
-            select(ImportWorkItem)
-            .where(
-                ImportWorkItem.available_at <= now,
-                claimable,
-                or_(self._overlay_scan_predicate(), self._overlay_import_predicate()),
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_ASSET",
+                LibraryImportTask.resource_id == resource_id,
+                LibraryImportTask.source_node_id == source_node_id,
             )
-            .order_by(
-                ImportWorkItem.priority.asc(),
-                ImportWorkItem.created_at.asc(),
-                ImportWorkItem.id.asc(),
+        )
+        if row is None:
+            return self.enqueue(
+                kind="IMPORT_ASSET",
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                role=role,
             )
+        if row.state == "SUCCEEDED":
+            return None
+        if row.state == "FAILED":
+            row.state = "QUEUED"
+            row.error_summary = None
+            row.started_at = None
+            row.finished_at = None
+            row.role = role.value
+            self._session.flush()
+        return self._to_record(row)
+
+    def next_queued(self) -> LibraryImportTaskRecord | None:
+        row = self._session.scalar(
+            select(LibraryImportTask)
+            .where(LibraryImportTask.state == "QUEUED")
+            .order_by(LibraryImportTask.created_at.asc())
             .limit(1)
         )
+        return None if row is None else self._to_record(row)
+
+    def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
+        row = self._session.get(LibraryImportTask, task_id)
+        return None if row is None else self._to_record(row)
+
+    def mark_running(self, task_id: str, *, started_at: datetime) -> None:
+        row = self._session.get(LibraryImportTask, task_id)
         if row is None:
-            return None
-
-        lease_secs = lease_seconds if row.kind == "IMPORT_SOURCE" else min(lease_seconds, 60)
-        lease_expires_at = now + timedelta(seconds=lease_secs)
-        claimed = self._session.execute(
-            update(ImportWorkItem)
-            .where(ImportWorkItem.id == row.id, claimable)
-            .values(
-                status="LEASED",
-                lease_owner=worker_id,
-                lease_expires_at=lease_expires_at,
-                attempts=ImportWorkItem.attempts + 1,
-                updated_at=now,
-            )
-        )
-        if not claimed.rowcount:
-            return None
-
-        if row.kind == "SCAN_DIRECTORY" and row.scan_job_id is not None:
-            job = self._session.get(ImportScanJob, row.scan_job_id)
-            if job is None:
-                return None
-            if job.status == "PENDING":
-                job.status = "RUNNING"
-                job.started_at = now
-            job.heartbeat_at = now
-            job.updated_at = now
-            self._session.flush()
-            return ClaimedWork(
-                work_item_id=row.id,
-                work_kind="scan",
-                target_id=job.library_id,
-                lease_owner=worker_id,
-                lease_expires_at=lease_expires_at,
-                scan_job_id=job.id,
-                bridge_import_task_id=None,
-            )
-
-        if row.kind == "IMPORT_SOURCE" and row.import_task_id is not None:
-            bridge = self._session.get(ImportTask, row.import_task_id)
-            if bridge is None or bridge.source_path is None:
-                return None
-            self._session.flush()
-            return ClaimedWork(
-                work_item_id=row.id,
-                work_kind="import",
-                target_id=bridge.source_path,
-                lease_owner=worker_id,
-                lease_expires_at=lease_expires_at,
-                scan_job_id=None,
-                bridge_import_task_id=bridge.id,
-            )
-        return None
-
-    def complete(self, claim: ClaimedWork) -> bool:
-        now = db_timestamp()
-        leased = self._session.execute(
-            update(ImportWorkItem)
-            .where(
-                ImportWorkItem.id == claim.work_item_id,
-                ImportWorkItem.status == "LEASED",
-                ImportWorkItem.lease_owner == claim.lease_owner,
-                or_(
-                    ImportWorkItem.lease_expires_at.is_(None),
-                    ImportWorkItem.lease_expires_at > now,
-                ),
-            )
-            .values(updated_at=now)
-        )
-        if not leased.rowcount:
-            return False
-        if claim.work_kind == "import" and claim.bridge_import_task_id is not None:
-            bridge = self._session.get(ImportTask, claim.bridge_import_task_id)
-            if bridge is not None:
-                bridge.status = "COMPLETED"
-        if claim.work_kind == "scan" and claim.scan_job_id is not None:
-            job = self._session.get(ImportScanJob, claim.scan_job_id)
-            if job is not None:
-                job.status = "COMPLETED"
-        complete_work_item(self._session, claim.work_item_id)
+            raise LookupError(task_id)
+        row.state = "RUNNING"
+        row.started_at = started_at
+        row.error_summary = None
         self._session.flush()
-        return True
 
-    def heartbeat(self, claim: ClaimedWork) -> bool:
-        return self.fence_claim(claim, lease_seconds=60)
+    def mark_succeeded(self, task_id: str, *, finished_at: datetime) -> None:
+        row = self._session.get(LibraryImportTask, task_id)
+        if row is None:
+            raise LookupError(task_id)
+        row.state = "SUCCEEDED"
+        row.finished_at = finished_at
+        row.error_summary = None
+        self._session.flush()
 
-    def fence_claim(self, claim: ClaimedWork, *, lease_seconds: int) -> bool:
-        now = db_timestamp()
-        expires = now + timedelta(seconds=lease_seconds)
+    def mark_failed(
+        self,
+        task_id: str,
+        *,
+        error_summary: str,
+        finished_at: datetime,
+    ) -> None:
+        row = self._session.get(LibraryImportTask, task_id)
+        if row is None:
+            raise LookupError(task_id)
+        row.state = "FAILED"
+        row.finished_at = finished_at
+        row.error_summary = error_summary
+        self._session.flush()
+
+    def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
         result = self._session.execute(
-            update(ImportWorkItem)
-            .where(
-                ImportWorkItem.id == claim.work_item_id,
-                ImportWorkItem.status == "LEASED",
-                ImportWorkItem.lease_owner == claim.lease_owner,
-                or_(
-                    ImportWorkItem.lease_expires_at.is_(None),
-                    ImportWorkItem.lease_expires_at > now,
-                ),
+            update(LibraryImportTask)
+            .where(LibraryImportTask.state == "RUNNING")
+            .values(
+                state="FAILED",
+                error_summary=WORKER_INTERRUPTED,
+                finished_at=finished_at,
             )
-            .values(lease_expires_at=expires, updated_at=now)
         )
         self._session.flush()
-        return bool(result.rowcount)
+        return int(result.rowcount or 0)
 
-    def release_and_requeue(
-        self, claim: ClaimedWork, *, delay_seconds: int = 5
+    def requeue_failed_for_library(self, library_id: str) -> int:
+        result = self._session.execute(
+            update(LibraryImportTask)
+            .where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.state == "FAILED",
+            )
+            .values(
+                state="QUEUED",
+                error_summary=None,
+                started_at=None,
+                finished_at=None,
+            )
+        )
+        self._session.flush()
+        return int(result.rowcount or 0)
+
+    def requeue_failed_for_source(self, source_node_id: str) -> int:
+        result = self._session.execute(
+            update(LibraryImportTask)
+            .where(
+                LibraryImportTask.source_node_id == source_node_id,
+                LibraryImportTask.state == "FAILED",
+            )
+            .values(
+                state="QUEUED",
+                error_summary=None,
+                started_at=None,
+                finished_at=None,
+            )
+        )
+        # Also requeue IMPORT_ASSET tasks under resources anchored at this node
+        # is handled by CONTINUE_SOURCE scan; FAILED for this source_node covers
+        # CONTINUE_SOURCE and file PRIMARY tasks.
+        self._session.flush()
+        return int(result.rowcount or 0)
+
+    def has_active_kind(
+        self,
+        *,
+        kind: ImportTaskKind,
+        library_id: str,
+        source_node_id: str | None = None,
     ) -> bool:
-        now = db_timestamp()
-        available_at = now + timedelta(seconds=delay_seconds)
-        result = self._session.execute(
-            update(ImportWorkItem)
-            .where(
-                ImportWorkItem.id == claim.work_item_id,
-                ImportWorkItem.lease_owner == claim.lease_owner,
-            )
-            .values(
-                status="PENDING",
-                lease_owner=None,
-                lease_expires_at=None,
-                available_at=available_at,
-                updated_at=now,
-            )
+        stmt = select(LibraryImportTask.id).where(
+            LibraryImportTask.kind == kind,
+            LibraryImportTask.library_id == library_id,
+            LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
         )
-        self._session.flush()
-        return bool(result.rowcount)
+        if source_node_id is not None:
+            stmt = stmt.where(LibraryImportTask.source_node_id == source_node_id)
+        return self._session.scalar(stmt.limit(1)) is not None
 
-    def is_claim_valid(self, claim: ClaimedWork) -> bool:
-        row = self._session.get(ImportWorkItem, claim.work_item_id)
-        if row is None:
-            return False
-        if row.status != "LEASED" or row.lease_owner != claim.lease_owner:
-            return False
-        now = db_timestamp()
-        if row.lease_expires_at is not None and row.lease_expires_at <= now:
-            return False
-        return True
-
-    def _overlay_scan_predicate(self) -> object:
-        return and_(
-            ImportWorkItem.kind == "SCAN_DIRECTORY",
-            ImportWorkItem.scan_job_id.is_not(None),
-            exists().where(
-                and_(
-                    ImportScanJob.id == ImportWorkItem.scan_job_id,
-                    ImportScanJob.trigger == OVERLAY_SCAN_TRIGGER,
-                )
-            ),
+    def _to_record(self, row: LibraryImportTask) -> LibraryImportTaskRecord:
+        role: AssetRole | None = None
+        if row.role is not None:
+            role = AssetRole(row.role)
+        return LibraryImportTaskRecord(
+            id=row.id,
+            kind=cast(ImportTaskKind, row.kind),
+            library_id=row.library_id,
+            state=cast(ImportTaskState, row.state),
+            resource_id=row.resource_id,
+            source_node_id=row.source_node_id,
+            role=role,
+            error_summary=row.error_summary,
         )
 
-    def _overlay_import_predicate(self) -> object:
-        return and_(
-            ImportWorkItem.kind == "IMPORT_SOURCE",
-            ImportWorkItem.import_task_id.is_not(None),
-            exists().where(
-                and_(
-                    ImportTask.id == ImportWorkItem.import_task_id,
-                    ImportTask.origin == OVERLAY_IMPORT_ORIGIN,
-                )
-            ),
-        )
+
+__all__ = ["SqlAlchemyReadableResourceWorkQueue"]

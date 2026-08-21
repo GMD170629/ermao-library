@@ -92,8 +92,6 @@ class ReadableResourceRecord:
     format: str
     enablement_state: ResourceEnablementState
     import_state: ResourceImportState
-    published_run_id: str | None
-    active_import_run_id: str | None
 
 
 class LibraryConfigPort(Protocol):
@@ -186,16 +184,7 @@ class BookResourceRepositoryPort(Protocol):
         book_id: str,
         source_node_id: str,
         adapter: AdapterIdentity,
-        active_import_run_id: str,
     ) -> ReadableResourceRecord: ...
-
-    def cas_set_active_import_run(
-        self,
-        resource_id: str,
-        *,
-        expected_active_run_id: str | None,
-        new_active_run_id: str | None,
-    ) -> bool: ...
 
     def set_enablement(
         self,
@@ -203,20 +192,14 @@ class BookResourceRepositoryPort(Protocol):
         state: ResourceEnablementState,
     ) -> None: ...
 
-    def publish_resource(
+    def mark_resource_ready(
         self,
         *,
         resource_id: str,
-        published_run_id: str,
-        adapter: AdapterIdentity,
-        title: str,
+        title: str | None = None,
     ) -> None: ...
 
     def mark_resource_failed(self, resource_id: str) -> None: ...
-
-    def clear_active_import_run(self, resource_id: str) -> None: ...
-
-    def touch_updated_at(self, resource_id: str) -> None: ...
 
     def upsert_asset(
         self,
@@ -224,7 +207,6 @@ class BookResourceRepositoryPort(Protocol):
         library_id: str,
         resource_id: str,
         source_node_id: str,
-        published_run_id: str,
         role: AssetRole,
         import_state: AssetImportState,
         sequence_index: int | None,
@@ -232,9 +214,7 @@ class BookResourceRepositoryPort(Protocol):
         failure_reason: str | None,
     ) -> str: ...
 
-    def count_ready_assets_for_published_run(
-        self, resource_id: str, published_run_id: str
-    ) -> int: ...
+    def count_ready_assets(self, resource_id: str) -> int: ...
 
     def find_outermost_directory_resource(
         self,
@@ -249,7 +229,3 @@ class BookResourceRepositoryPort(Protocol):
     ) -> tuple[str, ...]: ...
 
     def reevaluate_ready_after_asset_loss(self, resource_ids: Sequence[str]) -> None: ...
-
-    def cleanup_stale_assets(
-        self, resource_id: str, published_run_id: str
-    ) -> None: ...

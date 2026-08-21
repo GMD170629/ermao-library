@@ -2,7 +2,21 @@
 
 ## Status
 
-Accepted.
+Accepted — **scoped to the legacy production importer**.
+
+Scope revision (2026-08-21, see [ADR 0018](0018-physical-source-tree-book-readable-resource-overlay.md)):
+
+- This ADR’s complex persistent queue (lease, heartbeat, recovery, cancellation,
+  priority, and the `ImportWorkItem` bridge) applies only to the current legacy
+  production importer.
+- The ADR 0018 target importer does **not** inherit lease, heartbeat, recovery,
+  cancellation, priority, or WorkItem bridge semantics. It uses a single-consumer
+  `LibraryImportTask` queue and ContinueImport only.
+- After production switches to the target importer, the legacy queue is deleted
+  with the legacy importer.
+
+Historical decision text below is retained for the legacy system; it is not the
+target-state import queue contract.
 
 ## Context
 

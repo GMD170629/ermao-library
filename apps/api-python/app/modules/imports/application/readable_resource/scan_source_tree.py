@@ -1,4 +1,4 @@
-"""ScanLibrarySourceTree — ADR 0018 ordinary scan and first recognition."""
+"""Continue-import scan: streaming SourceNode discovery and task enqueue."""
 
 from __future__ import annotations
 
@@ -7,9 +7,7 @@ from dataclasses import dataclass
 from app.modules.imports.application.readable_resource.ports import (
     adapter_identity,
     BookResourceRepositoryPort,
-    ClaimedWork,
     ClockPort,
-    ImportRunRepositoryPort,
     LibraryConfigPort,
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
@@ -23,7 +21,6 @@ from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
     ProbeInterpretationResult,
 )
-from app.modules.imports.domain.import_run_policies import ImportRunKind
 from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     file_extension,
@@ -42,9 +39,6 @@ from app.modules.library.domain.source_nodes import (
     parse_source_node_relative_path,
 )
 
-_SCAN_COMMIT_BATCH = 32
-_DEFAULT_LEASE_SECONDS = 60
-
 
 @dataclass(frozen=True, slots=True)
 class ScanLibrarySourceTreeResult:
@@ -52,12 +46,12 @@ class ScanLibrarySourceTreeResult:
     nodes_inserted: int
     resources_created: int
     tasks_enqueued: int
-    paused_for_backpressure: bool
     path_key_collisions: int
-    stopped_for_lease: bool = False
 
 
 class ScanLibrarySourceTree:
+    """Execute SCAN_LIBRARY / CONTINUE_SOURCE work (single consumer, no lease)."""
+
     def __init__(
         self,
         *,
@@ -65,7 +59,6 @@ class ScanLibrarySourceTree:
         filesystem: SourceTreeFilesystemPort,
         source_nodes: SourceNodeRepositoryPort,
         books_resources: BookResourceRepositoryPort,
-        import_runs: ImportRunRepositoryPort,
         queue: WorkQueuePort,
         uow: UnitOfWorkPort,
         clock: ClockPort,
@@ -75,42 +68,96 @@ class ScanLibrarySourceTree:
         self._filesystem = filesystem
         self._source_nodes = source_nodes
         self._books_resources = books_resources
-        self._import_runs = import_runs
         self._queue = queue
         self._uow = uow
         self._clock = clock
         self._log = log
 
-    def execute(
-        self,
-        library_id: str,
-        claim: ClaimedWork | None = None,
-        *,
-        lease_seconds: int = _DEFAULT_LEASE_SECONDS,
-    ) -> ScanLibrarySourceTreeResult:
+    def execute_library(self, library_id: str) -> ScanLibrarySourceTreeResult:
         with self._uow.transaction():
             config = self._libraries.get_library(library_id)
+        return self._walk(
+            config=config,
+            start_parent_id=None,
+            start_parent_rel=None,
+            reprobe_node_only=True,
+        )
 
+    def execute_source(self, source_node_id: str) -> ScanLibrarySourceTreeResult:
+        with self._uow.transaction():
+            node = self._source_nodes.get(source_node_id)
+            if node is None:
+                raise LookupError(source_node_id)
+            config = self._libraries.get_library(node.library_id)
+            relative = SourceNodeRelativePath(node.relative_path)
+
+        if node.physical_kind is SourceNodePhysicalKind.REGULAR_FILE:
+            return self._continue_file(config, node.id, relative)
+        if node.physical_kind is SourceNodePhysicalKind.DIRECTORY:
+            # Re-probe NODE_ONLY / missing interpretation at this directory first.
+            self._maybe_reprobe_directory(config, node.id, relative)
+            return self._walk(
+                config=config,
+                start_parent_id=node.id,
+                start_parent_rel=relative.value,
+                reprobe_node_only=True,
+            )
+        return ScanLibrarySourceTreeResult(
+            library_id=config.library_id,
+            nodes_inserted=0,
+            resources_created=0,
+            tasks_enqueued=0,
+            path_key_collisions=0,
+        )
+
+    def _continue_file(
+        self,
+        config: LibrarySourceTreeConfig,
+        node_id: str,
+        relative: SourceNodeRelativePath,
+    ) -> ScanLibrarySourceTreeResult:
+        resources = 0
+        tasks = 0
+        with self._uow.transaction():
+            interpretation = self._source_nodes.get_interpretation(node_id)
+            resource = self._books_resources.get_resource_by_source_node(node_id)
+            if resource is not None:
+                created, enqueued = 0, self._ensure_asset_for_resource(
+                    config, resource.id, node_id, relative.name
+                )
+            elif interpretation is None or interpretation.result == "NODE_ONLY":
+                created, enqueued = self._recognize_regular_file(
+                    config, node_id, relative, force_reprobe=True
+                )
+            else:
+                created, enqueued = 0, 0
+            resources += created
+            tasks += enqueued
+        return ScanLibrarySourceTreeResult(
+            library_id=config.library_id,
+            nodes_inserted=0,
+            resources_created=resources,
+            tasks_enqueued=tasks,
+            path_key_collisions=0,
+        )
+
+    def _walk(
+        self,
+        *,
+        config: LibrarySourceTreeConfig,
+        start_parent_id: str | None,
+        start_parent_rel: str | None,
+        reprobe_node_only: bool,
+    ) -> ScanLibrarySourceTreeResult:
         inserted = 0
         resources_created = 0
         tasks_enqueued = 0
         collisions = 0
-        paused = False
-        stopped_for_lease = False
-        stack: list[tuple[str | None, str | None]] = [(None, None)]
-        batch_writes = 0
+        stack: list[tuple[str | None, str | None]] = [
+            (start_parent_id, start_parent_rel)
+        ]
 
         while stack:
-            with self._uow.transaction():
-                if claim is not None:
-                    if not self._queue.fence_claim(claim, lease_seconds=lease_seconds):
-                        stopped_for_lease = True
-                        break
-                queued = self._queue.queued_item_count()
-            if queued >= config.queue_high_water:
-                paused = True
-                break
-
             parent_id, parent_rel = stack.pop()
             absolute = (
                 config.root_path
@@ -119,256 +166,220 @@ class ScanLibrarySourceTree:
             )
             self._uow.release_before_io()
             try:
-                entries = self._filesystem.iter_directory_entries(absolute)
+                entries = list(self._filesystem.iter_directory_entries(absolute))
             except OSError:
                 self._log.emit(
                     "source_tree.scan.directory_unreadable",
-                    library_id=library_id,
+                    library_id=config.library_id,
                     stage="scan",
                     outcome="io_error",
                 )
                 continue
 
-            directory_paused = False
-            try:
-                for name, kind, size, mtime_ns in entries:
-                    if self._should_ignore(config, parent_rel, name):
-                        continue
-                    relative = name if parent_rel is None else f"{parent_rel}/{name}"
-                    parsed = parse_source_node_relative_path(relative)
-                    if not isinstance(parsed, SourceNodeRelativePath):
-                        continue
+            for name, kind, size, mtime_ns in entries:
+                if self._should_ignore(config, parent_rel, name):
+                    continue
+                relative_str = name if parent_rel is None else f"{parent_rel}/{name}"
+                parsed = parse_source_node_relative_path(relative_str)
+                if not isinstance(parsed, SourceNodeRelativePath):
+                    continue
 
-                    if (
-                        kind is SourceNodePhysicalKind.REGULAR_FILE
-                        or kind is SourceNodePhysicalKind.DIRECTORY
-                    ) and self._would_create_tasks(parsed, kind):
-                        with self._uow.transaction():
-                            if claim is not None and not self._queue.fence_claim(
-                                claim, lease_seconds=lease_seconds
-                            ):
-                                stopped_for_lease = True
-                                directory_paused = True
-                                stack.append((parent_id, parent_rel))
-                                break
-                            if self._queue.queued_item_count() >= config.queue_high_water:
-                                paused = True
-                                directory_paused = True
-                                stack.append((parent_id, parent_rel))
-                                break
+                entry = ObservedSourceEntry(
+                    relative_path=parsed,
+                    physical_kind=kind,
+                    observed_size_bytes=size,
+                    observed_mtime_ns=mtime_ns,
+                    observed_at=self._clock.now(),
+                )
 
-                    entry = ObservedSourceEntry(
-                        relative_path=parsed,
-                        physical_kind=kind,
-                        observed_size_bytes=size,
-                        observed_mtime_ns=mtime_ns,
-                        observed_at=self._clock.now(),
+                with self._uow.transaction():
+                    existing = self._source_nodes.get_by_path_key(
+                        config.library_id, parsed.path_key
                     )
-
-                    with self._uow.transaction():
-                        if claim is not None and not self._queue.fence_claim(
-                            claim, lease_seconds=lease_seconds
-                        ):
-                            stopped_for_lease = True
-                            directory_paused = True
-                            stack.append((parent_id, parent_rel))
-                            break
-                        existing = self._source_nodes.get_by_path_key(
-                            library_id, parsed.path_key
+                    if existing is not None:
+                        collision = evaluate_path_key_occupancy(
+                            occupied_relative_path=SourceNodeRelativePath(
+                                existing.relative_path
+                            ),
+                            candidate_relative_path=parsed,
                         )
-                        if existing is not None:
-                            collision = evaluate_path_key_occupancy(
-                                occupied_relative_path=SourceNodeRelativePath(
-                                    existing.relative_path
-                                ),
-                                candidate_relative_path=parsed,
+                        if collision is not None:
+                            collisions += 1
+                            self._log.emit(
+                                "source_tree.scan.path_key_collision",
+                                library_id=config.library_id,
+                                stage="scan",
+                                outcome=SourceNodeViolationCode.PATH_KEY_COLLISION.value,
                             )
-                            if collision is not None:
-                                collisions += 1
-                                self._log.emit(
-                                    "source_tree.scan.path_key_collision",
-                                    library_id=library_id,
-                                    stage="scan",
-                                    outcome=SourceNodeViolationCode.PATH_KEY_COLLISION.value,
-                                )
-                                continue
-                            node = existing
-                            created = False
-                        else:
-                            node, created = self._source_nodes.insert_if_absent(
-                                library_id=library_id,
-                                parent_id=parent_id,
-                                entry=entry,
-                            )
-                            if created:
-                                inserted += 1
-                                batch_writes += 1
-
-                        if kind is SourceNodePhysicalKind.DIRECTORY:
-                            if (
-                                volumes_root_folder_creates_empty_book_on_discovery(
-                                    config.organization_mode,
-                                    is_root_child_directory=parsed.is_root_child,
-                                )
-                                and self._books_resources.get_book_id_for_source_node(
-                                    node.id
-                                )
-                                is None
-                            ):
-                                self._books_resources.ensure_book(
-                                    library_id=library_id,
-                                    source_node_id=node.id,
-                                    title=parsed.name,
-                                )
-                                batch_writes += 1
-                            covered = (
-                                self._books_resources.find_outermost_directory_resource(
-                                    library_id, parsed.value
-                                )
-                            )
-                            interpretation = self._source_nodes.get_interpretation(
-                                node.id
-                            )
-                            needs_probe = interpretation is None and covered is None
-                        else:
-                            needs_probe = False
-                            covered = None
-                            interpretation = None
-
-                    if stopped_for_lease:
-                        break
+                            continue
+                        node = existing
+                    else:
+                        node, created = self._source_nodes.insert_if_absent(
+                            library_id=config.library_id,
+                            parent_id=parent_id,
+                            entry=entry,
+                        )
+                        if created:
+                            inserted += 1
 
                     if kind is SourceNodePhysicalKind.DIRECTORY:
-                        if needs_probe:
-                            self._uow.release_before_io()
-                            decision, _termination = self._filesystem.probe_directory(
-                                root=config.root_path,
-                                directory_relative_path=parsed.value,
-                                ignore_hidden=config.ignore_hidden,
-                                ignore_patterns=config.ignore_patterns,
-                                global_ignore_patterns=config.global_ignore_patterns,
-                                sample_limit=config.probe_sample_limit,
-                                max_entries=config.probe_max_entries,
-                                max_depth=config.probe_max_depth,
-                                time_budget_ms=config.probe_time_budget_ms,
+                        if (
+                            volumes_root_folder_creates_empty_book_on_discovery(
+                                config.organization_mode,
+                                is_root_child_directory=parsed.is_root_child,
                             )
-                            with self._uow.transaction():
-                                if claim is not None and not self._queue.fence_claim(
-                                    claim, lease_seconds=lease_seconds
-                                ):
-                                    stopped_for_lease = True
-                                    directory_paused = True
-                                    stack.append((parent_id, parent_rel))
-                                    break
-                                if self._would_enqueue_from_decision(decision):
-                                    if (
-                                        self._queue.queued_item_count()
-                                        >= config.queue_high_water
-                                    ):
-                                        paused = True
-                                        directory_paused = True
-                                        stack.append((parent_id, parent_rel))
-                                        break
-                                self._persist_directory_decision(
-                                    config=config,
-                                    node_id=node.id,
-                                    relative_path=parsed,
-                                    decision=decision,
-                                )
-                                if decision.result is ProbeInterpretationResult.RESOURCE:
-                                    resources_created += 1
-                                    tasks_enqueued += (
-                                        self._enqueue_initial_directory_tasks(
-                                            config, node.id, parsed, decision
-                                        )
-                                    )
-                                batch_writes += 1
-                        stack.append((node.id, parsed.value))
-                        if batch_writes >= _SCAN_COMMIT_BATCH:
-                            batch_writes = 0
-                        continue
-
-                    if kind is SourceNodePhysicalKind.REGULAR_FILE:
-                        with self._uow.transaction():
-                            if claim is not None and not self._queue.fence_claim(
-                                claim, lease_seconds=lease_seconds
-                            ):
-                                stopped_for_lease = True
-                                directory_paused = True
-                                stack.append((parent_id, parent_rel))
-                                break
-                            interpretation = self._source_nodes.get_interpretation(
+                            and self._books_resources.get_book_id_for_source_node(
                                 node.id
                             )
+                            is None
+                        ):
+                            self._books_resources.ensure_book(
+                                library_id=config.library_id,
+                                source_node_id=node.id,
+                                title=parsed.name,
+                            )
+                        covered = (
+                            self._books_resources.find_outermost_directory_resource(
+                                config.library_id, parsed.value
+                            )
+                        )
+                        interpretation = self._source_nodes.get_interpretation(node.id)
+                        needs_probe = covered is None and (
+                            interpretation is None
+                            or (
+                                reprobe_node_only
+                                and interpretation.result == "NODE_ONLY"
+                            )
+                        )
+                    else:
+                        needs_probe = False
+                        covered = None
+                        interpretation = self._source_nodes.get_interpretation(node.id)
+
+                if kind is SourceNodePhysicalKind.DIRECTORY:
+                    if needs_probe:
+                        created_r, enqueued = self._probe_and_persist_directory(
+                            config, node.id, parsed
+                        )
+                        resources_created += created_r
+                        tasks_enqueued += enqueued
+                    elif interpretation is not None and interpretation.result == "RESOURCE":
+                        # Existing directory resource: ensure tasks for compatible children later
+                        pass
+                    stack.append((node.id, parsed.value))
+                    continue
+
+                if kind is SourceNodePhysicalKind.REGULAR_FILE:
+                    with self._uow.transaction():
+                        interpretation = self._source_nodes.get_interpretation(node.id)
+                        resource = self._books_resources.get_resource_by_source_node(
+                            node.id
+                        )
+                        owner = self._books_resources.find_outermost_directory_resource(
+                            config.library_id, parsed.value
+                        )
+                        if resource is not None:
+                            tasks_enqueued += self._ensure_asset_for_resource(
+                                config, resource.id, node.id, parsed.name
+                            )
+                        elif owner is not None:
                             if interpretation is None:
-                                if self._would_create_tasks(
-                                    parsed, SourceNodePhysicalKind.REGULAR_FILE
-                                ):
-                                    if (
-                                        self._queue.queued_item_count()
-                                        >= config.queue_high_water
-                                    ):
-                                        paused = True
-                                        directory_paused = True
-                                        stack.append((parent_id, parent_rel))
-                                        break
-                                created_count, enqueued = self._recognize_regular_file(
-                                    config, node.id, parsed
+                                self._source_nodes.upsert_interpretation(
+                                    source_node_id=node.id,
+                                    result="NODE_ONLY",
+                                    source="AUTO",
+                                    adapter_id=None,
+                                    adapter_version=None,
+                                    reason_code="COVERED_BY_OUTER_DIRECTORY_RESOURCE",
+                                    sample_relative_paths=None,
+                                    sample_count=None,
+                                    max_entries_visited=None,
+                                    max_depth=None,
+                                    time_budget_ms=None,
+                                    termination_reason=None,
+                                    recognized_at=self._clock.now(),
                                 )
-                                resources_created += created_count
-                                tasks_enqueued += enqueued
-                                batch_writes += 1
-                            else:
-                                owner = (
-                                    self._books_resources.find_outermost_directory_resource(
-                                        library_id, parsed.value
-                                    )
-                                )
-                                if owner is not None:
-                                    if (
-                                        self._queue.queued_item_count()
-                                        >= config.queue_high_water
-                                    ):
-                                        paused = True
-                                        directory_paused = True
-                                        stack.append((parent_id, parent_rel))
-                                        break
-                                    tasks_enqueued += self._enqueue_owned_or_incremental(
-                                        config, owner.id, node.id, parsed.name
-                                    )
-                                    batch_writes += 1
-            except OSError:
-                self._log.emit(
-                    "source_tree.scan.directory_unreadable",
-                    library_id=library_id,
-                    stage="scan",
-                    outcome="io_error",
-                )
-                continue
+                            tasks_enqueued += self._ensure_asset_for_resource(
+                                config, owner.id, node.id, parsed.name
+                            )
+                        elif interpretation is None or (
+                            reprobe_node_only and interpretation.result == "NODE_ONLY"
+                        ):
+                            created_r, enqueued = self._recognize_regular_file(
+                                config,
+                                node.id,
+                                parsed,
+                                force_reprobe=True,
+                            )
+                            resources_created += created_r
+                            tasks_enqueued += enqueued
 
-            if directory_paused or stopped_for_lease:
-                break
-
-        outcome = "ok"
-        if stopped_for_lease:
-            outcome = "lease_lost"
-        elif paused:
-            outcome = "paused"
         self._log.emit(
             "source_tree.scan.completed",
-            library_id=library_id,
+            library_id=config.library_id,
             stage="scan",
-            outcome=outcome,
+            outcome="ok",
         )
         return ScanLibrarySourceTreeResult(
-            library_id=library_id,
+            library_id=config.library_id,
             nodes_inserted=inserted,
             resources_created=resources_created,
             tasks_enqueued=tasks_enqueued,
-            paused_for_backpressure=paused,
             path_key_collisions=collisions,
-            stopped_for_lease=stopped_for_lease,
         )
+
+    def _maybe_reprobe_directory(
+        self,
+        config: LibrarySourceTreeConfig,
+        node_id: str,
+        relative: SourceNodeRelativePath,
+    ) -> None:
+        with self._uow.transaction():
+            interpretation = self._source_nodes.get_interpretation(node_id)
+            resource = self._books_resources.get_resource_by_source_node(node_id)
+            if resource is not None:
+                return
+            if interpretation is not None and interpretation.result != "NODE_ONLY":
+                return
+        self._probe_and_persist_directory(config, node_id, relative)
+
+    def _probe_and_persist_directory(
+        self,
+        config: LibrarySourceTreeConfig,
+        node_id: str,
+        relative: SourceNodeRelativePath,
+    ) -> tuple[int, int]:
+        self._uow.release_before_io()
+        decision, _termination = self._filesystem.probe_directory(
+            root=config.root_path,
+            directory_relative_path=relative.value,
+            ignore_hidden=config.ignore_hidden,
+            ignore_patterns=config.ignore_patterns,
+            global_ignore_patterns=config.global_ignore_patterns,
+            sample_limit=config.probe_sample_limit,
+            max_entries=config.probe_max_entries,
+            max_depth=config.probe_max_depth,
+            time_budget_ms=config.probe_time_budget_ms,
+        )
+        with self._uow.transaction():
+            # Do not overwrite an existing RESOURCE interpretation/adapter.
+            existing_resource = self._books_resources.get_resource_by_source_node(
+                node_id
+            )
+            if existing_resource is not None:
+                return (0, self._enqueue_directory_samples(config, node_id, decision))
+            self._persist_directory_decision(
+                config=config,
+                node_id=node_id,
+                relative_path=relative,
+                decision=decision,
+            )
+            if decision.result is ProbeInterpretationResult.RESOURCE:
+                return (
+                    1,
+                    self._enqueue_directory_samples(config, node_id, decision),
+                )
+        return (0, 0)
 
     def _should_ignore(
         self,
@@ -389,18 +400,6 @@ class ScanLibrarySourceTree:
                 ):
                     return True
         return False
-
-    def _would_create_tasks(
-        self,
-        path: SourceNodeRelativePath,
-        kind: SourceNodePhysicalKind,
-    ) -> bool:
-        if kind is SourceNodePhysicalKind.REGULAR_FILE:
-            return unique_adapter_or_none(match_file_adapters(path.name)) is not None
-        return True
-
-    def _would_enqueue_from_decision(self, decision: DirectoryProbeDecision) -> bool:
-        return decision.result is ProbeInterpretationResult.RESOURCE
 
     def _persist_directory_decision(
         self,
@@ -432,63 +431,22 @@ class ScanLibrarySourceTree:
             or adapter is None
         ):
             return
-        placement = decide_book_anchor_for_resource(
-            organization_mode=config.organization_mode,
-            resource_relative_path=relative_path,
-            resource_is_directory=True,
-        )
-        if placement.create_new_book_at_source_node:
-            book_id = self._books_resources.ensure_book(
-                library_id=config.library_id,
-                source_node_id=node_id,
-                title=relative_path.name,
-            )
-        else:
-            if placement.volumes_root_folder_relative_path is None:
-                return
-            root_path = SourceNodeRelativePath(
-                placement.volumes_root_folder_relative_path
-            )
-            root_node = self._source_nodes.get_by_path_key(
-                config.library_id, root_path.path_key
-            )
-            if root_node is None:
-                return
-            book_id = self._books_resources.ensure_book(
-                library_id=config.library_id,
-                source_node_id=root_node.id,
-                title=root_path.name,
-            )
-        run_id = self._import_runs.create_run(
-            library_id=config.library_id,
-            kind=ImportRunKind.INITIAL,
-            source_node_id=node_id,
-            resource_id=None,
-            adapter_id=adapter.adapter_id.value,
-            adapter_version=adapter.adapter_version,
-        )
-        resource = self._books_resources.create_pending_resource(
+        if self._books_resources.get_resource_by_source_node(node_id) is not None:
+            return
+        book_id = self._resolve_book_id(config, node_id, relative_path, is_directory=True)
+        if book_id is None:
+            return
+        self._books_resources.create_pending_resource(
             library_id=config.library_id,
             book_id=book_id,
             source_node_id=node_id,
             adapter=adapter_identity(adapter),
-            active_import_run_id=run_id,
-        )
-        self._import_runs.attach_resource(run_id, resource.id)
-        self._import_runs.upsert_resource_candidate(
-            import_run_id=run_id,
-            library_id=config.library_id,
-            book_id=book_id,
-            source_node_id=node_id,
-            adapter=adapter,
-            title=relative_path.name,
         )
 
-    def _enqueue_initial_directory_tasks(
+    def _enqueue_directory_samples(
         self,
         config: LibrarySourceTreeConfig,
         node_id: str,
-        relative_path: SourceNodeRelativePath,
         decision: DirectoryProbeDecision,
     ) -> int:
         resource = self._books_resources.get_resource_by_source_node(node_id)
@@ -504,17 +462,9 @@ class ScanLibrarySourceTree:
             if sample_node is None:
                 continue
             if file_extension(sample_path.name) in adapter.file_extensions:
-                task = self._import_runs.create_task(
-                    library_id=config.library_id,
-                    resource_id=resource.id,
-                    source_node_id=sample_node.id,
-                    owner_import_run_id=resource.active_import_run_id,
-                    role=adapter.asset_role,
+                count += self._ensure_asset_for_resource(
+                    config, resource.id, sample_node.id, sample_path.name
                 )
-                self._queue.enqueue_library_import_task(task.id)
-                count += 1
-        if resource.active_import_run_id is not None:
-            self._import_runs.mark_discovery_complete(resource.active_import_run_id)
         return count
 
     def _recognize_regular_file(
@@ -522,9 +472,10 @@ class ScanLibrarySourceTree:
         config: LibrarySourceTreeConfig,
         node_id: str,
         relative_path: SourceNodeRelativePath,
+        *,
+        force_reprobe: bool,
     ) -> tuple[int, int]:
-        # Outer directory resources (PAGE/TRACK) own compatible children even when
-        # the filename has no standalone file adapter (e.g. .png under image-dir).
+        del force_reprobe  # always allow on continue-import path
         owner = self._books_resources.find_outermost_directory_resource(
             config.library_id, relative_path.value
         )
@@ -544,12 +495,15 @@ class ScanLibrarySourceTree:
                 termination_reason=None,
                 recognized_at=self._clock.now(),
             )
-            return (
-                0,
-                self._enqueue_owned_or_incremental(
-                    config, owner.id, node_id, relative_path.name
-                ),
-            )
+            return (0, self._ensure_asset_for_resource(
+                config, owner.id, node_id, relative_path.name
+            ))
+
+        existing = self._books_resources.get_resource_by_source_node(node_id)
+        if existing is not None:
+            return (0, self._ensure_asset_for_resource(
+                config, existing.id, node_id, relative_path.name
+            ))
 
         matches = match_file_adapters(relative_path.name)
         adapter = unique_adapter_or_none(matches)
@@ -571,49 +525,17 @@ class ScanLibrarySourceTree:
             )
             return (0, 0)
 
-        placement = decide_book_anchor_for_resource(
-            organization_mode=config.organization_mode,
-            resource_relative_path=relative_path,
-            resource_is_directory=False,
+        book_id = self._resolve_book_id(
+            config, node_id, relative_path, is_directory=False
         )
-        if placement.create_new_book_at_source_node:
-            book_id = self._books_resources.ensure_book(
-                library_id=config.library_id,
-                source_node_id=node_id,
-                title=relative_path.name,
-            )
-        else:
-            if placement.volumes_root_folder_relative_path is None:
-                return (0, 0)
-            root_path = SourceNodeRelativePath(
-                placement.volumes_root_folder_relative_path
-            )
-            root_node = self._source_nodes.get_by_path_key(
-                config.library_id, root_path.path_key
-            )
-            if root_node is None:
-                return (0, 0)
-            book_id = self._books_resources.ensure_book(
-                library_id=config.library_id,
-                source_node_id=root_node.id,
-                title=root_path.name,
-            )
-        run_id = self._import_runs.create_run(
-            library_id=config.library_id,
-            kind=ImportRunKind.INITIAL,
-            source_node_id=node_id,
-            resource_id=None,
-            adapter_id=adapter.adapter_id.value,
-            adapter_version=adapter.adapter_version,
-        )
+        if book_id is None:
+            return (0, 0)
         resource = self._books_resources.create_pending_resource(
             library_id=config.library_id,
             book_id=book_id,
             source_node_id=node_id,
             adapter=adapter_identity(adapter),
-            active_import_run_id=run_id,
         )
-        self._import_runs.attach_resource(run_id, resource.id)
         self._source_nodes.upsert_interpretation(
             source_node_id=node_id,
             result="RESOURCE",
@@ -629,26 +551,45 @@ class ScanLibrarySourceTree:
             termination_reason=None,
             recognized_at=self._clock.now(),
         )
-        self._import_runs.upsert_resource_candidate(
-            import_run_id=run_id,
-            library_id=config.library_id,
-            book_id=book_id,
-            source_node_id=node_id,
-            adapter=adapter,
-            title=relative_path.name,
+        enqueued = self._ensure_asset_for_resource(
+            config, resource.id, node_id, relative_path.name
         )
-        task = self._import_runs.create_task(
-            library_id=config.library_id,
-            resource_id=resource.id,
-            source_node_id=node_id,
-            owner_import_run_id=run_id,
-            role=adapter.asset_role,
-        )
-        self._queue.enqueue_library_import_task(task.id)
-        self._import_runs.mark_discovery_complete(run_id)
-        return (1, 1)
+        return (1, enqueued)
 
-    def _enqueue_owned_or_incremental(
+    def _resolve_book_id(
+        self,
+        config: LibrarySourceTreeConfig,
+        node_id: str,
+        relative_path: SourceNodeRelativePath,
+        *,
+        is_directory: bool,
+    ) -> str | None:
+        placement = decide_book_anchor_for_resource(
+            organization_mode=config.organization_mode,
+            resource_relative_path=relative_path,
+            resource_is_directory=is_directory,
+        )
+        if placement.create_new_book_at_source_node:
+            return self._books_resources.ensure_book(
+                library_id=config.library_id,
+                source_node_id=node_id,
+                title=relative_path.name,
+            )
+        if placement.volumes_root_folder_relative_path is None:
+            return None
+        root_path = SourceNodeRelativePath(placement.volumes_root_folder_relative_path)
+        root_node = self._source_nodes.get_by_path_key(
+            config.library_id, root_path.path_key
+        )
+        if root_node is None:
+            return None
+        return self._books_resources.ensure_book(
+            library_id=config.library_id,
+            source_node_id=root_node.id,
+            title=root_path.name,
+        )
+
+    def _ensure_asset_for_resource(
         self,
         config: LibrarySourceTreeConfig,
         resource_id: str,
@@ -668,13 +609,14 @@ class ScanLibrarySourceTree:
         )
         if adapter is None or file_extension(filename) not in adapter.file_extensions:
             return 0
-        owner_run_id = resource.active_import_run_id
-        task = self._import_runs.create_task(
+        role = adapter.asset_role
+        task = self._queue.ensure_import_asset_task(
             library_id=config.library_id,
             resource_id=resource_id,
             source_node_id=source_node_id,
-            owner_import_run_id=owner_run_id,
-            role=adapter.asset_role,
+            role=role,
         )
-        self._queue.enqueue_library_import_task(task.id)
-        return 1
+        return 0 if task is None else 1
+
+
+__all__ = ["ScanLibrarySourceTree", "ScanLibrarySourceTreeResult"]

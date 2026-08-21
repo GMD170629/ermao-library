@@ -1,4 +1,4 @@
-"""Structured logging, clock, and unit-of-work for the target pipeline."""
+"""Structured logging, clock, unit-of-work, and best-effort sidecar hooks."""
 
 from __future__ import annotations
 
@@ -31,12 +31,12 @@ class StructuredPipelineLog(PipelineLogPort):
         stage: str | None = None,
         outcome: str | None = None,
     ) -> None:
+        del run_id  # retained for ManagePipelineLogPort compatibility only
         logger.info(
             event,
             extra={
                 "library_id": library_id,
                 "resource_id": resource_id,
-                "run_id": run_id,
                 "task_id": task_id,
                 "stage": stage,
                 "outcome": outcome,
@@ -85,27 +85,48 @@ class InMemorySidecarWriteback(SidecarWritebackPort):
         self.scheduled.append(resource_id)
 
 
-# Backward-compatible alias for existing unit/integration helpers.
-DeferredSidecarWriteback = InMemorySidecarWriteback
+class BestEffortSidecarWriteback(SidecarWritebackPort):
+    """Call an optional public writeback; failures are logged only."""
 
-
-class DurableSidecarWriteback(SidecarWritebackPort):
-    """Production sidecar: structured log + durable enqueue callback.
-
-    Composition root injects a recoverable enqueue (e.g. short UoW via ports).
-    Test suites use InMemorySidecarWriteback instead.
-    """
-
-    def __init__(self, enqueue_fn: Callable[[str], None]) -> None:
-        self._enqueue = enqueue_fn
+    def __init__(self, writeback_fn: Callable[[str], None] | None = None) -> None:
+        self._writeback = writeback_fn
 
     def schedule_after_commit(self, resource_id: str) -> None:
-        logger.info(
-            "readable_resource.sidecar.scheduled",
-            extra={
-                "resource_id": resource_id,
-                "stage": "sidecar",
-                "outcome": "queued",
-            },
-        )
-        self._enqueue(resource_id)
+        if self._writeback is None:
+            logger.info(
+                "readable_resource.sidecar.skipped",
+                extra={
+                    "resource_id": resource_id,
+                    "stage": "sidecar",
+                    "outcome": "noop",
+                },
+            )
+            return
+        try:
+            self._writeback(resource_id)
+            logger.info(
+                "readable_resource.sidecar.ok",
+                extra={
+                    "resource_id": resource_id,
+                    "stage": "sidecar",
+                    "outcome": "ok",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "readable_resource.sidecar.failed",
+                extra={
+                    "resource_id": resource_id,
+                    "stage": "sidecar",
+                    "outcome": "error",
+                },
+            )
+
+
+__all__ = [
+    "BestEffortSidecarWriteback",
+    "InMemorySidecarWriteback",
+    "SqlAlchemyUnitOfWork",
+    "StructuredPipelineLog",
+    "UtcClock",
+]

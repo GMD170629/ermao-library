@@ -1,3 +1,5 @@
+"""Unit coverage: scan FS/probe I/O stays outside DB transactions."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -5,7 +7,10 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.modules.imports.application.readable_resource.ports import DirectoryEntry
+from app.modules.imports.application.readable_resource.ports import (
+    DirectoryEntry,
+    LibraryImportTaskRecord,
+)
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
 )
@@ -15,14 +20,14 @@ from app.modules.imports.domain.directory_probe import (
     ProbeInterpretationResult,
     ProbeTerminationReason,
 )
-from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
-from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 from app.modules.library.application.source_tree_ports import (
     InterpretationRecord,
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     SourceNodeRecord,
 )
+from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
+from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 
 
 class RecordingUoW:
@@ -45,7 +50,6 @@ class RecordingUoW:
     def release_before_io(self) -> None:
         self.events.append("release")
         assert not self.in_transaction
-        self.in_transaction = False
 
     def rollback(self) -> None:
         self.events.append("rollback")
@@ -53,7 +57,9 @@ class RecordingUoW:
 
 
 class RecordingFilesystem:
-    def __init__(self, uow: RecordingUoW, entries: dict[str, list[DirectoryEntry]]) -> None:
+    def __init__(
+        self, uow: RecordingUoW, entries: dict[str, list[DirectoryEntry]]
+    ) -> None:
         self._uow = uow
         self._entries = entries
         self.io_while_in_txn: list[str] = []
@@ -69,8 +75,6 @@ class RecordingFilesystem:
     ) -> Iterator[DirectoryEntry]:
         if self._uow.in_transaction:
             self.io_while_in_txn.append(f"scandir:{absolute_directory}")
-        key = absolute_directory.name if absolute_directory.name else str(absolute_directory)
-        # Prefer mapping by relative key stored as path string ends.
         for stored, items in self._entries.items():
             if str(absolute_directory).endswith(stored) or stored == ".":
                 yield from items
@@ -174,7 +178,9 @@ class FakeSourceNodes:
         self.inserts += 1
         return node, True
 
-    def refresh_observed(self, source_node_id: str, entry: ObservedSourceEntry) -> SourceNodeRecord:
+    def refresh_observed(
+        self, source_node_id: str, entry: ObservedSourceEntry
+    ) -> SourceNodeRecord:
         raise NotImplementedError
 
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]:
@@ -206,27 +212,19 @@ class FakeBooks:
     def create_pending_resource(self, **kwargs: object) -> None:
         raise NotImplementedError
 
-    def cas_set_active_import_run(self, *args: object, **kwargs: object) -> bool:
-        return True
-
     def set_enablement(self, *args: object, **kwargs: object) -> None:
         return None
 
-    def publish_resource(self, **kwargs: object) -> None:
+    def mark_resource_ready(self, **kwargs: object) -> None:
         return None
 
     def mark_resource_failed(self, resource_id: str) -> None:
         return None
 
-    def clear_active_import_run(self, resource_id: str) -> None:
-        return None
-
     def upsert_asset(self, **kwargs: object) -> str:
         return "asset-1"
 
-    def count_ready_assets_for_published_run(
-        self, resource_id: str, published_run_id: str
-    ) -> int:
+    def count_ready_assets(self, resource_id: str) -> int:
         return 0
 
     def find_outermost_directory_resource(
@@ -245,93 +243,40 @@ class FakeBooks:
     def reevaluate_ready_after_asset_loss(self, resource_ids: object) -> None:
         return None
 
-    def cleanup_stale_assets(self, resource_id: str, published_run_id: str) -> None:
-        return None
 
-
-class FakeImportRuns:
-    def create_run(self, **kwargs: object) -> str:
-        return "run-1"
-
-    def set_run_state(self, *args: object, **kwargs: object) -> None:
-        return None
-
-    def attach_resource(self, run_id: str, resource_id: str) -> None:
-        return None
-
-    def upsert_resource_candidate(self, **kwargs: object) -> None:
-        return None
-
-    def upsert_asset_candidate(self, **kwargs: object) -> None:
-        return None
-
-    def count_ready_asset_candidates(self, import_run_id: str) -> int:
-        return 0
-
-    def list_ready_asset_candidates(self, import_run_id: str) -> tuple[object, ...]:
-        return ()
-
-    def count_incomplete_tasks(self, owner_import_run_id: str) -> int:
-        return 0
-
-    def count_failed_tasks(self, owner_import_run_id: str) -> int:
-        return 0
-
-    def create_task(self, **kwargs: object) -> object:
+class FakeQueue:
+    def enqueue(self, **kwargs: object) -> LibraryImportTaskRecord:
         raise NotImplementedError
+
+    def ensure_import_asset_task(self, **kwargs: object) -> None:
+        return None
+
+    def next_queued(self) -> None:
+        return None
 
     def get_task(self, task_id: str) -> None:
         return None
 
-    def mark_task_state(self, *args: object, **kwargs: object) -> None:
+    def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         return None
 
-    def cleanup_run_candidates(self, run_id: str) -> None:
+    def mark_succeeded(self, task_id: str, *, finished_at: datetime) -> None:
         return None
 
-    def get_run(self, run_id: str) -> None:
+    def mark_failed(self, task_id: str, *, error_summary: str, finished_at: datetime) -> None:
         return None
 
-    def get_resource_candidate(self, run_id: str) -> None:
-        return None
+    def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
+        return 0
 
-    def mark_discovery_complete(self, run_id: str) -> None:
-        return None
+    def requeue_failed_for_library(self, library_id: str) -> int:
+        return 0
 
-    def is_discovery_complete(self, run_id: str) -> bool:
-        return True
+    def requeue_failed_for_source(self, source_node_id: str) -> int:
+        return 0
 
-
-class FakeQueue:
-    def __init__(self) -> None:
-        self.queued = 0
-
-    def queued_item_count(self) -> int:
-        return self.queued
-
-    def enqueue_library_import_task(self, task_id: str) -> None:
-        self.queued += 1
-
-    def enqueue_library_scan(self, library_id: str) -> None:
-        return None
-
-    def claim_next(self, worker_id: str, *, lease_seconds: int) -> None:
-        return None
-
-    def complete(self, claim: object) -> bool:
-        return True
-
-    def heartbeat(self, claim: object) -> bool:
-        return True
-
-    def is_claim_valid(self, claim: object) -> bool:
-        return True
-
-    def fence_claim(self, claim: object, *, lease_seconds: int) -> bool:
-        return True
-
-    def release_and_requeue(self, claim: object, *, delay_seconds: int = 5) -> bool:
-        return True
+    def has_active_kind(self, **kwargs: object) -> bool:
+        return False
 
 
 class FakeClock:
@@ -344,7 +289,7 @@ class FakeLog:
         return None
 
 
-def _config(root: Path, *, high_water: int = 1000) -> LibrarySourceTreeConfig:
+def _config(root: Path) -> LibrarySourceTreeConfig:
     return LibrarySourceTreeConfig(
         library_id="lib-1",
         root_path=root,
@@ -353,7 +298,7 @@ def _config(root: Path, *, high_water: int = 1000) -> LibrarySourceTreeConfig:
         ignore_patterns=None,
         global_ignore_patterns="",
         min_file_size_bytes=0,
-        queue_high_water=high_water,
+        queue_high_water=1000,
         probe_sample_limit=100,
         probe_max_entries=10_000,
         probe_max_depth=8,
@@ -364,14 +309,12 @@ def _config(root: Path, *, high_water: int = 1000) -> LibrarySourceTreeConfig:
 def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
     root = tmp_path / "books"
     root.mkdir()
-    # 40 plain files without adapters → insert nodes, short txns, no probe enqueue.
     file_entries: list[DirectoryEntry] = [
         (f"note-{i:02d}.md", SourceNodePhysicalKind.REGULAR_FILE, 1, i)
         for i in range(40)
     ]
     uow = RecordingUoW()
     filesystem = RecordingFilesystem(uow, {"books": file_entries, ".": file_entries})
-    # Map root absolute path.
     filesystem._entries[str(root)] = file_entries  # noqa: SLF001
     filesystem._entries[str(root.resolve())] = file_entries  # noqa: SLF001
 
@@ -380,17 +323,15 @@ def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
         filesystem=filesystem,
         source_nodes=FakeSourceNodes(),
         books_resources=FakeBooks(),
-        import_runs=FakeImportRuns(),
         queue=FakeQueue(),
         uow=uow,
         clock=FakeClock(),
         log=FakeLog(),
     )
-    result = scan.execute("lib-1")
+    result = scan.execute_library("lib-1")
     assert result.nodes_inserted == 40
     assert filesystem.io_while_in_txn == []
     assert "release" in uow.events
-    # Many short transactions (config load + queue checks + per-file writes).
     assert uow.txn_count >= 40
     assert uow.events.count("commit") == uow.txn_count
 
@@ -412,12 +353,11 @@ def test_scan_releases_before_directory_probe(tmp_path: Path) -> None:
         filesystem=filesystem,
         source_nodes=FakeSourceNodes(),
         books_resources=FakeBooks(),
-        import_runs=FakeImportRuns(),
         queue=FakeQueue(),
         uow=uow,
         clock=FakeClock(),
         log=FakeLog(),
     )
-    scan.execute("lib-1")
+    scan.execute_library("lib-1")
     assert filesystem.probe_calls >= 1
     assert filesystem.io_while_in_txn == []

@@ -67,11 +67,13 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "LibraryBook",
             "LibraryReadableResource",
             "LibraryResourceAsset",
-            "LibraryImportRun",
             "LibraryImportTask",
+        } <= table_names
+        assert {
+            "LibraryImportRun",
             "ResourceCandidate",
             "AssetCandidate",
-        } <= table_names
+        }.isdisjoint(table_names)
         assert {
             "MonitorFolder",
             "UserMonitorFolderAccess",

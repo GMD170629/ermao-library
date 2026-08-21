@@ -1,7 +1,7 @@
-"""Target ADR 0018 ImportRun / candidate / ImportTask ORM tables.
+"""Target ADR 0018 LibraryImportTask ORM table (single-consumer queue).
 
 Isolated from the legacy ImportTask / ImportScanJob pipeline. Not wired into
-workers or scanners in phase 1B.
+production workers in this phase.
 """
 
 from __future__ import annotations
@@ -9,350 +9,67 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
-    Integer,
     String,
     Text,
-    UniqueConstraint,
     and_,
     column,
+    or_,
 )
-from typing import TYPE_CHECKING
-
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
 from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
 
-_NONTERMINAL_RUN_STATES = ("PENDING", "RUNNING")
-
-
-class LibraryImportRun(Base):
-    __tablename__ = "LibraryImportRun"
-    __table_args__ = (
-        CheckConstraint(
-            column("kind").in_(("INITIAL", "RETRY", "REIMPORT", "RECOVERY")),
-            name="LibraryImportRun_kind_check",
-        ),
-        CheckConstraint(
-            column("state").in_(
-                (
-                    "PENDING",
-                    "RUNNING",
-                    "COMPLETED",
-                    "COMPLETED_WITH_ERRORS",
-                    "FAILED",
-                    "CANCELLED",
-                )
-            ),
-            name="LibraryImportRun_state_check",
-        ),
-        ForeignKeyConstraint(
-            ["sourceNodeId", "libraryId"],
-            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
-            ondelete="CASCADE",
-            onupdate="CASCADE",
-            name="fk_LibraryImportRun_sourceNode_library",
-        ),
-        ForeignKeyConstraint(
-            ["resourceId", "libraryId"],
-            ["LibraryReadableResource.id", "LibraryReadableResource.libraryId"],
-            ondelete="CASCADE",
-            onupdate="CASCADE",
-            use_alter=True,
-            name="fk_LibraryImportRun_resource_library",
-        ),
-        Index("LibraryImportRun_libraryId_state_idx", "libraryId", "state"),
-        Index("LibraryImportRun_sourceNodeId_idx", "sourceNodeId"),
-        Index(
-            "LibraryImportRun_nonterminal_resource_key",
-            "resourceId",
-            unique=True,
-            sqlite_where=and_(
-                column("resourceId").is_not(None),
-                column("state", String).in_(_NONTERMINAL_RUN_STATES),
-            ),
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    library_id: Mapped[str] = mapped_column(
-        "libraryId",
-        String(191),
-        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    state: Mapped[str] = mapped_column(
-        String(32),
-        nullable=False,
-        default="PENDING",
-        server_default="PENDING",
-    )
-    source_node_id: Mapped[str] = mapped_column(
-        "sourceNodeId", String(191), nullable=False
-    )
-    resource_id: Mapped[str | None] = mapped_column(
-        "resourceId", String(191), nullable=True
-    )
-    adapter_id: Mapped[str | None] = mapped_column("adapterId", String(191), nullable=True)
-    adapter_version: Mapped[str | None] = mapped_column(
-        "adapterVersion", String(64), nullable=True
-    )
-    discovery_complete: Mapped[bool] = mapped_column(
-        "discoveryComplete",
-        Boolean(),
-        nullable=False,
-        default=False,
-        server_default="0",
-    )
-    error_summary: Mapped[str | None] = mapped_column(
-        "errorSummary", Text, nullable=True
-    )
-    published_at: Mapped[datetime | None] = mapped_column(
-        "publishedAt", TimestampMilliseconds(), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-    source_node: Mapped["LibrarySourceNode"] = relationship(
-        back_populates="import_runs",
-        foreign_keys=[source_node_id, library_id],
-        primaryjoin=(
-            "and_(LibraryImportRun.source_node_id==LibrarySourceNode.id,"
-            "LibraryImportRun.library_id==LibrarySourceNode.library_id)"
-        ),
-    )
-    resource: Mapped["LibraryReadableResource | None"] = relationship(
-        foreign_keys=[resource_id, library_id],
-        post_update=True,
-        primaryjoin=(
-            "and_(LibraryImportRun.resource_id==LibraryReadableResource.id,"
-            "LibraryImportRun.library_id==LibraryReadableResource.library_id)"
-        ),
-        overlaps="source_node",
-    )
-    resource_candidates: Mapped[list["ResourceCandidate"]] = relationship(
-        back_populates="import_run",
-        cascade="all, delete-orphan",
-    )
-    asset_candidates: Mapped[list["AssetCandidate"]] = relationship(
-        back_populates="import_run",
-        cascade="all, delete-orphan",
-    )
-    tasks: Mapped[list["LibraryImportTask"]] = relationship(
-        back_populates="owner_import_run",
-        foreign_keys="LibraryImportTask.owner_import_run_id",
-    )
-
-
-class ResourceCandidate(Base):
-    """Temporary Resource-shaped row owned by one ImportRun; not a stable result."""
-
-    __tablename__ = "ResourceCandidate"
-    __table_args__ = (
-        CheckConstraint(
-            column("enablementState").in_(("ENABLED", "DISABLED")),
-            name="ResourceCandidate_enablementState_check",
-        ),
-        CheckConstraint(
-            column("importState").in_(("PENDING", "READY", "FAILED")),
-            name="ResourceCandidate_importState_check",
-        ),
-        UniqueConstraint("importRunId", name="ResourceCandidate_importRunId_key"),
-        ForeignKeyConstraint(
-            ["sourceNodeId", "libraryId"],
-            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
-            ondelete="CASCADE",
-            onupdate="CASCADE",
-            name="fk_ResourceCandidate_sourceNode_library",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    import_run_id: Mapped[str] = mapped_column(
-        "importRunId",
-        String(191),
-        ForeignKey("LibraryImportRun.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    library_id: Mapped[str] = mapped_column(
-        "libraryId",
-        String(191),
-        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    book_id: Mapped[str | None] = mapped_column("bookId", String(191), nullable=True)
-    source_node_id: Mapped[str] = mapped_column(
-        "sourceNodeId", String(191), nullable=False
-    )
-    adapter_id: Mapped[str] = mapped_column("adapterId", String(191), nullable=False)
-    adapter_version: Mapped[str] = mapped_column(
-        "adapterVersion", String(64), nullable=False
-    )
-    media_kind: Mapped[str] = mapped_column("mediaKind", String(32), nullable=False)
-    format: Mapped[str] = mapped_column(String(32), nullable=False)
-    enablement_state: Mapped[str] = mapped_column(
-        "enablementState",
-        String(32),
-        nullable=False,
-        default="ENABLED",
-        server_default="ENABLED",
-    )
-    import_state: Mapped[str] = mapped_column(
-        "importState",
-        String(32),
-        nullable=False,
-        default="PENDING",
-        server_default="PENDING",
-    )
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-    import_run: Mapped[LibraryImportRun] = relationship(
-        back_populates="resource_candidates",
-        foreign_keys=[import_run_id],
-    )
-    source_node: Mapped["LibrarySourceNode"] = relationship(
-        foreign_keys=[source_node_id, library_id],
-        primaryjoin=(
-            "and_(ResourceCandidate.source_node_id==LibrarySourceNode.id,"
-            "ResourceCandidate.library_id==LibrarySourceNode.library_id)"
-        ),
-    )
-
-
-class AssetCandidate(Base):
-    """Temporary Asset-shaped row owned by one ImportRun; not a stable result."""
-
-    __tablename__ = "AssetCandidate"
-    __table_args__ = (
-        CheckConstraint(
-            column("role").in_(
-                ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
-            ),
-            name="AssetCandidate_role_check",
-        ),
-        CheckConstraint(
-            column("importState").in_(("PENDING", "READY", "FAILED")),
-            name="AssetCandidate_importState_check",
-        ),
-        UniqueConstraint(
-            "importRunId",
-            "sourceNodeId",
-            name="AssetCandidate_importRunId_sourceNodeId_key",
-        ),
-        ForeignKeyConstraint(
-            ["sourceNodeId", "libraryId"],
-            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
-            ondelete="CASCADE",
-            onupdate="CASCADE",
-            name="fk_AssetCandidate_sourceNode_library",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    import_run_id: Mapped[str] = mapped_column(
-        "importRunId",
-        String(191),
-        ForeignKey("LibraryImportRun.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    library_id: Mapped[str] = mapped_column(
-        "libraryId",
-        String(191),
-        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    source_node_id: Mapped[str] = mapped_column(
-        "sourceNodeId", String(191), nullable=False
-    )
-    role: Mapped[str] = mapped_column(String(32), nullable=False)
-    import_state: Mapped[str] = mapped_column(
-        "importState",
-        String(32),
-        nullable=False,
-        default="PENDING",
-        server_default="PENDING",
-    )
-    sequence_index: Mapped[int | None] = mapped_column(
-        "sequenceIndex", Integer, nullable=True
-    )
-    sort_key: Mapped[str | None] = mapped_column("sortKey", Text, nullable=True)
-    failure_reason: Mapped[str | None] = mapped_column(
-        "failureReason", Text, nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-    import_run: Mapped[LibraryImportRun] = relationship(
-        back_populates="asset_candidates",
-        foreign_keys=[import_run_id],
-    )
-    source_node: Mapped["LibrarySourceNode"] = relationship(
-        foreign_keys=[source_node_id, library_id],
-        primaryjoin=(
-            "and_(AssetCandidate.source_node_id==LibrarySourceNode.id,"
-            "AssetCandidate.library_id==LibrarySourceNode.library_id)"
-        ),
-    )
-
 
 class LibraryImportTask(Base):
-    """Per-file read task for readable-resource import (not legacy ImportTask)."""
+    """Single-consumer continue-import work item (not legacy ImportTask)."""
 
     __tablename__ = "LibraryImportTask"
     __table_args__ = (
         CheckConstraint(
-            column("state").in_(
-                ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED")
-            ),
+            column("kind").in_(("SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET")),
+            name="LibraryImportTask_kind_check",
+        ),
+        CheckConstraint(
+            column("state").in_(("QUEUED", "RUNNING", "SUCCEEDED", "FAILED")),
             name="LibraryImportTask_state_check",
         ),
         CheckConstraint(
-            column("role").in_(
-                ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
+            or_(
+                column("role").is_(None),
+                column("role").in_(
+                    ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
+                ),
             ),
             name="LibraryImportTask_role_check",
+        ),
+        CheckConstraint(
+            or_(
+                and_(
+                    column("kind") == "SCAN_LIBRARY",
+                    column("sourceNodeId").is_(None),
+                    column("resourceId").is_(None),
+                    column("role").is_(None),
+                ),
+                and_(
+                    column("kind") == "CONTINUE_SOURCE",
+                    column("sourceNodeId").is_not(None),
+                    column("resourceId").is_(None),
+                    column("role").is_(None),
+                ),
+                and_(
+                    column("kind") == "IMPORT_ASSET",
+                    column("sourceNodeId").is_not(None),
+                    column("resourceId").is_not(None),
+                    column("role").is_not(None),
+                ),
+            ),
+            name="LibraryImportTask_kind_shape_check",
         ),
         ForeignKeyConstraint(
             ["resourceId", "libraryId"],
@@ -369,49 +86,36 @@ class LibraryImportTask(Base):
             name="fk_LibraryImportTask_sourceNode_library",
         ),
         Index(
-            "LibraryImportTask_run_owned_key",
-            "ownerImportRunId",
-            "sourceNodeId",
-            "role",
-            unique=True,
-            sqlite_where=column("ownerImportRunId").is_not(None),
-        ),
-        Index(
-            "LibraryImportTask_incremental_key",
+            "LibraryImportTask_import_asset_key",
             "resourceId",
             "sourceNodeId",
             unique=True,
-            sqlite_where=column("ownerImportRunId").is_(None),
+            sqlite_where=column("kind") == "IMPORT_ASSET",
         ),
-        Index("LibraryImportTask_state_idx", "state"),
+        Index("LibraryImportTask_queued_createdAt_idx", "state", "createdAt"),
+        Index("LibraryImportTask_libraryId_kind_idx", "libraryId", "kind", "state"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
     library_id: Mapped[str] = mapped_column(
         "libraryId",
         String(191),
         ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
+    resource_id: Mapped[str | None] = mapped_column(
+        "resourceId", String(191), nullable=True
+    )
+    source_node_id: Mapped[str | None] = mapped_column(
+        "sourceNodeId", String(191), nullable=True
+    )
+    role: Mapped[str | None] = mapped_column(String(32), nullable=True)
     state: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         default="QUEUED",
         server_default="QUEUED",
-    )
-    resource_id: Mapped[str] = mapped_column("resourceId", String(191), nullable=False)
-    source_node_id: Mapped[str] = mapped_column(
-        "sourceNodeId", String(191), nullable=False
-    )
-    owner_import_run_id: Mapped[str | None] = mapped_column(
-        "ownerImportRunId",
-        String(191),
-        ForeignKey("LibraryImportRun.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=True,
-    )
-    role: Mapped[str] = mapped_column(String(32), nullable=False)
-    attempt_count: Mapped[int] = mapped_column(
-        "attemptCount", Integer, nullable=False, default=0, server_default="0"
     )
     error_summary: Mapped[str | None] = mapped_column(
         "errorSummary", Text, nullable=True
@@ -423,25 +127,20 @@ class LibraryImportTask(Base):
         default=db_timestamp,
         server_default=timestamp_ms_server_default(),
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
+    started_at: Mapped[datetime | None] = mapped_column(
+        "startedAt", TimestampMilliseconds(), nullable=True
     )
-    owner_import_run: Mapped[LibraryImportRun | None] = relationship(
-        back_populates="tasks",
-        foreign_keys=[owner_import_run_id],
+    finished_at: Mapped[datetime | None] = mapped_column(
+        "finishedAt", TimestampMilliseconds(), nullable=True
     )
-    resource: Mapped["LibraryReadableResource"] = relationship(
+    resource: Mapped["LibraryReadableResource | None"] = relationship(
         foreign_keys=[resource_id, library_id],
         primaryjoin=(
             "and_(LibraryImportTask.resource_id==LibraryReadableResource.id,"
             "LibraryImportTask.library_id==LibraryReadableResource.library_id)"
         ),
     )
-    source_node: Mapped["LibrarySourceNode"] = relationship(
+    source_node: Mapped["LibrarySourceNode | None"] = relationship(
         foreign_keys=[source_node_id, library_id],
         primaryjoin=(
             "and_(LibraryImportTask.source_node_id==LibrarySourceNode.id,"
@@ -451,9 +150,4 @@ class LibraryImportTask(Base):
     )
 
 
-__all__ = [
-    "AssetCandidate",
-    "LibraryImportRun",
-    "LibraryImportTask",
-    "ResourceCandidate",
-]
+__all__ = ["LibraryImportTask"]
