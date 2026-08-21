@@ -27,6 +27,17 @@ class SourceNodeViolationCode(str, Enum):
     SELF_PARENT = "SELF_PARENT"
 
 
+class InvalidSourceNodeRelativePathError(Exception):
+    """Programmer error: constructed SourceNodeRelativePath with an illegal path."""
+
+    def __init__(self, relative_path: str) -> None:
+        self.relative_path = relative_path
+        self.code = SourceNodeViolationCode.INVALID_RELATIVE_PATH
+        super().__init__(
+            f"invalid library-relative path: {relative_path!r}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class SourceNodeViolation:
     code: SourceNodeViolationCode
@@ -38,6 +49,10 @@ class SourceNodeRelativePath:
     """Validated Library-relative path slot preserved exactly as supplied."""
 
     value: str
+
+    def __post_init__(self) -> None:
+        if not _is_valid_library_relative_path(self.value):
+            raise InvalidSourceNodeRelativePathError(self.value)
 
     @property
     def name(self) -> str:
@@ -51,7 +66,8 @@ class SourceNodeRelativePath:
 
     @property
     def path_key(self) -> str:
-        return source_node_path_key(self.value)
+        digest = hashlib.sha256(self.value.encode("utf-8")).hexdigest()
+        return f"v1:{digest}"
 
     @property
     def is_root_child(self) -> bool:
@@ -71,24 +87,18 @@ _DRIVE_PREFIX_LENGTH = 2
 _FORBIDDEN_SEGMENTS = frozenset({"", ".", ".."})
 
 
-def source_node_path_key(relative_path: str) -> str:
-    """Return ``v1:`` + lowercase hex SHA-256 of the UTF-8 relative path."""
-
-    digest = hashlib.sha256(relative_path.encode("utf-8")).hexdigest()
-    return f"v1:{digest}"
-
-
 def parse_source_node_relative_path(
     relative_path: str,
 ) -> SourceNodeRelativePath | SourceNodeViolation:
     """Validate and wrap a Library-relative path without normalizing spelling."""
 
-    if not _is_valid_library_relative_path(relative_path):
+    try:
+        return SourceNodeRelativePath(relative_path)
+    except InvalidSourceNodeRelativePathError as error:
         return SourceNodeViolation(
-            code=SourceNodeViolationCode.INVALID_RELATIVE_PATH,
-            relative_path=relative_path,
+            code=error.code,
+            relative_path=error.relative_path,
         )
-    return SourceNodeRelativePath(value=relative_path)
 
 
 def validate_source_node_direct_parent(
@@ -138,7 +148,8 @@ def validate_source_node_direct_parent(
             ),
         )
 
-    if expected_parent_path is None or parent.relative_path.value != expected_parent_path:
+    parent_path = parent.relative_path.value
+    if expected_parent_path is None or parent_path != expected_parent_path:
         return (
             SourceNodeViolation(
                 code=SourceNodeViolationCode.PARENT_PATH_MISMATCH,
@@ -151,8 +162,8 @@ def validate_source_node_direct_parent(
 
 def evaluate_path_key_occupancy(
     *,
-    occupied_relative_path: str,
-    candidate_relative_path: str,
+    occupied_relative_path: SourceNodeRelativePath,
+    candidate_relative_path: SourceNodeRelativePath,
 ) -> SourceNodeViolation | None:
     """Decide occupancy for an already-matched ``(libraryId, pathKey)`` slot.
 
@@ -161,11 +172,11 @@ def evaluate_path_key_occupancy(
     any other original path is a digest collision.
     """
 
-    if occupied_relative_path == candidate_relative_path:
+    if occupied_relative_path.value == candidate_relative_path.value:
         return None
     return SourceNodeViolation(
         code=SourceNodeViolationCode.PATH_KEY_COLLISION,
-        relative_path=candidate_relative_path,
+        relative_path=candidate_relative_path.value,
     )
 
 

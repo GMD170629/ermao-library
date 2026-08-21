@@ -519,13 +519,29 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
   - 直接父子树不变量与 `PATH_KEY_COLLISION` 占用规则
   - 违规码：`INVALID_RELATIVE_PATH`、`PATH_KEY_COLLISION`、`CROSS_LIBRARY_PARENT`、`PARENT_NOT_DIRECTORY`、`PARENT_PATH_MISMATCH`、`SELF_PARENT`
 - 测试：`apps/api-python/tests/unit/modules/library/test_source_nodes.py`
-- 验证（于 `apps/api-python`）：
-  - `uv run --no-sync pytest -q tests/unit/modules/library/test_source_nodes.py`
-  - `uv run --no-sync pytest -q tests/test_capability_architecture.py`
-  - `uv run --no-sync ruff format --check app/modules/library/domain tests/unit/modules/library/test_source_nodes.py`
-  - `uv run --no-sync ruff check app/modules/library/domain tests/unit/modules/library/test_source_nodes.py`
-  - `uv run --no-sync pytest -q`
 - 明确未接入：ORM、迁移、扫描、导入、API、Web 或运行时 composition root；本批不激活任何新运行时路径。
+
+#### 8141b45 初版门禁（Codex 独立确认）
+
+- 聚焦：`test_source_nodes.py` + `test_capability_architecture.py` → **64 passed**
+- 全量：`uv run --no-sync pytest -q` → **6 failed, 926 passed**
+- 同 6 个失败 node ID 在父 commit `83ae8d5` 上单独复跑仍为 6 failed，故为 1A 之前既有失败
+- Ruff：`uv run --no-sync ruff …` 在 no-sync 环境不可用（未安装、未改依赖）
+
+#### 审查修复（本批，在 8141b45 之后）
+
+- 封闭：`SourceNodeRelativePath` 构造器经 `__post_init__` 自校验；非法路径抛出
+  `InvalidSourceNodeRelativePathError`（稳定 `INVALID_RELATIVE_PATH` code + 原始 `relative_path`）
+- `parse_source_node_relative_path` 仍对非法输入返回 `SourceNodeViolation`、不抛异常；与构造器共用同一套校验
+- `pathKey` 仅由已验证的 `SourceNodeRelativePath.path_key` 提供；移除接受裸 `str` 的公共 pathKey 入口
+- `evaluate_path_key_occupancy` 仅接受已验证的 `SourceNodeRelativePath`
+- 验证命令与结果（于 `apps/api-python`）：
+  - `uv run --no-sync pytest -q tests/unit/modules/library/test_source_nodes.py` → **47 passed**
+  - `uv run --no-sync pytest -q tests/unit/modules/library/test_source_nodes.py tests/test_capability_architecture.py` → **80 passed**
+  - `uv run --no-sync python -m compileall -q app/modules/library/domain/source_nodes.py` → 成功
+  - 手工行宽：两个修改过的 Python 文件均无超过 88 字符的行
+  - `uv run --no-sync pytest -q` → **6 failed, 942 passed**（同既有 6 失败；通过数含新增单测）
+  - `uv run --no-sync ruff format --check …` / `ruff check …` → **不可用**（`Failed to spawn: ruff`；未安装依赖）
 
 ### 后续阶段 — 未完成
 
