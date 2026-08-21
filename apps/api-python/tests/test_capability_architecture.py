@@ -534,6 +534,36 @@ def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
                 assert token not in source, f"{path}: forbidden {token}"
 
 
+def test_adr0018_target_config_forbids_unused_queue_and_observed_refresh() -> None:
+    """Target config/repository must not revive high-water or observed refresh."""
+
+    paths = (
+        APP_ROOT / "modules" / "library" / "application" / "source_tree_ports.py",
+        APP_ROOT
+        / "modules"
+        / "library"
+        / "infrastructure"
+        / "persistence"
+        / "source_tree_repository.py",
+        APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource",
+        APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
+    )
+    forbidden = ("queue_high_water", "refresh_observed")
+    files: list[Path] = []
+    for root in paths:
+        if root.is_file():
+            files.append(root)
+        else:
+            files.extend(root.rglob("*.py"))
+    for path in files:
+        if path.name == "__init__.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            assert token not in source, f"{path}: forbidden {token}"
+
+
 def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:
     # library modules (except bootstrap) must not contain:
     #   app.modules.imports.application

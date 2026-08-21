@@ -66,8 +66,6 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
             ignore_hidden=bool(library.ignore_hidden),
             ignore_patterns=library.ignore_patterns,
             global_ignore_patterns="",
-            min_file_size_bytes=int(library.min_file_size_bytes),
-            queue_high_water=500,
             probe_sample_limit=100,
             probe_max_entries=5000,
             probe_max_depth=32,
@@ -160,20 +158,6 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         self._session.add(row)
         self._session.flush()
         return self._to_record(row), True
-
-    def refresh_observed(
-        self,
-        source_node_id: str,
-        entry: ObservedSourceEntry,
-    ) -> SourceNodeRecord:
-        row = self._session.get(LibrarySourceNode, source_node_id)
-        if row is None:
-            raise LookupError(source_node_id)
-        row.observed_size_bytes = entry.observed_size_bytes
-        row.observed_mtime_ns = entry.observed_mtime_ns
-        row.observed_at = entry.observed_at
-        self._session.flush()
-        return self._to_record(row)
 
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]:
         root = self._session.get(LibrarySourceNode, source_node_id)

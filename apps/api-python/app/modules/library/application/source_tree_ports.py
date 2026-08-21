@@ -39,8 +39,6 @@ class LibrarySourceTreeConfig:
     ignore_hidden: bool
     ignore_patterns: str | None
     global_ignore_patterns: str
-    min_file_size_bytes: int
-    queue_high_water: int
     probe_sample_limit: int
     probe_max_entries: int
     probe_max_depth: int
@@ -126,12 +124,6 @@ class SourceNodeRepositoryPort(Protocol):
         parent_id: str | None,
         entry: ObservedSourceEntry,
     ) -> tuple[SourceNodeRecord, bool]: ...
-
-    def refresh_observed(
-        self,
-        source_node_id: str,
-        entry: ObservedSourceEntry,
-    ) -> SourceNodeRecord: ...
 
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]: ...
 

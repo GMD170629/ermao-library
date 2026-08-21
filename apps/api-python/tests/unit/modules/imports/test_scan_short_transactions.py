@@ -180,11 +180,6 @@ class FakeSourceNodes:
         self.inserts += 1
         return node, True
 
-    def refresh_observed(
-        self, source_node_id: str, entry: ObservedSourceEntry
-    ) -> SourceNodeRecord:
-        raise NotImplementedError
-
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]:
         return (source_node_id,)
 
@@ -419,8 +414,6 @@ def _config(root: Path) -> LibrarySourceTreeConfig:
         ignore_hidden=True,
         ignore_patterns=None,
         global_ignore_patterns="",
-        min_file_size_bytes=0,
-        queue_high_water=1000,
         probe_sample_limit=100,
         probe_max_entries=10_000,
         probe_max_depth=8,

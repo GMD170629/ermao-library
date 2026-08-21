@@ -178,8 +178,6 @@ class FakeLibraries:
             ignore_hidden=True,
             ignore_patterns=None,
             global_ignore_patterns="",
-            min_file_size_bytes=0,
-            queue_high_water=1000,
             probe_sample_limit=100,
             probe_max_entries=10_000,
             probe_max_depth=8,
@@ -237,9 +235,6 @@ class FakeSourceNodes:
         return None
 
     def insert_if_absent(self, **kwargs: object) -> None:
-        raise NotImplementedError
-
-    def refresh_observed(self, **kwargs: object) -> None:
         raise NotImplementedError
 
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]:
