@@ -39,8 +39,8 @@ from app.modules.imports.infrastructure.readable_resource.support import (
     StructuredPipelineLog,
     UtcClock,
 )
-from app.modules.imports.infrastructure.readable_resource.work_queue import (
-    SqlAlchemyReadableResourceWorkQueue,
+from app.modules.imports.infrastructure.readable_resource.task_queue import (
+    SqlAlchemyLibraryImportTaskQueue,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
@@ -142,7 +142,7 @@ def _pipeline(
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(db)
     books_resources = SqlAlchemyBookResourceRepository(db)
-    queue = SqlAlchemyReadableResourceWorkQueue(db)
+    queue = SqlAlchemyLibraryImportTaskQueue(db)
     uow = SqlAlchemyUnitOfWork(db)
     clock = UtcClock()
     log = StructuredPipelineLog()
@@ -426,9 +426,19 @@ def test_no_db_transaction_during_file_parse(tmp_path: Path) -> None:
                 def __init__(self, session: Session) -> None:
                     self._session = session
 
-                def parse_file(self, **kwargs):  # type: ignore[no-untyped-def]
+                def parse_file(
+                    self,
+                    *,
+                    absolute_path: Path,
+                    adapter: ResourceAdapterSpec,
+                    role: AssetRole,
+                ) -> FileParseResult:
                     assert not self._session.in_transaction()
-                    return super().parse_file(**kwargs)
+                    return super().parse_file(
+                        absolute_path=absolute_path,
+                        adapter=adapter,
+                        role=role,
+                    )
 
             pipeline, _ = _pipeline(db, adapters=AssertNoTxnAdapter(db))
             (root / "book.epub").write_bytes(b"epub")

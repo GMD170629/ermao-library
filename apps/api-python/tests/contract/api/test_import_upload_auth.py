@@ -1,6 +1,6 @@
 def test_import_upload_requires_an_authenticated_backend_session(client):
     response = client.post(
-        "/api/works/import",
+        "/api/books/import",
         data={"targetPath": "/library/uploads"},
         files={"file": ("unauthorized.epub", b"not-an-epub", "application/epub+zip")},
     )
