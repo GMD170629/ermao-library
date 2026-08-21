@@ -11,11 +11,10 @@ const payload = {
     userId: 'user-1',
     readerType: 'audio',
     book: { id: 'book-1', title: '有声书', author: '作者' },
-    resource: { id: 'resource-1', bookId: 'book-1', title: '第一资源', sortOrder: 0, durationMs: 30_000, chapterCount: 1 },
-    resourceCompleted: false,
+    resource: { id: 'resource-1', bookId: 'book-1', title: '第一资源', sortOrder: 0, durationMs: 30_000, chapterCount: 1, resourceCompleted: false },
     availableResources: [
-      { id: 'resource-1', bookId: 'book-1', title: '第一资源', sortOrder: 0, chapterCount: 1, durationMs: 30_000 },
-      { id: 'resource-2', bookId: 'book-1', title: '第二资源', sortOrder: 1, chapterCount: 0, durationMs: 0 }
+      { id: 'resource-1', bookId: 'book-1', title: '第一资源', sortOrder: 0, chapterCount: 1, durationMs: 30_000, resourceCompleted: false },
+      { id: 'resource-2', bookId: 'book-1', title: '第二资源', sortOrder: 1, chapterCount: 0, durationMs: 0, resourceCompleted: true }
     ],
     assets: [
       { id: 'asset-1', mimeType: 'audio/mpeg', codec: 'mp3', durationMs: 10_000, sortOrder: 0, url: '/api/assets/asset-1' },

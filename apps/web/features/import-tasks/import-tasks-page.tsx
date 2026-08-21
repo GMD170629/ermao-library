@@ -1,573 +1,257 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw, Search, Square, Trash2, X } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import type { BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { useConfirm, useToast } from '../../components/ui/feedback';
-import { useI18n } from '../../i18n/provider';
+import { useToast } from '../../components/ui/feedback';
+import { I18nText, useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
-import { Progress } from '../../components/ui/progress';
 import { Select } from '../../components/ui/select';
-import { I18nText } from '@/i18n/provider';
-import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import {
-  requestImportQueueClear,
-  waitForImportQueueClear
-} from './api/clear-queue';
+  continueLibraryImport,
+  continueSourceImport,
+  fetchImportTasks,
+  type ImportTaskState,
+  type LibraryImportTask
+} from './public';
 
-type ImportTask = {
-  id: string;
-  origin: 'SCAN';
-  status: 'PENDING' | 'PARSING' | 'COMPLETED' | 'FAILED';
-  originalName?: string | null;
-  sourcePath: string;
-  sourceFileExists?: boolean;
-  progress: number;
-  message?: string | null;
-  errorSummary?: string | null;
-  errorCode?: string | null;
-  retryable?: boolean;
-  friendlyError?: string | null;
-  createdAt: string;
-  finishedAt?: string | null;
-  recognizedMetadata?: {
-    title: string;
-    resourceTitle: string;
-    author?: string | null;
-    fields: string[];
-    source: 'REQUESTED' | 'SIDECAR_OPF' | 'EMBEDDED' | 'PATH';
-  } | null;
-  library?: { name: string; rootPath: string } | null;
-  book?: { id: string; title: string } | null;
-  logs: Array<{ id: string; level: string; message: string; createdAt: string }>;
-};
+type ImportTaskStateFilter = 'ALL' | ImportTaskState;
+type PageSize = 10 | 20 | 50;
 
-type ImportScanJob = {
-  id: string;
-  rootPath: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-  filesScanned: number;
-  candidatesFound: number;
-  queuedCount: number;
-  skippedCount: number;
-  errorCount: number;
-  restartCount: number;
-};
+const pageSizes: readonly PageSize[] = [10, 20, 50];
 
-type StatusFilter = 'ALL' | ImportTask['status'];
-type PageSize = '10' | '20' | '50';
-
-const emptySummary = { completed: 0, failed: 0 };
-const statusOptions = [
-  { value: 'ALL', label: '全部状态' },
-  { value: 'PENDING', label: '等待中' },
-  { value: 'PARSING', label: '导入中' },
-  { value: 'COMPLETED', label: '已完成' },
-  { value: 'FAILED', label: '失败' }
-];
-const pageSizeOptions = [
-  { value: '10', label: '10 条/页' },
-  { value: '20', label: '20 条/页' },
-  { value: '50', label: '50 条/页' }
-];
-
-type ImportTasksPayload = {
-  ok: boolean;
-  data?: {
-    tasks: ImportTask[];
-    summary: typeof emptySummary;
-    page: number;
-    pageSize: number;
-    total: number;
-    totalPages: number;
-  };
-  error?: { message: string };
-};
-
-function normalizeImportTask(task: ImportTask): ImportTask {
-  return {
-    ...task,
-    sourcePath: task.sourcePath ?? '',
-    progress: Number.isFinite(task.progress) ? task.progress : 0,
-    logs: Array.isArray(task.logs) ? task.logs : []
-  };
-}
-
-function ImportLogMessage({ message }: { message: string }) {
-  if (message === 'AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置') {
-    return <I18nText>AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置</I18nText>;
-  }
-  return <>{message}</>;
-}
-
-function statusTone(status: ImportTask['status']) {
-  if (status === 'COMPLETED') return 'green';
-  if (status === 'FAILED') return 'red';
-  if (status === 'PARSING') return 'amber';
+function statusTone(state: ImportTaskState): BadgeTone {
+  if (state === 'SUCCEEDED') return 'green';
+  if (state === 'FAILED') return 'red';
+  if (state === 'RUNNING') return 'amber';
   return 'slate';
 }
 
-function statusLabel(status: ImportTask['status']) {
-  return { PENDING: '等待中', PARSING: '导入中', COMPLETED: '已完成', FAILED: '失败' }[status];
+function statusLabel(state: ImportTaskState): string {
+  return {
+    QUEUED: '等待中',
+    RUNNING: '导入中',
+    SUCCEEDED: '已完成',
+    FAILED: '失败'
+  }[state];
 }
 
-function importStage(task: ImportTask) {
-  return task.message ?? '正在导入读物';
+function kindLabel(kind: LibraryImportTask['kind']): string {
+  return {
+    SCAN_LIBRARY: '扫描书库',
+    CONTINUE_SOURCE: '继续导入资源',
+    IMPORT_ASSET: '导入资源资产'
+  }[kind];
 }
 
-function originLabel(origin: ImportTask['origin']) {
-  return { SCAN: '扫描导入' }[origin];
+function taskTarget(task: LibraryImportTask): string {
+  return task.resourceId ?? task.sourceNodeId ?? task.libraryId;
+}
+
+function taskDate(value: string | null, locale: string): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
 export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
-  const { t: i18nAttribute } = useAttributeI18n();
-  const { locale } = useI18n();
-  const [tasks, setTasks] = useState<ImportTask[]>([]);
-  const [scanJobs, setScanJobs] = useState<ImportScanJob[]>([]);
-  const [summary, setSummary] = useState(emptySummary);
+  const { t, locale } = useI18n();
+  const toast = useToast();
+  const [tasks, setTasks] = useState<LibraryImportTask[]>([]);
+  const [summary, setSummary] = useState({ completed: 0, failed: 0 });
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
-  const [pageSize, setPageSize] = useState<PageSize>('10');
-  const [keywordDraft, setKeywordDraft] = useState('');
-  const [keyword, setKeyword] = useState('');
+  const [stateFilter, setStateFilter] = useState<ImportTaskStateFilter>('ALL');
+  const [pageSize, setPageSize] = useState<PageSize>(10);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'clear' | 'rescan' | ''>('');
-  const [retryingTaskId, setRetryingTaskId] = useState('');
-  const [deletingTaskId, setDeletingTaskId] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<ImportTask | null>(null);
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [message, setMessage] = useState('');
+  const [continuingTaskId, setContinuingTaskId] = useState('');
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
-  const clearControllerRef = useRef<AbortController | null>(null);
-  const confirm = useConfirm();
-  const toast = useToast();
-  const activeTask = useMemo(() => page === 1 ? tasks.find((task) => task.status === 'PARSING' || task.status === 'PENDING') ?? null : null, [page, tasks]);
 
-  const loadActiveScanJobs = useCallback(async () => {
-    const responses = await Promise.all(
-      ['PENDING', 'RUNNING'].map(async (status) => {
-        const response = await fetch(`/api/import-scan-jobs?status=${status}`);
-        const payload = await response.json() as { ok: boolean; data?: { jobs: ImportScanJob[] }; error?: { message: string } };
-        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '读取扫描进度失败');
-        return payload.data?.jobs ?? [];
-      })
-    );
-    setScanJobs(responses.flat());
-  }, []);
-
-  const loadTasks = useCallback(async (targetPage: number) => {
+  const loadTasks = useCallback(async (targetPage: number, signal?: AbortSignal) => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(targetPage), pageSize });
-      if (statusFilter !== 'ALL') params.set('status', statusFilter);
-      if (keyword) params.set('keyword', keyword);
-      const response = await fetch(`/api/import-tasks?${params.toString()}`);
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as ImportTasksPayload : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `读取导入任务失败：HTTP ${response.status}`);
-      if (!payload) throw new Error('读取导入任务失败：服务暂时没有返回内容');
-      if (!payload.ok) throw new Error(payload.error?.message ?? '读取导入任务失败');
+      const result = await fetchImportTasks(targetPage, pageSize, stateFilter === 'ALL' ? null : stateFilter, signal);
       if (requestId !== requestIdRef.current) return;
-      const nextTotalPages = Math.max(1, Number(payload.data?.totalPages ?? 1));
-      const nextPage = Math.min(nextTotalPages, Math.max(1, Number(payload.data?.page ?? targetPage)));
-      setTasks((payload.data?.tasks ?? []).map(normalizeImportTask));
-      setSummary({ ...emptySummary, ...(payload.data?.summary ?? {}) });
-      setTotal(Math.max(0, Number(payload.data?.total ?? 0)));
-      setTotalPages(nextTotalPages);
+      const nextPage = Math.min(result.totalPages, Math.max(1, result.page));
+      setTasks(result.tasks);
+      setSummary(result.summary);
+      setTotal(result.total);
+      setTotalPages(result.totalPages);
       setPage((current) => current === nextPage ? current : nextPage);
       setError('');
     } catch (reason) {
-      if (requestId !== requestIdRef.current) return;
-      const nextError = reason instanceof Error ? reason.message : '读取导入任务失败';
-      setError(nextError);
-      toast.error('读取导入任务失败', nextError);
+      if (signal?.aborted || requestId !== requestIdRef.current) return;
+      const message = reason instanceof Error ? reason.message : t('读取导入任务失败');
+      setError(message);
+      toast.error(t('读取导入任务失败'), message);
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (!signal?.aborted && requestId === requestIdRef.current) setLoading(false);
     }
-  }, [keyword, pageSize, statusFilter, toast]);
-
-  async function requestRescan() {
-    setBusy('rescan');
-    try {
-      const response = await fetch('/api/import-tasks/rescan', { method: 'POST' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { requestedAt: string; jobs: ImportScanJob[] }; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `请求重新识别失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '请求重新识别失败');
-      setMessage('已请求重新识别书库');
-      setScanJobs(payload.data?.jobs ?? []);
-      toast.success('已请求重新识别书库');
-      setError('');
-      setPage(1);
-      await loadTasks(1);
-    } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '请求重新识别失败';
-      setError(nextError);
-      toast.error('请求重新识别失败', nextError);
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function clearImportQueue() {
-    const confirmed = await confirm({
-      title: '清理导入队列？',
-      description: '清理完成前会停止领取新任务，并等待当前任务安全完成或回滚。只删除队列记录，不会删除源文件、生成文件或已入库书籍。',
-      confirmLabel: '确认清理',
-      tone: 'danger'
-    });
-    if (!confirmed) return;
-    setBusy('clear');
-    const controller = new AbortController();
-    clearControllerRef.current?.abort();
-    clearControllerRef.current = controller;
-    try {
-      const requested = await requestImportQueueClear(controller.signal);
-      setMessage('正在停止并清理导入队列');
-      const completed = await waitForImportQueueClear(requested.id, {
-        signal: controller.signal
-      });
-      if (completed.status === 'failed') throw new Error('清理导入队列失败');
-      const successMessage = '导入队列已清理';
-      setMessage(successMessage);
-      toast.success(successMessage);
-      setError('');
-      setPage(1);
-      await loadTasks(1);
-    } catch (reason) {
-      if (controller.signal.aborted) return;
-      const nextError = reason instanceof Error ? reason.message : '清理导入队列失败';
-      setError(nextError);
-      toast.error('清理导入队列失败', nextError);
-    } finally {
-      if (clearControllerRef.current === controller) {
-        clearControllerRef.current = null;
-        setBusy('');
-      }
-    }
-  }
-
-  async function retryTask(task: ImportTask) {
-    setRetryingTaskId(task.id);
-    try {
-      const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}/retry`, { method: 'POST' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `重试失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '重试失败');
-      setMessage(`${task.originalName ?? task.sourcePath} 已重新加入队列`);
-      setError('');
-      toast.success('已重新加入导入队列');
-      setPage(1);
-      await loadTasks(1);
-    } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '重试失败';
-      setError(nextError);
-      toast.error('重试失败', nextError);
-    } finally {
-      setRetryingTaskId('');
-    }
-  }
-
-  function openDeleteTask(task: ImportTask) {
-    setDeleteTarget(task);
-  }
-
-  async function deleteTasks() {
-    const targets = bulkDeleteOpen ? tasks.filter((task) => selectedIds.has(task.id)) : deleteTarget ? [deleteTarget] : [];
-    if (targets.length === 0) return;
-    setDeletingTaskId(bulkDeleteOpen ? 'bulk' : targets[0].id);
-    try {
-      for (const task of targets) {
-        const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}`, {
-          method: 'DELETE'
-        });
-        const text = await response.text();
-        const payload = text ? JSON.parse(text) as { ok: boolean; error?: { message: string } } : null;
-        if (!response.ok) throw new Error(payload?.error?.message ?? `删除失败：HTTP ${response.status}`);
-        if (!payload?.ok) throw new Error(payload?.error?.message ?? '删除失败');
-      }
-      const successMessage = i18nAttribute('已删除 {value0} 条导入记录', { value0: targets.length });
-      setDeleteTarget(null);
-      setBulkDeleteOpen(false);
-      setSelectedIds(new Set());
-      setMessage(successMessage);
-      setError('');
-      toast.success(successMessage);
-      await loadTasks(page);
-    } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '删除失败';
-      setError(nextError);
-      toast.error('删除导入记录失败', nextError);
-    } finally {
-      setDeletingTaskId('');
-    }
-  }
+  }, [pageSize, stateFilter, t, toast]);
 
   useEffect(() => {
-    void loadTasks(page);
+    const controller = new AbortController();
+    void loadTasks(page, controller.signal);
+    return () => controller.abort();
   }, [loadTasks, page]);
 
-  useEffect(() => {
-    void loadActiveScanJobs().catch(() => undefined);
-    const timer = window.setInterval(() => {
-      void loadActiveScanJobs().catch(() => undefined);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [loadActiveScanJobs]);
+  const activeTask = useMemo(
+    () => tasks.find((task) => task.state === 'QUEUED' || task.state === 'RUNNING') ?? null,
+    [tasks]
+  );
 
-  useEffect(() => {
-    setSelectedIds(new Set());
-  }, [keyword, page, pageSize, statusFilter]);
+  async function continueTask(task: LibraryImportTask) {
+    if (task.state !== 'FAILED') return;
+    setContinuingTaskId(task.id);
+    try {
+      const result = task.sourceNodeId
+        ? await continueSourceImport(task.sourceNodeId)
+        : await continueLibraryImport(task.libraryId);
+      if (result.requeuedFailed > 0 || result.enqueued) {
+        toast.success(t('已重新加入导入队列'));
+      } else {
+        toast.success(t('没有新的导入任务'));
+      }
+      setError('');
+      await loadTasks(page);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : t('继续导入失败');
+      setError(message);
+      toast.error(t('继续导入失败'), message);
+    } finally {
+      setContinuingTaskId('');
+    }
+  }
 
-  useEffect(() => () => {
-    clearControllerRef.current?.abort();
-  }, []);
-
-  const selectableTasks = useMemo(() => tasks.filter((task) => task.status === 'COMPLETED' || task.status === 'FAILED'), [tasks]);
-  const selectedTasks = useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [selectedIds, tasks]);
-  const allPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedIds.has(task.id));
-  const dialogTargets = bulkDeleteOpen ? selectedTasks : deleteTarget ? [deleteTarget] : [];
-
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function changeStateFilter(next: ImportTaskStateFilter) {
+    setStateFilter(next);
     setPage(1);
-    setKeyword(keywordDraft.trim());
-  }
-
-  function toggleTaskSelection(taskId: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
-  }
-
-  function openBulkDelete() {
-    setBulkDeleteOpen(true);
   }
 
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-      {!embedded ? <PageTitle
-        title={i18nAttribute("导入任务")}
-        desc={i18nAttribute("查看手动上传和书库自动导入状态。")}
-        action={(
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
-            <Button loading={busy === 'rescan'} loadingText={i18nAttribute("请求中")} variant="secondary" icon={Search} onClick={() => void requestRescan()}>
-              <I18nText>强制重新识别</I18nText></Button>
-            <Button loading={busy === 'clear'} loadingText={i18nAttribute("清理中")} variant="danger" icon={Trash2} onClick={() => void clearImportQueue()}>
-              <I18nText>清理导入队列</I18nText></Button>
-          </div>
-        )}
-      /> : (
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
-          <Button loading={busy === 'rescan'} loadingText={i18nAttribute("请求中")} variant="secondary" icon={Search} onClick={() => void requestRescan()}><I18nText>重新识别全部文件夹</I18nText></Button>
-          <Button loading={busy === 'clear'} loadingText={i18nAttribute("清理中")} variant="ghost" icon={Trash2} onClick={() => void clearImportQueue()}><I18nText>清理导入队列</I18nText></Button>
+      {!embedded ? (
+        <PageTitle
+          title={t('导入任务')}
+          desc={t('查看书库扫描、资源继续导入和资源资产导入状态。')}
+          action={(
+            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={t('刷新中')} onClick={() => void loadTasks(page)}>
+              <I18nText>刷新</I18nText>
+            </Button>
+          )}
+        />
+      ) : (
+        <div className="flex justify-end">
+          <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={t('刷新中')} onClick={() => void loadTasks(page)}>
+            <I18nText>刷新</I18nText>
+          </Button>
         </div>
       )}
-      {scanJobs.length > 0 ? (
-        <div className="space-y-2 rounded-[20px] border border-[#F0DED5] bg-[#FFF8F4] p-4">
-          <div className="text-sm font-semibold text-[#3D3732]"><I18nText>活动扫描任务</I18nText></div>
-          {scanJobs.map((job) => (
-            <div key={job.id} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-xs text-[#6D625B] md:flex-row md:items-center">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-[#3D3732]">{job.rootPath}</div>
-                <div className="mt-1">
-                  <I18nText>检查文件：</I18nText>{job.filesScanned} · <I18nText>发现候选：</I18nText>{job.candidatesFound} · <I18nText>加入队列：</I18nText>{job.queuedCount} · <I18nText>按规则跳过：</I18nText>{job.skippedCount} · <I18nText>错误：</I18nText>{job.errorCount} · <I18nText>重启次数：</I18nText>{job.restartCount}
-                </div>
-              </div>
-              <Button variant="ghost" icon={Square} onClick={() => void (async () => {
-                await fetch(`/api/import-scan-jobs/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' });
-                await loadActiveScanJobs();
-              })()} aria-label={i18nAttribute("取消扫描任务")}><I18nText>取消扫描</I18nText></Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <form onSubmit={submitSearch} className="flex flex-col gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3 md:flex-row md:items-center">
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#DEDAD4] bg-white px-3 focus-within:border-[#F19B84] focus-within:ring-2 focus-within:ring-[#FCE5DE]">
-          <Search size={16} className="shrink-0 text-[#8A847D]" />
-          <input
-            value={keywordDraft}
-            onChange={(event) => setKeywordDraft(event.target.value)}
-            placeholder={i18nAttribute("搜索文件名、路径、图书或错误信息")}
-            className="h-10 min-w-0 flex-1 bg-transparent text-sm text-[#2A2825] outline-none placeholder:text-[#A6A099]"
-            aria-label={i18nAttribute("搜索导入记录")}
-          />
-          {keywordDraft ? <button type="button" onClick={() => { setKeywordDraft(''); setKeyword(''); setPage(1); }} className="text-[#8A847D] hover:text-[#2A2825]" aria-label={i18nAttribute("清空搜索")}><X size={15} /></button> : null}
-        </label>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3">
+        <span className="text-sm font-medium text-[#4F4A45]"><I18nText>按状态筛选</I18nText></span>
         <Select
-          value={statusFilter}
-          options={statusOptions}
-          onChange={(status) => { setStatusFilter(status); setPage(1); }}
-          ariaLabel={i18nAttribute("按状态筛选")}
+          value={stateFilter}
+          options={[
+            { value: 'ALL', label: t('全部状态') },
+            { value: 'QUEUED', label: t('等待中') },
+            { value: 'RUNNING', label: t('导入中') },
+            { value: 'SUCCEEDED', label: t('已完成') },
+            { value: 'FAILED', label: t('失败') }
+          ]}
+          onChange={changeStateFilter}
+          ariaLabel={t('按状态筛选')}
           className="min-w-[132px]"
           triggerClassName="h-10"
           menuClassName="min-w-[160px]"
         />
-        <Button type="submit" variant="secondary"><I18nText>搜索</I18nText></Button>
-        {selectedIds.size > 0 ? <Button type="button" variant="danger" icon={Trash2} onClick={openBulkDelete}><I18nText>删除所选（</I18nText>{selectedIds.size}）</Button> : null}
-      </form>
-      {selectableTasks.length > 0 ? (
-        <label className="flex w-fit cursor-pointer items-center gap-2 px-1 text-sm text-[#77716A]">
-          <input
-            type="checkbox"
-            checked={allPageSelected}
-            onChange={(event) => setSelectedIds(event.target.checked ? new Set(selectableTasks.map((task) => task.id)) : new Set())}
-            className="h-4 w-4 accent-[#E64A2E]"
-          />
-          <I18nText>选择本页已结束记录</I18nText></label>
-      ) : null}
-      {message ? <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700">{message}</div> : null}
-      {activeTask ? (
-        <div className="rounded-[28px] border border-amber-100 bg-amber-50 p-5 text-amber-800">
-          <div className="flex items-center gap-2 font-semibold"><Clock size={18} />{importStage(activeTask)}</div>
-          <Progress value={activeTask.progress} className="mt-4" />
-          <div className="mt-2 text-sm">{activeTask.originalName ?? activeTask.sourcePath}</div>
+        <span className="text-sm text-[#77716A]"><I18nText>每页显示数量</I18nText></span>
+        <Select
+          value={String(pageSize)}
+          options={pageSizes.map((size) => ({ value: String(size), label: `${size} ${t('条/页')}` }))}
+          onChange={(value) => { setPageSize(Number(value) as PageSize); setPage(1); }}
+          ariaLabel={t('每页显示数量')}
+          className="min-w-[112px]"
+          triggerClassName="h-10"
+          menuClassName="min-w-[128px]"
+        />
+      </div>
+
+      {!embedded ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          {[
+            { label: '已完成', value: summary.completed },
+            { label: '失败', value: summary.failed },
+            { label: '当前页', value: total }
+          ].map(({ label, value }) => (
+            <div key={label} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-xs text-slate-500">{t(label)}</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-950">{value}</div>
+            </div>
+          ))}
         </div>
       ) : null}
-      {!embedded ? <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          { label: '已完成', value: summary.completed },
-          { label: '失败', value: summary.failed }
-        ].map(({ label, value }) => (
-          <div key={label} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-xs text-slate-500">{i18nAttribute(label)}</div>
-            <div className="mt-1 text-2xl font-semibold text-slate-950">{value}</div>
-          </div>
-        ))}
-      </div> : null}
+
+      {activeTask ? (
+        <div className="rounded-[28px] border border-amber-100 bg-amber-50 p-5 text-amber-800">
+          <div className="flex items-center gap-2 font-semibold"><Clock size={18} /><I18nText>当前导入任务</I18nText></div>
+          <div className="mt-2 text-sm"><I18nText>{kindLabel(activeTask.kind)}</I18nText><span data-i18n-skip> · {taskTarget(activeTask)}</span></div>
+          <Badge tone={statusTone(activeTask.state)} className="mt-3">{t(statusLabel(activeTask.state))}</Badge>
+        </div>
+      ) : null}
+
       {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取导入任务...</I18nText></div> : null}
-      {error ? <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error}</div> : null}
+      {error ? <div className="rounded-3xl border border-red-100 bg-red-50 p-5 text-sm text-red-700">{error}</div> : null}
       {!loading && !error && tasks.length === 0 ? <div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-500"><I18nText>暂无导入任务。</I18nText></div> : null}
+
       <div className="space-y-3">
         {tasks.map((task) => (
-          <div key={task.id} className={`rounded-[28px] border bg-white p-5 shadow-sm transition ${selectedIds.has(task.id) ? 'border-[#F19B84] ring-2 ring-[#FCE5DE]' : 'border-slate-200'}`}>
+          <div key={task.id} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div className="flex min-w-0 flex-1 items-start gap-3">
-                {task.status === 'COMPLETED' || task.status === 'FAILED' ? (
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(task.id)}
-                    onChange={() => toggleTaskSelection(task.id)}
-                    className="mt-1 h-4 w-4 shrink-0 accent-[#E64A2E]"
-                    aria-label={i18nAttribute("选择 {value0}", { value0: task.originalName ?? task.sourcePath })}
-                  />
-                ) : <span className="w-4 shrink-0" />}
+                <FileArchive size={18} className="mt-0.5 shrink-0 text-blue-600" />
                 <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <FileArchive size={18} className="text-blue-600" />
-                  <span className="font-semibold">{task.book?.title ?? task.originalName ?? task.sourcePath.split('/').at(-1)}</span>
-                  <Badge tone={statusTone(task.status) as BadgeTone}>{statusLabel(task.status)}</Badge>
-                  <Badge>{originLabel(task.origin)}</Badge>
-                  {task.recognizedMetadata?.source === 'SIDECAR_OPF' ? <Badge tone="blue"><I18nText>OPF 元数据</I18nText></Badge> : null}
-                </div>
-                {task.recognizedMetadata ? (
-                  <div className="mt-2 text-sm text-[#554F49]">
-                    <span className="font-medium">{task.recognizedMetadata.title}</span>
-                    {task.recognizedMetadata.resourceTitle !== task.recognizedMetadata.title ? <span> · {task.recognizedMetadata.resourceTitle}</span> : null}
-                    {task.recognizedMetadata.author ? <span> · {task.recognizedMetadata.author}</span> : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span><I18nText>{kindLabel(task.kind)}</I18nText></span>
+                    <Badge tone={statusTone(task.state)}>{t(statusLabel(task.state))}</Badge>
+                    {task.role ? <Badge>{task.role}</Badge> : null}
                   </div>
-                ) : null}
-                <div className="mt-2 break-words text-sm text-slate-500">{task.library?.name ? `${task.library.name} · ` : ''}{task.sourcePath}</div>
-                {task.errorSummary ? (
-                  <div className="mt-3 space-y-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                    <div className="flex gap-2"><AlertTriangle size={16} />{task.errorSummary}</div>
-                    {task.friendlyError ? <div className="pl-6 text-red-600"><I18nText>建议：</I18nText>{task.friendlyError}</div> : null}
-                    {task.retryable ? (
-                      <div className="pl-6 pt-1">
-                        <Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={RefreshCw} loading={retryingTaskId === task.id} loadingText={i18nAttribute("正在重试")} onClick={() => void retryTask(task)}><I18nText>重试导入</I18nText></Button>
-                      </div>
-                    ) : null}
+                  <div data-i18n-skip className="mt-2 break-all text-sm text-slate-500">{taskTarget(task)}</div>
+                  <div className="mt-1 break-all text-xs text-slate-400">
+                    <I18nText>书库</I18nText> · {task.libraryId}
+                    {task.resourceId ? <> · <I18nText>资源</I18nText> · {task.resourceId}</> : null}
+                    {task.sourceNodeId ? <> · <I18nText>源节点</I18nText> · {task.sourceNodeId}</> : null}
                   </div>
-                ) : null}
+                  {task.errorSummary ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{task.errorSummary}</span></div> : null}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <div className="text-sm text-slate-500">{new Date(task.createdAt).toLocaleString(locale)}</div>
-                {task.status === 'COMPLETED' || task.status === 'FAILED' ? (
-                  <Button className="min-h-9 px-3 py-1.5" variant="ghost" icon={Trash2} onClick={() => openDeleteTask(task)}><I18nText>删除</I18nText></Button>
+              <div className="flex shrink-0 flex-col items-end gap-2 text-sm text-slate-500">
+                <span>{taskDate(task.createdAt, locale)}</span>
+                {task.state === 'FAILED' ? (
+                  <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={continuingTaskId === task.id} loadingText={t('继续中')} onClick={() => void continueTask(task)}>
+                    <I18nText>继续导入</I18nText>
+                  </Button>
                 ) : null}
               </div>
             </div>
-            {task.status === 'PARSING' || task.status === 'PENDING' ? <Progress value={task.progress} className="mt-4" /> : null}
-            {task.logs.length > 0 ? (
-              <div className="mt-4 space-y-1 rounded-2xl bg-slate-50 p-3 font-mono text-xs text-slate-500">
-                {task.logs.slice(0, 5).map((log) => (
-                  <div key={log.id} className="break-words">
-                    <span className={log.level === 'error' ? 'text-red-600' : log.level === 'warn' ? 'text-amber-600' : 'text-slate-500'}>{log.level}</span> · <ImportLogMessage message={log.message} />
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {task.status === 'COMPLETED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} /><I18nText>导入完成</I18nText></div> : null}
+            {task.state === 'SUCCEEDED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} /><I18nText>导入完成</I18nText></div> : null}
           </div>
         ))}
       </div>
-      {dialogTargets.length > 0 ? (
-        <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除导入记录")}>
-          <div className="w-full max-w-lg rounded-t-3xl border border-slate-200 bg-white p-5 shadow-2xl md:rounded-3xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">{bulkDeleteOpen ? i18nAttribute("批量删除 {value0} 条导入记录", { value0: dialogTargets.length }) : i18nAttribute("删除导入记录")}</h2>
-                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? i18nAttribute("只删除所选扫描记录，源文件和书库结构保持不变。") : i18nAttribute("只删除“{value0}”的扫描记录，源文件和书库结构保持不变。", { value0: dialogTargets[0].originalName ?? dialogTargets[0].sourcePath })}</p>
-              </div>
-              <button type="button" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
-            </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <Button type="button" variant="secondary" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }}><I18nText>取消</I18nText></Button>
-              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText={i18nAttribute("删除中")} onClick={() => void deleteTasks()}>{i18nAttribute("删除记录")}</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+
       {!error && total > 0 ? (
         <footer className="flex flex-wrap items-center justify-between gap-3 pt-1 text-sm text-[#77716A]">
-          <div className="flex flex-wrap items-center gap-3">
-            <span><I18nText>共 </I18nText>{total} <I18nText>条记录</I18nText></span>
-            <Select
-              value={pageSize}
-              options={pageSizeOptions}
-              onChange={(size) => { setPageSize(size); setPage(1); }}
-              ariaLabel={i18nAttribute("每页显示数量")}
-              size="sm"
-              align="left"
-              className="min-w-[112px]"
-              menuClassName="min-w-[128px]"
-            />
-          </div>
+          <span><I18nText>共 </I18nText>{total} <I18nText>条记录</I18nText></span>
           {totalPages > 1 ? (
-            <nav className="flex items-center gap-2" aria-label={i18nAttribute("导入活动分页")}>
-              <button
-                type="button"
-                disabled={page <= 1 || loading}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40"
-                aria-label={i18nAttribute("上一页")}
-              >
-                <ChevronLeft size={16} />
-              </button>
+            <nav className="flex items-center gap-2" aria-label={t('导入活动分页')}>
+              <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={t('上一页')}><ChevronLeft size={16} /></button>
               <span className="min-w-16 text-center text-[#4F4A45]">{page} / {totalPages}</span>
-              <button
-                type="button"
-                disabled={page >= totalPages || loading}
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40"
-                aria-label={i18nAttribute("下一页")}
-              >
-                <ChevronRight size={16} />
-              </button>
+              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={t('下一页')}><ChevronRight size={16} /></button>
             </nav>
           ) : null}
         </footer>

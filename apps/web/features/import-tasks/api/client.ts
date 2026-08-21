@@ -1,0 +1,153 @@
+export type ImportTaskKind = 'SCAN_LIBRARY' | 'CONTINUE_SOURCE' | 'IMPORT_ASSET';
+export type ImportTaskState = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+export type ImportTaskRole = 'PRIMARY' | 'TRACK' | 'PAGE' | 'SIDECAR' | 'SUPPLEMENT';
+
+export type LibraryImportTask = Readonly<{
+  id: string;
+  kind: ImportTaskKind;
+  libraryId: string;
+  resourceId: string | null;
+  sourceNodeId: string | null;
+  role: ImportTaskRole | null;
+  state: ImportTaskState;
+  errorSummary: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}>;
+
+export type ImportTasksPage = Readonly<{
+  tasks: LibraryImportTask[];
+  summary: Readonly<{ completed: number; failed: number }>;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}>;
+
+export type ContinueImportResult = Readonly<{
+  taskId: string | null;
+  libraryId: string;
+  sourceNodeId: string | null;
+  requeuedFailed: number;
+  enqueued: boolean;
+}>;
+
+type JsonObject = Record<string, unknown>;
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error(`导入任务响应缺少 ${field}`);
+  return value;
+}
+
+function nullableString(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  return requiredString(value, field);
+}
+
+function nonNegativeInteger(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function taskKind(value: unknown): ImportTaskKind {
+  if (value === 'SCAN_LIBRARY' || value === 'CONTINUE_SOURCE' || value === 'IMPORT_ASSET') return value;
+  throw new Error('导入任务响应包含无效类型');
+}
+
+function taskState(value: unknown): ImportTaskState {
+  if (value === 'QUEUED' || value === 'RUNNING' || value === 'SUCCEEDED' || value === 'FAILED') return value;
+  throw new Error('导入任务响应包含无效状态');
+}
+
+function taskRole(value: unknown): ImportTaskRole | null {
+  if (value === null || value === undefined) return null;
+  if (value === 'PRIMARY' || value === 'TRACK' || value === 'PAGE' || value === 'SIDECAR' || value === 'SUPPLEMENT') return value;
+  throw new Error('导入任务响应包含无效资产角色');
+}
+
+export function parseLibraryImportTask(value: unknown): LibraryImportTask {
+  if (!isObject(value)) throw new Error('导入任务响应无效');
+  return {
+    id: requiredString(value.id, 'id'),
+    kind: taskKind(value.kind),
+    libraryId: requiredString(value.libraryId, 'libraryId'),
+    resourceId: nullableString(value.resourceId, 'resourceId'),
+    sourceNodeId: nullableString(value.sourceNodeId, 'sourceNodeId'),
+    role: taskRole(value.role),
+    state: taskState(value.state),
+    errorSummary: nullableString(value.errorSummary, 'errorSummary'),
+    createdAt: requiredString(value.createdAt, 'createdAt'),
+    startedAt: nullableString(value.startedAt, 'startedAt'),
+    finishedAt: nullableString(value.finishedAt, 'finishedAt')
+  };
+}
+
+export function parseImportTasksPage(value: unknown): ImportTasksPage {
+  if (!isObject(value) || !Array.isArray(value.tasks) || !isObject(value.summary)) {
+    throw new Error('导入任务分页响应无效');
+  }
+  return {
+    tasks: value.tasks.map(parseLibraryImportTask),
+    summary: {
+      completed: nonNegativeInteger(value.summary.completed),
+      failed: nonNegativeInteger(value.summary.failed)
+    },
+    page: positiveInteger(value.page, 1),
+    pageSize: positiveInteger(value.pageSize, 10),
+    total: nonNegativeInteger(value.total),
+    totalPages: positiveInteger(value.totalPages, 1)
+  };
+}
+
+export function parseContinueImportResult(value: unknown): ContinueImportResult {
+  if (!isObject(value)) throw new Error('继续导入响应无效');
+  return {
+    taskId: nullableString(value.taskId, 'taskId'),
+    libraryId: requiredString(value.libraryId, 'libraryId'),
+    sourceNodeId: nullableString(value.sourceNodeId, 'sourceNodeId'),
+    requeuedFailed: nonNegativeInteger(value.requeuedFailed),
+    enqueued: value.enqueued === true
+  };
+}
+
+async function apiJson(path: string, init?: RequestInit): Promise<unknown> {
+  const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store', ...init });
+  const payload: unknown = await response.json().catch(() => null);
+  const envelope = isObject(payload) ? payload : {};
+  if (!response.ok || envelope.ok === false) {
+    const error = isObject(envelope.error) ? envelope.error : {};
+    throw new Error(typeof error.message === 'string' ? error.message : `导入请求失败（${response.status}）`);
+  }
+  return envelope.ok === true && 'data' in envelope ? envelope.data : payload;
+}
+
+export async function fetchImportTasks(
+  page: number,
+  pageSize: number,
+  state: ImportTaskState | null = null,
+  signal?: AbortSignal
+): Promise<ImportTasksPage> {
+  const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (state) query.set('state', state);
+  return parseImportTasksPage(await apiJson(`/api/import-tasks?${query.toString()}`, { signal }));
+}
+
+async function continueImport(path: string, signal?: AbortSignal): Promise<ContinueImportResult> {
+  return parseContinueImportResult(await apiJson(path, { method: 'POST', signal }));
+}
+
+export function continueLibraryImport(libraryId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
+  return continueImport(`/api/libraries/${encodeURIComponent(libraryId)}/scan`, signal);
+}
+
+export function continueSourceImport(sourceNodeId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
+  return continueImport(`/api/source-nodes/${encodeURIComponent(sourceNodeId)}/continue`, signal);
+}

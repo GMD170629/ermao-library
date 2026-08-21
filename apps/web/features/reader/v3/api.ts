@@ -27,6 +27,7 @@ export type ReaderResource = Readonly<{
   durationMs: number | null;
   trackCount: number | null;
   progress: number;
+  resourceCompleted: boolean;
   lastReadAt: string | null;
 }>;
 
@@ -122,6 +123,7 @@ function mapResource(value: unknown): ReaderResource | null {
     durationMs: nullableNumber(item.durationMs),
     trackCount: nullableNumber(item.trackCount),
     progress: Math.max(0, Math.min(100, numberValue(item.progress))),
+    resourceCompleted: item.resourceCompleted === true,
     lastReadAt: nullableString(item.lastReadAt)
   };
 }
@@ -303,7 +305,7 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
     sourceFormat: format,
     book: { id: stringValue(book.id, bookId), title: stringValue(book.title, '未命名图书'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
     resource,
-    resourceCompleted: data.resourceCompleted === true || resource.progress >= 100,
+    resourceCompleted: resource.resourceCompleted,
     availableResources: (Array.isArray(data.availableResources) ? data.availableResources : []).map(mapResource).filter((item): item is ReaderResource => item !== null),
     assets,
     units,

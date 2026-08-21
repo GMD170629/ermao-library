@@ -13,10 +13,9 @@ function bootstrapPayload(sourceFormat: 'mobi' | 'txt') {
       readerType: 'reflowable',
       sourceFormat,
       book: { id: 'book-1', title: 'Book' },
-      resourceCompleted: false,
       resource: {
         id: 'resource-1', bookId: 'book-1', title: 'Resource', format: sourceFormat,
-        readerType: 'reflowable', sortOrder: 0,
+        readerType: 'reflowable', sortOrder: 0, resourceCompleted: false,
       },
       availableResources: [],
       assets: [{

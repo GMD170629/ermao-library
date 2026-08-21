@@ -65,7 +65,8 @@ function normalizeResource(value: unknown, index: number, bookId: string): Audio
     title: stringValue(item.title, `资源 ${index + 1}`),
     sortOrder: numberValue(item.sortOrder ?? item.resourceIndex, index),
     chapterCount: Math.max(0, numberValue(item.chapterCount)),
-    durationMs: Math.max(0, numberValue(item.durationMs))
+    durationMs: Math.max(0, numberValue(item.durationMs)),
+    resourceCompleted: item.resourceCompleted === true
   };
 }
 
@@ -116,7 +117,7 @@ export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''
       coverUrl: nullableString(book.coverUrl)
     },
     resource,
-    resourceCompleted: raw.resourceCompleted === true,
+    resourceCompleted: resource.resourceCompleted,
     availableResources,
     tracks,
     chapters,

@@ -41,6 +41,7 @@ export type AudioResourceSummary = {
   sortOrder: number;
   chapterCount: number;
   durationMs: number;
+  resourceCompleted: boolean;
 };
 
 export type AudioLaunchSummary = {
