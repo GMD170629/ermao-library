@@ -1,4 +1,4 @@
-"""Schema integration coverage for ADR 0018 readable-resource overlay tables."""
+"""Fresh-baseline schema coverage for the ADR 0018/0019 target identity."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibrarySourceNode,
 )
 
-OVERLAY_TABLES = {
+TARGET_CORE_TABLES = {
     "LibrarySourceNode",
     "LibrarySourceNodeMetadata",
     "LibrarySourceNodeInterpretation",
@@ -39,6 +39,36 @@ OVERLAY_TABLES = {
     "LibraryResourceAsset",
     "LibraryResourceAssetMetadata",
     "LibraryImportTask",
+}
+
+LEGACY_TABLES = {
+    "LibraryImportRun",
+    "ResourceCandidate",
+    "AssetCandidate",
+    "LibraryWork",
+    "LibraryVersion",
+    "LibraryVolume",
+    "LibraryFile",
+    "LibraryMediaVersion",
+    "LibraryReadingUnit",
+    "LibraryReadingProgress",
+    "LibraryMetadata",
+    "LibraryWorkFacet",
+    "LibraryVolumeFacet",
+    "ShelfWork",
+    "WorkDetailPreference",
+    "ImportTask",
+    "ImportScanJob",
+    "ImportWorkItem",
+    "ImportAsset",
+    "ImportLog",
+    "BookIdentityCache",
+    "QueueControlOperation",
+    "MonitorFolder",
+    "UserMonitorFolderAccess",
+    "DuplicateCandidate",
+    "MediaVersionMigrationEvent",
+    "UserMediaHistory",
 }
 
 
@@ -92,11 +122,11 @@ def _source_node(
     )
 
 
-def test_fresh_schema_includes_overlay_tables(tmp_path: Path) -> None:
+def test_fresh_schema_includes_target_tables(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     try:
         names = set(inspect(engine).get_table_names())
-        assert OVERLAY_TABLES <= names
+        assert TARGET_CORE_TABLES <= names
         assert {
             "LibraryBookFacet",
             "LibraryReadableResourceFacet",
@@ -110,36 +140,12 @@ def test_fresh_schema_includes_overlay_tables(tmp_path: Path) -> None:
             "ReadableResourceNavigationUnit",
             "PublicationNavigationCache",
         } <= names
-        assert {
-            "LibraryImportRun",
-            "ResourceCandidate",
-            "AssetCandidate",
-        }.isdisjoint(names)
-        assert {
-            "LibraryWork",
-            "LibraryVersion",
-            "LibraryVolume",
-            "LibraryFile",
-            "LibraryReadingUnit",
-            "LibraryReadingProgress",
-            "LibraryMetadata",
-            "LibraryWorkFacet",
-            "LibraryVolumeFacet",
-            "ShelfWork",
-            "WorkDetailPreference",
-            "ImportTask",
-            "ImportScanJob",
-            "ImportWorkItem",
-            "ImportAsset",
-            "ImportLog",
-            "BookIdentityCache",
-            "QueueControlOperation",
-        } <= names
+        assert LEGACY_TABLES.isdisjoint(names)
     finally:
         engine.dispose()
 
 
-def test_alembic_metadata_has_no_diff_for_overlay(tmp_path: Path) -> None:
+def test_alembic_metadata_has_no_diff_for_target_schema(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     try:
         with engine.connect() as connection:
@@ -148,15 +154,15 @@ def test_alembic_metadata_has_no_diff_for_overlay(tmp_path: Path) -> None:
                 opts={"compare_type": True, "compare_server_default": True},
             )
             diff = compare_metadata(context, Base.metadata)
-        overlay_diff = [
+        target_diff = [
             item
             for item in diff
             if any(
                 table in str(item)
-                for table in OVERLAY_TABLES
+                for table in TARGET_CORE_TABLES
             )
         ]
-        assert overlay_diff == []
+        assert target_diff == []
     finally:
         engine.dispose()
 
@@ -235,6 +241,21 @@ def test_source_node_path_key_unique_and_ready_assets(tmp_path: Path) -> None:
             assert "publishedRunId" not in LibraryResourceAsset.__table__.c
             assert "activeImportRunId" not in LibraryReadableResource.__table__.c
             assert "ownerImportRunId" not in LibraryImportTask.__table__.c
+            assert {
+                column.name for column in LibraryImportTask.__table__.columns
+            } == {
+                "id",
+                "kind",
+                "libraryId",
+                "resourceId",
+                "sourceNodeId",
+                "role",
+                "state",
+                "errorSummary",
+                "createdAt",
+                "startedAt",
+                "finishedAt",
+            }
     finally:
         engine.dispose()
 
@@ -302,6 +323,17 @@ def test_import_task_kind_shape_and_asset_unique(tmp_path: Path) -> None:
                 )
             )
             db.commit()
+
+            db.add(
+                LibraryImportTask(
+                    id="continue-1",
+                    kind="CONTINUE_SOURCE",
+                    library_id="lib-1",
+                    source_node_id="n1",
+                    state="QUEUED",
+                )
+            )
+            db.commit()
             db.add(
                 LibraryImportTask(
                     id="asset-2",
@@ -311,6 +343,101 @@ def test_import_task_kind_shape_and_asset_unique(tmp_path: Path) -> None:
                     source_node_id="n1",
                     role="PRIMARY",
                     state="QUEUED",
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db.commit()
+            db.rollback()
+    finally:
+        engine.dispose()
+
+
+def test_composite_foreign_keys_reject_cross_library_links(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    try:
+        with Session(engine) as db:
+            db.add_all(
+                [
+                    Library(
+                        id="lib-1",
+                        name="Library 1",
+                        root_path=str(tmp_path / "lib-1"),
+                        organization_mode="FLAT",
+                    ),
+                    Library(
+                        id="lib-2",
+                        name="Library 2",
+                        root_path=str(tmp_path / "lib-2"),
+                        organization_mode="FLAT",
+                    ),
+                    _source_node(
+                        node_id="node-1",
+                        relative_path="one.epub",
+                        physical_kind="REGULAR_FILE",
+                    ),
+                    LibrarySourceNode(
+                        id="node-2",
+                        library_id="lib-2",
+                        parent_id=None,
+                        parent_physical_kind=None,
+                        relative_path="one.epub",
+                        path_key=_path_key("one.epub"),
+                        name="one.epub",
+                        physical_kind="REGULAR_FILE",
+                        observed_size_bytes=1,
+                        observed_mtime_ns=0,
+                        observed_at=_now(),
+                    ),
+                ]
+            )
+            db.commit()
+            db.add(
+                LibraryBook(
+                    id="book-1",
+                    library_id="lib-1",
+                    source_node_id="node-1",
+                )
+            )
+            db.commit()
+
+            db.add(
+                LibraryReadableResource(
+                    id="cross-library-resource",
+                    library_id="lib-1",
+                    book_id="book-1",
+                    source_node_id="node-2",
+                    adapter_id="epub-file",
+                    adapter_version="1",
+                    media_kind="EBOOK",
+                    format="EPUB",
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db.commit()
+            db.rollback()
+
+            db.add(
+                LibraryReadableResource(
+                    id="resource-1",
+                    library_id="lib-1",
+                    book_id="book-1",
+                    source_node_id="node-1",
+                    adapter_id="epub-file",
+                    adapter_version="1",
+                    media_kind="EBOOK",
+                    format="EPUB",
+                )
+            )
+            db.commit()
+            db.add(
+                LibraryResourceAsset(
+                    id="cross-library-asset",
+                    library_id="lib-1",
+                    resource_id="resource-1",
+                    source_node_id="node-2",
+                    source_node_physical_kind="REGULAR_FILE",
+                    role="PRIMARY",
+                    import_state="READY",
                 )
             )
             with pytest.raises(IntegrityError):

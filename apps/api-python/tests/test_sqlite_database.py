@@ -8,7 +8,16 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect, select
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    inspect,
+    select,
+)
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -25,6 +34,54 @@ from app.models.library import Library
 from app.models.settings import ReaderBookPreference, SystemSetting
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
+
+
+TARGET_CORE_TABLES = frozenset(
+    {
+        "LibrarySourceNode",
+        "LibrarySourceNodeMetadata",
+        "LibrarySourceNodeInterpretation",
+        "LibraryBook",
+        "LibraryBookMetadata",
+        "LibraryReadableResource",
+        "LibraryReadableResourceMetadata",
+        "LibraryResourceAsset",
+        "LibraryResourceAssetMetadata",
+        "LibraryImportTask",
+    }
+)
+
+LEGACY_TABLES = frozenset(
+    {
+        "LibraryImportRun",
+        "ResourceCandidate",
+        "AssetCandidate",
+        "LibraryWork",
+        "LibraryVersion",
+        "LibraryVolume",
+        "LibraryFile",
+        "LibraryMediaVersion",
+        "LibraryReadingUnit",
+        "LibraryReadingProgress",
+        "LibraryMetadata",
+        "LibraryWorkFacet",
+        "LibraryVolumeFacet",
+        "ShelfWork",
+        "WorkDetailPreference",
+        "ImportTask",
+        "ImportScanJob",
+        "ImportWorkItem",
+        "ImportAsset",
+        "ImportLog",
+        "BookIdentityCache",
+        "QueueControlOperation",
+        "MonitorFolder",
+        "UserMonitorFolderAccess",
+        "DuplicateCandidate",
+        "MediaVersionMigrationEvent",
+        "UserMediaHistory",
+    }
+)
 
 
 def _current_revision(engine) -> str | None:
@@ -49,6 +106,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
 
         inspector = inspect(engine)
         table_names = set(inspector.get_table_names())
+        assert TARGET_CORE_TABLES <= table_names
         assert {
             "Library",
             "LibrarySourceNode",
@@ -68,37 +126,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "ReadableResourceNavigationUnit",
             "PublicationNavigationCache",
         } <= table_names
-        assert {
-            "LibraryImportRun",
-            "ResourceCandidate",
-            "AssetCandidate",
-            "LibraryWork",
-            "LibraryVersion",
-            "LibraryVolume",
-            "LibraryFile",
-            "LibraryReadingUnit",
-            "LibraryReadingProgress",
-            "LibraryMetadata",
-            "LibraryWorkFacet",
-            "LibraryVolumeFacet",
-            "ShelfWork",
-            "WorkDetailPreference",
-            "ImportTask",
-            "ImportScanJob",
-            "ImportWorkItem",
-            "ImportAsset",
-            "ImportLog",
-            "BookIdentityCache",
-            "QueueControlOperation",
-        }.isdisjoint(table_names)
-        assert {
-            "MonitorFolder",
-            "UserMonitorFolderAccess",
-            "LibraryMediaVersion",
-            "DuplicateCandidate",
-            "MediaVersionMigrationEvent",
-            "UserMediaHistory",
-        }.isdisjoint(table_names)
+        assert LEGACY_TABLES.isdisjoint(table_names)
 
         library_columns = {
             column["name"]: column for column in inspector.get_columns("Library")
@@ -247,24 +275,28 @@ def test_apply_schema_rejects_former_development_revisions(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(settings.database_path)
+    retired_metadata = MetaData()
+    alembic_version = Table(
+        "alembic_version",
+        retired_metadata,
+        Column("version_num", String(191), nullable=False, primary_key=True),
+    )
     try:
         for retired in (
             "0002_version_covers",
             "0003_readable_resource_overlay_schema",
         ):
+            retired_metadata.create_all(engine)
             with engine.begin() as connection:
-                connection.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
-                connection.exec_driver_sql(
-                    "CREATE TABLE alembic_version ("
-                    "version_num VARCHAR(191) NOT NULL PRIMARY KEY)"
-                )
-                connection.exec_driver_sql(
-                    f"INSERT INTO alembic_version (version_num) VALUES ('{retired}')"
+                connection.execute(alembic_version.delete())
+                connection.execute(
+                    alembic_version.insert().values(version_num=retired)
                 )
             with pytest.raises(RuntimeError, match="fresh installation"):
                 runner_module.apply_schema(engine, settings)
             assert _current_revision(engine) == retired
             assert _application_tables(engine) == set()
+            alembic_version.drop(engine)
     finally:
         engine.dispose()
 

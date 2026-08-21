@@ -132,7 +132,7 @@ class StubOkAdapter(ResourceAdapterExecutorPort):
         )
 
 
-def _seed_full_overlay(db: Session, root: Path) -> dict[str, str]:
+def _seed_full_target_topology(db: Session, root: Path) -> dict[str, str]:
     """Seed SourceNodes/Books/Resources/Assets/metadata and mixed tasks."""
     (root / "album").mkdir(parents=True, exist_ok=True)
     (root / "album" / "track.mp3").write_bytes(b"audio")
@@ -325,7 +325,7 @@ def _seed_full_overlay(db: Session, root: Path) -> dict[str, str]:
     }
 
 
-def test_organization_mode_switch_clears_overlay_and_queues_fresh_scan(
+def test_organization_mode_switch_clears_target_topology_and_queues_fresh_scan(
     tmp_path: Path,
 ) -> None:
     engine = _bootstrap(tmp_path)
@@ -333,7 +333,7 @@ def test_organization_mode_switch_clears_overlay_and_queues_fresh_scan(
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            _seed_full_overlay(db, root)
+            _seed_full_target_topology(db, root)
             db.commit()
             pipeline = build_readable_resource_pipeline(db)
             result = pipeline.change_library_organization_mode.execute(
@@ -398,7 +398,7 @@ def test_illegal_organization_mode_has_no_side_effects(tmp_path: Path) -> None:
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            ids = _seed_full_overlay(db, root)
+            ids = _seed_full_target_topology(db, root)
             db.commit()
             pipeline = build_readable_resource_pipeline(db)
             result = pipeline.change_library_organization_mode.execute(
@@ -734,14 +734,14 @@ def test_delete_then_continue_import_rediscovers_with_new_source_node_id(
         engine.dispose()
 
 
-def test_relocate_library_root_preserves_overlay_identity(tmp_path: Path) -> None:
+def test_relocate_library_root_preserves_source_tree_identity(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     new_root = tmp_path / "relocated"
     try:
         with Session(engine) as db:
             _add_library(db, root)
-            ids = _seed_full_overlay(db, root)
+            ids = _seed_full_target_topology(db, root)
             db.commit()
             new_root.mkdir(parents=True, exist_ok=True)
             # Keep relative layout available under the new root (no auto-scan).
@@ -808,7 +808,7 @@ def test_relocate_unreadable_or_conflicting_root_has_no_side_effects(
         with Session(engine) as db:
             _add_library(db, root, library_id="lib-1")
             _add_library(db, other, library_id="lib-2")
-            ids = _seed_full_overlay(db, root)
+            ids = _seed_full_target_topology(db, root)
             db.commit()
             original = db.get(Library, "lib-1")
             assert original is not None
