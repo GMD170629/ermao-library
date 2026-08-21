@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
@@ -174,8 +174,6 @@ def pipeline_to_dict(row: MetadataProviderPipeline) -> dict[str, Any]:
 
 
 def list_metadata_sources(db: Session) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("Source"):
-        return []
     rows = db.scalars(
         select(Source)
         .where(Source.kind == METADATA_SOURCE_KIND)
@@ -185,8 +183,6 @@ def list_metadata_sources(db: Session) -> list[dict[str, Any]]:
 
 
 def get_provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
-    if not inspect(db.connection()).has_table("Source"):
-        return None
     row = db.scalars(
         select(Source)
         .where(Source.kind == METADATA_SOURCE_KIND, Source.provider_type == provider_id)
@@ -228,8 +224,6 @@ def ensure_pipeline_row(
 
 
 def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return []
     rows = db.scalars(
         select(MetadataProviderPipeline)
         .where(MetadataProviderPipeline.included.is_(True))
@@ -243,8 +237,6 @@ def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
 
 
 def list_pipeline_keys(db: Session) -> set[tuple[str, str]]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return set()
     return {
         (str(media_kind), str(provider_id))
         for media_kind, provider_id in db.execute(
@@ -257,8 +249,6 @@ def list_pipeline_keys(db: Session) -> set[tuple[str, str]]:
 
 
 def list_pipelines_for_provider(db: Session, provider_id: str) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return []
     rows = db.scalars(
         select(MetadataProviderPipeline).where(
             MetadataProviderPipeline.provider_id == provider_id,
@@ -360,8 +350,6 @@ def update_source_test_result(
 
 
 def list_enabled_provider_ids(db: Session, media_kind: str | None = None) -> list[str]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return []
     if media_kind is None:
         position_col = func.min(MetadataProviderPipeline.position).label("position")
         rows = db.execute(

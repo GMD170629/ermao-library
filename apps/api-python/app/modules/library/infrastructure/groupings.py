@@ -6,7 +6,7 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
-from app.models import LibraryFacet, LibraryBook, LibraryBookFacet
+from app.models import LibraryBook, LibraryBookFacet, LibraryBookMetadata, LibraryFacet
 from app.modules.library.application.groupings import (
     LibraryGrouping,
     LibraryGroupingPage,
@@ -36,7 +36,7 @@ class SqlAlchemyLibraryGroupingQueries:
         count_work = aliased(LibraryBook)
         count_work_visible = select(count_work.id).where(
             count_work.id == count_link.book_id,
-            count_work.hidden.is_(False),
+            count_work.visibility_state == "VISIBLE",
             book_visibility_predicate(context, count_work),
         )
         book_count = (
@@ -54,7 +54,7 @@ class SqlAlchemyLibraryGroupingQueries:
             select(latest_work.updated_at)
             .where(
                 latest_work.id == latest_link.book_id,
-                latest_work.hidden.is_(False),
+                latest_work.visibility_state == "VISIBLE",
                 book_visibility_predicate(context, latest_work),
             )
             .scalar_subquery()
@@ -76,7 +76,7 @@ class SqlAlchemyLibraryGroupingQueries:
                 select(visible_work.id)
                 .where(
                     visible_work.id == visible_link.book_id,
-                    visible_work.hidden.is_(False),
+                    visible_work.visibility_state == "VISIBLE",
                     book_visibility_predicate(context, visible_work),
                 )
                 .exists(),
@@ -143,9 +143,9 @@ class SqlAlchemyLibraryGroupingQueries:
             select(
                 LibraryBookFacet.facet_id.label("facet_id"),
                 LibraryBook.id.label("book_id"),
-                LibraryBook.title,
-                LibraryBook.author,
-                LibraryBook.cover_path,
+                LibraryBookMetadata.title,
+                LibraryBookMetadata.author,
+                LibraryBookMetadata.cover_path,
                 LibraryBook.updated_at,
                 func.row_number()
                 .over(
@@ -155,9 +155,10 @@ class SqlAlchemyLibraryGroupingQueries:
                 .label("representative_rank"),
             )
             .join(LibraryBook, LibraryBook.id == LibraryBookFacet.book_id)
+            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
             .where(
                 LibraryBookFacet.facet_id.in_(facet_ids),
-                LibraryBook.hidden.is_(False),
+                LibraryBook.visibility_state == "VISIBLE",
                 book_visibility_predicate(context),
             )
             .subquery()

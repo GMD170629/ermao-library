@@ -31,10 +31,6 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
-def has_table(db: Session, table: str) -> bool:
-    return organize_review.has_table(db, table)
-
-
 def parse_json_value(value: Any) -> Any:
     if value is None:
         return None
@@ -218,27 +214,30 @@ def first_exact_title_candidate(
 def metadata_context_for_book(
     db: Session, book_id: str
 ) -> dict[str, Any] | None:
-    return organize_review.load_work_context(db, book_id)
+    return organize_review.load_book_context(db, book_id)
 
 
 def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
-    work = context["work"]
+    book = context["book"]
     files = context["files"][:8]
     metadata = [
         parse_json_value(item.get("rawJson")) for item in context["metadata"][:4]
     ]
     return {
-        "title": work.get("title"),
-        "author": work.get("author"),
-        "seriesName": work.get("seriesName"),
-        "seriesIndex": work.get("seriesIndex"),
-        "tags": parse_json_value(work.get("tags")) or [],
-        "fileNames": [str(file.get("path") or "").rsplit("/", 1)[-1] for file in files],
+        "title": book.get("title"),
+        "author": book.get("author"),
+        "seriesName": book.get("seriesName"),
+        "seriesIndex": book.get("seriesIndex"),
+        "tags": parse_json_value(book.get("tags")) or [],
+        "fileNames": [
+            str(file.get("relativePath") or "").rsplit("/", 1)[-1]
+            for file in files
+        ],
         "parentPaths": sorted(
             {
-                str(file.get("path") or "").rsplit("/", 1)[0]
+                str(file.get("relativePath") or "").rsplit("/", 1)[0]
                 for file in files
-                if "/" in str(file.get("path") or "")
+                if "/" in str(file.get("relativePath") or "")
             }
         ),
         "embeddedMetadata": metadata,
@@ -718,8 +717,8 @@ def run_douban_crawler_provider(
     headers = douban_crawler_headers(config)
     volume = next(iter(context["volumes"]), {})
     isbn = first_string(volume.get("isbn"), volume.get("identifier"))
-    title = first_string(context["work"].get("title")) or ""
-    author = first_string(context["work"].get("author")) or ""
+    title = first_string(context["book"].get("title")) or ""
+    author = first_string(context["book"].get("author")) or ""
     query_text = query or isbn or " ".join(part for part in [title, author] if part)
     confidence = 0.9 if isbn else 0.8 if author else 0.7
     if not query_text:
@@ -1119,7 +1118,7 @@ def run_bangumi_metadata_provider(
         headers["Authorization"] = f"Bearer {access_token}"
     title = (
         query
-        or first_string(context["work"].get("seriesName"), context["work"].get("title"))
+        or first_string(context["book"].get("seriesName"), context["book"].get("title"))
         or ""
     )
     if not title:
@@ -1286,7 +1285,7 @@ def metadata_search_candidates(
     use_cache: bool = True,
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
-    search_text = query or first_string(context["work"].get("title")) or ""
+    search_text = query or first_string(context["book"].get("title")) or ""
     query_key = metadata_title_key(search_text)
     cache_eligible = source in {"bangumi", "douban", "ai"}
     cache_ready = (
@@ -1365,7 +1364,7 @@ def metadata_search_candidates(
             **result,
             "candidates": sort_candidates_for_title(
                 result.get("candidates") or [],
-                query or first_string(context["work"].get("title")),
+                query or first_string(context["book"].get("title")),
             ),
         }
     if cache_eligible and result.get("enabled"):

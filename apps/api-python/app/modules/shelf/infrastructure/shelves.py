@@ -28,8 +28,6 @@ def _entity_record(entity: object) -> dict[str, Any]:
 
 
 def list_shelves_for_user(db: Session, user_id: str) -> list[dict[str, Any]]:
-    if not sa_inspect(db.get_bind()).has_table(Shelf.__tablename__):
-        return []
     rows = db.scalars(
         select(Shelf)
         .where(Shelf.owner_user_id == user_id)
@@ -47,8 +45,6 @@ def get_owned_shelf(
     shelf_id: str,
     user_id: str,
 ) -> dict[str, Any] | None:
-    if not sa_inspect(db.get_bind()).has_table(Shelf.__tablename__):
-        return None
     row = db.scalar(
         select(Shelf).where(
             Shelf.id == shelf_id,

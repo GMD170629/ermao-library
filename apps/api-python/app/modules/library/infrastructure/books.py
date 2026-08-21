@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import inspect as sa_inspect, select, update
@@ -46,12 +47,14 @@ def _book_record(
     }
 
 
-def _book_statement(book_ids: object = None):
+def _book_statement(book_ids: str | Collection[str] | None = None):
     statement = select(LibraryBook, LibraryBookMetadata).outerjoin(
         LibraryBookMetadata,
         LibraryBookMetadata.book_id == LibraryBook.id,
     )
-    if book_ids is not None:
+    if isinstance(book_ids, str):
+        statement = statement.where(LibraryBook.id == book_ids)
+    elif book_ids is not None:
         statement = statement.where(LibraryBook.id.in_(book_ids))
     return statement
 

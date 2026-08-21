@@ -607,22 +607,6 @@ def provider_supports_media_kind(
 def enabled_metadata_provider_ids(
     db: Session, media_kind: str | None = None
 ) -> list[str]:
-    from sqlalchemy import inspect
-
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        providers = list_metadata_providers(db)
-        registry = metadata_provider_registry()
-        return [
-            str(provider["id"])
-            for provider in providers
-            if provider.get("enabled")
-            and (
-                media_kind is None
-                or provider_supports_media_kind(
-                    registry.require(str(provider["id"])).manifest, media_kind
-                )
-            )
-        ]
     if media_kind is None:
         return list_enabled_provider_ids(db)
     return list_enabled_provider_ids(db, str(media_kind).strip().upper())
@@ -655,25 +639,7 @@ def search_with_metadata_provider(
     use_cache: bool = True,
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
-    from sqlalchemy import inspect
-
     plugin = metadata_provider_registry().require(provider_id)
-    if not inspect(db.connection()).has_table("Source"):
-        config = _default_config(plugin.manifest)
-        if isinstance(plugin, BuiltinMetadataProvider):
-            return plugin.search(
-                db,
-                context,
-                query,
-                config=config,
-                force=force,
-                use_cache=use_cache,
-                automatic_request_gate=automatic_request_gate,
-            )
-        db.close()
-        return plugin.search(
-            db, context, query, config=config, force=force, use_cache=use_cache
-        )
     media_kind = _context_media_kind(context)
     config = metadata_provider_runtime_config(
         db, provider_id, str(media_kind) if media_kind else None

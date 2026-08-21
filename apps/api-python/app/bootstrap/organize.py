@@ -87,7 +87,7 @@ def cancel_organize_job_command(
     with OrganizeWriteTransaction(db):
         organize_jobs.cancel_lookup_tasks_for_job(db, job_id=job_id, now=timestamp)
         organize_jobs.cancel_job(db, job_id=job_id, now=timestamp)
-        organize_jobs.mark_work_organize_status(
+        organize_jobs.mark_book_curation_state(
             db, book_id=book_id, status="UNASSESSED", now=timestamp
         )
         execute_sync_organize_runs(db, sync_statement)
@@ -120,7 +120,7 @@ def recognize_organize_job_command(
         )
         organize_jobs.insert_prepared_lookup_task(db, prepared_task)
         organize_jobs.reset_job_for_recognition(db, job_id=job_id, now=timestamp)
-        organize_jobs.mark_work_organize_status(
+        organize_jobs.mark_book_curation_state(
             db, book_id=book_id, status="LOOKUP_PENDING", now=timestamp
         )
         if run_id is not None:
@@ -133,7 +133,7 @@ def delete_organize_job_command(
     job_id: str,
     task_ids: tuple[str, ...],
     book_id: str,
-    organize_status: str | None,
+    curation_state: str | None,
     run_id: str | None,
     timestamp: datetime,
 ) -> None:
@@ -153,9 +153,9 @@ def delete_organize_job_command(
             job_id=job_id,
             task_ids=prepared_task_ids,
         )
-        if book_id and organize_status is not None:
-            organize_jobs.mark_work_organize_status(
-                db, book_id=book_id, status=organize_status, now=timestamp
+        if book_id and curation_state is not None:
+            organize_jobs.mark_book_curation_state(
+                db, book_id=book_id, status=curation_state, now=timestamp
             )
         if refresh_statement is not None:
             organize_jobs.execute_refresh_run_queue_count(db, refresh_statement)

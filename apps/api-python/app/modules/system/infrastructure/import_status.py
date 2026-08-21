@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from sqlalchemy import inspect, select, func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Library, LibraryImportTask
@@ -54,7 +54,6 @@ def library_import_dashboard_snapshot(
 ) -> LibraryImportDashboardSnapshot:
     """Return one bounded, target-identity dashboard projection."""
 
-    bind = db.get_bind()
     enabled_libraries = (
         [
             _library_view(row)
@@ -64,17 +63,7 @@ def library_import_dashboard_snapshot(
                 .order_by(Library.created_at.desc(), Library.id.desc())
             ).all()
         ]
-        if inspect(bind).has_table("Library")
-        else []
     )
-    if not inspect(bind).has_table("LibraryImportTask"):
-        return {
-            "enabled_libraries": enabled_libraries,
-            "current_task": None,
-            "latest_task": None,
-            "failed_count": 0,
-        }
-
     current = db.scalar(
         select(LibraryImportTask)
         .where(LibraryImportTask.state.in_(("QUEUED", "RUNNING")))

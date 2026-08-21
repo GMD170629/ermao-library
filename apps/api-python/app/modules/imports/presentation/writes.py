@@ -29,7 +29,7 @@ from app.models.auth import User
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImportResult,
 )
-from app.modules.imports.infrastructure.library_queries import (
+from app.bootstrap.imports import (
     get_library,
     source_node_library_id,
 )
@@ -199,7 +199,7 @@ def import_book_files(
 
     # End any read transaction before touching the filesystem.  ContinueImport
     # opens its own short database transaction after publication succeeds.
-    db.rollback()
+    db.close()
     try:
         saved_uploads = save_uploaded_files(
             SaveUploadedFilesCommand(

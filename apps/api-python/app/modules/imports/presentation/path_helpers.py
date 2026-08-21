@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.modules.imports.application.library_paths import is_inside_path
-from app.modules.imports.infrastructure.library_queries import (
+from app.bootstrap.imports import (
     list_enabled_library_rows,
 )
 

@@ -9,7 +9,6 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -100,10 +99,6 @@ def _id(prefix: str) -> str:
     return f"py_{prefix}_{uuid4().hex}"
 
 
-def _has_table(db: Session, table: str) -> bool:
-    return inspect(db.connection()).has_table(table)
-
-
 def update_organize_policy_command(
     db: Session, payload: dict[str, Any]
 ) -> dict[str, Any]:
@@ -186,11 +181,6 @@ def create_organize_run(
     dedupe_key: str | None = None,
     limit: int = 500,
 ) -> dict[str, Any]:
-    if not all(
-        _has_table(db, table)
-        for table in ("OrganizeRun", "OrganizeJob", "MetadataLookupTask")
-    ):
-        raise ValueError("整理队列数据表尚未初始化")
     normalized_trigger = str(trigger or "MANUAL").upper()
     if normalized_trigger not in {"MANUAL", "SCHEDULE", "NEW"}:
         raise ValueError("不支持的整理任务触发方式")
@@ -266,9 +256,7 @@ def create_organize_run(
 
 
 def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = (
-        organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
-    )
+    job = organize_runs.get_job_row(db, job_id)
     if not job:
         raise ValueError("整理任务不存在")
     if str(job.get("status")) in TERMINAL_JOB_STATUSES:
@@ -281,15 +269,13 @@ def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
 
 
 def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = (
-        organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
-    )
+    job = organize_runs.get_job_row(db, job_id)
     if not job:
         raise ValueError("整理记录不存在")
-    work = organize_jobs.get_work_row(db, str(job["bookId"]))
-    if not work:
-        raise ValueError("作品已不存在")
-    current_unresolved = organize_jobs.get_unresolved_job_for_work(
+    book = organize_jobs.get_book_row(db, str(job["bookId"]))
+    if not book:
+        raise ValueError("图书已不存在")
+    current_unresolved = organize_jobs.get_unresolved_job_for_book(
         db,
         book_id=str(job["bookId"]),
         exclude_job_id=job_id,
@@ -336,9 +322,7 @@ def retry_organize_job(db: Session, job_id: str) -> dict[str, Any]:
 
 
 def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = (
-        organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
-    )
+    job = organize_runs.get_job_row(db, job_id)
     if not job:
         raise ValueError("整理记录不存在")
 
@@ -346,28 +330,18 @@ def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     run_id = str(job.get("runId") or "") or None
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
     now = _now()
-    has_work_table = bool(book_id) and _has_table(db, "LibraryBook")
-    remaining_status = (
-        organize_jobs.latest_job_status_for_work_excluding(db, book_id, job_id)
-        if has_work_table
-        else None
+    remaining_status = organize_jobs.latest_job_status_for_book_excluding(
+        db, book_id, job_id
     )
-    organized = (
-        organize_jobs.work_is_organized(db, book_id) if has_work_table else False
-    )
-    organize_status = (
-        remaining_status or ("APPLIED" if organized else "UNASSESSED")
-        if has_work_table
-        else None
-    )
-    has_run = bool(run_id) and _has_table(db, "OrganizeRun")
+    curated = organize_jobs.book_is_curated(db, book_id)
+    curation_state = remaining_status or ("APPLIED" if curated else "UNASSESSED")
     persist_delete_organize_job(
         db,
         job_id=job_id,
         task_ids=tuple(task_ids),
         book_id=book_id,
-        organize_status=organize_status,
-        run_id=run_id if has_run else None,
+        curation_state=curation_state,
+        run_id=run_id,
         timestamp=now,
     )
     return {"id": job_id, "bookId": book_id, "deleted": True}

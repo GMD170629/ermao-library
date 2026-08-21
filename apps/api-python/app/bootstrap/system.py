@@ -46,6 +46,9 @@ from app.modules.system.infrastructure.health_runs import (
     write_prepared_health_run_creation,
     write_prepared_old_health_runs_prune,
 )
+from app.modules.system.infrastructure.import_status import (
+    library_import_dashboard_snapshot,
+)
 from app.modules.system.infrastructure.queue_runtime import (
     QueueHeartbeatPump,
     active_queue_operation,
@@ -353,6 +356,7 @@ __all__ = [
     "list_event_level_facets",
     "list_event_source_facets",
     "list_settings",
+    "library_import_dashboard_snapshot",
     "list_system_events_page",
     "maintain_system_events",
     "mark_queue_stopped",

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.models import ReadableResourceNavigationUnit
 from app.modules.library.infrastructure.readable_resource_schema import (
-    LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
@@ -69,7 +68,6 @@ class SqlAlchemyPublicationNavigationCacheReader:
                     ReadableResourceNavigationUnit.unit_type == "chapter",
                 ),
                 exists().where(
-                    LibraryReadableResource.id == resource_id,
                     LibraryReadableResourceMetadata.resource_id == resource_id,
                     LibraryReadableResourceMetadata.chapter_count.is_not(None),
                 ),

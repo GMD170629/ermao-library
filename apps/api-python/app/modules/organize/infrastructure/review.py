@@ -1,21 +1,21 @@
-"""ORM persistence for organize review job / work / context reads and updates."""
+"""ORM persistence for organize review jobs and book/resource context."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
     LibraryResourceAsset,
+    LibrarySourceNode,
     LibraryBookMetadata,
     LibraryReadableResource,
     LibraryBook,
 )
 from app.models.organize import OrganizeJob
-from app.modules.library.domain.resource_identity import IMPLICIT_RESOURCE_SOURCE_KEY
-from app.modules.organize.infrastructure.eligibility import work_entity_record
+from app.modules.organize.infrastructure.eligibility import book_entity_record
 from app.modules.organize.infrastructure.runs import job_entity_record
 
 JOB_UPDATE_FIELD_MAP = {
@@ -30,91 +30,52 @@ JOB_UPDATE_FIELD_MAP = {
     "trigger": "trigger",
     "resourceId": "resource_id",
 }
-WORK_UPDATE_FIELD_MAP = {
-    "title": "title",
-    "author": "author",
-    "normalizedTitle": "normalized_title",
-    "normalizedAuthor": "normalized_author",
-    "description": "description",
-    "tags": "tags",
-    "seriesName": "series_name",
-    "seriesIndex": "series_index",
-    "organized": "organized",
-    "organizeStatus": "organize_status",
-    "metadataQuality": "metadata_quality",
-    "hidden": "hidden",
-    "coverPath": "cover_path",
-    "coverStatus": "cover_status",
+BOOK_UPDATE_FIELD_MAP = {
+    "visibilityState": "visibility_state",
+    "curationState": "curation_state",
     "updatedAt": "updated_at",
 }
 
 
-def volume_entity_as_dict(entity: LibraryReadableResource) -> dict[str, Any]:
+def resource_entity_as_dict(entity: LibraryReadableResource) -> dict[str, Any]:
     return {
         "id": entity.id,
-        "resourceId": entity.resource_id,
-        "title": entity.title,
-        "volumeIndex": entity.volume_index,
-        "sortOrder": entity.sort_order,
+        "bookId": entity.book_id,
+        "sourceNodeId": entity.source_node_id,
         "format": entity.format,
-        "classificationSource": entity.classification_source,
-        "suggestedMediaKind": entity.suggested_media_kind,
-        "resourceKey": entity.resource_key,
-        "importStatus": entity.import_status,
-        "importError": entity.import_error,
-        "isbn": entity.isbn,
-        "identifier": entity.identifier,
-        "hidden": entity.hidden,
+        "mediaKind": entity.media_kind,
+        "enablementState": entity.enablement_state,
+        "importState": entity.import_state,
         "createdAt": entity.created_at,
         "updatedAt": entity.updated_at,
     }
 
 
-def _has_table(db: Session, table: str) -> bool:
-    return inspect(db.connection()).has_table(table)
-
-
-def has_table(db: Session, table: str) -> bool:
-    return _has_table(db, table)
-
-
 def get_job(db: Session, job_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "OrganizeJob"):
-        return None
     entity = db.get(OrganizeJob, job_id)
     return job_entity_record(entity) if entity is not None else None
 
 
-def get_work(db: Session, book_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "LibraryBook"):
-        return None
-    entity = db.get(LibraryBook, book_id)
-    return work_entity_record(entity) if entity is not None else None
+def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
+    row = db.execute(
+        select(LibraryBook, LibraryBookMetadata)
+        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .where(LibraryBook.id == book_id)
+    ).first()
+    return book_entity_record(row[0], row[1]) if row is not None else None
 
 
-def _volumes_belonging_to_work(
+def _resources_for_book(
     db: Session, book_id: str, *, visible_only: bool
 ) -> list[LibraryReadableResource]:
-    if not _has_table(db, "LibraryReadableResource") or not _has_table(db, "LibraryReadableResource"):
-        return []
-    query = (
-        select(LibraryReadableResource)
-        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryReadableResource.resource_id)
-        .where(LibraryReadableResource.book_id == book_id)
+    query = select(LibraryReadableResource).where(
+        LibraryReadableResource.book_id == book_id
     )
     if visible_only:
-        query = query.where(LibraryReadableResource.hidden.is_(False))
+        query = query.where(LibraryReadableResource.enablement_state == "ENABLED")
     return list(
         db.scalars(
             query.order_by(
-                case(
-                    (LibraryReadableResource.source_key == IMPLICIT_RESOURCE_SOURCE_KEY, 0),
-                    else_=1,
-                ),
-                func.coalesce(LibraryReadableResource.source_name, ""),
-                LibraryReadableResource.source_key.asc(),
-                LibraryReadableResource.id.asc(),
-                LibraryReadableResource.sort_order.asc(),
                 LibraryReadableResource.created_at.asc(),
                 LibraryReadableResource.id.asc(),
             )
@@ -123,15 +84,13 @@ def _volumes_belonging_to_work(
 
 
 def earliest_resource_id(db: Session, book_id: str) -> str | None:
-    volumes = _volumes_belonging_to_work(db, book_id, visible_only=True)
-    return volumes[0].id if volumes else None
+    resources = _resources_for_book(db, book_id, visible_only=True)
+    return resources[0].id if resources else None
 
 
 def update_job(
     db: Session, job_id: str, values: dict[str, Any]
 ) -> dict[str, Any] | None:
-    if not _has_table(db, "OrganizeJob"):
-        return None
     mapped: dict[str, Any] = {}
     field_map = {
         "status": "status",
@@ -178,38 +137,62 @@ def write_prepared_job_updates(db: Session, rows: tuple[dict[str, Any], ...]) ->
 def update_book(
     db: Session, book_id: str, values: dict[str, Any]
 ) -> dict[str, Any] | None:
-    if not _has_table(db, "LibraryBook"):
-        return None
-    field_map = {
+    book_values = {
+        key: values[key]
+        for key in ("visibilityState", "curationState", "updatedAt")
+        if key in values
+    }
+    if book_values:
+        db.execute(
+            update(LibraryBook)
+            .where(LibraryBook.id == book_id)
+            .values(
+                **{
+                    mapped_key: value
+                    for key, value in book_values.items()
+                    if (mapped_key := BOOK_UPDATE_FIELD_MAP.get(key)) is not None
+                }
+            )
+        )
+    metadata_map = {
         "title": "title",
-        "author": "author",
         "normalizedTitle": "normalized_title",
+        "author": "author",
         "normalizedAuthor": "normalized_author",
         "description": "description",
-        "tags": "tags",
         "seriesName": "series_name",
         "seriesIndex": "series_index",
-        "organized": "organized",
-        "organizeStatus": "organize_status",
-        "metadataQuality": "metadata_quality",
-        "hidden": "hidden",
         "coverPath": "cover_path",
         "coverStatus": "cover_status",
+        "metadataQuality": "metadata_quality",
+        "publicationStatus": "publication_status",
+        "trackingStatus": "tracking_status",
         "updatedAt": "updated_at",
     }
-    mapped: dict[str, Any] = {}
-    for key, value in values.items():
-        attr = field_map.get(key)
-        if attr is not None:
-            mapped[attr] = value
-    if mapped:
-        db.execute(
-            update(LibraryBook).where(LibraryBook.id == book_id).values(**mapped)
-        )
-    return get_work(db, book_id)
+    metadata_values = {
+        mapped_key: values[key]
+        for key, mapped_key in metadata_map.items()
+        if key in values
+    }
+    if metadata_values:
+        metadata = db.get(LibraryBookMetadata, book_id)
+        if metadata is None:
+            metadata = LibraryBookMetadata(
+                book_id=book_id,
+                title=str(metadata_values.get("title") or ""),
+                normalized_title=str(
+                    metadata_values.get("normalized_title")
+                    or metadata_values.get("title")
+                    or ""
+                ).casefold(),
+            )
+            db.add(metadata)
+        for key, value in metadata_values.items():
+            setattr(metadata, key, value)
+    return get_book(db, book_id)
 
 
-def prepare_work_update_rows(
+def prepare_book_update_rows(
     rows: tuple[dict[str, Any], ...],
 ) -> tuple[dict[str, Any], ...]:
     return tuple(
@@ -218,67 +201,72 @@ def prepare_work_update_rows(
             **{
                 mapped_key: value
                 for key, value in row.items()
-                if (mapped_key := WORK_UPDATE_FIELD_MAP.get(key)) is not None
+                if (mapped_key := BOOK_UPDATE_FIELD_MAP.get(key)) is not None
             },
         }
         for row in rows
     )
 
 
-def write_prepared_work_updates(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
+def write_prepared_book_updates(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
     if rows:
         db.execute(update(LibraryBook), list(rows))
 
 
-def list_files_for_volume(db: Session, resource_id: str) -> list[dict[str, Any]]:
-    if not _has_table(db, "LibraryResourceAsset"):
-        return []
-    # Project only columns shared by production schema and lean test fixtures.
+def list_files_for_resource(db: Session, resource_id: str) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
-            LibraryResourceAsset.id,
-            LibraryResourceAsset.resource_id,
-            LibraryResourceAsset.path,
-            LibraryResourceAsset.file_path_hash,
-            LibraryResourceAsset.mtime_ms,
-            LibraryResourceAsset.kind,
-            LibraryResourceAsset.mime_type,
-            LibraryResourceAsset.size_bytes,
-            LibraryResourceAsset.sort_order,
-            LibraryResourceAsset.created_at,
-            LibraryResourceAsset.updated_at,
-        ).where(LibraryResourceAsset.resource_id == resource_id)
+            LibraryResourceAsset,
+            LibrarySourceNode,
+        )
+        .join(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+        )
+        .where(LibraryResourceAsset.resource_id == resource_id)
+        .order_by(
+            LibraryResourceAsset.sequence_index.asc().nulls_last(),
+            LibraryResourceAsset.id.asc(),
+        )
     ).all()
     return [
         {
-            "id": row.id,
-            "resourceId": row.resource_id,
-            "path": row.path,
-            "filePathHash": row.file_path_hash,
-            "mtimeMs": row.mtime_ms,
-            "kind": row.kind,
-            "mimeType": row.mime_type,
-            "sizeBytes": row.size_bytes,
-            "sortOrder": row.sort_order,
-            "createdAt": row.created_at,
-            "updatedAt": row.updated_at,
+            "id": asset.id,
+            "resourceId": asset.resource_id,
+            "sourceNodeId": asset.source_node_id,
+            "relativePath": source_node.relative_path,
+            "name": source_node.name,
+            "role": asset.role,
+            "importState": asset.import_state,
+            "sequenceIndex": asset.sequence_index,
+            "sortKey": asset.sort_key,
+            "failureReason": asset.failure_reason,
+            "createdAt": asset.created_at,
+            "updatedAt": asset.updated_at,
         }
-        for row in rows
+        for asset, source_node in rows
     ]
 
 
-def list_metadata_for_volume(db: Session, resource_id: str) -> list[dict[str, Any]]:
-    if not _has_table(db, "LibraryBookMetadata"):
-        return []
+def list_metadata_for_book(db: Session, book_id: str) -> list[dict[str, Any]]:
     rows = db.scalars(
-        select(LibraryBookMetadata).where(LibraryBookMetadata.book_id == resource_id)
+        select(LibraryBookMetadata).where(LibraryBookMetadata.book_id == book_id)
     ).all()
     return [
         {
-            "id": row.id,
-            "resourceId": row.resource_id,
-            "source": row.source,
-            "rawJson": row.raw_json,
+            "bookId": row.book_id,
+            "title": row.title,
+            "normalizedTitle": row.normalized_title,
+            "author": row.author,
+            "normalizedAuthor": row.normalized_author,
+            "description": row.description,
+            "seriesName": row.series_name,
+            "seriesIndex": row.series_index,
+            "coverPath": row.cover_path,
+            "coverStatus": row.cover_status,
+            "metadataQuality": row.metadata_quality,
+            "publicationStatus": row.publication_status,
+            "trackingStatus": row.tracking_status,
             "createdAt": row.created_at,
             "updatedAt": row.updated_at,
         }
@@ -286,29 +274,20 @@ def list_metadata_for_volume(db: Session, resource_id: str) -> list[dict[str, An
     ]
 
 
-def load_work_context(db: Session, book_id: str) -> dict[str, Any] | None:
-    work = get_work(db, book_id)
-    if not work:
+def load_book_context(db: Session, book_id: str) -> dict[str, Any] | None:
+    book = get_book(db, book_id)
+    if not book:
         return None
-    volumes = list_volumes_for_work(db, str(work["id"]))
+    resources = list_resources_for_book(db, str(book["id"]))
     files: list[dict[str, Any]] = []
-    metadata: list[dict[str, Any]] = []
-    for volume in volumes:
-        files.extend(list_files_for_volume(db, str(volume["id"])))
-        metadata.extend(list_metadata_for_volume(db, str(volume["id"])))
-    return {"work": work, "volumes": volumes, "files": files, "metadata": metadata}
+    for resource in resources:
+        files.extend(list_files_for_resource(db, str(resource["id"])))
+    metadata = list_metadata_for_book(db, book_id)
+    return {"book": book, "resources": resources, "files": files, "metadata": metadata}
 
 
-def list_volumes_for_work(db: Session, book_id: str) -> list[dict[str, Any]]:
+def list_resources_for_book(db: Session, book_id: str) -> list[dict[str, Any]]:
     return [
-        volume_entity_as_dict(row)
-        for row in _volumes_belonging_to_work(db, book_id, visible_only=False)
+        resource_entity_as_dict(row)
+        for row in _resources_for_book(db, book_id, visible_only=False)
     ]
-
-
-def work_column_names(db: Session) -> set[str]:
-    if not _has_table(db, "LibraryBook"):
-        return set()
-    return {
-        column["name"] for column in inspect(db.connection()).get_columns("LibraryBook")
-    }

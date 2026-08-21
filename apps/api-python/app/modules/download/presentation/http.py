@@ -49,15 +49,6 @@ def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
 
 
-def _has_table(db: Session, table: str) -> bool:
-    from sqlalchemy import inspect
-
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
 def _enabled_library_for_path(
     folders: tuple[dict[str, Any], ...],
     target: Path,
@@ -79,13 +70,9 @@ def _enabled_library_for_path(
 
 
 def _load_enabled_libraries(db: Session) -> tuple[dict[str, Any], ...]:
-    from app.modules.download.infrastructure.tasks import list_enabled_libraries
+    from app.bootstrap.download import list_enabled_libraries
 
-    folders = (
-        tuple(list_enabled_libraries(db))
-        if _has_table(db, "Library")
-        else ()
-    )
+    folders = tuple(list_enabled_libraries(db))
     db.close()
     return folders
 

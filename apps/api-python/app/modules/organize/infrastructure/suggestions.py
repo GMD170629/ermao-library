@@ -4,14 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import insert, inspect, select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
 
 from app.models.organize import MetadataSuggestion
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return inspect(db.connection()).has_table(table)
 
 
 def suggestion_entity_record(entity: MetadataSuggestion) -> dict[str, Any]:
@@ -31,8 +27,6 @@ def suggestion_entity_record(entity: MetadataSuggestion) -> dict[str, Any]:
 
 
 def list_pending_suggestions(db: Session, job_id: str) -> list[dict[str, Any]]:
-    if not _has_table(db, "MetadataSuggestion"):
-        return []
     rows = db.scalars(
         select(MetadataSuggestion).where(
             MetadataSuggestion.job_id == job_id,
@@ -43,8 +37,6 @@ def list_pending_suggestions(db: Session, job_id: str) -> list[dict[str, Any]]:
 
 
 def list_suggestion_dedupe_keys(db: Session, job_id: str) -> set[str]:
-    if not _has_table(db, "MetadataSuggestion"):
-        return set()
     rows = db.execute(
         select(
             MetadataSuggestion.field,
@@ -94,7 +86,7 @@ def insert_suggestions(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
 
 
 def mark_suggestions_applied(db: Session, suggestion_ids: list[str]) -> None:
-    if not suggestion_ids or not _has_table(db, "MetadataSuggestion"):
+    if not suggestion_ids:
         return
     db.execute(
         update(MetadataSuggestion)
@@ -104,8 +96,6 @@ def mark_suggestions_applied(db: Session, suggestion_ids: list[str]) -> None:
 
 
 def dismiss_pending_suggestions(db: Session, job_id: str) -> None:
-    if not _has_table(db, "MetadataSuggestion"):
-        return
     db.execute(
         update(MetadataSuggestion)
         .where(
@@ -119,7 +109,7 @@ def dismiss_pending_suggestions(db: Session, job_id: str) -> None:
 def dismiss_pending_suggestions_for_jobs(
     db: Session, job_ids: tuple[str, ...]
 ) -> None:
-    if not job_ids or not _has_table(db, "MetadataSuggestion"):
+    if not job_ids:
         return
     db.execute(
         update(MetadataSuggestion)

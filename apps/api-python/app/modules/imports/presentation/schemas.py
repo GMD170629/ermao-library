@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
@@ -103,43 +101,6 @@ DeletedLibraryResponse = SuccessEnvelope[DeletedLibraryPayload]
 ParsedReleaseTitleResponse = SuccessEnvelope[ParsedReleaseTitlePayload]
 
 
-ImportTaskKind = Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
-ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
-ImportTaskRole = Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"]
-
-
-class LibraryImportTaskContract(HttpContractModel):
-    id: str
-    kind: ImportTaskKind
-    library_id: str = Field(alias="libraryId")
-    resource_id: str | None = Field(default=None, alias="resourceId")
-    source_node_id: str | None = Field(default=None, alias="sourceNodeId")
-    role: ImportTaskRole | None = None
-    state: ImportTaskState
-    error_summary: str | None = Field(default=None, alias="errorSummary")
-    created_at: datetime | str = Field(alias="createdAt")
-    started_at: datetime | str | None = Field(default=None, alias="startedAt")
-    finished_at: datetime | str | None = Field(default=None, alias="finishedAt")
-
-
-class ImportTasksSummary(HttpContractModel):
-    completed: int
-    failed: int
-
-
-class ImportTasksPayload(HttpContractModel):
-    tasks: list[LibraryImportTaskContract]
-    summary: ImportTasksSummary
-    page: int
-    page_size: int = Field(alias="pageSize")
-    total: int
-    total_pages: int = Field(alias="totalPages")
-
-
-class ImportTaskPayload(HttpContractModel):
-    task: LibraryImportTaskContract
-
-
 class ContinueImportPayload(HttpContractModel):
     task_id: str | None = Field(default=None, alias="taskId")
     library_id: str = Field(alias="libraryId")
@@ -148,8 +109,6 @@ class ContinueImportPayload(HttpContractModel):
     enqueued: bool
 
 
-ImportTasksResponse = SuccessEnvelope[ImportTasksPayload]
-ImportTaskResponse = SuccessEnvelope[ImportTaskPayload]
 ContinueImportResponse = SuccessEnvelope[ContinueImportPayload]
 
 

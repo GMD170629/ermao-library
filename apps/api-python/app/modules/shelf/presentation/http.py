@@ -9,7 +9,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
@@ -77,13 +76,6 @@ def _now() -> datetime:
 
 def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
-
-
-def _has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
 
 
 def _parse_json(value: Any, fallback: Any) -> Any:
@@ -457,8 +449,6 @@ def _normalized_shelf_book_ids(
             book_ids.append(book_id)
     if not book_ids:
         return [], None
-    if not _has_table(db, "LibraryBook"):
-        return [], "选择的图书不存在，请刷新后重试"
     visible_ids = shelf_store.filter_visible_book_ids(
         db,
         book_ids,

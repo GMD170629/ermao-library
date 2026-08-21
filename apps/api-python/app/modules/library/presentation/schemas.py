@@ -265,6 +265,74 @@ class AssetsPayload(HttpContractModel):
     total_pages: int = Field(default=1, alias="totalPages")
 
 
+class ResourceImportAcceptedPayload(HttpContractModel):
+    resource_id: str = Field(alias="resourceId")
+    accepted: Literal[True] = True
+    task_id: str = Field(alias="taskId")
+
+
+class ResourceDeletedPayload(HttpContractModel):
+    resource_id: str = Field(alias="resourceId")
+    deleted: Literal[True] = True
+
+
+class AssetDeletedPayload(HttpContractModel):
+    asset_id: str = Field(alias="assetId")
+    deleted: Literal[True] = True
+
+
+class ResourceOperationSummary(HttpContractModel):
+    id: str
+    action: str
+    status: str
+    summary: str
+    expires_at: datetime | None = Field(default=None, alias="expiresAt")
+    undo_available: bool = Field(alias="undoAvailable")
+
+
+class ResourceReclassifyPayload(HttpContractModel):
+    affected_resource_ids: list[str] = Field(alias="affectedResourceIds")
+    operation: ResourceOperationSummary
+
+
+class ResourceBatchPayload(HttpContractModel):
+    affected_resource_ids: list[str] = Field(alias="affectedResourceIds")
+    operation_ids: list[str] = Field(alias="operationIds")
+
+
+class ReadingUnitView(HttpContractModel):
+    id: str
+    title: str
+    href: str
+    sort_order: int = Field(alias="sortOrder")
+    unit_type: str = Field(alias="unitType")
+    asset_id: str | None = Field(default=None, alias="assetId")
+    metadata_json: str = Field(alias="metadataJson")
+
+
+class ReadingUnitsPage(HttpContractModel):
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+
+
+class ReadingUnitsPayload(HttpContractModel):
+    book_id: str = Field(alias="bookId")
+    resource_id: str = Field(alias="resourceId")
+    units: list[ReadingUnitView]
+    page: ReadingUnitsPage
+    current_href: str | None = Field(default=None, alias="currentHref")
+    current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
+    current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
+    current_chapter_sort_order: int | None = Field(
+        default=None,
+        alias="currentChapterSortOrder",
+    )
+    current_page_number: int | None = Field(default=None, alias="currentPageNumber")
+    progress: float = Field(ge=0, le=100)
+
+
 class BooksResponse(SuccessEnvelope[BooksPayload]):
     pass
 
@@ -282,6 +350,30 @@ class ResourceResponse(SuccessEnvelope[ResourcePayload]):
 
 
 class AssetsResponse(SuccessEnvelope[AssetsPayload]):
+    pass
+
+
+class ResourceImportAcceptedResponse(SuccessEnvelope[ResourceImportAcceptedPayload]):
+    pass
+
+
+class ResourceDeletedResponse(SuccessEnvelope[ResourceDeletedPayload]):
+    pass
+
+
+class AssetDeletedResponse(SuccessEnvelope[AssetDeletedPayload]):
+    pass
+
+
+class ResourceReclassifyResponse(SuccessEnvelope[ResourceReclassifyPayload]):
+    pass
+
+
+class ResourceBatchResponse(SuccessEnvelope[ResourceBatchPayload]):
+    pass
+
+
+class ReadingUnitsResponse(SuccessEnvelope[ReadingUnitsPayload]):
     pass
 
 

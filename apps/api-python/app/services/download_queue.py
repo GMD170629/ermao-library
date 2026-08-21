@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.bootstrap.download import continue_download_import_command
 from app.core.config import Settings
 from app.modules.download.infrastructure.tasks import (
-    has_table,
     list_enabled_libraries,
     next_queued_download_task,
 )
@@ -124,9 +123,6 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
 
 
 def _library_id(db: Session, path: Path) -> str | None:
-    if not has_table(db, "Library"):
-        db.close()
-        return None
     folders = list_enabled_libraries(db)
     db.close()
     resolved = path.resolve()

@@ -36,10 +36,6 @@ _SNAPSHOT_MODELS: dict[str, type] = {
 }
 
 
-def has_table(db: Session, table: str) -> bool:
-    return sa_inspect(db.connection()).has_table(table)
-
-
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 

@@ -6,7 +6,6 @@ import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
@@ -52,13 +51,6 @@ def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
 
 
-def _has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
 def _parse_json(value: Any, fallback: Any) -> Any:
     if value is None:
         return fallback
@@ -76,14 +68,14 @@ def _dt(value: Any) -> str | None:
     return timestamp_ms_to_iso(value) or str(value)
 
 
-def _get_work(db: Session, book_id: str) -> dict[str, Any] | None:
+def _load_book(db: Session, book_id: str) -> dict[str, Any] | None:
     return get_book(db, book_id)
 
 
-def _work_view(
-    db: Session, work: dict[str, Any], user_id: str | None = None
+def _book_view(
+    db: Session, book: dict[str, Any], user_id: str | None = None
 ) -> dict[str, Any]:
-    return book_view(db, work, user_id)
+    return book_view(db, book, user_id)
 
 
 def _positive_int(value: Any, fallback: int, maximum: int) -> int:
@@ -122,8 +114,8 @@ def _organize_job_view(
     lookup: dict[str, Any] | None = None,
     executions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    work = _get_work(db, str(job.get("bookId") or ""))
-    if not work:
+    book = _load_book(db, str(job.get("bookId") or ""))
+    if not book:
         return None
     if lookup is None:
         lookup = organize_job_queries.latest_lookup_rows_by_job(
@@ -180,7 +172,7 @@ def _organize_job_view(
         "finishedAt": _dt(job.get("finishedAt")),
         "createdAt": _dt(job.get("createdAt")),
         "updatedAt": _dt(job.get("updatedAt")),
-        "book": _work_view(db, work, user_id),
+        "book": _book_view(db, book, user_id),
     }
 
 
@@ -344,11 +336,7 @@ def get_organize_job(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    job = (
-        organize_runs.get_job_row(db, job_id)
-        if organize_runs.has_job_table(db)
-        else None
-    )
+    job = organize_runs.get_job_row(db, job_id)
     if not job:
         raise OrganizeNotFoundError(OrganizeErrorBody(message="整理任务不存在"))
     view = _organize_job_view(db, job, getattr(user, "id", None))

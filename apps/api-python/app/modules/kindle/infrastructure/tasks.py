@@ -35,16 +35,7 @@ def _legacy_column_to_attr(model: type) -> dict[str, str]:
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 
-def has_table(db: Session, table: str) -> bool:
-    try:
-        return sa_inspect(db.connection()).has_table(table)
-    except Exception:
-        return False
-
-
 def get_kindle_send_task(db: Session, task_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
     task = db.get(KindleSendTask, task_id)
     return entity_record(task) if task is not None else None
 
@@ -57,8 +48,6 @@ def list_kindle_send_tasks(
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    if not has_table(db, "KindleSendTask"):
-        return [], 0
     filters = [KindleSendTask.user_id == user_id]
     if status:
         filters.append(KindleSendTask.status == status)
@@ -86,8 +75,6 @@ def find_active_kindle_task(
     recipient_email: str,
     exclude_task_id: str | None = None,
 ) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
     filters = [
         KindleSendTask.asset_id == asset_id,
         KindleSendTask.recipient_email == recipient_email,
@@ -154,8 +141,6 @@ def delete_kindle_send_task(db: Session, task_id: str) -> None:
 
 
 def next_queued_kindle_task(db: Session, now_ms: int) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
     cutoff = timestamp_ms_to_datetime(now_ms) or datetime.now(UTC)
     task = db.execute(
         select(KindleSendTask)
@@ -175,8 +160,6 @@ def next_queued_kindle_task(db: Session, now_ms: int) -> dict[str, Any] | None:
 def claim_kindle_send_task(
     db: Session, task_id: str, now: datetime
 ) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
     task = execute_kindle_send_task_update(
         db,
         prepare_claim_kindle_send_task(task_id, now=now),
@@ -304,8 +287,6 @@ def mark_kindle_task_sent(db: Session, task_id: str, sent_at: datetime) -> None:
 
 
 def list_sending_kindle_tasks(db: Session) -> list[dict[str, Any]]:
-    if not has_table(db, "KindleSendTask"):
-        return []
     rows = (
         db.execute(select(KindleSendTask).where(KindleSendTask.status == "sending"))
         .scalars()
@@ -350,8 +331,6 @@ def mark_kindle_tasks_unknown(
 
 
 def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "LibraryResourceAsset"):
-        return None
     row = db.execute(
         select(
             LibraryResourceAsset,
@@ -377,8 +356,6 @@ def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] |
 def get_library_asset_details_for_kindle(
     db: Session, asset_id: str
 ) -> dict[str, Any] | None:
-    if not has_table(db, "LibraryResourceAsset"):
-        return None
     row = db.execute(
         select(
             LibraryResourceAsset,

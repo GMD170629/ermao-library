@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -100,8 +100,6 @@ def load_raw_import_preferences_projection(
     """Read only raw preference columns; parsing belongs after Session release."""
 
     try:
-        if "SystemSetting" not in inspect(db.connection()).get_table_names():
-            return RawImportPreferencesProjection(available=False)
         rows = db.execute(
             select(SystemSetting.key, SystemSetting.value).where(
                 SystemSetting.key.in_(IMPORT_PREFERENCE_KEYS)

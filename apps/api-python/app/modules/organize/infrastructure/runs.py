@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -18,14 +18,6 @@ ACTIVE_RUN_STATUSES = ("QUEUED", "RUNNING")
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def has_run_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("OrganizeRun")
-
-
-def has_job_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("OrganizeJob")
 
 
 def run_entity_record(entity: OrganizeRun) -> dict[str, Any]:
@@ -253,13 +245,9 @@ def projected_run_view(db: Session, row: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_organize_run(db: Session, run_id: str) -> dict[str, Any] | None:
-    if not has_run_table(db):
-        return None
     row = get_run_row(db, run_id)
     return projected_run_view(db, row) if row else None
 
 
 def list_organize_runs(db: Session, limit: int = 20) -> list[dict[str, Any]]:
-    if not has_run_table(db):
-        return []
     return [projected_run_view(db, row) for row in list_run_rows(db, limit)]

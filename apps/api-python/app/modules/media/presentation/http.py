@@ -37,9 +37,7 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.modules.library.infrastructure.readable_resource_schema import (
-    LibraryReadableResource,
-)
+from app.models import LibraryReadableResource
 from app.modules.media.application.cover_proxy import (
     UnsafeCoverUrl,
     configured_cover_origins,
@@ -48,6 +46,7 @@ from app.modules.media.application.cover_proxy import (
 from app.modules.media.presentation.schemas import (
     MediaAssetResponse,
     MediaImageResponse,
+    ResourceDownloadResponse,
     ResourcePage,
     ResourcePagesPayload,
     ResourcePagesResponse,
@@ -178,14 +177,17 @@ def get_resource_asset(
     )
 
 
-@router.post("/books/{book_id}/resources/download")
+@router.post(
+    "/books/{book_id}/resources/download",
+    response_model=ResourceDownloadResponse,
+)
 def download_resource(
     book_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
 ) -> Annotated[
-    Response,
+    ResourceDownloadResponse,
     ErrorResponses(
         BasicBadRequestError,
         BasicUnauthorizedError,

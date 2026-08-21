@@ -16,6 +16,11 @@ from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
     continue_library_import,
+    get_library,
+    get_library_by_root_path,
+    library_has_topology,
+    list_libraries,
+    list_library_access_user_ids,
     persist_import_library_create,
     persist_import_library_delete,
     persist_import_library_update,
@@ -41,16 +46,6 @@ from app.modules.imports.application.library_paths import (
     library_directory_tree_node,
     resolve_library_root_path,
 )
-from app.modules.imports.infrastructure.library_queries import (
-    get_import_task as get_import_task_projection,
-    get_library,
-    get_library_by_root_path,
-    library_has_topology,
-    list_import_tasks_page,
-    list_libraries,
-    list_library_access_user_ids,
-)
-from app.modules.imports.presentation.mappers import import_task_view
 from app.modules.imports.presentation.path_helpers import enabled_library_for_path
 from app.modules.imports.presentation.schemas import (
     CreateLibraryRequest,
@@ -59,8 +54,6 @@ from app.modules.imports.presentation.schemas import (
     ImportConflictError,
     ImportForbiddenError,
     ImportNotFoundError,
-    ImportTaskResponse,
-    ImportTasksResponse,
     LibrariesResponse,
     LibraryDirectoryResponse,
     LibraryResponse,
@@ -346,72 +339,6 @@ def delete_library(
         ),
     )
     return ok({"deleted": deleted, "id": library_id})
-
-
-@router.get("/import-tasks")
-def list_import_tasks(
-    request: Request,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=10, ge=1, le=50, alias="pageSize"),
-    state: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> ImportTasksResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if user is None:
-        return fail("当前用户无权查看导入任务", status_code=403)
-    context = authorization_context(db, user)
-    normalized_state = str(state or "").strip().upper()
-    if normalized_state and normalized_state != "ALL" and normalized_state not in {
-        "QUEUED",
-        "RUNNING",
-        "SUCCEEDED",
-        "FAILED",
-    }:
-        return fail("导入状态无效", status_code=400)
-    tasks, total, summary = list_import_tasks_page(
-        db,
-        context,
-        page=page,
-        page_size=page_size,
-        state=normalized_state or None,
-    )
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    normalized_page = min(max(1, page), total_pages)
-    return ok(
-        {
-            "tasks": [import_task_view(task) for task in tasks],
-            "summary": summary,
-            "page": normalized_page,
-            "pageSize": page_size,
-            "total": total,
-            "totalPages": total_pages,
-        }
-    )
-
-
-@router.get("/import-tasks/{task_id}")
-def get_import_task(
-    task_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[ImportTaskResponse, ErrorResponses(ImportNotFoundError)]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if user is None:
-        return fail("导入任务不存在", status_code=404)
-    task = get_import_task_projection(
-        db,
-        task_id,
-        authorization_context(db, user),
-    )
-    if task is None:
-        return fail("导入任务不存在", status_code=404)
-    return ok({"task": import_task_view(task)})
 
 
 def _parsed_release_title(title: str) -> dict[str, object]:

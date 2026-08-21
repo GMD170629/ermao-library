@@ -6,7 +6,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Header, Request
 from fastapi.responses import Response
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
@@ -16,6 +15,7 @@ from app.bootstrap.system import (
     clear_system_events_with_audit,
     configured_max_event_bytes,
     get_setting,
+    library_import_dashboard_snapshot,
     list_settings,
     list_system_events_page,
     persist_opds_settings_update,
@@ -48,9 +48,6 @@ from app.modules.system.application.queries import (
     prepare_system_settings_update,
     system_settings_payload,
 )
-from app.modules.system.infrastructure.import_status import (
-    library_import_dashboard_snapshot,
-)
 from app.modules.system.presentation.health_schemas import SystemManagerRequiredError
 from app.modules.system.presentation.schemas import (
     AppConfigPayload,
@@ -80,13 +77,6 @@ from app.services.import_preferences import (
 )
 
 router = APIRouter(tags=["system"], route_class=TypedContractRoute)
-
-
-def _has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
 
 
 def _event_storage_snapshot(db: Session) -> dict[str, int]:
@@ -324,10 +314,6 @@ def list_system_events(
         return auth_error
     page = max(1, page)
     page_size = min(100, max(1, pageSize))
-    if not _has_table(db, "SystemEvent"):
-        return ManagementEventsResponse(
-            data=management_events_empty_page(page, page_size)
-        )
     date_from_ms, date_to_ms = parse_event_date_bounds(dateFrom, dateTo)
     snapshot = list_system_events_page(
         db,
@@ -369,8 +355,6 @@ def clear_system_events(
     user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    if not _has_table(db, "SystemEvent"):
-        return ClearedEventsResponse(data={"deleted": 0})
     prepared_event = prepare_system_event(
         level="info",
         source="system",

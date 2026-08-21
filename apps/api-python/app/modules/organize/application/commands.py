@@ -96,6 +96,17 @@ def prepare_organize_policy_update(
             if settings_changed or not old_next
             else old_next
         )
+    if "nextRunAt" in payload:
+        supplied_next_run = payload["nextRunAt"]
+        if supplied_next_run is None:
+            next_run_at = None
+        elif isinstance(supplied_next_run, datetime):
+            next_run_at = supplied_next_run
+        else:
+            try:
+                next_run_at = datetime.fromisoformat(str(supplied_next_run))
+            except ValueError as exc:
+                raise ValueError("下次执行时间格式不正确") from exc
     return PreparedOrganizePolicyUpdate(
         enabled=enabled,
         schedule_mode=schedule_mode,

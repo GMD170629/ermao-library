@@ -11,7 +11,7 @@ from urllib.error import HTTPError
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -72,26 +72,20 @@ def logical_import_path(
 ) -> str:
     resolved = path.expanduser().resolve()
     roots: list[tuple[str, Path]] = []
-    try:
-        if "Library" in inspect(db.connection()).get_table_names():
-            from app.models.library import Library
+    from app.models.library import Library
 
-            for row in db.execute(
-                select(Library.name, Library.root_path).where(
-                    Library.enabled.is_(True)
+    for row in db.execute(
+        select(Library.name, Library.root_path).where(Library.enabled.is_(True))
+    ):
+        try:
+            roots.append(
+                (
+                    str(row.name or Path(str(row.root_path)).name),
+                    Path(str(row.root_path)).expanduser().resolve(),
                 )
-            ):
-                try:
-                    roots.append(
-                        (
-                            str(row.name or Path(str(row.root_path)).name),
-                            Path(str(row.root_path)).expanduser().resolve(),
-                        )
-                    )
-                except OSError:
-                    continue
-    except Exception:
-        roots = []
+            )
+        except OSError:
+            continue
     matching = [
         (name, root)
         for name, root in roots
@@ -171,16 +165,7 @@ def recognize_book_identity(
     )
 
 
-def _identity_cache_available(db: Session) -> bool:
-    try:
-        return "BookIdentityCache" in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
 def _load_identity_cache(db: Session, logical_path: str) -> BookIdentity | None:
-    if not _identity_cache_available(db):
-        return None
     from app.models.settings import BookIdentityCache
 
     row = (

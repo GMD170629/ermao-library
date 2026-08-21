@@ -13,7 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.library import list_books
+from app.bootstrap.library import (
+    list_books,
+    resource_metadata,
+    update_book_fields,
+)
 from app.core.authorization import (
     authorization_context,
     can_access_asset,
@@ -51,6 +55,12 @@ from app.modules.library.presentation.schemas import (
     ResourceSourceDeleteRequest,
     ReclassifyResourceRequest,
     ResourceBatchRequest,
+    AssetDeletedResponse,
+    ReadingUnitsResponse,
+    ResourceBatchResponse,
+    ResourceDeletedResponse,
+    ResourceImportAcceptedResponse,
+    ResourceReclassifyResponse,
 )
 from app.modules.library.application.resource_commands import (
     LibraryActor,
@@ -64,14 +74,12 @@ from app.modules.library.application.resource_commands import (
     set_resource_media_kinds,
     update_resource,
 )
-from app.modules.library.infrastructure.resource_commands import SqlAlchemyResourceMetadata
 from app.modules.library.presentation.views import (
     book_view,
     get_book,
     list_resource_views,
     resource_view,
 )
-from app.modules.library.infrastructure.books import update_book_fields
 from app.schemas.responses import fail, ok
 
 router = APIRouter(tags=["library"], route_class=TypedContractRoute)
@@ -293,7 +301,7 @@ def update_library_resource(
     changes = payload.model_dump(exclude_unset=True, by_alias=False)
     try:
         update_resource(
-            SqlAlchemyResourceMetadata(db),
+            resource_metadata(db),
             db,
             actor=_actor(db, user),
             book_id=book_id,
@@ -311,14 +319,18 @@ def update_library_resource(
     return ResourceResponse(data=ResourcePayload(resource=updated))
 
 
-@router.post("/books/{book_id}/resources/{resource_id}/rescan")
+@router.post(
+    "/books/{book_id}/resources/{resource_id}/rescan",
+    response_model=ResourceImportAcceptedResponse,
+    status_code=202,
+)
 def rescan_library_resource(
     book_id: str,
     resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> dict[str, object]:
+) -> ResourceImportAcceptedResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -346,14 +358,18 @@ def rescan_library_resource(
     )
 
 
-@router.post("/books/{book_id}/resources/{resource_id}/cover/regenerate")
+@router.post(
+    "/books/{book_id}/resources/{resource_id}/cover/regenerate",
+    response_model=ResourceImportAcceptedResponse,
+    status_code=202,
+)
 def regenerate_library_resource_cover(
     book_id: str,
     resource_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> dict[str, object]:
+) -> ResourceImportAcceptedResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -383,7 +399,10 @@ def regenerate_library_resource_cover(
     )
 
 
-@router.delete("/books/{book_id}/resources/{resource_id}/source")
+@router.delete(
+    "/books/{book_id}/resources/{resource_id}/source",
+    response_model=ResourceDeletedResponse,
+)
 def delete_library_resource_source(
     book_id: str,
     resource_id: str,
@@ -391,7 +410,7 @@ def delete_library_resource_source(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> dict[str, object]:
+) -> ResourceDeletedResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -417,6 +436,7 @@ def delete_library_resource_source(
 
 @router.post(
     "/books/{book_id}/resources/{resource_id}/reclassify",
+    response_model=ResourceReclassifyResponse,
 )
 def reclassify_library_resource(
     book_id: str,
@@ -425,7 +445,7 @@ def reclassify_library_resource(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> dict[str, object]:
+) -> ResourceReclassifyResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -434,7 +454,7 @@ def reclassify_library_resource(
         return manager_error
     try:
         outcome = reclassify_resource(
-            SqlAlchemyResourceMetadata(db),
+            resource_metadata(db),
             db,
             actor=_actor(db, user),
             book_id=book_id,
@@ -455,14 +475,17 @@ def reclassify_library_resource(
     )
 
 
-@router.post("/books/{book_id}/resources/batch")
+@router.post(
+    "/books/{book_id}/resources/batch",
+    response_model=ResourceBatchResponse,
+)
 def batch_library_resource_action(
     book_id: str,
     payload: ResourceBatchRequest,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> dict[str, object]:
+) -> ResourceBatchResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -471,7 +494,7 @@ def batch_library_resource_action(
         return manager_error
     try:
         outcome = set_resource_media_kinds(
-            SqlAlchemyResourceMetadata(db),
+            resource_metadata(db),
             db,
             actor=_actor(db, user),
             book_id=book_id,
@@ -493,7 +516,10 @@ def batch_library_resource_action(
     )
 
 
-@router.get("/books/{book_id}/resources/{resource_id}/reading-units")
+@router.get(
+    "/books/{book_id}/resources/{resource_id}/reading-units",
+    response_model=ReadingUnitsResponse,
+)
 def list_library_reading_units(
     book_id: str,
     resource_id: str,
@@ -502,7 +528,7 @@ def list_library_reading_units(
     settings: ApplicationSettings,
     page: int = Query(default=1, ge=1),
     pageSize: int = Query(default=50, ge=1, le=500),
-) -> dict[str, object]:
+) -> ReadingUnitsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -565,13 +591,13 @@ def list_library_reading_units(
     )
 
 
-@router.delete("/assets/{asset_id}")
+@router.delete("/assets/{asset_id}", response_model=AssetDeletedResponse)
 def delete_library_asset(
     asset_id: str,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> dict[str, object]:
+) -> AssetDeletedResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error

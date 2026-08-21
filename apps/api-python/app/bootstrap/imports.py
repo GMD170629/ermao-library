@@ -33,6 +33,17 @@ from app.modules.imports.application.save_uploaded_files import (
 from app.modules.imports.infrastructure.library_write import (
     SqlAlchemyLibraryWriteStore,
 )
+from app.modules.imports.infrastructure.library_queries import (
+    get_import_task,
+    get_library,
+    get_library_by_root_path,
+    library_has_topology,
+    list_import_tasks_page,
+    list_enabled_library_rows,
+    list_libraries,
+    list_library_access_user_ids,
+    source_node_library_id,
+)
 from app.modules.imports.infrastructure.uploaded_file_publication import (
     AtomicUploadedFilePublisher,
 )
@@ -96,8 +107,17 @@ __all__ = [
     "build_readable_resource_worker",
     "continue_library_import",
     "continue_source_import",
+    "get_import_task",
+    "get_library",
+    "get_library_by_root_path",
+    "library_has_topology",
+    "list_import_tasks_page",
+    "list_enabled_library_rows",
+    "list_libraries",
+    "list_library_access_user_ids",
     "persist_import_library_create",
     "persist_import_library_delete",
     "persist_import_library_update",
     "save_uploaded_files",
+    "source_node_library_id",
 ]

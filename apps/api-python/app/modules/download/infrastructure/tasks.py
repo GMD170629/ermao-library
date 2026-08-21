@@ -22,21 +22,12 @@ def _legacy_column_to_attr(model: type) -> dict[str, str]:
 
 ACTIVE_DOWNLOAD_STATUSES = ("queued", "downloading", "downloaded", "completed")
 
-
-def has_table(db: Session, table: str) -> bool:
-    return sa_inspect(db.get_bind()).has_table(table)
-
-
 def get_download_task(db: Session, task_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "DownloadTask"):
-        return None
     task = db.get(DownloadTask, task_id)
     return entity_record(task) if task is not None else None
 
 
 def next_queued_download_task(db: Session) -> dict[str, Any] | None:
-    if not has_table(db, "DownloadTask"):
-        return None
     task = db.execute(
         select(DownloadTask)
         .where(DownloadTask.status == "queued")
@@ -127,16 +118,12 @@ def update_download_task(
     task_id: str,
     values: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not has_table(db, "DownloadTask"):
-        return None
     statement = prepare_download_task_state_update(task_id, values)
     task = execute_download_task_row_update(db, statement)
     return entity_record(task) if task is not None else None
 
 
 def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "DownloadTask"):
-        return None
     task = db.execute(
         select(DownloadTask)
         .where(
@@ -150,15 +137,11 @@ def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | N
 
 
 def system_setting_value(db: Session, key: str) -> str | None:
-    if not has_table(db, "SystemSetting"):
-        return None
     row = db.get(SystemSetting, key)
     return row.value if row is not None else None
 
 
 def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
-    if not has_table(db, "Library"):
-        return []
     rows = db.execute(
         select(Library).where(Library.enabled.is_(True))
     ).scalars().all()

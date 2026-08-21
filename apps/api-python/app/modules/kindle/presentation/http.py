@@ -20,7 +20,6 @@ from app.bootstrap.kindle import (
     find_active_kindle_task,
     get_kindle_send_task,
     get_library_asset_details_for_kindle,
-    has_table,
     retry_kindle_send_task_command,
     update_email_settings_command,
     update_kindle_recipient_command,
@@ -277,10 +276,6 @@ def list_kindle_send_tasks(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    if not has_table(db, "KindleSendTask"):
-        return ok(
-            {"tasks": [], "total": 0, "page": 1, "pageSize": pageSize, "totalPages": 1}
-        )
     page = max(1, page)
     page_size = min(200, max(1, pageSize))
     allowed_statuses = {"queued", "sending", "sent", "failed", "cancelled", "unknown"}
@@ -325,11 +320,6 @@ def create_kindle_send_task(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
-    queue_ready = has_table(db, "KindleSendTask")
-    db.close()
-    if not queue_ready:
-        return fail("Kindle 发送队列尚未初始化", status_code=503)
     if payload is None:
         return fail("发送参数格式不正确", status_code=400)
     asset_id = str(payload.asset_id or "").strip()

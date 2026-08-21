@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, func, insert, inspect, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -72,18 +72,6 @@ class PreparedProviderExecutionWrite:
     execution_id: str | None
 
 
-def _has_table(db: Session, table: str) -> bool:
-    return inspect(db.connection()).has_table(table)
-
-
-def organize_job_table_ready(db: Session) -> bool:
-    return _has_table(db, "OrganizeJob")
-
-
-def provider_execution_table_ready(db: Session) -> bool:
-    return _has_table(db, "MetadataProviderExecution")
-
-
 def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
     """Map ORM task attrs to camelCase keys matching legacy raw-SQL row dicts."""
 
@@ -115,7 +103,7 @@ def automatic_rate_limit_applies(db: Session, task: dict[str, Any]) -> bool:
     """Manual recognition is explicit; every background trigger stays safe."""
 
     job_id = str(task.get("organizeJobId") or "").strip()
-    if not job_id or not _has_table(db, "OrganizeJob"):
+    if not job_id:
         return True
     trigger = db.scalar(select(OrganizeJob.trigger).where(OrganizeJob.id == job_id))
     return str(trigger or "SCHEDULE").upper() != "MANUAL"
@@ -177,14 +165,6 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
 
 
 def write_metadata_to_files_enabled(db: Session) -> bool:
-    if not _has_table(db, "OrganizePolicy"):
-        return False
-    columns = {
-        str(column.get("name"))
-        for column in inspect(db.connection()).get_columns("OrganizePolicy")
-    }
-    if "writeMetadataToFiles" not in columns:
-        return False
     value = db.scalar(
         select(OrganizePolicy.write_metadata_to_files).where(
             OrganizePolicy.id == "default"
@@ -194,16 +174,8 @@ def write_metadata_to_files_enabled(db: Session) -> bool:
 
 
 def prefer_local_metadata_enabled(db: Session) -> bool:
-    """Return the safe default when the policy migration is not installed yet."""
+    """Read the fresh-baseline local metadata preference."""
 
-    if not _has_table(db, "OrganizePolicy"):
-        return True
-    columns = {
-        str(column.get("name"))
-        for column in inspect(db.connection()).get_columns("OrganizePolicy")
-    }
-    if "preferLocalMetadata" not in columns:
-        return True
     value = db.scalar(
         select(OrganizePolicy.prefer_local_metadata).where(
             OrganizePolicy.id == "default"
@@ -323,10 +295,6 @@ def mark_organize_job_running(
     db.execute(update(OrganizeJob).where(OrganizeJob.id == job_id).values(**values))
 
 
-def source_table_ready(db: Session) -> bool:
-    return _has_table(db, "Source")
-
-
 def prepare_provider_execution_start(
     task: dict[str, Any],
     provider: str,
@@ -334,10 +302,7 @@ def prepare_provider_execution_start(
     execution_id: str,
     attempts: int,
     now: datetime,
-    table_ready: bool,
 ) -> PreparedProviderExecutionWrite:
-    if not table_ready:
-        return PreparedProviderExecutionWrite(statement=None, execution_id=None)
     return PreparedProviderExecutionWrite(
         statement=insert(MetadataProviderExecution).values(
             id=execution_id,
@@ -361,9 +326,8 @@ def prepare_provider_execution_finish(
     raw_result_json: str | None = None,
     error: str | None = None,
     now: datetime,
-    table_ready: bool,
 ) -> PreparedProviderExecutionWrite:
-    if not execution_id or not table_ready:
+    if not execution_id:
         return PreparedProviderExecutionWrite(statement=None, execution_id=None)
     return PreparedProviderExecutionWrite(
         update(MetadataProviderExecution)

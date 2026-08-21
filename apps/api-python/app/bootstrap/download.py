@@ -36,6 +36,7 @@ from app.modules.download.infrastructure.tasks import (
     prepare_claim_download_task,
     prepare_download_task_state_update,
     prepare_mark_download_task_importing,
+    list_enabled_libraries as _list_enabled_libraries,
 )
 from app.modules.download.public import DownloadWriteTransaction
 from app.modules.imports.application.readable_resource.continue_import import (
@@ -46,6 +47,10 @@ from app.modules.system.domain.events import PreparedSystemEvent
 
 def list_download_tasks(db: Session, *, limit: int = 1000) -> list[DownloadTaskDTO]:
     return SqlAlchemyDownloadTaskRepository(db).list_recent(limit=limit)
+
+
+def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
+    return _list_enabled_libraries(db)
 
 
 def get_download_task(db: Session, task_id: str) -> DownloadTaskDTO | None:
@@ -206,6 +211,7 @@ __all__ = [
     "finalize_download_task_command",
     "get_download_task",
     "list_download_tasks",
+    "list_enabled_libraries",
     "continue_download_import_command",
     "update_download_task",
     "update_download_task_command",

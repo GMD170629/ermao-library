@@ -30,6 +30,7 @@ from app.modules.library.infrastructure.facet_sync import (
     prepare_book_facet_write,
 )
 from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
+from app.modules.library.infrastructure.resource_commands import SqlAlchemyResourceMetadata
 from app.modules.library.infrastructure.filter_options import SqlAlchemyLibraryFilterQueries
 from app.modules.library.application.filter_options import GetLibraryFilterSchema, SearchLibraryFilterOptions
 from app.core.config import Settings
@@ -79,6 +80,22 @@ def library_cover_publication(settings: Settings) -> RemoteCoverPublication:
     return RemoteCoverPublication(settings.resolved_storage_root)
 
 
+def get_book(db: Session, book_id: str) -> dict[str, object] | None:
+    return library_books.get_book(db, book_id)
+
+
+def update_book_fields(
+    db: Session,
+    book_id: str,
+    values: dict[str, object],
+) -> dict[str, object] | None:
+    return library_books.update_book_fields(db, book_id, values)
+
+
+def resource_metadata(db: Session) -> SqlAlchemyResourceMetadata:
+    return SqlAlchemyResourceMetadata(db)
+
+
 def load_metadata_apply_job_ids(db: Session, book_id: str) -> tuple[str, ...]:
     return tuple(
         str(task.id)
@@ -111,6 +128,7 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
             "seriesName": item.series_name,
             "seriesIndex": item.series_index,
             "libraryId": book.library_id if (book := db.get(LibraryBook, item.id)) else None,
+            "sourceNodeId": book.source_node_id if book else None,
             "visibilityState": book.visibility_state if book else "VISIBLE",
             "curationState": book.curation_state if book else "PENDING",
             "updatedAt": item.updated_at,
@@ -129,6 +147,7 @@ __all__ = [
     "PreparedBookFacetWrite",
     "bookshelf_items",
     "execute_book_facet_write",
+    "get_book",
     "library_books",
     "library_catalog",
     "library_cover_publication",
@@ -143,7 +162,9 @@ __all__ = [
     "load_metadata_apply_job_ids",
     "prepare_book_facet",
     "prepare_book_facet_write",
+    "resource_metadata",
     "smart_shelf_book_ids",
+    "update_book_fields",
     "library_filter_schema",
     "library_filter_options",
 ]

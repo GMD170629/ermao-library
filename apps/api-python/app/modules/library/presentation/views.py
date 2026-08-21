@@ -22,8 +22,8 @@ from app.models import (
     LibrarySourceNode,
     ReaderResourceProgress,
 )
-from app.modules.library.infrastructure.books import get_book as load_book
-from app.modules.library.infrastructure.readable_resource_schema import LibraryBook
+from app.bootstrap.library import get_book as load_book
+from app.models import LibraryBook
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 
 

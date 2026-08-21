@@ -31,7 +31,7 @@ class SqlAlchemyLibraryFacetReferenceQueries:
             .join(linked_work, linked_work.id == linked_facet.book_id)
             .where(
                 linked_facet.facet_id == LibraryFacet.id,
-                linked_work.hidden.is_(False),
+                linked_work.visibility_state == "VISIBLE",
                 book_visibility_predicate(context, linked_work),
             )
         )
@@ -46,7 +46,7 @@ class SqlAlchemyLibraryFacetReferenceQueries:
             self._reference(row.id, row.kind, row.name) if row is not None else None
         )
 
-    def for_visible_work(self, book_id: str) -> BookFacetReferences:
+    def for_visible_book(self, book_id: str) -> BookFacetReferences:
         rows = self._db.execute(
             select(LibraryFacet.id, LibraryFacet.kind, LibraryFacet.name)
             .join(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)

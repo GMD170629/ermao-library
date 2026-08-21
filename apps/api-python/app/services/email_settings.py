@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from email_validator import EmailNotValidError, validate_email
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.modules.system.infrastructure.settings import (
@@ -58,16 +57,7 @@ class PreparedEmailSettingsUpdate:
     changed_keys: tuple[str, ...]
 
 
-def _has_settings_table(db: Session) -> bool:
-    try:
-        return "SystemSetting" in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
 def _load_values(db: Session) -> dict[str, Any]:
-    if not _has_settings_table(db):
-        return {}
     keys = list(SETTING_KEYS.values())
     existing = existing_setting_keys(db, keys)
     if not existing:
@@ -197,8 +187,6 @@ def candidate_email_settings(db: Session, payload: dict[str, Any]) -> dict[str, 
 def prepare_email_settings_update(
     db: Session, payload: dict[str, Any]
 ) -> PreparedEmailSettingsUpdate:
-    if not _has_settings_table(db):
-        raise EmailSettingsError("系统设置表尚未初始化")
     normalized = candidate_email_settings(db, payload)
     smtp = payload.get("smtp") if isinstance(payload.get("smtp"), dict) else {}
     kindle = payload.get("kindle") if isinstance(payload.get("kindle"), dict) else {}

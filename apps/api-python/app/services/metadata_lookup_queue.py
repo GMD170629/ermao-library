@@ -74,7 +74,6 @@ def recover_stale_metadata_lookup_tasks(db: Session) -> int:
 def claim_next_metadata_lookup_task(
     db: Session, *, owner_id: str = "metadata-lookup-compat"
 ) -> dict[str, Any] | None:
-    organize_job_ready = lookup_persist.organize_job_table_ready(db)
     db.close()
     now = _now()
     lease_expires_at = now + timedelta(seconds=lookup_persist.LOOKUP_LEASE_SECONDS)
@@ -84,7 +83,7 @@ def claim_next_metadata_lookup_task(
             owner_id=owner_id,
             now=now,
             lease_expires_at=lease_expires_at,
-            organize_job_ready=organize_job_ready,
+            organize_job_ready=True,
         )
     return task
 
@@ -122,7 +121,6 @@ def _start_provider_execution(
     execution_id = f"py_{uuid4().hex}"
     attempts = int(task.get("attempts") or 0) + 1
     now = _now()
-    table_ready = lookup_persist.provider_execution_table_ready(db)
     db.close()
     prepared = lookup_persist.prepare_provider_execution_start(
         task,
@@ -130,7 +128,6 @@ def _start_provider_execution(
         execution_id=execution_id,
         attempts=attempts,
         now=now,
-        table_ready=table_ready,
     )
     with MetadataWriteTransaction(db):
         persisted_id = lookup_persist.write_prepared_provider_execution(db, prepared)
@@ -149,7 +146,6 @@ def _finish_provider_execution(
         json.dumps(result, ensure_ascii=False) if result is not None else None
     )
     now = _now()
-    table_ready = lookup_persist.provider_execution_table_ready(db)
     db.close()
     prepared = lookup_persist.prepare_provider_execution_finish(
         execution_id,
@@ -157,7 +153,6 @@ def _finish_provider_execution(
         raw_result_json=raw_result_json,
         error=error,
         now=now,
-        table_ready=table_ready,
     )
     with MetadataWriteTransaction(db):
         lookup_persist.write_prepared_provider_execution(db, prepared)
@@ -835,7 +830,6 @@ def process_metadata_lookup_task(
                     status="COMPLETED",
                     raw_result_json=execution_result_json,
                     now=finished_at,
-                    table_ready=execution_id is not None,
                 )
             )
             task_id = str(task["id"])

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import delete, insert, select, update
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
@@ -210,20 +209,17 @@ def prepare_personal_user_deletion(
     user_id: str,
     anonymous_user_id: str,
 ) -> PreparedPersonalUserDeletion:
-    """Delete account-owned rows even on databases upgraded from pre-FK schemas."""
+    """Prepare deletion of all account-owned rows in the fresh schema."""
 
-    tables = set(sa_inspect(db.connection()).get_table_names())
     statements: list[Delete | Update] = []
-    if {"Shelf", "ShelfBook"}.issubset(tables):
-        statements.append(
-            delete(ShelfBook).where(
-                ShelfBook.shelf_id.in_(
-                    select(Shelf.id).where(Shelf.owner_user_id == user_id)
-                )
+    statements.append(
+        delete(ShelfBook).where(
+            ShelfBook.shelf_id.in_(
+                select(Shelf.id).where(Shelf.owner_user_id == user_id)
             )
         )
-    if "Shelf" in tables:
-        statements.append(delete(Shelf).where(Shelf.owner_user_id == user_id))
+    )
+    statements.append(delete(Shelf).where(Shelf.owner_user_id == user_id))
     for model in (
         ReaderBookmark,
         BookDetailPreference,
@@ -236,24 +232,21 @@ def prepare_personal_user_deletion(
         PasswordResetToken,
         UserSession,
     ):
-        if model.__tablename__ in tables:
-            statements.append(delete(model).where(model.user_id == user_id))
+        statements.append(delete(model).where(model.user_id == user_id))
     for model in (KindleSendTask, LibraryOperation):
-        if model.__tablename__ in tables:
-            statements.append(
-                update(model).where(model.user_id == user_id).values(user_id=None)
-            )
-    if "SystemEvent" in tables:
         statements.append(
-            update(SystemEvent)
-            .where(SystemEvent.actor_id == user_id)
-            .values(actor_id=anonymous_user_id)
+            update(model).where(model.user_id == user_id).values(user_id=None)
         )
-        statements.append(
-            update(SystemEvent)
-            .where(SystemEvent.target_id == user_id)
-            .values(target_id=anonymous_user_id)
-        )
+    statements.append(
+        update(SystemEvent)
+        .where(SystemEvent.actor_id == user_id)
+        .values(actor_id=anonymous_user_id)
+    )
+    statements.append(
+        update(SystemEvent)
+        .where(SystemEvent.target_id == user_id)
+        .values(target_id=anonymous_user_id)
+    )
     return PreparedPersonalUserDeletion(statements=tuple(statements))
 
 

@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi.responses import FileResponse, Response
 from pydantic import Field
 
-from app.contracts.http import HttpContractModel
+from app.contracts.http import HttpContractModel, SuccessEnvelope
 
 
 class MediaAssetResponse(Response):
@@ -42,3 +42,12 @@ class ResourcePagesPayload(HttpContractModel):
 class ResourcePagesResponse(HttpContractModel):
     ok: Literal[True] = True
     data: ResourcePagesPayload
+
+
+class ResourceDownloadPayload(HttpContractModel):
+    supported: Literal[False] = False
+    message: str
+
+
+class ResourceDownloadResponse(SuccessEnvelope[ResourceDownloadPayload]):
+    pass

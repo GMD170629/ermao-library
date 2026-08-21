@@ -22,7 +22,6 @@ from app.modules.kindle.infrastructure.tasks import (
     find_active_kindle_task,
     get_kindle_send_task,
     get_library_asset_details_for_kindle,
-    has_table,
     list_kindle_send_tasks,
     mark_kindle_task_failed,
     mark_kindle_task_sent,
@@ -116,8 +115,6 @@ def delete_kindle_send_task_command(
 def claim_kindle_send_task_command(
     db: Session, task_id: str, *, timestamp: datetime
 ) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
     db.close()
     statement = prepare_claim_kindle_send_task(task_id, now=timestamp)
     with KindleWriteTransaction(db):
@@ -229,7 +226,6 @@ __all__ = [
     "find_active_kindle_task",
     "get_kindle_send_task",
     "get_library_asset_details_for_kindle",
-    "has_table",
     "list_kindle_send_tasks",
     "record_kindle_event_command",
     "recover_interrupted_kindle_tasks_command",
