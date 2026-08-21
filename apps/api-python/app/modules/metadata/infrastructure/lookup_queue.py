@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -207,26 +208,32 @@ def update_lookup_task(
         if mapped.get("status") != "RUNNING":
             mapped["lease_owner_id"] = None
             mapped["lease_expires_at"] = None
-    result = db.execute(update(MetadataLookupTask).where(*clauses).values(**mapped))
+    result = cast(
+        CursorResult[Any],
+        db.execute(update(MetadataLookupTask).where(*clauses).values(**mapped)),
+    )
     return bool(result.rowcount)
 
 
 def recover_stale_lookup_tasks(db: Session, *, now: datetime) -> int:
-    result = db.execute(
-        update(MetadataLookupTask)
-        .where(
-            MetadataLookupTask.status == "RUNNING",
-            MetadataLookupTask.lease_expires_at <= now,
-        )
-        .values(
-            status="PENDING",
-            next_attempt_at=now,
-            started_at=None,
-            lease_owner_id=None,
-            lease_expires_at=None,
-            error_summary="任务进程中断，已自动恢复",
-            updated_at=now,
-        )
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            update(MetadataLookupTask)
+            .where(
+                MetadataLookupTask.status == "RUNNING",
+                MetadataLookupTask.lease_expires_at <= now,
+            )
+            .values(
+                status="PENDING",
+                next_attempt_at=now,
+                started_at=None,
+                lease_owner_id=None,
+                lease_expires_at=None,
+                error_summary="任务进程中断，已自动恢复",
+                updated_at=now,
+            )
+        ),
     )
     db.flush()
     return int(result.rowcount or 0)

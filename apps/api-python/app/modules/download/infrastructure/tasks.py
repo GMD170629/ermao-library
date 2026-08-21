@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapper, Session
 from sqlalchemy.sql.dml import Update
 
 from app.models.common import db_timestamp
@@ -18,14 +18,14 @@ from app.models.settings import SystemSetting
 def entity_record(entity: object) -> dict[str, Any]:
     """Return a queue row as a transport-neutral column record."""
 
-    mapper = sa_inspect(entity).mapper
+    mapper = cast(Mapper[Any], sa_inspect(entity))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
 
 
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
-    mapper = sa_inspect(model)
+    mapper = cast(Mapper[Any], sa_inspect(model))
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 

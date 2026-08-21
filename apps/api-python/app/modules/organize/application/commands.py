@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from types import TracebackType
-from typing import Any, Protocol, Self
+from typing import Any, Literal, Protocol, Self
 
 from app.contracts.local_metadata import validate_local_metadata_priority
 from app.modules.organize.application.dto import PreparedOrganizePolicyUpdate
@@ -32,7 +32,7 @@ class OrganizeWriteTransaction:
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         del exception, traceback
         if exception_type is None:
             self._unit_of_work.commit()

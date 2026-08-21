@@ -7,7 +7,7 @@ import unicodedata
 from datetime import UTC, datetime
 from html import unescape
 from time import time_ns
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
@@ -138,7 +138,8 @@ def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
         *_metadata_title_strings(candidate.get("title")),
         *_metadata_title_strings(candidate.get("titleAliases")),
     ]
-    raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
+    raw_value = candidate.get("raw")
+    raw: dict[str, Any] = raw_value if isinstance(raw_value, dict) else {}
     for key in (
         "title",
         "name",
@@ -151,7 +152,8 @@ def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
         "aka",
     ):
         values.extend(_metadata_title_strings(raw.get(key)))
-    infobox = raw.get("infobox") if isinstance(raw.get("infobox"), list) else []
+    infobox_value = raw.get("infobox")
+    infobox = infobox_value if isinstance(infobox_value, list) else []
     for entry in infobox:
         if not isinstance(entry, dict) or not re.search(
             r"别名|又名|中文名|简体中文|繁体中文|原名|日文名|英文名",
@@ -304,22 +306,25 @@ def suggestion_from_external(
 
 def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
     raw = payload if isinstance(payload, dict) else {}
-    books = (
-        raw.get("books")
-        if isinstance(raw.get("books"), list)
-        else raw.get("items")
-        if isinstance(raw.get("items"), list)
-        else raw.get("results")
-        if isinstance(raw.get("results"), list)
-        else raw.get("subjects")
-        if isinstance(raw.get("subjects"), list)
-        else raw.get("data")
-        if isinstance(raw.get("data"), list)
-        else payload
-        if isinstance(payload, list)
-        else [raw]
-        if raw.get("title") or raw.get("id")
-        else []
+    books: list[Any] = cast(
+        list[Any],
+        (
+            raw.get("books")
+            if isinstance(raw.get("books"), list)
+            else raw.get("items")
+            if isinstance(raw.get("items"), list)
+            else raw.get("results")
+            if isinstance(raw.get("results"), list)
+            else raw.get("subjects")
+            if isinstance(raw.get("subjects"), list)
+            else raw.get("data")
+            if isinstance(raw.get("data"), list)
+            else payload
+            if isinstance(payload, list)
+            else [raw]
+            if raw.get("title") or raw.get("id")
+            else []
+        ),
     )
     candidates = []
     for index, item in enumerate(books):
@@ -490,6 +495,10 @@ def parse_douban_subject_html(
     html: str, fallback: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
     fallback = fallback or {}
+    fallback_raw_value = fallback.get("raw")
+    fallback_raw: dict[str, Any] = (
+        fallback_raw_value if isinstance(fallback_raw_value, dict) else {}
+    )
     json_ld = parse_json_ld_book(html) or {}
     info = parse_douban_info_block(html)
     author_value = json_ld.get("author")
@@ -519,22 +528,16 @@ def parse_douban_subject_html(
     description = first_string(parse_douban_intro(html), fallback.get("description"))
     pubdate = first_string(
         info.get("出版年"),
-        (fallback.get("raw") or {}).get("pubdate")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
+        fallback_raw.get("pubdate"),
     )
     publisher = first_string(
         info.get("出版社"),
-        (fallback.get("raw") or {}).get("publisher")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
+        fallback_raw.get("publisher"),
     )
     series_name = first_string(
         info.get("丛书"),
         fallback.get("seriesName"),
-        (fallback.get("raw") or {}).get("seriesName")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
+        fallback_raw.get("seriesName"),
     )
     cover_url = first_url(meta_content(html, "og:image"), fallback.get("coverUrl"))
     isbn = first_string(
@@ -558,7 +561,7 @@ def parse_douban_subject_html(
         "coverUrl": cover_url,
         "confidence": float(fallback.get("confidence") or 0.78),
         "raw": {
-            **(fallback.get("raw") if isinstance(fallback.get("raw"), dict) else {}),
+            **fallback_raw,
             "id": candidate_id,
             "url": url,
             "isbn": isbn,
@@ -578,10 +581,13 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
         payload = json.loads(match.group(1))
     except json.JSONDecodeError:
         return []
-    items = (
-        payload.get("items")
-        if isinstance(payload, dict) and isinstance(payload.get("items"), list)
-        else []
+    items: list[Any] = cast(
+        list[Any],
+        (
+            payload.get("items")
+            if isinstance(payload, dict) and isinstance(payload.get("items"), list)
+            else []
+        ),
     )
     candidates: list[dict[str, Any]] = []
     for item in items:
@@ -627,7 +633,8 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
 
 
 def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
+    raw_value = candidate.get("raw")
+    raw: dict[str, Any] = raw_value if isinstance(raw_value, dict) else {}
     return {
         **candidate,
         "seriesName": first_string(
@@ -713,7 +720,12 @@ def run_douban_crawler_provider(
 ) -> dict[str, Any]:
     base_url = douban_base_url(config)
     headers = douban_crawler_headers(config)
-    volume = next(iter(context["volumes"]), {})
+    volumes_value = context.get("volumes")
+    volumes: list[Any] = (
+        list(volumes_value) if isinstance(volumes_value, (list, tuple)) else []
+    )
+    volume_value: object = next(iter(volumes), {})
+    volume: dict[str, Any] = volume_value if isinstance(volume_value, dict) else {}
     isbn = first_string(volume.get("isbn"), volume.get("identifier"))
     title = first_string(context["book"].get("title")) or ""
     author = first_string(context["book"].get("author")) or ""
@@ -792,7 +804,7 @@ def run_douban_crawler_provider(
                 ],
             ]
     if not candidate:
-        message = (
+        message: str | None = (
             "豆瓣未找到标题完全匹配的图书"
             if match_title and candidates
             else "豆瓣未找到匹配图书"
@@ -880,18 +892,21 @@ def douban_book_suggestions(payload: Any, confidence: float) -> list[dict[str, A
 
 def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
     raw = payload if isinstance(payload, dict) else {}
-    data = (
-        raw.get("data")
-        if isinstance(raw.get("data"), list)
-        else raw.get("list")
-        if isinstance(raw.get("list"), list)
-        else raw.get("results")
-        if isinstance(raw.get("results"), list)
-        else payload
-        if isinstance(payload, list)
-        else [raw]
-        if raw.get("name") or raw.get("name_cn") or raw.get("id")
-        else []
+    data: list[Any] = cast(
+        list[Any],
+        (
+            raw.get("data")
+            if isinstance(raw.get("data"), list)
+            else raw.get("list")
+            if isinstance(raw.get("list"), list)
+            else raw.get("results")
+            if isinstance(raw.get("results"), list)
+            else payload
+            if isinstance(payload, list)
+            else [raw]
+            if raw.get("name") or raw.get("name_cn") or raw.get("id")
+            else []
+        ),
     )
     candidates = []
     for index, item in enumerate(data):
@@ -906,7 +921,8 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
             if isinstance(item.get("tags"), list)
             else []
         )
-        infobox = item.get("infobox") if isinstance(item.get("infobox"), list) else []
+        infobox_value = item.get("infobox")
+        infobox = infobox_value if isinstance(infobox_value, list) else []
         authors = []
         title_aliases = [
             *_metadata_title_strings(item.get("name")),
@@ -925,7 +941,8 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 re.IGNORECASE,
             ):
                 title_aliases.extend(_metadata_title_strings(value))
-        images = item.get("images") if isinstance(item.get("images"), dict) else {}
+        images_value = item.get("images")
+        images = images_value if isinstance(images_value, dict) else {}
         candidates.append(
             {
                 "id": str(item.get("id") or item.get("url") or f"bangumi-{index}"),
@@ -1027,7 +1044,8 @@ def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
         if isinstance(content, str)
         else raw
     )
-    suggestions = parsed.get("suggestions") if isinstance(parsed, dict) else []
+    suggestions_value = parsed.get("suggestions") if isinstance(parsed, dict) else []
+    suggestions = suggestions_value if isinstance(suggestions_value, list) else []
     return [
         suggestion
         for item in suggestions
@@ -1151,7 +1169,7 @@ def run_bangumi_metadata_provider(
     )
     suggestions = bangumi_candidate_suggestions(subject, 0.82)
     if match_title and not subject:
-        message = "Bangumi 未找到标题完全匹配的条目"
+        message: str | None = "Bangumi 未找到标题完全匹配的条目"
     else:
         message = None if suggestions else "Bangumi 未找到匹配条目"
     return {
@@ -1334,7 +1352,7 @@ def metadata_search_candidates(
             item["field"]: parse_json_value(item.get("suggestedValue"))
             for item in ai_result.get("suggestions") or []
         }
-        candidate = {
+        candidate: dict[str, Any] = {
             "id": "ai-suggestion",
             "source": "ai",
             "title": fields.get("title"),

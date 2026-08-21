@@ -207,13 +207,19 @@ def parse_audio_metadata(
             "无法读取音频时长，文件可能损坏或编码不受支持",
         )
 
+    raw_chapters = merged.get("chapters")
+    chapter_items = (
+        [item for item in raw_chapters if isinstance(item, dict)]
+        if isinstance(raw_chapters, list)
+        else []
+    )
     chapters = tuple(
         AudioChapterMetadata(
             title=str(item.get("title") or f"第 {index + 1} 章"),
             start_ms=max(0, int(item.get("start_ms") or 0)),
             end_ms=max(0, int(item.get("end_ms") or 0)),
         )
-        for index, item in enumerate(merged.get("chapters") or [])
+        for index, item in enumerate(chapter_items)
         if int(item.get("end_ms") or 0) > int(item.get("start_ms") or 0)
     )
     if len(chapters) > MAX_AUDIO_CHAPTERS:
@@ -221,6 +227,7 @@ def parse_audio_metadata(
             "AUDIO_METADATA_INVALID",
             f"音频章节超过 {MAX_AUDIO_CHAPTERS} 个，文件可能损坏或标签异常",
         )
+    raw_tags = merged.get("raw_tags")
     return AudioFileMetadata(
         path=source,
         title=_clean_text(merged.get("title")),
@@ -237,9 +244,7 @@ def parse_audio_metadata(
         series_name=_clean_text(merged.get("series_name")),
         volume_index=parse_structured_volume_index(merged.get("volume_index")),
         chapters=chapters,
-        raw_tags=merged.get("raw_tags")
-        if isinstance(merged.get("raw_tags"), dict)
-        else {},
+        raw_tags=raw_tags if isinstance(raw_tags, dict) else {},
         cover_data=merged.get("cover_data")
         if isinstance(merged.get("cover_data"), bytes)
         else None,
@@ -317,8 +322,9 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     for index, chapter in enumerate(payload.get("chapters") or []):
         if not isinstance(chapter, dict):
             continue
+        chapter_tags_value = chapter.get("tags")
         chapter_tags = (
-            chapter.get("tags") if isinstance(chapter.get("tags"), dict) else {}
+            chapter_tags_value if isinstance(chapter_tags_value, dict) else {}
         )
         start_ms = _seconds_to_ms(chapter.get("start_time"))
         end_ms = _seconds_to_ms(chapter.get("end_time"))
@@ -599,6 +605,8 @@ def _normalized_mutagen_tags(
 
 def _mutagen_declared_text_encoding(frame: Any) -> str | None:
     value = getattr(frame, "encoding", None)
+    if not isinstance(value, (str, int)):
+        return None
     try:
         return MUTAGEN_TEXT_ENCODINGS.get(int(value))
     except (TypeError, ValueError):

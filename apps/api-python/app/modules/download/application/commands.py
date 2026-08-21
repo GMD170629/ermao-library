@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Self
+from typing import Literal, Self
 
 from app.modules.download.application.ports import DownloadUnitOfWork
 
@@ -18,7 +18,7 @@ class DownloadWriteTransaction:
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         del exception, traceback
         if exception_type is None:
             self._unit_of_work.commit()

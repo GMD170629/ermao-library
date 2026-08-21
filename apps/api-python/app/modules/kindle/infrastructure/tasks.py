@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.orm import Session
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import Mapper, Session
 from sqlalchemy.sql.dml import Insert, Update
 
 from app.core.sql_batches import sqlite_parameter_chunks
@@ -24,14 +25,14 @@ from app.models.import_pipeline import KindleSendTask
 
 
 def entity_record(entity: object) -> dict[str, Any]:
-    mapper = sa_inspect(entity).mapper
+    mapper = cast(Mapper[Any], sa_inspect(entity))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
 
 
 def _column_to_attribute(model: type) -> dict[str, str]:
-    mapper = sa_inspect(model)
+    mapper = cast(Mapper[Any], sa_inspect(model))
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 
@@ -111,10 +112,13 @@ def execute_kindle_send_task_insert(
 
 
 def cancel_queued_kindle_task(db: Session, task_id: str, now: datetime) -> int:
-    result = db.execute(
-        update(KindleSendTask)
-        .where(KindleSendTask.id == task_id, KindleSendTask.status == "queued")
-        .values(status="cancelled", next_attempt_at=None, updated_at=now)
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            update(KindleSendTask)
+            .where(KindleSendTask.id == task_id, KindleSendTask.status == "queued")
+            .values(status="cancelled", next_attempt_at=None, updated_at=now)
+        ),
     )
     return int(result.rowcount or 0)
 

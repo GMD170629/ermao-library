@@ -177,7 +177,7 @@ def prepare_metadata_writeback_intents(
                 book_id=projection.book_id,
                 asset_id=resource_id,
                 lookup_task_id=lookup_task_id,
-                resource_id=resource_id,
+                resource_id=current_resource_id,
                 source=source,
                 idempotency_key=digest,
                 source_revision=revision,

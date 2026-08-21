@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, cast
 
 from sqlalchemy import delete, insert, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Insert, Update
 
@@ -109,7 +111,7 @@ def prepare_download_task_update(
         "progress": ("progress", changes.progress),
         "remoteRef": ("remote_ref", changes.remote_ref),
     }
-    patch = {
+    patch: dict[str, object] = {
         attribute: value
         for field in changes.changed_fields
         if (mapped := field_mapping.get(field)) is not None
@@ -136,7 +138,7 @@ def prepare_download_task_delete(task_id: str) -> Delete:
 
 
 def execute_download_task_delete(db: Session, statement: Delete) -> bool:
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return bool(result.rowcount)
 
 

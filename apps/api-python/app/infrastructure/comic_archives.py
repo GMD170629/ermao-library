@@ -10,14 +10,16 @@ import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Self, cast
+from typing import Any, BinaryIO, Literal, Self, TypeAlias, cast
 from xml.etree import ElementTree
 
-import rarfile
+# rarfile has no published typing metadata; ComicArchive is the typed adapter boundary.
+import rarfile  # type: ignore[import-untyped]
 
 from app.modules.imports.application.comic_types import (
     ComicArchiveInspection,
     ComicInfoMetadata,
+    ComicPageInspection,
 )
 from app.modules.imports.application.errors import (
     ComicArchiveBackendUnavailableError,
@@ -133,7 +135,7 @@ class ComicArchiveEntry:
         return self.directory
 
 
-ArchiveImplementation = zipfile.ZipFile | rarfile.RarFile
+ArchiveImplementation: TypeAlias = zipfile.ZipFile | rarfile.RarFile
 
 
 class ComicArchiveStream:
@@ -229,7 +231,7 @@ class ComicArchive:
             raise KeyError(name) from exc
 
     def open(
-        self, entry: str | ComicArchiveEntry, mode: str = "r"
+        self, entry: str | ComicArchiveEntry, mode: Literal["r"] = "r"
     ) -> ComicArchiveStream:
         name = entry.filename if isinstance(entry, ComicArchiveEntry) else entry
         try:
@@ -303,7 +305,7 @@ def inspect_comic_archive(
             if comic_info_entry
             else None
         )
-        pages = [
+        pages: list[ComicPageInspection] = [
             {
                 "index": index + 1,
                 "title": f"第 {index + 1} 页",

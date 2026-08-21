@@ -7,13 +7,15 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import case, delete, func, insert, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
@@ -157,7 +159,7 @@ def write_metadata_to_files_enabled(db: Session) -> bool:
     return bool(value)
 
 
-def _resource_order() -> tuple[object, ...]:
+def _resource_order() -> tuple[ColumnElement[Any], ...]:
     return (
         LibraryReadableResource.created_at.asc(),
         LibraryReadableResource.id.asc(),
@@ -382,19 +384,22 @@ def enqueue_prepared_writeback_intents(
         .on_conflict_do_nothing(index_elements=[MetadataOpfQueueState.id])
     )
     if pending:
-        reserved = db.execute(
-            update(MetadataOpfQueueState)
-            .where(
-                MetadataOpfQueueState.id == QUEUE_STATE_ID,
-                MetadataOpfQueueState.pending_preparations
-                <= max_pending_preparations - len(pending),
-            )
-            .values(
-                pending_preparations=(
-                    MetadataOpfQueueState.pending_preparations + len(pending)
-                ),
-                updated_at=now,
-            )
+        reserved = cast(
+            CursorResult[Any],
+            db.execute(
+                update(MetadataOpfQueueState)
+                .where(
+                    MetadataOpfQueueState.id == QUEUE_STATE_ID,
+                    MetadataOpfQueueState.pending_preparations
+                    <= max_pending_preparations - len(pending),
+                )
+                .values(
+                    pending_preparations=(
+                        MetadataOpfQueueState.pending_preparations + len(pending)
+                    ),
+                    updated_at=now,
+                )
+            ),
         )
         if not reserved.rowcount:
             return tuple(
@@ -410,12 +415,15 @@ def enqueue_prepared_writeback_intents(
             )
         inserted_preparations = 0
         for chunk in sqlite_parameter_chunks(preparation_rows, parameters_per_row=14):
-            result = db.execute(
-                sqlite_insert(MetadataWritebackPreparation)
-                .values(list(chunk))
-                .on_conflict_do_nothing(
-                    index_elements=[MetadataWritebackPreparation.idempotency_key]
-                )
+            result = cast(
+                CursorResult[Any],
+                db.execute(
+                    sqlite_insert(MetadataWritebackPreparation)
+                    .values(list(chunk))
+                    .on_conflict_do_nothing(
+                        index_elements=[MetadataWritebackPreparation.idempotency_key]
+                    )
+                ),
             )
             inserted_preparations += int(result.rowcount or 0)
         duplicate_reservations = len(pending) - inserted_preparations
@@ -854,7 +862,7 @@ def finalize_preparation(
         for statement in prepared.no_target_statements:
             db.execute(statement)
         return "NO_TARGETS"
-    reserved = db.execute(prepared.reserve_statement)
+    reserved = cast(CursorResult[Any], db.execute(prepared.reserve_statement))
     if not reserved.rowcount:
         for statement in prepared.deferred_statements:
             db.execute(statement)
@@ -863,7 +871,7 @@ def finalize_preparation(
         db.execute(statement)
     if prepared.delete_preparation_statement is None:
         raise RuntimeError("writeback preparation delete statement missing")
-    deleted = db.execute(prepared.delete_preparation_statement)
+    deleted = cast(CursorResult[Any], db.execute(prepared.delete_preparation_statement))
     if not deleted.rowcount:
         raise RuntimeError("writeback preparation lease was lost")
     for statement in prepared.finish_statements:
@@ -1019,20 +1027,23 @@ def mark_prepared(
     warning_code: str | None,
     now: datetime,
 ) -> bool:
-    result = db.execute(
-        update(MetadataWritebackTarget)
-        .where(
-            MetadataWritebackTarget.id == target_id,
-            MetadataWritebackTarget.status == "RUNNING",
-            MetadataWritebackTarget.lease_owner_id == owner_id,
-        )
-        .values(
-            status="PREPARED",
-            prepared_path=prepared_path,
-            warning_code=warning_code,
-            lease_expires_at=now + timedelta(seconds=WRITEBACK_LEASE_SECONDS),
-            updated_at=now,
-        )
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            update(MetadataWritebackTarget)
+            .where(
+                MetadataWritebackTarget.id == target_id,
+                MetadataWritebackTarget.status == "RUNNING",
+                MetadataWritebackTarget.lease_owner_id == owner_id,
+            )
+            .values(
+                status="PREPARED",
+                prepared_path=prepared_path,
+                warning_code=warning_code,
+                lease_expires_at=now + timedelta(seconds=WRITEBACK_LEASE_SECONDS),
+                updated_at=now,
+            )
+        ),
     )
     return bool(result.rowcount)
 
@@ -1045,11 +1056,14 @@ def _release_target(
     owner_id: str,
     now: datetime,
 ) -> bool:
-    result = db.execute(
-        delete(MetadataWritebackTarget).where(
-            MetadataWritebackTarget.id == target_id,
-            MetadataWritebackTarget.lease_owner_id == owner_id,
-        )
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            delete(MetadataWritebackTarget).where(
+                MetadataWritebackTarget.id == target_id,
+                MetadataWritebackTarget.lease_owner_id == owner_id,
+            )
+        ),
     )
     if not result.rowcount:
         return False

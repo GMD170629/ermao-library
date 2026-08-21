@@ -166,8 +166,10 @@ def public_email_settings(db: Session) -> dict[str, Any]:
 
 def candidate_email_settings(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     current = get_email_settings(db, include_password=True)
-    smtp = payload.get("smtp") if isinstance(payload.get("smtp"), dict) else {}
-    kindle = payload.get("kindle") if isinstance(payload.get("kindle"), dict) else {}
+    smtp_value = payload.get("smtp")
+    smtp: dict[str, Any] = smtp_value if isinstance(smtp_value, dict) else {}
+    kindle_value = payload.get("kindle")
+    kindle: dict[str, Any] = kindle_value if isinstance(kindle_value, dict) else {}
     mapping = {
         "host": smtp.get("host", current["host"]),
         "port": smtp.get("port", current["port"]),
@@ -188,8 +190,10 @@ def prepare_email_settings_update(
     db: Session, payload: dict[str, Any]
 ) -> PreparedEmailSettingsUpdate:
     normalized = candidate_email_settings(db, payload)
-    smtp = payload.get("smtp") if isinstance(payload.get("smtp"), dict) else {}
-    kindle = payload.get("kindle") if isinstance(payload.get("kindle"), dict) else {}
+    smtp_value = payload.get("smtp")
+    smtp: dict[str, Any] = smtp_value if isinstance(smtp_value, dict) else {}
+    kindle_value = payload.get("kindle")
+    kindle: dict[str, Any] = kindle_value if isinstance(kindle_value, dict) else {}
     supplied: dict[str, Any] = {}
     for key in (
         "host",

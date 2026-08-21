@@ -10,10 +10,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete
@@ -32,6 +33,7 @@ from app.modules.system.application.commands import (
     reset_failed_system_transaction,
 )
 from app.modules.system.domain.health import (
+    HealthRunItem,
     HealthRunSnapshot,
     normalize_health_run_snapshot,
     summarize_health_items,
@@ -321,7 +323,7 @@ def prepare_health_run_creation(
         )
     now = now_timestamp_ms()
     run_id = f"health_{uuid4().hex}"
-    snapshot = {
+    snapshot: dict[str, Any] = {
         "runId": run_id,
         "status": "running",
         "version": 1,
@@ -407,19 +409,22 @@ def _write_prepared_snapshot_update(
     db: Session,
     prepared: PreparedHealthRunUpdate,
 ) -> HealthRunSnapshot:
-    result = db.execute(
-        update(SystemHealthRun)
-        .where(
-            SystemHealthRun.id == prepared.run_id,
-            SystemHealthRun.version == prepared.expected_version,
-        )
-        .values(
-            status=prepared.status,
-            version=prepared.version,
-            snapshot=prepared.snapshot_json,
-            finished_at=prepared.finished_at,
-            updated_at=prepared.updated_at,
-        )
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            update(SystemHealthRun)
+            .where(
+                SystemHealthRun.id == prepared.run_id,
+                SystemHealthRun.version == prepared.expected_version,
+            )
+            .values(
+                status=prepared.status,
+                version=prepared.version,
+                snapshot=prepared.snapshot_json,
+                finished_at=prepared.finished_at,
+                updated_at=prepared.updated_at,
+            )
+        ),
     )
     if int(result.rowcount or 0) != 1:
         raise RuntimeError("health-run-concurrent-update")
@@ -521,14 +526,15 @@ def _queue_result(
         return "ok", "health.queue.ok", details
 
     runtime = queue_runtime_view(db, queue)
-    details: dict[str, Any] = {"queue": queue, "runtime": runtime}
+    runtime_details: dict[str, Any] = {"queue": queue, "runtime": runtime}
     model, pending_values, running_values, failed_values = QUEUE_MODELS[queue]
+    model = cast(Any, model)
     for key, statuses in (
         ("pending", pending_values),
         ("running", running_values),
         ("failed", failed_values),
     ):
-        details[key] = int(
+        runtime_details[key] = int(
             db.scalar(
                 select(func.count())
                 .select_from(model)
@@ -536,18 +542,18 @@ def _queue_result(
             )
             or 0
         )
-    details["oldestPendingAt"] = timestamp_ms_to_iso(
+    runtime_details["oldestPendingAt"] = timestamp_ms_to_iso(
         db.scalar(
             select(func.min(model.created_at)).where(model.status.in_(pending_values))
         )
     )
     if runtime is None:
-        return "error", "health.queue.noHeartbeat", details
+        return "error", "health.queue.noHeartbeat", runtime_details
     if runtime.get("status") != "running" or runtime.get("stale"):
-        return "error", "health.queue.stale", details
+        return "error", "health.queue.stale", runtime_details
     if runtime.get("lastError"):
-        return "warning", "health.queue.recentError", details
-    return "ok", "health.queue.ok", details
+        return "warning", "health.queue.recentError", runtime_details
+    return "ok", "health.queue.ok", runtime_details
 
 
 def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
@@ -634,7 +640,7 @@ def _providers_result(
 def _execute_item(
     factory: SessionFactory,
     close_sessions: bool,
-    item: dict[str, Any],
+    item: HealthRunItem,
     settings: Settings,
 ) -> tuple[str, str, dict[str, Any]]:
     kind = str(item["kind"])
@@ -929,5 +935,5 @@ def prepare_old_health_runs_prune(max_age_hours: int = 24) -> Delete:
 
 
 def write_prepared_old_health_runs_prune(db: Session, statement: Delete) -> int:
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return int(result.rowcount or 0)

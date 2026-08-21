@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from typing import cast as typing_cast
 from uuid import uuid4
 
 from sqlalchemy import BigInteger, String, case, cast, delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.core.sql_batches import sqlite_parameter_chunks
@@ -190,7 +192,10 @@ def write_prepared_system_event_prune(
         EVENT_PRUNE_DELETE_BATCH_SIZE,
     ):
         batch_ids = prepared.event_ids[start : start + EVENT_PRUNE_DELETE_BATCH_SIZE]
-        result = db.execute(delete(SystemEvent).where(SystemEvent.id.in_(batch_ids)))
+        result = typing_cast(
+            CursorResult[Any],
+            db.execute(delete(SystemEvent).where(SystemEvent.id.in_(batch_ids))),
+        )
         deleted += int(result.rowcount or 0)
 
     size_bytes = system_event_size_bytes(db)
@@ -289,7 +294,7 @@ def record_system_event(
 
 def list_event_source_facets(db: Session) -> list[dict[str, Any]]:
     return [
-        {"source": row.source, "count": int(row.count or 0)}
+        {"source": row._mapping["source"], "count": int(row._mapping["count"] or 0)}
         for row in db.execute(
             select(SystemEvent.source, func.count().label("count"))
             .group_by(SystemEvent.source)
@@ -300,7 +305,7 @@ def list_event_source_facets(db: Session) -> list[dict[str, Any]]:
 
 def list_event_level_facets(db: Session) -> list[dict[str, Any]]:
     return [
-        {"level": row.level, "count": int(row.count or 0)}
+        {"level": row._mapping["level"], "count": int(row._mapping["count"] or 0)}
         for row in db.execute(
             select(SystemEvent.level, func.count().label("count"))
             .group_by(SystemEvent.level)
@@ -409,7 +414,10 @@ def list_system_events_page(
 
 
 def clear_info_warning_events(db: Session) -> int:
-    result = db.execute(
-        delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning")))
+    result = typing_cast(
+        CursorResult[Any],
+        db.execute(
+            delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning")))
+        ),
     )
     return int(result.rowcount or 0)

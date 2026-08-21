@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import case, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -213,7 +214,7 @@ def prepare_sync_organize_runs(*, now: datetime) -> Executable:
 
 
 def execute_sync_organize_runs(db: Session, statement: Executable) -> int:
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return int(result.rowcount or 0)
 
 

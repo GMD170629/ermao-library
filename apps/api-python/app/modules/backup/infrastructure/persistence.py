@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import (
     Boolean,
@@ -19,10 +19,12 @@ from sqlalchemy import (
 )
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapper, Session
+from sqlalchemy.sql.dml import Delete, Insert
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import TimestampMilliseconds
+from app.db.base import Base
 from app.models import (
     BookDetailPreference,
     ExternalMetadataCache,
@@ -61,12 +63,12 @@ from app.modules.backup.application.restore import (
 )
 
 
-def _legacy_column_to_attr(model: type) -> dict[str, str]:
-    mapper = sa_inspect(model)
+def _legacy_column_to_attr(model: type[Base]) -> dict[str, str]:
+    mapper = cast(Mapper[Any], sa_inspect(model))
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 
-TABLE_MODELS: dict[str, type] = {
+TABLE_MODELS: dict[str, type[Base]] = {
     "User": User,
     "UserPreference": UserPreference,
     "Shelf": Shelf,
@@ -99,12 +101,12 @@ TABLE_MODELS: dict[str, type] = {
 }
 
 
-def model_columns(model: type) -> set[str]:
+def model_columns(model: type[Base]) -> set[str]:
     return {column.name for column in model.__table__.columns}
 
 
 def _entity_to_export_record(entity: object) -> dict[str, Any]:
-    mapper = sa_inspect(entity).mapper
+    mapper = cast(Mapper[Any], sa_inspect(entity))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
@@ -121,7 +123,9 @@ def fetch_table(db: Session, table: str) -> list[dict[str, Any]]:
     return [_entity_to_export_record(entity) for entity in db.scalars(stmt).all()]
 
 
-def _legacy_to_model_values(model: type, record: dict[str, Any]) -> dict[str, Any]:
+def _legacy_to_model_values(
+    model: type[Base], record: dict[str, Any]
+) -> dict[str, Any]:
     allowed = model_columns(model)
     name_to_attr = _legacy_column_to_attr(model)
     return {
@@ -161,6 +165,10 @@ def _converted_column_value(column: Any, value: object) -> object:
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             )
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
+            raise BackupRecordValidationError(
+                f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
+            )
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
@@ -169,6 +177,10 @@ def _converted_column_value(column: Any, value: object) -> object:
             ) from exc
     if isinstance(column_type, Float):
         if isinstance(value, bool):
+            raise BackupRecordValidationError(
+                f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
+            )
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             )
@@ -316,7 +328,9 @@ def prepare_maintenance_state_plan(
     setting_value: str | None,
 ) -> PreparedRestorePlan:
     if setting_value is None:
-        statement = delete(SystemSetting).where(SystemSetting.key == setting_key)
+        statement: Delete | Insert = delete(SystemSetting).where(
+            SystemSetting.key == setting_key
+        )
     else:
         timestamp = db_timestamp()
         statement = (

@@ -193,11 +193,7 @@ class MetadataProviderRegistry:
     def _load_entry_points(self) -> None:
         try:
             entry_points = importlib_metadata.entry_points()
-            selected = (
-                entry_points.select(group=ENTRY_POINT_GROUP)
-                if hasattr(entry_points, "select")
-                else entry_points.get(ENTRY_POINT_GROUP, [])
-            )
+            selected = entry_points.select(group=ENTRY_POINT_GROUP)
         except Exception:
             LOGGER.exception("failed to discover metadata provider entry points")
             return
