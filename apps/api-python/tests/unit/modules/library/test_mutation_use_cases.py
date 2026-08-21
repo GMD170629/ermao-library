@@ -37,9 +37,7 @@ class CoverPort:
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
-    def get_context(
-        self, *, book_id: str, resource_id: str
-    ) -> ResourceCoverContext:
+    def get_context(self, *, book_id: str, resource_id: str) -> ResourceCoverContext:
         return ResourceCoverContext(
             resource_id=resource_id,
             book_id=book_id,

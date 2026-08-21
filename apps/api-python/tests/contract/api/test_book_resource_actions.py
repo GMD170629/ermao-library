@@ -19,7 +19,9 @@ def _path_key(relative_path: str) -> str:
     return "v1:" + hashlib.sha256(relative_path.encode()).hexdigest()
 
 
-def _node(node_id: str, relative_path: str, *, directory: bool = False) -> LibrarySourceNode:
+def _node(
+    node_id: str, relative_path: str, *, directory: bool = False
+) -> LibrarySourceNode:
     return LibrarySourceNode(
         id=node_id,
         library_id="test-library",
@@ -66,7 +68,9 @@ def _add_graph(db_session, book_id: str, resource_id: str) -> None:
     )
     db_session.flush()
     db_session.add(
-        LibraryReadableResourceMetadata(resource_id=resource_id, title="Action resource")
+        LibraryReadableResourceMetadata(
+            resource_id=resource_id, title="Action resource"
+        )
     )
     db_session.flush()
     db_session.add(
@@ -190,7 +194,12 @@ def test_resource_actions_use_canonical_routes_and_do_not_restore_legacy_paths(
     _add_graph(db_session, "route-book", "route-resource")
     db_session.commit()
 
-    assert client.patch("/api/works/route-book/versions/route-resource", json={}).status_code == 404
+    assert (
+        client.patch(
+            "/api/works/route-book/versions/route-resource", json={}
+        ).status_code
+        == 404
+    )
     assert (
         client.post(
             "/api/books/route-book/resources/route-resource/cover/regenerate"

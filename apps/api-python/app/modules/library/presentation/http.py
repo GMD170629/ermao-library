@@ -6,8 +6,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,6 +19,7 @@ from app.bootstrap.library import (
     resource_metadata,
     update_book,
 )
+from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
     authorization_context,
     can_access_asset,
@@ -34,49 +34,47 @@ from app.models import (
     ReadableResourceNavigationUnit,
 )
 from app.models.auth import User
-from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
-from app.modules.library.application.book_list import BookListQuery
 from app.modules.library.application.asset_commands import (
     ResourceAssetNotFoundError,
 )
 from app.modules.library.application.book_commands import UpdateBookCommand
-from app.modules.library.application.resource_cover import (
-    RegenerateResourceCoverCommand,
-)
-from app.modules.library.presentation.schemas import (
-    BookPayload,
-    BookResponse,
-    BooksPayload,
-    BooksResponse,
-    AssetsPayload,
-    AssetsResponse,
-    ResourcePayload,
-    ResourceResponse,
-    ResourcesPayload,
-    ResourcesResponse,
-    UpdateBookRequest,
-    UpdateResourceRequest,
-    ResourceSourceDeleteRequest,
-    ReclassifyResourceRequest,
-    ResourceBatchRequest,
-    AssetDeletedResponse,
-    ReadingUnitsResponse,
-    ResourceBatchResponse,
-    ResourceDeletedResponse,
-    ResourceImportAcceptedResponse,
-    ResourceReclassifyResponse,
-)
+from app.modules.library.application.book_list import BookListQuery
 from app.modules.library.application.resource_commands import (
-    LibraryActor,
     BookNotFoundError,
     InvalidResourceChangeError,
+    LibraryActor,
     LibraryAuthorizationError,
     ResourceNotFoundError,
-    ResourceReclassifyOutcome,
     SetResourceMediaKindsCommand,
     reclassify_resource,
     set_resource_media_kinds,
     update_resource,
+)
+from app.modules.library.application.resource_cover import (
+    RegenerateResourceCoverCommand,
+)
+from app.modules.library.presentation.schemas import (
+    AssetDeletedResponse,
+    AssetsPayload,
+    AssetsResponse,
+    BookPayload,
+    BookResponse,
+    BooksPayload,
+    BooksResponse,
+    ReadingUnitsResponse,
+    ReclassifyResourceRequest,
+    ResourceBatchRequest,
+    ResourceBatchResponse,
+    ResourceDeletedResponse,
+    ResourceImportAcceptedResponse,
+    ResourcePayload,
+    ResourceReclassifyResponse,
+    ResourceResponse,
+    ResourceSourceDeleteRequest,
+    ResourcesPayload,
+    ResourcesResponse,
+    UpdateBookRequest,
+    UpdateResourceRequest,
 )
 from app.modules.library.presentation.views import (
     book_view,
@@ -179,9 +177,7 @@ def update_library_book(
     if not can_access_book(db, user, book_id):
         return fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
     values = payload.model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
-    book = update_book(db).execute(
-        UpdateBookCommand(book_id=book_id, values=values)
-    )
+    book = update_book(db).execute(UpdateBookCommand(book_id=book_id, values=values))
     if book is None:
         return fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
     return BookResponse(data=BookPayload(book=book_view(db, book, user.id)))
@@ -269,7 +265,9 @@ def list_resource_assets(
             page=normalized_page,
             pageSize=normalized_size,
             total=len(all_assets),
-            totalPages=max(1, (len(all_assets) + normalized_size - 1) // normalized_size),
+            totalPages=max(
+                1, (len(all_assets) + normalized_size - 1) // normalized_size
+            ),
         )
     )
 
