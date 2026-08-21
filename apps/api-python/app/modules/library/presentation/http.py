@@ -8,15 +8,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import (
+    delete_resource_asset,
     list_books,
+    regenerate_resource_cover,
     resource_metadata,
-    update_book_fields,
+    update_book,
 )
 from app.core.authorization import (
     authorization_context,
@@ -29,16 +31,18 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models import (
     LibraryReadableResource,
-    LibraryReadableResourceMetadata,
-    LibraryResourceAsset,
     ReadableResourceNavigationUnit,
 )
 from app.models.auth import User
-from app.bootstrap.readable_resource_pipeline import (
-    build_readable_resource_pipeline,
-    continue_source_import,
-)
+from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.modules.library.application.book_list import BookListQuery
+from app.modules.library.application.asset_commands import (
+    ResourceAssetNotFoundError,
+)
+from app.modules.library.application.book_commands import UpdateBookCommand
+from app.modules.library.application.resource_cover import (
+    RegenerateResourceCoverCommand,
+)
 from app.modules.library.presentation.schemas import (
     BookPayload,
     BookResponse,
@@ -175,10 +179,11 @@ def update_library_book(
     if not can_access_book(db, user, book_id):
         return fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
     values = payload.model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
-    book = update_book_fields(db, book_id, values)
+    book = update_book(db).execute(
+        UpdateBookCommand(book_id=book_id, values=values)
+    )
     if book is None:
         return fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
-    db.commit()
     return BookResponse(data=BookPayload(book=book_view(db, book, user.id)))
 
 
@@ -341,15 +346,16 @@ def regenerate_library_resource_cover(
         db, user, resource_id
     ):
         return fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-    resource = db.get(LibraryReadableResource, resource_id)
-    if resource is None or resource.book_id != book_id:
+    try:
+        result = regenerate_resource_cover(db).execute(
+            RegenerateResourceCoverCommand(
+                book_id=book_id,
+                resource_id=resource_id,
+                now=datetime.now(UTC),
+            )
+        )
+    except ResourceNotFoundError:
         return fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-    metadata = db.get(LibraryReadableResourceMetadata, resource_id)
-    if metadata is not None:
-        metadata.cover_path = None
-        metadata.cover_status = "PENDING"
-        db.commit()
-    result = continue_source_import(db, resource.source_node_id)
     return ok(
         {
             "resourceId": resource_id,
@@ -567,29 +573,11 @@ def delete_library_asset(
         return manager_error
     if not can_access_asset(db, user, asset_id):
         return fail("资源资产不存在", status_code=404, code="ASSET_NOT_FOUND")
-    asset = db.get(LibraryResourceAsset, asset_id)
-    if asset is None:
+    try:
+        result = delete_resource_asset(db).execute(asset_id=asset_id)
+    except ResourceAssetNotFoundError:
         return fail("资源资产不存在", status_code=404, code="ASSET_NOT_FOUND")
-    resource_id = asset.resource_id
-    db.delete(asset)
-    db.flush()
-    ready_assets = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryResourceAsset)
-            .where(
-                LibraryResourceAsset.resource_id == resource_id,
-                LibraryResourceAsset.import_state == "READY",
-            )
-        )
-        or 0
-    )
-    if ready_assets == 0:
-        resource = db.get(LibraryReadableResource, resource_id)
-        if resource is not None:
-            resource.import_state = "FAILED"
-    db.commit()
-    return ok({"assetId": asset_id, "deleted": True})
+    return ok({"assetId": result.asset_id, "deleted": result.deleted})
 
 
 __all__ = ["router"]

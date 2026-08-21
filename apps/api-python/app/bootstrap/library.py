@@ -8,11 +8,21 @@ from sqlalchemy.orm import Session
 from app.core.authorization import AuthorizationContext, authorization_context
 from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
+from app.modules.library.application.asset_commands import DeleteResourceAsset
 from app.modules.library.application.bookshelf import ListBookshelfItems
+from app.modules.library.application.book_commands import UpdateBook
 from app.modules.library.application.catalog import CatalogBookFilter, GetCatalogBook, ListCatalogBooks
 from app.modules.library.application.facet_sync import PreparedBookFacet, prepare_book_facet
 from app.modules.library.application.queries import GetSmartShelfBookIds, SmartShelfCriteria
 from app.modules.library.application.book_list import BookListQuery, BookListResult
+from app.modules.library.application.resource_cover import (
+    RegenerateResourceCover,
+    ResourceSourceContinuationPort,
+)
+from app.modules.library.infrastructure.asset_commands import (
+    SqlAlchemyResourceAssetMutation,
+)
+from app.modules.library.infrastructure.book_commands import SqlAlchemyBookMutation
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure import dashboard as library_dashboard
@@ -30,6 +40,7 @@ from app.modules.library.infrastructure.facet_sync import (
     prepare_book_facet_write,
 )
 from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
+from app.modules.library.infrastructure.resource_cover import SqlAlchemyResourceCover
 from app.modules.library.infrastructure.resource_commands import SqlAlchemyResourceMetadata
 from app.modules.library.infrastructure.filter_options import SqlAlchemyLibraryFilterQueries
 from app.modules.library.application.filter_options import GetLibraryFilterSchema, SearchLibraryFilterOptions
@@ -84,12 +95,32 @@ def get_book(db: Session, book_id: str) -> dict[str, object] | None:
     return library_books.get_book(db, book_id)
 
 
-def update_book_fields(
-    db: Session,
-    book_id: str,
-    values: dict[str, object],
-) -> dict[str, object] | None:
-    return library_books.update_book_fields(db, book_id, values)
+def update_book(db: Session) -> UpdateBook:
+    return UpdateBook(SqlAlchemyBookMutation(db), db)
+
+
+class ReadableResourceSourceContinuation(ResourceSourceContinuationPort):
+    """Composition adapter from cover regeneration to the import queue."""
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def enqueue_source_import(self, source_node_id: str) -> str | None:
+        from app.bootstrap.readable_resource_pipeline import continue_source_import
+
+        return continue_source_import(self._db, source_node_id).task_id
+
+
+def regenerate_resource_cover(db: Session) -> RegenerateResourceCover:
+    return RegenerateResourceCover(
+        SqlAlchemyResourceCover(db),
+        ReadableResourceSourceContinuation(db),
+        db,
+    )
+
+
+def delete_resource_asset(db: Session) -> DeleteResourceAsset:
+    return DeleteResourceAsset(SqlAlchemyResourceAssetMutation(db), db)
 
 
 def resource_metadata(db: Session) -> SqlAlchemyResourceMetadata:
@@ -163,8 +194,11 @@ __all__ = [
     "prepare_book_facet",
     "prepare_book_facet_write",
     "resource_metadata",
+    "update_book",
+    "regenerate_resource_cover",
+    "delete_resource_asset",
+    "ReadableResourceSourceContinuation",
     "smart_shelf_book_ids",
-    "update_book_fields",
     "library_filter_schema",
     "library_filter_options",
 ]
