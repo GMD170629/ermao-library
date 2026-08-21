@@ -7,8 +7,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Library
-from app.modules.library.infrastructure.readable_resource_schema import (
+from app.models import (
+    Library,
     LibraryBookMetadata,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,

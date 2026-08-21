@@ -4,19 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
 from app.models import (
-    LibraryReadableResource,
     LibraryBook,
     LibraryBookMetadata,
+    LibraryReadableResource,
 )
 from app.models.organize import OrganizeJob
-from app.modules.library.infrastructure.media_kind_sql import (
-    resource_media_kind,
-)
 
 UNRESOLVED_JOB_STATUSES = (
     "LOOKUP_PENDING",
@@ -138,7 +135,7 @@ def select_eligible_books(
     result: list[dict[str, Any]] = []
     for entity, metadata in books:
         book = book_entity_record(entity, metadata)
-        media_kind = resource_media_kind(LibraryReadableResource)
+        media_kind = LibraryReadableResource.media_kind
         book["availableMediaKinds"] = list(
             db.scalars(
                 select(media_kind.label("media_kind"))
@@ -167,7 +164,7 @@ def select_eligible_books(
 def first_resource_selection_for_book(
     db: Session, book_id: str, preferred_resource_id: str | None = None
 ) -> tuple[str, str, str | None] | None:
-    media_kind = resource_media_kind(LibraryReadableResource)
+    media_kind = LibraryReadableResource.media_kind
     filters = [
         LibraryReadableResource.book_id == book_id,
         LibraryReadableResource.enablement_state == "ENABLED",

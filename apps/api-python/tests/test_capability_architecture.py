@@ -683,6 +683,86 @@ def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:
             assert token not in source, f"{path}: {token}"
 
 
+def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
+    forbidden_imports = {
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource"
+        / "adapter_registry.py": ("app.modules.metadata.application",),
+        APP_ROOT
+        / "modules"
+        / "media"
+        / "infrastructure"
+        / "resource_repository.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT
+        / "modules"
+        / "organize"
+        / "infrastructure"
+        / "eligibility.py": ("app.modules.library.infrastructure",),
+        APP_ROOT
+        / "modules"
+        / "organize"
+        / "infrastructure"
+        / "job_queries.py": ("app.modules.library.infrastructure",),
+        APP_ROOT
+        / "modules"
+        / "reader"
+        / "infrastructure"
+        / "resource_repository.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT
+        / "modules"
+        / "reader"
+        / "presentation"
+        / "v4.py": (
+            "app.modules.publications.application",
+            "app.modules.publications.domain",
+        ),
+    }
+    for path, tokens in forbidden_imports.items():
+        source = path.read_text(encoding="utf-8")
+        for token in tokens:
+            assert token not in source, f"{path}: private import {token}"
+
+    public_imports = {
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource"
+        / "adapter_registry.py": "app.modules.metadata.public",
+        APP_ROOT
+        / "modules"
+        / "reader"
+        / "presentation"
+        / "v4.py": "app.modules.publications.public",
+    }
+    for path, token in public_imports.items():
+        assert token in path.read_text(encoding="utf-8"), (
+            f"{path}: expected public capability surface {token}"
+        )
+
+    for relative_path in (
+        "modules/download/infrastructure/tasks.py",
+        "modules/media/infrastructure/resource_repository.py",
+        "modules/reader/infrastructure/resource_repository.py",
+    ):
+        source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "app.models" in source, relative_path
+
+    for relative_path in (
+        "modules/organize/infrastructure/eligibility.py",
+        "modules/organize/infrastructure/job_queries.py",
+    ):
+        source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "LibraryReadableResource.media_kind" in source, relative_path
+
+
 _LEGACY_IDENTITY_NAMES = frozenset(
     {
         "LibraryWork",
@@ -876,6 +956,7 @@ def test_mobile_is_excluded_from_target_backend_capability_changes() -> None:
 def test_fresh_runtime_metadata_matches_the_single_baseline(tmp_path: Path) -> None:
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
+
     from app.core.config import Settings
     from app.db.base import Base
     from app.db.bootstrap import bootstrap_database

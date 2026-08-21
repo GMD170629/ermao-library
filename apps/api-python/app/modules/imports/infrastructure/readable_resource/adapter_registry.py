@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
-from posixpath import normpath
 from pathlib import Path
+from posixpath import normpath
 from zipfile import BadZipFile, ZipFile
 
 from app.modules.imports.application.readable_resource.ports import (
@@ -18,6 +18,7 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterSpec,
 )
 from app.modules.library.domain.readable_resource_states import AssetRole
+from app.modules.metadata.public import parse_opf_metadata
 
 
 class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
@@ -77,8 +78,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         )
 
     def _inspect_epub_title(self, path: Path) -> str | None:
-        from app.modules.metadata.application.opf import parse_opf_metadata
-
         try:
             with ZipFile(path) as archive:
                 container = archive.read("META-INF/container.xml")
@@ -89,7 +88,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 if match is None:
                     return None
                 opf_name = normpath(match.group(1).decode("utf-8"))
-                if opf_name.startswith("../") or opf_name.startswith("/"):
+                if opf_name.startswith(("../", "/")):
                     return None
                 metadata = parse_opf_metadata(archive.read(opf_name))
         except (BadZipFile, KeyError, OSError, ValueError):

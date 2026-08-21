@@ -10,14 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models.auth import ReaderBookmark
-from app.models.common import cuid
 from app.models import (
-    ReadableResourceNavigationUnit,
-    ReaderProgressMutation,
-    ReaderResourceProgress,
-)
-from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
@@ -25,12 +18,17 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
+    ReadableResourceNavigationUnit,
+    ReaderProgressMutation,
+    ReaderResourceProgress,
 )
+from app.models.auth import ReaderBookmark
+from app.models.common import cuid
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAssetDto,
-    ReaderBookmarkDto,
     ReaderBookDto,
+    ReaderBookmarkDto,
     ReaderExactLocationDto,
     ReaderNavigationUnitDto,
     ReaderProgressDto,

@@ -10,14 +10,11 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import LibraryReadableResource, LibraryBook
+from app.models import LibraryBook, LibraryReadableResource
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
     OrganizeJob,
-)
-from app.modules.library.infrastructure.media_kind_sql import (
-    resource_media_kind,
 )
 from app.modules.organize.application.dto import (
     OrganizeBookListItem,
@@ -306,7 +303,7 @@ def list_filtered_job_rows(
     book_ids = list(dict.fromkeys(str(row.book_id) for row in rows))
     media_kinds_by_book: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
     if book_ids:
-        media_kind = resource_media_kind(LibraryReadableResource)
+        media_kind = LibraryReadableResource.media_kind
         media_rows = db.execute(
             select(
                 LibraryReadableResource.book_id,

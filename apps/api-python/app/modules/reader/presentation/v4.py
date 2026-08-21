@@ -23,24 +23,22 @@ from app.core.authorization import authorization_context, can_access_resource
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.publications.application.ensure_navigation import (
-    PublicationNavigationSourceChangedError,
-)
-from app.modules.publications.application.ports import PublicationAccessScope
-from app.modules.publications.domain.model import (
+from app.modules.publications.public import (
+    PublicationAccessScope,
     PublicationCorruptError,
+    PublicationNavigationSourceChangedError,
     PublicationNotFoundError,
     PublicationUnsupportedError,
 )
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
+    ReaderAssetDto,
     ReaderAudioExactLocationDto,
     ReaderBookmarkDto,
     ReaderBootstrapDto,
     ReaderComicExactLocationDto,
     ReaderEngineLocatorDto,
     ReaderExactLocationDto,
-    ReaderAssetDto,
     ReaderPdfExactLocationDto,
     ReaderProgressDto,
     ReaderReflowableExactLocationDto,
@@ -55,9 +53,9 @@ from app.modules.reader.application.resource_reader import (
     ReaderResourceFormatUnsupported,
     ReaderResourceNotFound,
     ReplaceBookmarksCommand,
+    ResourceReaderService,
     SaveProgressCommand,
     SetResourceReadingStatusCommand,
-    ResourceReaderService,
 )
 from app.modules.reader.domain.resource_format import (
     ReaderType,
@@ -70,6 +68,7 @@ from app.modules.reader.presentation.v4_schemas import (
     ExactReaderLocation,
     OpaqueReadiumEngineLocator,
     PdfExactLocation,
+    ReaderAssetSummary,
     ReaderBookmark,
     ReaderBookmarksData,
     ReaderBookmarksReplaceRequest,
@@ -86,9 +85,9 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderComicPageResponse,
     ReaderConflictError,
     ReaderErrorBody,
-    ReaderAssetSummary,
     ReaderJsonValue,
     ReaderLocation,
+    ReaderNavigationUnitSummary,
     ReaderNotFoundError,
     ReaderProgressConflictBody,
     ReaderProgressConflictError,
@@ -101,11 +100,10 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderReadingStatusData,
     ReaderReadingStatusPut,
     ReaderReadingStatusResponse,
+    ReaderResourceSummary,
     ReaderSourceFormat,
     ReaderUnauthorizedError,
-    ReaderNavigationUnitSummary,
     ReaderValidationError,
-    ReaderResourceSummary,
     ReadiumEngineLocator,
     ReadiumLocatorPayload,
     ReflowableExactLocation,

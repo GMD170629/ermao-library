@@ -13,7 +13,16 @@ from app.models.common import db_timestamp
 from app.models.import_pipeline import DownloadTask
 from app.models.library import Library
 from app.models.settings import SystemSetting
-from app.modules.library.infrastructure.books import entity_record
+
+
+def entity_record(entity: object) -> dict[str, Any]:
+    """Return a queue row as a transport-neutral column record."""
+
+    mapper = sa_inspect(entity).mapper
+    return {
+        prop.columns[0].name: getattr(entity, prop.key)
+        for prop in mapper.column_attrs
+    }
 
 
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
