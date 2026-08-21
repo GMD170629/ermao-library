@@ -1,338 +1,507 @@
-# ADR 0018：物理资源树与 Book/ReadableResource 语义覆盖
+# ADR 0018：物理 SourceNode 树与可阅读资源导入
 
 - 状态：Accepted
 - 日期：2026-08-21
-- 取代：[ADR 0017](0017-library-root-directory-topology.md) 中固定的 `Work -> Version -> Volume` 目录映射
-- 继续遵循：[ADR 0002](0002-bounded-persistent-import-work-queue.md) 的有界持久导入队列
-- 继续遵循：[ADR 0016](0016-source-preserving-reader-publications.md) 的原始格式阅读约束
+- 范围：目标数据模型、SourceNode 扫描、首次导入和显式重新导入
+- 取代：[ADR 0017](0017-library-root-directory-topology.md) 的目标数据模型、
+  FLAT/VOLUMES 映射、目录遍历和 scanner/importer 职责
+- 修订：[ADR 0002](0002-bounded-persistent-import-work-queue.md) 的路径去重键和扫描产物；
+  保留其单一有界持久队列、背压、短事务和崩溃后从根重扫原则
+- 保留：[ADR 0016](0016-source-preserving-reader-publications.md) 的原始格式约束；目录资源
+  的原始输入是一组真实文件，不得合成为派生出版物
 
-## 背景与审计结论
+## 1. 范围
 
-当前图书导入以 `LibraryWork -> LibraryVersion -> LibraryVolume -> LibraryFile`
-表达图书结构。多卷模式把根目录下文件夹视为 Work、直接子文件夹视为
-Version，更深层目录无法自然映射；与此同时，Version 已不能筛选、不承担稳定的
-媒体类别或版本差异语义，却仍出现在数据库、导入、阅读器、API 和 Web UI 的大量
-路径中。
+本次重构只建立两件事：
 
-本次代码审计确认：继续保留 Version，或把任意目录继续强制映射成
-Work/Version/Volume，只会把文件系统层级偶然性固化为业务规则。最终架构采用两套
-职责清楚、可以独立演化的模型：
+1. 数据库如何表达物理路径、Book、ReadableResource 和 ResourceAsset；
+2. 扫描、首次导入和用户显式重新导入如何写入这些数据。
 
-1. `LibrarySourceNode` 完整记录图书馆根目录下的物理文件树；
-2. `LibraryBook` 与 `LibraryReadableResource` 在物理树上提供业务语义覆盖；
-3. `LibraryResourceAsset` 描述一个可阅读资源实际使用的文件或子节点；
-4. 删除 Version 概念，现有 Volume 演化为 ReadableResource，现有 File 演化为
-   ResourceAsset。
+Reader、进度、书签、API、Web、Mobile、下载、备份、OPDS、Kindle 和统计均延后设计。
+后续能力使用 Book、ReadableResource 和 ResourceAsset 的稳定 ID，但具体路由、Locator、
+进度所有权和下载协议不在本 ADR 决定。
 
-SourceNode 不是为了取代文件系统。它是数据库侧的物理索引和稳定关联点，使重扫时
-能够用一次顺序遍历更新物理状态，并只对发生变化的节点重算 Book、Resource、Asset、
-元数据和导入任务。若每次业务查询都临时访问 NAS，则无法稳定分页、关联进度、表达
-缺失状态或避免反复读取机械硬盘。
+本次不迁移旧数据库、不双写、不保留旧模型兼容层。目标实现从 fresh database 开始。
 
-## 最终领域边界
+## 2. 核心决定
+
+数据库分为物理层和语义层：
 
 ```text
 Library
-  └─ SourceNode (完整物理树，FILE 或 DIRECTORY)
+  └─ LibrarySourceNode *
+       ├─ LibrarySourceNodeMetadata 0..1
+       └─ LibrarySourceNodeInterpretation 0..1
 
-Book
-  ├─ sourceNodeId -> SourceNode
-  └─ ReadableResource *
-       ├─ sourceNodeId -> SourceNode（文件或目录）
-       └─ ResourceAsset * -> SourceNode
+LibraryBook
+  └─ LibraryReadableResource *
+       └─ LibraryResourceAsset *
+
+LibraryImportRun
+  ├─ ResourceCandidate 0..1
+  ├─ AssetCandidate *
+  └─ LibraryImportTask *
 ```
 
-物理模型只回答“磁盘上有什么、在哪里、是否仍存在”。业务模型只回答“什么是一本
-图书、什么可以独立阅读、阅读器需要哪些资源”。目录可以只是容器，也可以同时被
-解释为 Book 或目录型 ReadableResource；同一层级可以并列出现 EPUB、PDF、音频和
-普通文件夹。
+- SourceNode 只保存扫描时发现的路径树和观察快照；
+- Book 表示图书聚合；
+- ReadableResource 表示可独立打开的文件或目录型资源；
+- ResourceAsset 表示 Resource 实际使用的真实常规文件；
+- ImportRun 只隔离一次首次导入或重新导入的临时结果。
 
-### LibrarySourceNode
+删除 `LibraryVersion`。原 `LibraryVolume` 的业务位置由 ReadableResource 取代，原
+`LibraryFile` 的物理输入关系由 ResourceAsset 取代。
 
-根 Library 本身不创建 SourceNode；根目录下节点的 `parentId` 为 `NULL`。
+SourceNode 不是文件系统的实时镜像。系统不自动检测文件修改、移动、重命名、删除或
+不可读状态，不维护 `sourceRevision`、fingerprint、内容哈希、MISSING 或
+`lastSeenScanId`。打开路径时发现不存在或无法读取，只向调用方报告错误，不回写节点状态。
 
-建议字段：
+## 3. LibrarySourceNode
+
+### 3.1 字段
+
+核心字段：
 
 - `id`, `libraryId`, `parentId`；
 - `relativePath`, `pathKey`, `name`；
-- `physicalKind`: `FILE | DIRECTORY`；
-- `fileRole`: `READABLE | METADATA | COVER | SIDECAR | OTHER`；
-- `presenceStatus`: `PRESENT | MISSING | UNREADABLE`；
-- `sizeBytes`, `mtimeMs`, `fingerprint`；
-- `sourceRevision`, `lastSeenScanId`；
-- `defaultSortKey`, `metadataSortOrder`；
-- `displayTitle`, `coverPath`；
+- `physicalKind`: `REGULAR_FILE | DIRECTORY | SYMLINK | OTHER`；
+- `observedSizeBytes`, `observedMtimeNs`, `observedAt`；
+- `createdAt`, `updatedAt`。
+
+`observed*` 只是首次发现或显式重新导入时的快照，不得用于自动变化检测或决定是否重新
+导入。目录的 size 为 `NULL`。
+
+SourceNode 主表不保存展示标题、封面、排序、文件角色、格式解释、导入状态或用户选择。
+
+### 3.2 路径身份
+
+SourceNode 的身份是 Library 内的精确相对路径槽位：
+
+- `relativePath` 保留枚举得到的名称组件，只用 `/` 连接组件；
+- 不做大小写折叠，不做 Unicode NFC/NFD 归一化；
+- 拒绝绝对路径、空路径段、`.`、`..` 和 NUL；
+- `pathKey = v1:SHA-256(UTF-8(relativePath))`；
+- `UNIQUE(libraryId, pathKey)`；
+- 摘要相同仍比较原始路径；原路径不同时以 `PATH_KEY_COLLISION` 拒绝整个写入。
+
+大小写或 Unicode 拼写变化、移动、重命名都会产生新 SourceNode。系统不自动迁移、合并或
+删除旧节点。
+
+### 3.3 树约束
+
+- `parentId` 必须属于同一 Library，并指向 DIRECTORY；
+- SourceNode 树不得成环，节点路径必须与父路径一致；
+- Library 根目录本身不建 SourceNode；根下节点的 `parentId` 为 `NULL`；
+- 未被 ignore 规则排除的目录、常规文件、符号链接和特殊文件都建立节点；
+- SYMLINK 使用 `follow_symlinks=False`，只记录、不跟随、不导入；
+- socket、device、FIFO 等记为 OTHER，不参与资源识别。
+
+能由复合外键、唯一约束和 CHECK 表达的同 Library 与类型约束必须落入数据库；无环和父路径
+一致性由应用规则及集成测试保证。
+
+## 4. 元数据与解释
+
+### 4.1 元数据
+
+SourceNode、Book、ReadableResource 和 ResourceAsset 分别使用自己的元数据表。书架、标签、
+分面等成员关系继续使用独立关系表，不折叠进单行元数据。
+
+元数据优先级、封面选择、旁车读取和旁车写回完全沿用现有逻辑。本 ADR 只改变 owner 外键
+和重新导入的临时隔离边界，不借重构修改规则。实现前用 characterization fixtures 固定
+现有行为。
+
+开启旁车文件存储时，先提交数据库，再通过既有可恢复流程把当前元数据额外落盘。任何
+NAS、解析器或旁车 I/O 都不得发生在数据库事务内。
+
+### 4.2 SourceNodeInterpretation
+
+每个可解释节点至多一条当前解释：
+
+- `result`: `NODE_ONLY | RESOURCE`；
+- `source`: `AUTO | USER`；
+- `adapterId`, `adapterVersion`，无唯一匹配时可空；
+- `reasonCode`；
+- 目录探测的样本路径、样本数、预算、终止原因和识别时间。
+
+`RESOURCE` 表示该节点按当前规则建立了 ReadableResource，不等于文件已经成功解析。
+是否可打开由 Resource 导入状态决定。普通扫描不会重新判断已有终态解释；重新判断等同于
+用户显式重新导入。
+
+目录节点可能在“SourceNode 已提交、探测尚未完成”之间崩溃。此时解释为空，后续扫描只需
+补完这次首次判断；这不属于重新识别终态节点。
+
+## 5. Book、ReadableResource 与 ResourceAsset
+
+### 5.1 LibraryBook
+
+核心字段：`id`, `libraryId`, `sourceNodeId`。
+
+- `UNIQUE(sourceNodeId)`；
+- Book 与锚点 SourceNode 必须属于同一 Library；
+- `sourceNodeId` 创建后不可改变；
+- 标题、作者、简介、系列和封面等保存在 `LibraryBookMetadata`。
+
+Book 不复制 SourceNode 子树，也不保存 Version。
+
+### 5.2 LibraryReadableResource
+
+核心字段：
+
+- `id`, `bookId`, `sourceNodeId`；
+- `adapterId`, `adapterVersion`, `mediaKind`, `format`；
+- `enablementState`: `ENABLED | DISABLED`；
+- `importState`: `PENDING | READY | FAILED`；
+- `publishedRunId`，当前可见结果集合的 ImportRun ID，可空；
+- `activeImportRunId`，当前仍在导入的 ImportRun ID，可空；
 - 创建和更新时间。
 
-约束与索引：
+约束：
 
-- `UNIQUE(libraryId, pathKey)`；
-- 为 `(libraryId, parentId, presenceStatus)`、`lastSeenScanId` 和展示排序建立索引；
-- 数据库存相对路径，不重复存绝对路径；运行时相对 Library 根目录解析，并继续执行
-  路径穿越和符号链接逃逸检查；
-- 记录所有未被忽略的文件和目录。格式支持和最小文件大小只决定是否生成业务资源，
-  不决定是否保存 SourceNode；
-- 空目录也保存，界面默认隐藏，可通过查询参数显示；封面、OPF 等内部文件不计为可见
-  内容。
+- `UNIQUE(sourceNodeId)`，一个节点至多锚定一个 Resource；
+- Resource、Book 和锚点 SourceNode 必须属于同一 Library；
+- Resource 锚点等于 Book 锚点，或位于 Book 锚点子树内；
+- Resource 可锚定常规文件或目录；
+- `bookId` 和 `sourceNodeId` 创建后不变；
+- `enablementState` 只表达用户启停，不表达导入成功与否；
+- 只有 `ENABLED + READY` 才承诺当前可打开。
 
-默认排序使用当前文件系统展示所采用的自然排序；节点元数据配置了排序值时，使用
-`metadataSortOrder` 覆盖默认值。不增加手动拖拽排序体系。
+`publishedRunId` 只是“当前显示哪次导入结果”的发布隔离令牌，不是文件版本，不参与扫描或
+变化检测。已有 READY Resource 开始重新导入时仍保持 READY，直到新结果成功发布。
 
-### LibraryBook
+目录 Resource 在语义上是一个可独立打开的叶子对象。启用、禁用或重新导入它，只改变该
+Resource 自身及其 Asset，不级联修改后代 SourceNode 或后代 Resource。
 
-`LibraryWork` 直接演化并重命名为 `LibraryBook`，保留图书级标题、作者、简介、标签、
-书架、封面等业务字段，并增加唯一的 `sourceNodeId`。Book 详情页是点击图书后的默认
-入口。
+### 5.3 LibraryResourceAsset
 
-Book 不复制物理子树，也不保存 Version。Book 下的目录内容由 SourceNode 的父子关系
-按需查询，任意深度均采用相同规则。
+核心字段：
 
-### LibraryReadableResource
+- `id`, `resourceId`, `sourceNodeId`；
+- `publishedRunId`；
+- `role`: `PRIMARY | TRACK | PAGE | SIDECAR | SUPPLEMENT`；
+- `importState`: `PENDING | READY | FAILED`；
+- `sequenceIndex`, `sortKey`、技术元数据和失败原因；
+- 创建和更新时间。
 
-`LibraryVolume` 直接演化并重命名为 `LibraryReadableResource`：
+约束：
 
-- `bookId` 直接指向 Book；
-- `sourceNodeId` 唯一指向一个文件或目录节点；
-- `state`: `ACTIVE | DISABLED`；
-- `classificationSource`: `AUTO | LIBRARY_RULE | USER`；
-- 保留格式、阅读器、封面、时长、页数、章节数、轨道数及资源级元数据；
-- 每个 ReadableResource 独立拥有阅读进度、阅读单元、书签和最近阅读状态。
+- `UNIQUE(resourceId, sourceNodeId)`；
+- Asset、Resource 和 SourceNode 必须属于同一 Library；
+- Asset 的 SourceNode 必须是 REGULAR_FILE；
+- 文件型 Resource 的 PRIMARY 必须指向 Resource 自身节点；
+- 目录型 Resource 的 Asset 必须位于 Resource 锚点子树内；
+- 同一个 SourceNode 可以被不同 Resource 引用；
+- 同一关系重新导入后仍存在时保留 Asset ID，role 可以更新；
+- EPUB spine、压缩包内部图片、虚拟章节等解析器内部对象不是 SourceNode 或 ResourceAsset。
 
-目录型有声书是正式支持的 ReadableResource。系统可以按照现有音频适配器把一个包含
-音轨的目录识别为单一资源；用户可以把该节点转换为普通 DirectoryNode。转换时不删除
-资源和进度，而是把资源设为 `DISABLED` 且记录 `USER` 判定，使其子节点恢复为普通可见
-内容；重新启用时沿用原进度。
+读取 Resource 当前 Asset 时，只查询
+`asset.publishedRunId = resource.publishedRunId AND asset.importState = READY`。重新导入发布后，
+仍带旧 `publishedRunId` 的 Asset 不可见；它们只在本次遍历完成后清理，以便后来重新发现的
+同一路径可以继续复用原 Asset ID。
 
-### LibraryResourceAsset
+Asset 排序继续使用现有自然路径排序和元数据覆盖规则，最终必须形成稳定总序。
 
-`LibraryFile` 演化并重命名为 `LibraryResourceAsset`：
+## 6. Library 组织模式
 
-- `resourceId`, `sourceNodeId`；
-- `role`: `PRIMARY | TRACK | PAGE | SUPPLEMENT`；
-- 保留 MIME、媒体技术信息、轨道或页面顺序等资源内部属性。
+Library 只保留 `FLAT | VOLUMES`。删除 `AUDIOBOOK`；有声书、图片目录漫画和其他目录型
+出版物都由 Resource adapter 识别。FLAT 与 VOLUMES 使用完全相同的文件和目录识别规则。
 
-Asset 不重复保存绝对路径。阅读时通过 SourceNode 的相对路径和 Library 根路径定位原始
-文件。文件型 Resource 通常有一个 `PRIMARY` Asset；目录型音频 Resource 拥有多个
-`TRACK` Asset。
+### 6.1 FLAT
 
-## 导入模式的解释规则
+- 任意深度的每个自动识别 Resource 独立形成一本 Book；
+- 文件型和目录型 Resource 使用同一规则；
+- 目录被识别为 Resource 后，后代仍建 SourceNode，但不再自动识别后代 Resource 或 Book；
+- NODE_ONLY 目录继续递归，后代 Resource 各自形成 Book。
 
-三种导入模式只决定如何从 SourceNode 生成初始语义覆盖，不再决定物理树的形状。
+### 6.2 VOLUMES
 
-### FLAT
+- Library 根下的常规文件 Resource 各自形成单文件 Book；
+- 根下文件夹一经发现就建立 Book，允许空 Book；
+- 根文件夹内任意深度的 Resource 都归属该 Book；
+- 根文件夹本身也可以同时是 Book 和目录 Resource 的锚点；
+- 普通中间目录只是 SourceNode 导航容器。
 
-根目录任意深度中的每个受支持可读文件生成一个 Book、一个 ReadableResource 和一个
-PRIMARY Asset。祖先目录仍完整保留在物理树中，但不强制成为业务层级。
+Library 已存在 SourceNode 时，不允许原地切换 FLAT/VOLUMES。切换必须先删除该 Library 的
+全部关联数据库记录，再修改模式并重新扫描；磁盘文件不删除。
 
-### VOLUMES
+## 7. 首次识别
 
-- 根目录中的可读文件生成单文件 Book 和 Resource；
-- 根目录中的文件夹生成 Book；
-- Book 下允许文件和文件夹任意嵌套并在 UI 中并列展示；
-- 每个受支持可读文件生成 Resource；
-- 普通目录只是导航容器，除非被格式适配器或用户明确解释为目录型 Resource。
+### 7.1 常规文件
 
-不再规定“直接子目录是版本”，也不对更深层目录赋予新的业务名词。
+首次发现常规文件时，只把物理类型和后缀交给 file adapter registry，不打开文件：
 
-### AUDIOBOOK
+- 无匹配或多个 adapter 匹配：保存 NODE_ONLY，只保留 SourceNode；
+- 唯一匹配：原子保存 RESOURCE 解释、必要的 Book、PENDING Resource、ImportRun、候选
+  PRIMARY Asset 和首个 ImportTask。
 
-- 根目录中的音频文件生成单文件 Book 和 Resource；
-- 根目录中的文件夹生成 Book；
-- 被音频适配器识别为完整出版物的目录生成一个目录型 Resource；
-- 活跃目录型 Resource 的后代是它的 Asset，不再同时生成嵌套 Resource；
-- 用户把目录型 Resource 转换为普通目录后，其子节点重新按普通树展示和解释。
+worker 在事务外真正读取并验证文件。成功后发布 Resource 和 PRIMARY Asset；失败后 Resource
+变为 FAILED。普通扫描不会自动重试，用户可显式 retry 或重新导入。
 
-## 元数据、封面和进度
+### 7.2 目录的前 100 个文件探测
 
-元数据优先级继续使用系统已有的用户可配置规则，不新增另一套优先级机制：
+每次自动进入一个尚无终态解释、且不在外层目录 Resource 覆盖范围内的目录前，先执行有界
+探测：
 
-- 图书级目录元数据写入 Book；
-- 原 Version 所承担的目录展示标题、封面和排序写入 SourceNode；
-- EPUB、PDF、音频等文件元数据及旁车 OPF 写入 ReadableResource；
-- 媒体技术属性写入 ResourceAsset；
-- Book 或目录没有自己的封面/元数据时，可按现有优先级回退到第一个可读资源；
-- 普通文件夹只读取本地元数据，不自动执行外部图书元数据查询；外部查询目标仅为 Book
-  或 ReadableResource。
+1. 使用 `os.scandir()`、`follow_symlinks=False` 和 Library 的同一 ignore 规则；
+2. 按文件系统返回顺序做有界深度优先递归；
+3. 目录不计数，收集遇到的前 100 个常规文件；
+4. 只检查物理类型和后缀，不打开或解析文件；
+5. 同时限制最大遍历项数、最大深度和最长时间；
+6. 100 个样本全部属于唯一 adapter 时，立即建立目录 Resource；
+7. 子树提前结束且有 1～99 个样本时，按全部实际样本作同样判断；
+8. 因预算或局部 I/O 提前终止时，只要已有样本全部属于唯一 adapter，仍视为目录 Resource；
+9. 无样本、无匹配或多个 adapter 冲突时保存 NODE_ONLY。
 
-Book 阅读进度是所有 `ACTIVE` 且未隐藏 Resource 进度的等权平均值。`DISABLED` Resource
-不参与聚合；`MISSING` 但仍为 ACTIVE 的 Resource 保留进度并继续参与聚合。至少存在一个
-活跃 Resource 且全部达到 100% 时，Book 才算完成。“继续阅读”选择最近产生阅读进度的
-Resource。聚合查询直接使用 `resource.bookId`，不得递归遍历物理树。
+保存实际样本相对路径、样本数、adapter 版本、访问数量、深度预算、时间预算和终止原因。
+文件系统顺序可能因设备而异，这是被接受且可追溯的抽样结果。探测结果一旦保存，普通扫描
+不再主动探测。
 
-## 全量重扫与缺失处理
+探测得到的有界 entry 可由随后正式遍历复用，避免立即重复访问同一批 NAS 目录；缓存不得
+超过探测预算。
 
-一次完整重扫仍使用现有 `ImportScanJob`、`ImportWorkItem`、`os.scandir()` 有界迭代、队列
-水位和分片限制。扫描器为每个未忽略节点产生轻量观察值并批量执行：
+### 7.3 外层截断与后续文件
 
-1. 计算由类型、大小、修改时间及必要路径信息组成的廉价 fingerprint；
-2. 按 `(libraryId, pathKey)` 批量 upsert SourceNode；
-3. 所有已看到节点更新 `lastSeenScanId`；
-4. 只有 fingerprint、存在状态或解释状态实际变化时，递增 `sourceRevision` 并纳入本批
-   changed node IDs；
-5. 仅针对 changed node IDs 重算 Book、Resource、Asset、元数据读取和 ImportTask；
-6. 在同一个短事务中提交该批 SourceNode 及其直接派生写入。
-
-仅更新 `lastSeenScanId` 不得修改 `updatedAt` 或递增 `sourceRevision`，否则十万图书重扫会
-把所有行伪装成业务变化并触发全库级联更新。
-
-扫描完整结束且所有目录枚举均成功时，把本次未看到的既有节点标记为 `MISSING`，而不
-物理删除，也不立即删除 Book、Resource、Asset 或阅读进度。只要任一目录发生读取错误，
-本轮跳过 unseen-to-missing 对账，避免把 NAS 临时离线误判成批量删除。界面提示对应路径
-不存在即可。
-
-不实现移动/重命名识别；路径变化按旧节点 MISSING、新节点新增处理。不引入内容哈希、
-文件系统事件总线、分布式扫描、逐目录持久游标或复杂重试。进程崩溃后允许从 Library 根
-重新扫描，依靠幂等 upsert 恢复。
+目录 Resource 一旦建立：
 
-对于约十万本书、目录深度 2～3 层的普通 NAS/机械硬盘，主要成本是一次顺序目录枚举和
-SourceNode 批量 upsert。该成本与实际节点数线性相关，通常由 NAS 元数据访问延迟主导；
-通过有界扫描、短事务、批量写入和 changed-only 派生更新，不会再把未变化的十万本书
-全部重新解析。该设计接受最终一致性，不承诺实时反映文件系统变化。
+- 整棵接纳子树仍递归建立 SourceNode；
+- 当前 adapter 接受的常规文件各自创建 AssetImportTask，并逐个并入该 Resource；
+- 不兼容文件只建 SourceNode；
+- 后代目录不再自动执行 Resource 识别；
+- 第 101 个及后续文件不改变父 Resource 的类型；
+- 达到 adapter 声明的最小 READY Asset 条件即可发布 Resource，不等待完整遍历；
+- 发布后的其余成功 Asset 继续加入同一个当前结果集合；个别失败不使 READY Resource 失败。
 
-## API 与 Web 目标
+显式重新导入可以在已有目录 Resource 内或其祖先建立另一个 Resource，因此数据模型允许
+范围重叠。普通扫描发现重叠范围内的新文件时，只把从 Library 根向下遇到的最外层目录
+Resource 作为 automatic owner，不向多个祖先 Resource 扇出。嵌套 Resource 保留，但只有
+对它显式重新导入时才吸收后来发现的路径。Resource 的 ENABLED、DISABLED、PENDING、
+READY 或 FAILED 状态不改变该归属规则。
 
-本次是未发布版本的破坏性重构，不保留旧 API 别名或兼容响应。目标 API 以以下资源为
-中心：
-
-- `/api/books`, `/api/books/{bookId}`；
-- `/api/books/{bookId}/nodes`；
-- `/api/books/{bookId}/nodes/{nodeId}/children`；
-- `/api/source-nodes/{nodeId}/cover`；
-- `PATCH /api/source-nodes/{nodeId}/interpretation`；
-- `/api/resources/{resourceId}`、cover、reading-units、reclassify、download；
-- `/reader/v4/resources/{resourceId}/...`。
-
-`GET /api/books/{bookId}` 返回图书元数据、聚合进度、根节点信息和第一层目录内容；更深
-层级按需加载，禁止一次返回无界整棵树。
+## 8. 普通扫描
 
-Web 端把 `features/works` 演化为 `features/books`，使用 `BookView`、`SourceNodeView`、
-`ReadableResourceView`。图书详情由元数据头部、整体进度和当前目录内容组成：文件夹进入
-下一层，Resource 打开对应阅读器。删除版本画廊、版本分页和版本编辑入口。所有新增界面
-同时完成 `zh-CN` 与 `en-US` 文案。
-
-手机端在基础架构完成后单独更新；本次不为了兼容现有手机模型保留 Version。
-
-## 当前实现影响面
-
-审计时确认的主要切入点如下，行号会随开发变化，以文件和职责为准：
-
-- `apps/api-python/app/models/library.py` 定义当前 Work/Version/Volume/File 模型；
-- `apps/api-python/app/modules/library/domain/layout.py` 把路径强制解释为固定层级；
-- `apps/api-python/app/modules/importing/infrastructure/files/topology_scan.py` 只产出可导入
-  候选并拒绝普通目录；
-- `apps/api-python/app/modules/importing/infrastructure/files/streaming_scan.py` 已具备可复用
-  的有界扫描基础；
-- `apps/api-python/app/modules/importing/infrastructure/persistence/scan_batch_store.py` 当前
-  直接写入 Work/Version/Volume/ImportTask/ImportAsset/ImportWorkItem；
-- Library HTTP、Reader DTO、进度、书签、阅读单元、元数据、整理、下载、Kindle、OPDS、
-  备份、统计和 Web 均仍传播 `versionId`/`volumeId`。
-
-审计快照中，后端生产代码约有 34 个文件直接引用 `LibraryVersion`、43 个文件引用
-`LibraryVolume`、31 个文件引用 `LibraryFile`；约 60 个文件出现 `version_id`、93 个文件
-出现 `volume_id`。Web 版本相关表面约 22 个文件，手机端约 36 个文件。上述数字仅用于
-说明重构规模，不是实现完成条件；最终以全仓库语义检索为准。
-
-当前工作区存在与导入、Library 和 Web 重叠的未提交修改，其中部分修改继续强化 Version
-封面、画廊、分页和编辑能力。开始开发前必须先保存或隔离这些用户改动；扫描设置和有界
-扫描改进可按新架构复用，但 Version 专属迁移与 UI 不进入最终实现。
-
-## 一次性实施路径
-
-重构按依赖方向推进，允许中间阶段无法启动或测试失败；在最终模型完成前不运行全量测试，
-但每阶段必须做最小的结构或导入检查，避免错误累积。
-
-### 阶段 0：固定决策与保护工作区
-
-- 本 ADR 是最终结构决策；后续实现不再引入 Edition/Version 等中间容器；
-- 保存或隔离当前未提交修改，明确哪些扫描能力保留、哪些 Version 增强废弃；
-- 列出所有模型、外键、API、Worker 和 Web 调用方，作为删除清单。
-
-### 阶段 1：直接建立最终数据库模型
-
-- 因应用未发布，重写当前唯一 Alembic baseline，只支持新建数据库；
-- 新建 SourceNode、Book、ReadableResource、ResourceAsset 及索引和约束；
-- 把进度、书签、阅读单元、元数据、导入任务等外键直接改为 `bookId`/`resourceId`；
-- 删除 LibraryVersion 和 Version 专属表、约束、迁移；
-- 不写旧数据迁移、回填、双写或兼容模型。
-
-阶段完成只验证 ORM 模型可导入、全新数据库可创建。
-
-### 阶段 2：替换拓扑扫描和批量持久化
-
-- 删除 `LayoutVersion`、`LayoutVolume`、`version_identity`、
-  `PreparedTopologySource` 等固定层级解释；
-- 保留有界 `os.scandir()` 和持久队列，扫描器改为产出目录与文件观察值；
-- 实现 SourceNode 批量 upsert、changed node IDs、完整扫描 missing 对账；
-- `scan_batch_store` 只对变化节点创建或更新语义覆盖与导入任务；
-- 不引入第二张 change-log 表或事件总线。
-
-### 阶段 3：迁移格式导入器
-
-- 依次迁移 EPUB、PDF、TXT、MOBI、FB2、Comic 和 Audio；
-- 每个导入器从 SourceNode/Resource/Asset 读取和写入，不再创建 Work/Version/Volume；
-- 音频目录识别与用户转换成为显式策略；
-- 保持原始格式阅读，不生成派生 EPUB 或持久解包目录；
-- 完成调用方切换后立即删除旧实现，不做双写。
-
-### 阶段 4：迁移核心读取与阅读链路
-
-- 先迁移授权和图书/目录查询，再迁移媒体与 Publication；
-- Reader、进度、书签、阅读单元统一改用 `resourceId`；
-- Book 进度和继续阅读按本 ADR 的 Resource 聚合规则实现；
-- HTTP 路由保持薄适配器，事务与文件副作用顺序归应用用例负责。
-
-### 阶段 5：迁移次级后端能力
-
-- 元数据、封面、整理、OPDS、Kindle、下载、备份、仪表盘、书架、分面和事件；
-- 删除版本合并、转移、封面画廊、分页和编辑等结构操作；
-- 备份只表示新架构，不读取任何旧备份格式。
-
-### 阶段 6：重写 Web
-
-- 更新生成契约和 feature 模型；
-- 完成 Book 详情的惰性目录浏览、混合 Resource 展示、缺失和空目录状态；
-- 更新各阅读器入口与资源级进度；
-- 完成中英文国际化；
-- 手机端保持明确未适配状态，不加入临时兼容层。
-
-### 阶段 7：删除遗留并统一验收
-
-- 全仓库检索并删除运行时代码中的 Version/Edition、`versionId`、旧 `volumeId` 语义；
-- 删除重复实现、临时适配和无调用代码；
-- 最后统一运行后端单元/集成/API/Worker/导入测试、全新数据库迁移测试、Web lint、
-  typecheck、tests、i18n check 和关键 Reader E2E；
-- 测试失败应修复到最终架构，不恢复旧模型来换取通过。
-
-## 明确不做
-
-- 旧数据库迁移、历史数据回填、旧 API/备份兼容；
-- 本阶段手机端兼容；
-- 文件移动或重命名识别；
-- 全文件内容哈希；
-- 分布式扫描、文件事件总线、多写者协调；
-- 复杂的子树断点续扫或重试编排；
-- 手动拖拽排序体系；
-- 为中间阶段维持可发布状态。
-
-## 完成标准
-
-- 运行时代码和数据库不再存在 LibraryVersion/Version 业务概念；
-- 物理层只有 SourceNode 树，业务层只有 Book、ReadableResource、ResourceAsset；
-- 全量重扫更新全部已见 SourceNode，但只有真实变化触发业务派生更新；
-- 删除或离线目录以 MISSING 表达，不误删阅读进度；
-- Book 下可浏览任意深度文件夹，并列展示不同格式和目录；
-- 文件型与目录型 ReadableResource 均可阅读、转换并保持资源级进度；
-- Book 聚合进度、完成状态和继续阅读符合本 ADR；
-- Web 完成新模型和中英文适配；
-- 最终适用质量门全部通过；
-- 手机端适配作为基础架构完成后的独立工作明确保留。
-
-## Consequences
-
-该决策消除了没有实际语义的 Version，并允许文件系统保持任意自然层级。代价是本次需要
-同时改动数据库、扫描、导入、Reader、API 和 Web，属于一次中大型破坏性重构；但应用尚未
-发布，不承担兼容成本，现在是一次完成该边界调整的最低成本窗口。
-
-SourceNode 会使数据库行数接近所有未忽略文件和目录数，但它把昂贵 NAS 遍历与高频业务
-查询解耦，并为增量派生更新、缺失提示、稳定分页和资源关联提供必要基础。架构接受重扫
-期间的短暂最终一致性，以简单、可解释和可维护为优先目标。
+一次 ScanJob 只做以下事情：
+
+1. 从 Library 根开始有界遍历；
+2. 按 `(libraryId, pathKey)` 插入尚不存在的 SourceNode；
+3. 为新节点完成第 7 节的首次解释和任务创建；
+4. 对目录 Resource 范围内的新兼容文件创建一次 AssetImportTask；
+5. 保存有界进度和错误摘要。
+
+普通扫描明确不做：
+
+- 更新已有 SourceNode 的 size、mtime、observedAt 或元数据；
+- 重新判断已有 NODE_ONLY/RESOURCE 解释；
+- 因未看到路径而删除记录或设置 MISSING；
+- 识别移动、重命名或同路径内容替换；
+- 自动重试已有路径的失败导入。
+
+扫描可补完两种尚未完成的首次状态：扫描崩溃留下的空解释，以及失败重新导入新建但尚未
+形成 Asset/终态解释的 SourceNode。这只是补完第一次语义写入，不是重新探测终态路径。
+
+目录必须先写 SourceNode，再在事务外探测。探测结束后的解释、Book/Resource、ImportRun、
+首批候选与任务在一个短事务提交。常规文件的 SourceNode 与首次解释/任务在一个短事务提交。
+队列水位不足时，在写入会产生任务的 SourceNode 前暂停，避免留下无任务且无法自动补偿的
+节点。
+
+扫描继续使用 ADR 0002 的单一有界持久队列、lease、heartbeat、取消、重试、背压、短事务
+和崩溃后从根重扫。扫描产物从“候选文件”改为 SourceNode 与必要 ImportTask；路径去重键
+改为本 ADR 的 `(libraryId, pathKey)`。取消或失败保留已经提交的节点和任务，不执行缺失推断。
+
+## 9. 导入流程
+
+### 9.1 ImportRun 与 ImportTask
+
+ImportRun 表示一次首次导入、显式 retry 或显式重新导入：
+
+- `kind`: `INITIAL | RETRY | REIMPORT | RECOVERY`；
+- `state`: `PENDING | RUNNING | COMPLETED | COMPLETED_WITH_ERRORS | FAILED | CANCELLED`；
+- 目标 SourceNode、可空的 Resource ID、adapter、错误摘要和 `publishedAt`；
+- 每个 Resource 同时至多一个非终态 active ImportRun。
+
+ImportTask 表示一个文件的实际读取：
+
+- `state`: `QUEUED | RUNNING | SUCCEEDED | FAILED | CANCELLED`；
+- 目标 SourceNode、Resource、可空的 owner ImportRun、role、尝试次数和错误摘要；
+- `(ownerImportRunId, sourceNodeId, role)` 或普通增量任务的 `(resourceId, sourceNodeId)` 保证
+  一次导入意图只创建一次。
+
+任务租约、超时回收、自动执行重试和 WorkItem 删除沿用 ADR 0002，不在本 ADR 重建另一套
+队列状态机。业务结果、Task 终态和 WorkItem ack 必须在同一个短事务提交。
+
+### 9.2 首次导入与目录增量
+
+- worker 在事务外读取一个真实文件并产生有界结果；
+- 初始 Run 的结果先写 `ResourceCandidate`/`AssetCandidate` 临时表；
+- 单文件 PRIMARY 成功，或目录候选达到 adapter 的最小 READY 条件时，执行一次短发布事务；
+- 发布事务写入 Resource 当前字段和元数据、upsert 稳定 Asset、设置 Resource/Asset 的
+  `publishedRunId`，并把 Resource 置为 READY；
+- 目录发布后，同一 Run 的剩余成功任务直接追加到当前 `publishedRunId`；
+- 完整遍历和全部任务结束仍未达到最小条件时，Resource 置为 FAILED；
+- 已经 READY 后发生的遍历错误或个别 Asset 失败，只让 Run 为 COMPLETED_WITH_ERRORS。
+
+初次目录遍历期间发现的兼容文件都归属于同一个 INITIAL Run。发布不等于 Run 已结束：达到
+最小条件后可以先 READY，待目录遍历和已有任务终态后才清空 `activeImportRunId`。发布前
+终止且未达到最小条件时，清空 active Run 并把新 Resource 置为 FAILED。
+
+普通扫描为 READY 目录 Resource 发现新兼容路径时，创建不属于重新导入 Run 的增量任务。
+如果 Resource 正有 active Run，该任务保持 QUEUED；active Run 终态后再按当时的
+`publishedRunId` 导入，避免写入正在切换的结果。每次增量成功后重新检查 adapter 最小条件；
+PENDING/FAILED 目录 Resource 可以因为一个全新兼容路径创建 RECOVERY Run 并恢复 READY，
+但不得借此重新读取或重试任何已有失败路径。
+
+### 9.3 事务与晚到任务
+
+数据库事务内禁止 NAS、解析器和旁车 I/O。每个 worker 的顺序固定为：
+
+1. claim 持久任务；
+2. 在事务外读取并验证一个文件；
+3. 打开短事务，核对任务 lease 和 Resource 的 active/published Run；
+4. 写业务结果、任务终态并 ack；
+5. 提交后执行需要的可恢复旁车写回。
+
+属于 ImportRun 的结果只有在 `resource.activeImportRunId = task.ownerImportRunId` 时可提交。
+普通增量结果只有在 Resource 没有 active Run 时可提交；否则保留任务等待。过期结果不得
+覆盖当前数据。这里的 Run ID 仅用于事务隔离，不是 SourceNode 或文件内容版本。
+
+## 10. 显式重新导入
+
+“重新识别”与“重新导入”是同一个 `ReimportSourceNode` 用例。用户可以对任意已有文件或
+目录 SourceNode 执行；普通扫描不会代替用户触发。
+
+流程：
+
+1. 创建新的 REIMPORT Run，并以 CAS 占用 Resource 的 `activeImportRunId`；节点尚无
+   Resource 时，只以 SourceNode 为目标并预分配候选 Resource ID；
+2. 文件重新读取格式和元数据；目录重新执行前 100 个文件探测，并有界遍历其资产范围；
+3. 本次访问到的已有 SourceNode 刷新 observed 快照；新路径按正常规则 insert-if-absent；
+4. 新解释、Resource 元数据和 Asset 结果只写 Run candidate tables，不修改当前稳定结果；
+5. 达到最小可用条件时，用一个短事务发布：保留既有 Resource/Book ID，按
+   `(resourceId, sourceNodeId)` 复用 Asset ID，更新 adapter、mediaKind、role 和元数据，
+   把 Resource 与当前 Asset 的 `publishedRunId` 切到新 Run；
+6. 未出现在当前已发布集合的旧 Asset 保持旧 `publishedRunId` 因而立即不可见；Run 遍历
+   结束前不删除，以便后续重新发现时仍能复用 ID；
+7. 发布后的其余成功 Asset 继续加入新 `publishedRunId`；Run 终态后再有界清理旧结果和
+   candidate。
+
+发布前失败、取消、无唯一 adapter，或完整遍历后仍不满足最小条件时：
+
+- 已有 Resource、Asset、解释和元数据完全不变；
+- 清空 `activeImportRunId`；尚无旧成功结果的首次 Resource 置为 FAILED；
+- 只记录失败 Run/Task；
+- 已实际观察到的 SourceNode 快照和新 SourceNode 可以保留；
+- 这些新节点以后由普通扫描补完从未完成的首次解释/Asset 任务。
+
+一旦第 5 步发布成功，本次重新导入即成功。之后的深层遍历错误、取消或个别 Asset 失败记为
+COMPLETED_WITH_ERRORS，新 READY 结果不回滚。这是“达到最小条件即可使用”与“发布前失败
+保留旧数据”的明确边界。
+
+重新导入可以改变现有 Resource 的 adapter、mediaKind、role 和元数据，但不改变 Resource、
+Book 及重合 Asset 的稳定 ID，也不改变 enablementState。对 NODE_ONLY 节点成功重新导入时
+可以创建新 Resource；FLAT 同时创建 Book，VOLUMES 挂入对应根文件夹 Book。
+
+重新导入不级联删除或改状态后代 Resource。FLAT 中显式把普通祖先目录重新导入为 Resource
+时，新建祖先 Book，并保留已存在的后代 Book/Resource；这类重叠只由显式操作产生。
+
+## 11. 删除、模式切换与根路径迁移
+
+用户删除 SourceNode 时，删除以下数据库记录：
+
+- 该节点及其 SourceNode 子树；
+- 锚定在子树内的 Book、Resource、Asset、元数据、Run 和 Task；
+- 子树外 Resource 对任一被删节点的 Asset 引用及相关任务/候选。
+
+磁盘文件不删除。幸存 Resource 删除 Asset 后若不再满足最小 READY 条件，置为 FAILED；否则
+保持 READY。磁盘路径仍存在时，未来扫描会以新 SourceNode ID 重新发现。
+
+Library 组织模式切换不是原地转换：先删除该 Library 的全部数据库关联记录，再修改模式并
+重新扫描。
+
+Library 根路径只允许通过显式 `RelocateLibraryRoot` 修改。验证新根存在、可读且不与其他
+Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/Asset ID 保留。系统不自动
+推断根目录移动，新根缺少文件时仍只在打开或重新导入时报告错误。
+
+## 12. 实施路径
+
+目标实现放在未激活的 target composition root 中。每个阶段从 fresh database 验收并保持
+全仓可构建、适用测试为绿色；不允许“中间不可运行，最后统一修复”。
+
+1. **领域与 schema**：建立 SourceNode、Interpretation、Book、Resource、Asset、ImportRun、
+   candidate 和 Task；落实外键、唯一约束、删除策略和纯状态测试。
+2. **扫描与分类**：实现精确路径、四种 physicalKind、FLAT/VOLUMES 编排、目录有界探测、
+   外层截断、背压和崩溃补完。
+3. **首个单文件闭环**：选择一个格式完成 SourceNode → Resource → PRIMARY Asset → metadata，
+   验证真实队列、短事务和失败。
+4. **首个目录闭环**：同一切片接入有声书目录 classifier 与 TRACK importer，覆盖前 100 个
+   文件、READY 早发布、尾部追加和部分失败。
+5. **其余格式**：图片目录与 PAGE importer 同切片；其余每种文件格式分别形成可验证闭环。
+6. **重新导入和管理操作**：完成原子发布、ID 保留、删除、模式切换和根路径迁移。
+7. **规模与最终验收**：百万节点、NAS 错误、取消、崩溃、晚到 worker、队列水位和 fresh
+   baseline。
+
+开发期可使用临时增量 schema revision。全部目标模型和导入流程稳定、首次发布前压平为
+唯一 fresh baseline；baseline 发布后不可重写。
+
+## 13. 验收矩阵
+
+### 数据模型
+
+- SourceNode 路径唯一、同 Library 父子、父节点类型、无环和路径一致；
+- Book/Resource/Asset 不得跨 Library 或越出锚点范围；
+- 一个节点至多一个 Book 和一个锚定 Resource；
+- 同一 SourceNode 可以被多个 Resource 作为 Asset 引用；
+- 当前 Asset 查询只看到 Resource `publishedRunId` 下的 READY 行；
+- 删除节点完整清理关联记录，且不误删子树外 Resource；
+- FLAT/VOLUMES 不可在已有节点时原地切换；根路径迁移保留相对身份。
+
+### 路径和扫描
+
+- 绝对路径、空段、`.`、`..`、NUL、字面反斜杠、大小写和 Unicode 拼写；
+- pathKey 摘要碰撞保护；
+- SYMLINK 环、越根链接和特殊文件不被跟随或导入；
+- 重复扫描不更新已有节点，不做 missing 对账，不重试终态路径；
+- 移动/重命名产生新节点，旧节点保留；
+- 根离线、目录不可读、取消和崩溃不删除已有数据；
+- 未完成的首次解释/任务能补完，终态解释不被重新探测；
+- 百万节点内存保持 `O(depth + batch + probe budget)`，队列不超过水位。
+
+### 目录识别与导入
+
+- 0、1、99、100、101 个递归常规文件；
+- 唯一匹配、无匹配、adapter 冲突、最大深度、预算和局部 I/O；
+- 提前终止但已有样本唯一匹配时建立 Resource；无样本或冲突时 NODE_ONLY；
+- 探测不读取文件内容，保存完整判断证据；
+- 父 Resource 后代全部建 Node，只给兼容文件建 Asset，不自动建后代 Resource/Book；
+- 重叠范围内普通新文件只归最外层 Resource；
+- 达到最小 READY 条件即发布，尾部 Asset 增量加入，单项失败不回滚 READY；
+- 文件 I/O 不占数据库事务，Task 结果与 ack 同事务；
+- 过期 worker 不覆盖 active/published Run。
+
+### 重新导入
+
+- 任意文件或目录节点均可重新导入；
+- 发布前失败完整保留旧 Resource、Asset、解释和元数据；
+- 发布成功保留 Resource/Book/重合 Asset ID，并原子切换当前集合；
+- adapter、mediaKind 和 role 可以更新；
+- 发布后错误为 COMPLETED_WITH_ERRORS，当前结果不回滚；
+- 失败 reimport 新建的 SourceNode 可由后续扫描补完首次语义；
+- 普通扫描不会因 size、mtime 或内容变化自动触发重新导入。
+
+## 14. 明确不做
+
+- 旧数据库迁移、回填、双写和兼容层；
+- LibraryVersion、Edition 或固定中间目录业务层；
+- `AUDIOBOOK` 组织模式；
+- 自动文件变化检测、MISSING 对账、移动/重命名识别和自动删除；
+- 自动重新识别终态目录或自动重试失败路径；
+- 修改元数据优先级和旁车行为；
+- Reader/API/Web/Mobile 等上层契约；
+- 派生 EPUB、ZIP、目录打包、持久解包或把压缩包内部内容建成 SourceNode/Asset。
+
+## 15. 结果
+
+该模型只保留一棵物理路径快照和一层可阅读语义。普通扫描只发现新路径，不承担文件同步；
+用户要刷新已有路径时显式重新导入。目录通过前 100 个递归常规文件快速建立 Resource，达到
+最小有效 Asset 条件即可使用，剩余文件独立追加。
+
+代价是旧路径可能长期保留，并在实际打开时才报告不存在或不可读；目录类型也受文件系统
+枚举顺序和有限样本影响。系统通过保存判断证据、禁止隐式重判以及提供显式重新导入，让
+这些取舍保持简单且可解释。
