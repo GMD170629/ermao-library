@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from app.modules.imports.application.readable_resource.ports import (
     adapter_identity,
     BookResourceRepositoryPort,
+    ClaimedWork,
     ClockPort,
     ImportRunRepositoryPort,
     LibraryConfigPort,
@@ -42,6 +43,7 @@ from app.modules.library.domain.source_nodes import (
 )
 
 _SCAN_COMMIT_BATCH = 32
+_DEFAULT_LEASE_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,7 @@ class ScanLibrarySourceTreeResult:
     tasks_enqueued: int
     paused_for_backpressure: bool
     path_key_collisions: int
+    stopped_for_lease: bool = False
 
 
 class ScanLibrarySourceTree:
@@ -78,7 +81,13 @@ class ScanLibrarySourceTree:
         self._clock = clock
         self._log = log
 
-    def execute(self, library_id: str) -> ScanLibrarySourceTreeResult:
+    def execute(
+        self,
+        library_id: str,
+        claim: ClaimedWork | None = None,
+        *,
+        lease_seconds: int = _DEFAULT_LEASE_SECONDS,
+    ) -> ScanLibrarySourceTreeResult:
         with self._uow.transaction():
             config = self._libraries.get_library(library_id)
 
@@ -87,11 +96,16 @@ class ScanLibrarySourceTree:
         tasks_enqueued = 0
         collisions = 0
         paused = False
+        stopped_for_lease = False
         stack: list[tuple[str | None, str | None]] = [(None, None)]
         batch_writes = 0
 
         while stack:
             with self._uow.transaction():
+                if claim is not None:
+                    if not self._queue.fence_claim(claim, lease_seconds=lease_seconds):
+                        stopped_for_lease = True
+                        break
                 queued = self._queue.queued_item_count()
             if queued >= config.queue_high_water:
                 paused = True
@@ -130,6 +144,13 @@ class ScanLibrarySourceTree:
                         or kind is SourceNodePhysicalKind.DIRECTORY
                     ) and self._would_create_tasks(parsed, kind):
                         with self._uow.transaction():
+                            if claim is not None and not self._queue.fence_claim(
+                                claim, lease_seconds=lease_seconds
+                            ):
+                                stopped_for_lease = True
+                                directory_paused = True
+                                stack.append((parent_id, parent_rel))
+                                break
                             if self._queue.queued_item_count() >= config.queue_high_water:
                                 paused = True
                                 directory_paused = True
@@ -145,6 +166,13 @@ class ScanLibrarySourceTree:
                     )
 
                     with self._uow.transaction():
+                        if claim is not None and not self._queue.fence_claim(
+                            claim, lease_seconds=lease_seconds
+                        ):
+                            stopped_for_lease = True
+                            directory_paused = True
+                            stack.append((parent_id, parent_rel))
+                            break
                         existing = self._source_nodes.get_by_path_key(
                             library_id, parsed.path_key
                         )
@@ -207,6 +235,9 @@ class ScanLibrarySourceTree:
                             covered = None
                             interpretation = None
 
+                    if stopped_for_lease:
+                        break
+
                     if kind is SourceNodePhysicalKind.DIRECTORY:
                         if needs_probe:
                             self._uow.release_before_io()
@@ -222,6 +253,13 @@ class ScanLibrarySourceTree:
                                 time_budget_ms=config.probe_time_budget_ms,
                             )
                             with self._uow.transaction():
+                                if claim is not None and not self._queue.fence_claim(
+                                    claim, lease_seconds=lease_seconds
+                                ):
+                                    stopped_for_lease = True
+                                    directory_paused = True
+                                    stack.append((parent_id, parent_rel))
+                                    break
                                 if self._would_enqueue_from_decision(decision):
                                     if (
                                         self._queue.queued_item_count()
@@ -252,6 +290,13 @@ class ScanLibrarySourceTree:
 
                     if kind is SourceNodePhysicalKind.REGULAR_FILE:
                         with self._uow.transaction():
+                            if claim is not None and not self._queue.fence_claim(
+                                claim, lease_seconds=lease_seconds
+                            ):
+                                stopped_for_lease = True
+                                directory_paused = True
+                                stack.append((parent_id, parent_rel))
+                                break
                             interpretation = self._source_nodes.get_interpretation(
                                 node.id
                             )
@@ -301,14 +346,19 @@ class ScanLibrarySourceTree:
                 )
                 continue
 
-            if directory_paused:
+            if directory_paused or stopped_for_lease:
                 break
 
+        outcome = "ok"
+        if stopped_for_lease:
+            outcome = "lease_lost"
+        elif paused:
+            outcome = "paused"
         self._log.emit(
             "source_tree.scan.completed",
             library_id=library_id,
             stage="scan",
-            outcome="paused" if paused else "ok",
+            outcome=outcome,
         )
         return ScanLibrarySourceTreeResult(
             library_id=library_id,
@@ -317,6 +367,7 @@ class ScanLibrarySourceTree:
             tasks_enqueued=tasks_enqueued,
             paused_for_backpressure=paused,
             path_key_collisions=collisions,
+            stopped_for_lease=stopped_for_lease,
         )
 
     def _should_ignore(
@@ -462,6 +513,8 @@ class ScanLibrarySourceTree:
                 )
                 self._queue.enqueue_library_import_task(task.id)
                 count += 1
+        if resource.active_import_run_id is not None:
+            self._import_runs.mark_discovery_complete(resource.active_import_run_id)
         return count
 
     def _recognize_regular_file(
@@ -592,6 +645,7 @@ class ScanLibrarySourceTree:
             role=adapter.asset_role,
         )
         self._queue.enqueue_library_import_task(task.id)
+        self._import_runs.mark_discovery_complete(run_id)
         return (1, 1)
 
     def _enqueue_owned_or_incremental(

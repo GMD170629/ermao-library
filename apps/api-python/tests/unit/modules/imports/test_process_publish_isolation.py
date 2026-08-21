@@ -128,7 +128,6 @@ class TrackingBooks:
             self.resource,
             import_state=ResourceImportState.READY,
             published_run_id=published_run_id,
-            active_import_run_id=None,
         )
 
     def upsert_asset(self, *, published_run_id: str, **kwargs: object) -> str:
@@ -242,6 +241,31 @@ class TrackingImportRuns:
     def cleanup_run_candidates(self, run_id: str) -> None:
         self.events.append(f"cleanup_candidates:{run_id}")
 
+    def get_run(self, run_id: str) -> object | None:
+        from app.modules.imports.application.readable_resource.ports import ImportRunRecord
+        from app.modules.imports.domain.import_run_policies import ImportRunKind
+
+        return ImportRunRecord(
+            id=run_id,
+            library_id="lib-1",
+            kind=ImportRunKind.REIMPORT,
+            state=ImportRunState.RUNNING,
+            source_node_id="node-1",
+            resource_id="res-1",
+            adapter_id="epub",
+            adapter_version="1",
+            discovery_complete=True,
+        )
+
+    def get_resource_candidate(self, run_id: str) -> None:
+        return None
+
+    def is_discovery_complete(self, run_id: str) -> bool:
+        return True
+
+    def mark_discovery_complete(self, run_id: str) -> None:
+        return None
+
 
 class FakeAdapters:
     def __init__(self, result: FileParseResult) -> None:
@@ -257,10 +281,20 @@ class FakeQueue:
     def __init__(self, *, valid: bool = True) -> None:
         self.valid = valid
         self.completed = False
+        self.requeued = False
         self.write_guard_hits = 0
 
     def is_claim_valid(self, claim: ClaimedWork) -> bool:
         return self.valid
+
+    def fence_claim(self, claim: ClaimedWork, *, lease_seconds: int) -> bool:
+        return self.valid
+
+    def release_and_requeue(
+        self, claim: ClaimedWork, *, delay_seconds: int = 5
+    ) -> bool:
+        self.requeued = True
+        return True
 
     def complete(self, claim: ClaimedWork) -> bool:
         self.completed = True
@@ -279,7 +313,7 @@ class FakeQueue:
         return None
 
     def heartbeat(self, claim: ClaimedWork) -> bool:
-        return True
+        return self.valid
 
 
 class FakeClock:
@@ -439,7 +473,7 @@ def test_late_invalid_claim_skips_writes(tmp_path: Path) -> None:
         tmp_path, resource=resource, task=task, claim_valid=False
     )
     result = usecase.execute("task-1", _claim())
-    assert result.outcome == "lease_invalid"
+    assert result.outcome == "late_lease"
     assert runs.asset_candidates == []
     assert books.publish_calls == []
     assert books.upsert_asset_calls == []

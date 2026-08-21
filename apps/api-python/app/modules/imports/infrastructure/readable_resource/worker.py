@@ -40,12 +40,19 @@ class ReadableResourceWorkerProcessor:
             return "idle"
         try:
             if claimed.work_kind == "scan":
-                self._scan.execute(claimed.target_id)
+                result = self._scan.execute(
+                    claimed.target_id, claimed, lease_seconds=min(lease_seconds, 60)
+                )
+                if result.stopped_for_lease:
+                    return "lease_lost"
                 with self._uow.transaction():
-                    self._queue.complete(claimed)
+                    if not self._queue.complete(claimed):
+                        return "lease_lost"
                 return "scan"
-            result = self._process_import.execute(claimed.target_id, claimed)
-            return result.outcome
+            outcome = self._process_import.execute(
+                claimed.target_id, claimed, lease_seconds=lease_seconds
+            )
+            return outcome.outcome
         except Exception:
             self._uow.rollback()
             logger.exception(

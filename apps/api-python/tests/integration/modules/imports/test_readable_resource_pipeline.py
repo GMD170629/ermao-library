@@ -35,7 +35,7 @@ from app.modules.imports.infrastructure.readable_resource.import_run_repository 
     SqlAlchemyImportRunRepository,
 )
 from app.modules.imports.infrastructure.readable_resource.support import (
-    DeferredSidecarWriteback,
+    InMemorySidecarWriteback,
     SqlAlchemyUnitOfWork,
     StructuredPipelineLog,
     UtcClock,
@@ -122,7 +122,7 @@ def _pipeline(db: Session) -> ReadableResourcePipeline:
     uow = SqlAlchemyUnitOfWork(db)
     clock = UtcClock()
     log = StructuredPipelineLog()
-    sidecar = DeferredSidecarWriteback()
+    sidecar = InMemorySidecarWriteback()
     process = ProcessReadableResourceImportTask(
         libraries=libraries,
         filesystem=filesystem,
@@ -221,7 +221,7 @@ def test_late_lease_second_worker_does_not_overwrite(tmp_path: Path) -> None:
             assert claim_b.lease_owner == "worker-b"
 
             stale = pipeline.process_import_task.execute(claim_a.target_id, claim_a)
-            assert stale.outcome == "lease_invalid"
+            assert stale.outcome == "late_lease"
             assert db.scalar(select(LibraryResourceAsset).limit(1)) is None
 
             live = pipeline.process_import_task.execute(claim_b.target_id, claim_b)
@@ -285,7 +285,15 @@ def test_audiobook_directory_queues_track_candidates(tmp_path: Path) -> None:
                     LibraryResourceAsset.resource_id == resource.id
                 )
             ).all()
-            assert len(published) >= 1 or len(candidates) >= 1 or processed >= 1
+            assert processed >= 1
+            assert len(published) >= 1 or len(candidates) >= 1
+            assert resource.import_state in {"READY", "PENDING"}
+            if published:
+                assert all(asset.role == "TRACK" for asset in published)
+                assert all(
+                    asset.published_run_id == resource.published_run_id
+                    for asset in published
+                )
     finally:
         engine.dispose()
 
@@ -331,6 +339,16 @@ def test_image_directory_queues_page_path(tmp_path: Path) -> None:
             assert claim.work_kind == "import"
             outcome = pipeline.process_import_task.execute(claim.target_id, claim)
             assert outcome.outcome == "ok"
+            db.refresh(resource)
+            assert resource.import_state == "READY"
+            assert resource.published_run_id is not None
+            pages = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.resource_id == resource.id
+                )
+            ).all()
+            assert len(pages) >= 1
+            assert all(asset.role == "PAGE" for asset in pages)
     finally:
         engine.dispose()
 

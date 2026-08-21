@@ -216,6 +216,8 @@ class BookResourceRepositoryPort(Protocol):
 
     def clear_active_import_run(self, resource_id: str) -> None: ...
 
+    def touch_updated_at(self, resource_id: str) -> None: ...
+
     def upsert_asset(
         self,
         *,

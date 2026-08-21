@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -102,6 +103,13 @@ class LibraryImportRun(Base):
     adapter_id: Mapped[str | None] = mapped_column("adapterId", String(191), nullable=True)
     adapter_version: Mapped[str | None] = mapped_column(
         "adapterVersion", String(64), nullable=True
+    )
+    discovery_complete: Mapped[bool] = mapped_column(
+        "discoveryComplete",
+        Boolean(),
+        nullable=False,
+        default=False,
+        server_default="0",
     )
     error_summary: Mapped[str | None] = mapped_column(
         "errorSummary", Text, nullable=True

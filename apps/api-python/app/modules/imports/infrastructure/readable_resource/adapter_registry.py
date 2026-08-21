@@ -38,22 +38,25 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     error_summary="source file is not a regular file",
                 )
             title = absolute_path.stem
-            if adapter.adapter_id is ResourceAdapterId.EPUB:
-                title = self._inspect_epub_title(absolute_path) or title
-            elif adapter.adapter_id is ResourceAdapterId.PDF:
-                title = self._inspect_pdf_title(absolute_path) or title
-            elif adapter.adapter_id in {
-                ResourceAdapterId.TXT,
-                ResourceAdapterId.KINDLE,
-            }:
-                title = self._inspect_reflowable_title(absolute_path) or title
-            elif adapter.adapter_id is ResourceAdapterId.COMIC_ARCHIVE:
-                title = self._inspect_comic_title(absolute_path) or title
-            elif adapter.adapter_id in {
-                ResourceAdapterId.AUDIO_FILE,
-                ResourceAdapterId.AUDIOBOOK_DIRECTORY,
-            }:
-                title = self._inspect_audio_title(absolute_path) or title
+            try:
+                if adapter.adapter_id is ResourceAdapterId.EPUB:
+                    title = self._inspect_epub_title(absolute_path) or title
+                elif adapter.adapter_id is ResourceAdapterId.PDF:
+                    title = self._inspect_pdf_title(absolute_path) or title
+                elif adapter.adapter_id in {
+                    ResourceAdapterId.TXT,
+                    ResourceAdapterId.KINDLE,
+                }:
+                    title = self._inspect_reflowable_title(absolute_path) or title
+                elif adapter.adapter_id is ResourceAdapterId.COMIC_ARCHIVE:
+                    title = self._inspect_comic_title(absolute_path) or title
+                elif adapter.adapter_id in {
+                    ResourceAdapterId.AUDIO_FILE,
+                    ResourceAdapterId.AUDIOBOOK_DIRECTORY,
+                }:
+                    title = self._inspect_audio_title(absolute_path) or title
+            except Exception:
+                title = absolute_path.stem
             # IMAGE_DIRECTORY pages: filename stem is enough; no archive unpack.
             asset = ParsedAssetPayload(
                 title=title,

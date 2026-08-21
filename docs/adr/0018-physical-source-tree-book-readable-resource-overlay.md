@@ -509,8 +509,9 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 ## 实施进度
 
 非规范性实施台账。本节不改变上文规范。阶段 1A/1B 与阶段 2～6 目标实现已落地；
-阶段 7A（运行时验收修复）已完成门禁记录；阶段 7B（baseline/激活决策）仍未完成。
-target composition root 可独立构造，但尚未接入生产启动路径。
+阶段 7A 审查修复（discovery 屏障、租约 fence、全量目录 reimport、sidecar 生产注入等）
+已落地并完成聚焦门禁；**不得记为「7A / 阶段 7 完成」**。阶段 7B（baseline/激活决策）
+仍未开始。target composition root 可独立构造，但尚未接入生产启动路径。
 
 ### 阶段 1A：SourceNode 纯领域基础 — 已完成
 
@@ -634,45 +635,50 @@ target composition root 可独立构造，但尚未接入生产启动路径。
     （实现位于 `imports/infrastructure/readable_resource/worker.py`）
 - **未**注册到现有生产 API / router / worker 启动路径
 
-### 阶段 7A：运行时验收修复 — 本批完成实现与门禁（非“阶段 7 完成”）
+### 阶段 7A：审查修复完成，待复核（非“阶段 7 完成”）
 
-**修复的真实问题：**
+**本批审查修复（相对初版 7A）：**
 
-1. ORM flush 顺序：为 SourceNode→Book/Run→Resource→candidate/Task→Asset 补齐 relationship /
-   `foreign_keys` / `post_update` / `overlaps`，同一事务插入对象图不再 FOREIGN KEY failed
-2. 能力边界：`ScanLibrarySourceTree` 与 `SqlAlchemyImportRunRepository` 迁入 imports；
-   library 持久化端口迁至 `library/application/source_tree_ports.py` 并由 `library.public` 导出；
-   `AdapterIdentity` 解除 library→imports.domain 耦合；架构回归禁止 peer 深导入
-3. 短事务：`release_before_io` + `transaction()`；scandir/probe/parse 时 Session 不在活动事务；
-   提交后才 sidecar；异常路径 rollback
-4. 队列：`ClaimedWork` 不可变 DTO；overlay SQL 预过滤；精确 `work_item_id` ack/heartbeat/lease CAS；
-   晚到 worker 不得写结果
-5. 发布隔离：run-owned 结果先写 candidate；达最小 READY 才原子切 `publishedRunId`；
-   reimport 不写旧 published 集合；CAS 失败 Run→FAILED；目录单项失败不提前终结 Run
-6. 流式扫描：`iter_directory_entries` Iterator；probe 循环内预算；百万合成流式测试
-
-**新增测试矩阵（节选）：**
-
-- domain：directory probe、adapter 匹配、Run 策略、FLAT/VOLUMES、READY 条件
-- application：短事务扫描、publish 隔离、reimport/retry CAS、manage 用例
-- infrastructure：流式 scandir / 百万条目不物化、路径 escape
-- integration：schema 全绿、单文件/有声书 TRACK/图片 PAGE、claim/late lease
-- architecture：跨能力深导入守卫；bootstrap 不直接 rollback
+1. `LibraryImportRun.discoveryComplete`（默认 false）；`mark_discovery_complete` /
+   `is_discovery_complete`；finalize 仅当 discovery 完成且 incomplete tasks == 0
+2. Reimport：`ACTIVE_RUN_BUSY` 在已有 active run 时立即返回（无 FS I/O、无 Run）；
+   `create_run(resource_id=None)` + CAS `expected=None` + `attach_resource`；
+   目录 reimport 对 scope 做完整有界流式 DFS（非仅 probe 样本）；文件 reimport
+   入队后立即 mark discovery complete
+3. Process：run-owned adapter 取自 ImportRun / ResourceCandidate；publish 用 candidate
+   身份；`cleanup_stale_assets` 仅 finalize；incremental 遇 active run → QUEUED +
+   `release_and_requeue`；写事务内先 `fence_claim`，失败 → `late_lease` 不写业务结果
+4. Scan：`execute(..., claim=None)`；worker 传入 claim；租约丢失 → `stopped_for_lease`；
+   complete 失败不得报 scan 成功
+5. Sidecar：`InMemorySidecarWriteback` 测试专用；production composition root 注入
+   `DurableSidecarWriteback`（结构化日志 + 提交后短事务 `touch_updated_at` 可恢复标记；
+   不改变现有 OPF 写回优先级，后续可替换为 metadata writeback 队列公开端口）
+6. WorkQueue：`fence_claim` / `release_and_requeue`；complete 带 LEASED+owner+未过期 CAS
 
 **本批实际运行命令与结果（于 `apps/api-python`）：**
 
-- `.venv/bin/pytest -q tests/unit/modules/imports tests/unit/modules/library/test_book_placement.py tests/unit/modules/library/test_readable_resource_states.py tests/unit/modules/library/test_manage_source_tree.py tests/unit/modules/library/test_source_nodes.py tests/integration/modules/library/test_readable_resource_schema.py tests/integration/modules/imports tests/test_capability_architecture.py tests/test_sqlite_database.py` → **261 passed**
-- `.venv/bin/pytest -q` 全量 → **6 failed, 1030 passed**（仅既有 6 项；无新增失败）
-- `.venv/bin/python -m compileall -q app tests` → 成功
-- 仓库根 `git diff --check` → 成功
-- Ruff：不可用（环境未安装 ruff；未改依赖锁）
+- `.venv/bin/pytest -q tests/unit/modules/imports tests/unit/modules/library/test_source_nodes.py tests/unit/modules/library/test_book_placement.py tests/unit/modules/library/test_readable_resource_states.py tests/unit/modules/library/test_manage_source_tree.py tests/integration/modules/imports tests/integration/modules/library/test_readable_resource_schema.py tests/test_capability_architecture.py tests/test_sqlite_database.py` → **272 passed**
+- `.venv/bin/pytest -q` → **6 failed, 1041 passed**（仅既有 6 项；无新增失败）
+- `.venv/bin/python -m compileall -q app tests` → exit 0
+- 仓库根 `git diff --check` → exit 0
+- Ruff：环境不可用（`ruff not found`）；本批未改依赖
+
+既有 6 项失败（本批不修）：
+
+- `tests/contract/api/test_reader_publication_http.py::test_mobi_publication_uses_pinned_runtime_without_materializing_epub`
+- `tests/integration/modules/library/test_volume_metadata_commands.py::test_volume_metadata_update_preserves_directory_owned_fields`
+- `tests/integration/modules/library/test_volume_metadata_commands.py::test_batch_media_kind_override_preserves_work_version_volume_topology`
+- `tests/test_audiobook_support.py::test_three_media_filters_tabs_preferences_and_completion_are_user_scoped`
+- `tests/test_library_groupings_api.py::test_grouping_api_and_exact_facet_work_filter`
+- `tests/test_multi_user_authorization.py::test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection`
 
 **明确未完成：**
 
-- 阶段 7B：fresh baseline 压平 0001～0003、是否激活 target composition root 的产品决策
+- 阶段 7B：**未开始** — fresh baseline 压平 0001～0003、是否激活 target composition root
 - target composition root **仍未激活**到生产启动路径
-- 不得将本批记为“阶段 7 完成”
+- Durable sidecar 目前为 Resource `updatedAt` 可恢复标记，尚未接入完整 metadata writeback 队列公开端口
+- 不得将本批记为“阶段 7 完成”；表述为“7A 审查修复完成，待复核”
 
-### 阶段 7B — 未完成
+### 阶段 7B — 未开始
 
 - baseline 压平与激活决策；规模验收收尾

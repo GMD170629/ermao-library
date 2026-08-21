@@ -58,6 +58,7 @@ class FakeImportRuns:
         self.created_runs: list[tuple[str, ImportRunKind]] = []
         self.run_states: list[tuple[str, ImportRunState, str | None]] = []
         self.tasks: list[str] = []
+        self.attached: list[tuple[str, str]] = []
         self._seq = 0
 
     def create_run(
@@ -84,6 +85,12 @@ class FakeImportRuns:
         published_at: object | None = None,
     ) -> None:
         self.run_states.append((run_id, state, error_summary))
+
+    def attach_resource(self, run_id: str, resource_id: str) -> None:
+        self.attached.append((run_id, resource_id))
+
+    def mark_discovery_complete(self, run_id: str) -> None:
+        return None
 
     def create_task(
         self,
@@ -138,6 +145,12 @@ class FakeQueue:
     def is_claim_valid(self, claim: object) -> bool:
         return True
 
+    def fence_claim(self, claim: object, *, lease_seconds: int) -> bool:
+        return True
+
+    def release_and_requeue(self, claim: object, *, delay_seconds: int = 5) -> bool:
+        return True
+
 
 class FakeLog:
     def emit(self, event: str, **kwargs: object) -> None:
@@ -173,15 +186,11 @@ def test_retry_cas_failure_marks_run_failed_not_running_orphan() -> None:
     result = usecase.execute("res-1")
     assert result.ok is False
     assert result.code == "ACTIVE_RUN_BUSY"
-    assert result.run_id == "run-1"
-    assert books.cas_calls == 1
-    assert runs.run_states == [
-        ("run-1", ImportRunState.FAILED, "active_run_cas_failed")
-    ]
+    assert result.run_id is None
+    assert books.cas_calls == 0
+    assert runs.created_runs == []
     assert queue.enqueued == []
     assert runs.tasks == []
-    # Must not leave a RUNNING orphan: only FAILED was recorded after create.
-    assert all(state is ImportRunState.FAILED for _, state, _ in runs.run_states)
 
 
 def test_retry_cas_success_enqueues_owned_task() -> None:

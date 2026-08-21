@@ -348,6 +348,12 @@ def _build_overlay_metadata() -> MetaData:
         Column("resourceId", String(191), nullable=True),
         Column("adapterId", String(191), nullable=True),
         Column("adapterVersion", String(64), nullable=True),
+        Column(
+            "discoveryComplete",
+            Boolean(),
+            nullable=False,
+            server_default="0",
+        ),
         Column("errorSummary", Text(), nullable=True),
         Column("publishedAt", BigInteger(), nullable=True),
         Column(

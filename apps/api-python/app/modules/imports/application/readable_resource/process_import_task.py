@@ -34,6 +34,8 @@ from app.modules.library.domain.readable_resource_states import (
     meets_minimum_ready_assets,
 )
 
+_DEFAULT_LEASE_SECONDS = 120
+
 
 @dataclass(frozen=True, slots=True)
 class ProcessTaskResult:
@@ -69,14 +71,26 @@ class ProcessReadableResourceImportTask:
         self._log = log
         self._sidecar = sidecar
 
-    def execute(self, task_id: str, claim: ClaimedWork) -> ProcessTaskResult:
+    def execute(
+        self,
+        task_id: str,
+        claim: ClaimedWork,
+        *,
+        lease_seconds: int = _DEFAULT_LEASE_SECONDS,
+    ) -> ProcessTaskResult:
         try:
-            return self._execute(task_id, claim)
+            return self._execute(task_id, claim, lease_seconds=lease_seconds)
         except Exception:
             self._uow.rollback()
             raise
 
-    def _execute(self, task_id: str, claim: ClaimedWork) -> ProcessTaskResult:
+    def _execute(
+        self,
+        task_id: str,
+        claim: ClaimedWork,
+        *,
+        lease_seconds: int,
+    ) -> ProcessTaskResult:
         with self._uow.transaction():
             task = self._import_runs.get_task(task_id)
             if task is None:
@@ -85,7 +99,7 @@ class ProcessReadableResourceImportTask:
             node = self._source_nodes.get(task.source_node_id)
             if resource is None or node is None:
                 return ProcessTaskResult(task_id=task_id, outcome="missing_targets")
-            adapter = self._resolve_adapter(resource.adapter_id)
+            adapter = self._resolve_adapter_for_task(task.owner_import_run_id, resource)
             if adapter is None:
                 return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
             config = self._libraries.get_library(resource.library_id)
@@ -94,6 +108,7 @@ class ProcessReadableResourceImportTask:
             role = task.role
             resource_id = resource.id
             library_id = resource.library_id
+            owner_run_id = task.owner_import_run_id
 
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
@@ -106,8 +121,8 @@ class ProcessReadableResourceImportTask:
         schedule_sidecar = False
         outcome = "ok"
         with self._uow.transaction():
-            if not self._queue.is_claim_valid(claim):
-                return ProcessTaskResult(task_id=task_id, outcome="lease_invalid")
+            if not self._queue.fence_claim(claim, lease_seconds=lease_seconds):
+                return ProcessTaskResult(task_id=task_id, outcome="late_lease")
 
             task = self._import_runs.get_task(task_id)
             resource = self._books_resources.get_resource(resource_id)
@@ -115,7 +130,7 @@ class ProcessReadableResourceImportTask:
             if task is None or resource is None or node is None:
                 return ProcessTaskResult(task_id=task_id, outcome="missing_targets")
 
-            adapter = self._resolve_adapter(resource.adapter_id)
+            adapter = self._resolve_adapter_for_task(task.owner_import_run_id, resource)
             if adapter is None:
                 self._import_runs.mark_task_state(
                     task_id,
@@ -123,7 +138,8 @@ class ProcessReadableResourceImportTask:
                     error_summary="unknown_adapter",
                     increment_attempt=True,
                 )
-                self._queue.complete(claim)
+                if not self._queue.complete(claim):
+                    raise RuntimeError("claim_complete_failed_after_writes")
                 return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
 
             self._import_runs.mark_task_state(
@@ -144,7 +160,7 @@ class ProcessReadableResourceImportTask:
                 )
             if not allowed:
                 self._import_runs.mark_task_state(task_id, LibraryImportTaskState.QUEUED)
-                # Leave claim leased for retry after active run finishes.
+                self._queue.release_and_requeue(claim)
                 return ProcessTaskResult(task_id=task_id, outcome="deferred_active_run")
 
             if task.owner_import_run_id is not None:
@@ -185,11 +201,44 @@ class ProcessReadableResourceImportTask:
             )
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
 
+    def _resolve_adapter_for_task(
+        self,
+        owner_import_run_id: str | None,
+        resource: object,
+    ) -> ResourceAdapterSpec | None:
+        if owner_import_run_id is not None:
+            run = self._import_runs.get_run(owner_import_run_id)
+            candidate = self._import_runs.get_resource_candidate(owner_import_run_id)
+            adapter_id = None
+            if run is not None and run.adapter_id:
+                adapter_id = run.adapter_id
+            elif candidate is not None:
+                adapter_id = candidate.adapter_id
+            if adapter_id is not None:
+                return self._resolve_adapter(adapter_id)
+        adapter_id = getattr(resource, "adapter_id", None)
+        if isinstance(adapter_id, str):
+            return self._resolve_adapter(adapter_id)
+        return None
+
     def _resolve_adapter(self, adapter_id: str) -> ResourceAdapterSpec | None:
         return next(
             (spec for spec in ADAPTER_SPECS if spec.adapter_id.value == adapter_id),
             None,
         )
+
+    def _publish_adapter(
+        self, owner_run_id: str, fallback: ResourceAdapterSpec
+    ) -> ResourceAdapterSpec:
+        candidate = self._import_runs.get_resource_candidate(owner_run_id)
+        if candidate is None:
+            return fallback
+        resolved = self._resolve_adapter(candidate.adapter_id)
+        return resolved if resolved is not None else fallback
+
+    def _ack_or_raise(self, claim: ClaimedWork) -> None:
+        if not self._queue.complete(claim):
+            raise RuntimeError("claim_complete_failed_after_writes")
 
     def _commit_run_owned(
         self,
@@ -207,7 +256,10 @@ class ProcessReadableResourceImportTask:
         resource = self._books_resources.get_resource(resource_id)
         if resource is None or resource.active_import_run_id != owner_run_id:
             self._import_runs.mark_task_state(task_id, LibraryImportTaskState.QUEUED)
+            self._queue.release_and_requeue(claim)
             return "deferred_active_run"
+
+        publish_adapter = self._publish_adapter(owner_run_id, adapter)
 
         if not parsed.ok or parsed.asset is None:
             self._import_runs.upsert_asset_candidate(
@@ -228,10 +280,10 @@ class ProcessReadableResourceImportTask:
             self._maybe_finalize_run(
                 resource_id=resource_id,
                 owner_run_id=owner_run_id,
-                adapter=adapter,
+                adapter=publish_adapter,
                 error_summary=parsed.error_summary,
             )
-            self._queue.complete(claim)
+            self._ack_or_raise(claim)
             return "failed"
 
         self._import_runs.upsert_asset_candidate(
@@ -248,6 +300,7 @@ class ProcessReadableResourceImportTask:
         resource = self._books_resources.get_resource(resource_id)
         if resource is None or resource.active_import_run_id != owner_run_id:
             self._import_runs.mark_task_state(task_id, LibraryImportTaskState.QUEUED)
+            self._queue.release_and_requeue(claim)
             return "deferred_active_run"
 
         ready_candidates = self._import_runs.count_ready_asset_candidates(owner_run_id)
@@ -257,7 +310,6 @@ class ProcessReadableResourceImportTask:
         )
 
         if already_published_this_run:
-            # Tail append onto the current published run only.
             self._books_resources.upsert_asset(
                 library_id=library_id,
                 resource_id=resource_id,
@@ -271,14 +323,13 @@ class ProcessReadableResourceImportTask:
             )
         elif meets_minimum_ready_assets(
             ready_asset_count=ready_candidates,
-            minimum_ready_assets=adapter.minimum_ready_assets,
+            minimum_ready_assets=publish_adapter.minimum_ready_assets,
         ):
-            # Publish to the NEW run id only — never write to an old publishedRunId.
             title = parsed.resource_title or node_name
             self._books_resources.publish_resource(
                 resource_id=resource_id,
                 published_run_id=owner_run_id,
-                adapter=adapter_identity(adapter),
+                adapter=adapter_identity(publish_adapter),
                 title=title,
             )
             for candidate in self._import_runs.list_ready_asset_candidates(owner_run_id):
@@ -293,16 +344,16 @@ class ProcessReadableResourceImportTask:
                     sort_key=candidate.sort_key,
                     failure_reason=None,
                 )
-            self._books_resources.cleanup_stale_assets(resource_id, owner_run_id)
+            # cleanup_stale_assets only on finalize, not first READY publish.
 
         self._import_runs.mark_task_state(task_id, LibraryImportTaskState.SUCCEEDED)
         self._maybe_finalize_run(
             resource_id=resource_id,
             owner_run_id=owner_run_id,
-            adapter=adapter,
+            adapter=publish_adapter,
             error_summary=None,
         )
-        self._queue.complete(claim)
+        self._ack_or_raise(claim)
         return "ok"
 
     def _commit_incremental(
@@ -324,10 +375,11 @@ class ProcessReadableResourceImportTask:
                 LibraryImportTaskState.FAILED,
                 error_summary="resource_missing",
             )
-            self._queue.complete(claim)
+            self._ack_or_raise(claim)
             return "missing_targets"
         if resource.active_import_run_id is not None:
             self._import_runs.mark_task_state(task_id, LibraryImportTaskState.QUEUED)
+            self._queue.release_and_requeue(claim)
             return "deferred_active_run"
 
         published_run_id = resource.published_run_id
@@ -337,7 +389,7 @@ class ProcessReadableResourceImportTask:
                 LibraryImportTaskState.FAILED,
                 error_summary="missing_published_run",
             )
-            self._queue.complete(claim)
+            self._ack_or_raise(claim)
             return "missing_published_run"
 
         if not parsed.ok or parsed.asset is None:
@@ -346,7 +398,7 @@ class ProcessReadableResourceImportTask:
                 LibraryImportTaskState.FAILED,
                 error_summary=parsed.error_summary or parsed.error_code,
             )
-            self._queue.complete(claim)
+            self._ack_or_raise(claim)
             return "failed"
 
         self._books_resources.upsert_asset(
@@ -368,7 +420,7 @@ class ProcessReadableResourceImportTask:
                 title=parsed.resource_title or node_name,
             )
         self._import_runs.mark_task_state(task_id, LibraryImportTaskState.SUCCEEDED)
-        self._queue.complete(claim)
+        self._ack_or_raise(claim)
         return "ok"
 
     def _maybe_finalize_run(
@@ -379,6 +431,8 @@ class ProcessReadableResourceImportTask:
         adapter: ResourceAdapterSpec,
         error_summary: str | None,
     ) -> None:
+        if not self._import_runs.is_discovery_complete(owner_run_id):
+            return
         if self._import_runs.count_incomplete_tasks(owner_run_id) > 0:
             return
         resource = self._books_resources.get_resource(resource_id)

@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models.common import cuid
+from app.models.common import cuid, db_timestamp
 from app.models.library import Library
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
@@ -408,6 +408,13 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         if row is None:
             return
         row.active_import_run_id = None
+        self._session.flush()
+
+    def touch_updated_at(self, resource_id: str) -> None:
+        row = self._session.get(LibraryReadableResource, resource_id)
+        if row is None:
+            return
+        row.updated_at = db_timestamp()
         self._session.flush()
 
     def upsert_asset(

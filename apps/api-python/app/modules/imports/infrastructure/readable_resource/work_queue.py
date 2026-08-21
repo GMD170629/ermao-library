@@ -164,7 +164,21 @@ class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
         return None
 
     def complete(self, claim: ClaimedWork) -> bool:
-        if not self.is_claim_valid(claim):
+        now = db_timestamp()
+        leased = self._session.execute(
+            update(ImportWorkItem)
+            .where(
+                ImportWorkItem.id == claim.work_item_id,
+                ImportWorkItem.status == "LEASED",
+                ImportWorkItem.lease_owner == claim.lease_owner,
+                or_(
+                    ImportWorkItem.lease_expires_at.is_(None),
+                    ImportWorkItem.lease_expires_at > now,
+                ),
+            )
+            .values(updated_at=now)
+        )
+        if not leased.rowcount:
             return False
         if claim.work_kind == "import" and claim.bridge_import_task_id is not None:
             bridge = self._session.get(ImportTask, claim.bridge_import_task_id)
@@ -179,18 +193,45 @@ class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
         return True
 
     def heartbeat(self, claim: ClaimedWork) -> bool:
-        if not self.is_claim_valid(claim):
-            return False
+        return self.fence_claim(claim, lease_seconds=60)
+
+    def fence_claim(self, claim: ClaimedWork, *, lease_seconds: int) -> bool:
         now = db_timestamp()
-        expires = now + timedelta(seconds=60)
+        expires = now + timedelta(seconds=lease_seconds)
         result = self._session.execute(
             update(ImportWorkItem)
             .where(
                 ImportWorkItem.id == claim.work_item_id,
                 ImportWorkItem.status == "LEASED",
                 ImportWorkItem.lease_owner == claim.lease_owner,
+                or_(
+                    ImportWorkItem.lease_expires_at.is_(None),
+                    ImportWorkItem.lease_expires_at > now,
+                ),
             )
             .values(lease_expires_at=expires, updated_at=now)
+        )
+        self._session.flush()
+        return bool(result.rowcount)
+
+    def release_and_requeue(
+        self, claim: ClaimedWork, *, delay_seconds: int = 5
+    ) -> bool:
+        now = db_timestamp()
+        available_at = now + timedelta(seconds=delay_seconds)
+        result = self._session.execute(
+            update(ImportWorkItem)
+            .where(
+                ImportWorkItem.id == claim.work_item_id,
+                ImportWorkItem.lease_owner == claim.lease_owner,
+            )
+            .values(
+                status="PENDING",
+                lease_owner=None,
+                lease_expires_at=None,
+                available_at=available_at,
+                updated_at=now,
+            )
         )
         self._session.flush()
         return bool(result.rowcount)

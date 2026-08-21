@@ -30,7 +30,7 @@ from app.modules.imports.infrastructure.readable_resource.import_run_repository 
     SqlAlchemyImportRunRepository,
 )
 from app.modules.imports.infrastructure.readable_resource.support import (
-    DeferredSidecarWriteback,
+    DurableSidecarWriteback,
     SqlAlchemyUnitOfWork,
     StructuredPipelineLog,
     UtcClock,
@@ -53,7 +53,6 @@ from app.modules.library.infrastructure.persistence.source_tree_repository impor
     SqlAlchemyLibraryConfigAdapter,
     SqlAlchemySourceNodeRepository,
 )
-
 __all__ = [
     "ReadableResourcePipeline",
     "ReadableResourceWorkerProcessor",
@@ -94,7 +93,13 @@ def build_readable_resource_pipeline(
     uow = SqlAlchemyUnitOfWork(session)
     clock = UtcClock()
     log = StructuredPipelineLog()
-    sidecar = DeferredSidecarWriteback()
+
+    def _persist_sidecar_intent(resource_id: str) -> None:
+        # Recoverable marker after the import UoW committed; OPF priority unchanged.
+        with uow.transaction():
+            books_resources.touch_updated_at(resource_id)
+
+    sidecar = DurableSidecarWriteback(_persist_sidecar_intent)
 
     scan = ScanLibrarySourceTree(
         libraries=libraries,

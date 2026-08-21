@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -75,15 +75,37 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
         self._session.rollback()
 
 
-class DeferredSidecarWriteback(SidecarWritebackPort):
-    """Schedules recoverable sidecar writeback after commit; no-op until phase 7."""
+class InMemorySidecarWriteback(SidecarWritebackPort):
+    """Test-only sidecar scheduler that records resource ids in memory."""
 
     def __init__(self) -> None:
-        self._pending: list[str] = []
+        self.scheduled: list[str] = []
 
     def schedule_after_commit(self, resource_id: str) -> None:
-        self._pending.append(resource_id)
+        self.scheduled.append(resource_id)
+
+
+# Backward-compatible alias for existing unit/integration helpers.
+DeferredSidecarWriteback = InMemorySidecarWriteback
+
+
+class DurableSidecarWriteback(SidecarWritebackPort):
+    """Production sidecar: structured log + durable enqueue callback.
+
+    Composition root injects a recoverable enqueue (e.g. short UoW via ports).
+    Test suites use InMemorySidecarWriteback instead.
+    """
+
+    def __init__(self, enqueue_fn: Callable[[str], None]) -> None:
+        self._enqueue = enqueue_fn
+
+    def schedule_after_commit(self, resource_id: str) -> None:
         logger.info(
             "readable_resource.sidecar.scheduled",
-            extra={"resource_id": resource_id, "stage": "sidecar", "outcome": "queued"},
+            extra={
+                "resource_id": resource_id,
+                "stage": "sidecar",
+                "outcome": "queued",
+            },
         )
+        self._enqueue(resource_id)

@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 from app.models.common import cuid
 from app.modules.imports.application.readable_resource.ports import (
     AssetCandidateRecord,
+    ImportRunRecord,
     ImportRunRepositoryPort,
     LibraryImportTaskRecord,
+    ResourceCandidateRecord,
 )
 from app.modules.imports.domain.import_run_policies import (
     ImportRunKind,
@@ -61,10 +63,60 @@ class SqlAlchemyImportRunRepository(ImportRunRepositoryPort):
                 resource_id=resource_id,
                 adapter_id=adapter_id,
                 adapter_version=adapter_version,
+                discovery_complete=False,
             )
         )
         self._session.flush()
         return run_id
+
+    def get_run(self, run_id: str) -> ImportRunRecord | None:
+        row = self._session.get(LibraryImportRun, run_id)
+        if row is None:
+            return None
+        return ImportRunRecord(
+            id=row.id,
+            library_id=row.library_id,
+            kind=ImportRunKind(row.kind),
+            state=ImportRunState(row.state),
+            source_node_id=row.source_node_id,
+            resource_id=row.resource_id,
+            adapter_id=row.adapter_id,
+            adapter_version=row.adapter_version,
+            discovery_complete=bool(row.discovery_complete),
+        )
+
+    def get_resource_candidate(
+        self, run_id: str
+    ) -> ResourceCandidateRecord | None:
+        row = self._session.scalar(
+            select(ResourceCandidate).where(ResourceCandidate.import_run_id == run_id)
+        )
+        if row is None:
+            return None
+        return ResourceCandidateRecord(
+            import_run_id=row.import_run_id,
+            library_id=row.library_id,
+            book_id=row.book_id,
+            source_node_id=row.source_node_id,
+            adapter_id=row.adapter_id,
+            adapter_version=row.adapter_version,
+            media_kind=row.media_kind,
+            format_label=row.format,
+            title=row.title,
+        )
+
+    def mark_discovery_complete(self, run_id: str) -> None:
+        row = self._session.get(LibraryImportRun, run_id)
+        if row is None:
+            raise LookupError(run_id)
+        row.discovery_complete = True
+        self._session.flush()
+
+    def is_discovery_complete(self, run_id: str) -> bool:
+        row = self._session.get(LibraryImportRun, run_id)
+        if row is None:
+            return False
+        return bool(row.discovery_complete)
 
     def set_run_state(
         self,

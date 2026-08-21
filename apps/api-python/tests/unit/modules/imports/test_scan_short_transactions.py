@@ -44,7 +44,7 @@ class RecordingUoW:
 
     def release_before_io(self) -> None:
         self.events.append("release")
-        assert not self.in_transaction or True  # release may follow closed txn
+        assert not self.in_transaction
         self.in_transaction = False
 
     def rollback(self) -> None:
@@ -289,6 +289,18 @@ class FakeImportRuns:
     def cleanup_run_candidates(self, run_id: str) -> None:
         return None
 
+    def get_run(self, run_id: str) -> None:
+        return None
+
+    def get_resource_candidate(self, run_id: str) -> None:
+        return None
+
+    def mark_discovery_complete(self, run_id: str) -> None:
+        return None
+
+    def is_discovery_complete(self, run_id: str) -> bool:
+        return True
+
 
 class FakeQueue:
     def __init__(self) -> None:
@@ -313,6 +325,12 @@ class FakeQueue:
         return True
 
     def is_claim_valid(self, claim: object) -> bool:
+        return True
+
+    def fence_claim(self, claim: object, *, lease_seconds: int) -> bool:
+        return True
+
+    def release_and_requeue(self, claim: object, *, delay_seconds: int = 5) -> bool:
         return True
 
 

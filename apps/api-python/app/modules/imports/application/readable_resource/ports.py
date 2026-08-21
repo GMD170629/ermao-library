@@ -50,6 +50,7 @@ __all__ = [
     "ClockPort",
     "DirectoryEntry",
     "FileParseResult",
+    "ImportRunRecord",
     "ImportRunRepositoryPort",
     "InterpretationRecord",
     "LibraryConfigPort",
@@ -61,6 +62,7 @@ __all__ = [
     "ReadableResourceRecord",
     "ResourceAdapterExecutorPort",
     "ResourceAdapterSpec",
+    "ResourceCandidateRecord",
     "SidecarWritebackPort",
     "SourceNodeRecord",
     "SourceNodeRepositoryPort",
@@ -101,6 +103,32 @@ class LibraryImportTaskRecord:
     owner_import_run_id: str | None
     role: AssetRole
     attempt_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ImportRunRecord:
+    id: str
+    library_id: str
+    kind: ImportRunKind
+    state: ImportRunState
+    source_node_id: str
+    resource_id: str | None
+    adapter_id: str | None
+    adapter_version: str | None
+    discovery_complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceCandidateRecord:
+    import_run_id: str
+    library_id: str
+    book_id: str | None
+    source_node_id: str
+    adapter_id: str
+    adapter_version: str
+    media_kind: str
+    format_label: str
+    title: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +227,16 @@ class ImportRunRepositoryPort(Protocol):
         adapter_version: str | None,
     ) -> str: ...
 
+    def get_run(self, run_id: str) -> ImportRunRecord | None: ...
+
+    def get_resource_candidate(
+        self, run_id: str
+    ) -> ResourceCandidateRecord | None: ...
+
+    def mark_discovery_complete(self, run_id: str) -> None: ...
+
+    def is_discovery_complete(self, run_id: str) -> bool: ...
+
     def set_run_state(
         self,
         run_id: str,
@@ -282,6 +320,12 @@ class WorkQueuePort(Protocol):
     def heartbeat(self, claim: ClaimedWork) -> bool: ...
 
     def is_claim_valid(self, claim: ClaimedWork) -> bool: ...
+
+    def fence_claim(self, claim: ClaimedWork, *, lease_seconds: int) -> bool: ...
+
+    def release_and_requeue(
+        self, claim: ClaimedWork, *, delay_seconds: int = 5
+    ) -> bool: ...
 
 
 class ResourceAdapterExecutorPort(Protocol):
