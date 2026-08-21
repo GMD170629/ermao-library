@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import delete, insert, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapper, Session
 
 from app.models import (
     LibraryBookFacet,
@@ -98,7 +98,7 @@ def write_prepared_operation(db: Session, prepared: PreparedOperationWrite) -> N
 
 
 def _column_name_to_attr(model: type) -> dict[str, str]:
-    mapper = sa_inspect(model)
+    mapper: Mapper[Any] = sa_inspect(model, raiseerr=True)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 
@@ -195,7 +195,7 @@ def insert_snapshot(db: Session, table: str, row: dict[str, Any]) -> None:
     values = row_to_attr_values(model, row)
     if not values:
         return
-    mapper = sa_inspect(model)
+    mapper: Mapper[Any] = sa_inspect(model, raiseerr=True)
     primary_key = list(mapper.primary_key)
     primary_key_attrs = {
         mapper.get_property_by_column(column).key for column in primary_key
@@ -239,7 +239,7 @@ def restore_book_metadata(db: Session, row: dict[str, Any]) -> None:
         .where(LibraryBookMetadata.book_id == book_id)
         .values(**values)
     )
-    if result.rowcount != 1:
+    if getattr(result, "rowcount", 0) != 1:
         raise ValueError("Book metadata snapshot target does not exist")
 
 
@@ -276,7 +276,7 @@ def restore_resource_metadata(db: Session, row: dict[str, Any]) -> None:
         .where(LibraryReadableResourceMetadata.resource_id == resource_id)
         .values(**values)
     )
-    if result.rowcount != 1:
+    if getattr(result, "rowcount", 0) != 1:
         raise ValueError("Resource metadata snapshot target does not exist")
 
 

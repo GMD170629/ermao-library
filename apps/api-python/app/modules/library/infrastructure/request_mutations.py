@@ -38,7 +38,7 @@ from app.modules.library.infrastructure.facet_sync import (
 from app.modules.shelf.public import ShelfBookMembershipPort
 
 EventWriter = Callable[[Session, list[object]], None]
-MetadataWriter = Callable[[Session, tuple[object, ...]], object]
+MetadataWriter = Callable[[Session, tuple[object, ...]], tuple[str, ...]]
 
 
 def load_metadata_apply_job_ids(db: Session, book_id: str) -> tuple[str, ...]:
@@ -272,7 +272,7 @@ class SqlAlchemyLibraryRequestMutations:
                 updated_at=command.now,
             )
         )
-        return bool(result.rowcount)
+        return bool(getattr(result, "rowcount", 0))
 
 
 __all__ = ["SqlAlchemyLibraryRequestMutations", "load_metadata_apply_job_ids"]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -79,7 +81,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         total = int(
             self._db.scalar(select(func.count()).select_from(base.subquery())) or 0
         )
-        order = (
+        order: tuple[Any, ...] = (
             LibraryBookMetadata.title.asc(),
             LibraryBook.id.asc(),
         )
@@ -150,7 +152,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         facets = tuple(
             CatalogFacet(
                 id=facet.id,
-                kind=kind,
+                kind=cast(CatalogFacetKind, facet.kind),
                 name=facet.name,
                 normalized_name=facet.normalized_name,
                 book_count=int(count or 0),
@@ -168,7 +170,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
 
     @staticmethod
     def _book_id_column():
-        return LibraryBook.id
+        return cast(Any, LibraryBook.id)
 
     def _assemble_book(
         self,
@@ -177,7 +179,11 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         context: AuthorizationContext,
     ) -> CatalogBook:
         facets = tuple(
-            CatalogBookFacet(id=facet.id, kind=facet.kind, name=facet.name)
+            CatalogBookFacet(
+                id=facet.id,
+                kind=cast(CatalogFacetKind, facet.kind),
+                name=facet.name,
+            )
             for facet in self._db.scalars(
                 select(LibraryFacet)
                 .join(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)

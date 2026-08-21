@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -34,7 +36,7 @@ from app.modules.library.infrastructure.filter_query import (
 
 def _resource_exists(
     *,
-    book_id: ColumnElement[object],
+    book_id: object,
     media_kinds: tuple[str, ...] = (),
     formats: tuple[str, ...] = (),
 ) -> ColumnElement[bool]:
@@ -203,28 +205,32 @@ def _order(query: BookListQuery) -> list[ColumnElement[object]]:
         and query.sort in {"updated", "recent_read", "recent_import", "progress"}
     )
 
-    def direction(column: ColumnElement[object]) -> ColumnElement[object]:
-        return column.desc() if descending else column.asc()
+    def direction(column: object) -> ColumnElement[object]:
+        expression = cast(ColumnElement[object], column)
+        return expression.desc() if descending else expression.asc()
+
+    def ascending(column: object) -> ColumnElement[object]:
+        return cast(ColumnElement[object], column).asc()
 
     if query.sort == "title":
-        return [direction(LibraryBookMetadata.title), LibraryBook.id.asc()]
+        return [direction(LibraryBookMetadata.title), ascending(LibraryBook.id)]
     if query.sort == "author":
         return [
             direction(LibraryBookMetadata.author),
-            LibraryBookMetadata.title.asc(),
-            LibraryBook.id.asc(),
+            ascending(LibraryBookMetadata.title),
+            ascending(LibraryBook.id),
         ]
     if query.sort == "series":
         return [
             direction(LibraryBookMetadata.series_name),
-            LibraryBookMetadata.series_index.asc(),
-            LibraryBook.id.asc(),
+            ascending(LibraryBookMetadata.series_index),
+            ascending(LibraryBook.id),
         ]
     if query.sort == "series_index":
         return [
             direction(LibraryBookMetadata.series_index),
-            LibraryBookMetadata.title.asc(),
-            LibraryBook.id.asc(),
+            ascending(LibraryBookMetadata.title),
+            ascending(LibraryBook.id),
         ]
     return [direction(LibraryBook.updated_at), direction(LibraryBook.id)]
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy import ColumnElement, distinct, func, select
 from sqlalchemy.orm import Session
 
@@ -74,9 +76,9 @@ class SqlAlchemyLibraryFilterQueries:
     def _resource_options(
         self,
         context: AuthorizationContext,
-        column: ColumnElement[str],
+        column: object,
     ) -> tuple[LibraryFilterOption, ...]:
-        value = func.trim(func.coalesce(column, ""))
+        value = func.trim(func.coalesce(cast(ColumnElement[str], column), ""))
         count = func.count().label("option_count")
         rows = self._db.execute(
             select(value.label("value"), count)
@@ -125,11 +127,11 @@ class SqlAlchemyLibraryFilterQueries:
     def _book_text_options(
         self,
         context: AuthorizationContext,
-        column: ColumnElement[str | None],
+        column: object,
         query: str,
         limit: int,
     ) -> tuple[tuple[LibraryFilterOption, ...], bool]:
-        value = func.trim(func.coalesce(column, ""))
+        value = func.trim(func.coalesce(cast(ColumnElement[str | None], column), ""))
         normalized = func.lower(value)
         count = func.count(distinct(LibraryBook.id)).label("option_count")
         rows = self._db.execute(

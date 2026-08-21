@@ -17,7 +17,7 @@ STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
 def entity_record(entity: object) -> dict[str, Any]:
     """Return an ORM row as a transport-neutral column record."""
 
-    mapper = sa_inspect(entity).mapper
+    mapper = sa_inspect(entity, raiseerr=True).mapper
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }

@@ -57,7 +57,9 @@ def media_kind_counts(
         .where(resource_visibility_predicate(context))
         .group_by(LibraryReadableResource.media_kind)
     ).all()
-    return [{"value": row.value, "count": int(row.count or 0)} for row in rows]
+    return [
+        {"value": row.value, "count": int(row._mapping["count"] or 0)} for row in rows
+    ]
 
 
 def visible_categories(

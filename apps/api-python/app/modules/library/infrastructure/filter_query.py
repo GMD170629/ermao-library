@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Any
+from typing import cast as typing_cast
 
 from sqlalchemy import (
     ColumnElement,
@@ -63,8 +65,12 @@ RESOURCE_TEXT_FIELDS = {
 }
 
 
-def _normalized_text(expression: ColumnElement[object]) -> ColumnElement[str]:
-    return func.lower(func.trim(func.coalesce(expression, "")))
+def _column(expression: object) -> ColumnElement[object]:
+    return typing_cast(ColumnElement[object], expression)
+
+
+def _normalized_text(expression: object) -> ColumnElement[str]:
+    return func.lower(func.trim(func.coalesce(_column(expression), "")))
 
 
 def _literal_like_value(value: str) -> str:
@@ -72,7 +78,7 @@ def _literal_like_value(value: str) -> str:
 
 
 def _text(
-    expression: ColumnElement[object],
+    expression: object,
     condition: FilterCondition,
     *,
     empty_values: tuple[str, ...] = (),
@@ -87,7 +93,7 @@ def _text(
         return not_(empty_predicate)
     value = _literal_like_value(str(condition.value or "").casefold())
     if condition.operator in {"contains", "not_contains"}:
-        result = normalized.like(f"%{value}%", escape="\\")
+        result: ColumnElement[bool] = normalized.like(f"%{value}%", escape="\\")
         return not_(result) if condition.operator == "not_contains" else result
     if condition.operator == "starts_with":
         return normalized.like(f"{value}%", escape="\\")
@@ -98,13 +104,14 @@ def _text(
 
 
 def _number(
-    expression: ColumnElement[object], condition: FilterCondition, *, scale: float = 1
+    expression: object, condition: FilterCondition, *, scale: float = 1
 ) -> ColumnElement[bool]:
+    column = _column(expression)
     if condition.operator == "is_empty":
-        return expression.is_(None)
+        return column.is_(None)
     if condition.operator == "is_not_empty":
-        return expression.is_not(None)
-    numeric = cast(expression, Float)
+        return column.is_not(None)
+    numeric = cast(column, Float)
     if condition.operator == "between":
         assert isinstance(condition.value, tuple)
         return numeric.between(
@@ -121,33 +128,32 @@ def _number(
     }[condition.operator]
 
 
-def _date(
-    expression: ColumnElement[object], condition: FilterCondition
-) -> ColumnElement[bool]:
+def _date(expression: object, condition: FilterCondition) -> ColumnElement[bool]:
+    column = _column(expression)
     if condition.operator == "is_empty":
-        return expression.is_(None)
+        return column.is_(None)
     if condition.operator == "is_not_empty":
-        return expression.is_not(None)
+        return column.is_not(None)
     if condition.operator == "between":
         assert isinstance(condition.value, tuple)
         start = datetime.fromisoformat(condition.value[0]).replace(tzinfo=UTC)
         end = datetime.fromisoformat(condition.value[1]).replace(
             tzinfo=UTC
         ) + timedelta(days=1)
-        return and_(expression >= start, expression < end)
+        return and_(column >= start, column < end)
     start = datetime.fromisoformat(str(condition.value)).replace(tzinfo=UTC)
     end = start + timedelta(days=1)
     if condition.operator == "equals":
-        return and_(expression >= start, expression < end)
+        return and_(column >= start, column < end)
     if condition.operator == "not_equals":
-        return not_(and_(expression >= start, expression < end))
+        return not_(and_(column >= start, column < end))
     if condition.operator == "after":
-        return expression >= end
+        return column >= end
     if condition.operator == "on_or_after":
-        return expression >= start
+        return column >= start
     if condition.operator == "before":
-        return expression < start
-    return expression < end
+        return column < start
+    return column < end
 
 
 def _visible_resource(
@@ -161,8 +167,8 @@ def _visible_resource(
 
 
 def _relation_text(
-    statement: object,
-    expression: ColumnElement[object],
+    statement: Any,
+    expression: object,
     condition: FilterCondition,
 ) -> ColumnElement[bool]:
     negative = condition.operator in {"not_contains", "not_equals", "is_empty"}
@@ -310,13 +316,18 @@ def _condition(
             condition,
         )
     if field == "shelf":
-        link = aliased(ShelfBook)
+        shelf_link = aliased(ShelfBook)
         shelf = aliased(Shelf)
-        clauses = [link.book_id == LibraryBook.id, shelf.kind == "STATIC"]
+        clauses = [
+            shelf_link.book_id == LibraryBook.id,
+            shelf.kind == "STATIC",
+        ]
         if shelf_owner_user_id:
             clauses.append(shelf.owner_user_id == shelf_owner_user_id)
         return _relation_text(
-            select(link.book_id).join(shelf, shelf.id == link.shelf_id).where(*clauses),
+            select(shelf_link.book_id)
+            .join(shelf, shelf.id == shelf_link.shelf_id)
+            .where(*clauses),
             shelf.id,
             condition,
         )
@@ -396,18 +407,22 @@ def _condition(
             condition,
         )
     if field == "organized":
-        value = ~exists(
+        organized_value = ~exists(
             select(OrganizeJob.id).where(
                 OrganizeJob.book_id == LibraryBook.id, OrganizeJob.status != "COMPLETED"
             )
         )
-        return value if condition.operator == "is_true" else not_(value)
+        return (
+            organized_value
+            if condition.operator == "is_true"
+            else not_(organized_value)
+        )
     if field == "hasCover":
-        value = and_(
+        cover_value = and_(
             LibraryBookMetadata.cover_path.is_not(None),
             LibraryBookMetadata.cover_status == "READY",
         )
-        return value if condition.operator == "is_true" else not_(value)
+        return cover_value if condition.operator == "is_true" else not_(cover_value)
     raise ValueError(f"Unsupported filter field: {field}")
 
 

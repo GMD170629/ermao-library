@@ -46,6 +46,7 @@ def get_cover_record(
     book_id: str | None = None,
     resource_id: str | None = None,
 ) -> dict[str, object] | None:
+    record: LibraryBookMetadata | LibraryReadableResourceMetadata | None
     if book_id is not None:
         record = db.get(LibraryBookMetadata, book_id)
     elif resource_id is not None:
@@ -64,18 +65,23 @@ def update_cover_record(
     cover_status: str | None,
     now: datetime,
 ) -> None:
-    if record_type == "LibraryBook":
-        model = LibraryBookMetadata
-        identifier = model.book_id
-    elif record_type == "LibraryReadableResource":
-        model = LibraryReadableResourceMetadata
-        identifier = model.resource_id
-    else:
-        raise ValueError(f"Unsupported cover record type: {record_type}")
     values: dict[str, object] = {"cover_path": cover_path, "updated_at": now}
     if cover_status is not None:
         values["cover_status"] = cover_status
-    db.execute(update(model).where(identifier == record_id).values(**values))
+    if record_type == "LibraryBook":
+        db.execute(
+            update(LibraryBookMetadata)
+            .where(LibraryBookMetadata.book_id == record_id)
+            .values(**values)
+        )
+    elif record_type == "LibraryReadableResource":
+        db.execute(
+            update(LibraryReadableResourceMetadata)
+            .where(LibraryReadableResourceMetadata.resource_id == record_id)
+            .values(**values)
+        )
+    else:
+        raise ValueError(f"Unsupported cover record type: {record_type}")
     db.flush()
 
 
@@ -118,7 +124,7 @@ def update_book_cover(
             updated_at=now,
         )
     )
-    return bool(result.rowcount)
+    return bool(getattr(result, "rowcount", 0))
 
 
 def update_book_covers(

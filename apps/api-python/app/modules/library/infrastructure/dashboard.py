@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.contracts.media_capabilities import reader_type_for_format
@@ -79,7 +79,10 @@ def dashboard_summary(
             .where(
                 LibraryResourceAsset.import_state == "READY",
                 LibrarySourceNode.physical_kind == "REGULAR_FILE",
-                library_visibility_predicate(context, LibrarySourceNode.library_id),
+                library_visibility_predicate(
+                    context,
+                    cast(ColumnElement[str], LibrarySourceNode.library_id),
+                ),
             )
         )
         or 0

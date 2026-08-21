@@ -17,6 +17,7 @@ from app.core.time import to_timestamp_ms
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
+    LibraryBookMetadata,
     LibraryFacet,
 )
 from app.models.common import db_timestamp
@@ -138,32 +139,46 @@ def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
     if not unique_book_ids:
         return
 
-    books = db.execute(
+    book_rows = db.execute(
         select(
             LibraryBook.id,
-            LibraryBook.author,
-            LibraryBook.tags,
-            LibraryBook.series_name,
-        ).where(LibraryBook.id.in_(unique_book_ids))
+            LibraryBookMetadata.author,
+            LibraryBookMetadata.series_name,
+        )
+        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .where(LibraryBook.id.in_(unique_book_ids))
     ).all()
-    if not books:
+    if not book_rows:
         return
 
+    tag_rows = db.execute(
+        select(LibraryBookFacet.book_id, LibraryFacet.name)
+        .join(LibraryFacet, LibraryFacet.id == LibraryBookFacet.facet_id)
+        .where(
+            LibraryBookFacet.book_id.in_(unique_book_ids),
+            LibraryFacet.kind == "TAG",
+        )
+        .order_by(LibraryBookFacet.book_id.asc(), LibraryBookFacet.sort_order.asc())
+    ).all()
+    tags_by_book: dict[str, list[str]] = {book_id: [] for book_id in unique_book_ids}
+    for row in tag_rows:
+        tags_by_book.setdefault(str(row.book_id), []).append(str(row.name))
+
     now = db_timestamp()
-    prepared = tuple(
+    prepared: tuple[tuple[str, tuple[tuple[str, str, str, int], ...]], ...] = tuple(
         (
             str(book.id),
             tuple(
                 (kind, name, normalized_name(name), sort_order)
                 for kind, names in (
                     ("AUTHOR", split_authors(book.author)),
-                    ("TAG", book_tags(book.tags)),
+                    ("TAG", unique_names(tags_by_book.get(str(book.id), []))),
                     ("SERIES", unique_names([book.series_name])),
                 )
                 for sort_order, name in enumerate(names)
             ),
         )
-        for book in books
+        for book in book_rows
     )
     facets: dict[tuple[str, str], tuple[str, str]] = {}
     for _book_id, values in prepared:
@@ -181,10 +196,10 @@ def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
         }
         for (kind, normalized), (name, facet_id) in facets.items()
     ]
-    for chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7):
+    for facet_row_chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7):
         db.execute(
             sqlite_insert(LibraryFacet)
-            .values(list(chunk))
+            .values(list(facet_row_chunk))
             .on_conflict_do_nothing(
                 index_elements=[LibraryFacet.kind, LibraryFacet.normalized_name]
             )
@@ -192,13 +207,17 @@ def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
 
     facet_ids: dict[tuple[str, str], str] = {}
     facet_keys = tuple(facets)
-    for chunk in sqlite_parameter_chunks(facet_keys, parameters_per_row=2):
+    for facet_key_chunk in sqlite_parameter_chunks(facet_keys, parameters_per_row=2):
         rows = db.execute(
             select(
                 LibraryFacet.kind,
                 LibraryFacet.normalized_name,
                 LibraryFacet.id,
-            ).where(tuple_(LibraryFacet.kind, LibraryFacet.normalized_name).in_(chunk))
+            ).where(
+                tuple_(LibraryFacet.kind, LibraryFacet.normalized_name).in_(
+                    facet_key_chunk
+                )
+            )
         )
         facet_ids.update(
             {(str(row.kind), str(row.normalized_name)): str(row.id) for row in rows}
@@ -342,9 +361,11 @@ def list_categories_page(
     )
 
     def fetch(target_page: int) -> list[Any]:
-        return db.execute(
-            base_statement.limit(page_size).offset((target_page - 1) * page_size)
-        ).all()
+        return list(
+            db.execute(
+                base_statement.limit(page_size).offset((target_page - 1) * page_size)
+            ).all()
+        )
 
     rows = fetch(page)
     if rows:

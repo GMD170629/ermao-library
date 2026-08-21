@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import LibraryReadableResource
@@ -12,4 +14,4 @@ def resource_media_kind(
 ) -> ColumnElement[str]:
     """Return the normalized media-kind column owned by the resource."""
 
-    return resource.media_kind
+    return cast(ColumnElement[str], resource.media_kind)
