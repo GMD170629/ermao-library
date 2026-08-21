@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -18,6 +19,17 @@ from app.modules.imports.domain.import_run_policies import (
     LibraryImportTaskState,
 )
 from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
+from app.modules.library.public import (
+    AdapterIdentity,
+    BookResourceRepositoryPort,
+    InterpretationRecord,
+    LibraryConfigPort,
+    LibrarySourceTreeConfig,
+    ObservedSourceEntry,
+    ReadableResourceRecord,
+    SourceNodeRecord,
+    SourceNodeRepositoryPort,
+)
 from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
 from app.modules.library.domain.readable_resource_states import (
     AssetImportState,
@@ -30,70 +42,53 @@ from app.modules.library.domain.source_nodes import (
     SourceNodeRelativePath,
 )
 
+__all__ = [
+    "AdapterIdentity",
+    "AssetTechnicalMetadata",
+    "BookResourceRepositoryPort",
+    "ClaimedWork",
+    "ClockPort",
+    "DirectoryEntry",
+    "FileParseResult",
+    "ImportRunRepositoryPort",
+    "InterpretationRecord",
+    "LibraryConfigPort",
+    "LibraryImportTaskRecord",
+    "LibrarySourceTreeConfig",
+    "ObservedSourceEntry",
+    "ParsedAssetPayload",
+    "PipelineLogPort",
+    "ReadableResourceRecord",
+    "ResourceAdapterExecutorPort",
+    "ResourceAdapterSpec",
+    "SidecarWritebackPort",
+    "SourceNodeRecord",
+    "SourceNodeRepositoryPort",
+    "SourceTreeFilesystemPort",
+    "UnitOfWorkPort",
+    "WorkQueuePort",
+    "adapter_identity",
+]
 
-@dataclass(frozen=True, slots=True)
-class LibrarySourceTreeConfig:
-    library_id: str
-    root_path: Path
-    organization_mode: TargetLibraryOrganizationMode
-    ignore_hidden: bool
-    ignore_patterns: str | None
-    global_ignore_patterns: str
-    min_file_size_bytes: int
-    queue_high_water: int
-    probe_sample_limit: int
-    probe_max_entries: int
-    probe_max_depth: int
-    probe_time_budget_ms: int
 
-
-@dataclass(frozen=True, slots=True)
-class ObservedSourceEntry:
-    relative_path: SourceNodeRelativePath
-    physical_kind: SourceNodePhysicalKind
-    observed_size_bytes: int | None
-    observed_mtime_ns: int
-    observed_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class SourceNodeRecord:
-    id: str
-    library_id: str
-    parent_id: str | None
-    relative_path: str
-    path_key: str
-    name: str
-    physical_kind: SourceNodePhysicalKind
-    observed_size_bytes: int | None
-    observed_mtime_ns: int
-    observed_at: datetime
+def adapter_identity(spec: ResourceAdapterSpec) -> AdapterIdentity:
+    return AdapterIdentity(
+        adapter_id=spec.adapter_id.value,
+        adapter_version=spec.adapter_version,
+        media_kind=spec.media_kind,
+        format_label=spec.format_label,
+    )
 
 
 @dataclass(frozen=True, slots=True)
-class InterpretationRecord:
-    source_node_id: str
-    result: str
-    source: str
-    adapter_id: str | None
-    adapter_version: str | None
-    reason_code: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class ReadableResourceRecord:
-    id: str
-    library_id: str
-    book_id: str
-    source_node_id: str
-    adapter_id: str
-    adapter_version: str
-    media_kind: str
-    format: str
-    enablement_state: ResourceEnablementState
-    import_state: ResourceImportState
-    published_run_id: str | None
-    active_import_run_id: str | None
+class ClaimedWork:
+    work_item_id: str
+    work_kind: Literal["scan", "import"]
+    target_id: str
+    lease_owner: str
+    lease_expires_at: datetime
+    scan_job_id: str | None
+    bridge_import_task_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +101,18 @@ class LibraryImportTaskRecord:
     owner_import_run_id: str | None
     role: AssetRole
     attempt_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class AssetCandidateRecord:
+    import_run_id: str
+    library_id: str
+    source_node_id: str
+    role: AssetRole
+    import_state: AssetImportState
+    sequence_index: int | None
+    sort_key: str | None
+    failure_reason: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,30 +147,19 @@ class FileParseResult:
     error_summary: str | None
 
 
+DirectoryEntry = tuple[str, SourceNodePhysicalKind, int | None, int]
+
+
 class ClockPort(Protocol):
     def now(self) -> datetime: ...
 
 
 class UnitOfWorkPort(Protocol):
-    def commit(self) -> None: ...
+    def release_before_io(self) -> None: ...
+
+    def transaction(self) -> AbstractContextManager[None]: ...
 
     def rollback(self) -> None: ...
-
-
-class LibraryConfigPort(Protocol):
-    def get_library(self, library_id: str) -> LibrarySourceTreeConfig: ...
-
-    def source_node_count(self, library_id: str) -> int: ...
-
-    def update_organization_mode(
-        self,
-        library_id: str,
-        mode: TargetLibraryOrganizationMode,
-    ) -> None: ...
-
-    def update_root_path(self, library_id: str, root_path: Path) -> None: ...
-
-    def root_path_conflicts(self, root_path: Path, *, exclude_library_id: str) -> bool: ...
 
 
 class SourceTreeFilesystemPort(Protocol):
@@ -172,7 +168,7 @@ class SourceTreeFilesystemPort(Protocol):
     def iter_directory_entries(
         self,
         absolute_directory: Path,
-    ) -> Sequence[tuple[str, SourceNodePhysicalKind, int | None, int]]: ...
+    ) -> Iterator[DirectoryEntry]: ...
 
     def probe_directory(
         self,
@@ -189,141 +185,6 @@ class SourceTreeFilesystemPort(Protocol):
     ) -> tuple[DirectoryProbeDecision, ProbeTerminationReason]: ...
 
     def path_is_readable_directory(self, path: Path) -> bool: ...
-
-
-class SourceNodeRepositoryPort(Protocol):
-    def get_by_path_key(
-        self, library_id: str, path_key: str
-    ) -> SourceNodeRecord | None: ...
-
-    def get(self, source_node_id: str) -> SourceNodeRecord | None: ...
-
-    def insert_if_absent(
-        self,
-        *,
-        library_id: str,
-        parent_id: str | None,
-        entry: ObservedSourceEntry,
-    ) -> tuple[SourceNodeRecord, bool]: ...
-
-    def refresh_observed(
-        self,
-        source_node_id: str,
-        entry: ObservedSourceEntry,
-    ) -> SourceNodeRecord: ...
-
-    def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]: ...
-
-    def delete_subtree(self, source_node_id: str) -> None: ...
-
-    def get_interpretation(
-        self, source_node_id: str
-    ) -> InterpretationRecord | None: ...
-
-    def upsert_interpretation(
-        self,
-        *,
-        source_node_id: str,
-        result: str,
-        source: str,
-        adapter_id: str | None,
-        adapter_version: str | None,
-        reason_code: str | None,
-        sample_relative_paths: str | None,
-        sample_count: int | None,
-        max_entries_visited: int | None,
-        max_depth: int | None,
-        time_budget_ms: int | None,
-        termination_reason: str | None,
-        recognized_at: datetime | None,
-    ) -> None: ...
-
-
-class BookResourceRepositoryPort(Protocol):
-    def ensure_book(
-        self,
-        *,
-        library_id: str,
-        source_node_id: str,
-        title: str,
-    ) -> str: ...
-
-    def get_book_id_for_source_node(self, source_node_id: str) -> str | None: ...
-
-    def get_resource_by_source_node(
-        self, source_node_id: str
-    ) -> ReadableResourceRecord | None: ...
-
-    def get_resource(self, resource_id: str) -> ReadableResourceRecord | None: ...
-
-    def create_pending_resource(
-        self,
-        *,
-        library_id: str,
-        book_id: str,
-        source_node_id: str,
-        adapter: ResourceAdapterSpec,
-        active_import_run_id: str,
-    ) -> ReadableResourceRecord: ...
-
-    def cas_set_active_import_run(
-        self,
-        resource_id: str,
-        *,
-        expected_active_run_id: str | None,
-        new_active_run_id: str | None,
-    ) -> bool: ...
-
-    def set_enablement(
-        self,
-        resource_id: str,
-        state: ResourceEnablementState,
-    ) -> None: ...
-
-    def publish_resource(
-        self,
-        *,
-        resource_id: str,
-        published_run_id: str,
-        adapter: ResourceAdapterSpec,
-        title: str,
-    ) -> None: ...
-
-    def mark_resource_failed(self, resource_id: str) -> None: ...
-
-    def clear_active_import_run(self, resource_id: str) -> None: ...
-
-    def upsert_asset(
-        self,
-        *,
-        library_id: str,
-        resource_id: str,
-        source_node_id: str,
-        published_run_id: str,
-        role: AssetRole,
-        import_state: AssetImportState,
-        sequence_index: int | None,
-        sort_key: str | None,
-        failure_reason: str | None,
-    ) -> str: ...
-
-    def count_ready_assets_for_published_run(
-        self, resource_id: str, published_run_id: str
-    ) -> int: ...
-
-    def find_outermost_directory_resource(
-        self,
-        library_id: str,
-        relative_path: str,
-    ) -> ReadableResourceRecord | None: ...
-
-    def delete_library_overlay_rows(self, library_id: str) -> None: ...
-
-    def delete_assets_for_source_nodes(
-        self, source_node_ids: Sequence[str]
-    ) -> tuple[str, ...]: ...
-
-    def reevaluate_ready_after_asset_loss(self, resource_ids: Sequence[str]) -> None: ...
 
 
 class ImportRunRepositoryPort(Protocol):
@@ -373,6 +234,16 @@ class ImportRunRepositoryPort(Protocol):
         failure_reason: str | None,
     ) -> None: ...
 
+    def count_ready_asset_candidates(self, import_run_id: str) -> int: ...
+
+    def list_ready_asset_candidates(
+        self, import_run_id: str
+    ) -> tuple[AssetCandidateRecord, ...]: ...
+
+    def count_incomplete_tasks(self, owner_import_run_id: str) -> int: ...
+
+    def count_failed_tasks(self, owner_import_run_id: str) -> int: ...
+
     def create_task(
         self,
         *,
@@ -396,10 +267,6 @@ class ImportRunRepositoryPort(Protocol):
 
     def cleanup_run_candidates(self, run_id: str) -> None: ...
 
-    def cleanup_stale_assets(
-        self, resource_id: str, published_run_id: str
-    ) -> None: ...
-
 
 class WorkQueuePort(Protocol):
     def queued_item_count(self) -> int: ...
@@ -408,15 +275,13 @@ class WorkQueuePort(Protocol):
 
     def enqueue_library_scan(self, library_id: str) -> None: ...
 
-    def claim_next(
-        self, worker_id: str, *, lease_seconds: int
-    ) -> tuple[str, str] | None:
-        """Return (work_kind, target_id) where kind is scan|import."""
-        ...
+    def claim_next(self, worker_id: str, *, lease_seconds: int) -> ClaimedWork | None: ...
 
-    def complete(self, work_kind: str, target_id: str) -> None: ...
+    def complete(self, claim: ClaimedWork) -> bool: ...
 
-    def heartbeat(self, work_kind: str, target_id: str, worker_id: str) -> None: ...
+    def heartbeat(self, claim: ClaimedWork) -> bool: ...
+
+    def is_claim_valid(self, claim: ClaimedWork) -> bool: ...
 
 
 class ResourceAdapterExecutorPort(Protocol):

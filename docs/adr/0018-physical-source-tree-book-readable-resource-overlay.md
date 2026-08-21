@@ -509,7 +509,8 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 ## 实施进度
 
 非规范性实施台账。本节不改变上文规范。阶段 1A/1B 与阶段 2～6 目标实现已落地；
-阶段 7（统一验证与激活）仍未完成。target composition root 可独立构造，但尚未接入生产启动路径。
+阶段 7A（运行时验收修复）已完成门禁记录；阶段 7B（baseline/激活决策）仍未完成。
+target composition root 可独立构造，但尚未接入生产启动路径。
 
 ### 阶段 1A：SourceNode 纯领域基础 — 已完成
 
@@ -582,7 +583,7 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 ### 阶段 2：扫描与分类 — 实现完成，等待阶段 7 验证
 
 - 实现：
-  - `app/modules/library/application/commands/scan_source_tree.py` — `ScanLibrarySourceTree`
+  - `app/modules/imports/application/readable_resource/scan_source_tree.py` — `ScanLibrarySourceTree`
   - `app/modules/imports/infrastructure/readable_resource/filesystem.py` — `OsSourceTreeFilesystem`
     （`os.scandir`、`follow_symlinks=False`、有界目录探测、路径防穿越/symlink escape）
   - `app/modules/imports/domain/directory_probe.py` — 前 100 样本与终止原因决策
@@ -629,9 +630,49 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 
 - 入口：`apps/api-python/app/bootstrap/readable_resource_pipeline.py`
   - `build_readable_resource_pipeline(session)`
-  - `ReadableResourceWorkerProcessor`
-- **未**注册到现有生产 API / router / worker 启动路径；阶段 7 验证后再决定激活
+  - `build_readable_resource_worker(pipeline)` → `ReadableResourceWorkerProcessor`
+    （实现位于 `imports/infrastructure/readable_resource/worker.py`）
+- **未**注册到现有生产 API / router / worker 启动路径
 
-### 阶段 7 — 未完成
+### 阶段 7A：运行时验收修复 — 本批完成实现与门禁（非“阶段 7 完成”）
 
-- 规模与最终验收；统一运行测试并修复问题；决定是否激活 target composition root
+**修复的真实问题：**
+
+1. ORM flush 顺序：为 SourceNode→Book/Run→Resource→candidate/Task→Asset 补齐 relationship /
+   `foreign_keys` / `post_update` / `overlaps`，同一事务插入对象图不再 FOREIGN KEY failed
+2. 能力边界：`ScanLibrarySourceTree` 与 `SqlAlchemyImportRunRepository` 迁入 imports；
+   library 持久化端口迁至 `library/application/source_tree_ports.py` 并由 `library.public` 导出；
+   `AdapterIdentity` 解除 library→imports.domain 耦合；架构回归禁止 peer 深导入
+3. 短事务：`release_before_io` + `transaction()`；scandir/probe/parse 时 Session 不在活动事务；
+   提交后才 sidecar；异常路径 rollback
+4. 队列：`ClaimedWork` 不可变 DTO；overlay SQL 预过滤；精确 `work_item_id` ack/heartbeat/lease CAS；
+   晚到 worker 不得写结果
+5. 发布隔离：run-owned 结果先写 candidate；达最小 READY 才原子切 `publishedRunId`；
+   reimport 不写旧 published 集合；CAS 失败 Run→FAILED；目录单项失败不提前终结 Run
+6. 流式扫描：`iter_directory_entries` Iterator；probe 循环内预算；百万合成流式测试
+
+**新增测试矩阵（节选）：**
+
+- domain：directory probe、adapter 匹配、Run 策略、FLAT/VOLUMES、READY 条件
+- application：短事务扫描、publish 隔离、reimport/retry CAS、manage 用例
+- infrastructure：流式 scandir / 百万条目不物化、路径 escape
+- integration：schema 全绿、单文件/有声书 TRACK/图片 PAGE、claim/late lease
+- architecture：跨能力深导入守卫；bootstrap 不直接 rollback
+
+**本批实际运行命令与结果（于 `apps/api-python`）：**
+
+- `.venv/bin/pytest -q tests/unit/modules/imports tests/unit/modules/library/test_book_placement.py tests/unit/modules/library/test_readable_resource_states.py tests/unit/modules/library/test_manage_source_tree.py tests/unit/modules/library/test_source_nodes.py tests/integration/modules/library/test_readable_resource_schema.py tests/integration/modules/imports tests/test_capability_architecture.py tests/test_sqlite_database.py` → **261 passed**
+- `.venv/bin/pytest -q` 全量 → **6 failed, 1030 passed**（仅既有 6 项；无新增失败）
+- `.venv/bin/python -m compileall -q app tests` → 成功
+- 仓库根 `git diff --check` → 成功
+- Ruff：不可用（环境未安装 ruff；未改依赖锁）
+
+**明确未完成：**
+
+- 阶段 7B：fresh baseline 压平 0001～0003、是否激活 target composition root 的产品决策
+- target composition root **仍未激活**到生产启动路径
+- 不得将本批记为“阶段 7 完成”
+
+### 阶段 7B — 未完成
+
+- baseline 压平与激活决策；规模验收收尾

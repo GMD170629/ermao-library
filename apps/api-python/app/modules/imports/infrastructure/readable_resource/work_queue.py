@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.common import cuid, db_timestamp
 from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
-from app.modules.imports.application.readable_resource.ports import WorkQueuePort
+from app.modules.imports.application.readable_resource.ports import (
+    ClaimedWork,
+    WorkQueuePort,
+)
 from app.modules.imports.infrastructure.work_queue import (
-    claim_next_work_item,
     complete_work_item,
     ensure_import_work_item,
 )
@@ -29,7 +31,10 @@ class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
             self._session.scalar(
                 select(func.count())
                 .select_from(ImportWorkItem)
-                .where(ImportWorkItem.status.in_(("PENDING", "LEASED")))
+                .where(
+                    ImportWorkItem.status.in_(("PENDING", "LEASED")),
+                    or_(self._overlay_scan_predicate(), self._overlay_import_predicate()),
+                )
             )
             or 0
         )
@@ -79,108 +84,148 @@ class SqlAlchemyReadableResourceWorkQueue(WorkQueuePort):
         self._session.add(work)
         self._session.flush()
 
-    def claim_next(
-        self, worker_id: str, *, lease_seconds: int
-    ) -> tuple[str, str] | None:
-        item = claim_next_work_item(
-            self._session, worker_id=worker_id, import_lease_seconds=lease_seconds
+    def claim_next(self, worker_id: str, *, lease_seconds: int) -> ClaimedWork | None:
+        now = db_timestamp()
+        claimable = or_(
+            ImportWorkItem.status == "PENDING",
+            and_(
+                ImportWorkItem.status == "LEASED",
+                ImportWorkItem.lease_expires_at.is_not(None),
+                ImportWorkItem.lease_expires_at <= now,
+            ),
         )
-        if item is None:
+        row = self._session.scalar(
+            select(ImportWorkItem)
+            .where(
+                ImportWorkItem.available_at <= now,
+                claimable,
+                or_(self._overlay_scan_predicate(), self._overlay_import_predicate()),
+            )
+            .order_by(
+                ImportWorkItem.priority.asc(),
+                ImportWorkItem.created_at.asc(),
+                ImportWorkItem.id.asc(),
+            )
+            .limit(1)
+        )
+        if row is None:
             return None
-        if item.kind == "SCAN_DIRECTORY" and item.scan_job_id is not None:
-            job = self._session.get(ImportScanJob, item.scan_job_id)
-            if job is None or job.trigger != OVERLAY_SCAN_TRIGGER:
-                # Not an overlay scan; release lease for legacy workers.
-                self._session.execute(
-                    update(ImportWorkItem)
-                    .where(ImportWorkItem.id == item.id)
-                    .values(
-                        status="PENDING",
-                        lease_owner=None,
-                        lease_expires_at=None,
-                        updated_at=db_timestamp(),
-                    )
-                )
-                self._session.flush()
+
+        lease_secs = lease_seconds if row.kind == "IMPORT_SOURCE" else min(lease_seconds, 60)
+        lease_expires_at = now + timedelta(seconds=lease_secs)
+        claimed = self._session.execute(
+            update(ImportWorkItem)
+            .where(ImportWorkItem.id == row.id, claimable)
+            .values(
+                status="LEASED",
+                lease_owner=worker_id,
+                lease_expires_at=lease_expires_at,
+                attempts=ImportWorkItem.attempts + 1,
+                updated_at=now,
+            )
+        )
+        if not claimed.rowcount:
+            return None
+
+        if row.kind == "SCAN_DIRECTORY" and row.scan_job_id is not None:
+            job = self._session.get(ImportScanJob, row.scan_job_id)
+            if job is None:
                 return None
-            return ("scan", job.library_id)
-        if item.kind == "IMPORT_SOURCE" and item.import_task_id is not None:
-            bridge = self._session.get(ImportTask, item.import_task_id)
-            if bridge is None or bridge.origin != OVERLAY_IMPORT_ORIGIN:
-                self._session.execute(
-                    update(ImportWorkItem)
-                    .where(ImportWorkItem.id == item.id)
-                    .values(
-                        status="PENDING",
-                        lease_owner=None,
-                        lease_expires_at=None,
-                        updated_at=db_timestamp(),
-                    )
-                )
-                self._session.flush()
+            if job.status == "PENDING":
+                job.status = "RUNNING"
+                job.started_at = now
+            job.heartbeat_at = now
+            job.updated_at = now
+            self._session.flush()
+            return ClaimedWork(
+                work_item_id=row.id,
+                work_kind="scan",
+                target_id=job.library_id,
+                lease_owner=worker_id,
+                lease_expires_at=lease_expires_at,
+                scan_job_id=job.id,
+                bridge_import_task_id=None,
+            )
+
+        if row.kind == "IMPORT_SOURCE" and row.import_task_id is not None:
+            bridge = self._session.get(ImportTask, row.import_task_id)
+            if bridge is None or bridge.source_path is None:
                 return None
-            return ("import", bridge.source_path)
+            self._session.flush()
+            return ClaimedWork(
+                work_item_id=row.id,
+                work_kind="import",
+                target_id=bridge.source_path,
+                lease_owner=worker_id,
+                lease_expires_at=lease_expires_at,
+                scan_job_id=None,
+                bridge_import_task_id=bridge.id,
+            )
         return None
 
-    def complete(self, work_kind: str, target_id: str) -> None:
-        if work_kind == "import":
-            bridge = self._session.scalar(
-                select(ImportTask).where(
-                    ImportTask.origin == OVERLAY_IMPORT_ORIGIN,
-                    ImportTask.source_path == target_id,
-                )
-            )
-            if bridge is None:
-                return
-            work = self._session.scalar(
-                select(ImportWorkItem).where(
-                    ImportWorkItem.import_task_id == bridge.id
-                )
-            )
-            if work is not None:
-                complete_work_item(self._session, work.id)
-            bridge.status = "COMPLETED"
-            self._session.flush()
-            return
-        if work_kind == "scan":
-            job = self._session.scalar(
-                select(ImportScanJob)
-                .where(
-                    ImportScanJob.library_id == target_id,
-                    ImportScanJob.trigger == OVERLAY_SCAN_TRIGGER,
-                    ImportScanJob.status.in_(("PENDING", "RUNNING")),
-                )
-                .order_by(ImportScanJob.created_at.desc())
-                .limit(1)
-            )
-            if job is None:
-                return
-            work = self._session.scalar(
-                select(ImportWorkItem).where(ImportWorkItem.scan_job_id == job.id)
-            )
-            if work is not None:
-                complete_work_item(self._session, work.id)
-            job.status = "COMPLETED"
-            self._session.flush()
+    def complete(self, claim: ClaimedWork) -> bool:
+        if not self.is_claim_valid(claim):
+            return False
+        if claim.work_kind == "import" and claim.bridge_import_task_id is not None:
+            bridge = self._session.get(ImportTask, claim.bridge_import_task_id)
+            if bridge is not None:
+                bridge.status = "COMPLETED"
+        if claim.work_kind == "scan" and claim.scan_job_id is not None:
+            job = self._session.get(ImportScanJob, claim.scan_job_id)
+            if job is not None:
+                job.status = "COMPLETED"
+        complete_work_item(self._session, claim.work_item_id)
+        self._session.flush()
+        return True
 
-    def heartbeat(self, work_kind: str, target_id: str, worker_id: str) -> None:
+    def heartbeat(self, claim: ClaimedWork) -> bool:
+        if not self.is_claim_valid(claim):
+            return False
         now = db_timestamp()
         expires = now + timedelta(seconds=60)
-        if work_kind == "import":
-            bridge = self._session.scalar(
-                select(ImportTask).where(
+        result = self._session.execute(
+            update(ImportWorkItem)
+            .where(
+                ImportWorkItem.id == claim.work_item_id,
+                ImportWorkItem.status == "LEASED",
+                ImportWorkItem.lease_owner == claim.lease_owner,
+            )
+            .values(lease_expires_at=expires, updated_at=now)
+        )
+        self._session.flush()
+        return bool(result.rowcount)
+
+    def is_claim_valid(self, claim: ClaimedWork) -> bool:
+        row = self._session.get(ImportWorkItem, claim.work_item_id)
+        if row is None:
+            return False
+        if row.status != "LEASED" or row.lease_owner != claim.lease_owner:
+            return False
+        now = db_timestamp()
+        if row.lease_expires_at is not None and row.lease_expires_at <= now:
+            return False
+        return True
+
+    def _overlay_scan_predicate(self) -> object:
+        return and_(
+            ImportWorkItem.kind == "SCAN_DIRECTORY",
+            ImportWorkItem.scan_job_id.is_not(None),
+            exists().where(
+                and_(
+                    ImportScanJob.id == ImportWorkItem.scan_job_id,
+                    ImportScanJob.trigger == OVERLAY_SCAN_TRIGGER,
+                )
+            ),
+        )
+
+    def _overlay_import_predicate(self) -> object:
+        return and_(
+            ImportWorkItem.kind == "IMPORT_SOURCE",
+            ImportWorkItem.import_task_id.is_not(None),
+            exists().where(
+                and_(
+                    ImportTask.id == ImportWorkItem.import_task_id,
                     ImportTask.origin == OVERLAY_IMPORT_ORIGIN,
-                    ImportTask.source_path == target_id,
                 )
-            )
-            if bridge is None:
-                return
-            self._session.execute(
-                update(ImportWorkItem)
-                .where(
-                    ImportWorkItem.import_task_id == bridge.id,
-                    ImportWorkItem.lease_owner == worker_id,
-                )
-                .values(lease_expires_at=expires, updated_at=now)
-            )
-            self._session.flush()
+            ),
+        )

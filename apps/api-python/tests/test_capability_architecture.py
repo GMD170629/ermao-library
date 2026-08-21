@@ -469,3 +469,57 @@ def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None
                 f"expressions, not string SQL (line {node.lineno})"
             )
     assert check_count == 20
+
+
+def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:
+    # library modules (except bootstrap) must not contain:
+    #   app.modules.imports.application
+    #   app.modules.imports.infrastructure
+    #   app.modules.imports.domain
+    # except allow app.modules.imports.public
+    # imports modules must not contain:
+    #   app.modules.library.application
+    #   app.modules.library.infrastructure
+    # except allow app.modules.library.public and app.modules.library.domain
+    # Exclude TYPE_CHECKING-only is hard; simply forbid the import strings in library/**/*.py
+    # Note: library infrastructure must NOT import imports.*
+    #
+    # Relationship string names like "LibraryImportRun" are allowed without imports.
+    # Pre-ADR0018 legacy adapters retain deep library imports; exclude them only.
+    legacy_imports_deep_library = {
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "library_queries.py",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "orchestration_services.py",
+    }
+
+    library_forbidden = (
+        "app.modules.imports.application",
+        "app.modules.imports.infrastructure",
+        "app.modules.imports.domain",
+    )
+    library_root = APP_ROOT / "modules" / "library"
+    for path in library_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for token in library_forbidden:
+            assert token not in source, f"{path}: {token}"
+        if "infrastructure" in path.relative_to(library_root).parts:
+            assert "app.modules.imports" not in source, path
+
+    imports_forbidden = (
+        "app.modules.library.application",
+        "app.modules.library.infrastructure",
+    )
+    imports_root = APP_ROOT / "modules" / "imports"
+    for path in imports_root.rglob("*.py"):
+        if path in legacy_imports_deep_library:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for token in imports_forbidden:
+            assert token not in source, f"{path}: {token}"

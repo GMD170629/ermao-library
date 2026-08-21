@@ -1,8 +1,13 @@
-"""Structured logging and post-commit sidecar hooks for the target pipeline."""
+"""Structured logging, clock, and unit-of-work for the target pipeline."""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
 
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
@@ -10,9 +15,6 @@ from app.modules.imports.application.readable_resource.ports import (
     SidecarWritebackPort,
     UnitOfWorkPort,
 )
-from datetime import datetime, timezone
-
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger("ermao.readable_resource_pipeline")
 
@@ -51,8 +53,23 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def commit(self) -> None:
-        self._session.commit()
+    def release_before_io(self) -> None:
+        session = self._session
+        if session.new or session.dirty or session.deleted:
+            raise RuntimeError(
+                "release_before_io called with pending session changes"
+            )
+        if session.in_transaction():
+            session.rollback()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        try:
+            yield
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
 
     def rollback(self) -> None:
         self._session.rollback()

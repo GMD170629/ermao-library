@@ -17,11 +17,17 @@ from app.modules.imports.application.readable_resource.reimport import (
     ReimportSourceNode,
     RetryReadableResourceImport,
 )
+from app.modules.imports.application.readable_resource.scan_source_tree import (
+    ScanLibrarySourceTree,
+)
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
 )
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
+)
+from app.modules.imports.infrastructure.readable_resource.import_run_repository import (
+    SqlAlchemyImportRunRepository,
 )
 from app.modules.imports.infrastructure.readable_resource.support import (
     DeferredSidecarWriteback,
@@ -32,6 +38,9 @@ from app.modules.imports.infrastructure.readable_resource.support import (
 from app.modules.imports.infrastructure.readable_resource.work_queue import (
     SqlAlchemyReadableResourceWorkQueue,
 )
+from app.modules.imports.infrastructure.readable_resource.worker import (
+    ReadableResourceWorkerProcessor,
+)
 from app.modules.library.application.commands.manage_source_tree import (
     ChangeLibraryOrganizationMode,
     DeleteSourceNode,
@@ -39,15 +48,17 @@ from app.modules.library.application.commands.manage_source_tree import (
     EnableReadableResource,
     RelocateLibraryRoot,
 )
-from app.modules.library.application.commands.scan_source_tree import (
-    ScanLibrarySourceTree,
-)
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
     SqlAlchemyBookResourceRepository,
-    SqlAlchemyImportRunRepository,
     SqlAlchemyLibraryConfigAdapter,
     SqlAlchemySourceNodeRepository,
 )
+
+__all__ = [
+    "ReadableResourcePipeline",
+    "ReadableResourceWorkerProcessor",
+    "build_readable_resource_pipeline",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,9 +77,13 @@ class ReadableResourcePipeline:
     queue: SqlAlchemyReadableResourceWorkQueue
     filesystem: OsSourceTreeFilesystem
     adapters: RegistryResourceAdapterExecutor
+    uow: SqlAlchemyUnitOfWork
+    worker_id: str
 
 
-def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeline:
+def build_readable_resource_pipeline(
+    session: Session, *, worker_id: str = "overlay-worker"
+) -> ReadableResourcePipeline:
     libraries = SqlAlchemyLibraryConfigAdapter(session)
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(session)
@@ -81,31 +96,34 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
     log = StructuredPipelineLog()
     sidecar = DeferredSidecarWriteback()
 
+    scan = ScanLibrarySourceTree(
+        libraries=libraries,
+        filesystem=filesystem,
+        source_nodes=source_nodes,
+        books_resources=books_resources,
+        import_runs=import_runs,
+        queue=queue,
+        uow=uow,
+        clock=clock,
+        log=log,
+    )
+    process_import = ProcessReadableResourceImportTask(
+        libraries=libraries,
+        filesystem=filesystem,
+        source_nodes=source_nodes,
+        books_resources=books_resources,
+        import_runs=import_runs,
+        adapters=adapters,
+        queue=queue,
+        uow=uow,
+        clock=clock,
+        log=log,
+        sidecar=sidecar,
+    )
+
     return ReadableResourcePipeline(
-        scan_library_source_tree=ScanLibrarySourceTree(
-            libraries=libraries,
-            filesystem=filesystem,
-            source_nodes=source_nodes,
-            books_resources=books_resources,
-            import_runs=import_runs,
-            queue=queue,
-            uow=uow,
-            clock=clock,
-            log=log,
-        ),
-        process_import_task=ProcessReadableResourceImportTask(
-            libraries=libraries,
-            filesystem=filesystem,
-            source_nodes=source_nodes,
-            books_resources=books_resources,
-            import_runs=import_runs,
-            adapters=adapters,
-            queue=queue,
-            uow=uow,
-            clock=clock,
-            log=log,
-            sidecar=sidecar,
-        ),
+        scan_library_source_tree=scan,
+        process_import_task=process_import,
         reimport_source_node=ReimportSourceNode(
             libraries=libraries,
             filesystem=filesystem,
@@ -156,35 +174,18 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
         queue=queue,
         filesystem=filesystem,
         adapters=adapters,
+        uow=uow,
+        worker_id=worker_id,
     )
 
 
-class ReadableResourceWorkerProcessor:
-    """Target worker loop body: claim overlay work and dispatch use cases."""
-
-    def __init__(self, pipeline: ReadableResourcePipeline, *, worker_id: str) -> None:
-        self._pipeline = pipeline
-        self._worker_id = worker_id
-
-    def process_once(self, *, lease_seconds: int = 120) -> str:
-        claimed = self._pipeline.queue.claim_next(
-            self._worker_id, lease_seconds=lease_seconds
-        )
-        if claimed is None:
-            return "idle"
-        kind, target_id = claimed
-        try:
-            if kind == "scan":
-                self._pipeline.scan_library_source_tree.execute(target_id)
-                self._pipeline.queue.complete("scan", target_id)
-                return "scan"
-            result = self._pipeline.process_import_task.execute(target_id)
-            return result.outcome
-        except Exception:
-            # Containment boundary only.
-            logger = __import__("logging").getLogger("ermao.readable_resource_pipeline")
-            logger.exception(
-                "readable_resource.worker.containment_failure",
-                extra={"stage": "worker", "outcome": "error"},
-            )
-            return "error"
+def build_readable_resource_worker(
+    pipeline: ReadableResourcePipeline,
+) -> ReadableResourceWorkerProcessor:
+    return ReadableResourceWorkerProcessor(
+        queue=pipeline.queue,
+        scan=pipeline.scan_library_source_tree,
+        process_import=pipeline.process_import_task,
+        uow=pipeline.uow,
+        worker_id=pipeline.worker_id,
+    )

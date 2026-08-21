@@ -20,7 +20,9 @@ from sqlalchemy import (
     and_,
     column,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from typing import TYPE_CHECKING
+
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
@@ -121,6 +123,35 @@ class LibraryImportRun(Base):
         default=db_timestamp,
         onupdate=db_timestamp,
     )
+    source_node: Mapped["LibrarySourceNode"] = relationship(
+        back_populates="import_runs",
+        foreign_keys=[source_node_id, library_id],
+        primaryjoin=(
+            "and_(LibraryImportRun.source_node_id==LibrarySourceNode.id,"
+            "LibraryImportRun.library_id==LibrarySourceNode.library_id)"
+        ),
+    )
+    resource: Mapped["LibraryReadableResource | None"] = relationship(
+        foreign_keys=[resource_id, library_id],
+        post_update=True,
+        primaryjoin=(
+            "and_(LibraryImportRun.resource_id==LibraryReadableResource.id,"
+            "LibraryImportRun.library_id==LibraryReadableResource.library_id)"
+        ),
+        overlaps="source_node",
+    )
+    resource_candidates: Mapped[list["ResourceCandidate"]] = relationship(
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+    )
+    asset_candidates: Mapped[list["AssetCandidate"]] = relationship(
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+    )
+    tasks: Mapped[list["LibraryImportTask"]] = relationship(
+        back_populates="owner_import_run",
+        foreign_keys="LibraryImportTask.owner_import_run_id",
+    )
 
 
 class ResourceCandidate(Base):
@@ -198,6 +229,17 @@ class ResourceCandidate(Base):
         default=db_timestamp,
         onupdate=db_timestamp,
     )
+    import_run: Mapped[LibraryImportRun] = relationship(
+        back_populates="resource_candidates",
+        foreign_keys=[import_run_id],
+    )
+    source_node: Mapped["LibrarySourceNode"] = relationship(
+        foreign_keys=[source_node_id, library_id],
+        primaryjoin=(
+            "and_(ResourceCandidate.source_node_id==LibrarySourceNode.id,"
+            "ResourceCandidate.library_id==LibrarySourceNode.library_id)"
+        ),
+    )
 
 
 class AssetCandidate(Base):
@@ -273,6 +315,17 @@ class AssetCandidate(Base):
         nullable=False,
         default=db_timestamp,
         onupdate=db_timestamp,
+    )
+    import_run: Mapped[LibraryImportRun] = relationship(
+        back_populates="asset_candidates",
+        foreign_keys=[import_run_id],
+    )
+    source_node: Mapped["LibrarySourceNode"] = relationship(
+        foreign_keys=[source_node_id, library_id],
+        primaryjoin=(
+            "and_(AssetCandidate.source_node_id==LibrarySourceNode.id,"
+            "AssetCandidate.library_id==LibrarySourceNode.library_id)"
+        ),
     )
 
 
@@ -368,6 +421,25 @@ class LibraryImportTask(Base):
         nullable=False,
         default=db_timestamp,
         onupdate=db_timestamp,
+    )
+    owner_import_run: Mapped[LibraryImportRun | None] = relationship(
+        back_populates="tasks",
+        foreign_keys=[owner_import_run_id],
+    )
+    resource: Mapped["LibraryReadableResource"] = relationship(
+        foreign_keys=[resource_id, library_id],
+        primaryjoin=(
+            "and_(LibraryImportTask.resource_id==LibraryReadableResource.id,"
+            "LibraryImportTask.library_id==LibraryReadableResource.library_id)"
+        ),
+    )
+    source_node: Mapped["LibrarySourceNode"] = relationship(
+        foreign_keys=[source_node_id, library_id],
+        primaryjoin=(
+            "and_(LibraryImportTask.source_node_id==LibrarySourceNode.id,"
+            "LibraryImportTask.library_id==LibrarySourceNode.library_id)"
+        ),
+        overlaps="resource",
     )
 
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator
 from pathlib import Path
 
 from app.modules.imports.application.readable_resource.ports import (
+    DirectoryEntry,
     SourceTreeFilesystemPort,
 )
 from app.modules.imports.domain.directory_probe import (
@@ -27,7 +28,6 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         except ValueError as error:
             raise ValueError("path_escapes_library_root") from error
         if candidate.is_symlink():
-            # Do not follow symlink targets outside the library root.
             real = candidate.parent.resolve() / candidate.name
             try:
                 real.relative_to(root_resolved)
@@ -38,23 +38,24 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
     def iter_directory_entries(
         self,
         absolute_directory: Path,
-    ) -> Sequence[tuple[str, SourceNodePhysicalKind, int | None, int]]:
-        results: list[tuple[str, SourceNodePhysicalKind, int | None, int]] = []
-        with os.scandir(absolute_directory) as iterator:
+    ) -> Iterator[DirectoryEntry]:
+        iterator = os.scandir(absolute_directory)
+        try:
             for entry in iterator:
                 kind = self._physical_kind(entry)
-                size: int | None
-                mtime_ns: int
                 try:
                     stat = entry.stat(follow_symlinks=False)
                     mtime_ns = int(stat.st_mtime_ns)
-                    size = None if kind is SourceNodePhysicalKind.DIRECTORY else int(
-                        stat.st_size
+                    size = (
+                        None
+                        if kind is SourceNodePhysicalKind.DIRECTORY
+                        else int(stat.st_size)
                     )
                 except OSError:
                     continue
-                results.append((entry.name, kind, size, mtime_ns))
-        return results
+                yield (entry.name, kind, size, mtime_ns)
+        finally:
+            iterator.close()
 
     def probe_directory(
         self,
@@ -75,8 +76,9 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         max_depth_reached = 0
         termination = ProbeTerminationReason.COMPLETE_SUBTREE
         stack: list[tuple[str, int]] = [(directory_relative_path, 0)]
+        stop = False
 
-        while stack:
+        while stack and not stop:
             if (time.monotonic() - started) * 1000 >= time_budget_ms:
                 termination = ProbeTerminationReason.TIME_BUDGET
                 break
@@ -94,23 +96,36 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
             except OSError:
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
-            for name, kind, _size, _mtime in entries:
-                entries_visited += 1
-                if ignore_hidden and name.startswith(".") and len(name) > 1:
-                    continue
-                child_rel = f"{relative_dir}/{name}"
-                if self._matches_ignore(
-                    child_rel, name, ignore_patterns, global_ignore_patterns
-                ):
-                    continue
-                if kind is SourceNodePhysicalKind.REGULAR_FILE:
-                    samples.append(child_rel)
-                    if len(samples) >= sample_limit:
-                        termination = ProbeTerminationReason.SAMPLE_LIMIT
-                        stack.clear()
+            try:
+                for name, kind, _size, _mtime in entries:
+                    if (time.monotonic() - started) * 1000 >= time_budget_ms:
+                        termination = ProbeTerminationReason.TIME_BUDGET
+                        stop = True
                         break
-                elif kind is SourceNodePhysicalKind.DIRECTORY:
-                    stack.append((child_rel, depth + 1))
+                    if entries_visited >= max_entries:
+                        termination = ProbeTerminationReason.ENTRY_BUDGET
+                        stop = True
+                        break
+                    entries_visited += 1
+                    if ignore_hidden and name.startswith(".") and len(name) > 1:
+                        continue
+                    child_rel = f"{relative_dir}/{name}"
+                    if self._matches_ignore(
+                        child_rel, name, ignore_patterns, global_ignore_patterns
+                    ):
+                        continue
+                    if kind is SourceNodePhysicalKind.REGULAR_FILE:
+                        samples.append(child_rel)
+                        if len(samples) >= sample_limit:
+                            termination = ProbeTerminationReason.SAMPLE_LIMIT
+                            stop = True
+                            stack.clear()
+                            break
+                    elif kind is SourceNodePhysicalKind.DIRECTORY:
+                        stack.append((child_rel, depth + 1))
+            except OSError:
+                termination = ProbeTerminationReason.LOCAL_IO_ERROR
+                break
 
         decision = decide_directory_probe(
             sample_relative_paths=tuple(samples),

@@ -390,7 +390,20 @@ def test_current_published_asset_query_isolation(tmp_path: Path) -> None:
     try:
         with Session(engine) as db, db.begin():
             _add_library(db, tmp_path)
-            db.add(_source_node(node_id="file", relative_path="a.epub", physical_kind="REGULAR_FILE"))
+            db.add(
+                _source_node(
+                    node_id="file",
+                    relative_path="a.epub",
+                    physical_kind="REGULAR_FILE",
+                )
+            )
+            db.add(
+                _source_node(
+                    node_id="track-old",
+                    relative_path="old.mp3",
+                    physical_kind="REGULAR_FILE",
+                )
+            )
             db.add(LibraryBook(id="book", library_id="lib-1", source_node_id="file"))
             db.add(
                 LibraryImportRun(
@@ -424,15 +437,17 @@ def test_current_published_asset_query_isolation(tmp_path: Path) -> None:
                     import_state="READY",
                 )
             )
+            # Same (resourceId, sourceNodeId) reuses one Asset row; isolation is by
+            # publishedRunId across different source nodes after a publish switch.
             db.add(
                 LibraryResourceAsset(
                     id="old-asset",
                     library_id="lib-1",
                     resource_id="res",
-                    source_node_id="file",
+                    source_node_id="track-old",
                     source_node_physical_kind="REGULAR_FILE",
                     published_run_id="run-old",
-                    role="PRIMARY",
+                    role="TRACK",
                     import_state="READY",
                 )
             )
@@ -493,6 +508,9 @@ def test_active_import_run_uniqueness_and_candidates(tmp_path: Path) -> None:
                     active_import_run_id="run-1",
                 )
             )
+            run = db.get(LibraryImportRun, "run-1")
+            assert run is not None
+            run.resource_id = "res"
             db.add(
                 ResourceCandidate(
                     id="rc-1",

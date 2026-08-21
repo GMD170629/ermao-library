@@ -11,29 +11,16 @@ from sqlalchemy.orm import Session
 
 from app.models.common import cuid
 from app.models.library import Library
-from app.modules.imports.application.readable_resource.ports import (
+from app.modules.library.application.source_tree_ports import (
+    AdapterIdentity,
     BookResourceRepositoryPort,
-    ImportRunRepositoryPort,
     InterpretationRecord,
     LibraryConfigPort,
-    LibraryImportTaskRecord,
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
-)
-from app.modules.imports.domain.import_run_policies import (
-    ImportRunKind,
-    ImportRunState,
-    LibraryImportTaskState,
-)
-from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
-from app.modules.imports.infrastructure.readable_resource_import_schema import (
-    AssetCandidate,
-    LibraryImportRun,
-    LibraryImportTask,
-    ResourceCandidate,
 )
 from app.modules.library.domain.organization_modes import (
     TargetLibraryOrganizationMode,
@@ -336,7 +323,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         library_id: str,
         book_id: str,
         source_node_id: str,
-        adapter: ResourceAdapterSpec,
+        adapter: AdapterIdentity,
         active_import_run_id: str,
     ) -> ReadableResourceRecord:
         row = LibraryReadableResource(
@@ -344,7 +331,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             library_id=library_id,
             book_id=book_id,
             source_node_id=source_node_id,
-            adapter_id=adapter.adapter_id.value,
+            adapter_id=adapter.adapter_id,
             adapter_version=adapter.adapter_version,
             media_kind=adapter.media_kind,
             format=adapter.format_label,
@@ -388,7 +375,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         *,
         resource_id: str,
         published_run_id: str,
-        adapter: ResourceAdapterSpec,
+        adapter: AdapterIdentity,
         title: str,
     ) -> None:
         row = self._session.get(LibraryReadableResource, resource_id)
@@ -396,7 +383,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             raise LookupError(resource_id)
         row.published_run_id = published_run_id
         row.import_state = ResourceImportState.READY.value
-        row.adapter_id = adapter.adapter_id.value
+        row.adapter_id = adapter.adapter_id
         row.adapter_version = adapter.adapter_version
         row.media_kind = adapter.media_kind
         row.format = adapter.format_label
@@ -546,6 +533,18 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             if ready < 1:
                 self.mark_resource_failed(resource_id)
 
+    def cleanup_stale_assets(
+        self, resource_id: str, published_run_id: str
+    ) -> None:
+        self._session.execute(
+            delete(LibraryResourceAsset).where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.published_run_id.is_not(None),
+                LibraryResourceAsset.published_run_id != published_run_id,
+            )
+        )
+        self._session.flush()
+
     def _to_resource(self, row: LibraryReadableResource) -> ReadableResourceRecord:
         return ReadableResourceRecord(
             id=row.id,
@@ -560,196 +559,4 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             import_state=ResourceImportState(row.import_state),
             published_run_id=row.published_run_id,
             active_import_run_id=row.active_import_run_id,
-        )
-
-
-class SqlAlchemyImportRunRepository(ImportRunRepositoryPort):
-    def __init__(self, session: Session) -> None:
-        self._session = session
-
-    def create_run(
-        self,
-        *,
-        library_id: str,
-        kind: ImportRunKind,
-        source_node_id: str,
-        resource_id: str | None,
-        adapter_id: str | None,
-        adapter_version: str | None,
-    ) -> str:
-        run_id = cuid()
-        self._session.add(
-            LibraryImportRun(
-                id=run_id,
-                library_id=library_id,
-                kind=kind.value,
-                state=ImportRunState.RUNNING.value,
-                source_node_id=source_node_id,
-                resource_id=resource_id,
-                adapter_id=adapter_id,
-                adapter_version=adapter_version,
-            )
-        )
-        self._session.flush()
-        return run_id
-
-    def set_run_state(
-        self,
-        run_id: str,
-        state: ImportRunState,
-        *,
-        error_summary: str | None = None,
-        published_at: datetime | None = None,
-    ) -> None:
-        row = self._session.get(LibraryImportRun, run_id)
-        if row is None:
-            raise LookupError(run_id)
-        row.state = state.value
-        row.error_summary = error_summary
-        row.published_at = published_at
-        self._session.flush()
-
-    def attach_resource(self, run_id: str, resource_id: str) -> None:
-        row = self._session.get(LibraryImportRun, run_id)
-        if row is None:
-            raise LookupError(run_id)
-        row.resource_id = resource_id
-        self._session.flush()
-
-    def upsert_resource_candidate(
-        self,
-        *,
-        import_run_id: str,
-        library_id: str,
-        book_id: str | None,
-        source_node_id: str,
-        adapter: ResourceAdapterSpec,
-        title: str | None,
-    ) -> None:
-        row = self._session.scalar(
-            select(ResourceCandidate).where(
-                ResourceCandidate.import_run_id == import_run_id
-            )
-        )
-        if row is None:
-            row = ResourceCandidate(id=cuid(), import_run_id=import_run_id)
-            self._session.add(row)
-        row.library_id = library_id
-        row.book_id = book_id
-        row.source_node_id = source_node_id
-        row.adapter_id = adapter.adapter_id.value
-        row.adapter_version = adapter.adapter_version
-        row.media_kind = adapter.media_kind
-        row.format = adapter.format_label
-        row.title = title
-        self._session.flush()
-
-    def upsert_asset_candidate(
-        self,
-        *,
-        import_run_id: str,
-        library_id: str,
-        source_node_id: str,
-        role: AssetRole,
-        import_state: AssetImportState,
-        sequence_index: int | None,
-        sort_key: str | None,
-        failure_reason: str | None,
-    ) -> None:
-        row = self._session.scalar(
-            select(AssetCandidate).where(
-                AssetCandidate.import_run_id == import_run_id,
-                AssetCandidate.source_node_id == source_node_id,
-            )
-        )
-        if row is None:
-            row = AssetCandidate(
-                id=cuid(),
-                import_run_id=import_run_id,
-                source_node_id=source_node_id,
-            )
-            self._session.add(row)
-        row.library_id = library_id
-        row.role = role.value
-        row.import_state = import_state.value
-        row.sequence_index = sequence_index
-        row.sort_key = sort_key
-        row.failure_reason = failure_reason
-        self._session.flush()
-
-    def create_task(
-        self,
-        *,
-        library_id: str,
-        resource_id: str,
-        source_node_id: str,
-        owner_import_run_id: str | None,
-        role: AssetRole,
-    ) -> LibraryImportTaskRecord:
-        row = LibraryImportTask(
-            id=cuid(),
-            library_id=library_id,
-            state=LibraryImportTaskState.QUEUED.value,
-            resource_id=resource_id,
-            source_node_id=source_node_id,
-            owner_import_run_id=owner_import_run_id,
-            role=role.value,
-            attempt_count=0,
-        )
-        self._session.add(row)
-        self._session.flush()
-        return self._to_task(row)
-
-    def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
-        row = self._session.get(LibraryImportTask, task_id)
-        return None if row is None else self._to_task(row)
-
-    def mark_task_state(
-        self,
-        task_id: str,
-        state: LibraryImportTaskState,
-        *,
-        error_summary: str | None = None,
-        increment_attempt: bool = False,
-    ) -> None:
-        row = self._session.get(LibraryImportTask, task_id)
-        if row is None:
-            raise LookupError(task_id)
-        row.state = state.value
-        row.error_summary = error_summary
-        if increment_attempt:
-            row.attempt_count += 1
-        self._session.flush()
-
-    def cleanup_run_candidates(self, run_id: str) -> None:
-        self._session.execute(
-            delete(ResourceCandidate).where(ResourceCandidate.import_run_id == run_id)
-        )
-        self._session.execute(
-            delete(AssetCandidate).where(AssetCandidate.import_run_id == run_id)
-        )
-        self._session.flush()
-
-    def cleanup_stale_assets(
-        self, resource_id: str, published_run_id: str
-    ) -> None:
-        self._session.execute(
-            delete(LibraryResourceAsset).where(
-                LibraryResourceAsset.resource_id == resource_id,
-                LibraryResourceAsset.published_run_id.is_not(None),
-                LibraryResourceAsset.published_run_id != published_run_id,
-            )
-        )
-        self._session.flush()
-
-    def _to_task(self, row: LibraryImportTask) -> LibraryImportTaskRecord:
-        return LibraryImportTaskRecord(
-            id=row.id,
-            library_id=row.library_id,
-            state=LibraryImportTaskState(row.state),
-            resource_id=row.resource_id,
-            source_node_id=row.source_node_id,
-            owner_import_run_id=row.owner_import_run_id,
-            role=AssetRole(row.role),
-            attempt_count=row.attempt_count,
         )

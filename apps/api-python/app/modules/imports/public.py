@@ -25,6 +25,17 @@ from app.modules.imports.application.release_titles import (
     ParsedReleaseTitle,
     parse_release_title,
 )
+from app.modules.imports.application.readable_resource.ports import ClaimedWork
+from app.modules.imports.application.readable_resource.process_import_task import (
+    ProcessReadableResourceImportTask,
+)
+from app.modules.imports.application.readable_resource.reimport import (
+    ReimportSourceNode,
+    RetryReadableResourceImport,
+)
+from app.modules.imports.application.readable_resource.scan_source_tree import (
+    ScanLibrarySourceTree,
+)
 from app.modules.imports.application.save_uploaded_files import (
     SavedUploadFile,
     SaveUploadedFiles,
@@ -37,15 +48,20 @@ from app.modules.imports.application.save_uploaded_files import (
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
+    "ClaimedWork",
     "ImportOptions",
     "ImportResult",
     "ImportTaskDTO",
     "ImportUnitOfWork",
     "LibraryPathError",
     "ParsedReleaseTitle",
+    "ProcessReadableResourceImportTask",
+    "ReimportSourceNode",
+    "RetryReadableResourceImport",
     "SaveUploadedFiles",
     "SaveUploadedFilesCommand",
     "SavedUploadFile",
+    "ScanLibrarySourceTree",
     "SeriesVolumeInfo",
     "UploadFileTooLargeError",
     "UploadPublicationError",
