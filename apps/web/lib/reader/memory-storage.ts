@@ -59,20 +59,7 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderResourceCache, 
   async getClientId() { return this.clientId; }
   async getExactProgress(identity: ExactProgressIdentity) {
     const key = exactProgressKey(identity);
-    const current = this.exactProgress.get(key);
-    if (current) return current;
-    const legacy = [...this.exactProgress.values()]
-      .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
-        && candidate.userId === identity.userId
-        && candidate.clientId === identity.clientId
-        && candidate.bookId === identity.bookId
-        && candidate.resourceId === identity.resourceId)
-      .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
-    if (!legacy) return null;
-    const migrated = { ...legacy, ...identity, key };
-    this.exactProgress.set(key, migrated);
-    if (legacy.key !== key) this.exactProgress.delete(legacy.key);
-    return migrated;
+    return this.exactProgress.get(key) ?? null;
   }
   async putExactProgress(progress: ExactProgressRecord) { this.exactProgress.set(progress.key, progress); return progress; }
   async putExactAndPending(progress: ExactProgressRecord, mutation: PendingProgressMutation) { this.exactProgress.set(progress.key, progress); this.pending.set(mutation.key, mutation); }
@@ -80,20 +67,7 @@ export class MemoryReaderStorage implements ReaderStorage, ReaderResourceCache, 
   async getPendingProgress(key: string) { return this.pending.get(key) ?? null; }
   async getPendingProgressForIdentity(identity: ExactProgressIdentity) {
     const key = syncStateKey(identity);
-    const current = this.pending.get(key);
-    if (current) return current;
-    const legacy = [...this.pending.values()]
-      .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
-        && candidate.userId === identity.userId
-        && candidate.clientId === identity.clientId
-        && candidate.bookId === identity.bookId
-        && candidate.resourceId === identity.resourceId)
-      .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
-    if (!legacy) return null;
-    const migrated = { ...legacy, key };
-    this.pending.set(key, migrated);
-    if (legacy.key !== key) this.pending.delete(legacy.key);
-    return migrated;
+    return this.pending.get(key) ?? null;
   }
   async listPendingProgress(userId: string) { return [...this.pending.values()].filter((item) => item.userId === userId); }
   async deletePendingProgress(key: string, mutationId?: string) { const current = this.pending.get(key); if (!mutationId || current?.mutationId === mutationId) this.pending.delete(key); }

@@ -10,13 +10,13 @@ const locator = parsePublicationLocation(exactRequest.locator);
 if (!locator) throw new Error('invalid exact fixture');
 const input = { serverIdentity: 'https://library.example', userId: 'user-1', bookId: 'book-1', resourceId: 'resource-1', baseRevision: 17, locator, displayPercent: 42 } as const;
 
-test('migrates a fingerprint-keyed local record into the book and resource progress slot', async () => {
+test('ignores a progress record stored under a non-canonical key', async () => {
   const storage = new MemoryReaderStorage();
   const clientId = await storage.getClientId();
   const identity = { serverIdentity: input.serverIdentity, userId: input.userId, clientId, bookId: input.bookId, resourceId: input.resourceId };
   await storage.putExactProgress({
     ...identity,
-    key: 'legacy-fingerprint-key',
+    key: 'non-canonical-key',
     schemaVersion: 1,
     locator,
     displayPercent: 42,
@@ -24,9 +24,19 @@ test('migrates a fingerprint-keyed local record into the book and resource progr
     capturedAtEpochMillis: 99
   });
 
-  const migrated = await storage.getExactProgress(identity);
+  const current = await storage.getExactProgress(identity);
 
-  assert.equal(migrated?.key, exactProgressKey(identity));
+  assert.equal(current, null);
+  await storage.putExactProgress({
+    ...identity,
+    key: exactProgressKey(identity),
+    schemaVersion: 1,
+    locator,
+    displayPercent: 42,
+    revision: 17,
+    capturedAtEpochMillis: 99
+  });
+  assert.equal((await storage.getExactProgress(identity))?.key, exactProgressKey(identity));
   assert.equal(await storage.getExactProgress({ ...identity, bookId: 'another-book' }), null);
 });
 

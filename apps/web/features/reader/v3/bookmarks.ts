@@ -26,14 +26,6 @@ export function readerBookmarkId(location: ReaderLocation | null | undefined) {
     }
     return null;
   }
-  if (location.cfi) return `epub:cfi:${location.cfi}`;
-
-  const progression = typeof location.progression === 'number'
-    ? Math.round(location.progression * 10_000) / 10_000
-    : '';
-  if (location.href || location.spineIndex !== undefined || progression !== '') {
-    return `epub:position:${location.href ?? ''}:${location.spineIndex ?? ''}:${progression}`;
-  }
   return null;
 }
 

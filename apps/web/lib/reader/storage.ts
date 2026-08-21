@@ -102,7 +102,7 @@ function openDatabase() {
   if (databasePromise) return databasePromise;
   databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(READER_PROGRESS_DB_NAME, READER_DB_SCHEMA_VERSION);
-    request.onupgradeneeded = (event) => {
+    request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(PREFERENCES_STORE)) database.createObjectStore(PREFERENCES_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(EXACT_PROGRESS_STORE)) database.createObjectStore(EXACT_PROGRESS_STORE, { keyPath: 'key' });
@@ -110,7 +110,6 @@ function openDatabase() {
         const store = database.createObjectStore(PENDING_PROGRESS_STORE, { keyPath: 'key' });
         store.createIndex('by-user', 'userId', { unique: false });
       }
-      if (database.objectStoreNames.contains('progress-conflicts')) database.deleteObjectStore('progress-conflicts');
       if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(DIAGNOSTICS_STORE)) database.createObjectStore(DIAGNOSTICS_STORE, { keyPath: 'id' });
       if (!database.objectStoreNames.contains(RESOURCE_CACHE_STORE)) {
@@ -121,11 +120,6 @@ function openDatabase() {
         const store = database.createObjectStore(PDF_RANGE_CHUNKS_STORE, { keyPath: 'key' });
         store.createIndex('by-document', 'documentKey', { unique: false });
         store.createIndex('by-namespace', 'namespaceKey', { unique: false });
-      }
-      if (event.oldVersion > 0 && event.oldVersion < 2) {
-        [EXACT_PROGRESS_STORE, PENDING_PROGRESS_STORE].forEach((name) => {
-          if (database.objectStoreNames.contains(name)) request.transaction?.objectStore(name).clear();
-        });
       }
     };
     request.onsuccess = () => {
@@ -258,23 +252,10 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderResourceCach
     });
   }
   async getExactProgress(identity: ExactProgressIdentity) {
-    return withTransaction(EXACT_PROGRESS_STORE, 'readwrite', async (stores) => {
+    return withTransaction(EXACT_PROGRESS_STORE, 'readonly', async (stores) => {
       const store = stores(EXACT_PROGRESS_STORE);
       const key = exactProgressKey(identity);
-      const current = await requestResult(store.get(key)) as ExactProgressRecord | undefined;
-      if (current) return current;
-      const legacy = ((await requestResult(store.getAll())) as ExactProgressRecord[])
-        .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
-          && candidate.userId === identity.userId
-          && candidate.clientId === identity.clientId
-          && candidate.bookId === identity.bookId
-          && candidate.resourceId === identity.resourceId)
-        .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
-      if (!legacy) return null;
-      const migrated = { ...legacy, ...identity, key };
-      await requestResult(store.put(migrated));
-      if (legacy.key !== key) await requestResult(store.delete(legacy.key));
-      return migrated;
+      return (await requestResult(store.get(key)) as ExactProgressRecord | undefined) ?? null;
     });
   }
   async putExactProgress(progress: ExactProgressRecord) { await withTransaction(EXACT_PROGRESS_STORE, 'readwrite', async (stores) => { await requestResult(stores(EXACT_PROGRESS_STORE).put(progress)); }); return progress; }
@@ -282,23 +263,10 @@ export class IndexedDbReaderStorage implements ReaderStorage, ReaderResourceCach
   async putPendingProgress(mutation: PendingProgressMutation) { await withTransaction(PENDING_PROGRESS_STORE, 'readwrite', async (stores) => { await requestResult(stores(PENDING_PROGRESS_STORE).put(mutation)); }); }
   async getPendingProgress(key: string) { return withTransaction(PENDING_PROGRESS_STORE, 'readonly', async (stores) => (await requestResult(stores(PENDING_PROGRESS_STORE).get(key)) as PendingProgressMutation | undefined) ?? null); }
   async getPendingProgressForIdentity(identity: ExactProgressIdentity) {
-    return withTransaction(PENDING_PROGRESS_STORE, 'readwrite', async (stores) => {
+    return withTransaction(PENDING_PROGRESS_STORE, 'readonly', async (stores) => {
       const store = stores(PENDING_PROGRESS_STORE);
       const key = syncStateKey(identity);
-      const current = await requestResult(store.get(key)) as PendingProgressMutation | undefined;
-      if (current) return current;
-      const legacy = ((await requestResult(store.getAll())) as PendingProgressMutation[])
-        .filter((candidate) => candidate.serverIdentity === identity.serverIdentity
-          && candidate.userId === identity.userId
-          && candidate.clientId === identity.clientId
-          && candidate.bookId === identity.bookId
-          && candidate.resourceId === identity.resourceId)
-        .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0];
-      if (!legacy) return null;
-      const migrated = { ...legacy, key };
-      await requestResult(store.put(migrated));
-      if (legacy.key !== key) await requestResult(store.delete(legacy.key));
-      return migrated;
+      return (await requestResult(store.get(key)) as PendingProgressMutation | undefined) ?? null;
     });
   }
   async listPendingProgress(userId: string) { return withTransaction(PENDING_PROGRESS_STORE, 'readonly', async (stores) => await requestResult(stores(PENDING_PROGRESS_STORE).index('by-user').getAll(userId)) as PendingProgressMutation[]); }

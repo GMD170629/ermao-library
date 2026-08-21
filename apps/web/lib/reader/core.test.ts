@@ -24,19 +24,25 @@ const capabilities: ReaderCapabilities = {
   supportsSpreads: false
 };
 
-test('normalizes a complete V4 preference snapshot from legacy and invalid input', () => {
+test('normalizes a partial V4 preference snapshot and invalid current values', () => {
   const preferences = normalizeReaderPreferences({
-    theme: 'warm',
-    fontSize: 80,
-    lineHeight: 1.87,
-    pageWidth: 2000,
-    fontFamily: 'not-a-font',
-    ebookPageTurnAnimation: 'off',
-    comicDirection: 'rtl',
-    comicMode: 'double',
-    imageFit: 'contain',
-    imageVariant: 'data-saver',
-    zoom: 1.63
+    schemaVersion: 4,
+    appearance: { theme: 'warm' },
+    epub: {
+      fontSize: 80,
+      lineHeight: 1.87,
+      pageWidth: 2000,
+      fontFamily: 'not-a-font',
+      pageTurnAnimation: 'off'
+    },
+    comic: {
+      direction: 'rtl',
+      spreadMode: 'double',
+      imageFit: 'contain',
+      imageVariant: 'data-saver',
+      zoom: 1.63
+    },
+    pdf: { zoom: 1.63 }
   });
 
   assert.deepEqual(preferences, {
@@ -101,39 +107,17 @@ test('preserves an explicitly saved PDF width fit preference', () => {
   assert.equal(preferences.pdf.fit, 'width');
 });
 
-test('migrates V2 kindle animation and missing paging fields to V4 defaults', () => {
-  const preferences = normalizeReaderPreferences({
-    schemaVersion: 2,
-    epub: {
-      pageTurnAnimation: 'kindle'
-    },
-    comic: {
-      mode: 'double'
-    }
-  });
-
-  assert.equal(preferences.schemaVersion, 4);
-  assert.equal(preferences.epub.spreadMode, 'single');
-  assert.equal(preferences.epub.pageTurnAnimation, 'slide');
-  assert.equal(preferences.comic.spreadMode, 'double');
-  assert.equal(preferences.comic.pageTurnAnimation, 'slide');
+test('rejects preference snapshots from retired schema versions', () => {
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 2 }), /schema version 4/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 3 }), /schema version 4/);
 });
 
-test('preserves valid V3 spread and animation preferences', () => {
-  const preferences = normalizeReaderPreferences({
-    schemaVersion: 3,
-    epub: {
-      spreadMode: 'double',
-      pageTurnAnimation: 'slide'
-    },
-    comic: {
-      pageTurnAnimation: 'off'
-    }
-  });
-
-  assert.equal(preferences.epub.spreadMode, 'double');
-  assert.equal(preferences.epub.pageTurnAnimation, 'slide');
-  assert.equal(preferences.comic.pageTurnAnimation, 'off');
+test('rejects retired preference fields and values', () => {
+  assert.throws(() => normalizeReaderPreferences({ theme: 'warm' }), /preference fields/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 4, comic: { mode: 'double' } }), /preference fields/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 4, epub: { pageTurnAnimation: 'kindle' } }), /page-turn animation/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 4, comic: { flow: 'vertical' } }), /comic reader flow/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 4, pdf: { flow: 'continuous' } }), /PDF reader flow/);
 });
 
 test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
@@ -143,8 +127,8 @@ test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
     display: { progressStyle: 'remaining', showClock: true },
     interaction: { keepScreenAwake: true },
     epub: { fontWeight: 700, letterSpacing: 0.08, pageMargin: 'wide', spreadMode: 'auto' },
-    comic: { flow: 'vertical', coverSingle: true, pageGap: 16 },
-    pdf: { flow: 'continuous', rotation: 270, cropMargins: 'auto' }
+    comic: { flow: 'scrolled', coverSingle: true, pageGap: 16 },
+    pdf: { flow: 'paged', rotation: 270, cropMargins: 'auto' }
   });
 
   assert.equal(preferences.appearance.theme, 'green');
@@ -269,7 +253,7 @@ test('session reducer rejects stale operations and events from another session',
     operation: bootstrap,
     occurredAt: 1,
     capabilities,
-    location: { kind: 'epub', cfi: 'epubcfi(/6/2)' }
+    location: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/2)' }
   };
   state = readerSessionReducer(state, { type: 'adapter/event', event: ready });
   assert.equal(state.lifecycle, 'ready');
@@ -304,7 +288,7 @@ test('session reducer rejects stale operations and events from another session',
       sessionId: state.sessionId,
       operation: firstNavigation,
       occurredAt: 2,
-      location: { kind: 'epub', cfi: 'epubcfi(/6/4)' },
+      location: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/4)' },
       percent: 20
     }
   });
@@ -317,11 +301,11 @@ test('session reducer rejects stale operations and events from another session',
       sessionId: state.sessionId,
       operation: currentNavigation,
       occurredAt: 3,
-      location: { kind: 'epub', cfi: 'epubcfi(/6/8)' },
+      location: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/8)' },
       percent: 150
     }
   });
-  assert.deepEqual(state.location, { kind: 'epub', cfi: 'epubcfi(/6/8)' });
+  assert.deepEqual(state.location, { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/8)' });
   assert.equal(state.percent, 100);
 
   const beforeForeign = state;

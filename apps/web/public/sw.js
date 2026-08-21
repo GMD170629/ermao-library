@@ -3,7 +3,6 @@ const VERSION = `shuku-pwa-v${FRONTEND_RESOURCE_VERSION}`;
 const SHELL_CACHE = `${VERSION}-app-shell`;
 const STATIC_CACHE = `${VERSION}-static`;
 const PRIVATE_CACHE_PREFIX = 'shuku-pwa-private-v1-';
-const LEGACY_PRIVATE_CACHE_PATTERN = /^shuku-pwa-v\d+\.\d+\.\d+-private-(.+)$/;
 const FRONTEND_RESOURCE_CACHE_PATTERN = /^shuku-pwa-v\d+\.\d+\.\d+-(?:app-shell|static)$/;
 let privateCacheNamespace = '';
 const BASE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, '');
@@ -206,24 +205,8 @@ async function staleWhileRevalidate(request, cacheName) {
 async function clearPrivateCaches() {
   const keys = await caches.keys();
   await Promise.all(keys
-    .filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX) || LEGACY_PRIVATE_CACHE_PATTERN.test(cacheName))
+    .filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX))
     .map((cacheName) => caches.delete(cacheName)));
-}
-
-async function migrateLegacyPrivateCaches() {
-  const keys = await caches.keys();
-  for (const legacyName of keys) {
-    const match = LEGACY_PRIVATE_CACHE_PATTERN.exec(legacyName);
-    if (!match) continue;
-    const targetName = `${PRIVATE_CACHE_PREFIX}${match[1]}`;
-    const [legacyCache, targetCache] = await Promise.all([caches.open(legacyName), caches.open(targetName)]);
-    const requests = await legacyCache.keys();
-    for (const request of requests) {
-      const response = await legacyCache.match(request);
-      if (response) await targetCache.put(request, response);
-    }
-    await caches.delete(legacyName);
-  }
 }
 
 async function clearOldFrontendResourceCaches() {
@@ -255,8 +238,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   debugLog('info', 'activate', VERSION);
   event.waitUntil(
-    migrateLegacyPrivateCaches()
-      .then(() => clearOldFrontendResourceCaches())
+    clearOldFrontendResourceCaches()
       .then(() => self.clients.claim())
       .then(() => debugLog('info', 'clients claimed', VERSION))
       .catch((error) => {

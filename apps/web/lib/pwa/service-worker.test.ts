@@ -63,7 +63,7 @@ test('forced updates only purge versioned frontend resources and preserve reader
   assert.match(source, /event\.data\?\.type === 'PURGE_FRONTEND_RESOURCES_AND_ACTIVATE'/);
   assert.match(source, /function clearOldFrontendResourceCaches/);
   assert.match(source, /isFrontendResourceCache\(cacheName\)/);
-  assert.match(source, /migrateLegacyPrivateCaches/);
+  assert.doesNotMatch(source, /migrateLegacyPrivateCaches/);
   assert.doesNotMatch(source, /indexedDB/);
   assert.doesNotMatch(source, /keys\.filter\(\(key\) => !key\.startsWith\(VERSION\)\)/);
 });

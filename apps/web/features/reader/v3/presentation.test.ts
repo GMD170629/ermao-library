@@ -20,7 +20,8 @@ test('projects discriminated locations into the existing visual progress model',
 
 test('never presents the EPUB table of contents as chapters or physical pages', () => {
   assert.deepEqual(locationProgress({
-    kind: 'epub',
+    kind: 'reflowable',
+    format: 'epub',
     cfi: 'epubcfi(/6/482!/4/2/8:12)',
     href: 'all-chapters.xhtml#chapter-241',
     spineIndex: 4,

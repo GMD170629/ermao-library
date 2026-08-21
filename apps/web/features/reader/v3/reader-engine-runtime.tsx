@@ -361,11 +361,11 @@ export function ReaderEngineRuntime({
     if (currentLocation?.kind === 'comic') {
       return bootstrap.resource.title ? `${bootstrap.resource.title} · ${progress.label}` : progress.label;
     }
-    if (currentLocation?.kind !== 'reflowable' && currentLocation?.kind !== 'epub') return progress.label;
+    if (currentLocation?.kind !== 'reflowable') return progress.label;
     const activeIndex = resolveActiveEpubNavigationIndex(
       items,
       currentLocation.href,
-      currentLocation.kind === 'epub' ? currentLocation.spineIndex : undefined
+      currentLocation.spineIndex
     );
     const chapter = activeIndex === null ? null : items[activeIndex];
     return chapter ? `${chapter.title} · 全书 ${Math.round(progress.percent)}%` : progress.label;

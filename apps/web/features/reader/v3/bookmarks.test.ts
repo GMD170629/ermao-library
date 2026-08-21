@@ -3,7 +3,7 @@ import test from 'node:test';
 import { hasReaderBookmark, mergeReaderBookmarks, readReaderBookmarks, readerBookmarkId, readerBookmarkStorageKey, removeReaderBookmark, toggleReaderBookmark } from './bookmarks';
 
 test('creates stable bookmark ids for every reader location kind', () => {
-  assert.equal(readerBookmarkId({ kind: 'epub', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'epub:cfi:epubcfi(/6/4!/4/2:1)');
+  assert.equal(readerBookmarkId({ kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'reflowable:epub:cfi:epubcfi(/6/4!/4/2:1)');
   assert.equal(readerBookmarkId({ kind: 'reflowable', format: 'fb2', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'reflowable:fb2:cfi:epubcfi(/6/4!/4/2:1)');
   assert.equal(readerBookmarkId({ kind: 'comic', resourceId: 'resource-2', pageIndex: 18 }), 'comic:resource-2:18');
   assert.equal(readerBookmarkId({ kind: 'pdf', pageIndex: 7, pageProgression: 0 }), 'pdf:7');
