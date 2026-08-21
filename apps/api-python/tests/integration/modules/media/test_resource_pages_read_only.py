@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -16,16 +17,43 @@ from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
 from app.models.auth import User
-from app.models.library import (
-    Library,
-    LibraryFile,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
-)
+from app.models.library import Library, ReadableResourceNavigationUnit
 from app.models.settings import SystemSetting
+from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
+)
 from tests.support.sqlalchemy import StatementRecorder
+
+
+def _path_key(path: str) -> str:
+    return f"v1:{hashlib.sha256(path.encode('utf-8')).hexdigest()}"
+
+
+def _node(
+    node_id: str,
+    relative_path: str,
+    *,
+    physical_kind: str,
+    size_bytes: int | None,
+    mtime_ms: int = 1,
+) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=relative_path,
+        path_key=_path_key(relative_path),
+        name=Path(relative_path).name or node_id,
+        physical_kind=physical_kind,
+        observed_size_bytes=size_bytes if physical_kind != "DIRECTORY" else None,
+        observed_mtime_ns=mtime_ms * 1_000_000,
+        observed_at=datetime.now(UTC),
+    )
 
 
 def _write_comic_archive(path: Path) -> None:
@@ -35,16 +63,20 @@ def _write_comic_archive(path: Path) -> None:
         archive.writestr("002.jpg", b"two")
 
 
-def _seed_comic(engine: Engine, settings: Settings) -> datetime:
+def _seed_comic(engine: Engine, settings: Settings) -> tuple[datetime, str]:
     archive_path = settings.resolved_storage_root / "library" / "comic.cbz"
     _write_comic_archive(archive_path)
     preserved_updated_at = datetime(2026, 8, 11, 8, tzinfo=UTC)
+    book_id = "comic-lock-book"
+    resource_id = "comic-lock-resource"
+    asset_id = "comic-lock-asset"
+    archive_relative_path = "library/comic.cbz"
     with Session(engine) as db:
         db.add(
             Library(
                 id="test-library",
                 name="Test Library",
-                root_path="/test-library",
+                root_path=str(settings.resolved_storage_root),
                 organization_mode="FLAT",
             )
         )
@@ -55,49 +87,78 @@ def _seed_comic(engine: Engine, settings: Settings) -> datetime:
             password_hash=hash_password("starshipnas"),
             role="admin",
         )
-        work = LibraryWork(
+        book_node = _node(
+            "comic-lock-book-node",
+            "comic-lock-book/",
+            physical_kind="DIRECTORY",
+            size_bytes=None,
+        )
+        source_node = _node(
+            "comic-lock-source-node",
+            archive_relative_path,
+            physical_kind="REGULAR_FILE",
+            size_bytes=archive_path.stat().st_size,
+            mtime_ms=int(archive_path.stat().st_mtime * 1000),
+        )
+        book = LibraryBook(
+            id=book_id,
             library_id="test-library",
-            id="comic-lock-work",
-            origin="MANUAL",
+            source_node_id=book_node.id,
+        )
+        book_metadata = LibraryBookMetadata(
+            book_id=book_id,
             title="Comic lock",
             normalized_title="comic lock",
             author="作者",
             normalized_author="作者",
-            tags="[]",
         )
-        version = LibraryVersion(
-            id="comic-lock-version",
-            work_id=work.id,
-            source_key="comic-lock:version",
-        )
-        volume = LibraryVolume(
-            id="comic-lock-volume",
-            version_id=version.id,
-            title="第一卷",
+        resource = LibraryReadableResource(
+            id=resource_id,
+            library_id="test-library",
+            book_id=book_id,
+            source_node_id=source_node.id,
+            adapter_id="comic",
+            adapter_version="1",
+            media_kind="COMIC",
             format="CBZ",
-            resource_key="manual:comic-lock",
-            import_status="COMPLETED",
-            page_count=None,
+            enablement_state="ENABLED",
+            import_state="READY",
+        )
+        resource_metadata = LibraryReadableResourceMetadata(
+            resource_id=resource_id,
+            title="Comic lock",
             updated_at=preserved_updated_at,
         )
-        file = LibraryFile(
-            id="comic-lock-file",
-            volume_id=volume.id,
-            path=str(archive_path.resolve()),
-            mtime_ms=1,
-            kind="COMIC",
-            mime_type="application/zip",
-            size_bytes=archive_path.stat().st_size,
+        asset = LibraryResourceAsset(
+            id=asset_id,
+            library_id="test-library",
+            resource_id=resource_id,
+            source_node_id=source_node.id,
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+            sequence_index=0,
+            sort_key="0",
         )
-        db.add_all([user, work])
-        db.flush()
-        db.add(version)
-        db.flush()
-        db.add(volume)
-        db.flush()
-        db.add(file)
+        asset_metadata = LibraryResourceAssetMetadata(
+            asset_id=asset_id,
+            mime_type="application/vnd.comicbook+zip",
+        )
+        db.add_all(
+            [
+                user,
+                book_node,
+                source_node,
+                book,
+                book_metadata,
+                resource,
+                resource_metadata,
+                asset,
+                asset_metadata,
+            ]
+        )
         db.commit()
-    return preserved_updated_at
+    return preserved_updated_at, resource_id
 
 
 def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
@@ -112,7 +173,7 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
     writer_engine = create_sqlite_engine(settings.database_path)
     reader_engine = create_sqlite_engine(settings.database_path, timeout_seconds=0.1)
     bootstrap_database(writer_engine, settings)
-    preserved_updated_at = _seed_comic(writer_engine, settings)
+    preserved_updated_at, resource_id = _seed_comic(writer_engine, settings)
     reader_factory = sessionmaker(
         bind=reader_engine,
         autoflush=False,
@@ -140,10 +201,10 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
             with StatementRecorder(reader_engine) as recorder:
                 recorder.reset_after_warmup()
                 started_at = monotonic()
-                listed = client.get("/api/volumes/comic-lock-volume/pages")
+                listed = client.get(f"/api/resources/{resource_id}/pages")
                 list_elapsed = monotonic() - started_at
                 started_at = monotonic()
-                page = client.get("/api/volumes/comic-lock-volume/pages/2")
+                page = client.get(f"/api/resources/{resource_id}/pages/2")
                 page_elapsed = monotonic() - started_at
 
             assert listed.status_code == 200
@@ -155,15 +216,17 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
 
             with Session(reader_engine) as verification:
                 page_rows = verification.scalar(
-                    select(func.count()).select_from(LibraryReadingUnit)
+                    select(func.count()).select_from(ReadableResourceNavigationUnit)
                 )
-                volume_state = verification.execute(
-                    select(LibraryVolume.page_count, LibraryVolume.updated_at).where(
-                        LibraryVolume.id == "comic-lock-volume"
+                resource_state = verification.execute(
+                    select(
+                        LibraryReadableResourceMetadata.updated_at,
+                    ).where(
+                        LibraryReadableResourceMetadata.resource_id == resource_id
                     )
                 ).one()
             assert page_rows == 0
-            assert volume_state == (None, preserved_updated_at)
+            assert resource_state == (preserved_updated_at,)
     finally:
         blocker.rollback()
         blocker.close()

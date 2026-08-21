@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -11,18 +12,25 @@ from sqlalchemy.orm import Session
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
-from app.models.library import (
-    LibraryFile,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import ReadableResourceNavigationUnit
+from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
 )
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+
+
+def _path_key(path: str) -> str:
+    return f"v1:{hashlib.sha256(path.encode('utf-8')).hexdigest()}"
 
 
 def _login(client: TestClient, db: Session) -> User:
     user = User(
+        id="publication-reader-user",
         email="publication-reader@example.com",
         name="Publication Reader",
         password_hash=hash_password("starshipnas"),
@@ -36,6 +44,110 @@ def _login(client: TestClient, db: Session) -> User:
     )
     assert response.status_code == 200
     return user
+
+
+def _source_node(
+    node_id: str,
+    path: str,
+    *,
+    size_bytes: int | None,
+    mtime_ms: int = 1,
+    physical_kind: str = "REGULAR_FILE",
+) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=path,
+        path_key=_path_key(path),
+        name=Path(path).name or node_id,
+        physical_kind=physical_kind,
+        observed_size_bytes=size_bytes if physical_kind != "DIRECTORY" else None,
+        observed_mtime_ns=mtime_ms * 1_000_000,
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _seed_resource(
+    db: Session,
+    *,
+    resource_id: str,
+    book_id: str,
+    path: str,
+    title: str,
+    fmt: str,
+    mime_type: str,
+) -> LibraryReadableResource:
+    source = Path(path)
+    mtime_ms = int(source.stat().st_mtime * 1000)
+    book_node = _source_node(
+        f"{book_id}-node",
+        f"{book_id}/",
+        size_bytes=None,
+        physical_kind="DIRECTORY",
+    )
+    source_node = _source_node(
+        f"{resource_id}-node",
+        path,
+        size_bytes=source.stat().st_size,
+        mtime_ms=mtime_ms,
+    )
+    book = LibraryBook(
+        id=book_id,
+        library_id="test-library",
+        source_node_id=book_node.id,
+    )
+    book_metadata = LibraryBookMetadata(
+        book_id=book_id,
+        title=title,
+        normalized_title=title.lower(),
+        author="测试作者",
+        normalized_author="测试作者",
+    )
+    resource = LibraryReadableResource(
+        id=resource_id,
+        library_id="test-library",
+        book_id=book_id,
+        source_node_id=source_node.id,
+        adapter_id=fmt.lower(),
+        adapter_version="1",
+        media_kind="READABLE",
+        format=fmt,
+        enablement_state="ENABLED",
+        import_state="READY",
+    )
+    resource_metadata = LibraryReadableResourceMetadata(
+        resource_id=resource_id,
+        title=title,
+    )
+    asset = LibraryResourceAsset(
+        id=f"{resource_id}-asset",
+        library_id="test-library",
+        resource_id=resource_id,
+        source_node_id=source_node.id,
+        source_node_physical_kind="REGULAR_FILE",
+        role="PRIMARY",
+        import_state="READY",
+        sequence_index=0,
+        sort_key="0",
+    )
+    asset_metadata = LibraryResourceAssetMetadata(
+        asset_id=asset.id,
+        mime_type=mime_type,
+    )
+    db.add_all(
+        [
+            book_node,
+            source_node,
+            book,
+            book_metadata,
+            resource,
+            resource_metadata,
+            asset,
+            asset_metadata,
+        ]
+    )
+    db.commit()
+    return resource
 
 
 def _write_epub(path: Path) -> None:
@@ -83,106 +195,40 @@ def _seed_epub(
     settings: Settings,
     *,
     user_suffix: str = "",
-) -> LibraryVolume:
-    relative_path = Path("library") / "exact.epub"
+) -> LibraryReadableResource:
+    relative_path = Path("library") / f"exact{user_suffix}.epub"
     source_path = settings.resolved_storage_root / relative_path
     _write_epub(source_path)
-    work = LibraryWork(
-        library_id="test-library",
-        id=f"work-publication{user_suffix}",
-        origin="MANUAL",
+    return _seed_resource(
+        db,
+        resource_id=f"resource-publication{user_suffix}",
+        book_id=f"book-publication{user_suffix}",
+        path=str(source_path),
         title="跨端出版物",
-        normalized_title="跨端出版物",
-        author="测试作者",
-        normalized_author="测试作者",
-        tags="[]",
-    )
-    version = LibraryVersion(
-        id=f"version-publication{user_suffix}",
-        work_id=work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    volume = LibraryVolume(
-        id=f"volume-publication{user_suffix}",
-        version_id=version.id,
-        title="跨端出版物",
-        sort_order=0,
-        format="EPUB",
-        resource_key="manual:publication",
-        import_status="COMPLETED",
-    )
-    source = LibraryFile(
-        id=f"file-publication{user_suffix}",
-        volume_id=volume.id,
-        path=str(relative_path),
-        mtime_ms=int(source_path.stat().st_mtime * 1000),
-        kind="EPUB",
+        fmt="EPUB",
         mime_type="application/epub+zip",
-        size_bytes=source_path.stat().st_size,
-        sort_order=0,
     )
-    db.add(work)
-    db.flush()
-    db.add(version)
-    db.flush()
-    db.add(volume)
-    db.flush()
-    db.add(source)
-    db.commit()
-    return volume
 
 
-def _seed_txt(db: Session, settings: Settings) -> LibraryVolume:
+def _seed_txt(db: Session, settings: Settings) -> LibraryReadableResource:
     relative_path = Path("library") / "exact.txt"
     source_path = settings.resolved_storage_root / relative_path
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_bytes(
         b"\xff\xfe"
-        + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
+        + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode(
+            "utf-16-le"
+        )
     )
-    work = LibraryWork(
-        library_id="test-library",
-        id="work-txt-publication",
-        origin="MANUAL",
+    return _seed_resource(
+        db,
+        resource_id="resource-txt-publication",
+        book_id="book-txt-publication",
+        path=str(source_path),
         title="确定性文本出版物",
-        normalized_title="确定性文本出版物",
-        author="测试作者",
-        normalized_author="测试作者",
-        tags="[]",
-    )
-    version = LibraryVersion(
-        id="version-txt-publication",
-        work_id=work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    volume = LibraryVolume(
-        id="volume-txt-publication",
-        version_id=version.id,
-        title=work.title,
-        sort_order=0,
-        format="TXT",
-        resource_key="manual:txt-publication",
-        import_status="COMPLETED",
-    )
-    source = LibraryFile(
-        id="file-txt-publication",
-        volume_id=volume.id,
-        path=str(relative_path),
-        mtime_ms=int(source_path.stat().st_mtime * 1000),
-        kind="TXT",
+        fmt="TXT",
         mime_type="text/plain",
-        size_bytes=source_path.stat().st_size,
-        sort_order=0,
     )
-    db.add(work)
-    db.flush()
-    db.add(version)
-    db.flush()
-    db.add(volume)
-    db.flush()
-    db.add(source)
-    db.commit()
-    return volume
 
 
 def test_epub_publication_requires_authentication(
@@ -190,10 +236,10 @@ def test_epub_publication_requires_authentication(
     db_session: Session,
     test_settings: Settings,
 ) -> None:
-    volume = _seed_epub(db_session, test_settings)
+    resource = _seed_epub(db_session, test_settings)
 
     response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
 
     assert response.status_code == 401
@@ -205,10 +251,10 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     test_settings: Settings,
 ) -> None:
     _login(client, db_session)
-    volume = _seed_epub(db_session, test_settings)
+    resource = _seed_epub(db_session, test_settings)
 
     manifest_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
 
     assert manifest_response.status_code == 200
@@ -224,33 +270,30 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     runtime = manifest["https://shuku.app/reader/runtime"]
     assert runtime["parser"] == "epub-package:1"
     assert runtime["normalization"] == "shuku-epub-locator-dom-v2"
-    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    assert runtime["sourceSizeBytes"] == source.size_bytes
-    assert runtime["sourceMtimeMs"] == source.mtime_ms
+    source_path = test_settings.resolved_storage_root / "library/exact.epub"
+    assert runtime["sourceSizeBytes"] == source_path.stat().st_size
+    assert runtime["sourceMtimeMs"] == int(source_path.stat().st_mtime * 1000)
 
     resource_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/Text/chapter.xhtml"
+        f"/api/reader/v4/resources/{resource.id}/publication/OEBPS/Text/chapter.xhtml"
     )
     assert resource_response.status_code == 200
     assert resource_response.headers["cache-control"] == "private, no-cache"
     assert "default-src 'none'" in resource_response.headers["content-security-policy"]
-    source_path = test_settings.resolved_storage_root / source.path
     with zipfile.ZipFile(source_path) as archive:
         assert resource_response.content == archive.read("OEBPS/Text/chapter.xhtml")
     assert 'data-shuku-security-profile="web-v2"' not in resource_response.text
     assert "天地玄黄" in resource_response.text
 
     head_response = client.head(
-        f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/Text/chapter.xhtml"
+        f"/api/reader/v4/resources/{resource.id}/publication/OEBPS/Text/chapter.xhtml"
     )
     assert head_response.status_code == 200
     assert head_response.content == b""
-    assert int(head_response.headers["content-length"]) == len(
-        resource_response.content
-    )
+    assert int(head_response.headers["content-length"]) == len(resource_response.content)
 
     positions_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/positions.json"
     )
     assert positions_response.status_code == 200
     assert positions_response.json() == {
@@ -269,26 +312,26 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     }
 
 
-def test_work_detail_and_reader_manifest_share_publication_navigation(
+def test_book_detail_and_reader_manifest_share_publication_navigation(
     client: TestClient,
     db_session: Session,
     test_settings: Settings,
 ) -> None:
     _login(client, db_session)
-    volume = _seed_epub(db_session, test_settings)
-    assert db_session.query(LibraryReadingUnit).count() == 0
+    resource = _seed_epub(db_session, test_settings)
+    assert db_session.query(ReadableResourceNavigationUnit).count() == 0
 
-    detail_response = client.get("/api/works/work-publication")
-    units_response = client.get(
-        f"/api/works/work-publication/volumes/{volume.id}/reading-units"
-    )
+    detail_response = client.get("/api/books/book-publication")
     manifest_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
+    )
+    units_response = client.get(
+        f"/api/books/book-publication/resources/{resource.id}/reading-units"
     )
 
     assert detail_response.status_code == 200
-    detail_volume = detail_response.json()["data"]["book"]["versions"][0]["volumes"][0]
-    assert detail_volume["chapterCount"] is None
+    detail_resource = detail_response.json()["data"]["book"]["resources"][0]
+    assert detail_resource["chapterCount"] is None
     assert units_response.status_code == 200
     units = units_response.json()["data"]["units"]
     assert [(unit["title"], unit["href"]) for unit in units] == [
@@ -308,17 +351,18 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
     test_settings: Settings,
 ) -> None:
     _login(client, db_session)
-    volume = _seed_epub(db_session, test_settings)
-    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_path = test_settings.resolved_storage_root / source.path
+    resource = _seed_epub(db_session, test_settings)
+    source_path = test_settings.resolved_storage_root / "library/exact.epub"
     source_path.write_bytes(b"not-an-epub")
-    source.size_bytes = source_path.stat().st_size
-    source.mtime_ms = int(source_path.stat().st_mtime * 1000)
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.observed_size_bytes = source_path.stat().st_size
+    source_node.observed_mtime_ns = int(source_path.stat().st_mtime * 1_000_000_000)
     db_session.add(
-        LibraryReadingUnit(
+        ReadableResourceNavigationUnit(
             id="stale-publication-chapter",
-            volume_id=volume.id,
-            file_id=source.id,
+            resource_id=resource.id,
+            asset_id=f"{resource.id}-asset",
             unit_type="chapter",
             title="过期章节",
             href="stale.xhtml",
@@ -326,22 +370,28 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
             metadata_json="{}",
         )
     )
-    volume.chapter_count = 1
+    resource_metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert resource_metadata is not None
+    resource_metadata.chapter_count = 1
     db_session.commit()
 
-    detail_response = client.get("/api/works/work-publication")
+    detail_response = client.get("/api/books/book-publication")
+    manifest_response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
+    )
     units_response = client.get(
-        f"/api/works/work-publication/volumes/{volume.id}/reading-units"
+        f"/api/books/book-publication/resources/{resource.id}/reading-units"
     )
 
     assert detail_response.status_code == 200
-    detail_volume = detail_response.json()["data"]["book"]["versions"][0]["volumes"][0]
-    assert detail_volume["chapterCount"] == 1
+    assert manifest_response.status_code == 404
+    detail_resource = detail_response.json()["data"]["book"]["resources"][0]
+    assert detail_resource["chapterCount"] == 1
     assert units_response.status_code == 200
     assert units_response.json()["data"]["units"] == []
     db_session.expire_all()
-    assert db_session.get(LibraryReadingUnit, "stale-publication-chapter") is None
-    assert db_session.get(LibraryVolume, volume.id).chapter_count is None
+    assert db_session.get(ReadableResourceNavigationUnit, "stale-publication-chapter") is None
+    assert db_session.get(LibraryReadableResourceMetadata, resource.id).chapter_count is None
 
 
 def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
@@ -350,17 +400,18 @@ def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
     test_settings: Settings,
 ) -> None:
     _login(client, db_session)
-    volume = _seed_epub(db_session, test_settings)
-    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_path = test_settings.resolved_storage_root / source.path
+    resource = _seed_epub(db_session, test_settings)
+    source_path = test_settings.resolved_storage_root / "library/exact.epub"
     source_path.write_bytes(b"not-an-epub")
-    source.size_bytes = source_path.stat().st_size
-    source.mtime_ms = int(source_path.stat().st_mtime * 1000)
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.observed_size_bytes = source_path.stat().st_size
+    source_node.observed_mtime_ns = int(source_path.stat().st_mtime * 1_000_000_000)
     db_session.commit()
 
-    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
     manifest_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
 
     assert response.status_code == 200
@@ -374,13 +425,13 @@ def test_epub_publication_rejects_unindexed_and_traversal_resources(
     test_settings: Settings,
 ) -> None:
     _login(client, db_session)
-    volume = _seed_epub(db_session, test_settings)
+    resource = _seed_epub(db_session, test_settings)
 
     missing = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/OEBPS/not-in-manifest.js"
+        f"/api/reader/v4/resources/{resource.id}/publication/OEBPS/not-in-manifest.js"
     )
     traversal = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/%2e%2e/secret"
+        f"/api/reader/v4/resources/{resource.id}/publication/%2e%2e/secret"
     )
 
     assert missing.status_code == 404
@@ -400,51 +451,18 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixture, target)
     source_hash_before = hashlib.sha256(target.read_bytes()).hexdigest()
-    work = LibraryWork(
-        library_id="test-library",
-        id="work-mobi-publication",
-        origin="MANUAL",
+    resource = _seed_resource(
+        db_session,
+        resource_id="resource-mobi-publication",
+        book_id="book-mobi-publication",
+        path=str(target),
         title="中文字符完整性验证",
-        normalized_title="中文字符完整性验证",
-        author="测试作者",
-        normalized_author="测试作者",
-        tags="[]",
-    )
-    version = LibraryVersion(
-        id="version-mobi-publication",
-        work_id=work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    volume = LibraryVolume(
-        id="volume-mobi-publication",
-        version_id=version.id,
-        title=work.title,
-        sort_order=0,
-        format="AZW3",
-        resource_key="manual:mobi-publication",
-        import_status="COMPLETED",
-    )
-    source = LibraryFile(
-        id="file-mobi-publication",
-        volume_id=volume.id,
-        path="library/exact.azw3",
-        mtime_ms=int(target.stat().st_mtime * 1000),
-        kind="AZW3",
+        fmt="AZW3",
         mime_type="application/x-mobipocket-ebook",
-        size_bytes=target.stat().st_size,
-        sort_order=0,
     )
-    db_session.add(work)
-    db_session.flush()
-    db_session.add(version)
-    db_session.flush()
-    db_session.add(volume)
-    db_session.flush()
-    db_session.add(source)
-    db_session.commit()
 
     manifest_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
 
     assert manifest_response.status_code == 200
@@ -460,16 +478,14 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
         "positionPageLength": 1024,
     }
     resource_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/part00000.html"
+        f"/api/reader/v4/resources/{resource.id}/publication/part00000.html"
     )
     assert resource_response.status_code == 200
     assert resource_response.headers["content-type"].startswith("text/html")
     assert "天地玄黄" in resource_response.text
     assert hashlib.sha256(target.read_bytes()).hexdigest() == source_hash_before
     assert not list(test_settings.resolved_storage_root.rglob("*.epub"))
-    assert not (
-        test_settings.resolved_storage_root / "cache" / "publication-render"
-    ).exists()
+    assert not (test_settings.resolved_storage_root / "cache" / "publication-render").exists()
 
 
 def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
@@ -478,40 +494,39 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     test_settings: Settings,
 ) -> None:
     _login(client, db_session)
-    volume = _seed_txt(db_session, test_settings)
-    source = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_path = test_settings.resolved_storage_root / source.path
+    resource = _seed_txt(db_session, test_settings)
+    source_path = test_settings.resolved_storage_root / "library/exact.txt"
     source_hash_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
 
-    bootstrap_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    bootstrap_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
     manifest_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
     units_response = client.get(
-        f"/api/works/work-txt-publication/volumes/{volume.id}/reading-units"
+        f"/api/books/book-txt-publication/resources/{resource.id}/reading-units"
     )
 
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     publication_access = bootstrap["publication"]
     assert publication_access["manifestUrl"] == (
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
     assert publication_access["positionsUrl"] == (
-        f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/positions.json"
     )
     assert "renderArtifact" not in publication_access
     retired_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/render.epub"
+        f"/api/reader/v4/resources/{resource.id}/publication/render.epub"
     )
     assert retired_response.status_code == 404
     assert "publicationFingerprint" not in bootstrap
-    assert "contentHash" not in bootstrap["files"][0]
+    assert all("contentHash" not in item for item in bootstrap["assets"])
 
     assert manifest_response.status_code == 200
     manifest = manifest_response.json()
     assert manifest["metadata"]["identifier"] == (
-        f"urn:shuku:txt:{source.size_bytes}:{source_path.stat().st_mtime_ns}"
+        f"urn:shuku:txt:{source_path.stat().st_size}:{source_path.stat().st_mtime_ns}"
     )
     assert manifest["metadata"]["title"] == "确定性文本出版物"
     assert manifest["metadata"]["author"] == "测试作者"
@@ -534,8 +549,8 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
         },
     ]
     assert manifest["https://shuku.app/reader/runtime"] == {
-        "sourceSizeBytes": source.size_bytes,
-        "sourceMtimeMs": source.mtime_ms,
+        "sourceSizeBytes": source_path.stat().st_size,
+        "sourceMtimeMs": int(source_path.stat().st_mtime * 1000),
         "parser": "shuku-txt-parser-v1",
         "normalization": "shuku-txt-publication-v2",
         "positionPageLength": 1024,
@@ -549,7 +564,7 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     assert all(unit["metadataJson"]["hrefBase"] == "publication-root" for unit in units)
 
     resource_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/text/chapter-0002.xhtml"
+        f"/api/reader/v4/resources/{resource.id}/publication/text/chapter-0002.xhtml"
     )
     assert resource_response.status_code == 200
     assert resource_response.headers["content-type"].startswith("application/xhtml+xml")
@@ -558,20 +573,18 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     assert "天地 &amp; &lt;宇宙&gt;" in resource_response.text
 
     positions_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/positions.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/positions.json"
     )
     assert positions_response.status_code == 200
     assert positions_response.json()["total"] == 3
 
     missing_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/text/not-indexed.xhtml"
+        f"/api/reader/v4/resources/{resource.id}/publication/text/not-indexed.xhtml"
     )
     traversal_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/%2e%2e/secret"
+        f"/api/reader/v4/resources/{resource.id}/publication/%2e%2e/secret"
     )
     assert missing_response.status_code == 404
     assert traversal_response.status_code == 404
     assert hashlib.sha256(source_path.read_bytes()).hexdigest() == source_hash_before
-    assert not (
-        test_settings.resolved_storage_root / "cache" / "publication-render"
-    ).exists()
+    assert not (test_settings.resolved_storage_root / "cache" / "publication-render").exists()

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import hashlib
 import json
 import zipfile
 from datetime import UTC, datetime
@@ -6,28 +9,33 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
-from app.core.config import Settings
-from app.models.auth import ReaderBookmark, User
-from app.models.library import (
-    LibraryFile,
-    LibraryReadingProgress,
-    LibraryReadingUnit,
-    LibraryVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import ReadableResourceNavigationUnit, ReaderBookmark, ReaderResourceProgress
+from app.models.auth import User
+from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
 )
-from app.modules.library.domain.version_identity import IMPLICIT_VERSION_SOURCE_KEY
+
+
+def _path_key(path: str) -> str:
+    return f"v1:{hashlib.sha256(path.encode('utf-8')).hexdigest()}"
 
 
 def _login(client: TestClient, db_session: Session) -> User:
     user = User(
-        email="reader-v3@example.com",
-        name="Reader V3",
+        id="reader-v4-user",
+        email="reader-v4@example.com",
+        name="Reader v4",
         password_hash=hash_password("starshipnas"),
         role="admin",
     )
@@ -41,52 +49,138 @@ def _login(client: TestClient, db_session: Session) -> User:
     return user
 
 
-def _ebook_volume(db_session: Session) -> LibraryVolume:
+def _source_node(
+    node_id: str,
+    path: str,
+    *,
+    physical_kind: str,
+    size_bytes: int | None,
+    mtime_ms: int = 1,
+) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=path,
+        path_key=_path_key(path),
+        name=Path(path).name or node_id,
+        physical_kind=physical_kind,
+        observed_size_bytes=size_bytes if physical_kind != "DIRECTORY" else None,
+        observed_mtime_ns=mtime_ms * 1_000_000,
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _add_resource(
+    db_session: Session,
+    *,
+    book_id: str,
+    resource_id: str,
+    asset_id: str,
+    source_path: Path | str,
+    title: str = "电子书",
+    fmt: str = "EPUB",
+    mime_type: str = "application/epub+zip",
+    resource_index: float | None = None,
+    page_count: int | None = None,
+    duration_ms: int | None = None,
+) -> tuple[LibraryReadableResource, LibraryResourceAsset]:
+    source = Path(source_path)
+    path = str(source)
+    exists = source.is_file()
+    size_bytes = source.stat().st_size if exists else 4
+    mtime_ms = int(source.stat().st_mtime * 1000) if exists else 1
+    book = db_session.get(LibraryBook, book_id)
+    if book is None:
+        book_node = _source_node(
+            f"{book_id}-node",
+            f"{book_id}/",
+            physical_kind="DIRECTORY",
+            size_bytes=None,
+        )
+        book = LibraryBook(
+            id=book_id,
+            library_id="test-library",
+            source_node_id=book_node.id,
+        )
+        db_session.add(book_node)
+        db_session.add(book)
+        db_session.add(
+            LibraryBookMetadata(
+                book_id=book_id,
+                title="Reader v4",
+                normalized_title="reader v4",
+                author="测试作者",
+                normalized_author="测试作者",
+            )
+        )
+        db_session.flush()
+    source_node = _source_node(
+        f"{resource_id}-node",
+        path,
+        physical_kind="REGULAR_FILE",
+        size_bytes=size_bytes,
+        mtime_ms=mtime_ms,
+    )
+    media_kind = (
+        "COMIC"
+        if fmt.upper() in {"CBZ", "ZIP", "CBR", "RAR"}
+        else "AUDIO"
+        if fmt.upper() in {"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"}
+        else "READABLE"
+    )
+    resource = LibraryReadableResource(
+        id=resource_id,
+        library_id="test-library",
+        book_id=book_id,
+        source_node_id=source_node.id,
+        adapter_id=fmt.lower(),
+        adapter_version="1",
+        media_kind=media_kind,
+        format=fmt,
+        enablement_state="ENABLED",
+        import_state="READY",
+    )
+    metadata = LibraryReadableResourceMetadata(
+        resource_id=resource_id,
+        title=title,
+        resource_index=resource_index,
+        page_count=page_count,
+        duration_ms=duration_ms,
+    )
+    asset = LibraryResourceAsset(
+        id=asset_id,
+        library_id="test-library",
+        resource_id=resource_id,
+        source_node_id=source_node.id,
+        source_node_physical_kind="REGULAR_FILE",
+        role="PRIMARY",
+        import_state="READY",
+        sequence_index=0,
+        sort_key="0",
+    )
+    asset_metadata = LibraryResourceAssetMetadata(
+        asset_id=asset_id,
+        mime_type=mime_type,
+        duration_ms=duration_ms,
+    )
+    db_session.add_all([source_node, resource, metadata, asset, asset_metadata])
+    db_session.commit()
+    return resource, asset
+
+
+def _ebook_resource(db_session: Session) -> tuple[LibraryReadableResource, LibraryResourceAsset]:
     source_path = (
         Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
-    work = LibraryWork(
-        library_id="test-library",
-        id="work-reader-v3",
-        origin="MANUAL",
-        title="Reader v4",
-        normalized_title="reader v3",
-        author="测试作者",
-        normalized_author="测试作者",
-        tags="[]",
-    )
-    version = LibraryVersion(
-        id="version-reader-v3",
-        work_id=work.id,
-        source_key=IMPLICIT_VERSION_SOURCE_KEY,
-    )
-    volume = LibraryVolume(
-        id="volume-reader-v3",
-        version_id=version.id,
+    return _add_resource(
+        db_session,
+        book_id="book-reader-v4",
+        resource_id="resource-reader-v4",
+        asset_id="asset-reader-v4",
+        source_path=source_path,
         title="电子书",
-        volume_index=None,
-        sort_order=0,
-        format="EPUB",
-        resource_key="manual:reader-v3",
-        import_status="COMPLETED",
+        resource_index=1,
     )
-    file = LibraryFile(
-        id="file-reader-v3",
-        volume_id=volume.id,
-        path=str(source_path),
-        mtime_ms=1,
-        kind="EPUB",
-        mime_type="application/epub+zip",
-        size_bytes=source_path.stat().st_size,
-        sort_order=0,
-    )
-    db_session.add(work)
-    db_session.flush()
-    db_session.add_all([version, volume])
-    db_session.flush()
-    db_session.add(file)
-    db_session.commit()
-    return volume
 
 
 def _write_reader_epub(path: Path) -> None:
@@ -106,33 +200,30 @@ def _write_reader_epub(path: Path) -> None:
             properties="nav"/>
             <item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/>
             <item id="two" href="Text/two.xhtml" media-type="application/xhtml+xml"/>
-            </manifest><spine><itemref idref="one"/>
-            <itemref idref="two"/></spine></package>""",
+            </manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>""",
         )
         archive.writestr(
             "OEBPS/nav.xhtml",
             """<html xmlns="http://www.w3.org/1999/xhtml"
-            xmlns:epub="http://www.idpf.org/2007/ops"><head>
-            <title>目录</title></head><body><nav epub:type="toc"><ol>
+            xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head>
+            <body><nav epub:type="toc"><ol>
             <li><a href="Text/one.xhtml#start">第一章</a></li>
             <li><a href="Text/two.xhtml">第二章</a></li>
             </ol></nav></body></html>""",
         )
         archive.writestr(
             "OEBPS/Text/one.xhtml",
-            """<html xmlns="http://www.w3.org/1999/xhtml"><head>
-            <title>第一章</title></head><body><h1 id="start">第一章</h1>
-            </body></html>""",
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head>
+            <body><h1 id="start">第一章</h1></body></html>""",
         )
         archive.writestr(
             "OEBPS/Text/two.xhtml",
-            """<html xmlns="http://www.w3.org/1999/xhtml"><head>
-            <title>第二章</title></head><body><h1>第二章</h1></body></html>""",
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head>
+            <body><h1>第二章</h1></body></html>""",
         )
 
 
 def _exact_locator(
-    bootstrap: dict[str, object],
     *,
     href: str = "OEBPS/chapter1.xhtml",
     media_type: str = "application/xhtml+xml",
@@ -167,9 +258,7 @@ def _exact_locator(
     }
 
 
-def _exact_pdf_locator(
-    bootstrap: dict[str, object], *, page_index: int, page_progression: float
-) -> dict[str, object]:
+def _exact_pdf_locator(*, page_index: int, page_progression: float) -> dict[str, object]:
     return {
         "kind": "pdf",
         "pageIndex": page_index,
@@ -177,9 +266,7 @@ def _exact_pdf_locator(
     }
 
 
-def _exact_comic_locator(
-    bootstrap: dict[str, object], *, page_index: int, resource_href: str
-) -> dict[str, object]:
+def _exact_comic_locator(*, page_index: int, resource_href: str) -> dict[str, object]:
     return {
         "kind": "comic",
         "pageIndex": page_index,
@@ -188,15 +275,11 @@ def _exact_comic_locator(
 
 
 def _exact_audio_locator(
-    bootstrap: dict[str, object],
-    *,
-    file_id: str,
-    chapter_id: str | None,
-    position_millis: int,
+    *, asset_id: str, chapter_id: str | None, position_millis: int
 ) -> dict[str, object]:
     locator: dict[str, object] = {
         "kind": "audio",
-        "fileId": file_id,
+        "assetId": asset_id,
         "positionMillis": position_millis,
     }
     if chapter_id is not None:
@@ -205,7 +288,6 @@ def _exact_audio_locator(
 
 
 def _progress_payload(
-    bootstrap: dict[str, object],
     *,
     base_revision: int = 0,
     mutation_id: str | None = None,
@@ -217,50 +299,49 @@ def _progress_payload(
         "mutationId": mutation_id or str(uuid4()),
         "baseRevision": base_revision,
         "capturedAtEpochMillis": 1_700_000_001_000,
-        "locator": locator or _exact_locator(bootstrap),
+        "locator": locator or _exact_locator(),
     }
 
 
-def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
+def test_reader_v4_bootstrap_and_progress_are_resource_scoped(
     client: TestClient,
     db_session: Session,
 ) -> None:
     user = _login(client, db_session)
-    volume = _ebook_volume(db_session)
+    resource, _asset = _ebook_resource(db_session)
 
-    bootstrap_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    bootstrap_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["schemaVersion"] == 4
     assert bootstrap["progressSnapshot"] is None
-    empty_progress_response = client.get(f"/api/reader/v4/volumes/{volume.id}/progress")
+    empty_progress_response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/progress"
+    )
     assert empty_progress_response.status_code == 200
     assert empty_progress_response.headers["etag"] == '"reader-progress-0"'
     assert empty_progress_response.json()["data"] == {
         "schemaVersion": 4,
         "progressSnapshot": None,
     }
-    assert bootstrap["volume"]["id"] == volume.id
-    assert bootstrap["version"] == {
-        "id": "version-reader-v3",
-        "workId": "work-reader-v3",
-        "sourceKey": IMPLICIT_VERSION_SOURCE_KEY,
-        "sourceName": None,
-    }
-    assert bootstrap["volume"]["versionId"] == "version-reader-v3"
-    assert bootstrap["versionCompleted"] is False
+    assert bootstrap["book"]["id"] == "book-reader-v4"
+    assert bootstrap["resource"]["id"] == resource.id
+    assert bootstrap["resource"]["bookId"] == "book-reader-v4"
+    assert bootstrap["resource"]["resourceCompleted"] is False
+    assert bootstrap["bookCompleted"] is False
+    assert bootstrap["availableResources"][0]["id"] == resource.id
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
     assert "edition" not in bootstrap
     assert bootstrap["sourceFormat"] == "epub"
     assert "publicationFingerprint" not in bootstrap
     assert "contentFingerprint" not in bootstrap
-    assert all("contentHash" not in file for file in bootstrap["files"])
+    assert all("contentHash" not in asset for asset in bootstrap["assets"])
 
     mutation_id = str(uuid4())
     progress_response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(bootstrap, mutation_id=mutation_id),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(mutation_id=mutation_id),
     )
     assert progress_response.status_code == 200
     progress = progress_response.json()["data"]
@@ -279,23 +360,19 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert progress["displayPercent"] == 50
     assert progress["capturedAtEpochMillis"] == 1_700_000_001_000
     assert progress["locator"]["kind"] == "reflowable"
-    assert progress["locator"]["engineLocator"]["engine"] == "readium"
-    assert progress["locator"]["engineLocator"]["payload"]["href"] == (
-        "OEBPS/chapter1.xhtml"
-    )
-    stored = db_session.query(LibraryReadingProgress).one()
+    stored = db_session.query(ReaderResourceProgress).one()
     assert stored.user_id == user.id
-    assert stored.volume_id == volume.id
+    assert stored.resource_id == resource.id
     assert stored.percent == 50
     assert stored.location_json is not None
     assert stored.revision == 1
     assert stored.mutation_id == mutation_id
     initial_bootstrap = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/bootstrap"
+        f"/api/reader/v4/resources/{resource.id}/bootstrap"
     ).json()["data"]
     assert initial_bootstrap["progressSnapshot"] == progress
 
-    progress_query = client.get(f"/api/reader/v4/volumes/{volume.id}/progress")
+    progress_query = client.get(f"/api/reader/v4/resources/{resource.id}/progress")
     assert progress_query.status_code == 200
     assert progress_query.headers["etag"] == '"reader-progress-1"'
     assert progress_query.json()["data"] == {
@@ -303,19 +380,18 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
         "progressSnapshot": progress,
     }
     unchanged = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         headers={"If-None-Match": progress_query.headers["etag"]},
     )
     assert unchanged.status_code == 304
     assert unchanged.content == b""
 
     stale_response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
             base_revision=0,
             locator=_exact_locator(
-                bootstrap, progression=0.1, total_progression=0.1, platform="ios"
+                progression=0.1, total_progression=0.1, platform="ios"
             ),
         ),
     )
@@ -323,21 +399,17 @@ def test_reader_v4_bootstrap_and_progress_are_volume_scoped(
     assert stale_response.json()["error"]["code"] == "READER_PROGRESS_CONFLICT"
     assert stale_response.json()["error"]["current"] == progress
     db_session.expire_all()
-    stored = db_session.query(LibraryReadingProgress).one()
+    stored = db_session.query(ReaderResourceProgress).one()
     assert stored.percent == 50
     assert stored.revision == 1
-    resumed = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+    resumed = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
         "data"
     ]["progressSnapshot"]
     assert resumed == progress
 
     repeated = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(
-            bootstrap,
-            base_revision=0,
-            mutation_id=mutation_id,
-        ),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(base_revision=0, mutation_id=mutation_id),
     )
     assert repeated.status_code == 200
     assert repeated.json()["data"] == progress
@@ -348,25 +420,26 @@ def test_reader_v4_first_exact_save_replaces_status_only_revision_zero_row(
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
+    resource, _asset = _ebook_resource(db_session)
     finished = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/reading-status",
+        f"/api/reader/v4/resources/{resource.id}/reading-status",
         json={"status": "FINISHED"},
     )
     assert finished.status_code == 200
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+    bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
         "data"
     ]
     saved = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(bootstrap, base_revision=0),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(),
     )
 
     assert saved.status_code == 200, saved.json()
     assert saved.json()["data"]["revision"] == 1
-    progress = db_session.query(LibraryReadingProgress).one()
+    progress = db_session.query(ReaderResourceProgress).one()
     assert progress.location_type == "reflowable"
     assert progress.revision == 1
+    assert bootstrap["resource"]["resourceCompleted"] is True
 
 
 def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
@@ -374,37 +447,35 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    volume.format = "PDF"
-    volume.page_count = 12
-    file.kind = "PDF"
-    file.mime_type = "application/pdf"
+    resource, asset = _ebook_resource(db_session)
+    resource.format = "PDF"
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None
+    metadata.page_count = 12
+    asset_metadata = db_session.get(LibraryResourceAssetMetadata, asset.id)
+    assert asset_metadata is not None
+    asset_metadata.mime_type = "application/pdf"
     db_session.commit()
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+    bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
         "data"
     ]
     assert bootstrap["sourceFormat"] == "pdf"
     assert bootstrap["readerType"] == "pdf"
-    assert bootstrap["version"]["id"] == "version-reader-v3"
-    assert bootstrap["volume"]["versionId"] == "version-reader-v3"
-    assert "mediaKind" not in bootstrap["version"]
+    assert bootstrap["resource"]["bookId"] == "book-reader-v4"
+    assert "mediaKind" not in bootstrap["book"]
 
-    nullable_locator = _exact_pdf_locator(
-        bootstrap, page_index=2, page_progression=0.25
-    )
+    nullable_locator = _exact_pdf_locator(page_index=2, page_progression=0.25)
     nullable_locator["engineLocator"] = None
     explicit_null = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(bootstrap, locator=nullable_locator),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(locator=nullable_locator),
     )
     assert explicit_null.status_code == 422
 
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
-            locator=_exact_pdf_locator(bootstrap, page_index=2, page_progression=0.25),
+            locator=_exact_pdf_locator(page_index=2, page_progression=0.25)
         ),
     )
 
@@ -412,16 +483,14 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     assert "engineLocator" not in response.json()["data"]["locator"]
 
     out_of_range = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
             base_revision=1,
-            locator=_exact_pdf_locator(bootstrap, page_index=12, page_progression=0.25),
+            locator=_exact_pdf_locator(page_index=12, page_progression=0.25),
         ),
     )
     assert out_of_range.status_code == 422
-    error_code = out_of_range.json()["error"]["code"]
-    assert error_code == "READER_LOCATOR_RESOURCE_INVALID"
+    assert out_of_range.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
 
 
 def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
@@ -429,79 +498,81 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    volume.format = "CBZ"
-    volume.page_count = 2
-    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    file.kind = "CBZ"
-    file.mime_type = "application/vnd.comicbook+zip"
+    resource, asset = _ebook_resource(db_session)
+    resource.format = "CBZ"
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None
+    metadata.page_count = 2
+    asset_metadata = db_session.get(LibraryResourceAssetMetadata, asset.id)
+    assert asset_metadata is not None
+    asset_metadata.mime_type = "application/vnd.comicbook+zip"
     db_session.add_all(
         [
-            LibraryReadingUnit(
+            ReadableResourceNavigationUnit(
                 id=f"comic-page-{page_number}",
-                volume_id=volume.id,
-                file_id=file.id,
+                resource_id=resource.id,
+                asset_id=asset.id,
                 unit_type="page",
-                title=f"Page {page_number}",
-                href=f"images/{page_number:04}.jpg",
+                title=f"Page {page_number + 1}",
+                href=f"images/{page_number + 1:04}.jpg",
                 media_type="image/jpeg",
                 sort_order=page_number,
                 metadata_json="{}",
             )
-            for page_number in (1, 2)
+            for page_number in (0, 1)
         ]
     )
     db_session.commit()
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+    bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
         "data"
     ]
     assert bootstrap["sourceFormat"] == "cbz"
     assert bootstrap["readerType"] == "comic"
-    assert bootstrap["version"]["id"] == "version-reader-v3"
-    assert bootstrap["volume"]["versionId"] == "version-reader-v3"
+    assert bootstrap["resource"]["bookId"] == "book-reader-v4"
 
     accepted = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
             locator=_exact_comic_locator(
-                bootstrap, page_index=1, resource_href="images/0002.jpg"
-            ),
+                page_index=1, resource_href="images/0002.jpg"
+            )
         ),
     )
     wrong_media_type = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
             locator=_exact_comic_locator(
-                bootstrap, page_index=1, resource_href="images/not-page-2.png"
-            ),
+                page_index=1, resource_href="images/not-page-2.png"
+            )
         ),
     )
 
     assert accepted.status_code == 200
     assert wrong_media_type.status_code == 422
-    assert wrong_media_type.json()["error"]["code"] == (
-        "READER_LOCATOR_RESOURCE_INVALID"
-    )
+    assert wrong_media_type.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
 
 
-def test_reader_v4_validates_audio_file_chapter_and_position(
+def test_reader_v4_validates_audio_asset_chapter_and_position(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    volume.format = "MP3"
-    volume.duration_ms = 60_000
-    file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    file.kind = "AUDIO"
-    file.mime_type = "audio/mpeg"
-    file.duration_ms = 60_000
-    chapter = LibraryReadingUnit(
+    source_path = Path(__file__).parent / "reader-audio.mp3"
+    resource, asset = _add_resource(
+        db_session,
+        book_id="book-reader-audio",
+        resource_id="resource-reader-audio",
+        asset_id="asset-reader-audio",
+        source_path=source_path,
+        fmt="MP3",
+        mime_type="audio/mpeg",
+        title="有声书",
+        duration_ms=60_000,
+    )
+    chapter = ReadableResourceNavigationUnit(
         id="audio-chapter-1",
-        volume_id=volume.id,
-        file_id=file.id,
+        resource_id=resource.id,
+        asset_id=asset.id,
         unit_type="chapter",
         title="Chapter 1",
         href="",
@@ -514,35 +585,32 @@ def test_reader_v4_validates_audio_file_chapter_and_position(
     )
     db_session.add(chapter)
     db_session.commit()
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+    bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
         "data"
     ]
 
     accepted = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
             locator=_exact_audio_locator(
-                bootstrap,
-                file_id=file.id,
+                asset_id=asset.id,
                 chapter_id=chapter.id,
                 position_millis=42_000,
-            ),
+            )
         ),
     )
     out_of_range = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
             locator=_exact_audio_locator(
-                bootstrap,
-                file_id=file.id,
+                asset_id=asset.id,
                 chapter_id=chapter.id,
                 position_millis=60_001,
-            ),
+            )
         ),
     )
 
+    assert bootstrap["readerType"] == "audio"
     assert accepted.status_code == 200, accepted.json()
     assert accepted.json()["data"]["locator"]["kind"] == "audio"
     assert accepted.json()["data"]["displayPercent"] == 70
@@ -555,20 +623,16 @@ def test_reader_v4_rejects_position_only_reflow_anchor(
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
-
-    locator = _exact_locator(bootstrap)
+    resource, _asset = _ebook_resource(db_session)
+    locator = _exact_locator()
     locator["engineLocator"]["payload"] = {
         "href": "chapter-1.xhtml",
         "type": "application/xhtml+xml",
         "locations": {"position": 1},
     }
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(bootstrap, locator=locator),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(locator=locator),
     )
 
     assert response.status_code == 422
@@ -580,20 +644,15 @@ def test_reader_v4_rejects_progress_without_locator(
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
-
-    payload = _progress_payload(bootstrap)
+    resource, _asset = _ebook_resource(db_session)
+    payload = _progress_payload()
     payload.pop("locator")
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=payload,
+        f"/api/reader/v4/resources/{resource.id}/progress", json=payload
     )
 
     assert response.status_code == 422
-    assert db_session.query(LibraryReadingProgress).count() == 0
+    assert db_session.query(ReaderResourceProgress).count() == 0
 
 
 def test_reader_v4_rejects_removed_publication_fingerprint_field(
@@ -601,40 +660,33 @@ def test_reader_v4_rejects_removed_publication_fingerprint_field(
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
-    locator = _exact_locator(bootstrap)
-    locator["publication"] = {
-        "originalFileHash": f"sha256:{'b' * 64}",
-        "parser": "replacement-parser:2",
-        "normalization": "replacement-normalization:2",
-    }
+    resource, _asset = _ebook_resource(db_session)
+    locator = _exact_locator()
+    locator["publication"] = {"parser": "replacement-parser:2"}
 
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(bootstrap, locator=locator),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(locator=locator),
     )
 
     assert response.status_code == 422
-    assert db_session.query(LibraryReadingProgress).count() == 0
+    assert db_session.query(ReaderResourceProgress).count() == 0
 
 
-def test_reader_v4_bootstrap_does_not_expose_file_hashes(
+def test_reader_v4_bootstrap_does_not_expose_asset_hashes(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    resource, _asset = _ebook_resource(db_session)
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
 
     assert response.status_code == 200
     bootstrap = response.json()["data"]
-    assert bootstrap["volume"]["id"] == volume.id
+    assert bootstrap["resource"]["id"] == resource.id
     assert "publicationFingerprint" not in bootstrap
     assert "contentFingerprint" not in bootstrap
-    assert all("contentHash" not in item for item in bootstrap["files"])
+    assert all("contentHash" not in item for item in bootstrap["assets"])
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
 
@@ -657,53 +709,46 @@ def test_reader_v4_rejects_noncanonical_location_payloads(
     mutate_locator: object,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
-    locator = _exact_locator(bootstrap)
+    resource, _asset = _ebook_resource(db_session)
+    locator = _exact_locator()
     assert callable(mutate_locator)
     mutate_locator(locator)
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
-        json=_progress_payload(bootstrap, locator=locator),
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json=_progress_payload(locator=locator),
     )
 
     assert response.status_code == 422
-    assert db_session.query(LibraryReadingProgress).count() == 0
+    assert db_session.query(ReaderResourceProgress).count() == 0
 
 
-def test_reader_v4_rejects_locator_media_type_that_does_not_match_volume(
+def test_reader_v4_rejects_locator_media_type_that_does_not_match_resource(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
-        "data"
-    ]
+    resource, _asset = _ebook_resource(db_session)
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/progress",
+        f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            bootstrap,
-            locator=_exact_locator(bootstrap, media_type="application/pdf"),
+            locator=_exact_locator(media_type="application/pdf")
         ),
     )
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
-    assert db_session.query(LibraryReadingProgress).count() == 0
+    assert db_session.query(ReaderResourceProgress).count() == 0
 
 
-def test_reader_v4_rejects_bookmark_kind_that_does_not_match_volume(
+def test_reader_v4_rejects_bookmark_kind_that_does_not_match_resource(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
+    resource, _asset = _ebook_resource(db_session)
 
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/bookmarks",
+        f"/api/reader/v4/resources/{resource.id}/bookmarks",
         json={
             "bookmarks": [
                 {
@@ -713,7 +758,7 @@ def test_reader_v4_rejects_bookmark_kind_that_does_not_match_volume(
                     "percent": 20,
                     "createdAt": "2026-08-13T00:00:00Z",
                 }
-            ],
+            ]
         },
     )
 
@@ -722,55 +767,46 @@ def test_reader_v4_rejects_bookmark_kind_that_does_not_match_volume(
     assert db_session.query(ReaderBookmark).count() == 0
 
 
-def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
+def test_resource_reading_status_updates_book_detail_and_isolated_progress(
     client: TestClient,
     db_session: Session,
 ) -> None:
     user = _login(client, db_session)
-    first_volume = _ebook_volume(db_session)
-    second_volume = LibraryVolume(
-        id="volume-reader-v3-2",
-        version_id=first_volume.version_id,
+    first, _first_asset = _ebook_resource(db_session)
+    second, _second_asset = _add_resource(
+        db_session,
+        book_id="book-reader-v4",
+        resource_id="resource-reader-v4-2",
+        asset_id="asset-reader-v4-2",
+        source_path="/tmp/reader-v4-second.epub",
         title="电子书 2",
-        volume_index=2,
-        sort_order=1,
-        format="EPUB",
-        resource_key="manual:reader-v3-2",
-        import_status="COMPLETED",
+        resource_index=2,
     )
-    second_file = LibraryFile(
-        id="file-reader-v3-2",
-        volume_id=second_volume.id,
-        path="library/reader-v3-2.epub",
-        mtime_ms=1,
-        kind="EPUB",
-        mime_type="application/epub+zip",
-        size_bytes=10,
-        sort_order=0,
-    )
-    db_session.add(second_volume)
-    db_session.flush()
-    db_session.add(second_file)
-    db_session.commit()
 
     finished_response = client.put(
-        f"/api/reader/v4/volumes/{first_volume.id}/reading-status",
+        f"/api/reader/v4/resources/{first.id}/reading-status",
         json={"status": "FINISHED"},
     )
 
     assert finished_response.status_code == 200
     assert finished_response.json()["data"] == {
-        "volumeId": first_volume.id,
+        "resourceId": first.id,
         "status": "FINISHED",
         "percent": 100.0,
     }
-    detail = client.get("/api/works/work-reader-v3").json()["data"]["book"]
-    assert detail["continueVolumeId"] == second_volume.id
-    progresses = db_session.query(LibraryReadingProgress).all()
-    assert [
-        (progress.user_id, progress.volume_id, progress.percent)
-        for progress in progresses
-    ] == [(user.id, first_volume.id, 100.0)]
+    detail = client.get("/api/books/book-reader-v4").json()["data"]["book"]
+    assert detail["continueResourceId"] == first.id
+    assert {item["id"] for item in detail["resources"]} == {first.id, second.id}
+    assert next(item for item in detail["resources"] if item["id"] == first.id)[
+        "resourceCompleted"
+    ] is True
+    assert next(item for item in detail["resources"] if item["id"] == second.id)[
+        "resourceCompleted"
+    ] is False
+    progresses = db_session.query(ReaderResourceProgress).all()
+    assert [(progress.user_id, progress.resource_id, progress.percent) for progress in progresses] == [
+        (user.id, first.id, 100.0)
+    ]
     created_progress = progresses[0]
     assert created_progress.schema_version == 4
     assert created_progress.reader_type == "reflowable"
@@ -786,60 +822,36 @@ def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
     assert created_progress.source_device_name is None
 
     unread_response = client.put(
-        f"/api/reader/v4/volumes/{first_volume.id}/reading-status",
+        f"/api/reader/v4/resources/{first.id}/reading-status",
         json={"status": "UNREAD"},
     )
 
     assert unread_response.status_code == 200
     assert unread_response.json()["data"]["percent"] == 0.0
-    assert db_session.query(LibraryReadingProgress).count() == 0
+    assert db_session.query(ReaderResourceProgress).count() == 0
 
 
-def test_volume_reading_status_replaces_all_legacy_progress_state(
+def test_resource_reading_status_creates_clean_revision_zero_progress(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    user = _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    legacy_progressed_at = datetime(2025, 1, 1, tzinfo=UTC)
-    db_session.add(
-        LibraryReadingProgress(
-            user_id=user.id,
-            volume_id=volume.id,
-            reader_type="comic",
-            position="legacy-position",
-            page=7,
-            percent=12,
-            extra='{"legacy":true}',
-            schema_version=3,
-            location_type="comic",
-            location_json='{"type":"comic","pageIndex":7}',
-            mutation_id="legacy-mutation",
-            client_id="legacy-client",
-            client_sequence=99,
-            progressed_at=legacy_progressed_at,
-            source_protocol="SHUKU_WEB",
-            source_device_name="Legacy Device",
-        )
-    )
-    db_session.commit()
+    _login(client, db_session)
+    resource, _asset = _ebook_resource(db_session)
 
     response = client.put(
-        f"/api/reader/v4/volumes/{volume.id}/reading-status",
+        f"/api/reader/v4/resources/{resource.id}/reading-status",
         json={"status": "FINISHED"},
     )
 
     assert response.status_code == 200
     db_session.expire_all()
-    progress = db_session.query(LibraryReadingProgress).one()
+    progress = db_session.query(ReaderResourceProgress).one()
     assert progress.schema_version == 4
     assert progress.reader_type == "reflowable"
-    assert progress.position == "legacy-position"
-    assert progress.page == 7
+    assert progress.position == "0"
     assert progress.percent == 100
-    assert progress.extra == '{"legacy":true}'
-    assert progress.location_type == "comic"
-    assert progress.location_json == '{"type":"comic","pageIndex":7}'
+    assert progress.location_type is None
+    assert progress.location_json is None
     assert progress.revision == 0
 
 
@@ -849,17 +861,22 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     tmp_path: Path,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    epub = tmp_path / "legacy-without-units.epub"
+    resource, _asset = _ebook_resource(db_session)
+    epub = tmp_path / "without-units.epub"
     _write_reader_epub(epub)
-    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_file.path = str(epub)
-    source_file.size_bytes = epub.stat().st_size
-    source_file.mtime_ms = int(epub.stat().st_mtime * 1000)
-    volume.chapter_count = None
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.relative_path = str(epub)
+    source_node.path_key = _path_key(str(epub))
+    source_node.name = epub.name
+    source_node.observed_size_bytes = epub.stat().st_size
+    source_node.observed_mtime_ns = int(epub.stat().st_mtime * 1_000_000_000)
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None
+    metadata.chapter_count = None
     db_session.commit()
 
-    first_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    first_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
 
     engine = db_session.get_bind()
     assert isinstance(engine, Engine)
@@ -882,7 +899,7 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
 
     event.listen(engine, "before_cursor_execute", capture_writes)
     try:
-        second_response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+        second_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
     finally:
         event.remove(engine, "before_cursor_execute", capture_writes)
 
@@ -897,41 +914,43 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
         "index",
         "title",
         "href",
-        "fileId",
+        "assetId",
         "startMs",
         "endMs",
         "durationMs",
         "metadata",
     }
-    assert (
-        second_response.json()["data"]["units"]
-        == first_response.json()["data"]["units"]
-    )
+    assert second_response.json()["data"]["units"] == first_response.json()["data"]["units"]
     assert writes == []
-    assert db_session.query(LibraryReadingUnit).count() == 2
-    db_session.refresh(volume)
-    assert volume.chapter_count == 2
+    assert db_session.query(ReadableResourceNavigationUnit).count() == 2
+    db_session.expire_all()
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None
+    assert metadata.chapter_count == 2
 
 
-def test_reader_v4_bootstrap_replaces_legacy_navigation_with_publication_toc(
+def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
+    resource, asset = _ebook_resource(db_session)
     epub = tmp_path / "legacy-relative-hrefs.epub"
     _write_reader_epub(epub)
-    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_file.path = str(epub)
-    source_file.size_bytes = epub.stat().st_size
-    source_file.mtime_ms = int(epub.stat().st_mtime * 1000)
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.relative_path = str(epub)
+    source_node.path_key = _path_key(str(epub))
+    source_node.name = epub.name
+    source_node.observed_size_bytes = epub.stat().st_size
+    source_node.observed_mtime_ns = int(epub.stat().st_mtime * 1_000_000_000)
     db_session.add_all(
         [
-            LibraryReadingUnit(
+            ReadableResourceNavigationUnit(
                 id="legacy-unit-one",
-                volume_id=volume.id,
-                file_id=source_file.id,
+                resource_id=resource.id,
+                asset_id=asset.id,
                 unit_type="chapter",
                 title="第一章",
                 href="Text/one.xhtml#start",
@@ -939,10 +958,10 @@ def test_reader_v4_bootstrap_replaces_legacy_navigation_with_publication_toc(
                 sort_order=1,
                 metadata_json=json.dumps({"idref": "one"}),
             ),
-            LibraryReadingUnit(
+            ReadableResourceNavigationUnit(
                 id="legacy-unit-two",
-                volume_id=volume.id,
-                file_id=source_file.id,
+                resource_id=resource.id,
+                asset_id=asset.id,
                 unit_type="chapter",
                 title="第二章",
                 href="Text/two.xhtml",
@@ -952,21 +971,23 @@ def test_reader_v4_bootstrap_replaces_legacy_navigation_with_publication_toc(
             ),
         ]
     )
-    volume.chapter_count = 2
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None
+    metadata.chapter_count = 2
     db_session.commit()
 
-    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
 
     assert response.status_code == 200
     assert [unit["href"] for unit in response.json()["data"]["units"]] == [
         "OEBPS/Text/one.xhtml#start",
         "OEBPS/Text/two.xhtml",
     ]
-    stored_units = (
-        db_session.query(LibraryReadingUnit)
-        .order_by(LibraryReadingUnit.sort_order)
-        .all()
-    )
+    stored_units = db_session.scalars(
+        select(ReadableResourceNavigationUnit).order_by(
+            ReadableResourceNavigationUnit.sort_order
+        )
+    ).all()
     assert [unit.id for unit in stored_units] == [
         response.json()["data"]["units"][0]["id"],
         response.json()["data"]["units"][1]["id"],
@@ -980,12 +1001,8 @@ def test_reader_v4_bootstrap_replaces_legacy_navigation_with_publication_toc(
         json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
         for unit in stored_units
     )
-    assert all(
-        json.loads(unit.metadata_json)["exactNavigation"] is True
-        for unit in stored_units
-    )
     detail_units_response = client.get(
-        f"/api/works/work-reader-v3/volumes/{volume.id}/reading-units",
+        f"/api/books/book-reader-v4/resources/{resource.id}/reading-units",
         params={"page": 1, "pageSize": 120},
     )
     assert detail_units_response.status_code == 200
@@ -1001,19 +1018,16 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
     db_session: Session,
 ) -> None:
     user = _login(client, db_session)
-    volume = _ebook_volume(db_session)
+    resource, _asset = _ebook_resource(db_session)
     fallback_created_at = datetime(2026, 8, 1, 12, 30, tzinfo=UTC)
     db_session.add(
         ReaderBookmark(
-            id="reader-v3-legacy-bookmark",
+            id="reader-v4-bookmark-row",
             user_id=user.id,
-            volume_id=volume.id,
+            resource_id=resource.id,
             bookmark_id="legacy-created-at",
             location_json=json.dumps(
-                {
-                    "kind": "reflow",
-                    "resourceKey": "chapter-1.xhtml",
-                }
+                {"kind": "reflow", "resourceKey": "chapter-1.xhtml"}
             ),
             label="Legacy timestamp",
             percent=10,
@@ -1024,9 +1038,7 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
     )
     db_session.commit()
 
-    response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/bookmarks",
-    )
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bookmarks")
 
     assert response.status_code == 200
     bookmark = response.json()["data"]["bookmarks"][0]
@@ -1034,57 +1046,67 @@ def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
     assert datetime.fromisoformat(bookmark["createdAt"]) == fallback_created_at
 
 
-def test_volume_file_route_streams_the_selected_volume_only(
+def test_resource_asset_route_streams_the_selected_asset_only(
     client: TestClient,
     db_session: Session,
-    test_settings: Settings,
+    test_settings,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    stored_file = test_settings.resolved_storage_root / "library" / "reader-v3.epub"
+    resource, asset = _ebook_resource(db_session)
+    stored_file = test_settings.resolved_storage_root / "library" / "reader-v4.epub"
     stored_file.parent.mkdir(parents=True, exist_ok=True)
-    stored_file.write_bytes(b"reader-v3")
-    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    source_file.path = "library/reader-v3.epub"
+    stored_file.write_bytes(b"reader-v4")
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.relative_path = str(stored_file)
+    source_node.path_key = _path_key(str(stored_file))
+    source_node.observed_size_bytes = stored_file.stat().st_size
+    source_node.observed_mtime_ns = int(stored_file.stat().st_mtime * 1_000_000_000)
     db_session.commit()
 
-    response = client.get(f"/api/volumes/{volume.id}/file")
+    response = client.get(f"/api/assets/{asset.id}")
 
     assert response.status_code == 200
-    assert response.content == b"reader-v3"
+    assert response.content == b"reader-v4"
     assert response.headers["content-type"] == "application/epub+zip"
 
 
 @pytest.mark.parametrize(
     ("filename", "mime_type"),
     [
-        ("reader-v3.txt", "text/plain"),
-        ("reader-v3.pdf", "application/pdf"),
-        ("reader-v3.epub", "application/epub+zip"),
-        ("reader-v3.cbz", "application/vnd.comicbook+zip"),
-        ("reader-v3.mp3", "audio/mpeg"),
+        ("reader-v4.txt", "text/plain"),
+        ("reader-v4.pdf", "application/pdf"),
+        ("reader-v4.epub", "application/epub+zip"),
+        ("reader-v4.cbz", "application/vnd.comicbook+zip"),
+        ("reader-v4.mp3", "audio/mpeg"),
     ],
 )
-def test_volume_file_download_mode_uses_attachment_for_every_media_format(
+def test_resource_asset_download_mode_uses_attachment_for_every_media_format(
     client: TestClient,
     db_session: Session,
-    test_settings: Settings,
+    test_settings,
     filename: str,
     mime_type: str,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    library_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
-    library_file.path = f"library/{filename}"
-    library_file.mime_type = mime_type
-    db_session.commit()
-    stored_file = test_settings.resolved_storage_root / library_file.path
+    resource, _asset = _ebook_resource(db_session)
+    stored_file = test_settings.resolved_storage_root / "library" / filename
     stored_file.parent.mkdir(parents=True, exist_ok=True)
     stored_file.write_bytes(b"downloadable")
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.relative_path = str(stored_file)
+    source_node.path_key = _path_key(str(stored_file))
+    source_node.observed_size_bytes = stored_file.stat().st_size
+    source_node.observed_mtime_ns = int(stored_file.stat().st_mtime * 1_000_000_000)
+    asset_metadata = db_session.get(LibraryResourceAssetMetadata, "asset-reader-v4")
+    assert asset_metadata is not None
+    asset_metadata.mime_type = mime_type
+    db_session.commit()
 
-    inline_response = client.get(f"/api/volumes/{volume.id}/file")
+    inline_response = client.get(f"/api/resources/{resource.id}/asset")
     download_response = client.get(
-        f"/api/volumes/{volume.id}/file", params={"download": "true"}
+        f"/api/resources/{resource.id}/asset", params={"download": "true"}
     )
 
     assert inline_response.status_code == 200
@@ -1096,229 +1118,174 @@ def test_volume_file_download_mode_uses_attachment_for_every_media_format(
     )
 
 
-def test_work_cover_fallback_returns_an_available_volume_cover(
+def test_book_cover_route_returns_the_book_cover(
     client: TestClient,
     db_session: Session,
-    test_settings: Settings,
+    test_settings,
 ) -> None:
     _login(client, db_session)
-    ebook_volume = _ebook_volume(db_session)
-    ebook_volume.cover_path = "covers/ebook.jpg"
-    comic_volume = LibraryVolume(
-        id="volume-reader-v3-comic",
-        version_id=ebook_volume.version_id,
-        title="漫画",
-        sort_order=-10,
-        format="CBZ",
-        resource_key="manual:reader-v3-comic",
-        cover_path="covers/comic.jpg",
-    )
-    db_session.add(comic_volume)
+    resource, _asset = _ebook_resource(db_session)
+    book_metadata = db_session.get(LibraryBookMetadata, resource.book_id)
+    assert book_metadata is not None
+    book_metadata.cover_path = "covers/ebook.jpg"
     db_session.commit()
     cover_root = test_settings.resolved_storage_root / "covers"
     cover_root.mkdir(parents=True, exist_ok=True)
     (cover_root / "ebook.jpg").write_bytes(b"ebook-cover")
-    (cover_root / "comic.jpg").write_bytes(b"comic-cover")
 
-    response = client.get("/api/works/work-reader-v3/cover")
+    response = client.get(f"/api/books/{resource.book_id}/cover")
 
     assert response.status_code == 200
     assert response.content == b"ebook-cover"
 
 
-def test_sibling_volumes_keep_independent_progress_and_version_completion(
+def test_sibling_resources_keep_independent_progress_and_completion(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
 ) -> None:
     _login(client, db_session)
-    source = _ebook_volume(db_session)
-    source_file = db_session.query(LibraryFile).filter_by(volume_id=source.id).one()
-    sibling_path = tmp_path / "reader-v3-sibling.epub"
-    sibling_path.write_bytes(Path(source_file.path).read_bytes())
-    with zipfile.ZipFile(sibling_path, "a") as archive:
-        archive.writestr("META-INF/sibling-volume", "sibling")
-    sibling = LibraryVolume(
-        id="volume-reader-v3-sibling",
-        version_id=source.version_id,
-        title="EPUB 第二卷",
-        sort_order=1,
-        format="EPUB",
-        resource_key="directory:reader-v3-sibling",
-        import_status="COMPLETED",
+    source, _source_asset = _ebook_resource(db_session)
+    sibling_path = tmp_path / "reader-v4-sibling.epub"
+    sibling_path.write_bytes(
+        Path(
+            Path(__file__).parents[3]
+            / "test-data"
+            / "library"
+            / "epub"
+            / "reader-v2.epub"
+        ).read_bytes()
     )
-    db_session.add(sibling)
-    db_session.flush()
-    db_session.add(
-        LibraryFile(
-            id="file-reader-v3-sibling",
-            volume_id=sibling.id,
-            path=str(sibling_path),
-            mtime_ms=2,
-            kind="EPUB",
-            mime_type="application/epub+zip",
-            size_bytes=sibling_path.stat().st_size,
-            sort_order=0,
-        )
+    sibling, _sibling_asset = _add_resource(
+        db_session,
+        book_id=source.book_id,
+        resource_id="resource-reader-v4-sibling",
+        asset_id="asset-reader-v4-sibling",
+        source_path=sibling_path,
+        title="EPUB 第二资源",
+        resource_index=2,
     )
-    db_session.commit()
 
     source_bootstrap = client.get(
-        f"/api/reader/v4/volumes/{source.id}/bootstrap"
+        f"/api/reader/v4/resources/{source.id}/bootstrap"
     ).json()["data"]
     source_save = client.put(
-        f"/api/reader/v4/volumes/{source.id}/progress",
+        f"/api/reader/v4/resources/{source.id}/progress",
         json=_progress_payload(
-            source_bootstrap,
-            locator=_exact_locator(
-                source_bootstrap, progression=1, total_progression=1
-            ),
+            locator=_exact_locator(progression=1, total_progression=1)
         ),
     )
     assert source_save.status_code == 200
-    assert (
-        client.get(f"/api/reader/v4/volumes/{source.id}/bootstrap").json()["data"][
-            "versionCompleted"
-        ]
-        is False
-    )
+    assert source_bootstrap["resource"]["resourceCompleted"] is False
 
     sibling_bootstrap = client.get(
-        f"/api/reader/v4/volumes/{sibling.id}/bootstrap"
+        f"/api/reader/v4/resources/{sibling.id}/bootstrap"
     ).json()["data"]
     sibling_save = client.put(
-        f"/api/reader/v4/volumes/{sibling.id}/progress",
+        f"/api/reader/v4/resources/{sibling.id}/progress",
         json=_progress_payload(
-            sibling_bootstrap,
             locator=_exact_locator(
-                sibling_bootstrap,
-                href="OEBPS/chapter1.xhtml",
-                progression=1,
-                total_progression=1,
-            ),
+                href="OEBPS/chapter1.xhtml", progression=1, total_progression=1
+            )
         ),
     )
     assert sibling_save.status_code == 200, sibling_save.json()
-    assert (
-        client.get(f"/api/reader/v4/volumes/{source.id}/bootstrap").json()["data"][
-            "versionCompleted"
-        ]
-        is True
-    )
-    progresses = db_session.query(LibraryReadingProgress).all()
-    assert {progress.volume_id for progress in progresses} == {
+    source_after = client.get(
+        f"/api/reader/v4/resources/{source.id}/bootstrap"
+    ).json()["data"]
+    sibling_after = client.get(
+        f"/api/reader/v4/resources/{sibling.id}/bootstrap"
+    ).json()["data"]
+    assert source_after["resource"]["resourceCompleted"] is True
+    assert sibling_after["resource"]["resourceCompleted"] is True
+    assert source_after["bookCompleted"] is True
+    assert sibling_after["bookCompleted"] is True
+    progresses = db_session.query(ReaderResourceProgress).all()
+    assert {progress.resource_id for progress in progresses} == {
         source.id,
         sibling.id,
     }
 
 
-def test_reader_v4_bootstrap_uses_directory_version(
+def test_reader_v4_bootstrap_uses_book_and_resources(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
+    resource, _asset = _ebook_resource(db_session)
 
-    response = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap")
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
 
     assert response.status_code == 200
     bootstrap = response.json()["data"]
-    assert bootstrap["version"] == {
-        "id": "version-reader-v3",
-        "workId": "work-reader-v3",
-        "sourceKey": IMPLICIT_VERSION_SOURCE_KEY,
-        "sourceName": None,
-    }
-    assert bootstrap["volume"]["versionId"] == volume.version_id
+    assert bootstrap["book"]["id"] == "book-reader-v4"
+    assert bootstrap["resource"]["bookId"] == "book-reader-v4"
     assert bootstrap["readerType"] == "reflowable"
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
     assert all(
-        item["versionId"] == volume.version_id for item in bootstrap["availableVolumes"]
+        item["bookId"] == "book-reader-v4" for item in bootstrap["availableResources"]
     )
 
 
-def test_reader_v4_reader_type_follows_volume_format(
+def test_reader_v4_reader_type_follows_resource_format(
     client: TestClient,
     db_session: Session,
 ) -> None:
     _login(client, db_session)
-    volume = _ebook_volume(db_session)
-    volume.format = "AUDIO"
+    resource, _asset = _ebook_resource(db_session)
+    resource.format = "AUDIO"
+    resource.media_kind = "AUDIO"
     db_session.commit()
 
-    bootstrap = client.get(f"/api/reader/v4/volumes/{volume.id}/bootstrap").json()[
+    bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
         "data"
     ]
 
     assert bootstrap["readerType"] == "audio"
     assert bootstrap["sourceFormat"] == "audio"
-    assert "mediaKind" not in bootstrap["version"]
-    assert bootstrap["version"]["id"] == volume.version_id
+    assert bootstrap["resource"]["mediaKind"] == "AUDIO"
+    assert bootstrap["resource"]["id"] == resource.id
 
 
-def test_reader_v4_version_completed_ignores_other_versions(
+def test_reader_v4_book_completion_is_scoped_to_the_current_book(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
 ) -> None:
     _login(client, db_session)
-    current = _ebook_volume(db_session)
-    other_path = tmp_path / "other-version.epub"
+    current, _current_asset = _ebook_resource(db_session)
+    other_path = tmp_path / "other-book.epub"
     _write_reader_epub(other_path)
-    other_version = LibraryVersion(
-        id="version-reader-other",
-        work_id="work-reader-v3",
-        source_key="other-source",
-        source_name="Other",
+    other, _other_asset = _add_resource(
+        db_session,
+        book_id="book-reader-other",
+        resource_id="resource-reader-other",
+        asset_id="asset-reader-other",
+        source_path=other_path,
+        title="另一图书",
+        resource_index=1,
     )
-    other_volume = LibraryVolume(
-        id="volume-reader-other",
-        version_id=other_version.id,
-        title="另一版本",
-        sort_order=1,
-        format="EPUB",
-        resource_key="manual:reader-other",
-        import_status="COMPLETED",
-    )
-    db_session.add(other_version)
-    db_session.flush()
-    db_session.add(other_volume)
-    db_session.flush()
-    db_session.add(
-        LibraryFile(
-            id="file-reader-other",
-            volume_id=other_volume.id,
-            path=str(other_path),
-            mtime_ms=2,
-            kind="EPUB",
-            mime_type="application/epub+zip",
-            size_bytes=other_path.stat().st_size,
-            sort_order=0,
-        )
-    )
-    db_session.commit()
 
     finished = client.put(
-        f"/api/reader/v4/volumes/{other_volume.id}/reading-status",
+        f"/api/reader/v4/resources/{other.id}/reading-status",
         json={"status": "FINISHED"},
     )
     assert finished.status_code == 200
 
     current_bootstrap = client.get(
-        f"/api/reader/v4/volumes/{current.id}/bootstrap"
+        f"/api/reader/v4/resources/{current.id}/bootstrap"
     ).json()["data"]
     other_bootstrap = client.get(
-        f"/api/reader/v4/volumes/{other_volume.id}/bootstrap"
+        f"/api/reader/v4/resources/{other.id}/bootstrap"
     ).json()["data"]
 
-    assert current_bootstrap["version"]["id"] == current.version_id
-    assert other_bootstrap["version"]["id"] == other_version.id
-    assert current_bootstrap["versionCompleted"] is False
-    assert other_bootstrap["versionCompleted"] is True
-    assert {item["versionId"] for item in current_bootstrap["availableVolumes"]} == {
-        current.version_id,
-        other_version.id,
+    assert current_bootstrap["book"]["id"] == "book-reader-v4"
+    assert other_bootstrap["book"]["id"] == "book-reader-other"
+    assert current_bootstrap["bookCompleted"] is False
+    assert other_bootstrap["bookCompleted"] is True
+    assert {item["id"] for item in current_bootstrap["availableResources"]} == {
+        current.id
     }
 
 
@@ -1326,7 +1293,7 @@ def test_reader_v4_openapi_requires_no_edition_or_user_identity(
     client: TestClient,
 ) -> None:
     schema = client.get("/openapi.json").json()
-    path = schema["paths"]["/api/reader/v4/volumes/{volume_id}/progress"]["put"]
+    path = schema["paths"]["/api/reader/v4/resources/{resource_id}/progress"]["put"]
     request_ref = path["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     request_name = request_ref.rsplit("/", 1)[-1]
     required = set(schema["components"]["schemas"][request_name]["required"])
@@ -1354,11 +1321,11 @@ def test_reader_v4_openapi_requires_no_edition_or_user_identity(
         ("put", "bookmarks"),
     ],
 )
-def test_reader_v3_volume_routes_are_removed(
+def test_reader_v3_resource_routes_are_removed(
     client: TestClient,
     method: str,
     resource: str,
 ) -> None:
-    response = client.request(method, f"/api/reader/v3/volumes/legacy/{resource}")
+    response = client.request(method, f"/api/reader/v3/resources/legacy/{resource}")
 
     assert response.status_code == 404

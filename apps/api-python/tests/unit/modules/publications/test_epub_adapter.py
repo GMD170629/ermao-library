@@ -15,8 +15,8 @@ from app.modules.publications.infrastructure.epub_adapter import EpubPublication
 
 def _source(path: Path) -> PublicationSource:
     return PublicationSource(
-        volume_id="epub-volume",
-        file_id="epub-file",
+        resource_id="epub-resource",
+        asset_id="epub-asset",
         source_format="epub",
         path=str(path),
         size_bytes=path.stat().st_size,

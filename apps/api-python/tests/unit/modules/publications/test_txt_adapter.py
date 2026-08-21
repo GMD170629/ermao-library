@@ -14,8 +14,8 @@ from app.modules.publications.infrastructure.txt_adapter import TxtPublicationAd
 
 def _source(path: Path) -> PublicationSource:
     return PublicationSource(
-        volume_id="txt-volume",
-        file_id="txt-file",
+        resource_id="txt-resource",
+        asset_id="txt-asset",
         source_format="txt",
         path=str(path),
         size_bytes=path.stat().st_size,
