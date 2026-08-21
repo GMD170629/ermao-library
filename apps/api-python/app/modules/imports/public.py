@@ -2,6 +2,10 @@
 
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.application.file_types import is_supported_import_filename
+from app.modules.imports.application.identity_policy import (
+    UNKNOWN_AUTHOR,
+    normalize_identity_part,
+)
 from app.modules.imports.application.library_paths import (
     LibraryPathError,
     is_inside_path,
@@ -51,9 +55,11 @@ __all__ = [
     "UploadFileTooLargeError",
     "UploadPublicationError",
     "UploadSource",
+    "UNKNOWN_AUTHOR",
     "is_inside_path",
     "is_supported_import_filename",
     "library_directory_tree_node",
+    "normalize_identity_part",
     "parse_release_title",
     "resolve_library_root_path",
     "safe_upload_filename",

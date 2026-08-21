@@ -20,8 +20,11 @@ from app.models import (
     LibraryBook,
     LibraryBookFacet,
 )
+from app.modules.imports.public import (
+    UNKNOWN_AUTHOR,
+    normalize_identity_part,
+)
 from app.modules.library.domain.facets import FACET_KINDS
-from app.services.book_identity import UNKNOWN_AUTHOR, normalize_identity_part
 
 
 def parse_json(value: Any, fallback: Any) -> Any:
@@ -306,11 +309,11 @@ def list_categories_page(
         raise ValueError("分页参数无效")
 
     count_link = aliased(LibraryBookFacet)
-    count_work = aliased(LibraryBook)
-    visible_work = exists(
-        select(count_work.id).where(
-            count_work.id == count_link.book_id,
-            func.coalesce(count_work.hidden, 0) == 0,
+    count_book = aliased(LibraryBook)
+    visible_book = exists(
+        select(count_book.id).where(
+            count_book.id == count_link.book_id,
+            func.coalesce(count_book.hidden, 0) == 0,
         )
     )
     book_count = (
@@ -318,7 +321,7 @@ def list_categories_page(
         .select_from(count_link)
         .where(
             count_link.facet_id == LibraryFacet.id,
-            visible_work,
+            visible_book,
         )
         .correlate(LibraryFacet)
         .scalar_subquery()

@@ -33,7 +33,6 @@ from app.modules.download.presentation.schemas import (
     DownloadTasksResponse,
     UpdateDownloadTaskRequest,
 )
-from app.modules.download.presentation.sources import router as sources_router
 from app.modules.download.public import CreateDownloadTask, UpdateDownloadTask
 from app.modules.imports.public import (
     target_directory_from_path as _target_directory_from_path,
@@ -42,7 +41,6 @@ from app.schemas.responses import fail, ok
 from app.services.download_executor import execute_download_task
 
 router = APIRouter(tags=["download"], route_class=TypedContractRoute)
-router.include_router(sources_router)
 
 
 def _auth(db: Session, request: Request, settings: Settings):

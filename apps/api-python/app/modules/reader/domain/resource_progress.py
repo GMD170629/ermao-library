@@ -47,7 +47,7 @@ def completed_for_available_resources(resources: list[ResourceReadingState]) -> 
 
 
 def choose_continue_resource_id(resources: list[ResourceReadingState]) -> str | None:
-    """Choose a resource without inventing media- or work-level progress state."""
+    """Choose a resource without inventing media- or book-level progress state."""
 
     available = [resource for resource in resources if resource.available]
     if not available:

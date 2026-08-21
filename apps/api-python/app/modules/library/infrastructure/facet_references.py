@@ -24,22 +24,22 @@ class SqlAlchemyLibraryFacetReferenceQueries:
         kind: str,
         facet_id: str,
     ) -> LibraryFacetReference | None:
-        linked_work = aliased(LibraryBook)
+        linked_book = aliased(LibraryBook)
         linked_facet = aliased(LibraryBookFacet)
-        has_visible_work = exists(
+        has_visible_book = exists(
             select(linked_facet.book_id)
-            .join(linked_work, linked_work.id == linked_facet.book_id)
+            .join(linked_book, linked_book.id == linked_facet.book_id)
             .where(
                 linked_facet.facet_id == LibraryFacet.id,
-                linked_work.visibility_state == "VISIBLE",
-                book_visibility_predicate(context, linked_work),
+                linked_book.visibility_state == "VISIBLE",
+                book_visibility_predicate(context, linked_book),
             )
         )
         row = self._db.execute(
             select(LibraryFacet.id, LibraryFacet.kind, LibraryFacet.name).where(
                 LibraryFacet.id == facet_id,
                 LibraryFacet.kind == kind,
-                has_visible_work,
+                has_visible_book,
             )
         ).one_or_none()
         return (

@@ -31,7 +31,7 @@ class RemoteCoverPublication:
         if not cover_url.startswith(("http://", "https://")):
             raise ValueError("Remote cover URL must use HTTP or HTTPS")
         if not book_id or Path(book_id).name != book_id:
-            raise ValueError("Invalid work identifier")
+            raise ValueError("Invalid book identifier")
         request = UrlRequest(
             cover_url,
             headers={

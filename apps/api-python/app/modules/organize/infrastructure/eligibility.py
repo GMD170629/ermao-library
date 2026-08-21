@@ -76,7 +76,7 @@ def reason_codes_for_book(
     return reasons
 
 
-def select_eligible_works(
+def select_eligible_books(
     db: Session,
     *,
     rules: dict[str, Any],

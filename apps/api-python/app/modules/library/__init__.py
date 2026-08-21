@@ -1,1 +1,1 @@
-"""Library capability: facets and work organization."""
+"""Library capability: facets and book organization."""

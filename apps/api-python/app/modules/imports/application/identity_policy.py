@@ -64,7 +64,7 @@ def explicit_volume_range_start(value: str) -> float | None:
     marker. This avoids treating ordinary year ranges as publication order.
     Callers should apply this to a source filename, not a collection folder:
     an explicitly marked episode range starts at volume 1, while an unmarked
-    numeric range remains a work title.
+    numeric range remains a collection title.
     """
 
     for match in _VOLUME_RANGE_START_PATTERN.finditer(value):

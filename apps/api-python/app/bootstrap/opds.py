@@ -411,7 +411,7 @@ class SqlAlchemyOpdsCatalog:
             )
             if query.view == "catalog":
                 sections = (
-                    ("books", _catalog_text(locale, "全部作品", "All books")),
+                    ("books", _catalog_text(locale, "全部图书", "All books")),
                     ("recent", _catalog_text(locale, "最近添加", "Recently added")),
                     ("authors", _catalog_text(locale, "作者", "Authors")),
                     ("series", _catalog_text(locale, "系列", "Series")),
@@ -620,7 +620,7 @@ class SqlAlchemyOpdsCatalog:
                     facet_id=query.resource_id,
                 ),
                 f"/opds/v1.2/{query.view.removesuffix('_books')}/{quote(query.resource_id)}",
-                _catalog_text(locale, "作品", "Works"),
+                _catalog_text(locale, "图书", "Books"),
                 None,
             )
         if query.view == "shelf":
@@ -641,7 +641,7 @@ class SqlAlchemyOpdsCatalog:
         return (
             CatalogBookFilter(),
             "/opds/v1.2/books",
-            _catalog_text(locale, "全部作品", "All books"),
+            _catalog_text(locale, "全部图书", "All books"),
             None,
         )
 

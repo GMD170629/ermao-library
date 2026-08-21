@@ -76,7 +76,7 @@ __all__ = [
     "cancel_organize_job",
     "create_organize_run",
     "delete_organize_job",
-    "eligible_organize_works",
+    "eligible_organize_books",
     "ensure_organize_policy",
     "get_organize_policy",
     "get_organize_run",
@@ -115,7 +115,7 @@ def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, An
     return update_organize_policy_command(db, payload)
 
 
-def eligible_organize_works(
+def eligible_organize_books(
     db: Session,
     policy: dict[str, Any] | None = None,
     *,
@@ -125,7 +125,7 @@ def eligible_organize_works(
     force_selected: bool = False,
 ) -> list[dict[str, Any]]:
     policy = policy or get_organize_policy(db)
-    return organize_eligibility.select_eligible_works(
+    return organize_eligibility.select_eligible_books(
         db,
         rules=policy["rules"],
         book_ids=book_ids,
@@ -138,26 +138,26 @@ def eligible_organize_works(
 
 def organize_candidate_summary(db: Session) -> dict[str, Any]:
     policy = get_organize_policy(db)
-    works = eligible_organize_works(db, policy, limit=2000)
+    books = eligible_organize_books(db, policy, limit=2000)
     counts: dict[str, int] = {}
-    for work in works:
-        for reason in work.get("reasonCodes") or []:
+    for book in books:
+        for reason in book.get("reasonCodes") or []:
             counts[reason] = counts.get(reason, 0) + 1
     return {
-        "total": len(works),
+        "total": len(books),
         "reasonCounts": counts,
-        "works": [
+        "books": [
             {
-                "id": work.get("id"),
-                "title": work.get("title"),
-                "author": work.get("author"),
-                "availableMediaKinds": work.get("availableMediaKinds") or [],
-                "coverPath": work.get("coverPath"),
-                "metadataQuality": int(work.get("metadataQuality") or 0),
-                "reasonCodes": work.get("reasonCodes") or [],
-                "createdAt": work.get("createdAt"),
+                "id": book.get("id"),
+                "title": book.get("title"),
+                "author": book.get("author"),
+                "availableMediaKinds": book.get("availableMediaKinds") or [],
+                "coverPath": book.get("coverPath"),
+                "metadataQuality": int(book.get("metadataQuality") or 0),
+                "reasonCodes": book.get("reasonCodes") or [],
+                "createdAt": book.get("createdAt"),
             }
-            for work in works
+            for book in books
         ],
     }
 
@@ -186,7 +186,7 @@ def create_organize_run(
         raise ValueError("不支持的整理任务触发方式")
     policy = get_organize_policy(db)
     selected = [str(item) for item in (book_ids or []) if str(item).strip()]
-    works = eligible_organize_works(
+    books = eligible_organize_books(
         db,
         policy,
         book_ids=selected or None,
@@ -195,22 +195,22 @@ def create_organize_run(
         force_selected=bool(selected) and normalized_trigger == "MANUAL",
     )
     selections = {
-        str(work["id"]): organize_eligibility.first_resource_selection_for_book(
-            db, str(work["id"])
+        str(book["id"]): organize_eligibility.first_resource_selection_for_book(
+            db, str(book["id"])
         )
-        for work in works
+        for book in books
     }
-    works = [work for work in works if selections[str(work["id"])] is not None]
+    books = [book for book in books if selections[str(book["id"])] is not None]
     provider_plans = {
-        str(work["id"]): enabled_metadata_provider_ids(
-            db, selections[str(work["id"])][1]
+        str(book["id"]): enabled_metadata_provider_ids(
+            db, selections[str(book["id"])][1]
         )
-        for work in works
+        for book in books
     }
     # All policy, eligibility, media and provider projections are detached
     # before dedupe/ID construction or the write unit of work begins.
     db.close()
-    ids = [str(work["id"]) for work in works]
+    ids = [str(book["id"]) for book in books]
     key = _run_dedupe_key(normalized_trigger, ids, dedupe_key)
     existing = organize_runs.get_run_by_dedupe_key(db, key)
     db.close()
@@ -219,21 +219,21 @@ def create_organize_run(
 
     now = _now()
     run_id = _id("organize_run")
-    run_status = "RUNNING" if works else "COMPLETED"
+    run_status = "RUNNING" if books else "COMPLETED"
     scope = {"bookIds": selected, "rules": policy["rules"]}
     job_plans = tuple(
         PreparedOrganizeJobEnqueue(
             job_id=_id("organize_job"),
             task_id=_id("metadata_lookup"),
-            book_id=str(work["id"]),
-            resource_id=selections[str(work["id"])][0],
-            provider_order=tuple(provider_plans[str(work["id"])]),
-            reasons=tuple(str(reason) for reason in work.get("reasonCodes") or []),
+            book_id=str(book["id"]),
+            resource_id=selections[str(book["id"])][0],
+            provider_order=tuple(provider_plans[str(book["id"])]),
+            reasons=tuple(str(reason) for reason in book.get("reasonCodes") or []),
         )
-        for work in works
+        for book in books
     )
     # The eligibility read and inserts are intentionally separated. A
-    # concurrent organizer may claim a work in between; the database
+    # concurrent organizer may claim a book in between; the database
     # unique index is the final arbiter, so the actual count is filled
     # after the inserts below.
     queued_count = persist_organize_run(
@@ -281,7 +281,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         exclude_job_id=job_id,
     )
     if current_unresolved:
-        # Re-recognition is a work-level intent. Reuse its unresolved record
+        # Re-recognition is a book-level intent. Reuse its unresolved record
         # when the action originated from an older successful history row.
         job = current_unresolved
         job_id = str(current_unresolved["id"])
@@ -292,7 +292,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         str(job.get("resourceId") or "") or None,
     )
     if selection is None:
-        raise ValueError("作品没有可整理的版本")
+        raise ValueError("图书没有可整理的资源")
     _, media_kind, resource_id = selection
     providers = enabled_metadata_provider_ids(db, media_kind)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
@@ -354,10 +354,10 @@ def process_organize_schedule_tick(db: Session) -> int:
     queued = 0
     now = _now()
     if policy["autoRunOnNew"]:
-        new_works = eligible_organize_works(db, policy, trigger="NEW", limit=500)
+        new_books = eligible_organize_books(db, policy, trigger="NEW", limit=500)
         db.close()
-        if new_works:
-            ids = [str(item["id"]) for item in new_works]
+        if new_books:
+            ids = [str(item["id"]) for item in new_books]
             result = create_organize_run(
                 db,
                 trigger="NEW",

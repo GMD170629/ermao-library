@@ -337,19 +337,13 @@ def _calibrate_runtime_rows(
     table_name: str,
     records: tuple[dict[str, object], ...],
 ) -> tuple[dict[str, object], ...]:
-    """Release restored in-flight leases without creating OPF history work."""
+    """Release restored metadata and organize jobs without creating history."""
 
     result: list[dict[str, object]] = []
     for source_record in records:
         record = dict(source_record)
         status = record.get("status")
-        if table_name == "LibraryImportTask" and status == "PARSING":
-            record.update(
-                status="PENDING",
-                leaseOwner=None,
-                leaseExpiresAt=None,
-            )
-        elif table_name == "MetadataLookupTask" and status == "RUNNING":
+        if table_name == "MetadataLookupTask" and status == "RUNNING":
             record.update(
                 status="PENDING",
                 leaseOwnerId=None,

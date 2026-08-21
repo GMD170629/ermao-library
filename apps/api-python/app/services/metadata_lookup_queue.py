@@ -34,7 +34,7 @@ from app.modules.metadata.application.writeback import (
 )
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
-from app.services.book_identity import (
+from app.modules.imports.public import (
     UNKNOWN_AUTHOR,
     normalize_identity_part,
 )
@@ -727,7 +727,7 @@ def process_metadata_lookup_task(
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> str:
     import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
-    if import_status is not None and import_status != "COMPLETED":
+    if import_status is not None and import_status != "SUCCEEDED":
         _schedule_retry(db, task, "等待本地导入任务完成", [])
         return "PENDING"
     book = lookup_persist.get_book(db, task.get("bookId"))

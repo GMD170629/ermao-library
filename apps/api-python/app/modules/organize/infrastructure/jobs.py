@@ -355,7 +355,7 @@ def book_is_curated(db: Session, book_id: str) -> bool:
     return str(state or "") not in {"", "PENDING", "UNASSESSED", "DISMISSED"}
 
 
-def finish_unresolved_jobs_for_work(
+def finish_unresolved_jobs_for_book(
     db: Session,
     *,
     book_id: str,

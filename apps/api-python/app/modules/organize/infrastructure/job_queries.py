@@ -345,7 +345,7 @@ def list_filtered_job_rows(
             updated_at=row.updated_at,
             book=OrganizeBookListItem(
                 id=str(row.book_id),
-                title=str(row.title or "未命名作品"),
+                title=str(row.title or "未命名图书"),
                 author=str(row.author or "未知作者"),
                 available_media_kinds=media_kinds_by_book[str(row.book_id)],
             ),

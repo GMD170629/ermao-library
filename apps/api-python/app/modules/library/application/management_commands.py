@@ -35,7 +35,7 @@ class LibraryManagementGateway(Protocol):
 
 
 class FacetSyncGateway(Protocol):
-    def sync_work(self, book_id: str) -> None: ...
+    def sync_book(self, book_id: str) -> None: ...
 
     def sync_books(self, book_ids: Iterable[str]) -> None: ...
 
@@ -113,7 +113,7 @@ class SyncBookFacets:
 
     def execute(self, book_id: str) -> None:
         try:
-            self._gateway.sync_work(book_id)
+            self._gateway.sync_book(book_id)
             self._uow.commit()
         except Exception:
             self._uow.rollback()

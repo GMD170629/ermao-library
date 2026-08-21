@@ -74,7 +74,7 @@ class OrganizeCandidate(HttpContractModel):
 class OrganizeCandidates(HttpContractModel):
     total: int
     reason_counts: dict[str, int] = Field(alias="reasonCounts")
-    works: list[OrganizeCandidate]
+    books: list[OrganizeCandidate]
 
 
 class OrganizeCandidatesPayload(HttpContractModel):
@@ -124,7 +124,6 @@ class ProviderExecution(HttpContractModel):
 class OrganizeJob(HttpContractModel):
     id: str
     run_id: str | None = Field(alias="runId")
-    resource_id: str | None = Field(alias="resourceId")
     resource_id: str | None = Field(default=None, alias="resourceId")
     trigger: str
     status: str

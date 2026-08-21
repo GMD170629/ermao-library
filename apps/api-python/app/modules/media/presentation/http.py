@@ -222,10 +222,10 @@ def get_cover(
     if resource_id and not can_access_resource(db, user, resource_id):
         return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     if resource_id:
-        version_book_id = db.scalar(
+        resource_book_id = db.scalar(
             select(LibraryReadableResource.book_id).where(LibraryReadableResource.id == resource_id)
         )
-        if not version_book_id or not can_access_book(db, user, str(version_book_id)):
+        if not resource_book_id or not can_access_book(db, user, str(resource_book_id)):
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     cover_path_value = media_resource_query(db).cover_path(
         book_id=book_id,

@@ -109,38 +109,38 @@ class LibraryFilterQueryPort(Protocol):
 
 
 FILTER_FIELD_DEFINITIONS = (
-    LibraryFilterFieldDefinition("title", "书名", "作品元数据", "text", TEXT_OPERATORS),
+    LibraryFilterFieldDefinition("title", "书名", "图书元数据", "text", TEXT_OPERATORS),
     LibraryFilterFieldDefinition(
         "author",
         "作者",
-        "作品元数据",
+        "图书元数据",
         "select",
         SELECT_OPERATORS,
         "authors",
         True,
     ),
     LibraryFilterFieldDefinition(
-        "tag", "标签", "作品元数据", "select", SELECT_OPERATORS, "tags", True
+        "tag", "标签", "图书元数据", "select", SELECT_OPERATORS, "tags", True
     ),
     LibraryFilterFieldDefinition(
         "series",
         "丛书",
-        "作品元数据",
+        "图书元数据",
         "select",
         SELECT_OPERATORS,
         "series",
         True,
     ),
     LibraryFilterFieldDefinition(
-        "description", "简介", "作品元数据", "text", TEXT_OPERATORS
+        "description", "简介", "图书元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
-        "seriesIndex", "丛书序号", "作品元数据", "number", NUMBER_OPERATORS
+        "seriesIndex", "丛书序号", "图书元数据", "number", NUMBER_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "metadataQuality",
         "元数据完整度",
-        "作品元数据",
+        "图书元数据",
         "number",
         NUMBER_OPERATORS,
         unit="%",

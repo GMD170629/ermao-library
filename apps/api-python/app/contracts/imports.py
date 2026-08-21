@@ -13,7 +13,7 @@ ImportTaskRole = Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"]
 
 
 class LibraryImportTaskContract(BaseModel):
-    """Wire projection; no importer lease or legacy work identity is exposed."""
+    """Wire projection; no importer lease or legacy book identity is exposed."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
