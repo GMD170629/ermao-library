@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable, Iterable
+from importlib import import_module
 from pathlib import Path
 from time import monotonic
-from typing import Protocol
+from typing import Protocol, cast
 
 from app.modules.imports.application.pdf_types import (
     PdfChapter,
@@ -52,9 +53,25 @@ class _PdfBookmark(Protocol):
 
 
 class _PdfDocument(Protocol):
+    def __len__(self) -> int: ...
+
     def __getitem__(self, index: int) -> _PdfPage: ...
 
+    def get_metadata_dict(self) -> dict[str, object] | None: ...
+
     def get_toc(self, max_depth: int) -> Iterable[_PdfBookmark]: ...
+
+    def close(self) -> None: ...
+
+
+class _PdfiumModule(Protocol):
+    def PdfDocument(self, path: str) -> _PdfDocument: ...
+
+
+def _load_pdfium() -> _PdfiumModule:
+    """Load the optional PDF adapter behind an explicit typed boundary."""
+
+    return cast(_PdfiumModule, import_module("pypdfium2"))
 
 
 def inspect_pdf(
@@ -79,8 +96,7 @@ def inspect_pdf(
         elapsed_ms=0,
     )
     try:
-        import pypdfium2 as pdfium
-
+        pdfium = _load_pdfium()
         pdf = pdfium.PdfDocument(str(path))
         try:
             page_count = max(1, len(pdf))

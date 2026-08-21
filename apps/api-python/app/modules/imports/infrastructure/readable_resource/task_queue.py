@@ -161,7 +161,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         self._session.flush()
-        return int(result.rowcount or 0)
+        return int(getattr(result, "rowcount", 0) or 0)
 
     def requeue_failed_for_library(self, library_id: str) -> int:
         result = self._session.execute(
@@ -178,7 +178,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         self._session.flush()
-        return int(result.rowcount or 0)
+        return int(getattr(result, "rowcount", 0) or 0)
 
     def requeue_failed_for_source(self, source_node_id: str) -> int:
         result = self._session.execute(
@@ -198,7 +198,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         # is handled by CONTINUE_SOURCE scan; FAILED for this source_node covers
         # CONTINUE_SOURCE and file PRIMARY tasks.
         self._session.flush()
-        return int(result.rowcount or 0)
+        return int(getattr(result, "rowcount", 0) or 0)
 
     def has_active_kind(
         self,

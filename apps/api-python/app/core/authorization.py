@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import ColumnElement, exists, false, select, true
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -86,7 +86,9 @@ def book_visibility_predicate(
 ) -> ColumnElement[bool]:
     if context.is_admin:
         return book.id.is_not(None)
-    return library_visibility_predicate(context, book.library_id)
+    return library_visibility_predicate(
+        context, cast(ColumnElement[str], book.library_id)
+    )
 
 
 def resource_visibility_predicate(
@@ -100,7 +102,11 @@ def resource_visibility_predicate(
     if context.is_admin:
         return resource.id.is_not(None) & state[0] & state[1]
     return (
-        library_visibility_predicate(context, resource.library_id) & state[0] & state[1]
+        library_visibility_predicate(
+            context, cast(ColumnElement[str], resource.library_id)
+        )
+        & state[0]
+        & state[1]
     )
 
 

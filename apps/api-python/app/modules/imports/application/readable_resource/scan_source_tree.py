@@ -601,9 +601,9 @@ class ScanLibrarySourceTree:
                 source_node_id=node_id,
                 title=relative_path.name,
             )
-        if placement.volumes_root_folder_relative_path is None:
+        if placement.resource_root_folder_relative_path is None:
             return None
-        root_path = SourceNodeRelativePath(placement.volumes_root_folder_relative_path)
+        root_path = SourceNodeRelativePath(placement.resource_root_folder_relative_path)
         root_node = self._source_nodes.get_by_path_key(
             config.library_id, root_path.path_key
         )

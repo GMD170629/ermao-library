@@ -20,7 +20,7 @@ class SqlAlchemyLibraryWriteStore:
         self._db = db
 
     def create(self, prepared: PreparedLibraryCreate) -> None:
-        self._db.execute(insert(Library.__table__).values(prepared.values))
+        self._db.execute(insert(Library).values(prepared.values))
         write_prepared_system_events(self._db, (prepared.event,))
 
     def update(self, prepared: PreparedLibraryUpdate) -> None:
@@ -35,7 +35,7 @@ class SqlAlchemyLibraryWriteStore:
         result = self._db.execute(
             delete(Library).where(Library.id == prepared.library_id)
         )
-        deleted = bool(result.rowcount)
+        deleted = bool(getattr(result, "rowcount", 0))
         if prepared.affected_user_ids:
             self._db.execute(
                 update(User)

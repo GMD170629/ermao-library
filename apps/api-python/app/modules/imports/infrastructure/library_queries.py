@@ -9,8 +9,9 @@ queries.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -152,7 +153,10 @@ def get_import_task(
         visible = db.scalar(
             select(LibraryImportTask.id).where(
                 LibraryImportTask.id == task_id,
-                library_visibility_predicate(context, LibraryImportTask.library_id),
+                library_visibility_predicate(
+                    context,
+                    cast(ColumnElement[str], LibraryImportTask.library_id),
+                ),
             )
         )
         if visible is None:
@@ -169,7 +173,10 @@ def list_import_tasks_page(
     library_id: str | None = None,
     state: str | None = None,
 ) -> tuple[list[dict[str, object]], int, dict[str, int]]:
-    scope = library_visibility_predicate(context, LibraryImportTask.library_id)
+    scope = library_visibility_predicate(
+        context,
+        cast(ColumnElement[str], LibraryImportTask.library_id),
+    )
     filters = [scope]
     if library_id is not None:
         filters.append(LibraryImportTask.library_id == library_id)
