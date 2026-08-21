@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
-from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -19,7 +19,6 @@ from app.db.maintenance import (
 )
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
-from app.models.auth import User
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
@@ -29,6 +28,7 @@ from app.models import (
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
 )
+from app.models.auth import User
 from app.models.library import Library
 from app.models.settings import SystemSetting
 from tests.support.sqlalchemy import StatementRecorder

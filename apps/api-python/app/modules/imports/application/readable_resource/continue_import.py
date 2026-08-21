@@ -6,10 +6,10 @@ from dataclasses import dataclass
 
 from app.modules.imports.application.readable_resource.ports import (
     LibraryConfigPort,
+    LibraryImportTaskQueuePort,
     PipelineLogPort,
     SourceNodeRepositoryPort,
     UnitOfWorkPort,
-    LibraryImportTaskQueuePort,
 )
 
 
@@ -67,9 +67,7 @@ class ContinueImport:
             if not self._queue.has_active_kind(
                 kind="SCAN_LIBRARY", library_id=library_id
             ):
-                task = self._queue.enqueue(
-                    kind="SCAN_LIBRARY", library_id=library_id
-                )
+                task = self._queue.enqueue(kind="SCAN_LIBRARY", library_id=library_id)
                 enqueued = True
                 task_id = task.id
         self._log.emit(

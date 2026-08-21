@@ -6,7 +6,9 @@ from app.modules.reader.domain.resource_format import (
 )
 
 
-@pytest.mark.parametrize("resource_format", ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"])
+@pytest.mark.parametrize(
+    "resource_format", ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"]
+)
 def test_all_native_reflowable_formats_are_directly_readable(
     resource_format: str,
 ) -> None:

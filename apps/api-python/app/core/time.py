@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import BigInteger
 from sqlalchemy.types import TypeDecorator
-
 
 TIMESTAMP_MILLISECONDS_MIN = 100_000_000_000
 
@@ -36,11 +35,11 @@ def to_timestamp_ms(value: Any, *, naive_timezone=None) -> int | None:
         parsed = value
     else:
         try:
-            parsed = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(text_value)
         except ValueError:
             return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=naive_timezone or timezone.utc)
+        parsed = parsed.replace(tzinfo=naive_timezone or UTC)
     return int(parsed.timestamp() * 1000)
 
 
@@ -48,7 +47,7 @@ def timestamp_ms_to_datetime(value: Any) -> datetime | None:
     timestamp = to_timestamp_ms(value)
     if timestamp is None:
         return None
-    return datetime.fromtimestamp(timestamp / 1000, timezone.utc)
+    return datetime.fromtimestamp(timestamp / 1000, UTC)
 
 
 def timestamp_ms_to_iso(value: Any) -> str | None:

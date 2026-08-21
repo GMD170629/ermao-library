@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -145,7 +145,9 @@ class FakeSourceNodes:
         self._seq = 0
         self.inserts = 0
 
-    def get_by_path_key(self, library_id: str, path_key: str) -> SourceNodeRecord | None:
+    def get_by_path_key(
+        self, library_id: str, path_key: str
+    ) -> SourceNodeRecord | None:
         return self._by_key.get((library_id, path_key))
 
     def get(self, source_node_id: str) -> SourceNodeRecord | None:
@@ -260,7 +262,9 @@ class FakeQueue:
     def mark_succeeded(self, task_id: str, *, finished_at: datetime) -> None:
         return None
 
-    def mark_failed(self, task_id: str, *, error_summary: str, finished_at: datetime) -> None:
+    def mark_failed(
+        self, task_id: str, *, error_summary: str, finished_at: datetime
+    ) -> None:
         return None
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
@@ -278,7 +282,7 @@ class FakeQueue:
 
 class FakeClock:
     def now(self) -> datetime:
-        return datetime(2024, 1, 1, tzinfo=timezone.utc)
+        return datetime(2024, 1, 1, tzinfo=UTC)
 
 
 class FakeLog:
@@ -334,8 +338,7 @@ class DemandDrivenDirectoryFilesystem:
             self.io_while_in_txn.append("scandir")
         for index in range(self._conceptual_size):
             outstanding = self.yielded - self._source_nodes.inserts
-            if outstanding > self.max_outstanding:
-                self.max_outstanding = outstanding
+            self.max_outstanding = max(self.max_outstanding, outstanding)
             if index > 0 and self._source_nodes.inserts < index:
                 raise AssertionError(
                     "directory entry yielded before previous entry was inserted; "
@@ -350,8 +353,7 @@ class DemandDrivenDirectoryFilesystem:
                 raise OSError("simulated mid-iteration directory failure")
             self.yielded += 1
             outstanding = self.yielded - self._source_nodes.inserts
-            if outstanding > self.max_outstanding:
-                self.max_outstanding = outstanding
+            self.max_outstanding = max(self.max_outstanding, outstanding)
             yield (
                 f"note-{index:07d}.md",
                 SourceNodePhysicalKind.REGULAR_FILE,
@@ -430,8 +432,8 @@ def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
     ]
     uow = RecordingUoW()
     filesystem = RecordingFilesystem(uow, {"books": file_entries, ".": file_entries})
-    filesystem._entries[str(root)] = file_entries  # noqa: SLF001
-    filesystem._entries[str(root.resolve())] = file_entries  # noqa: SLF001
+    filesystem._entries[str(root)] = file_entries
+    filesystem._entries[str(root.resolve())] = file_entries
 
     scan = ScanLibrarySourceTree(
         libraries=FakeLibraries(_config(root)),
@@ -459,9 +461,9 @@ def test_scan_releases_before_directory_probe(tmp_path: Path) -> None:
     ]
     uow = RecordingUoW()
     filesystem = RecordingFilesystem(uow, {})
-    filesystem._entries[str(root)] = entries  # noqa: SLF001
-    filesystem._entries[str(root.resolve())] = entries  # noqa: SLF001
-    filesystem._entries[str(root / "Audiobook")] = []  # noqa: SLF001
+    filesystem._entries[str(root)] = entries
+    filesystem._entries[str(root.resolve())] = entries
+    filesystem._entries[str(root / "Audiobook")] = []
 
     scan = ScanLibrarySourceTree(
         libraries=FakeLibraries(_config(root)),
@@ -571,8 +573,8 @@ def test_entry_processing_oserror_is_not_swallowed_as_unreadable_directory(
     uow = RecordingUoW()
     log = FakeLog()
     filesystem = RecordingFilesystem(uow, {})
-    filesystem._entries[str(root)] = file_entries  # noqa: SLF001
-    filesystem._entries[str(root.resolve())] = file_entries  # noqa: SLF001
+    filesystem._entries[str(root)] = file_entries
+    filesystem._entries[str(root.resolve())] = file_entries
 
     scan = ScanLibrarySourceTree(
         libraries=FakeLibraries(_config(root)),

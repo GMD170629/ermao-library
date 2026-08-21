@@ -8,8 +8,8 @@ from app.modules.reader.application.resource_reader import (
     ReaderProgressDateConflict,
     ReaderResourceFormatUnsupported,
     ReaderResourceNotFound,
-    SaveExternalProgressCommand,
     ResourceReaderService,
+    SaveExternalProgressCommand,
 )
 from app.modules.reader.domain.progress import (
     normalize_reader_href,
@@ -35,9 +35,9 @@ __all__ = [
     "ReaderProgressDateConflict",
     "ReaderResourceFormatUnsupported",
     "ReaderResourceNotFound",
-    "SaveExternalProgressCommand",
     "ResourceReaderService",
     "ResourceReadingState",
+    "SaveExternalProgressCommand",
     "choose_continue_resource_id",
     "completed_for_available_resources",
     "normalize_reader_href",

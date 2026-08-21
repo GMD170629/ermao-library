@@ -43,11 +43,7 @@ def dashboard_summary(
 ) -> dict[str, Any]:
     visible_book = _visible_book_filter(context)
     total_books = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryBook)
-            .where(*visible_book)
-        )
+        db.scalar(select(func.count()).select_from(LibraryBook).where(*visible_book))
         or 0
     )
 
@@ -89,7 +85,14 @@ def dashboard_summary(
         or 0
     )
     library_count = (
-        int(db.scalar(select(func.count()).select_from(Library).where(Library.enabled.is_(True))) or 0)
+        int(
+            db.scalar(
+                select(func.count())
+                .select_from(Library)
+                .where(Library.enabled.is_(True))
+            )
+            or 0
+        )
         if context.is_admin
         else len(context.library_ids)
     )
@@ -150,7 +153,10 @@ def recent_reading(
             latest_read_at,
         )
         .select_from(ReaderResourceProgress)
-        .join(LibraryReadableResource, LibraryReadableResource.id == ReaderResourceProgress.resource_id)
+        .join(
+            LibraryReadableResource,
+            LibraryReadableResource.id == ReaderResourceProgress.resource_id,
+        )
         .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
         .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .where(
@@ -202,8 +208,15 @@ def continue_reading_progress(
                 ReaderResourceProgress.updated_at.label("progress_updated_at"),
             )
             .select_from(ReaderResourceProgress)
-            .join(LibraryReadableResource, LibraryReadableResource.id == ReaderResourceProgress.resource_id)
-            .join(LibraryReadableResourceMetadata, LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == ReaderResourceProgress.resource_id,
+            )
+            .join(
+                LibraryReadableResourceMetadata,
+                LibraryReadableResourceMetadata.resource_id
+                == LibraryReadableResource.id,
+            )
             .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
             .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
             .where(
@@ -211,14 +224,21 @@ def continue_reading_progress(
                 *_visible_book_filter(context),
                 resource_visibility_predicate(context),
             )
-            .order_by(ReaderResourceProgress.updated_at.desc(), ReaderResourceProgress.id.desc())
+            .order_by(
+                ReaderResourceProgress.updated_at.desc(),
+                ReaderResourceProgress.id.desc(),
+            )
             .limit(1)
         )
         if unfinished_only:
-            statement = statement.where(func.coalesce(ReaderResourceProgress.percent, 0) < 100)
+            statement = statement.where(
+                func.coalesce(ReaderResourceProgress.percent, 0) < 100
+            )
         return db.execute(statement).first()
 
-    selected = latest_progress(unfinished_only=True) or latest_progress(unfinished_only=False)
+    selected = latest_progress(unfinished_only=True) or latest_progress(
+        unfinished_only=False
+    )
     if selected is None:
         return None
     reader_type = reader_type_for_format(str(selected.resource_format))
@@ -254,15 +274,17 @@ def management_card_counts(db: Session) -> dict[str, int]:
             select(func.count())
             .select_from(OrganizeJob)
             .where(
-                OrganizeJob.status.in_((
-                    "LOOKUP_PENDING",
-                    "PENDING",
-                    "QUEUED",
-                    "RUNNING",
-                    "RETRY_WAIT",
-                    "REVIEWING",
-                    "FAILED",
-                ))
+                OrganizeJob.status.in_(
+                    (
+                        "LOOKUP_PENDING",
+                        "PENDING",
+                        "QUEUED",
+                        "RUNNING",
+                        "RETRY_WAIT",
+                        "REVIEWING",
+                        "FAILED",
+                    )
+                )
             )
         )
         or 0
@@ -271,7 +293,10 @@ def management_card_counts(db: Session) -> dict[str, int]:
         db.scalar(
             select(func.coalesce(func.sum(LibrarySourceNode.observed_size_bytes), 0))
             .select_from(LibraryResourceAsset)
-            .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
             .where(LibraryResourceAsset.import_state == "READY")
         )
         or 0
@@ -307,7 +332,9 @@ def list_management_books(db: Session, *, limit: int = 300) -> list[dict[str, An
         media_rows = db.execute(
             select(LibraryReadableResource.book_id, LibraryReadableResource.media_kind)
             .where(LibraryReadableResource.book_id.in_(book_ids))
-            .group_by(LibraryReadableResource.book_id, LibraryReadableResource.media_kind)
+            .group_by(
+                LibraryReadableResource.book_id, LibraryReadableResource.media_kind
+            )
         ).all()
         priority = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
         for book_id, media_kind in media_rows:

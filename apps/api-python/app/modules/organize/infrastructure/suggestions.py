@@ -106,9 +106,7 @@ def dismiss_pending_suggestions(db: Session, job_id: str) -> None:
     )
 
 
-def dismiss_pending_suggestions_for_jobs(
-    db: Session, job_ids: tuple[str, ...]
-) -> None:
+def dismiss_pending_suggestions_for_jobs(db: Session, job_ids: tuple[str, ...]) -> None:
     if not job_ids:
         return
     db.execute(

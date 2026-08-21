@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
-from app.models.auth import User
 from app.models import Library, LibraryImportTask
+from app.models.auth import User
 
 
 def _login_system_manager(client: TestClient, db: Session) -> User:

@@ -171,16 +171,16 @@ def test_response_dto_wire_schemas_have_no_retired_identity_fields() -> None:
             properties = value.get("properties")
             names = set(properties) if isinstance(properties, dict) else set()
             return names | {
-                name
-                for child in value.values()
-                for name in property_names(child)
+                name for child in value.values() for name in property_names(child)
             }
         if isinstance(value, list):
             return {name for child in value for name in property_names(child)}
         return set()
 
     for name, model in _response_contracts().items():
-        assert retired.isdisjoint(property_names(TypeAdapter(model).json_schema())), name
+        assert retired.isdisjoint(property_names(TypeAdapter(model).json_schema())), (
+            name
+        )
 
 
 def test_library_resource_asset_schema_accepts_comic_page_fields() -> None:

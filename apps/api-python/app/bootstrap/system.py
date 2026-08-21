@@ -1,6 +1,7 @@
 """System capability composition root."""
 
 from typing import Any
+
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -282,10 +283,10 @@ __all__ = [
     "get_setting",
     "get_setting_raw",
     "health_run_snapshot",
+    "library_import_dashboard_snapshot",
     "list_event_level_facets",
     "list_event_source_facets",
     "list_settings",
-    "library_import_dashboard_snapshot",
     "list_system_events_page",
     "maintain_system_events",
     "mark_queue_stopped",

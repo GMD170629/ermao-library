@@ -29,7 +29,9 @@ def _resource(
     )
 
 
-def test_completion_requires_every_available_resource_and_non_empty_projection() -> None:
+def test_completion_requires_every_available_resource_and_non_empty_projection() -> (
+    None
+):
     assert not completed_for_available_resources([])
     assert not completed_for_available_resources(
         [

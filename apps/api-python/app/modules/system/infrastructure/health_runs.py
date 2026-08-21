@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import smtplib
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete
 
@@ -20,10 +22,10 @@ from app.core.config import Settings
 from app.core.safe_errors import safe_error_message
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
-from app.models.auth import UserPreference
 from app.models import DownloadTask, KindleSendTask, LibraryImportTask
-from app.models.organize import MetadataLookupTask
+from app.models.auth import UserPreference
 from app.models.library import Library
+from app.models.organize import MetadataLookupTask
 from app.models.settings import SystemHealthRun
 from app.modules.system.application.commands import (
     SystemWriteTransaction,
@@ -480,7 +482,7 @@ def _database_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     try:
         probe_database(db)
         return "ok", "health.database.ok", {}
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         reset_failed_system_transaction(db)
         return "error", "health.database.error", {"error": safe_error_message(exc)}
 
@@ -573,7 +575,7 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     db.close()
     try:
         test_smtp_connection(values, timeout=10)
-    except Exception as exc:
+    except (EmailSettingsError, OSError, smtplib.SMTPException) as exc:
         return (
             "error",
             "health.smtp.connectionFailed",
@@ -617,7 +619,9 @@ def _providers_result(
                 }
             )
             failed += 0 if ok else 1
-        except Exception as exc:
+        # A provider is an external health-check boundary; one broken plugin
+        # must become a failed provider item without aborting the run.
+        except Exception as exc:  # noqa: BLE001
             failed += 1
             details["providers"].append(
                 {"id": provider_id, "ok": False, "message": safe_error_message(exc)}
@@ -723,7 +727,9 @@ def run_health_checks(
                     )
                 finally:
                     db.close()
-            except Exception as exc:
+            # Each health item is isolated so an adapter failure cannot strand
+            # the remaining items in a pending state.
+            except Exception as exc:  # noqa: BLE001
                 finished = now_timestamp_ms()
                 db = _isolated_session(factory, close_sessions)
                 try:
@@ -812,7 +818,8 @@ def run_health_checks(
                 write_prepared_system_events(db, [prepared_event])
         finally:
             db.close()
-    except Exception as exc:
+    # The worker boundary must persist an interrupted run before terminating.
+    except Exception as exc:  # noqa: BLE001
         db = _isolated_session(factory, close_sessions)
         try:
             snapshot = health_run_snapshot(db, run_id)

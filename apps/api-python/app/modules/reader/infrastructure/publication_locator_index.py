@@ -36,7 +36,9 @@ class NormalizedPublicationLocatorIndex:
         location: ReaderExactLocationDto,
     ) -> bool:
         if isinstance(location, ReaderReflowableExactLocationDto):
-            publication = self._manifest(resource_id=resource_id, access_scope=access_scope)
+            publication = self._manifest(
+                resource_id=resource_id, access_scope=access_scope
+            )
             return publication is not None and any(
                 link.href == location.resource_href
                 and _is_reflowable_markup(link.media_type)
@@ -75,7 +77,9 @@ class NormalizedPublicationLocatorIndex:
             if context.resource.format.lower() not in _AUDIO_FORMATS:
                 return False
             assets = self._reader_repository.list_assets(resource_id)
-            target = next((file for file in assets if file.id == location.asset_id), None)
+            target = next(
+                (file for file in assets if file.id == location.asset_id), None
+            )
             if target is None or not target.mime_type.lower().startswith("audio/"):
                 return False
             if (

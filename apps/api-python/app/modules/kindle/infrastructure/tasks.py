@@ -12,7 +12,6 @@ from sqlalchemy.sql.dml import Insert, Update
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import timestamp_ms_to_datetime
-from app.models.import_pipeline import KindleSendTask
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
@@ -21,6 +20,7 @@ from app.models import (
     LibraryResourceAsset,
     LibrarySourceNode,
 )
+from app.models.import_pipeline import KindleSendTask
 
 
 def entity_record(entity: object) -> dict[str, Any]:
@@ -30,7 +30,7 @@ def entity_record(entity: object) -> dict[str, Any]:
     }
 
 
-def _legacy_column_to_attr(model: type) -> dict[str, str]:
+def _column_to_attribute(model: type) -> dict[str, str]:
     mapper = sa_inspect(model)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
@@ -92,7 +92,7 @@ def find_active_kindle_task(
 
 
 def prepare_kindle_send_task_insert(values: dict[str, Any]) -> Insert:
-    name_to_attr = _legacy_column_to_attr(KindleSendTask)
+    name_to_attr = _column_to_attribute(KindleSendTask)
     payload = {
         name_to_attr[key]: value for key, value in values.items() if key in name_to_attr
     }
@@ -339,8 +339,14 @@ def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] |
             LibrarySourceNode.relative_path.label("sourcePath"),
             LibrarySourceNode.observed_size_bytes.label("sizeBytes"),
         )
-        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryResourceAsset.resource_id)
-        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+        .join(
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryResourceAsset.resource_id,
+        )
+        .join(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+        )
         .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:
@@ -366,11 +372,20 @@ def get_library_asset_details_for_kindle(
             LibrarySourceNode.relative_path.label("sourcePath"),
             LibrarySourceNode.observed_size_bytes.label("sizeBytes"),
         )
-        .join(LibraryReadableResource, LibraryReadableResource.id == LibraryResourceAsset.resource_id)
+        .join(
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryResourceAsset.resource_id,
+        )
         .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
         .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .join(LibraryReadableResourceMetadata, LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id)
-        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+        .join(
+            LibraryReadableResourceMetadata,
+            LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+        )
+        .join(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+        )
         .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:

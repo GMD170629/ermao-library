@@ -63,7 +63,9 @@ def test_validate_restore_relationships_rejects_dangling_resource_book() -> None
         validate_restore_relationships(records_by_table)
 
 
-def test_validate_restore_relationships_ignores_unhashable_non_relationship_payloads() -> None:
+def test_validate_restore_relationships_ignores_unhashable_non_relationship_payloads() -> (
+    None
+):
     validate_restore_relationships(
         {
             "SystemSetting": (

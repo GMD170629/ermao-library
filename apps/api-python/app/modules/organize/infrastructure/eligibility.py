@@ -108,9 +108,7 @@ def select_eligible_books(
     if trigger == "NEW":
         new_trigger_exists = (
             select(OrganizeJob.id)
-            .where(
-                OrganizeJob.book_id == LibraryBook.id, OrganizeJob.trigger == "NEW"
-            )
+            .where(OrganizeJob.book_id == LibraryBook.id, OrganizeJob.trigger == "NEW")
             .exists()
         )
         filters.append(~new_trigger_exists)

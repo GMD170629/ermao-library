@@ -3,6 +3,12 @@ from __future__ import annotations
 import hashlib
 from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends, Request, Response
+from pydantic import EmailStr, TypeAdapter, ValidationError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.auth import (
     list_library_ids,
@@ -55,11 +61,6 @@ from app.modules.auth.presentation.user_schemas import (
 )
 from app.modules.system.public import PreparedSystemEvent
 from app.services.system_events import prepare_system_event
-from fastapi import APIRouter, Depends, Request, Response
-from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 router = APIRouter(route_class=TypedContractRoute)
 preferences_router = APIRouter(route_class=TypedContractRoute)
@@ -399,14 +400,9 @@ def update_user(
             and payload.can_view_manual_imports is not None
         ):
             next_can_view_manual_imports = payload.can_view_manual_imports
-        if (
-            "library_ids" in fields_set
-            and payload.library_ids is not None
-        ):
+        if "library_ids" in fields_set and payload.library_ids is not None:
             try:
-                prepared_folder_ids = _validate_folder_ids(
-                    db, payload.library_ids
-                )
+                prepared_folder_ids = _validate_folder_ids(db, payload.library_ids)
             except ValueError as exc:
                 raise UserBadRequestError(
                     CodedMessageBody(

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +10,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
-from app.models.auth import User
 from app.models import (
     DownloadTask,
     LibraryBook,
@@ -22,6 +21,7 @@ from app.models import (
     LibraryResourceAsset,
     LibrarySourceNode,
 )
+from app.models.auth import User
 from app.models.library import Library
 from app.services.download_executor import DownloadExecutionResult
 from app.services.download_queue import process_next_download_task
@@ -144,7 +144,15 @@ def _book_graph(
 
 
 def _add_book_graph(db_session: Session, graph: tuple[object, ...]) -> None:
-    book_source, book, book_metadata, resource_source, resource, resource_metadata, asset = graph
+    (
+        book_source,
+        book,
+        book_metadata,
+        resource_source,
+        resource,
+        resource_metadata,
+        asset,
+    ) = graph
     db_session.add_all([book_source, resource_source])
     db_session.flush()
     db_session.add(book)
@@ -377,9 +385,7 @@ def test_download_inside_library_schedules_library_scan_task(
     assert scan_task is not None
     assert scan_task.kind == "SCAN_LIBRARY"
     assert scan_task.state == "QUEUED"
-    assert (
-        db_session.scalar(select(func.count()).select_from(LibraryImportTask)) == 1
-    )
+    assert db_session.scalar(select(func.count()).select_from(LibraryImportTask)) == 1
 
 
 def test_batch_resource_classification_rejects_cross_book_resource(

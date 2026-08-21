@@ -59,7 +59,9 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
             )
         ).all()
         book_by_id = {str(row.id): row for row in book_rows}
-        visible_book_ids = tuple(book_id for book_id in book_ids if book_id in book_by_id)
+        visible_book_ids = tuple(
+            book_id for book_id in book_ids if book_id in book_by_id
+        )
         if not visible_book_ids:
             return ()
 

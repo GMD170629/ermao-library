@@ -19,11 +19,7 @@ def test_structural_book_mutations_are_absent_from_openapi() -> None:
 
 def test_structural_resource_implementations_are_removed() -> None:
     infrastructure = (
-        Path(__file__).parents[3]
-        / "app"
-        / "modules"
-        / "library"
-        / "infrastructure"
+        Path(__file__).parents[3] / "app" / "modules" / "library" / "infrastructure"
     )
 
     assert not (infrastructure / "structural_operations.py").exists()
@@ -40,9 +36,7 @@ def test_resource_metadata_contract_excludes_directory_owned_fields() -> None:
     batch_schema = schema["paths"]["/api/books/{book_id}/resources/batch"]["post"][
         "requestBody"
     ]["content"]["application/json"]["schema"]
-    assert batch_schema == {
-        "$ref": "#/components/schemas/ResourceBatchRequest"
-    }
+    assert batch_schema == {"$ref": "#/components/schemas/ResourceBatchRequest"}
 
 
 def test_bulk_delete_is_rejected_as_directory_topology_mutation(
@@ -68,6 +62,8 @@ def test_bulk_delete_is_rejected_as_directory_topology_mutation(
     )
     assert login.status_code == 200
 
-    response = client.post("/api/works/bulk", json={"ids": [], "action": "delete_records"})
+    response = client.post(
+        "/api/works/bulk", json={"ids": [], "action": "delete_records"}
+    )
 
     assert response.status_code == 404

@@ -6,8 +6,8 @@ import logging
 
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
-    UnitOfWorkPort,
     LibraryImportTaskQueuePort,
+    UnitOfWorkPort,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
@@ -63,18 +63,14 @@ class ReadableResourceWorkerProcessor:
             if kind == "SCAN_LIBRARY":
                 self._scan.execute_library(library_id)
                 with self._uow.transaction():
-                    self._queue.mark_succeeded(
-                        task_id, finished_at=self._clock.now()
-                    )
+                    self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
                 return "scan"
             if kind == "CONTINUE_SOURCE":
                 if source_node_id is None:
                     raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
                 self._scan.execute_source(source_node_id)
                 with self._uow.transaction():
-                    self._queue.mark_succeeded(
-                        task_id, finished_at=self._clock.now()
-                    )
+                    self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
                 return "continue_source"
             if kind == "IMPORT_ASSET":
                 outcome = self._process_import.execute(task_id)

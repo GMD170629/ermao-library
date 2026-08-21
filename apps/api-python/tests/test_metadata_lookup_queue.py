@@ -107,7 +107,9 @@ def _lookup_task(
     return task
 
 
-def test_lookup_claim_and_stale_recovery_preserve_book_resource_scope(db_session) -> None:
+def test_lookup_claim_and_stale_recovery_preserve_book_resource_scope(
+    db_session,
+) -> None:
     book, resource = _seed_lookup_graph(db_session)
     task = _lookup_task(db_session, book, resource)
 
@@ -180,7 +182,9 @@ def test_lookup_waits_for_resource_import_and_schedules_retry(
     assert refreshed.next_attempt_at is not None
 
 
-def test_exact_candidate_selection_requires_one_title_match_and_can_use_author() -> None:
+def test_exact_candidate_selection_requires_one_title_match_and_can_use_author() -> (
+    None
+):
     candidates = [
         {"title": "黑暗坡食人树", "author": "岛田庄司", "source": "douban"},
         {"title": "黑暗坡食人树", "author": "其他作者", "source": "bangumi"},
@@ -202,9 +206,13 @@ def test_cancelled_lookup_cannot_be_reopened_by_a_stale_worker(db_session) -> No
     db_session.commit()
 
     assert recover_stale_metadata_lookup_tasks(db_session) == 0
-    assert db_session.scalar(
-        select(MetadataLookupTask.status).where(MetadataLookupTask.id == task.id)
-    ) == "CANCELLED"
-    assert db_session.scalar(
-        select(OrganizeJob.id).where(OrganizeJob.book_id == book.id)
-    ) is None
+    assert (
+        db_session.scalar(
+            select(MetadataLookupTask.status).where(MetadataLookupTask.id == task.id)
+        )
+        == "CANCELLED"
+    )
+    assert (
+        db_session.scalar(select(OrganizeJob.id).where(OrganizeJob.book_id == book.id))
+        is None
+    )

@@ -32,8 +32,8 @@ from app.contracts.http_errors import (
 )
 from app.core.authorization import (
     can_access_asset,
-    can_access_resource,
     can_access_book,
+    can_access_resource,
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -223,7 +223,9 @@ def get_cover(
         return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     if resource_id:
         resource_book_id = db.scalar(
-            select(LibraryReadableResource.book_id).where(LibraryReadableResource.id == resource_id)
+            select(LibraryReadableResource.book_id).where(
+                LibraryReadableResource.id == resource_id
+            )
         )
         if not resource_book_id or not can_access_book(db, user, str(resource_book_id)):
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
@@ -351,7 +353,9 @@ def list_resource_pages(
         )
         for unit in index.pages
     ]
-    return ResourcePagesResponse(data=ResourcePagesPayload(pages=pages, total=len(pages)))
+    return ResourcePagesResponse(
+        data=ResourcePagesPayload(pages=pages, total=len(pages))
+    )
 
 
 @router.get(

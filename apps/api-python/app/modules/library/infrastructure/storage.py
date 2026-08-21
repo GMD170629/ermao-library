@@ -8,7 +8,6 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
-    LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,

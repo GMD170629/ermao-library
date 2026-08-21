@@ -170,7 +170,6 @@ def test_management_events_and_overview_accept_real_event_metadata(
     assert events_response.json()["data"]["events"][0]["metadata"] == metadata
 
 
-
 def test_canonical_book_resource_contract_has_only_target_identities(
     client: TestClient,
     db_session: Session,

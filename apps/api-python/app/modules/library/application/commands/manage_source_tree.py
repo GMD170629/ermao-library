@@ -51,8 +51,8 @@ class DeleteSourceNode:
                     return ManagementResult(ok=False, code="SOURCE_NODE_NOT_FOUND")
                 library_id = node.library_id
                 subtree = self._source_nodes.list_subtree_ids(source_node_id)
-                affected_resources = self._books_resources.delete_assets_for_source_nodes(
-                    subtree
+                affected_resources = (
+                    self._books_resources.delete_assets_for_source_nodes(subtree)
                 )
                 self._import_tasks.delete_tasks_for_source_nodes(subtree)
                 self._source_nodes.delete_subtree(source_node_id)

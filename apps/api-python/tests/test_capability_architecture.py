@@ -74,7 +74,9 @@ def test_api_router_registers_capability_presentations_only() -> None:
         assert f"app.modules.{capability}.presentation" in source
 
 
-def test_capability_presentations_do_not_import_legacy_routes_or_infrastructure() -> None:
+def test_capability_presentations_do_not_import_legacy_routes_or_infrastructure() -> (
+    None
+):
     for capability in CAPABILITIES:
         presentation = APP_ROOT / "modules" / capability / "presentation"
         if not presentation.exists():
@@ -328,9 +330,7 @@ def test_import_legacy_query_and_task_compatibility_are_removed() -> None:
     infrastructure = APP_ROOT / "modules" / "imports" / "infrastructure"
     assert not (infrastructure / "library_query_gateway.py").exists()
 
-    query_port = (
-        APP_ROOT / "modules" / "imports" / "application" / "query_ports.py"
-    )
+    query_port = APP_ROOT / "modules" / "imports" / "application" / "query_ports.py"
     if query_port.exists():
         source = query_port.read_text(encoding="utf-8")
         assert "__getattr__" not in source
@@ -449,9 +449,7 @@ def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None
         if isinstance(node, ast.JoinedStr):
             return True
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            return _is_string_expression(node.left) or _is_string_expression(
-                node.right
-            )
+            return _is_string_expression(node.left) or _is_string_expression(node.right)
         return False
 
     check_count = 0
@@ -478,11 +476,7 @@ def test_readable_resource_baseline_overlay_check_constraints_use_typed_expressi
     import ast
 
     path = (
-        APP_ROOT
-        / "db"
-        / "alembic"
-        / "versions"
-        / "0001_library_topology_baseline.py"
+        APP_ROOT / "db" / "alembic" / "versions" / "0001_library_topology_baseline.py"
     )
     source = path.read_text(encoding="utf-8")
     start = source.index("def _build_overlay_metadata()")
@@ -505,9 +499,7 @@ def test_readable_resource_baseline_overlay_check_constraints_use_typed_expressi
         if isinstance(node, ast.JoinedStr):
             return True
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            return _is_string_expression(node.left) or _is_string_expression(
-                node.right
-            )
+            return _is_string_expression(node.left) or _is_string_expression(node.right)
         return False
 
     check_count = 0
@@ -566,11 +558,7 @@ def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
         / "library"
         / "infrastructure"
         / "readable_resource_schema.py",
-        APP_ROOT
-        / "db"
-        / "alembic"
-        / "versions"
-        / "0001_library_topology_baseline.py",
+        APP_ROOT / "db" / "alembic" / "versions" / "0001_library_topology_baseline.py",
     )
     files: list[Path] = []
     for root in roots:
@@ -645,11 +633,7 @@ def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:
     # Relationship string names like "LibraryImportRun" are allowed without imports.
     # Pre-ADR0018 legacy adapters retain deep library imports; exclude them only.
     legacy_imports_deep_library = {
-        APP_ROOT
-        / "modules"
-        / "imports"
-        / "infrastructure"
-        / "library_queries.py",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "library_queries.py",
         APP_ROOT
         / "modules"
         / "imports"
@@ -691,35 +675,19 @@ def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
         / "infrastructure"
         / "readable_resource"
         / "adapter_registry.py": ("app.modules.metadata.application",),
-        APP_ROOT
-        / "modules"
-        / "media"
-        / "infrastructure"
-        / "resource_repository.py": (
+        APP_ROOT / "modules" / "media" / "infrastructure" / "resource_repository.py": (
             "app.modules.library.infrastructure",
         ),
-        APP_ROOT
-        / "modules"
-        / "organize"
-        / "infrastructure"
-        / "eligibility.py": ("app.modules.library.infrastructure",),
-        APP_ROOT
-        / "modules"
-        / "organize"
-        / "infrastructure"
-        / "job_queries.py": ("app.modules.library.infrastructure",),
-        APP_ROOT
-        / "modules"
-        / "reader"
-        / "infrastructure"
-        / "resource_repository.py": (
+        APP_ROOT / "modules" / "organize" / "infrastructure" / "eligibility.py": (
             "app.modules.library.infrastructure",
         ),
-        APP_ROOT
-        / "modules"
-        / "reader"
-        / "presentation"
-        / "v4.py": (
+        APP_ROOT / "modules" / "organize" / "infrastructure" / "job_queries.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT / "modules" / "reader" / "infrastructure" / "resource_repository.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT / "modules" / "reader" / "presentation" / "v4.py": (
             "app.modules.publications.application",
             "app.modules.publications.domain",
         ),
@@ -812,7 +780,8 @@ def _runtime_python_files() -> tuple[Path, ...]:
         for path in APP_ROOT.rglob("*.py")
         if "__pycache__" not in path.parts
         and not (
-            "modules" in path.parts and path.parts[path.parts.index("modules") + 1] == "mobile"
+            "modules" in path.parts
+            and path.parts[path.parts.index("modules") + 1] == "mobile"
         )
     )
 
@@ -839,16 +808,10 @@ def _legacy_identity_hits(
 
 def test_runtime_and_target_fixture_have_no_legacy_identity_references() -> None:
     hits = [
-        hit
-        for path in _runtime_python_files()
-        for hit in _legacy_identity_hits(path)
+        hit for path in _runtime_python_files() for hit in _legacy_identity_hits(path)
     ]
     fixture = (
-        API_ROOT
-        / "tests"
-        / "contract"
-        / "api"
-        / "test_openapi_runtime_regressions.py"
+        API_ROOT / "tests" / "contract" / "api" / "test_openapi_runtime_regressions.py"
     )
     hits.extend(_legacy_identity_hits(fixture, include_string_literals=False))
     assert hits == [], "legacy identity references:\n" + "\n".join(hits)
@@ -859,7 +822,10 @@ def test_runtime_has_no_dynamic_table_presence_detection() -> None:
     for path in _runtime_python_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_has_table":
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "_has_table"
+            ):
                 hits.append(f"{path}:{node.lineno}:_has_table")
             if isinstance(node, ast.Attribute) and node.attr == "has_table":
                 hits.append(f"{path}:{node.lineno}:has_table")
@@ -910,11 +876,7 @@ def test_target_import_pipeline_has_one_queue_and_no_legacy_controls() -> None:
     files = (
         APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
         APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
-        APP_ROOT
-        / "modules"
-        / "imports"
-        / "infrastructure"
-        / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource",
         APP_ROOT / "modules" / "imports" / "presentation",
     )
     paths = [
@@ -948,8 +910,9 @@ def test_mobile_is_excluded_from_target_backend_capability_changes() -> None:
         if "__pycache__" not in path.parts
         and "app.modules.mobile" in path.read_text(encoding="utf-8")
     ]
-    assert hits == [], "target backend imports a Mobile compatibility shim: " + ", ".join(
-        str(path) for path in hits
+    assert hits == [], (
+        "target backend imports a Mobile compatibility shim: "
+        + ", ".join(str(path) for path in hits)
     )
 
 

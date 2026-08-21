@@ -10,7 +10,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import Library, LibraryReadableResource, LibraryResourceAsset, LibrarySourceNode, ReadableResourceNavigationUnit
+from app.models import (
+    Library,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+    ReadableResourceNavigationUnit,
+)
 from app.modules.media.application.page_index import (
     ResourcePageIndexProjection,
     ResourcePageSource,
@@ -139,7 +144,10 @@ def get_resource_asset(db: Session, asset_id: str) -> dict[str, Any] | None:
             LibrarySourceNode.observed_mtime_ns,
             Library.root_path,
         )
-        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+        .join(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+        )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
         .where(
             LibraryResourceAsset.id == asset_id,
@@ -183,7 +191,10 @@ def load_read_only_page_index_projection(
             LibrarySourceNode.observed_mtime_ns,
             Library.root_path,
         )
-        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+        .join(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+        )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
         .where(
             LibraryResourceAsset.resource_id == resource_id,

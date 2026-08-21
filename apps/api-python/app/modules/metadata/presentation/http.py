@@ -37,8 +37,8 @@ from app.modules.metadata.presentation.schemas import (
 )
 from app.services.metadata_file_writeback import (
     metadata_opf_queue_status,
-    metadata_writeback_view,
     metadata_writeback_book_id,
+    metadata_writeback_view,
 )
 from app.services.metadata_provider_registry import (
     get_metadata_provider,

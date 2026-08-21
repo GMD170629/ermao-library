@@ -45,7 +45,9 @@ class ResourcePageIndexProjection:
     sources: tuple[ResourcePageSource, ...]
 
     def comic_source(self) -> ResourcePageSource | None:
-        return next((source for source in self.sources if source.role == "PRIMARY"), None)
+        return next(
+            (source for source in self.sources if source.role == "PRIMARY"), None
+        )
 
 
 @dataclass(frozen=True)

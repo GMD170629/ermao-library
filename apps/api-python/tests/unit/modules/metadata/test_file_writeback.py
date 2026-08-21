@@ -71,9 +71,7 @@ def test_every_book_format_writes_opf_without_mutating_source(
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
     assert prepared.output_path == source.with_suffix(".opf")
     assert prepared.warning_code is None
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     assert output == source.with_suffix(".opf")
     assert source.read_bytes() == original
@@ -99,9 +97,7 @@ def test_sidecar_preserves_extensions_and_clears_removed_managed_fields(
     )
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     content = output.read_bytes()
     metadata = parse_opf_metadata(content)
@@ -129,9 +125,7 @@ def test_audiobook_fields_and_book_series_index_round_trip_independently(
         ),
         tmp_path,
     )
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     metadata = parse_opf_metadata(output.read_bytes())
     assert metadata.narrators == ("甲", "乙")
@@ -153,9 +147,7 @@ def test_cover_is_written_beside_opf_and_referenced_with_real_media_type(
     prepared = prepare_writeback(
         str(source), _payload(source, coverPath=str(cover)), tmp_path
     )
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     package = etree.fromstring(output.read_bytes())
     cover_item = next(
@@ -181,9 +173,7 @@ def test_directory_book_writes_metadata_opf_without_changing_contents(
     chapter.write_bytes(b"immutable chapter")
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     assert output == source / "metadata.opf"
     assert chapter.read_bytes() == b"immutable chapter"

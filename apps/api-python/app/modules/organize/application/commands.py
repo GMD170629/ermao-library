@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 from app.contracts.local_metadata import validate_local_metadata_priority
 from app.modules.organize.application.dto import PreparedOrganizePolicyUpdate
@@ -24,7 +24,7 @@ class OrganizeWriteTransaction:
     def __init__(self, unit_of_work: OrganizeUnitOfWork) -> None:
         self._unit_of_work = unit_of_work
 
-    def __enter__(self) -> OrganizeWriteTransaction:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(

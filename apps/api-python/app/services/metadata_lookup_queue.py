@@ -26,6 +26,10 @@ from app.bootstrap.library import (
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
 from app.models.common import db_timestamp
+from app.modules.imports.public import (
+    UNKNOWN_AUTHOR,
+    normalize_identity_part,
+)
 from app.modules.library.public import prepare_book_facet
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
@@ -34,10 +38,6 @@ from app.modules.metadata.application.writeback import (
 )
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
-from app.modules.imports.public import (
-    UNKNOWN_AUTHOR,
-    normalize_identity_part,
-)
 from app.services.metadata_file_writeback import (
     process_next_metadata_writeback,
     recover_interrupted_metadata_writebacks,
@@ -402,7 +402,9 @@ def _prepare_candidate_application(
                 applied.append("publishedAt")
         for field in ("publisher", "language", "isbn"):
             value = str(resource_metadata.get(field) or "").strip()
-            if value and (not prefer_local or not str(resource.get(field) or "").strip()):
+            if value and (
+                not prefer_local or not str(resource.get(field) or "").strip()
+            ):
                 resource_patch[field] = value
                 applied.append(field)
     if (not prefer_local or not local_cover_exists) and str(

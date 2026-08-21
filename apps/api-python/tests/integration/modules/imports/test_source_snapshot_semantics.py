@@ -355,9 +355,7 @@ def test_symlink_is_recorded_but_not_followed_or_imported(tmp_path: Path) -> Non
             assert kinds.get("dirlink") == "SYMLINK"
             assert kinds.get("nested/loop") == "SYMLINK"
             assert "secret.epub" not in kinds
-            assert all(
-                not path.startswith("dirlink/") for path in kinds
-            )
+            assert all(not path.startswith("dirlink/") for path in kinds)
             assert db.scalar(select(func.count()).select_from(LibraryBook)) == 0
             assert (
                 db.scalar(select(func.count()).select_from(LibraryReadableResource))
@@ -474,8 +472,7 @@ def test_exact_path_spellings_create_distinct_source_nodes(tmp_path: Path) -> No
             _continue_and_drain(pipeline)
             db.commit()
             paths = {
-                row.relative_path
-                for row in db.scalars(select(LibrarySourceNode)).all()
+                row.relative_path for row in db.scalars(select(LibrarySourceNode)).all()
             }
             assert "Case.epub" in paths
             assert "case.epub" in paths
@@ -503,7 +500,9 @@ def test_scanner_preserves_distinct_unicode_path_spellings(tmp_path: Path) -> No
                 created_both = (root / nfc).exists() and (root / nfd).exists()
                 if created_both:
                     # Same inode / collapsed content means the FS did not keep two names.
-                    created_both = (root / nfc).stat().st_ino != (root / nfd).stat().st_ino
+                    created_both = (root / nfc).stat().st_ino != (
+                        root / nfd
+                    ).stat().st_ino
             except OSError:
                 created_both = False
 

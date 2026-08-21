@@ -81,7 +81,8 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
     assert summary == {"completed": 75_000, "failed": 25_000}
     assert len(views) == 10
     assert all(
-        set(view) == {
+        set(view)
+        == {
             "id",
             "kind",
             "libraryId",

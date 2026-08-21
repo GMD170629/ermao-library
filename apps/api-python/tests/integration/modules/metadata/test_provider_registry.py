@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event, select, update
+from sqlalchemy.orm import Session
+
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
@@ -21,8 +24,6 @@ from app.services.metadata_provider_registry import (
 from app.services.metadata_provider_registry import (
     test_metadata_provider as run_metadata_provider_test,
 )
-from sqlalchemy import event, select, update
-from sqlalchemy.orm import Session
 
 
 def test_provider_queries_remain_readable_while_another_writer_holds_lock(

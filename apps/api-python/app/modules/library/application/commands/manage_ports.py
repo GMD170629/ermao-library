@@ -42,7 +42,9 @@ class ManageLibraryConfigPort(Protocol):
 
     def update_root_path(self, library_id: str, root_path: Path) -> None: ...
 
-    def root_path_conflicts(self, root_path: Path, *, exclude_library_id: str) -> bool: ...
+    def root_path_conflicts(
+        self, root_path: Path, *, exclude_library_id: str
+    ) -> bool: ...
 
 
 class ManageFilesystemPort(Protocol):
@@ -72,7 +74,9 @@ class ManageBookResourcePort(Protocol):
         self, source_node_ids: Sequence[str]
     ) -> tuple[str, ...]: ...
 
-    def reevaluate_ready_after_asset_loss(self, resource_ids: Sequence[str]) -> None: ...
+    def reevaluate_ready_after_asset_loss(
+        self, resource_ids: Sequence[str]
+    ) -> None: ...
 
 
 class ManageLibraryImportTasksPort(Protocol):
@@ -82,9 +86,7 @@ class ManageLibraryImportTasksPort(Protocol):
         """Delete every target task for the library and enqueue SCAN_LIBRARY."""
         ...
 
-    def delete_tasks_for_source_nodes(
-        self, source_node_ids: Sequence[str]
-    ) -> None:
+    def delete_tasks_for_source_nodes(self, source_node_ids: Sequence[str]) -> None:
         """Delete CONTINUE_SOURCE / IMPORT_ASSET tasks keyed by source nodes."""
         ...
 

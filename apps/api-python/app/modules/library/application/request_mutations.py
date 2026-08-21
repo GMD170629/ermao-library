@@ -276,9 +276,10 @@ class CompensateCoverPublication:
 
 __all__ = [
     "ApplyBookMetadata",
+    "BookRecordMutation",
+    "BulkBookMutation",
     "BulkReadingStatusMutation",
     "BulkShelfMembershipMutation",
-    "BulkBookMutation",
     "CompensateCoverPublication",
     "CoverMutation",
     "CoverPublicationFailure",
@@ -289,10 +290,9 @@ __all__ = [
     "MetadataApplyMutation",
     "MetadataApplyResult",
     "SaveDetailPreference",
+    "UpdateBookRecord",
+    "UpdateBulkBooks",
     "UpdateBulkReadingStatus",
     "UpdateBulkShelfMembership",
-    "UpdateBulkBooks",
     "UpdateCoverRecords",
-    "UpdateBookRecord",
-    "BookRecordMutation",
 ]

@@ -82,7 +82,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except Exception:
+    except ValueError:
         return fallback
 
 
@@ -188,8 +188,7 @@ async def create_download_task(
     return ok(
         {
             "task": task,
-            "autoImport": _enabled_library_for_path(folders, target_dir)
-            is not None,
+            "autoImport": _enabled_library_for_path(folders, target_dir) is not None,
         },
         status_code=201,
     )

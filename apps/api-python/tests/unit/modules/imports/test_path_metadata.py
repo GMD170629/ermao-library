@@ -21,9 +21,7 @@ def test_filename_identity_preserves_release_title_and_parsed_index(
     title: str,
     volume_index: float,
 ) -> None:
-    parsed = split_explicit_volume(filename) or split_numeric_volume_fallback(
-        filename
-    )
+    parsed = split_explicit_volume(filename) or split_numeric_volume_fallback(filename)
 
     assert parsed == (title, volume_index)
 

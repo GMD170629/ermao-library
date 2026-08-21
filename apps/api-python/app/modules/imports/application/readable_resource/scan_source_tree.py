@@ -5,17 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.modules.imports.application.readable_resource.ports import (
-    adapter_identity,
     BookResourceRepositoryPort,
     ClockPort,
     LibraryConfigPort,
+    LibraryImportTaskQueuePort,
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     PipelineLogPort,
     SourceNodeRepositoryPort,
     SourceTreeFilesystemPort,
     UnitOfWorkPort,
-    LibraryImportTaskQueuePort,
+    adapter_identity,
 )
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -122,8 +122,11 @@ class ScanLibrarySourceTree:
             interpretation = self._source_nodes.get_interpretation(node_id)
             resource = self._books_resources.get_resource_by_source_node(node_id)
             if resource is not None:
-                created, enqueued = 0, self._ensure_asset_for_resource(
-                    config, resource.id, node_id, relative.name
+                created, enqueued = (
+                    0,
+                    self._ensure_asset_for_resource(
+                        config, resource.id, node_id, relative.name
+                    ),
                 )
             elif interpretation is None or interpretation.result == "NODE_ONLY":
                 created, enqueued = self._recognize_regular_file(
@@ -276,7 +279,10 @@ class ScanLibrarySourceTree:
                         )
                         resources_created += created_r
                         tasks_enqueued += enqueued
-                    elif interpretation is not None and interpretation.result == "RESOURCE":
+                    elif (
+                        interpretation is not None
+                        and interpretation.result == "RESOURCE"
+                    ):
                         # Existing directory resource: ensure tasks for compatible children later
                         pass
                     stack.append((node.id, parsed.value))
@@ -408,8 +414,10 @@ class ScanLibrarySourceTree:
                 pattern = pattern.strip()
                 if not pattern:
                     continue
-                if pattern == name or pattern == relative or relative.endswith(
-                    "/" + pattern
+                if (
+                    pattern == name
+                    or pattern == relative
+                    or relative.endswith("/" + pattern)
                 ):
                     return True
         return False
@@ -439,14 +447,13 @@ class ScanLibrarySourceTree:
             termination_reason=decision.evidence.termination_reason.value,
             recognized_at=self._clock.now(),
         )
-        if (
-            decision.result is not ProbeInterpretationResult.RESOURCE
-            or adapter is None
-        ):
+        if decision.result is not ProbeInterpretationResult.RESOURCE or adapter is None:
             return
         if self._books_resources.get_resource_by_source_node(node_id) is not None:
             return
-        book_id = self._resolve_book_id(config, node_id, relative_path, is_directory=True)
+        book_id = self._resolve_book_id(
+            config, node_id, relative_path, is_directory=True
+        )
         if book_id is None:
             return
         self._books_resources.create_pending_resource(
@@ -508,15 +515,21 @@ class ScanLibrarySourceTree:
                 termination_reason=None,
                 recognized_at=self._clock.now(),
             )
-            return (0, self._ensure_asset_for_resource(
-                config, owner.id, node_id, relative_path.name
-            ))
+            return (
+                0,
+                self._ensure_asset_for_resource(
+                    config, owner.id, node_id, relative_path.name
+                ),
+            )
 
         existing = self._books_resources.get_resource_by_source_node(node_id)
         if existing is not None:
-            return (0, self._ensure_asset_for_resource(
-                config, existing.id, node_id, relative_path.name
-            ))
+            return (
+                0,
+                self._ensure_asset_for_resource(
+                    config, existing.id, node_id, relative_path.name
+                ),
+            )
 
         matches = match_file_adapters(relative_path.name)
         adapter = unique_adapter_or_none(matches)

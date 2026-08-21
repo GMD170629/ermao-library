@@ -190,9 +190,7 @@ class OrganizeJob(Base):
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
         String(191),
-        ForeignKey(
-            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
-        ),
+        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
@@ -269,9 +267,7 @@ class MetadataLookupTask(Base):
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
         String(191),
-        ForeignKey(
-            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
-        ),
+        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
@@ -363,9 +359,7 @@ class MetadataWritebackOperation(Base):
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
         String(191),
-        ForeignKey(
-            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
-        ),
+        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     lookup_task_id: Mapped[str | None] = mapped_column(
@@ -470,9 +464,7 @@ class MetadataWritebackPreparation(Base):
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
         String(191),
-        ForeignKey(
-            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
-        ),
+        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     lookup_task_id: Mapped[str | None] = mapped_column(
@@ -562,9 +554,7 @@ class MetadataWritebackTarget(Base):
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
         String(191),
-        ForeignKey(
-            "LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"
-        ),
+        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     target_key: Mapped[str] = mapped_column("targetKey", String(64), nullable=False)

@@ -151,9 +151,9 @@ def prepare_metadata_writeback_intents(
 
     revision = (projection.source_revision or NULL_SOURCE_REVISION).isoformat()
     intents: list[PreparedWritebackIntent] = []
-    for resource_id in projection.resource_ids:
+    for current_resource_id in projection.resource_ids:
         snapshot_json = json.dumps(
-            {"resources": resources_by_book.get(resource_id, [])},
+            {"resources": resources_by_book.get(current_resource_id, [])},
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -161,8 +161,8 @@ def prepare_metadata_writeback_intents(
         key_input = "\0".join(
             (
                 projection.book_id,
-                resource_id,
-                resource_id or "",
+                current_resource_id,
+                current_resource_id or "",
                 lookup_task_id or "",
                 source,
                 revision,

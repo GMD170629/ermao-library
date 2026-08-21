@@ -48,7 +48,6 @@ def job_entity_record(entity: OrganizeJob) -> dict[str, Any]:
         "runId": entity.run_id,
         "bookId": entity.book_id,
         "resourceId": entity.resource_id,
-        "resourceId": entity.resource_id,
         "importTaskId": entity.import_task_id,
         "trigger": entity.trigger,
         "status": entity.status,

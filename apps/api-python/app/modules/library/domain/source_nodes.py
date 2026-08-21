@@ -34,9 +34,7 @@ class InvalidSourceNodeRelativePathError(Exception):
     def __init__(self, relative_path: str) -> None:
         self.relative_path = relative_path
         self.code = SourceNodeViolationCode.INVALID_RELATIVE_PATH
-        super().__init__(
-            f"invalid library-relative path: {relative_path!r}"
-        )
+        super().__init__(f"invalid library-relative path: {relative_path!r}")
 
 
 class SourceNodeTopologyError(Exception):
@@ -205,13 +203,11 @@ def _is_valid_library_relative_path(relative_path: str) -> bool:
     if _has_windows_drive_prefix(relative_path):
         return False
     segments = relative_path.split("/")
-    if any(segment in _FORBIDDEN_SEGMENTS for segment in segments):
-        return False
-    return True
+    return not any(segment in _FORBIDDEN_SEGMENTS for segment in segments)
 
 
 def _is_windows_unc_form(relative_path: str) -> bool:
-    return relative_path.startswith("//") or relative_path.startswith("\\\\")
+    return relative_path.startswith(("//", "\\\\"))
 
 
 def _has_windows_drive_prefix(relative_path: str) -> bool:

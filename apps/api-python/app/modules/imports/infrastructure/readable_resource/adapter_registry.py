@@ -104,9 +104,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             return None
         return getattr(inspection, "title", None)
 
-    def _inspect_reflowable_title(
-        self, path: Path, source_format: str
-    ) -> str | None:
+    def _inspect_reflowable_title(self, path: Path, source_format: str) -> str | None:
         from app.modules.imports.infrastructure.reflowable_metadata import (
             inspect_reflowable_book,
         )

@@ -1,4 +1,5 @@
 """SQLAlchemy source lookup scoped to the authenticated actor."""
+
 from __future__ import annotations
 
 from sqlalchemy import false, select
@@ -89,12 +90,12 @@ class SqlAlchemyPublicationSourceRepository:
         if row is None:
             return None
         (
-            book,
+            _book,
             book_metadata,
             resource,
             resource_metadata,
             asset,
-            asset_metadata,
+            _asset_metadata,
             source_node,
         ) = row
         return PublicationSource(
@@ -107,7 +108,9 @@ class SqlAlchemyPublicationSourceRepository:
             title=(
                 resource_metadata.title
                 if resource_metadata is not None
-                else book_metadata.title if book_metadata is not None else source_node.name
+                else book_metadata.title
+                if book_metadata is not None
+                else source_node.name
             ),
             author=book_metadata.author if book_metadata is not None else None,
         )

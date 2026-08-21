@@ -87,9 +87,7 @@ def next_queued_task(db: Session) -> dict[str, Any] | None:
 
 def _claim_task(db: Session, task_id: str) -> dict[str, Any] | None:
     claimed_at = datetime.now(UTC)
-    return claim_kindle_send_task_command(
-        db, task_id, timestamp=claimed_at
-    )
+    return claim_kindle_send_task_command(db, task_id, timestamp=claimed_at)
 
 
 def _file_for_task(db: Session, task: dict[str, Any]) -> dict[str, Any]:
@@ -191,7 +189,9 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
     path = _stored_path(file_row.get("sourcePath"), settings)
     if path is None or not path.is_file():
         raise KindleSendError("附件文件已不存在或不在受管理目录中")
-    file_format = str(task.get("format") or file_row.get("resourceFormat") or "").upper()
+    file_format = str(
+        task.get("format") or file_row.get("resourceFormat") or ""
+    ).upper()
     suffix = path.suffix.lower()
     if file_format not in SUPPORTED_FORMATS or suffix not in SUPPORTED_EXTENSIONS:
         raise KindleSendError("Kindle 邮件发送目前仅支持 EPUB 和 PDF")
@@ -242,6 +242,8 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
     try:
         client = open_smtp_connection(config)
         client.send_message(message)
+    # SMTP and provider libraries expose heterogeneous exceptions; translate
+    # them at this adapter boundary before the queue records the failure.
     except Exception as exc:
         raise _smtp_error(exc, config.password) from exc
     finally:
@@ -262,7 +264,9 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
         return True
     try:
         _send_task(db, settings, task)
-    except Exception as exc:
+    # Task processing is a queue containment boundary: translate every
+    # adapter failure into the durable retry/failure state for this task.
+    except Exception as exc:  # noqa: BLE001
         error = (
             exc
             if isinstance(exc, KindleSendError)
@@ -389,7 +393,9 @@ class KindleSendQueueWorker:
         try:
             with self.db_factory() as db:
                 return process_next_kindle_send_task(db, self.settings)
-        except Exception as exc:
+        # The worker boundary must keep the queue alive after an unexpected
+        # database or adapter failure.
+        except Exception as exc:  # noqa: BLE001
             print(
                 f"[kindle-send-queue] task processing failed: {safe_error_message(exc)}",
                 flush=True,
@@ -402,13 +408,8 @@ class KindleSendQueueWorker:
         self._heartbeat.start()
         try:
             while not self._stop_event.is_set():
-                error = None
-                try:
-                    processed = self.process_once()
-                except Exception as exc:
-                    processed = False
-                    error = exc
-                self._heartbeat.pulse(processed=processed, error=error)
+                processed = self.process_once()
+                self._heartbeat.pulse(processed=processed, error=None)
                 if processed:
                     continue
                 self._stop_event.wait(self.settings.kindle_send_queue_interval_seconds)

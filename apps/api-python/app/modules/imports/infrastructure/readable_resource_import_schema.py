@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -20,6 +21,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
 from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
+
+if TYPE_CHECKING:
+    from app.models import LibraryReadableResource, LibrarySourceNode
 
 
 class LibraryImportTask(Base):
@@ -129,14 +133,14 @@ class LibraryImportTask(Base):
     finished_at: Mapped[datetime | None] = mapped_column(
         "finishedAt", TimestampMilliseconds(), nullable=True
     )
-    resource: Mapped["LibraryReadableResource | None"] = relationship(
+    resource: Mapped[LibraryReadableResource | None] = relationship(
         foreign_keys=[resource_id, library_id],
         primaryjoin=(
             "and_(LibraryImportTask.resource_id==LibraryReadableResource.id,"
             "LibraryImportTask.library_id==LibraryReadableResource.library_id)"
         ),
     )
-    source_node: Mapped["LibrarySourceNode | None"] = relationship(
+    source_node: Mapped[LibrarySourceNode | None] = relationship(
         foreign_keys=[source_node_id, library_id],
         primaryjoin=(
             "and_(LibraryImportTask.source_node_id==LibrarySourceNode.id,"

@@ -1,4 +1,5 @@
 """Read-only media application contracts for Book/Resource/Asset."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,9 +30,7 @@ class MediaResourceQuery:
     def get_asset(self, asset_id: str) -> MediaAssetResource | None:
         return self._repository.get_asset(asset_id)
 
-    def first_resource_asset(
-        self, resource_id: str
-    ) -> MediaAssetResource | None:
+    def first_resource_asset(self, resource_id: str) -> MediaAssetResource | None:
         return self._repository.first_resource_asset(resource_id)
 
     def cover_path(

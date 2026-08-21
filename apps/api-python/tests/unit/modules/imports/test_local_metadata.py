@@ -5,6 +5,7 @@ from app.contracts.local_metadata import (
     validate_local_metadata_priority,
 )
 
+
 def test_default_priority_is_opf_then_embedded_then_path() -> None:
     assert DEFAULT_LOCAL_METADATA_PRIORITY == (
         "SIDECAR_OPF",
@@ -27,6 +28,7 @@ def test_priority_validation_requires_each_local_source_once(value: list[str]) -
 
 
 def test_priority_validation_normalizes_source_names() -> None:
-    assert validate_local_metadata_priority(
-        ["sidecar_opf", "embedded", "path"]
-    ) == DEFAULT_LOCAL_METADATA_PRIORITY
+    assert (
+        validate_local_metadata_priority(["sidecar_opf", "embedded", "path"])
+        == DEFAULT_LOCAL_METADATA_PRIORITY
+    )

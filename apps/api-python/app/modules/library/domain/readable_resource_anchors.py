@@ -75,9 +75,7 @@ def is_resource_anchor_within_book_scope(
         return True
     if book_anchor_kind is not SourceNodePhysicalKind.DIRECTORY:
         return False
-    return is_strict_descendant_path(
-        ancestor=book_anchor, candidate=resource_anchor
-    )
+    return is_strict_descendant_path(ancestor=book_anchor, candidate=resource_anchor)
 
 
 def is_asset_path_within_resource_scope(
@@ -91,7 +89,5 @@ def is_asset_path_within_resource_scope(
     if resource_anchor_kind is SourceNodePhysicalKind.REGULAR_FILE:
         return asset_path.value == resource_anchor.value
     if resource_anchor_kind is SourceNodePhysicalKind.DIRECTORY:
-        return is_strict_descendant_path(
-            ancestor=resource_anchor, candidate=asset_path
-        )
+        return is_strict_descendant_path(ancestor=resource_anchor, candidate=asset_path)
     return False

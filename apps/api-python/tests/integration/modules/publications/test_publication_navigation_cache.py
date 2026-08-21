@@ -320,7 +320,10 @@ def test_stale_projection_version_regenerates_without_a_source_change(
     db_session.expire_all()
     refreshed = db_session.get(PublicationNavigationCache, resource.id)
     assert refreshed is not None
-    assert refreshed.projection_version == CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
+    assert (
+        refreshed.projection_version
+        == CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
+    )
 
 
 def test_successful_empty_toc_is_cached_without_reparsing(
@@ -390,7 +393,9 @@ def test_cache_mismatch_is_invalidated_before_parse_failure(
     adapter.raise_corrupt = True
 
     with pytest.raises(PublicationCorruptError):
-        _ensure(db_session, adapter).execute(resource_id=resource.id, access_scope=_ADMIN)
+        _ensure(db_session, adapter).execute(
+            resource_id=resource.id, access_scope=_ADMIN
+        )
 
     db_session.expire_all()
     assert db_session.get(ReadableResourceNavigationUnit, "stale-chapter") is None
@@ -573,7 +578,10 @@ def test_unsupported_format_never_invalidates_non_publication_units(
         ensure.open_and_ensure(resource_id=resource.id, access_scope=_ADMIN)
     assert adapter.open_count == 0
     db_session.expire_all()
-    assert db_session.get(ReadableResourceNavigationUnit, "comic-chapter-shaped-unit") is not None
+    assert (
+        db_session.get(ReadableResourceNavigationUnit, "comic-chapter-shaped-unit")
+        is not None
+    )
     assert db_session.get(ReadableResourceNavigationUnit, "comic-page") is not None
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None

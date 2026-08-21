@@ -9,9 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    BookDetailPreference,
     LibraryResourceAsset,
     ReadableResourceNavigationUnit,
-    BookDetailPreference,
 )
 from app.models.organize import MetadataLookupTask
 from app.modules.library.infrastructure.books import entity_record
@@ -40,10 +40,7 @@ def get_detail_preferences(
             BookDetailPreference.book_id.in_(book_ids),
         )
     ).all()
-    return {
-        preference.book_id: entity_record(preference)
-        for preference in preferences
-    }
+    return {preference.book_id: entity_record(preference) for preference in preferences}
 
 
 def save_detail_preference(
@@ -79,7 +76,9 @@ def save_detail_preference(
 
 def get_reading_unit_title(db: Session, unit_id: str) -> str | None:
     return db.scalar(
-        select(ReadableResourceNavigationUnit.title).where(ReadableResourceNavigationUnit.id == unit_id)
+        select(ReadableResourceNavigationUnit.title).where(
+            ReadableResourceNavigationUnit.id == unit_id
+        )
     )
 
 

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from sqlalchemy.orm import Session
 
-from app.modules.imports.application.library_paths import is_inside_path
 from app.bootstrap.imports import (
     list_enabled_library_rows,
 )
+from app.modules.imports.application.library_paths import is_inside_path
 
 
 def enabled_library_for_path(db: Session, target: Path) -> dict[str, object] | None:

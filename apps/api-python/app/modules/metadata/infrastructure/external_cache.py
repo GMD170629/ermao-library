@@ -31,7 +31,8 @@ def get_cached_raw_json(db: Session, *, provider: str, query_key: str) -> str | 
         select(ExternalMetadataCache).where(
             ExternalMetadataCache.provider == provider,
             ExternalMetadataCache.query_key == query_key,
-            (ExternalMetadataCache.expires_at.is_(None)) | (ExternalMetadataCache.expires_at > now),
+            (ExternalMetadataCache.expires_at.is_(None))
+            | (ExternalMetadataCache.expires_at > now),
         )
     )
     return entity.raw_json if entity is not None else None
@@ -83,7 +84,10 @@ def prepare_cache_entry_write(
             updated_at=now,
         )
         .on_conflict_do_update(
-            index_elements=[ExternalMetadataCache.provider, ExternalMetadataCache.query_key],
+            index_elements=[
+                ExternalMetadataCache.provider,
+                ExternalMetadataCache.query_key,
+            ],
             set_={
                 ExternalMetadataCache.raw_json: raw_json,
                 ExternalMetadataCache.expires_at: expires_at,

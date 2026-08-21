@@ -42,7 +42,6 @@ from app.modules.system.application.queries import (
     backup_created_payload,
     backup_detail_payload,
     dashboard_system_status_payload,
-    management_events_empty_page,
     management_events_payload,
     parse_event_date_bounds,
     prepare_system_settings_update,

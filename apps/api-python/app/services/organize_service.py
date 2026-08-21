@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database_errors import is_database_busy_error
@@ -211,9 +212,7 @@ def first_exact_title_candidate(
     )
 
 
-def metadata_context_for_book(
-    db: Session, book_id: str
-) -> dict[str, Any] | None:
+def metadata_context_for_book(db: Session, book_id: str) -> dict[str, Any] | None:
     return organize_review.load_book_context(db, book_id)
 
 
@@ -230,8 +229,7 @@ def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
         "seriesIndex": book.get("seriesIndex"),
         "tags": parse_json_value(book.get("tags")) or [],
         "fileNames": [
-            str(file.get("relativePath") or "").rsplit("/", 1)[-1]
-            for file in files
+            str(file.get("relativePath") or "").rsplit("/", 1)[-1] for file in files
         ],
         "parentPaths": sorted(
             {
@@ -780,7 +778,7 @@ def run_douban_crawler_provider(
                 else None
             )
         # A failed optional detail fetch must not discard the valid search result.
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError):
             subject_candidate = None
         candidate = subject_candidate or selected
         if candidate:
@@ -1231,10 +1229,7 @@ def external_metadata_cache_put(
     *,
     cache_ready: bool | None = None,
 ) -> None:
-    if (
-        not query_key
-        or not external_metadata_result_cacheable(result)
-    ):
+    if not query_key or not external_metadata_result_cacheable(result):
         return
     if cache_ready is None:
         cache_ready = metadata_cache.external_metadata_cache_ready(db)
@@ -1262,10 +1257,12 @@ def external_metadata_cache_put(
         now_ms=timestamp,
     )
     try:
-        with metadata_short_write_session(db) as writer:
-            with MetadataWriteTransaction(writer):
-                metadata_cache.write_prepared_cache_entry(writer, prepared)
-    except Exception as exc:
+        with (
+            metadata_short_write_session(db) as writer,
+            MetadataWriteTransaction(writer),
+        ):
+            metadata_cache.write_prepared_cache_entry(writer, prepared)
+    except SQLAlchemyError as exc:
         if not is_database_busy_error(exc):
             raise
         LOGGER.info(

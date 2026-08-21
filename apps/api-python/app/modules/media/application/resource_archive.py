@@ -23,6 +23,4 @@ class ResourceDownloadDescriptor:
 
 
 def reject_directory_resource_download() -> NoReturn:
-    raise ResourceDownloadUnsupportedError(
-        "DIRECTORY_RESOURCE_DOWNLOAD_UNSUPPORTED"
-    )
+    raise ResourceDownloadUnsupportedError("DIRECTORY_RESOURCE_DOWNLOAD_UNSUPPORTED")

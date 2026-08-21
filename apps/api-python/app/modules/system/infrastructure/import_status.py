@@ -54,16 +54,14 @@ def library_import_dashboard_snapshot(
 ) -> LibraryImportDashboardSnapshot:
     """Return one bounded, target-identity dashboard projection."""
 
-    enabled_libraries = (
-        [
-            _library_view(row)
-            for row in db.scalars(
-                select(Library)
-                .where(Library.enabled.is_(True))
-                .order_by(Library.created_at.desc(), Library.id.desc())
-            ).all()
-        ]
-    )
+    enabled_libraries = [
+        _library_view(row)
+        for row in db.scalars(
+            select(Library)
+            .where(Library.enabled.is_(True))
+            .order_by(Library.created_at.desc(), Library.id.desc())
+        ).all()
+    ]
     current = db.scalar(
         select(LibraryImportTask)
         .where(LibraryImportTask.state.in_(("QUEUED", "RUNNING")))

@@ -893,7 +893,12 @@ def _send_original_comic_page_file(
 ) -> Response:
     return _with_comic_page_variant_header(
         _send_file(
-            path, request, user_id, media_type=media_type, route=route, asset_id=asset_id
+            path,
+            request,
+            user_id,
+            media_type=media_type,
+            route=route,
+            asset_id=asset_id,
         ),
         COMIC_PAGE_ORIGINAL_VARIANT,
     )

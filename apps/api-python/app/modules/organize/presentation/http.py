@@ -15,7 +15,7 @@ from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_iso
 from app.db.session import get_db
-from app.modules.library.public import get_book, book_view
+from app.modules.library.public import book_view, get_book
 from app.modules.organize.application.dto import OrganizeJobListItem
 from app.modules.organize.presentation.schemas import (
     DeletedOrganizeJobResponse,
@@ -58,7 +58,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except Exception:
+    except ValueError:
         return fallback
 
 
@@ -150,7 +150,6 @@ def _organize_job_view(
     return {
         "id": job.get("id"),
         "runId": job.get("runId"),
-        "resourceId": job.get("resourceId"),
         "resourceId": job.get("resourceId"),
         "trigger": job.get("trigger") or "SCHEDULE",
         "status": raw_status,

@@ -22,7 +22,9 @@ def test_suffix_matching_boundaries() -> None:
     assert unique_adapter_or_none(match_file_adapters("readme.md")) is None
     assert unique_adapter_or_none(match_file_adapters("track.mp3")) is not None
     directory = next(
-        s for s in ADAPTER_SPECS if s.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+        s
+        for s in ADAPTER_SPECS
+        if s.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
     )
     assert directory.is_directory_adapter is True
 

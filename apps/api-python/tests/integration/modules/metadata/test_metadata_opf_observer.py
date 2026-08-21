@@ -24,7 +24,6 @@ from app.modules.imports.application.readable_resource.ports import (
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
 )
-from app.modules.library.domain.readable_resource_states import AssetRole
 from app.modules.imports.domain.resource_adapters import ADAPTER_SPECS
 from app.modules.imports.infrastructure.readable_resource.support import (
     BestEffortSidecarWriteback,
@@ -32,6 +31,7 @@ from app.modules.imports.infrastructure.readable_resource.support import (
 )
 from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
 from app.modules.library.domain.readable_resource_states import (
+    AssetRole,
     ResourceEnablementState,
     ResourceImportState,
 )
@@ -54,12 +54,8 @@ class _Uow(UnitOfWorkPort):
 
     @contextmanager
     def transaction(self):
-        try:
-            yield
-        except Exception:
-            raise
-        else:
-            self.commits += 1
+        yield
+        self.commits += 1
 
     def release_before_io(self) -> None:
         return None

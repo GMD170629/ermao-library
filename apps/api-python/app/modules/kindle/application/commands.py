@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Protocol
+from typing import Protocol, Self
 
 
 class KindleUnitOfWork(Protocol):
@@ -14,7 +14,7 @@ class KindleWriteTransaction:
     def __init__(self, unit_of_work: KindleUnitOfWork) -> None:
         self._unit_of_work = unit_of_work
 
-    def __enter__(self) -> KindleWriteTransaction:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(

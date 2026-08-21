@@ -90,7 +90,7 @@ def _seed_catalog(
 ) -> LibraryReadableResource:
     """Create a complete Book -> Resource -> Asset graph for repository tests."""
 
-    first_asset_id, first_path, _first_role, _first_mime, _first_order = assets[0]
+    first_asset_id, _first_path, _first_role, _first_mime, _first_order = assets[0]
     book_node = _source_node(
         node_id=f"{book_id}-node",
         path=f"{book_id}/",
@@ -105,9 +105,7 @@ def _seed_catalog(
             physical_kind="REGULAR_FILE",
             size_bytes=Path(path).stat().st_size if Path(path).is_file() else 4,
             mtime_ms=(
-                int(Path(path).stat().st_mtime * 1000)
-                if Path(path).is_file()
-                else 1
+                int(Path(path).stat().st_mtime * 1000) if Path(path).is_file() else 1
             ),
         )
         for asset_id, path, _role, _mime, _order in assets
@@ -306,7 +304,9 @@ def test_reader_source_lookup_uses_resource_without_legacy_version_layer(
         resource_id="resource-orphan",
         title="无版本资源",
         fmt="EPUB",
-        assets=(("asset-orphan", str(source_path), "PRIMARY", "application/epub+zip", 0),),
+        assets=(
+            ("asset-orphan", str(source_path), "PRIMARY", "application/epub+zip", 0),
+        ),
     )
 
     source = SqlAlchemyPublicationSourceRepository(db_session).find_source(

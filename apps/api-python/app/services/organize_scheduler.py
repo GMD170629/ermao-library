@@ -110,7 +110,7 @@ def update_organize_policy_command(
 
 
 def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
-    """Backward-compatible named policy command."""
+    """Apply the public organize policy update command."""
 
     return update_organize_policy_command(db, payload)
 
@@ -316,7 +316,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
 
 
 def retry_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    """Backward-compatible service alias for callers from older releases."""
+    """Restart metadata recognition for an organize job."""
 
     return recognize_organize_job(db, job_id)
 

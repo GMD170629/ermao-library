@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -63,9 +62,7 @@ def _add_audiobook(db_session) -> tuple[LibraryBook, LibraryReadableResource]:
         format="M4B",
         import_state="READY",
     )
-    db_session.add_all(
-        [book_node]
-    )
+    db_session.add_all([book_node])
     db_session.flush()
     db_session.add(book)
     db_session.flush()
@@ -193,7 +190,10 @@ def test_audio_parser_reads_series_and_resource_index_without_reusing_disc(
 def test_audio_format_catalog_admits_every_declared_extension() -> None:
     assert LEGACY_AUDIO_EXTS == {".m4a", ".m4b", ".mp3"}
     assert SUPPORTED_AUDIO_EXTS == NEW_AUDIO_EXTS | LEGACY_AUDIO_EXTS
-    assert all(is_supported_audio_file(f"track{extension}") for extension in SUPPORTED_AUDIO_EXTS)
+    assert all(
+        is_supported_audio_file(f"track{extension}")
+        for extension in SUPPORTED_AUDIO_EXTS
+    )
     assert audio_mime_type("book.m4b") == "audio/mp4"
     assert audio_mime_type("book.flac") == "audio/flac"
     assert audio_mime_type("book.opus") == "audio/ogg"
@@ -240,14 +240,19 @@ def test_ffprobe_rejects_video_but_allows_attached_cover(
     )
 
     if attached_picture:
-        assert audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)["codec"] == "flac"
+        assert (
+            audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)["codec"]
+            == "flac"
+        )
     else:
         with pytest.raises(audio_metadata_module.AudioInspectionError) as captured:
             audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)
         assert captured.value.code == "AUDIO_VIDEO_STREAM_UNSUPPORTED"
 
 
-def test_m4a_rfc6381_aac_codec_is_accepted_without_ffprobe(tmp_path, monkeypatch) -> None:
+def test_m4a_rfc6381_aac_codec_is_accepted_without_ffprobe(
+    tmp_path, monkeypatch
+) -> None:
     source = tmp_path / "aac-lc.m4a"
     source.write_bytes(b"not-a-real-container")
     monkeypatch.setattr(
@@ -273,7 +278,9 @@ def test_m4a_rfc6381_aac_codec_is_accepted_without_ffprobe(tmp_path, monkeypatch
     assert parsed.title == "RFC 6381 AAC"
 
 
-def test_audiobook_resource_is_published_through_canonical_book_api(client, db_session) -> None:
+def test_audiobook_resource_is_published_through_canonical_book_api(
+    client, db_session
+) -> None:
     _login(client, db_session)
     _book, resource = _add_audiobook(db_session)
     db_session.commit()

@@ -14,14 +14,12 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.models import (
+    LibraryBookFacet,
+    LibraryBookMetadata,
     LibraryFacet,
     LibraryOperation,
-    LibraryBookMetadata,
-    LibraryReadableResource,
-    LibraryReadableResourceMetadata,
     LibraryReadableResourceFacet,
-    LibraryBook,
-    LibraryBookFacet,
+    LibraryReadableResourceMetadata,
 )
 from app.modules.library.application.resource_commands import OperationSummary
 from app.modules.library.infrastructure.books import entity_record
@@ -254,7 +252,6 @@ def restore_resource_metadata(db: Session, row: dict[str, Any]) -> None:
     field_map = {
         "publisher": "publisher",
         "language": "language",
-        "publisher": "publisher",
         "publishedAt": "published_at",
         "identifier": "identifier",
         "isbn": "isbn",
@@ -294,5 +291,7 @@ def delete_book_facets_for_book(db: Session, book_id: str) -> None:
 
 def delete_resource_facets_for_resource(db: Session, resource_id: str) -> None:
     db.execute(
-        delete(LibraryReadableResourceFacet).where(LibraryReadableResourceFacet.resource_id == resource_id)
+        delete(LibraryReadableResourceFacet).where(
+            LibraryReadableResourceFacet.resource_id == resource_id
+        )
     )

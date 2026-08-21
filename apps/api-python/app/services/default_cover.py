@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from app.core.config import Settings
 
-
 DEFAULT_COVER_RELATIVE_PATH = Path("covers/default-book-cover-v1.png")
-DEFAULT_COVER_ASSET_PATH = Path(__file__).resolve().parent.parent / "assets/default-book-cover-v1.png"
+DEFAULT_COVER_ASSET_PATH = (
+    Path(__file__).resolve().parent.parent / "assets/default-book-cover-v1.png"
+)
 DEFAULT_COVER_STATUS = "DEFAULT"
 
 
@@ -19,13 +20,18 @@ def default_cover_path(settings: Settings) -> Path:
 def ensure_default_cover(settings: Settings) -> str:
     """Copy the bundled fallback cover into durable storage and return its path."""
     target = default_cover_path(settings)
-    if target.is_file() and target.stat().st_size == DEFAULT_COVER_ASSET_PATH.stat().st_size:
+    if (
+        target.is_file()
+        and target.stat().st_size == DEFAULT_COVER_ASSET_PATH.stat().st_size
+    ):
         return str(DEFAULT_COVER_RELATIVE_PATH)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
-        with NamedTemporaryFile(dir=target.parent, prefix=".default-cover-", suffix=".png", delete=False) as handle:
+        with NamedTemporaryFile(
+            dir=target.parent, prefix=".default-cover-", suffix=".png", delete=False
+        ) as handle:
             temporary = Path(handle.name)
             with DEFAULT_COVER_ASSET_PATH.open("rb") as source:
                 shutil.copyfileobj(source, handle)

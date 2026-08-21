@@ -13,15 +13,15 @@ from pathlib import Path
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
+from app.core.authorization import (
+    AuthorizationContext,
+    library_visibility_predicate,
+)
 from app.models import (
     Library,
     LibraryImportTask,
     LibrarySourceNode,
     UserLibraryAccess,
-)
-from app.core.authorization import (
-    AuthorizationContext,
-    library_visibility_predicate,
 )
 
 
@@ -86,9 +86,7 @@ def get_library_by_root_path(
 
 def library_has_topology(db: Session, library_id: str) -> bool:
     return bool(
-        db.scalar(
-            select(exists().where(LibrarySourceNode.library_id == library_id))
-        )
+        db.scalar(select(exists().where(LibrarySourceNode.library_id == library_id)))
     )
 
 
@@ -108,9 +106,7 @@ def library_id_for_path(db: Session, target: Path) -> str | None:
         resolved_target = target.expanduser().resolve()
     except OSError:
         return None
-    for row in db.scalars(
-        select(Library).where(Library.enabled.is_(True))
-    ).all():
+    for row in db.scalars(select(Library).where(Library.enabled.is_(True))).all():
         try:
             root = Path(row.root_path).expanduser().resolve()
             resolved_target.relative_to(root)
@@ -154,8 +150,7 @@ def get_import_task(
         return None
     if context is not None:
         visible = db.scalar(
-            select(LibraryImportTask.id)
-            .where(
+            select(LibraryImportTask.id).where(
                 LibraryImportTask.id == task_id,
                 library_visibility_predicate(context, LibraryImportTask.library_id),
             )
@@ -182,9 +177,7 @@ def list_import_tasks_page(
     if normalized_state and normalized_state != "ALL":
         filters.append(LibraryImportTask.state == normalized_state)
     total = int(
-        db.scalar(
-            select(func.count()).select_from(LibraryImportTask).where(*filters)
-        )
+        db.scalar(select(func.count()).select_from(LibraryImportTask).where(*filters))
         or 0
     )
     completed = int(

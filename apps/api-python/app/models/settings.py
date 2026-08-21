@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
-    Boolean,
     Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -21,13 +21,17 @@ from app.core.time import TimestampMilliseconds
 from app.db.base import Base
 from app.models.common import timestamp_ms_server_default
 
+if TYPE_CHECKING:
+    from app.models import LibraryBook, LibraryReadableResource
+    from app.models.auth import User
+
 
 def cuid() -> str:
     return f"py_{uuid4().hex}"
 
 
 def db_timestamp() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class SystemSetting(Base):
@@ -86,7 +90,9 @@ class SystemEvent(Base):
     target_type: Mapped[str | None] = mapped_column(
         "targetType", String(191), nullable=True
     )
-    target_id: Mapped[str | None] = mapped_column("targetId", String(191), nullable=True)
+    target_id: Mapped[str | None] = mapped_column(
+        "targetId", String(191), nullable=True
+    )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -102,11 +108,15 @@ class SystemHealthRun(Base):
     __tablename__ = "SystemHealthRun"
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    actor_user_id: Mapped[str] = mapped_column("actorUserId", String(191), nullable=False)
+    actor_user_id: Mapped[str] = mapped_column(
+        "actorUserId", String(191), nullable=False
+    )
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="running", server_default="running"
     )
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         "startedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp
@@ -234,8 +244,8 @@ class ReaderBookPreference(Base):
         onupdate=db_timestamp,
     )
 
-    user: Mapped["User"] = relationship("User")
-    book: Mapped["LibraryBook"] = relationship("LibraryBook")
+    user: Mapped[User] = relationship("User")
+    book: Mapped[LibraryBook] = relationship("LibraryBook")
 
 
 class ReaderProgressCursor(Base):
@@ -290,10 +300,8 @@ class ReaderProgressCursor(Base):
         onupdate=db_timestamp,
     )
 
-    user: Mapped["User"] = relationship("User")
-    resource: Mapped["LibraryReadableResource"] = relationship(
-        "LibraryReadableResource"
-    )
+    user: Mapped[User] = relationship("User")
+    resource: Mapped[LibraryReadableResource] = relationship("LibraryReadableResource")
 
 
 __all__ = [

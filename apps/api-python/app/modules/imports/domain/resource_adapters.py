@@ -131,9 +131,7 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
         adapter_version="1",
         media_kind="COMIC",
         format_label="IMAGE_DIR",
-        file_extensions=frozenset(
-            {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
-        ),
+        file_extensions=frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}),
         is_directory_adapter=True,
         asset_role=AssetRole.PAGE,
         minimum_ready_assets=1,
@@ -167,7 +165,9 @@ def match_directory_adapters_for_samples(
     for spec in ADAPTER_SPECS:
         if not spec.is_directory_adapter:
             continue
-        if all(file_extension(name) in spec.file_extensions for name in sample_filenames):
+        if all(
+            file_extension(name) in spec.file_extensions for name in sample_filenames
+        ):
             matched.append(spec)
     return tuple(matched)
 

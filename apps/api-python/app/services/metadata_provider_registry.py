@@ -682,7 +682,9 @@ def _context_media_kind(context: dict[str, Any]) -> str | None:
             continue
         return effective_media_kind(
             format=resource_format,
-            classification_source=str(raw_resource.get("classificationSource") or "AUTO"),
+            classification_source=str(
+                raw_resource.get("classificationSource") or "AUTO"
+            ),
             suggested_media_kind=(
                 str(raw_resource["suggestedMediaKind"])
                 if raw_resource.get("suggestedMediaKind")

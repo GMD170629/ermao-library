@@ -113,9 +113,7 @@ def test_retired_identity_routes_are_unregistered_and_return_404(client) -> None
         "/api/volumes/example",
     )
     registered = {
-        route.path
-        for route in client.app.routes
-        if getattr(route, "path", "")
+        route.path for route in client.app.routes if getattr(route, "path", "")
     }
     assert not any(
         any(segment in path.split("/") for segment in ("works", "versions", "volumes"))

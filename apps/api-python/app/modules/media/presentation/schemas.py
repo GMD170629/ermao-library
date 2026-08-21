@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope

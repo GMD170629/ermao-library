@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import Any
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
@@ -150,10 +150,11 @@ class QueueHeartbeatPump:
         prepared_write = prepare_queue_heartbeat_write(prepared)
         with self._write_lock:
             try:
-                with self._session_factory() as db:
-                    with SystemWriteTransaction(db):
-                        write_prepared_queue_runtime(db, prepared_write)
-            except Exception as exc:
+                with self._session_factory() as db, SystemWriteTransaction(db):
+                    write_prepared_queue_runtime(db, prepared_write)
+            # Heartbeat persistence is best-effort; contain adapter failures so
+            # they cannot terminate the worker loop.
+            except Exception as exc:  # noqa: BLE001
                 now = monotonic()
                 if now - self._last_write_warning_at >= 30:
                     LOGGER.warning(
@@ -174,10 +175,11 @@ class QueueHeartbeatPump:
         )
         with self._write_lock:
             try:
-                with self._session_factory() as db:
-                    with SystemWriteTransaction(db):
-                        write_prepared_queue_runtime(db, prepared_stop)
-            except Exception as exc:
+                with self._session_factory() as db, SystemWriteTransaction(db):
+                    write_prepared_queue_runtime(db, prepared_stop)
+            # Stopping must remain best-effort after the worker has been told to
+            # exit; an unavailable database cannot block process shutdown.
+            except Exception as exc:  # noqa: BLE001
                 LOGGER.warning(
                     "queue stopped state write deferred queue=%s error=%s",
                     self._queue_name,

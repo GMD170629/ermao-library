@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from app.core.sql_batches import rows_per_sqlite_statement, sqlite_parameter_chunks
 
 

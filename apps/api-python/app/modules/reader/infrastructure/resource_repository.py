@@ -52,7 +52,9 @@ def _resource_dto(
     title = (
         resource_metadata.title
         if resource_metadata is not None
-        else book_metadata.title if book_metadata is not None else source_node.name
+        else book_metadata.title
+        if book_metadata is not None
+        else source_node.name
     )
     return ReaderResourceDto(
         id=resource.id,
@@ -66,7 +68,8 @@ def _resource_dto(
         ),
         sort_order=(
             int(resource_metadata.resource_index)
-            if resource_metadata is not None and resource_metadata.resource_index is not None
+            if resource_metadata is not None
+            and resource_metadata.resource_index is not None
             else 0
         ),
         page_count=(
@@ -262,7 +265,9 @@ class SqlAlchemyReaderResourceRepository:
             _resource_dto(resource, resource_metadata, book_metadata, source_node)
             for resource, resource_metadata, book_metadata, source_node in rows
         ]
-        return sorted(resources, key=lambda item: (item.sort_order, item.updated_at, item.id))
+        return sorted(
+            resources, key=lambda item: (item.sort_order, item.updated_at, item.id)
+        )
 
     def list_assets(self, resource_id: str) -> list[ReaderAssetDto]:
         rows = self._session.execute(
@@ -299,7 +304,8 @@ class SqlAlchemyReaderResourceRepository:
                 role=asset.role,
                 mime_type=(
                     asset_metadata.mime_type
-                    if asset_metadata is not None and asset_metadata.mime_type is not None
+                    if asset_metadata is not None
+                    and asset_metadata.mime_type is not None
                     else "application/octet-stream"
                 ),
                 size_bytes=source_node.observed_size_bytes or 0,
@@ -319,9 +325,7 @@ class SqlAlchemyReaderResourceRepository:
             for asset, source_node, asset_metadata in rows
         ]
 
-    def list_navigation_units(
-        self, resource_id: str
-    ) -> list[ReaderNavigationUnitDto]:
+    def list_navigation_units(self, resource_id: str) -> list[ReaderNavigationUnitDto]:
         rows = self._session.scalars(
             select(ReadableResourceNavigationUnit)
             .where(ReadableResourceNavigationUnit.resource_id == resource_id)
@@ -348,9 +352,7 @@ class SqlAlchemyReaderResourceRepository:
             for unit in rows
         ]
 
-    def get_progress(
-        self, user_id: str, resource_id: str
-    ) -> ReaderProgressDto | None:
+    def get_progress(self, user_id: str, resource_id: str) -> ReaderProgressDto | None:
         progress = self._session.scalar(
             select(ReaderResourceProgress).where(
                 ReaderResourceProgress.user_id == user_id,
@@ -634,9 +636,7 @@ class SqlAlchemyReaderResourceRepository:
             raise RuntimeError("external resource progress upsert returned no row")
         return _progress_dto(progress)
 
-    def list_bookmarks(
-        self, user_id: str, resource_id: str
-    ) -> list[ReaderBookmarkDto]:
+    def list_bookmarks(self, user_id: str, resource_id: str) -> list[ReaderBookmarkDto]:
         bookmarks = self._session.scalars(
             select(ReaderBookmark)
             .where(

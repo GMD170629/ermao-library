@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
-    LibraryResourceAsset,
-    LibrarySourceNode,
+    LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
-    LibraryBook,
+    LibraryResourceAsset,
+    LibrarySourceNode,
 )
 from app.models.organize import OrganizeJob
 from app.modules.organize.infrastructure.eligibility import book_entity_record

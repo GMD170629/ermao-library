@@ -8,15 +8,18 @@ from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
     LibraryConfigPort,
+    LibraryImportTaskQueuePort,
     PipelineLogPort,
     ResourceAdapterExecutorPort,
     SidecarWritebackPort,
     SourceNodeRepositoryPort,
     SourceTreeFilesystemPort,
     UnitOfWorkPort,
-    LibraryImportTaskQueuePort,
 )
-from app.modules.imports.domain.resource_adapters import ADAPTER_SPECS, ResourceAdapterSpec
+from app.modules.imports.domain.resource_adapters import (
+    ADAPTER_SPECS,
+    ResourceAdapterSpec,
+)
 from app.modules.library.domain.readable_resource_states import AssetImportState
 
 
@@ -57,7 +60,11 @@ class ProcessReadableResourceImportTask:
             task = self._queue.get_task(task_id)
             if task is None or task.kind != "IMPORT_ASSET":
                 return ProcessTaskResult(task_id=task_id, outcome="missing_task")
-            if task.resource_id is None or task.source_node_id is None or task.role is None:
+            if (
+                task.resource_id is None
+                or task.source_node_id is None
+                or task.role is None
+            ):
                 self._queue.mark_failed(
                     task_id,
                     error_summary="INVALID_TASK_SHAPE",

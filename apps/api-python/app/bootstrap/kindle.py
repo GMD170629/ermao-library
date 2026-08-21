@@ -40,9 +40,7 @@ from app.services.email_settings import (
 )
 
 
-def record_kindle_event_command(
-    db: Session, event: PreparedSystemEvent
-) -> None:
+def record_kindle_event_command(db: Session, event: PreparedSystemEvent) -> None:
     with KindleWriteTransaction(db):
         write_prepared_system_events(db, (event,))
 
@@ -58,9 +56,7 @@ def update_email_settings_command(
         write_prepared_system_events(db, (event,))
 
 
-def update_kindle_recipient_command(
-    db: Session, *, user_id: str, email: str
-) -> None:
+def update_kindle_recipient_command(db: Session, *, user_id: str, email: str) -> None:
     statement = prepare_user_preference_write(user_id, "kindle.email", email)
     with KindleWriteTransaction(db):
         write_prepared_user_preference(db, statement)
@@ -178,9 +174,7 @@ def fail_kindle_send_task_command(
     event: PreparedSystemEvent,
 ) -> None:
     with KindleWriteTransaction(db):
-        mark_kindle_task_failed(
-            db, task_id, error_message=error_message, now=timestamp
-        )
+        mark_kindle_task_failed(db, task_id, error_message=error_message, now=timestamp)
         write_prepared_system_events(db, (event,))
 
 
@@ -213,9 +207,10 @@ def recover_interrupted_kindle_tasks_command(
         )
         write_prepared_system_events(db, events)
 
+
 __all__ = [
-    "cancel_queued_kindle_task",
     "cancel_kindle_send_task_command",
+    "cancel_queued_kindle_task",
     "claim_kindle_send_task_command",
     "complete_kindle_send_task_command",
     "create_kindle_send_task",
@@ -229,10 +224,10 @@ __all__ = [
     "list_kindle_send_tasks",
     "record_kindle_event_command",
     "recover_interrupted_kindle_tasks_command",
-    "retry_kindle_task",
     "retry_kindle_send_task_command",
+    "retry_kindle_task",
     "schedule_kindle_retry_command",
-    "update_kindle_recipient_command",
     "update_email_settings_command",
+    "update_kindle_recipient_command",
     "update_kindle_send_snapshot_command",
 ]

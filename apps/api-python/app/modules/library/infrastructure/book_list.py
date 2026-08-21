@@ -20,10 +20,16 @@ from app.models import (
     ReaderResourceProgress,
 )
 from app.models.auth import User
-from app.models.shelf import ShelfBook
-from app.modules.library.application.book_list import BookListQuery, BookListResult, resolve_page_size
+from app.modules.library.application.book_list import (
+    BookListQuery,
+    BookListResult,
+    resolve_page_size,
+)
 from app.modules.library.infrastructure.books import _book_record
-from app.modules.library.infrastructure.filter_query import compile_filter_expression, resolve_library_roots
+from app.modules.library.infrastructure.filter_query import (
+    compile_filter_expression,
+    resolve_library_roots,
+)
 
 
 def _resource_exists(
@@ -64,7 +70,10 @@ def _predicates(
         book_visibility_predicate(context),
     ]
     if query.visibility == "ignored":
-        return [LibraryBook.visibility_state == "HIDDEN", book_visibility_predicate(context)]
+        return [
+            LibraryBook.visibility_state == "HIDDEN",
+            book_visibility_predicate(context),
+        ]
     term = (query.search or query.keyword or "").strip().casefold()
     if term:
         pattern = f"%{term}%"
@@ -72,25 +81,49 @@ def _predicates(
             or_(
                 func.lower(LibraryBookMetadata.title).like(pattern),
                 func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(pattern),
-                func.lower(func.coalesce(LibraryBookMetadata.series_name, "")).like(pattern),
-                func.lower(func.coalesce(LibraryBookMetadata.description, "")).like(pattern),
+                func.lower(func.coalesce(LibraryBookMetadata.series_name, "")).like(
+                    pattern
+                ),
+                func.lower(func.coalesce(LibraryBookMetadata.description, "")).like(
+                    pattern
+                ),
             )
         )
     if query.type_filter:
         normalized = query.type_filter.strip().upper()
-        media_values = {"EBOOK": "EBOOK", "AUDIO": "AUDIOBOOK", "AUDIOBOOK": "AUDIOBOOK", "COMIC": "COMIC"}
+        media_values = {
+            "EBOOK": "EBOOK",
+            "AUDIO": "AUDIOBOOK",
+            "AUDIOBOOK": "AUDIOBOOK",
+            "COMIC": "COMIC",
+        }
         if normalized in media_values:
-            predicates.append(_resource_exists(book_id=LibraryBook.id, media_kinds=(media_values[normalized],)))
+            predicates.append(
+                _resource_exists(
+                    book_id=LibraryBook.id, media_kinds=(media_values[normalized],)
+                )
+            )
         else:
-            predicates.append(_resource_exists(book_id=LibraryBook.id, formats=(normalized,)))
+            predicates.append(
+                _resource_exists(book_id=LibraryBook.id, formats=(normalized,))
+            )
     if query.media_kinds:
-        predicates.append(_resource_exists(book_id=LibraryBook.id, media_kinds=query.media_kinds))
-    statuses = tuple(dict.fromkeys((*query.statuses, query.status) if query.status else query.statuses))
+        predicates.append(
+            _resource_exists(book_id=LibraryBook.id, media_kinds=query.media_kinds)
+        )
+    statuses = tuple(
+        dict.fromkeys(
+            (*query.statuses, query.status) if query.status else query.statuses
+        )
+    )
     for status in statuses:
         normalized = status.upper()
         started = exists(
             select(ReaderResourceProgress.id)
-            .join(LibraryReadableResource, LibraryReadableResource.id == ReaderResourceProgress.resource_id)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == ReaderResourceProgress.resource_id,
+            )
             .where(
                 LibraryReadableResource.book_id == LibraryBook.id,
                 ReaderResourceProgress.user_id == user.id,
@@ -105,7 +138,9 @@ def _predicates(
         elif normalized == "FINISHED":
             predicates.append(_resource_exists(book_id=LibraryBook.id))
     if query.publication_status:
-        predicates.append(LibraryBookMetadata.publication_status == query.publication_status)
+        predicates.append(
+            LibraryBookMetadata.publication_status == query.publication_status
+        )
     if query.tracking_status:
         predicates.append(LibraryBookMetadata.tracking_status == query.tracking_status)
     if query.tag:
@@ -131,12 +166,13 @@ def _predicates(
     if query.new_import:
         predicates.append(_resource_exists(book_id=LibraryBook.id))
     if query.series_name:
-        predicates.append(func.trim(LibraryBookMetadata.series_name) == query.series_name.strip())
+        predicates.append(
+            func.trim(LibraryBookMetadata.series_name) == query.series_name.strip()
+        )
     if query.facet_kind and query.facet_id:
         predicates.append(
             exists(
-                select(LibraryBookFacet.book_id)
-                .where(
+                select(LibraryBookFacet.book_id).where(
                     LibraryBookFacet.book_id == LibraryBook.id,
                     LibraryBookFacet.facet_id == query.facet_id,
                     exists(
@@ -163,7 +199,8 @@ def _predicates(
 
 def _order(query: BookListQuery) -> list[ColumnElement[object]]:
     descending = (query.sort_direction or "").lower() == "desc" or (
-        not query.sort_direction and query.sort in {"updated", "recent_read", "recent_import", "progress"}
+        not query.sort_direction
+        and query.sort in {"updated", "recent_read", "recent_import", "progress"}
     )
 
     def direction(column: ColumnElement[object]) -> ColumnElement[object]:
@@ -172,11 +209,23 @@ def _order(query: BookListQuery) -> list[ColumnElement[object]]:
     if query.sort == "title":
         return [direction(LibraryBookMetadata.title), LibraryBook.id.asc()]
     if query.sort == "author":
-        return [direction(LibraryBookMetadata.author), LibraryBookMetadata.title.asc(), LibraryBook.id.asc()]
+        return [
+            direction(LibraryBookMetadata.author),
+            LibraryBookMetadata.title.asc(),
+            LibraryBook.id.asc(),
+        ]
     if query.sort == "series":
-        return [direction(LibraryBookMetadata.series_name), LibraryBookMetadata.series_index.asc(), LibraryBook.id.asc()]
+        return [
+            direction(LibraryBookMetadata.series_name),
+            LibraryBookMetadata.series_index.asc(),
+            LibraryBook.id.asc(),
+        ]
     if query.sort == "series_index":
-        return [direction(LibraryBookMetadata.series_index), LibraryBookMetadata.title.asc(), LibraryBook.id.asc()]
+        return [
+            direction(LibraryBookMetadata.series_index),
+            LibraryBookMetadata.title.asc(),
+            LibraryBook.id.asc(),
+        ]
     return [direction(LibraryBook.updated_at), direction(LibraryBook.id)]
 
 

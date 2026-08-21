@@ -138,9 +138,12 @@ def test_empty_book_is_not_queued_until_it_has_a_readable_resource(db_session) -
     run = create_organize_run(db_session, book_ids=[book.id])
 
     assert run["queuedCount"] == 0
-    assert db_session.scalars(
-        select(OrganizeJob).where(OrganizeJob.book_id == book.id)
-    ).all() == []
+    assert (
+        db_session.scalars(
+            select(OrganizeJob).where(OrganizeJob.book_id == book.id)
+        ).all()
+        == []
+    )
 
 
 def test_recognition_replaces_unresolved_lookup_with_same_book_resource_scope(
@@ -158,18 +161,21 @@ def test_recognition_replaces_unresolved_lookup_with_same_book_resource_scope(
 
     assert recognized["bookId"] == book.id
     assert recognized["resourceId"] == resource.id
-    assert db_session.scalar(
-        select(MetadataLookupTask.id).where(
-            MetadataLookupTask.book_id == book.id,
-            MetadataLookupTask.resource_id == resource.id,
+    assert (
+        db_session.scalar(
+            select(MetadataLookupTask.id).where(
+                MetadataLookupTask.book_id == book.id,
+                MetadataLookupTask.resource_id == resource.id,
+            )
         )
-    ) is not None
+        is not None
+    )
 
 
 def test_deleting_organize_job_does_not_delete_its_book_or_resource(db_session) -> None:
     book, resource = _seed_book(db_session, "delete-organize-book")
     assert resource is not None
-    run = create_organize_run(db_session, book_ids=[book.id])
+    create_organize_run(db_session, book_ids=[book.id])
     job = db_session.scalars(
         select(OrganizeJob).where(OrganizeJob.book_id == book.id)
     ).one()
@@ -181,7 +187,9 @@ def test_deleting_organize_job_does_not_delete_its_book_or_resource(db_session) 
     assert db_session.get(LibraryReadableResource, resource.id) is not None
 
 
-def test_metadata_provider_enablement_is_scoped_by_resource_media_kind(db_session) -> None:
+def test_metadata_provider_enablement_is_scoped_by_resource_media_kind(
+    db_session,
+) -> None:
     _seed_book(db_session, "provider-book")
     seed_baseline_data(db_session)
     update_metadata_provider(db_session, "douban", {"enabled": True})

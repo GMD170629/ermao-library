@@ -47,9 +47,7 @@ class SqlAlchemyMediaResourceRepository:
         ).one_or_none()
         return self._asset_resource(row)
 
-    def first_resource_asset(
-        self, resource_id: str
-    ) -> MediaAssetResource | None:
+    def first_resource_asset(self, resource_id: str) -> MediaAssetResource | None:
         row = self._session.execute(
             select(
                 LibraryResourceAsset,

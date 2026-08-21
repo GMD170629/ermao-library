@@ -175,6 +175,7 @@ def mark_organize_policy_scheduled_command(
     with OrganizeWriteTransaction(db):
         mark_policy_scheduled(db, now=timestamp, next_run_at=next_run_at)
 
+
 __all__ = [
     "DEFAULT_INTERVAL_MINUTES",
     "DEFAULT_POLICY_ID",

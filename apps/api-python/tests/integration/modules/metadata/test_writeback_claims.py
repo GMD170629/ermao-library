@@ -29,7 +29,9 @@ from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.infrastructure import writeback_queue
 
 
-def _node(node_id: str, relative_path: str, *, directory: bool = False) -> LibrarySourceNode:
+def _node(
+    node_id: str, relative_path: str, *, directory: bool = False
+) -> LibrarySourceNode:
     return LibrarySourceNode(
         id=node_id,
         library_id="test-library",

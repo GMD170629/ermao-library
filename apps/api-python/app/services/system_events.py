@@ -1,4 +1,4 @@
-"""Compatibility re-export for system event storage (owned by modules.system)."""
+"""Stable service facade for system event storage (owned by modules.system)."""
 
 from app.bootstrap.system import (
     configured_max_event_bytes,
@@ -29,8 +29,8 @@ __all__ = [
     "MIN_MAX_EVENT_BYTES",
     "PROTECTED_ERROR_ACTIONS",
     "configured_max_event_bytes",
-    "prune_system_events",
     "prepare_system_event",
+    "prune_system_events",
     "record_system_event",
     "set_max_event_bytes",
     "system_event_size_bytes",

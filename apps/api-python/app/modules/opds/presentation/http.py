@@ -472,7 +472,9 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             actor_id(authorization, request), dependencies.book_cover, book_id, request
         )
 
-    @router.api_route("/opds/v1.2/resources/{resource_id}/cover", methods=["GET", "HEAD"])
+    @router.api_route(
+        "/opds/v1.2/resources/{resource_id}/cover", methods=["GET", "HEAD"]
+    )
     def resource_cover(
         resource_id: str,
         request: Request,
@@ -485,7 +487,9 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             request,
         )
 
-    @router.api_route("/opds/v1.2/resources/{resource_id}/asset", methods=["GET", "HEAD"])
+    @router.api_route(
+        "/opds/v1.2/resources/{resource_id}/asset", methods=["GET", "HEAD"]
+    )
     def resource_asset(
         resource_id: str,
         request: Request,

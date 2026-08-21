@@ -16,16 +16,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models.common import db_timestamp
 from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
     LibraryImportTask,
-    LibraryResourceAsset,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
-    LibraryBookMetadata,
+    LibraryResourceAsset,
     LibrarySourceNode,
-    LibraryBook,
 )
+from app.models.common import db_timestamp
 from app.models.organize import (
     MetadataOpfQueueState,
     MetadataWritebackOperation,
@@ -248,7 +248,9 @@ def load_metadata_writeback_projection(
                     LibraryImportTask.resource_id.in_(resource_ids),
                     LibraryImportTask.state == "SUCCEEDED",
                 )
-                .order_by(LibraryImportTask.created_at.asc(), LibraryImportTask.id.asc())
+                .order_by(
+                    LibraryImportTask.created_at.asc(), LibraryImportTask.id.asc()
+                )
             ).all()
         )
         if resource_ids
@@ -356,7 +358,6 @@ def enqueue_prepared_writeback_intents(
             "id": intent.preparation_id,
             "operation_id": intent.operation_id,
             "book_id": intent.book_id,
-            "resource_id": intent.resource_id,
             "resource_id": intent.resource_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,

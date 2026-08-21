@@ -21,8 +21,6 @@ from sqlalchemy import (
     func,
     or_,
 )
-from typing import TYPE_CHECKING
-
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import TimestampMilliseconds
@@ -122,15 +120,21 @@ class LibrarySourceNode(Base):
         ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    parent_id: Mapped[str | None] = mapped_column("parentId", String(191), nullable=True)
+    parent_id: Mapped[str | None] = mapped_column(
+        "parentId", String(191), nullable=True
+    )
     # Shadow: pairs with parentId; must be DIRECTORY when parent is set.
     parent_physical_kind: Mapped[str | None] = mapped_column(
         "parentPhysicalKind", String(32), nullable=True
     )
     relative_path: Mapped[str] = mapped_column("relativePath", Text, nullable=False)
-    path_key: Mapped[str] = mapped_column("pathKey", String(_PATH_KEY_LENGTH), nullable=False)
+    path_key: Mapped[str] = mapped_column(
+        "pathKey", String(_PATH_KEY_LENGTH), nullable=False
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    physical_kind: Mapped[str] = mapped_column("physicalKind", String(32), nullable=False)
+    physical_kind: Mapped[str] = mapped_column(
+        "physicalKind", String(32), nullable=False
+    )
     observed_size_bytes: Mapped[int | None] = mapped_column(
         "observedSizeBytes", BigInteger, nullable=True
     )
@@ -155,7 +159,7 @@ class LibrarySourceNode(Base):
         onupdate=db_timestamp,
     )
 
-    books: Mapped[list["LibraryBook"]] = relationship(
+    books: Mapped[list[LibraryBook]] = relationship(
         back_populates="source_node",
         foreign_keys="LibraryBook.source_node_id",
         primaryjoin=(
@@ -164,7 +168,7 @@ class LibrarySourceNode(Base):
         ),
         passive_deletes=True,
     )
-    anchored_resources: Mapped[list["LibraryReadableResource"]] = relationship(
+    anchored_resources: Mapped[list[LibraryReadableResource]] = relationship(
         back_populates="source_node",
         foreign_keys="LibraryReadableResource.source_node_id",
         primaryjoin=(
@@ -173,7 +177,7 @@ class LibrarySourceNode(Base):
         ),
         passive_deletes=True,
     )
-    resource_assets: Mapped[list["LibraryResourceAsset"]] = relationship(
+    resource_assets: Mapped[list[LibraryResourceAsset]] = relationship(
         back_populates="source_node",
         foreign_keys="LibraryResourceAsset.source_node_id",
         primaryjoin=(
@@ -240,16 +244,22 @@ class LibrarySourceNodeInterpretation(Base):
     )
     result: Mapped[str] = mapped_column(String(32), nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
-    adapter_id: Mapped[str | None] = mapped_column("adapterId", String(191), nullable=True)
+    adapter_id: Mapped[str | None] = mapped_column(
+        "adapterId", String(191), nullable=True
+    )
     adapter_version: Mapped[str | None] = mapped_column(
         "adapterVersion", String(64), nullable=True
     )
-    reason_code: Mapped[str | None] = mapped_column("reasonCode", String(64), nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(
+        "reasonCode", String(64), nullable=True
+    )
     # Newline-separated relative paths from directory probe (not generic metadata JSON).
     sample_relative_paths: Mapped[str | None] = mapped_column(
         "sampleRelativePaths", Text, nullable=True
     )
-    sample_count: Mapped[int | None] = mapped_column("sampleCount", Integer, nullable=True)
+    sample_count: Mapped[int | None] = mapped_column(
+        "sampleCount", Integer, nullable=True
+    )
     max_entries_visited: Mapped[int | None] = mapped_column(
         "maxEntriesVisited", Integer, nullable=True
     )
@@ -344,7 +354,7 @@ class LibraryBook(Base):
             "LibraryBook.library_id==LibrarySourceNode.library_id)"
         ),
     )
-    resources: Mapped[list["LibraryReadableResource"]] = relationship(
+    resources: Mapped[list[LibraryReadableResource]] = relationship(
         back_populates="book",
         foreign_keys="LibraryReadableResource.book_id",
         primaryjoin=(
@@ -365,14 +375,18 @@ class LibraryBookMetadata(Base):
         primary_key=True,
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    normalized_title: Mapped[str] = mapped_column("normalizedTitle", Text, nullable=False)
+    normalized_title: Mapped[str] = mapped_column(
+        "normalizedTitle", Text, nullable=False
+    )
     author: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalized_author: Mapped[str | None] = mapped_column(
         "normalizedAuthor", Text, nullable=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     series_name: Mapped[str | None] = mapped_column("seriesName", Text, nullable=True)
-    series_index: Mapped[float | None] = mapped_column("seriesIndex", Float, nullable=True)
+    series_index: Mapped[float | None] = mapped_column(
+        "seriesIndex", Float, nullable=True
+    )
     cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
     cover_status: Mapped[str] = mapped_column(
         "coverStatus",
@@ -425,7 +439,9 @@ class LibraryReadableResource(Base):
             column("importState").in_(("PENDING", "READY", "FAILED")),
             name="LibraryReadableResource_importState_check",
         ),
-        UniqueConstraint("sourceNodeId", name="LibraryReadableResource_sourceNodeId_key"),
+        UniqueConstraint(
+            "sourceNodeId", name="LibraryReadableResource_sourceNodeId_key"
+        ),
         UniqueConstraint(
             "id",
             "libraryId",
@@ -511,7 +527,7 @@ class LibraryReadableResource(Base):
         ),
         overlaps="book",
     )
-    assets: Mapped[list["LibraryResourceAsset"]] = relationship(
+    assets: Mapped[list[LibraryResourceAsset]] = relationship(
         back_populates="resource",
         foreign_keys="LibraryResourceAsset.resource_id",
         primaryjoin=(
@@ -546,8 +562,12 @@ class LibraryReadableResourceMetadata(Base):
     chapter_count: Mapped[int | None] = mapped_column(
         "chapterCount", Integer, nullable=True
     )
-    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
-    track_count: Mapped[int | None] = mapped_column("trackCount", Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(
+        "durationMs", Integer, nullable=True
+    )
+    track_count: Mapped[int | None] = mapped_column(
+        "trackCount", Integer, nullable=True
+    )
     narrator: Mapped[str | None] = mapped_column(Text, nullable=True)
     abridged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     resource_index: Mapped[float | None] = mapped_column(
@@ -581,9 +601,7 @@ class LibraryResourceAsset(Base):
     __tablename__ = "LibraryResourceAsset"
     __table_args__ = (
         CheckConstraint(
-            column("role").in_(
-                ("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")
-            ),
+            column("role").in_(("PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT")),
             name="LibraryResourceAsset_role_check",
         ),
         CheckConstraint(
@@ -704,13 +722,21 @@ class LibraryResourceAssetMetadata(Base):
         ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    mime_type: Mapped[str | None] = mapped_column("mimeType", String(191), nullable=True)
-    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(
+        "mimeType", String(191), nullable=True
+    )
+    duration_ms: Mapped[int | None] = mapped_column(
+        "durationMs", Integer, nullable=True
+    )
     codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sample_rate: Mapped[int | None] = mapped_column("sampleRate", Integer, nullable=True)
+    sample_rate: Mapped[int | None] = mapped_column(
+        "sampleRate", Integer, nullable=True
+    )
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    disc_number: Mapped[int | None] = mapped_column("discNumber", Integer, nullable=True)
+    disc_number: Mapped[int | None] = mapped_column(
+        "discNumber", Integer, nullable=True
+    )
     track_number: Mapped[int | None] = mapped_column(
         "trackNumber", Integer, nullable=True
     )

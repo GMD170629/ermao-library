@@ -146,11 +146,12 @@ def _audiobook_book(physical_path: str, canonical_path: str) -> LayoutBook:
         if not is_audiobook_disc_directory(physical)
     ]
     resource_path = "/".join(
-        [canonical_parts[0], *(canonical for _physical, canonical in semantic_directories)]
+        [
+            canonical_parts[0],
+            *(canonical for _physical, canonical in semantic_directories),
+        ]
     )
-    resource_name = (
-        semantic_directories[-1][0] if semantic_directories else book_name
-    )
+    resource_name = semantic_directories[-1][0] if semantic_directories else book_name
     return LayoutBook(
         source_key=_book_key(book_path),
         source_name=book_name,

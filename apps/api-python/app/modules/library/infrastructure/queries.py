@@ -3,12 +3,25 @@ from __future__ import annotations
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from app.core.authorization import authorization_context, book_visibility_predicate, resource_visibility_predicate
-from app.models import LibraryBook, LibraryBookFacet, LibraryBookMetadata, LibraryFacet, LibraryReadableResource
+from app.core.authorization import (
+    authorization_context,
+    book_visibility_predicate,
+    resource_visibility_predicate,
+)
+from app.models import (
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
+    LibraryFacet,
+    LibraryReadableResource,
+)
 from app.models.auth import User
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.application.queries import SmartShelfCriteria
-from app.modules.library.infrastructure.filter_query import compile_filter_expression, resolve_library_roots
+from app.modules.library.infrastructure.filter_query import (
+    compile_filter_expression,
+    resolve_library_roots,
+)
 
 
 class SqlAlchemyLibraryQueries:
@@ -34,18 +47,24 @@ class SqlAlchemyLibraryQueries:
                 library_ids=(),
                 authz_version=1,
             )
-        predicates = [LibraryBook.visibility_state == "VISIBLE", book_visibility_predicate(context)]
+        predicates = [
+            LibraryBook.visibility_state == "VISIBLE",
+            book_visibility_predicate(context),
+        ]
         if criteria.search:
             term = f"%{criteria.search.casefold()}%"
             predicates.append(
                 exists(
-                    select(LibraryBookMetadata.book_id)
-                    .where(
+                    select(LibraryBookMetadata.book_id).where(
                         LibraryBookMetadata.book_id == LibraryBook.id,
                         or_(
                             func.lower(LibraryBookMetadata.title).like(term),
-                            func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(term),
-                            func.lower(func.coalesce(LibraryBookMetadata.series_name, "")).like(term),
+                            func.lower(
+                                func.coalesce(LibraryBookMetadata.author, "")
+                            ).like(term),
+                            func.lower(
+                                func.coalesce(LibraryBookMetadata.series_name, "")
+                            ).like(term),
                         ),
                     )
                 )
@@ -54,11 +73,15 @@ class SqlAlchemyLibraryQueries:
             status_filters = FilterExpression(
                 combinator="ANY",
                 conditions=tuple(
-                    FilterCondition(field="readingStatus", operator="equals", value=status)
+                    FilterCondition(
+                        field="readingStatus", operator="equals", value=status
+                    )
                     for status in criteria.statuses
                 ),
             )
-            dynamic = compile_filter_expression(status_filters, context=context, user_id=user_id)
+            dynamic = compile_filter_expression(
+                status_filters, context=context, user_id=user_id
+            )
             if dynamic is not None:
                 predicates.append(dynamic)
         if criteria.media_kinds:
@@ -90,12 +113,14 @@ class SqlAlchemyLibraryQueries:
                 exists(
                     select(LibraryBookMetadata.book_id).where(
                         LibraryBookMetadata.book_id == LibraryBook.id,
-                        or_(*(
-                            func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(
-                                f"%{author.casefold()}%"
+                        or_(
+                            *(
+                                func.lower(
+                                    func.coalesce(LibraryBookMetadata.author, "")
+                                ).like(f"%{author.casefold()}%")
+                                for author in criteria.authors
                             )
-                            for author in criteria.authors
-                        )),
+                        ),
                     )
                 )
             )
@@ -105,7 +130,9 @@ class SqlAlchemyLibraryQueries:
                 context=context,
                 user_id=user_id,
                 shelf_owner_user_id=user_id,
-                library_roots=resolve_library_roots(self._db, criteria.filters, context),
+                library_roots=resolve_library_roots(
+                    self._db, criteria.filters, context
+                ),
             )
             if dynamic is not None:
                 predicates.append(dynamic)
@@ -127,4 +154,15 @@ class SqlAlchemyLibraryQueries:
                 )
             )
         )
-        return list(dict.fromkeys([*matched_ids, *(book_id for book_id in criteria.included_book_ids if book_id in included)]))
+        return list(
+            dict.fromkeys(
+                [
+                    *matched_ids,
+                    *(
+                        book_id
+                        for book_id in criteria.included_book_ids
+                        if book_id in included
+                    ),
+                ]
+            )
+        )

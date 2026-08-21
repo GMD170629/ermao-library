@@ -204,9 +204,7 @@ def test_generated_openapi_contains_only_target_identity_and_import_surfaces(
             properties = value.get("properties")
             names = set(properties) if isinstance(properties, dict) else set()
             return names | {
-                name
-                for child in value.values()
-                for name in property_names(child)
+                name for child in value.values() for name in property_names(child)
             }
         if isinstance(value, list):
             return {name for child in value for name in property_names(child)}

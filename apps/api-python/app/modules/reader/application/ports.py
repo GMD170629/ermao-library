@@ -7,12 +7,12 @@ from typing import Protocol
 
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
+    ReaderAssetDto,
     ReaderBookmarkDto,
     ReaderExactLocationDto,
-    ReaderAssetDto,
+    ReaderNavigationUnitDto,
     ReaderProgressDto,
     ReaderReadingStatus,
-    ReaderNavigationUnitDto,
     ReaderResourceContextDto,
     ReaderResourceDto,
 )
@@ -27,7 +27,9 @@ class ReaderResourceRepository(Protocol):
 
     def list_assets(self, resource_id: str) -> list[ReaderAssetDto]: ...
 
-    def list_navigation_units(self, resource_id: str) -> list[ReaderNavigationUnitDto]: ...
+    def list_navigation_units(
+        self, resource_id: str
+    ) -> list[ReaderNavigationUnitDto]: ...
 
     def get_progress(
         self, user_id: str, resource_id: str

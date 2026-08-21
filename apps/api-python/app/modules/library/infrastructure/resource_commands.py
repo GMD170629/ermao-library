@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -20,7 +20,6 @@ from app.models import (
 )
 from app.modules.library.application.resource_commands import (
     LibraryActor,
-    OperationSummary,
     ResourceContext,
     ResourceMetadataChanges,
     ResourceReclassifyOutcome,
@@ -110,14 +109,14 @@ class SqlAlchemyResourceMetadata:
                 book_id=resource.book_id,
                 media_kind=resource.media_kind,
                 sort_order=(
-                    int(resource_index)
-                    if resource_index is not None
-                    else 2**31 - 1
+                    int(resource_index) if resource_index is not None else 2**31 - 1
                 ),
             )
             for resource, resource_index in rows
         }
-        return tuple(by_id[resource_id] for resource_id in resource_ids if resource_id in by_id)
+        return tuple(
+            by_id[resource_id] for resource_id in resource_ids if resource_id in by_id
+        )
 
     def update_resource(
         self,

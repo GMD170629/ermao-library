@@ -13,7 +13,9 @@ from app.modules.opds.application.dto import (
 
 
 class OpdsAuthenticator(Protocol):
-    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None: ...
+    def authenticate(
+        self, request: OpdsAuthenticationRequestDto
+    ) -> OpdsActorDto | None: ...
 
 
 class OpdsCatalogPort(Protocol):

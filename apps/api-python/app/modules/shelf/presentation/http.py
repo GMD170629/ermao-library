@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import bookshelf_items as get_bookshelf_items
+from app.bootstrap.library import smart_shelf_book_ids
 from app.bootstrap.shelf import shelf_store
 from app.core.authorization import (
     AuthorizationContext,
@@ -49,7 +50,6 @@ from app.modules.shelf.public import (
 )
 from app.schemas.responses import fail, ok
 from app.services.library_filters import normalize_filter_rules
-from app.bootstrap.library import smart_shelf_book_ids
 
 router = APIRouter(tags=["shelf"], route_class=TypedContractRoute)
 
@@ -85,7 +85,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except Exception:
+    except ValueError:
         return fallback
 
 

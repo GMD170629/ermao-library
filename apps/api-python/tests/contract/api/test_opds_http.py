@@ -212,9 +212,12 @@ def test_opds_missing_resource_page_does_not_read_or_create_navigation_units(
 
     assert response.status_code == 404
     assert dml_statements == []
-    assert db_session.scalar(
-        select(func.count()).select_from(ReadableResourceNavigationUnit)
-    ) == 0
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(ReadableResourceNavigationUnit)
+        )
+        == 0
+    )
 
 
 def test_opds_authentication_is_read_only_and_does_not_log_credentials(

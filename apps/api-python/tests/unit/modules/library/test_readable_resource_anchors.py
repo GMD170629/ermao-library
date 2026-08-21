@@ -72,9 +72,7 @@ def test_case_and_unicode_spellings_remain_distinct_scopes() -> None:
     lower = _path("books/a.epub")
     assert not is_strict_descendant_path(ancestor=directory, candidate=lower)
     nfc = SourceNodeRelativePath(unicodedata.normalize("NFC", "café"))
-    nfd_child = SourceNodeRelativePath(
-        unicodedata.normalize("NFD", "café") + "/a.epub"
-    )
+    nfd_child = SourceNodeRelativePath(unicodedata.normalize("NFD", "café") + "/a.epub")
     assert not is_strict_descendant_path(ancestor=nfc, candidate=nfd_child)
 
 

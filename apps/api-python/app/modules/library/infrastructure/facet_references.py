@@ -6,10 +6,10 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
-from app.models import LibraryFacet, LibraryBook, LibraryBookFacet
+from app.models import LibraryBook, LibraryBookFacet, LibraryFacet
 from app.modules.library.application.facet_references import (
-    LibraryFacetReference,
     BookFacetReferences,
+    LibraryFacetReference,
 )
 
 
@@ -42,9 +42,7 @@ class SqlAlchemyLibraryFacetReferenceQueries:
                 has_visible_book,
             )
         ).one_or_none()
-        return (
-            self._reference(row.id, row.kind, row.name) if row is not None else None
-        )
+        return self._reference(row.id, row.kind, row.name) if row is not None else None
 
     def for_visible_book(self, book_id: str) -> BookFacetReferences:
         rows = self._db.execute(
@@ -60,9 +58,7 @@ class SqlAlchemyLibraryFacetReferenceQueries:
                 LibraryFacet.id.asc(),
             )
         ).all()
-        references = tuple(
-            self._reference(row.id, row.kind, row.name) for row in rows
-        )
+        references = tuple(self._reference(row.id, row.kind, row.name) for row in rows)
         return BookFacetReferences(
             series=next((item for item in references if item.kind == "SERIES"), None),
             authors=tuple(item for item in references if item.kind == "AUTHOR"),

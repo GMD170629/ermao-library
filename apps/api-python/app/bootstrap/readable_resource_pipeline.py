@@ -168,9 +168,7 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
     )
 
 
-def continue_library_import(
-    session: Session, library_id: str
-) -> ContinueImportResult:
+def continue_library_import(session: Session, library_id: str) -> ContinueImportResult:
     """Enqueue one library ContinueImport command in the caller session."""
 
     pipeline = build_readable_resource_pipeline(session)

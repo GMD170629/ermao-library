@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import mimetypes
 import math
+import mimetypes
 import re
 import shutil
 import stat
@@ -26,11 +26,14 @@ from app.modules.imports.application.errors import (
     ComicArchiveInvalidError,
     ComicArchiveMultiVolumeError,
 )
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 _NUMBER = r"(?P<value>\d+(?:\.\d+)?)"
 _ORDINAL_PREFIX = chr(0x7B2C)
-_RESOURCE_UNITS = "".join(chr(codepoint) for codepoint in (0x5377, 0x518C, 0x90E8, 0x96C6))
+_RESOURCE_UNITS = "".join(
+    chr(codepoint) for codepoint in (0x5377, 0x518C, 0x90E8, 0x96C6)
+)
 _STRUCTURED_RESOURCE_PATTERNS = (
     re.compile(rf"^{_NUMBER}$", re.IGNORECASE),
     re.compile(rf"^{_NUMBER}\s*(?:of|/)\s*\d+(?:\.\d+)?$", re.IGNORECASE),
@@ -107,6 +110,7 @@ def _parse_resource_index(value: object | None) -> float | None:
         parsed = float(match.group("value"))
         return parsed if math.isfinite(parsed) and parsed >= 0 else None
     return None
+
 
 MAX_COMIC_INFO_BYTES = 1024 * 1024
 MAX_CBZ_ENTRIES = 10_000
@@ -272,7 +276,9 @@ def inspect_comic_archive(
         if fmt == "cbz":
             _validate_cbz_entries(all_entries)
         entries = [
-            info for info in all_entries if not info.is_dir() and _safe_entry_name(info.filename)
+            info
+            for info in all_entries
+            if not info.is_dir() and _safe_entry_name(info.filename)
         ]
         images = [
             info
@@ -375,9 +381,7 @@ def _validate_cbz_entries(entries: list[ComicArchiveEntry]) -> None:
         total_size += entry.file_size
         if total_size > MAX_CBZ_UNCOMPRESSED_BYTES:
             raise ComicArchiveInvalidError("CBZ archive exceeds the expansion limit")
-        unsafe_ratio = (
-            entry.file_size > 0 and entry.compressed_size == 0
-        ) or (
+        unsafe_ratio = (entry.file_size > 0 and entry.compressed_size == 0) or (
             entry.compressed_size > 0
             and entry.file_size / entry.compressed_size > MAX_CBZ_COMPRESSION_RATIO
         )
@@ -395,12 +399,7 @@ def extract_comic_cover(
 ) -> str:
     extension = Path(entry_name).suffix.lower() or ".jpg"
     target = (
-        storage_root
-        / "books"
-        / book_id
-        / resource_id
-        / asset_id
-        / f"cover{extension}"
+        storage_root / "books" / book_id / resource_id / asset_id / f"cover{extension}"
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f"{target.suffix}.part")

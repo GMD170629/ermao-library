@@ -396,7 +396,6 @@ __all__ = [
     "persist_account_email",
     "persist_account_name",
     "persist_account_password",
-    "prepare_account_avatar_publication",
     "persist_admin_password_reset",
     "persist_admin_user_create",
     "persist_admin_user_delete",
@@ -408,6 +407,7 @@ __all__ = [
     "persist_password_reset_request",
     "persist_session_refresh",
     "persist_user_preferences",
+    "prepare_account_avatar_publication",
     "remove_password_reset_request",
     "validate_library_ids",
 ]

@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 from typing import cast
 
 import pytest
@@ -61,7 +60,7 @@ class RecordingUoW:
 
 class FixedClock:
     def now(self) -> datetime:
-        return datetime(2024, 1, 1, tzinfo=timezone.utc)
+        return datetime(2024, 1, 1, tzinfo=UTC)
 
 
 class FakeLog:
@@ -229,12 +228,11 @@ class FakeSourceNodes:
             physical_kind=SourceNodePhysicalKind.REGULAR_FILE,
             observed_size_bytes=1,
             observed_mtime_ns=1,
-            observed_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            observed_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
 
     def get_by_path_key(self, library_id: str, path_key: str) -> None:
         del library_id, path_key
-        return None
 
     def insert_if_absent(self, **kwargs: object) -> None:
         raise NotImplementedError
@@ -247,7 +245,6 @@ class FakeSourceNodes:
 
     def get_interpretation(self, source_node_id: str) -> None:
         del source_node_id
-        return None
 
     def upsert_interpretation(self, **kwargs: object) -> None:
         return None
@@ -267,11 +264,9 @@ class FakeBooks:
 
     def get_resource_by_source_node(self, source_node_id: str) -> None:
         del source_node_id
-        return None
 
     def get_book_id_for_source_node(self, source_node_id: str) -> None:
         del source_node_id
-        return None
 
     def ensure_book(self, **kwargs: object) -> str:
         return "book-1"
@@ -300,7 +295,6 @@ class FakeBooks:
         self, library_id: str, relative_path: str
     ) -> None:
         del library_id, relative_path
-        return None
 
     def delete_library_overlay_rows(self, library_id: str) -> None:
         del library_id

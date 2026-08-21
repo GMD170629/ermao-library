@@ -30,11 +30,9 @@ from app.db.runner import head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
 from app.models.import_pipeline import Source
-from app.models.library import Library
 from app.models.settings import ReaderBookPreference, SystemSetting
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
-
 
 TARGET_CORE_TABLES = frozenset(
     {
@@ -289,9 +287,7 @@ def test_apply_schema_rejects_former_development_revisions(tmp_path) -> None:
             retired_metadata.create_all(engine)
             with engine.begin() as connection:
                 connection.execute(alembic_version.delete())
-                connection.execute(
-                    alembic_version.insert().values(version_num=retired)
-                )
+                connection.execute(alembic_version.insert().values(version_num=retired))
             with pytest.raises(RuntimeError, match="fresh installation"):
                 runner_module.apply_schema(engine, settings)
             assert _current_revision(engine) == retired

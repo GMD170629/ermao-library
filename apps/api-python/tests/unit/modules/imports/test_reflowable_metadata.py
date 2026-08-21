@@ -8,6 +8,7 @@ from app.modules.imports.infrastructure.reflowable_metadata import (
     inspect_reflowable_book,
 )
 
+
 def test_txt_inspection_reads_metadata_without_generating_navigation(
     tmp_path: Path,
 ) -> None:

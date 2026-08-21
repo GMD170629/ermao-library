@@ -10,19 +10,19 @@ from datetime import UTC, datetime
 from app.modules.reader.application.dto import (
     ExactReaderLocationKind,
     ReaderAccessScope,
+    ReaderAssetDto,
     ReaderAudioExactLocationDto,
     ReaderBookmarkDto,
     ReaderBootstrapDto,
     ReaderComicExactLocationDto,
     ReaderExactLocationDto,
     ReaderExternalProgressDto,
-    ReaderAssetDto,
     ReaderLocationKind,
+    ReaderNavigationUnitDto,
     ReaderPdfExactLocationDto,
     ReaderProgressDto,
     ReaderReadingStatus,
     ReaderReflowableExactLocationDto,
-    ReaderNavigationUnitDto,
     ReaderResourceContextDto,
 )
 from app.modules.reader.application.exact_location import (
@@ -31,8 +31,8 @@ from app.modules.reader.application.exact_location import (
 from app.modules.reader.application.ports import (
     ReaderClock,
     ReaderPublicationLocatorIndex,
-    ReaderUnitOfWork,
     ReaderResourceRepository,
+    ReaderUnitOfWork,
 )
 from app.modules.reader.domain.resource_format import (
     ReaderType,
@@ -192,7 +192,9 @@ class ResourceReaderService:
         return progress
 
     def save_progress(self, command: SaveProgressCommand) -> ReaderProgressDto:
-        context = self._require_visible_context(command.resource_id, command.access_scope)
+        context = self._require_visible_context(
+            command.resource_id, command.access_scope
+        )
         reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None:
             raise ReaderResourceFormatUnsupported
@@ -273,7 +275,9 @@ class ResourceReaderService:
     ) -> ReaderProgressDto | None:
         if command.status not in {"UNREAD", "FINISHED"}:
             raise ValueError("status must be UNREAD or FINISHED")
-        context = self._require_visible_context(command.resource_id, command.access_scope)
+        context = self._require_visible_context(
+            command.resource_id, command.access_scope
+        )
         reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None:
             raise ReaderResourceFormatUnsupported
@@ -307,7 +311,9 @@ class ResourceReaderService:
     ) -> ReaderExternalProgressDto:
         if not 0 <= command.progression <= 1:
             raise ValueError("progression must be between zero and one")
-        context = self._require_visible_context(command.resource_id, command.access_scope)
+        context = self._require_visible_context(
+            command.resource_id, command.access_scope
+        )
         reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None or reader_type.value == "audio":
             raise ReaderResourceFormatUnsupported
@@ -383,7 +389,9 @@ class ResourceReaderService:
     def replace_bookmarks(
         self, command: ReplaceBookmarksCommand
     ) -> list[ReaderBookmarkDto]:
-        context = self._require_visible_context(command.resource_id, command.access_scope)
+        context = self._require_visible_context(
+            command.resource_id, command.access_scope
+        )
         reader_type = reader_type_for_format(context.resource.format)
         if reader_type is None:
             raise ReaderResourceFormatUnsupported

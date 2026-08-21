@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime
-
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
 from app.models import (
-    LibraryBookFacet,
     LibraryBook,
+    LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
     LibraryReadableResource,
@@ -74,10 +71,14 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             )
         base = (
             select(LibraryBook, LibraryBookMetadata)
-            .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+            .outerjoin(
+                LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
+            )
             .where(*predicates)
         )
-        total = int(self._db.scalar(select(func.count()).select_from(base.subquery())) or 0)
+        total = int(
+            self._db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        )
         order = (
             LibraryBookMetadata.title.asc(),
             LibraryBook.id.asc(),
@@ -87,7 +88,9 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         rows = self._db.execute(
             base.order_by(*order).offset((page - 1) * page_size).limit(page_size)
         ).all()
-        books = tuple(self._assemble_book(book, metadata, context) for book, metadata in rows)
+        books = tuple(
+            self._assemble_book(book, metadata, context) for book, metadata in rows
+        )
         return CatalogBookPage(
             books=books,
             total=total,
@@ -96,7 +99,9 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             updated_at=max((book.updated_at for book in books), default=None),
         )
 
-    def get_book(self, *, context: AuthorizationContext, book_id: str) -> CatalogBook | None:
+    def get_book(
+        self, *, context: AuthorizationContext, book_id: str
+    ) -> CatalogBook | None:
         page = self.list_books(
             context=context,
             filters=CatalogBookFilter(book_ids=(book_id,)),
@@ -117,7 +122,9 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         predicates = [LibraryFacet.kind == kind]
         if search:
             predicates.append(LibraryFacet.name.ilike(f"%{search}%"))
-        visible_book_ids = select(LibraryBook.id).where(book_visibility_predicate(context))
+        visible_book_ids = select(LibraryBook.id).where(
+            book_visibility_predicate(context)
+        )
         base = (
             select(LibraryFacet, func.count(LibraryBookFacet.book_id))
             .outerjoin(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
@@ -129,7 +136,12 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             .where(*predicates)
             .group_by(LibraryFacet.id)
         )
-        total = int(self._db.scalar(select(func.count()).select_from(LibraryFacet).where(*predicates)) or 0)
+        total = int(
+            self._db.scalar(
+                select(func.count()).select_from(LibraryFacet).where(*predicates)
+            )
+            or 0
+        )
         rows = self._db.execute(
             base.order_by(LibraryFacet.name.asc(), LibraryFacet.id.asc())
             .offset((page - 1) * page_size)
@@ -179,7 +191,8 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
                 select(LibraryReadableResource, LibraryReadableResourceMetadata)
                 .outerjoin(
                     LibraryReadableResourceMetadata,
-                    LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+                    LibraryReadableResourceMetadata.resource_id
+                    == LibraryReadableResource.id,
                 )
                 .where(
                     LibraryReadableResource.book_id == book.id,
@@ -209,9 +222,17 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         metadata: LibraryReadableResourceMetadata | None,
     ) -> CatalogResource:
         asset_row = self._db.execute(
-            select(LibraryResourceAsset, LibraryResourceAssetMetadata, LibrarySourceNode)
-            .outerjoin(LibraryResourceAssetMetadata, LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id)
-            .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+            select(
+                LibraryResourceAsset, LibraryResourceAssetMetadata, LibrarySourceNode
+            )
+            .outerjoin(
+                LibraryResourceAssetMetadata,
+                LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+            )
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
             .where(
                 LibraryResourceAsset.resource_id == resource.id,
                 LibraryResourceAsset.import_state == "READY",
@@ -230,7 +251,9 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             asset_row_entity, asset_metadata, source = asset_row
             asset = CatalogAsset(
                 id=asset_row_entity.id,
-                mime_type=asset_metadata.mime_type if asset_metadata and asset_metadata.mime_type else "application/octet-stream",
+                mime_type=asset_metadata.mime_type
+                if asset_metadata and asset_metadata.mime_type
+                else "application/octet-stream",
                 size_bytes=int(source.observed_size_bytes or 0),
                 updated_at=source.updated_at,
             )
@@ -240,7 +263,9 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             media_kind=resource.media_kind,
             format=resource.format,
             resource_index=metadata.resource_index if metadata else None,
-            sort_order=int(metadata.resource_index or 0) if metadata and metadata.resource_index is not None else 0,
+            sort_order=int(metadata.resource_index or 0)
+            if metadata and metadata.resource_index is not None
+            else 0,
             description=metadata.description if metadata else None,
             language=metadata.language if metadata else None,
             publisher=metadata.publisher if metadata else None,

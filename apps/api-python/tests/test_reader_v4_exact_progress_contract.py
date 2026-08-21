@@ -38,10 +38,10 @@ def _path_key(path: str) -> str:
     return f"v1:{hashlib.sha256(path.encode('utf-8')).hexdigest()}"
 
 
-def _login_and_resource(client: TestClient, session: Session) -> LibraryReadableResource:
-    source_path = (
-        _REPOSITORY_ROOT / "test-data" / "library" / "epub" / "reader-v2.epub"
-    )
+def _login_and_resource(
+    client: TestClient, session: Session
+) -> LibraryReadableResource:
+    source_path = _REPOSITORY_ROOT / "test-data" / "library" / "epub" / "reader-v2.epub"
     user = User(
         id="reader-v4-exact-user",
         email="reader-v4-exact@example.com",
@@ -174,7 +174,9 @@ def test_shared_exact_fixture_round_trips_and_is_idempotent(
     payload["baseRevision"] = 0
     payload["locator"]["engineLocator"]["payload"]["href"] = "OEBPS/chapter1.xhtml"
     first = client.put(f"/api/reader/v4/resources/{resource.id}/progress", json=payload)
-    replay = client.put(f"/api/reader/v4/resources/{resource.id}/progress", json=payload)
+    replay = client.put(
+        f"/api/reader/v4/resources/{resource.id}/progress", json=payload
+    )
 
     assert first.status_code == 200, first.json()
     assert replay.status_code == 200

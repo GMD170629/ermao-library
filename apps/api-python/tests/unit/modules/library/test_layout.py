@@ -36,11 +36,25 @@ def _topology(
     [
         (
             "A/B/book.epub",
-            ("book:A/B/book.epub", "book", "resource:A/B/book.epub", "book", "A/B/book.epub", 0),
+            (
+                "book:A/B/book.epub",
+                "book",
+                "resource:A/B/book.epub",
+                "book",
+                "A/B/book.epub",
+                0,
+            ),
         ),
         (
             "十/级/以/上/目录/作品.pdf",
-            ("book:十/级/以/上/目录/作品.pdf", "作品", "resource:十/级/以/上/目录/作品.pdf", "作品", "十/级/以/上/目录/作品.pdf", 0),
+            (
+                "book:十/级/以/上/目录/作品.pdf",
+                "作品",
+                "resource:十/级/以/上/目录/作品.pdf",
+                "作品",
+                "十/级/以/上/目录/作品.pdf",
+                0,
+            ),
         ),
     ],
 )
@@ -63,7 +77,14 @@ def test_flat_maps_every_resource_to_an_independent_book(
         ),
         (
             "三体/中文版/精校/01.epub",
-            ("book:三体", "三体", "resource:三体/中文版/精校/01.epub", "01", "三体/中文版/精校/01.epub", 0),
+            (
+                "book:三体",
+                "三体",
+                "resource:三体/中文版/精校/01.epub",
+                "01",
+                "三体/中文版/精校/01.epub",
+                0,
+            ),
         ),
     ],
 )
@@ -90,11 +111,25 @@ def test_volumes_anchors_book_and_resource_from_the_source_path(
         ),
         (
             "Book/V1/Vol1/CD2/01.mp3",
-            ("book:Book", "Book", "resource:Book/V1/Vol1", "Vol1", "Book/V1/Vol1/CD2/01.mp3", 0),
+            (
+                "book:Book",
+                "Book",
+                "resource:Book/V1/Vol1",
+                "Vol1",
+                "Book/V1/Vol1/CD2/01.mp3",
+                0,
+            ),
         ),
         (
             "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3",
-            ("book:Book", "Book", "resource:Book/V1/Vol1/Extra", "Extra", "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3", 0),
+            (
+                "book:Book",
+                "Book",
+                "resource:Book/V1/Vol1/Extra",
+                "Extra",
+                "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3",
+                0,
+            ),
         ),
     ],
 )
@@ -163,17 +198,21 @@ def test_nfc_spelling_produces_the_same_topology_keys() -> None:
     assert nfd.book is not None and nfc.book is not None
     assert nfd.book.source_key == nfc.book.source_key == "book:café"
     assert nfd.book.resources[0].source_key == nfc.book.resources[0].source_key
-    assert (
-        nfd.book.resources[0].assets[0].relative_path == nfd_path
-    )
-    assert (
-        nfc.book.resources[0].assets[0].relative_path == nfc_path
-    )
+    assert nfd.book.resources[0].assets[0].relative_path == nfd_path
+    assert nfc.book.resources[0].assets[0].relative_path == nfc_path
 
 
 @pytest.mark.parametrize(
     "path",
-    ["", "/tmp/book.epub", "C:/library/book.epub", "../book.epub", "a/./b.epub", "a//b.epub", "book.epub/"],
+    [
+        "",
+        "/tmp/book.epub",
+        "C:/library/book.epub",
+        "../book.epub",
+        "a/./b.epub",
+        "a//b.epub",
+        "book.epub/",
+    ],
 )
 def test_invalid_relative_paths_return_one_stable_violation(path: str) -> None:
     result = parse_library_file_path(path, LibraryOrganizationMode.FLAT)

@@ -75,9 +75,7 @@ class FakeBooks:
     def get_resource(self, resource_id: str) -> ResourceView | None:
         return self.resources.get(resource_id)
 
-    def set_enablement(
-        self, resource_id: str, state: ResourceEnablementState
-    ) -> None:
+    def set_enablement(self, resource_id: str, state: ResourceEnablementState) -> None:
         self.enablements.append((resource_id, state))
 
     def delete_library_overlay_rows(self, library_id: str) -> None:

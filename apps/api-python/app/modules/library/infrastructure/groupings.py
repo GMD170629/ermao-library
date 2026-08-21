@@ -9,8 +9,8 @@ from app.core.authorization import AuthorizationContext, book_visibility_predica
 from app.models import LibraryBook, LibraryBookFacet, LibraryBookMetadata, LibraryFacet
 from app.modules.library.application.groupings import (
     LibraryGrouping,
-    LibraryGroupingPage,
     LibraryGroupingBook,
+    LibraryGroupingPage,
 )
 
 
@@ -90,8 +90,7 @@ class SqlAlchemyLibraryGroupingQueries:
                 LibraryFacet.updated_at.label("facet_updated_at"),
                 book_count.label("book_count"),
                 latest_book_updated_at.label("latest_book_updated_at"),
-            )
-            .where(*filters, has_visible_book)
+            ).where(*filters, has_visible_book)
         ).subquery()
         rows = self._db.execute(
             select(grouped, func.count().over().label("total_count"))

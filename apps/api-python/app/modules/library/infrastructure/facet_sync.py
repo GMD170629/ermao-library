@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
 
@@ -20,8 +20,8 @@ from app.models import (
     LibraryFacet,
 )
 from app.modules.library.application.facet_sync import (
-    PreparedBookFacet,
     BookFacetProjection,
+    PreparedBookFacet,
 )
 
 
@@ -69,7 +69,9 @@ def load_book_facet_projections(
         BookFacetProjection(
             book_id=str(row.id),
             author=str(row.author) if row.author is not None else None,
-            tags_source=json.dumps(tags_by_book.get(str(row.id), []), ensure_ascii=False),
+            tags_source=json.dumps(
+                tags_by_book.get(str(row.id), []), ensure_ascii=False
+            ),
             series_name=(str(row.series_name) if row.series_name is not None else None),
         )
         for row in book_rows

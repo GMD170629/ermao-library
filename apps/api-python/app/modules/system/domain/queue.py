@@ -11,6 +11,7 @@ from app.core.database_errors import (
     is_database_busy_error,
 )
 
+
 @dataclass(frozen=True, slots=True)
 class PreparedQueueHeartbeat:
     queue_name: str

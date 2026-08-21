@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -78,7 +78,7 @@ def _path_key(relative_path: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _bootstrap(tmp_path: Path):
@@ -157,10 +157,7 @@ def test_alembic_metadata_has_no_diff_for_target_schema(tmp_path: Path) -> None:
         target_diff = [
             item
             for item in diff
-            if any(
-                table in str(item)
-                for table in TARGET_CORE_TABLES
-            )
+            if any(table in str(item) for table in TARGET_CORE_TABLES)
         ]
         assert target_diff == []
     finally:
@@ -191,9 +188,7 @@ def test_source_node_path_key_unique_and_ready_assets(tmp_path: Path) -> None:
                 db.commit()
             db.rollback()
 
-            db.add(
-                LibraryBook(id="book-1", library_id="lib-1", source_node_id="n1")
-            )
+            db.add(LibraryBook(id="book-1", library_id="lib-1", source_node_id="n1"))
             db.flush()
             db.add(
                 LibraryReadableResource(
@@ -241,9 +236,7 @@ def test_source_node_path_key_unique_and_ready_assets(tmp_path: Path) -> None:
             assert "publishedRunId" not in LibraryResourceAsset.__table__.c
             assert "activeImportRunId" not in LibraryReadableResource.__table__.c
             assert "ownerImportRunId" not in LibraryImportTask.__table__.c
-            assert {
-                column.name for column in LibraryImportTask.__table__.columns
-            } == {
+            assert {column.name for column in LibraryImportTask.__table__.columns} == {
                 "id",
                 "kind",
                 "libraryId",

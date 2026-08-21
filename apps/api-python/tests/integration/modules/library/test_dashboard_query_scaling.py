@@ -8,20 +8,21 @@ from sqlalchemy import event, insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext
-from app.models.auth import User, UserLibraryAccess
 from app.models import (
     LibraryBook,
+    LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
-    LibraryBookFacet,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
     ReaderResourceProgress,
 )
-from app.modules.library.application.bookshelf import ListBookshelfItems
+from app.models.auth import User, UserLibraryAccess
 from app.modules.library.application.book_list import BookListQuery
+from app.modules.library.application.bookshelf import ListBookshelfItems
+from app.modules.library.infrastructure.book_list import list_books
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.dashboard import (
     continue_reading_progress,
@@ -30,7 +31,6 @@ from app.modules.library.infrastructure.dashboard import (
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
-from app.modules.library.infrastructure.book_list import list_books
 
 _ResultT = TypeVar("_ResultT")
 

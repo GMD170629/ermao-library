@@ -266,7 +266,7 @@ def process_next_metadata_writeback(
     db: Session,
     settings: Settings,
     *,
-    owner_id: str = "metadata-writeback-compat",
+    owner_id: str = "metadata-writeback-worker",
     prefer_preparation: bool = True,
 ) -> bool:
     if prefer_preparation:

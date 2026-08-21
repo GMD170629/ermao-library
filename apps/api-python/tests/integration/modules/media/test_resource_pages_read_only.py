@@ -222,9 +222,7 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
                 resource_state = verification.execute(
                     select(
                         LibraryReadableResourceMetadata.updated_at,
-                    ).where(
-                        LibraryReadableResourceMetadata.resource_id == resource_id
-                    )
+                    ).where(LibraryReadableResourceMetadata.resource_id == resource_id)
                 ).one()
             assert page_rows == 0
             assert resource_state == (preserved_updated_at,)

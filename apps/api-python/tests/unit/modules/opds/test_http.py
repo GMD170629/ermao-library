@@ -22,7 +22,9 @@ NOW = datetime(2026, 8, 3, 8, 0, tzinfo=UTC)
 
 
 class FakeAuthenticator:
-    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None:
+    def authenticate(
+        self, request: OpdsAuthenticationRequestDto
+    ) -> OpdsActorDto | None:
         credentials = request.credentials
         assert request.client_address
         assert request.method in {"GET", "PUT"}
@@ -124,10 +126,7 @@ def test_catalog_requires_basic_and_partitions_cache_by_authorization() -> None:
         "application/opds-authentication+json"
     )
     assert invalid_credentials.status_code == 401
-    assert (
-        invalid_credentials.headers["www-authenticate"]
-        == 'Basic realm="Shuku OPDS"'
-    )
+    assert invalid_credentials.headers["www-authenticate"] == 'Basic realm="Shuku OPDS"'
     assert response.status_code == 200
     assert response.headers["vary"] == "Authorization"
     assert response.headers["content-type"].startswith("application/atom+xml")

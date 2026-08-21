@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -44,7 +44,7 @@ class StructuredPipelineLog(PipelineLogPort):
 
 class UtcClock(ClockPort):
     def now(self) -> datetime:
-        return datetime.now(tz=timezone.utc)
+        return datetime.now(tz=UTC)
 
 
 class SqlAlchemyUnitOfWork(UnitOfWorkPort):
@@ -54,9 +54,7 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
     def release_before_io(self) -> None:
         session = self._session
         if session.new or session.dirty or session.deleted:
-            raise RuntimeError(
-                "release_before_io called with pending session changes"
-            )
+            raise RuntimeError("release_before_io called with pending session changes")
         if session.in_transaction():
             session.rollback()
 

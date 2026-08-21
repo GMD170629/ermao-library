@@ -41,7 +41,9 @@ class FacetSyncGateway(Protocol):
 
 
 class MergeLibraryCategories:
-    def __init__(self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork) -> None:
+    def __init__(
+        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+    ) -> None:
         self._gateway = gateway
         self._uow = uow
 
@@ -53,7 +55,9 @@ class MergeLibraryCategories:
         user_id: str | None,
     ) -> dict[str, object]:
         try:
-            result = self._gateway.merge_categories(kind, source_ids, target_id, user_id)
+            result = self._gateway.merge_categories(
+                kind, source_ids, target_id, user_id
+            )
             self._uow.commit()
         except Exception:
             self._uow.rollback()
@@ -62,11 +66,15 @@ class MergeLibraryCategories:
 
 
 class RenameLibraryCategory:
-    def __init__(self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork) -> None:
+    def __init__(
+        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+    ) -> None:
         self._gateway = gateway
         self._uow = uow
 
-    def execute(self, facet_id: str, name: str, user_id: str | None) -> dict[str, object]:
+    def execute(
+        self, facet_id: str, name: str, user_id: str | None
+    ) -> dict[str, object]:
         try:
             result = self._gateway.rename_category(facet_id, name, user_id)
             self._uow.commit()
@@ -77,7 +85,9 @@ class RenameLibraryCategory:
 
 
 class DeleteLibraryCategory:
-    def __init__(self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork) -> None:
+    def __init__(
+        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+    ) -> None:
         self._gateway = gateway
         self._uow = uow
 
@@ -92,7 +102,9 @@ class DeleteLibraryCategory:
 
 
 class UndoLibraryOperation:
-    def __init__(self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork) -> None:
+    def __init__(
+        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+    ) -> None:
         self._gateway = gateway
         self._uow = uow
 
@@ -107,7 +119,9 @@ class UndoLibraryOperation:
 
 
 class SyncBookFacets:
-    def __init__(self, gateway: FacetSyncGateway, uow: LibraryManagementUnitOfWork) -> None:
+    def __init__(
+        self, gateway: FacetSyncGateway, uow: LibraryManagementUnitOfWork
+    ) -> None:
         self._gateway = gateway
         self._uow = uow
 
@@ -121,7 +135,9 @@ class SyncBookFacets:
 
 
 class SyncBooksFacets:
-    def __init__(self, gateway: FacetSyncGateway, uow: LibraryManagementUnitOfWork) -> None:
+    def __init__(
+        self, gateway: FacetSyncGateway, uow: LibraryManagementUnitOfWork
+    ) -> None:
         self._gateway = gateway
         self._uow = uow
 

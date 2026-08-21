@@ -35,7 +35,7 @@ class SmartShelfCriteria:
     @classmethod
     def from_external(cls, value: object) -> SmartShelfCriteria:
         if not isinstance(value, dict):
-            raise ValueError("智能书架规则格式不正确")
+            raise TypeError("智能书架规则格式不正确")
         statuses = tuple(
             item
             for item in _strings(value.get("statuses"), upper=True)

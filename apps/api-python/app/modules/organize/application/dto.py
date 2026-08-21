@@ -36,7 +36,6 @@ class PreparedOrganizeJobEnqueue:
     task_id: str
     book_id: str
     resource_id: str | None
-    resource_id: str | None
     provider_order: tuple[str, ...]
     reasons: tuple[str, ...]
 

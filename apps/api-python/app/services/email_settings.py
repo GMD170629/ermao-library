@@ -209,9 +209,8 @@ def prepare_email_settings_update(
 
     changed_keys = list(supplied.keys())
     clear_password = payload.get("clearSmtpPassword") is True
-    if clear_password:
-        if SMTP_PASSWORD_KEY not in changed_keys:
-            changed_keys.append(SMTP_PASSWORD_KEY)
+    if clear_password and SMTP_PASSWORD_KEY not in changed_keys:
+        changed_keys.append(SMTP_PASSWORD_KEY)
 
     return PreparedEmailSettingsUpdate(
         supplied=supplied,

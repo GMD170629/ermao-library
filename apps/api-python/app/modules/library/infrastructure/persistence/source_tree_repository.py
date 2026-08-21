@@ -111,9 +111,7 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
         library.root_path = str(root_path)
         self._session.flush()
 
-    def root_path_conflicts(
-        self, root_path: Path, *, exclude_library_id: str
-    ) -> bool:
+    def root_path_conflicts(self, root_path: Path, *, exclude_library_id: str) -> bool:
         normalized = str(root_path.resolve())
         existing = self._session.scalar(
             select(Library.id).where(
@@ -182,9 +180,7 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
             relative_path=entry.relative_path,
             physical_kind=entry.physical_kind,
         )
-        violations = validate_source_node_direct_parent(
-            node=child, parent=parent_tree
-        )
+        violations = validate_source_node_direct_parent(node=child, parent=parent_tree)
         if violations:
             raise SourceNodeTopologyError(
                 violations[0].code,
@@ -234,9 +230,7 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         )
         self._session.flush()
 
-    def get_interpretation(
-        self, source_node_id: str
-    ) -> InterpretationRecord | None:
+    def get_interpretation(self, source_node_id: str) -> InterpretationRecord | None:
         row = self._session.get(LibrarySourceNodeInterpretation, source_node_id)
         if row is None:
             return None
@@ -401,7 +395,9 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         if book_anchor is None or resource_anchor is None:
             raise ReadableResourceTopologyError(
                 ReadableResourceAnchorViolationCode.SOURCE_NODE_NOT_FOUND,
-                detail=source_node_id if resource_anchor is None else book.source_node_id,
+                detail=source_node_id
+                if resource_anchor is None
+                else book.source_node_id,
             )
         if (
             book_anchor.library_id != library_id
@@ -505,7 +501,9 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         if asset_node is None or resource_anchor is None:
             raise ReadableResourceTopologyError(
                 ReadableResourceAnchorViolationCode.SOURCE_NODE_NOT_FOUND,
-                detail=source_node_id if asset_node is None else resource.source_node_id,
+                detail=source_node_id
+                if asset_node is None
+                else resource.source_node_id,
             )
         if asset_node.library_id != library_id:
             raise ReadableResourceTopologyError(
@@ -574,9 +572,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             candidates.append("/".join(parts[:index]))
         if not candidates:
             return None
-        path_keys = [
-            SourceNodeRelativePath(path).path_key for path in candidates
-        ]
+        path_keys = [SourceNodeRelativePath(path).path_key for path in candidates]
         nodes = self._session.scalars(
             select(LibrarySourceNode).where(
                 LibrarySourceNode.library_id == library_id,
@@ -619,9 +615,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         self._session.flush()
         return resource_ids
 
-    def reevaluate_ready_after_asset_loss(
-        self, resource_ids: Sequence[str]
-    ) -> None:
+    def reevaluate_ready_after_asset_loss(self, resource_ids: Sequence[str]) -> None:
         for resource_id in resource_ids:
             resource = self.get_resource(resource_id)
             if resource is None:

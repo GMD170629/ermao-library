@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from app.contracts.media_capabilities import (
     ReaderType,
+)
+from app.contracts.media_capabilities import (
     reader_type_for_format as contract_reader_type_for_format,
 )
 

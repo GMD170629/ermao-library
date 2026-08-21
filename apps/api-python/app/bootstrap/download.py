@@ -7,12 +7,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.bootstrap.readable_resource_pipeline import continue_library_import
 from app.bootstrap.system import (
     prepare_settings_write,
     write_prepared_settings,
     write_prepared_system_events,
 )
-from app.bootstrap.readable_resource_pipeline import continue_library_import
 from app.models.common import db_timestamp
 from app.models.library import Library
 from app.modules.download.application.dto import (
@@ -36,6 +36,8 @@ from app.modules.download.infrastructure.tasks import (
     prepare_claim_download_task,
     prepare_download_task_state_update,
     prepare_mark_download_task_importing,
+)
+from app.modules.download.infrastructure.tasks import (
     list_enabled_libraries as _list_enabled_libraries,
 )
 from app.modules.download.public import DownloadWriteTransaction
@@ -204,6 +206,7 @@ def continue_download_import_command(
 
 __all__ = [
     "claim_download_task_command",
+    "continue_download_import_command",
     "create_download_task",
     "create_download_task_command",
     "delete_download_task",
@@ -212,7 +215,6 @@ __all__ = [
     "get_download_task",
     "list_download_tasks",
     "list_enabled_libraries",
-    "continue_download_import_command",
     "update_download_task",
     "update_download_task_command",
     "write_download_task",

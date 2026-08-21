@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -98,7 +99,9 @@ def resource_visibility_predicate(
     )
     if context.is_admin:
         return resource.id.is_not(None) & state[0] & state[1]
-    return library_visibility_predicate(context, resource.library_id) & state[0] & state[1]
+    return (
+        library_visibility_predicate(context, resource.library_id) & state[0] & state[1]
+    )
 
 
 def asset_visibility_predicate(
@@ -203,17 +206,13 @@ def prepare_user_preference_write(
 ) -> Insert:
     encoded_value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     statement = sqlite_insert(UserPreference)
-    return (
-        statement
-        .values(
-            user_id=user_id,
-            key=key,
-            value=encoded_value,
-        )
-        .on_conflict_do_update(
-            index_elements=[UserPreference.user_id, UserPreference.key],
-            set_={"value": encoded_value},
-        )
+    return statement.values(
+        user_id=user_id,
+        key=key,
+        value=encoded_value,
+    ).on_conflict_do_update(
+        index_elements=[UserPreference.user_id, UserPreference.key],
+        set_={"value": encoded_value},
     )
 
 

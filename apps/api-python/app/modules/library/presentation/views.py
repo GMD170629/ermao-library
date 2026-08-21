@@ -11,10 +11,13 @@ from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.contracts.media_capabilities import kindle_send_available_for_format, reader_type_for_format
+from app.bootstrap.library import get_book as load_book
+from app.contracts.media_capabilities import (
+    kindle_send_available_for_format,
+    reader_type_for_format,
+)
 from app.models import (
     Library,
-    LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
@@ -22,8 +25,6 @@ from app.models import (
     LibrarySourceNode,
     ReaderResourceProgress,
 )
-from app.bootstrap.library import get_book as load_book
-from app.models import LibraryBook
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 
 
@@ -35,7 +36,11 @@ def _format_bytes(value: int | None) -> str:
     size = max(0, int(value or 0))
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size < 1024 or unit == "TB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size / (1 if unit == 'KB' else 1024):.1f} {unit}"
+            return (
+                f"{size:.0f} {unit}"
+                if unit == "B"
+                else f"{size / (1 if unit == 'KB' else 1024):.1f} {unit}"
+            )
         size /= 1024
     return "0 B"
 
@@ -52,7 +57,13 @@ def _parse_json(value: object, fallback: object) -> object:
     return parsed
 
 
-def _cover_url(kind: str, identity: str, book: dict[str, Any] | None = None, *, size: str | None = None) -> str:
+def _cover_url(
+    kind: str,
+    identity: str,
+    book: dict[str, Any] | None = None,
+    *,
+    size: str | None = None,
+) -> str:
     path = f"/api/{kind}/{quote(identity, safe='')}/cover"
     return f"{path}?size={quote(size, safe='')}" if size else path
 
@@ -61,13 +72,16 @@ def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
     return load_book(db, book_id)
 
 
-def _resource_rows(db: Session, book_id: str) -> list[tuple[LibraryReadableResource, LibraryReadableResourceMetadata | None]]:
+def _resource_rows(
+    db: Session, book_id: str
+) -> list[tuple[LibraryReadableResource, LibraryReadableResourceMetadata | None]]:
     return list(
         db.execute(
             select(LibraryReadableResource, LibraryReadableResourceMetadata)
             .outerjoin(
                 LibraryReadableResourceMetadata,
-                LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+                LibraryReadableResourceMetadata.resource_id
+                == LibraryReadableResource.id,
             )
             .where(
                 LibraryReadableResource.book_id == book_id,
@@ -104,7 +118,10 @@ def _asset_rows(
                 LibraryResourceAssetMetadata,
                 LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
             )
-            .join(LibrarySourceNode, LibrarySourceNode.id == LibraryResourceAsset.source_node_id)
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
             .join(Library, Library.id == LibraryResourceAsset.library_id)
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
@@ -134,7 +151,9 @@ def _resource_view(
             "resourceId": asset.resource_id,
             "sourceNodeId": asset.source_node_id,
             "role": asset.role,
-            "mimeType": asset_metadata.mime_type if asset_metadata else "application/octet-stream",
+            "mimeType": asset_metadata.mime_type
+            if asset_metadata
+            else "application/octet-stream",
             "sizeBytes": int(source.observed_size_bytes or 0),
             "path": str(Path(library.root_path) / source.relative_path),
             "kind": asset.role,
@@ -203,11 +222,15 @@ def _format_bytes(value: int | None) -> str:
     return f"{size} {units[index]}"
 
 
-def book_view(db: Session, book: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
+def book_view(
+    db: Session, book: dict[str, Any], user_id: str | None = None
+) -> dict[str, Any]:
     book_id = str(book["id"])
     progress_by_resource: dict[str, ReaderResourceProgress] = {}
     if user_id:
-        resource_ids = [resource.id for resource, _metadata in _resource_rows(db, book_id)]
+        resource_ids = [
+            resource.id for resource, _metadata in _resource_rows(db, book_id)
+        ]
         if resource_ids:
             progress_by_resource = {
                 row.resource_id: row
@@ -335,7 +358,9 @@ def bookshelf_item_view(item: BookshelfItemSummary) -> dict[str, Any]:
     }
 
 
-def bookshelf_item_views(items: tuple[BookshelfItemSummary, ...] | list[BookshelfItemSummary]) -> list[dict[str, Any]]:
+def bookshelf_item_views(
+    items: tuple[BookshelfItemSummary, ...] | list[BookshelfItemSummary],
+) -> list[dict[str, Any]]:
     return [bookshelf_item_view(item) for item in items]
 
 

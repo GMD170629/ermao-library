@@ -14,15 +14,14 @@ from sqlalchemy.orm import Session, aliased
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import to_timestamp_ms
-from app.models.common import db_timestamp
 from app.models import (
-    LibraryFacet,
     LibraryBook,
     LibraryBookFacet,
+    LibraryFacet,
 )
+from app.models.common import db_timestamp
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
-from app.modules.library.domain.facets import FACET_KINDS
-from app.modules.library.domain.facets import normalize_facet_name
+from app.modules.library.domain.facets import FACET_KINDS, normalize_facet_name
 
 
 def parse_json(value: Any, fallback: Any) -> Any:

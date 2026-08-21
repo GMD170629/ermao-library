@@ -310,11 +310,13 @@ def test_node_only_then_compatible_files_become_resource(tmp_path: Path) -> None
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
             _drain(pipeline)
             interp = db.scalar(
-                select(LibrarySourceNodeInterpretation).join(
+                select(LibrarySourceNodeInterpretation)
+                .join(
                     LibrarySourceNode,
                     LibrarySourceNode.id
                     == LibrarySourceNodeInterpretation.source_node_id,
-                ).where(LibrarySourceNode.relative_path == "mixed")
+                )
+                .where(LibrarySourceNode.relative_path == "mixed")
             )
             assert interp is not None
             assert interp.result == "NODE_ONLY"
@@ -390,9 +392,7 @@ def test_partial_asset_failure_keeps_ready_resource(tmp_path: Path) -> None:
             album.mkdir()
             (album / "ok.mp3").write_bytes(b"a")
             (album / "bad.mp3").write_bytes(b"a")
-            pipeline, _ = _pipeline(
-                db, adapters=StubFailOnceAdapter({"bad.mp3"})
-            )
+            pipeline, _ = _pipeline(db, adapters=StubFailOnceAdapter({"bad.mp3"}))
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
             _drain(pipeline)
             resource = db.scalar(select(LibraryReadableResource))

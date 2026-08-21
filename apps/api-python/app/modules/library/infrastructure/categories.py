@@ -9,12 +9,12 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
-    LibraryFacet,
-    LibraryReadableResource,
-    LibraryReadableResourceMetadata,
-    LibraryReadableResourceFacet,
     LibraryBook,
     LibraryBookFacet,
+    LibraryFacet,
+    LibraryReadableResource,
+    LibraryReadableResourceFacet,
+    LibraryReadableResourceMetadata,
 )
 from app.modules.library.infrastructure.books import entity_record
 
@@ -76,12 +76,16 @@ def list_book_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, A
     return [entity_record(row) for row in rows]
 
 
-def list_resource_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
+def list_resource_facet_links(
+    db: Session, facet_ids: list[str]
+) -> list[dict[str, Any]]:
     if not facet_ids:
         return []
     rows = (
         db.execute(
-            select(LibraryReadableResourceFacet).where(LibraryReadableResourceFacet.facet_id.in_(facet_ids))
+            select(LibraryReadableResourceFacet).where(
+                LibraryReadableResourceFacet.facet_id.in_(facet_ids)
+            )
         )
         .scalars()
         .all()

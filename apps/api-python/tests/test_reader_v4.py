@@ -14,7 +14,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
-from app.models import ReadableResourceNavigationUnit, ReaderBookmark, ReaderResourceProgress
+from app.models import (
+    ReadableResourceNavigationUnit,
+    ReaderBookmark,
+    ReaderResourceProgress,
+)
 from app.models.auth import User
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
@@ -190,7 +194,9 @@ def _add_resource(
     return resource, asset
 
 
-def _ebook_resource(db_session: Session) -> tuple[LibraryReadableResource, LibraryResourceAsset]:
+def _ebook_resource(
+    db_session: Session,
+) -> tuple[LibraryReadableResource, LibraryResourceAsset]:
     source_path = (
         Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
     )
@@ -280,7 +286,9 @@ def _exact_locator(
     }
 
 
-def _exact_pdf_locator(*, page_index: int, page_progression: float) -> dict[str, object]:
+def _exact_pdf_locator(
+    *, page_index: int, page_progression: float
+) -> dict[str, object]:
     return {
         "kind": "pdf",
         "pageIndex": page_index,
@@ -440,7 +448,7 @@ def test_reader_v4_exact_save_after_reading_status_uses_current_revision(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    user = _login(client, db_session)
+    _login(client, db_session)
     resource, _asset = _ebook_resource(db_session)
     finished = client.put(
         f"/api/reader/v4/resources/{resource.id}/reading-status",
@@ -467,7 +475,7 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    user = _login(client, db_session)
+    _login(client, db_session)
     resource, asset = _ebook_resource(db_session)
     resource.format = "PDF"
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
@@ -559,9 +567,7 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     accepted = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            locator=_exact_comic_locator(
-                page_index=1, resource_href="images/0002.jpg"
-            )
+            locator=_exact_comic_locator(page_index=1, resource_href="images/0002.jpg")
         ),
     )
     wrong_media_type = client.put(
@@ -756,9 +762,7 @@ def test_reader_v4_rejects_locator_media_type_that_does_not_match_resource(
     resource, _asset = _ebook_resource(db_session)
     response = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
-        json=_progress_payload(
-            locator=_exact_locator(media_type="application/pdf")
-        ),
+        json=_progress_payload(locator=_exact_locator(media_type="application/pdf")),
     )
 
     assert response.status_code == 422
@@ -823,16 +827,23 @@ def test_resource_reading_status_updates_book_detail_and_isolated_progress(
     detail = client.get("/api/books/book-reader-v4").json()["data"]["book"]
     assert detail["continueResourceId"] == first.id
     assert {item["id"] for item in detail["resources"]} == {first.id, second.id}
-    assert next(item for item in detail["resources"] if item["id"] == first.id)[
-        "resourceCompleted"
-    ] is True
-    assert next(item for item in detail["resources"] if item["id"] == second.id)[
-        "resourceCompleted"
-    ] is False
+    assert (
+        next(item for item in detail["resources"] if item["id"] == first.id)[
+            "resourceCompleted"
+        ]
+        is True
+    )
+    assert (
+        next(item for item in detail["resources"] if item["id"] == second.id)[
+            "resourceCompleted"
+        ]
+        is False
+    )
     progresses = db_session.query(ReaderResourceProgress).all()
-    assert [(progress.user_id, progress.resource_id, progress.percent) for progress in progresses] == [
-        (user.id, first.id, 100.0)
-    ]
+    assert [
+        (progress.user_id, progress.resource_id, progress.percent)
+        for progress in progresses
+    ] == [(user.id, first.id, 100.0)]
     created_progress = progresses[0]
     assert created_progress.schema_version == 4
     assert created_progress.reader_type == "reflowable"
@@ -896,9 +907,7 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     source_node.path_key = _path_key(str(epub))
     source_node.name = epub.name
     source_node.observed_size_bytes = epub.stat().st_size
-    source_node.observed_mtime_ns = (
-        epub.stat().st_mtime_ns // 1_000_000
-    ) * 1_000_000
+    source_node.observed_mtime_ns = (epub.stat().st_mtime_ns // 1_000_000) * 1_000_000
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None
     metadata.chapter_count = None
@@ -927,7 +936,9 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
 
     event.listen(engine, "before_cursor_execute", capture_writes)
     try:
-        second_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+        second_response = client.get(
+            f"/api/reader/v4/resources/{resource.id}/bootstrap"
+        )
     finally:
         event.remove(engine, "before_cursor_execute", capture_writes)
 
@@ -948,7 +959,10 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
         "durationMs",
         "metadata",
     }
-    assert second_response.json()["data"]["units"] == first_response.json()["data"]["units"]
+    assert (
+        second_response.json()["data"]["units"]
+        == first_response.json()["data"]["units"]
+    )
     assert writes == []
     assert db_session.query(ReadableResourceNavigationUnit).count() == 2
     db_session.expire_all()
@@ -972,9 +986,7 @@ def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
     source_node.path_key = _path_key(str(epub))
     source_node.name = epub.name
     source_node.observed_size_bytes = epub.stat().st_size
-    source_node.observed_mtime_ns = (
-        epub.stat().st_mtime_ns // 1_000_000
-    ) * 1_000_000
+    source_node.observed_mtime_ns = (epub.stat().st_mtime_ns // 1_000_000) * 1_000_000
     db_session.add_all(
         [
             ReadableResourceNavigationUnit(
@@ -1215,6 +1227,7 @@ def test_sibling_resources_keep_independent_progress_and_completion(
     sibling_bootstrap = client.get(
         f"/api/reader/v4/resources/{sibling.id}/bootstrap"
     ).json()["data"]
+    assert sibling_bootstrap["resource"]["resourceCompleted"] is False
     sibling_save = client.put(
         f"/api/reader/v4/resources/{sibling.id}/progress",
         json=_progress_payload(
@@ -1224,9 +1237,9 @@ def test_sibling_resources_keep_independent_progress_and_completion(
         ),
     )
     assert sibling_save.status_code == 200, sibling_save.json()
-    source_after = client.get(
-        f"/api/reader/v4/resources/{source.id}/bootstrap"
-    ).json()["data"]
+    source_after = client.get(f"/api/reader/v4/resources/{source.id}/bootstrap").json()[
+        "data"
+    ]
     sibling_after = client.get(
         f"/api/reader/v4/resources/{sibling.id}/bootstrap"
     ).json()["data"]

@@ -35,7 +35,10 @@ def test_library_and_shelf_write_bodies_are_documented() -> None:
         assert "requestBody" in schema["paths"][path][method], (method, path)
 
     assert "201" in schema["paths"]["/api/shelves"]["post"]["responses"]
-    assert "206" in schema["paths"]["/api/resources/{resource_id}/asset"]["get"]["responses"]
+    assert (
+        "206"
+        in schema["paths"]["/api/resources/{resource_id}/asset"]["get"]["responses"]
+    )
     assert (
         "206"
         in schema["paths"]["/api/resources/{resource_id}/pages/{page_index}"]["get"][

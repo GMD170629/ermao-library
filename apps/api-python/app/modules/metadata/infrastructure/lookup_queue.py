@@ -79,7 +79,6 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
         "id": task.id,
         "bookId": task.book_id,
         "resourceId": task.resource_id,
-        "resourceId": task.resource_id,
         "importTaskId": task.import_task_id,
         "organizeJobId": task.organize_job_id,
         "status": task.status,
@@ -446,7 +445,9 @@ def resource_has_cover(db: Session, resource_id: str) -> bool:
 def get_import_task_status(db: Session, import_task_id: str | None) -> str | None:
     if not import_task_id:
         return None
-    return db.scalar(select(LibraryImportTask.state).where(LibraryImportTask.id == import_task_id))
+    return db.scalar(
+        select(LibraryImportTask.state).where(LibraryImportTask.id == import_task_id)
+    )
 
 
 def get_lookup_task_status(db: Session, task_id: str) -> str | None:

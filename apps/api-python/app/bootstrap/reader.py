@@ -16,7 +16,9 @@ from app.modules.reader.infrastructure.resource_repository import (
 )
 
 
-def reader_resource_service(session: Session, settings: Settings) -> ResourceReaderService:
+def reader_resource_service(
+    session: Session, settings: Settings
+) -> ResourceReaderService:
     repository = SqlAlchemyReaderResourceRepository(session)
     return ResourceReaderService(
         repository,

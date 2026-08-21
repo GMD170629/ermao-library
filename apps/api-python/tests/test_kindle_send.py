@@ -18,9 +18,9 @@ from app.models import (
     LibraryResourceAsset,
     LibrarySourceNode,
 )
-from app.models.auth import User, UserLibraryAccess
+from app.models.auth import User
 from app.models.import_pipeline import KindleSendTask
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemEvent
 from app.services import kindle_queue
 from app.services.kindle_queue import (
     process_next_kindle_send_task,
@@ -109,14 +109,18 @@ def _seed_book_resource_asset(db_session, test_settings) -> tuple[Path, str]:
     )
     db_session.add(resource)
     db_session.flush()
-    db_session.add(LibraryReadableResourceMetadata(resource_id=resource.id, title="EPUB"))
+    db_session.add(
+        LibraryReadableResourceMetadata(resource_id=resource.id, title="EPUB")
+    )
     db_session.add(asset)
     db_session.flush()
     db_session.commit()
     return path, asset.id
 
 
-def _prepare(client, db_session, test_settings, *, max_attachment_mb: float | None = None):
+def _prepare(
+    client, db_session, test_settings, *, max_attachment_mb: float | None = None
+):
     _login(client, db_session)
     _seed_book_resource_asset(db_session, test_settings)
     saved = client.put(
@@ -197,7 +201,9 @@ def test_enqueue_deduplicates_and_rejects_unsupported_assets(
     assert duplicate["id"] == created["id"]
     assert client.get("/api/kindle-send-tasks").json()["data"]["total"] == 1
 
-    comic_path = test_settings.resolved_storage_root / "books" / "book-kindle" / "comic.cbz"
+    comic_path = (
+        test_settings.resolved_storage_root / "books" / "book-kindle" / "comic.cbz"
+    )
     comic_path.write_bytes(b"comic")
     comic_node = _node("kindle-comic-node", "books/book-kindle/comic.cbz")
     comic_resource = LibraryReadableResource(
@@ -329,7 +335,9 @@ def test_worker_retries_transient_failure_and_recovers_interrupted_send(
         def close(self):
             return None
 
-    monkeypatch.setattr(kindle_queue, "open_smtp_connection", lambda _config: FailingSmtp())
+    monkeypatch.setattr(
+        kindle_queue, "open_smtp_connection", lambda _config: FailingSmtp()
+    )
     for expected_attempt in (1, 2, 3):
         assert process_next_kindle_send_task(db_session, test_settings) is True
         stored = db_session.get(KindleSendTask, task["id"])

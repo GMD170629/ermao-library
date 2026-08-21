@@ -111,9 +111,7 @@ def prepare_organize_run_write(
         }
         for plan in job_plans
     }
-    book_ids_for_run = select(OrganizeJob.book_id).where(
-        OrganizeJob.run_id == run_id
-    )
+    book_ids_for_run = select(OrganizeJob.book_id).where(OrganizeJob.run_id == run_id)
     book_statement = (
         update(LibraryBook)
         .where(LibraryBook.id.in_(book_ids_for_run))
@@ -385,9 +383,7 @@ def finish_unresolved_jobs_for_book(
     return job_ids
 
 
-def prepare_refresh_run_queue_count(
-    *, run_id: str, now: datetime
-) -> Executable:
+def prepare_refresh_run_queue_count(*, run_id: str, now: datetime) -> Executable:
     queued_count = (
         select(func.count())
         .select_from(OrganizeJob)

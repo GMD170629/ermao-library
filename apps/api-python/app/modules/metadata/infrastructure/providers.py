@@ -51,9 +51,7 @@ def prepare_pipeline_update_write(
         pipeline_rows,
         parameters_per_row=7,
     ):
-        pipeline_insert = sqlite_insert(MetadataProviderPipeline).values(
-            list(chunk)
-        )
+        pipeline_insert = sqlite_insert(MetadataProviderPipeline).values(list(chunk))
         statements.append(
             pipeline_insert.on_conflict_do_update(
                 index_elements=[

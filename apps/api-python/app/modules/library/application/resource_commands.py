@@ -276,7 +276,7 @@ __all__ = [
     "ResourceReclassifyOutcome",
     "SetResourceMediaKindsCommand",
     "SetResourceMediaKindsOutcome",
-    "set_resource_media_kinds",
     "reclassify_resource",
+    "set_resource_media_kinds",
     "update_resource",
 ]

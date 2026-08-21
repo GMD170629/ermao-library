@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
 
 from app.core.sql_batches import sqlite_parameter_chunks
+from app.models import BookDetailPreference, LibraryOperation, ReaderResourceProgress
 from app.models.auth import (
     PasswordResetToken,
     ReaderBookmark,
@@ -23,7 +24,6 @@ from app.models.auth import (
     Session as UserSession,
 )
 from app.models.import_pipeline import KindleSendTask
-from app.models import BookDetailPreference, LibraryOperation, ReaderResourceProgress
 from app.models.settings import (
     ReaderBookPreference,
     ReaderPreference,

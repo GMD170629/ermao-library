@@ -20,8 +20,7 @@ def entity_record(entity: object) -> dict[str, Any]:
 
     mapper = sa_inspect(entity).mapper
     return {
-        prop.columns[0].name: getattr(entity, prop.key)
-        for prop in mapper.column_attrs
+        prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
 
 
@@ -29,7 +28,9 @@ def _legacy_column_to_attr(model: type) -> dict[str, str]:
     mapper = sa_inspect(model)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
+
 ACTIVE_DOWNLOAD_STATUSES = ("queued", "downloading", "downloaded", "completed")
+
 
 def get_download_task(db: Session, task_id: str) -> dict[str, Any] | None:
     task = db.get(DownloadTask, task_id)
@@ -151,7 +152,5 @@ def system_setting_value(db: Session, key: str) -> str | None:
 
 
 def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(Library).where(Library.enabled.is_(True))
-    ).scalars().all()
+    rows = db.execute(select(Library).where(Library.enabled.is_(True))).scalars().all()
     return [entity_record(row) for row in rows]

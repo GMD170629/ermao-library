@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any
 
-from sqlalchemy import inspect as sa_inspect, select, update
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import LibraryBook, LibraryBookMetadata
@@ -117,12 +118,18 @@ def update_book_fields(
     values: dict[str, Any],
 ) -> dict[str, Any] | None:
     book_values = {
-        "visibility_state": values.get("visibility_state", values.get("visibilityState")),
+        "visibility_state": values.get(
+            "visibility_state", values.get("visibilityState")
+        ),
         "curation_state": values.get("curation_state", values.get("curationState")),
     }
-    book_values = {key: value for key, value in book_values.items() if value is not None}
+    book_values = {
+        key: value for key, value in book_values.items() if value is not None
+    }
     if book_values:
-        db.execute(update(LibraryBook).where(LibraryBook.id == book_id).values(**book_values))
+        db.execute(
+            update(LibraryBook).where(LibraryBook.id == book_id).values(**book_values)
+        )
     metadata_values = _metadata_values(values)
     if metadata_values:
         metadata = db.get(LibraryBookMetadata, book_id)

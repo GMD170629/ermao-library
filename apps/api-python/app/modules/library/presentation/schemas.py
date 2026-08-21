@@ -82,7 +82,9 @@ class ResourceView(HttpContractModel):
     sort_order: int = Field(default=0, alias="sortOrder")
     format: str
     media_kind: MediaKind = Field(alias="mediaKind")
-    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(alias="readerType")
+    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
+        alias="readerType"
+    )
     classification: dict[str, str | None] = Field(default_factory=dict)
     kindle_send_available: bool = Field(alias="kindleSendAvailable")
     publisher: str | None = None
@@ -138,8 +140,12 @@ class BookView(HttpContractModel):
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     completed: bool
     continue_resource_id: str | None = Field(default=None, alias="continueResourceId")
-    continue_resource_title: str | None = Field(default=None, alias="continueResourceTitle")
-    continue_resource_progress: float = Field(default=0, alias="continueResourceProgress")
+    continue_resource_title: str | None = Field(
+        default=None, alias="continueResourceTitle"
+    )
+    continue_resource_progress: float = Field(
+        default=0, alias="continueResourceProgress"
+    )
 
 
 class BookSummary(HttpContractModel):
@@ -185,7 +191,9 @@ class ContinueReadingItem(HttpContractModel):
     cover_url: str = Field(alias="coverUrl")
     media_kind: MediaKind = Field(alias="mediaKind")
     resource_format: str = Field(alias="resourceFormat")
-    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(alias="readerType")
+    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
+        alias="readerType"
+    )
     resource_id: str = Field(alias="resourceId")
     resource_title: str = Field(alias="resourceTitle")
     percent: float = Field(ge=0, le=100)

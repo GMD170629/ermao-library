@@ -12,7 +12,9 @@ class UnsafeCoverUrl(ValueError):
     """Raised when a cover URL could reach a non-public network target."""
 
 
-def configured_cover_origins(values: Iterable[object]) -> frozenset[tuple[str, str, int | None]]:
+def configured_cover_origins(
+    values: Iterable[object],
+) -> frozenset[tuple[str, str, int | None]]:
     origins: set[tuple[str, str, int | None]] = set()
     for value in values:
         parsed = urlsplit(str(value or "").strip())
@@ -53,7 +55,9 @@ def validate_cover_url(
     try:
         addresses = {
             ipaddress.ip_address(result[4][0])
-            for result in socket.getaddrinfo(hostname, port or (443 if scheme == "https" else 80))
+            for result in socket.getaddrinfo(
+                hostname, port or (443 if scheme == "https" else 80)
+            )
         }
     except (OSError, ValueError) as exc:
         raise UnsafeCoverUrl("cover host could not be resolved") from exc

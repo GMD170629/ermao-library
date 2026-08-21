@@ -38,8 +38,12 @@ class PublicationNavigationCache(Base):
         ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    source_size_bytes: Mapped[int] = mapped_column("sourceSizeBytes", Integer, nullable=False)
-    source_mtime_ms: Mapped[int] = mapped_column("sourceMtimeMs", Integer, nullable=False)
+    source_size_bytes: Mapped[int] = mapped_column(
+        "sourceSizeBytes", Integer, nullable=False
+    )
+    source_mtime_ms: Mapped[int] = mapped_column(
+        "sourceMtimeMs", Integer, nullable=False
+    )
     parser: Mapped[str] = mapped_column(String(191), nullable=False)
     normalization: Mapped[str] = mapped_column(String(191), nullable=False)
     projection_version: Mapped[int] = mapped_column(

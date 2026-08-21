@@ -30,7 +30,6 @@ def test_categories_remain_page_bounded(
         ],
     )
     book_count = 100_000
-    duplicate_book_count = 10_000
     for start in range(0, book_count, 1_000):
         stop = min(book_count, start + 1_000)
         db_session.execute(

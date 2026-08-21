@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from pydantic import Field
+
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.modules.auth.presentation.schemas import (
@@ -12,7 +14,6 @@ from app.modules.auth.presentation.schemas import (
     AuthUser,
     UserPreferences,
 )
-from pydantic import Field
 
 
 class AdminUser(AuthUser):

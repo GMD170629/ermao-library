@@ -90,9 +90,9 @@ def test_collection_membership_is_many_to_many_and_exposed_in_views(
     )
     assert updated.status_code == 200
     assert updated.json()["data"]["shelf"]["collectionIds"] == [second_collection["id"]]
-    first_detail = client.get(f"/api/shelves/{first_collection['id']}").json()[
-        "data"
-    ]["shelf"]
+    first_detail = client.get(f"/api/shelves/{first_collection['id']}").json()["data"][
+        "shelf"
+    ]
     assert first_detail["memberShelfIds"] == [smart_shelf["id"]]
 
 

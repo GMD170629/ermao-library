@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -46,7 +46,7 @@ def _node(
         physical_kind=physical_kind,
         observed_size_bytes=None if physical_kind == "DIRECTORY" else 1,
         observed_mtime_ns=1,
-        observed_at=datetime(2024, 7, 1, tzinfo=timezone.utc),
+        observed_at=datetime(2024, 7, 1, tzinfo=UTC),
     )
 
 
@@ -108,16 +108,12 @@ def test_book_and_resource_anchors_are_unique_source_node_slots(
             db.add(node)
             db.flush()
             db.add(
-                LibraryBook(
-                    id="book-1", library_id="library", source_node_id=node.id
-                )
+                LibraryBook(id="book-1", library_id="library", source_node_id=node.id)
             )
             db.commit()
 
             db.add(
-                LibraryBook(
-                    id="book-2", library_id="library", source_node_id=node.id
-                )
+                LibraryBook(id="book-2", library_id="library", source_node_id=node.id)
             )
             with pytest.raises(IntegrityError):
                 db.commit()

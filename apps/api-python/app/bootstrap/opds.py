@@ -21,8 +21,8 @@ from app.bootstrap.reader import reader_resource_service
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
-    can_access_resource,
     can_access_book,
+    can_access_resource,
     read_user_preferences,
 )
 from app.core.config import Settings
@@ -37,14 +37,14 @@ from app.modules.auth.public import (
     PasswordCredentials,
 )
 from app.modules.library.application.catalog import (
+    CatalogBook,
+    CatalogBookFilter,
     CatalogFacet,
     CatalogFacetKind,
     CatalogResource,
-    CatalogBook,
-    CatalogBookFilter,
     GetCatalogBook,
-    ListCatalogFacets,
     ListCatalogBooks,
+    ListCatalogFacets,
 )
 from app.modules.library.application.queries import (
     GetSmartShelfBookIds,
@@ -658,7 +658,9 @@ class ReaderOpdsProgression:
         try:
             user = _active_user(db, actor_id)
             context = authorization_context(db, user)
-            progress = reader_resource_service(db, self._settings).get_external_progress(
+            progress = reader_resource_service(
+                db, self._settings
+            ).get_external_progress(
                 user_id=user.id,
                 resource_id=resource_id,
                 access_scope=_reader_scope(context),
@@ -719,7 +721,9 @@ class OpdsMediaResources:
     def book_cover(self, actor_id: str, book_id: str, request: Request) -> Response:
         return self._cover(actor_id, request, book_id=book_id)
 
-    def resource_cover(self, actor_id: str, resource_id: str, request: Request) -> Response:
+    def resource_cover(
+        self, actor_id: str, resource_id: str, request: Request
+    ) -> Response:
         return self._cover(actor_id, request, resource_id=resource_id)
 
     def _cover(
@@ -735,7 +739,9 @@ class OpdsMediaResources:
             user = _active_user(db, actor_id)
             if book_id is not None and not can_access_book(db, user, book_id):
                 return Response(status_code=404)
-            if resource_id is not None and not can_access_resource(db, user, resource_id):
+            if resource_id is not None and not can_access_resource(
+                db, user, resource_id
+            ):
                 return Response(status_code=404)
             path_value = media_resource_query(db).cover_path(
                 book_id=book_id, resource_id=resource_id
@@ -756,7 +762,9 @@ class OpdsMediaResources:
         finally:
             db.close()
 
-    def resource_asset(self, actor_id: str, resource_id: str, request: Request) -> Response:
+    def resource_asset(
+        self, actor_id: str, resource_id: str, request: Request
+    ) -> Response:
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)

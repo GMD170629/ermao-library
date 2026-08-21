@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.core.config import Settings
-from app.models.auth import User
 from app.models import ReadableResourceNavigationUnit
+from app.models.auth import User
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -224,9 +224,7 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryReadableResource:
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_bytes(
         b"\xff\xfe"
-        + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode(
-            "utf-16-le"
-        )
+        + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
     )
     return _seed_resource(
         db,
@@ -298,7 +296,9 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     )
     assert head_response.status_code == 200
     assert head_response.content == b""
-    assert int(head_response.headers["content-length"]) == len(resource_response.content)
+    assert int(head_response.headers["content-length"]) == len(
+        resource_response.content
+    )
 
     positions_response = client.get(
         f"/api/reader/v4/resources/{resource.id}/publication/positions.json"
@@ -399,8 +399,14 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
     assert units_response.status_code == 200
     assert units_response.json()["data"]["units"] == []
     db_session.expire_all()
-    assert db_session.get(ReadableResourceNavigationUnit, "stale-publication-chapter") is None
-    assert db_session.get(LibraryReadableResourceMetadata, resource.id).chapter_count is None
+    assert (
+        db_session.get(ReadableResourceNavigationUnit, "stale-publication-chapter")
+        is None
+    )
+    assert (
+        db_session.get(LibraryReadableResourceMetadata, resource.id).chapter_count
+        is None
+    )
 
 
 def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
@@ -494,7 +500,9 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     assert "天地玄黄" in resource_response.text
     assert hashlib.sha256(target.read_bytes()).hexdigest() == source_hash_before
     assert not list(test_settings.resolved_storage_root.rglob("*.epub"))
-    assert not (test_settings.resolved_storage_root / "cache" / "publication-render").exists()
+    assert not (
+        test_settings.resolved_storage_root / "cache" / "publication-render"
+    ).exists()
 
 
 def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
@@ -601,4 +609,6 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
     assert missing_response.status_code == 404
     assert traversal_response.status_code == 404
     assert hashlib.sha256(source_path.read_bytes()).hexdigest() == source_hash_before
-    assert not (test_settings.resolved_storage_root / "cache" / "publication-render").exists()
+    assert not (
+        test_settings.resolved_storage_root / "cache" / "publication-render"
+    ).exists()

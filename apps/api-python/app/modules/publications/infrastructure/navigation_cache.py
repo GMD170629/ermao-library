@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from sqlalchemy import delete, exists, select, update
+from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
 from app.models import ReadableResourceNavigationUnit

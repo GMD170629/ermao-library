@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+
 from app import main as app_main
 from app.core.auth import hash_password
 from app.models.auth import User

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import base64
-from io import BytesIO
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
