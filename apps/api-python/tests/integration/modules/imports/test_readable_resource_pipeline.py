@@ -173,7 +173,6 @@ def _pipeline(
         adapters=base.adapters,
         uow=uow,
         clock=clock,
-        worker_id=base.worker_id,
     )
     return pipeline, sidecar
 
@@ -464,5 +463,88 @@ def test_epub_and_image_directory_adapters(tmp_path: Path) -> None:
             assert "image-directory" in adapters
             interpretations = db.scalars(select(LibrarySourceNodeInterpretation)).all()
             assert interpretations
+    finally:
+        engine.dispose()
+
+
+class StubBoomAdapter(StubAlwaysOkAdapter):
+    def parse_file(
+        self,
+        *,
+        absolute_path: Path,
+        adapter: ResourceAdapterSpec,
+        role: AssetRole,
+    ) -> FileParseResult:
+        del absolute_path, adapter, role
+        raise RuntimeError("simulated adapter crash")
+
+
+def test_unexpected_adapter_error_is_contained_as_worker_error(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db, adapters=StubBoomAdapter())
+            (root / "crash.epub").write_bytes(b"epub")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            outcomes = _drain(pipeline)
+            assert "error" in outcomes
+            failed = db.scalars(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET",
+                    LibraryImportTask.state == "FAILED",
+                )
+            ).all()
+            assert len(failed) == 1
+            assert failed[0].error_summary == "WORKER_ERROR"
+            assert failed[0].error_summary != "UNHANDLED_ERROR"
+            summaries = [
+                task.error_summary
+                for task in db.scalars(select(LibraryImportTask)).all()
+            ]
+            assert "UNHANDLED_ERROR" not in summaries
+    finally:
+        engine.dispose()
+
+
+def test_modeled_parse_failure_keeps_parse_summary(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db, adapters=StubFailOnceAdapter({"bad.epub"}))
+            (root / "bad.epub").write_bytes(b"x")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            outcomes = _drain(pipeline)
+            assert "failed" in outcomes
+            assert "error" not in outcomes
+            failed = db.scalars(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET",
+                    LibraryImportTask.state == "FAILED",
+                )
+            ).all()
+            assert len(failed) == 1
+            assert failed[0].error_summary == "PARSE_FAILED"
+            assert failed[0].error_summary != "WORKER_ERROR"
+    finally:
+        engine.dispose()
+
+
+def test_pipeline_construction_omits_worker_id_and_continue_import_clock(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    try:
+        with Session(engine) as db:
+            pipeline = build_readable_resource_pipeline(db)
+            assert not hasattr(pipeline, "worker_id")
+            assert not hasattr(pipeline.continue_import, "_clock")
+            worker = build_readable_resource_worker(pipeline)
+            assert not hasattr(worker, "_worker_id")
     finally:
         engine.dispose()

@@ -53,19 +53,6 @@ class ProcessReadableResourceImportTask:
         self._sidecar = sidecar
 
     def execute(self, task_id: str) -> ProcessTaskResult:
-        try:
-            return self._execute(task_id)
-        except Exception:
-            self._uow.rollback()
-            with self._uow.transaction():
-                self._queue.mark_failed(
-                    task_id,
-                    error_summary="UNHANDLED_ERROR",
-                    finished_at=self._clock.now(),
-                )
-            raise
-
-    def _execute(self, task_id: str) -> ProcessTaskResult:
         with self._uow.transaction():
             task = self._queue.get_task(task_id)
             if task is None or task.kind != "IMPORT_ASSET":

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.modules.imports.application.readable_resource.ports import (
-    ClockPort,
     LibraryConfigPort,
     PipelineLogPort,
     SourceNodeRepositoryPort,
@@ -43,14 +42,12 @@ class ContinueImport:
         source_nodes: SourceNodeRepositoryPort,
         queue: WorkQueuePort,
         uow: UnitOfWorkPort,
-        clock: ClockPort,
         log: PipelineLogPort,
     ) -> None:
         self._libraries = libraries
         self._source_nodes = source_nodes
         self._queue = queue
         self._uow = uow
-        self._clock = clock
         self._log = log
 
     def execute(

@@ -26,12 +26,10 @@ class StructuredPipelineLog(PipelineLogPort):
         *,
         library_id: str | None = None,
         resource_id: str | None = None,
-        run_id: str | None = None,
         task_id: str | None = None,
         stage: str | None = None,
         outcome: str | None = None,
     ) -> None:
-        del run_id  # retained for ManagePipelineLogPort compatibility only
         logger.info(
             event,
             extra={

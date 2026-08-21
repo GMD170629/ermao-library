@@ -489,6 +489,9 @@ def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
         "DurableSidecarWriteback",
         "ReimportSourceNode",
         "RetryReadableResourceImport",
+        "worker_id",
+        "run_id",
+        "UNHANDLED_ERROR",
     )
     # heartbeat as a method name is also banned in target queue code
     heartbeat_paths_extra = ("heartbeat",)

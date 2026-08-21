@@ -75,12 +75,9 @@ class ReadableResourcePipeline:
     adapters: RegistryResourceAdapterExecutor
     uow: SqlAlchemyUnitOfWork
     clock: UtcClock
-    worker_id: str
 
 
-def build_readable_resource_pipeline(
-    session: Session, *, worker_id: str = "overlay-worker"
-) -> ReadableResourcePipeline:
+def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeline:
     libraries = SqlAlchemyLibraryConfigAdapter(session)
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(session)
@@ -120,7 +117,6 @@ def build_readable_resource_pipeline(
         source_nodes=source_nodes,
         queue=queue,
         uow=uow,
-        clock=clock,
         log=log,
     )
 
@@ -161,7 +157,6 @@ def build_readable_resource_pipeline(
         adapters=adapters,
         uow=uow,
         clock=clock,
-        worker_id=worker_id,
     )
 
 
@@ -174,5 +169,4 @@ def build_readable_resource_worker(
         process_import=pipeline.process_import_task,
         uow=pipeline.uow,
         clock=pipeline.clock,
-        worker_id=pipeline.worker_id,
     )

@@ -30,14 +30,12 @@ class ReadableResourceWorkerProcessor:
         process_import: ProcessReadableResourceImportTask,
         uow: UnitOfWorkPort,
         clock: ClockPort,
-        worker_id: str,
     ) -> None:
         self._queue = queue
         self._scan = scan
         self._process_import = process_import
         self._uow = uow
         self._clock = clock
-        self._worker_id = worker_id
 
     def startup(self) -> int:
         with self._uow.transaction():
@@ -91,7 +89,6 @@ class ReadableResourceWorkerProcessor:
                     "stage": "worker",
                     "outcome": "error",
                     "task_id": task_id,
-                    "worker_id": self._worker_id,
                 },
             )
             with self._uow.transaction():

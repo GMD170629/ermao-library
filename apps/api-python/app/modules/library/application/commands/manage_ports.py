@@ -82,7 +82,6 @@ class ManagePipelineLogPort(Protocol):
         *,
         library_id: str | None = None,
         resource_id: str | None = None,
-        run_id: str | None = None,
         task_id: str | None = None,
         stage: str | None = None,
         outcome: str | None = None,
