@@ -1,0 +1,661 @@
+"""Target ADR 0018 physical SourceNode / Book / Resource / Asset ORM tables.
+
+Not wired into scanner, API, or worker composition roots in phase 1B.
+Shadow columns exist only to express composite FK / CHECK constraints in SQLite
+and must not appear on domain or API DTOs.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    column,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.time import TimestampMilliseconds
+from app.db.base import Base
+from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
+
+_PATH_KEY_LENGTH = 67  # "v1:" + 64-char lowercase SHA-256 hex digest
+
+
+class LibrarySourceNode(Base):
+    __tablename__ = "LibrarySourceNode"
+    __table_args__ = (
+        CheckConstraint(
+            "\"physicalKind\" IN "
+            "('REGULAR_FILE', 'DIRECTORY', 'SYMLINK', 'OTHER')",
+            name="LibrarySourceNode_physicalKind_check",
+        ),
+        CheckConstraint(
+            f'length("pathKey") = {_PATH_KEY_LENGTH} '
+            "AND substr(\"pathKey\", 1, 3) = 'v1:'",
+            name="LibrarySourceNode_pathKey_format_check",
+        ),
+        CheckConstraint(
+            '("parentId" IS NULL AND "parentPhysicalKind" IS NULL) OR '
+            '("parentId" IS NOT NULL AND "parentPhysicalKind" = \'DIRECTORY\')',
+            name="LibrarySourceNode_parent_pair_check",
+        ),
+        CheckConstraint(
+            '"parentId" IS NULL OR "parentId" != "id"',
+            name="LibrarySourceNode_no_self_parent_check",
+        ),
+        CheckConstraint(
+            '("physicalKind" = \'DIRECTORY\' AND "observedSizeBytes" IS NULL) OR '
+            '("physicalKind" != \'DIRECTORY\' AND '
+            '"observedSizeBytes" IS NOT NULL AND "observedSizeBytes" >= 0)',
+            name="LibrarySourceNode_observedSizeBytes_check",
+        ),
+        UniqueConstraint(
+            "libraryId",
+            "pathKey",
+            name="LibrarySourceNode_libraryId_pathKey_key",
+        ),
+        UniqueConstraint(
+            "id",
+            "libraryId",
+            name="LibrarySourceNode_id_libraryId_key",
+        ),
+        UniqueConstraint(
+            "id",
+            "physicalKind",
+            name="LibrarySourceNode_id_physicalKind_key",
+        ),
+        ForeignKeyConstraint(
+            ["parentId", "libraryId"],
+            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibrarySourceNode_parent_library",
+        ),
+        ForeignKeyConstraint(
+            ["parentId", "parentPhysicalKind"],
+            ["LibrarySourceNode.id", "LibrarySourceNode.physicalKind"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibrarySourceNode_parent_directory",
+        ),
+        Index("LibrarySourceNode_libraryId_parentId_idx", "libraryId", "parentId"),
+        Index("LibrarySourceNode_libraryId_name_idx", "libraryId", "name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
+        String(191),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    parent_id: Mapped[str | None] = mapped_column("parentId", String(191), nullable=True)
+    # Shadow: pairs with parentId; must be DIRECTORY when parent is set.
+    parent_physical_kind: Mapped[str | None] = mapped_column(
+        "parentPhysicalKind", String(32), nullable=True
+    )
+    relative_path: Mapped[str] = mapped_column("relativePath", Text, nullable=False)
+    path_key: Mapped[str] = mapped_column("pathKey", String(_PATH_KEY_LENGTH), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    physical_kind: Mapped[str] = mapped_column("physicalKind", String(32), nullable=False)
+    observed_size_bytes: Mapped[int | None] = mapped_column(
+        "observedSizeBytes", BigInteger, nullable=True
+    )
+    observed_mtime_ns: Mapped[int] = mapped_column(
+        "observedMtimeNs", BigInteger, nullable=False
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        "observedAt", TimestampMilliseconds(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibrarySourceNodeMetadata(Base):
+    __tablename__ = "LibrarySourceNodeMetadata"
+
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId",
+        String(191),
+        ForeignKey("LibrarySourceNode.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
+    cover_status: Mapped[str] = mapped_column(
+        "coverStatus",
+        String(32),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibrarySourceNodeInterpretation(Base):
+    __tablename__ = "LibrarySourceNodeInterpretation"
+    __table_args__ = (
+        CheckConstraint(
+            "\"result\" IN ('NODE_ONLY', 'RESOURCE')",
+            name="LibrarySourceNodeInterpretation_result_check",
+        ),
+        CheckConstraint(
+            "\"source\" IN ('AUTO', 'USER')",
+            name="LibrarySourceNodeInterpretation_source_check",
+        ),
+    )
+
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId",
+        String(191),
+        ForeignKey("LibrarySourceNode.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    result: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    adapter_id: Mapped[str | None] = mapped_column("adapterId", String(191), nullable=True)
+    adapter_version: Mapped[str | None] = mapped_column(
+        "adapterVersion", String(64), nullable=True
+    )
+    reason_code: Mapped[str | None] = mapped_column("reasonCode", String(64), nullable=True)
+    # Newline-separated relative paths from directory probe (not generic metadata JSON).
+    sample_relative_paths: Mapped[str | None] = mapped_column(
+        "sampleRelativePaths", Text, nullable=True
+    )
+    sample_count: Mapped[int | None] = mapped_column("sampleCount", Integer, nullable=True)
+    max_entries_visited: Mapped[int | None] = mapped_column(
+        "maxEntriesVisited", Integer, nullable=True
+    )
+    max_depth: Mapped[int | None] = mapped_column("maxDepth", Integer, nullable=True)
+    time_budget_ms: Mapped[int | None] = mapped_column(
+        "timeBudgetMs", Integer, nullable=True
+    )
+    termination_reason: Mapped[str | None] = mapped_column(
+        "terminationReason", String(64), nullable=True
+    )
+    recognized_at: Mapped[datetime | None] = mapped_column(
+        "recognizedAt", TimestampMilliseconds(), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibraryBook(Base):
+    __tablename__ = "LibraryBook"
+    __table_args__ = (
+        UniqueConstraint("sourceNodeId", name="LibraryBook_sourceNodeId_key"),
+        UniqueConstraint(
+            "id",
+            "libraryId",
+            name="LibraryBook_id_libraryId_key",
+        ),
+        ForeignKeyConstraint(
+            ["sourceNodeId", "libraryId"],
+            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryBook_sourceNode_library",
+        ),
+        Index("LibraryBook_libraryId_idx", "libraryId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
+        String(191),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId", String(191), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibraryBookMetadata(Base):
+    __tablename__ = "LibraryBookMetadata"
+
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
+        String(191),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_title: Mapped[str] = mapped_column("normalizedTitle", Text, nullable=False)
+    author: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_author: Mapped[str | None] = mapped_column(
+        "normalizedAuthor", Text, nullable=True
+    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    series_name: Mapped[str | None] = mapped_column("seriesName", Text, nullable=True)
+    series_index: Mapped[float | None] = mapped_column("seriesIndex", Float, nullable=True)
+    cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
+    cover_status: Mapped[str] = mapped_column(
+        "coverStatus",
+        String(32),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    metadata_quality: Mapped[int] = mapped_column(
+        "metadataQuality", Integer, nullable=False, default=0, server_default="0"
+    )
+    publication_status: Mapped[str] = mapped_column(
+        "publicationStatus",
+        String(32),
+        nullable=False,
+        default="UNKNOWN",
+        server_default="UNKNOWN",
+    )
+    tracking_status: Mapped[str] = mapped_column(
+        "trackingStatus",
+        String(32),
+        nullable=False,
+        default="NOT_TRACKING",
+        server_default="NOT_TRACKING",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibraryReadableResource(Base):
+    __tablename__ = "LibraryReadableResource"
+    __table_args__ = (
+        CheckConstraint(
+            "\"enablementState\" IN ('ENABLED', 'DISABLED')",
+            name="LibraryReadableResource_enablementState_check",
+        ),
+        CheckConstraint(
+            "\"importState\" IN ('PENDING', 'READY', 'FAILED')",
+            name="LibraryReadableResource_importState_check",
+        ),
+        UniqueConstraint("sourceNodeId", name="LibraryReadableResource_sourceNodeId_key"),
+        UniqueConstraint(
+            "id",
+            "libraryId",
+            name="LibraryReadableResource_id_libraryId_key",
+        ),
+        ForeignKeyConstraint(
+            ["bookId", "libraryId"],
+            ["LibraryBook.id", "LibraryBook.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryReadableResource_book_library",
+        ),
+        ForeignKeyConstraint(
+            ["sourceNodeId", "libraryId"],
+            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryReadableResource_sourceNode_library",
+        ),
+        Index("LibraryReadableResource_bookId_idx", "bookId"),
+        Index("LibraryReadableResource_libraryId_idx", "libraryId"),
+        Index(
+            "LibraryReadableResource_activeImportRunId_key",
+            "activeImportRunId",
+            unique=True,
+            sqlite_where=column("activeImportRunId").is_not(None),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
+        String(191),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    book_id: Mapped[str] = mapped_column("bookId", String(191), nullable=False)
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId", String(191), nullable=False
+    )
+    adapter_id: Mapped[str] = mapped_column("adapterId", String(191), nullable=False)
+    adapter_version: Mapped[str] = mapped_column(
+        "adapterVersion", String(64), nullable=False
+    )
+    media_kind: Mapped[str] = mapped_column("mediaKind", String(32), nullable=False)
+    format: Mapped[str] = mapped_column(String(32), nullable=False)
+    enablement_state: Mapped[str] = mapped_column(
+        "enablementState",
+        String(32),
+        nullable=False,
+        default="ENABLED",
+        server_default="ENABLED",
+    )
+    import_state: Mapped[str] = mapped_column(
+        "importState",
+        String(32),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    published_run_id: Mapped[str | None] = mapped_column(
+        "publishedRunId",
+        String(191),
+        ForeignKey(
+            "LibraryImportRun.id",
+            ondelete="SET NULL",
+            onupdate="CASCADE",
+            use_alter=True,
+            name="fk_LibraryReadableResource_publishedRunId",
+        ),
+        nullable=True,
+    )
+    active_import_run_id: Mapped[str | None] = mapped_column(
+        "activeImportRunId",
+        String(191),
+        ForeignKey(
+            "LibraryImportRun.id",
+            ondelete="SET NULL",
+            onupdate="CASCADE",
+            use_alter=True,
+            name="fk_LibraryReadableResource_activeImportRunId",
+        ),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibraryReadableResourceMetadata(Base):
+    __tablename__ = "LibraryReadableResourceMetadata"
+
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
+        String(191),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
+        primary_key=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        "publishedAt", TimestampMilliseconds(), nullable=True
+    )
+    identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    isbn: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    page_count: Mapped[int | None] = mapped_column("pageCount", Integer, nullable=True)
+    chapter_count: Mapped[int | None] = mapped_column(
+        "chapterCount", Integer, nullable=True
+    )
+    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
+    track_count: Mapped[int | None] = mapped_column("trackCount", Integer, nullable=True)
+    narrator: Mapped[str | None] = mapped_column(Text, nullable=True)
+    abridged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    volume_index: Mapped[float | None] = mapped_column(
+        "volumeIndex", Float, nullable=True
+    )
+    cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
+    cover_status: Mapped[str] = mapped_column(
+        "coverStatus",
+        String(32),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibraryResourceAsset(Base):
+    __tablename__ = "LibraryResourceAsset"
+    __table_args__ = (
+        CheckConstraint(
+            "\"role\" IN "
+            "('PRIMARY', 'TRACK', 'PAGE', 'SIDECAR', 'SUPPLEMENT')",
+            name="LibraryResourceAsset_role_check",
+        ),
+        CheckConstraint(
+            "\"importState\" IN ('PENDING', 'READY', 'FAILED')",
+            name="LibraryResourceAsset_importState_check",
+        ),
+        CheckConstraint(
+            "\"sourceNodePhysicalKind\" = 'REGULAR_FILE'",
+            name="LibraryResourceAsset_sourceNodePhysicalKind_check",
+        ),
+        UniqueConstraint(
+            "resourceId",
+            "sourceNodeId",
+            name="LibraryResourceAsset_resourceId_sourceNodeId_key",
+        ),
+        ForeignKeyConstraint(
+            ["resourceId", "libraryId"],
+            ["LibraryReadableResource.id", "LibraryReadableResource.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryResourceAsset_resource_library",
+        ),
+        ForeignKeyConstraint(
+            ["sourceNodeId", "libraryId"],
+            ["LibrarySourceNode.id", "LibrarySourceNode.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryResourceAsset_sourceNode_library",
+        ),
+        ForeignKeyConstraint(
+            ["sourceNodeId", "sourceNodePhysicalKind"],
+            ["LibrarySourceNode.id", "LibrarySourceNode.physicalKind"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryResourceAsset_sourceNode_file",
+        ),
+        Index(
+            "LibraryResourceAsset_current_published_idx",
+            "resourceId",
+            "publishedRunId",
+            "importState",
+        ),
+        Index("LibraryResourceAsset_sourceNodeId_idx", "sourceNodeId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
+        String(191),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    resource_id: Mapped[str] = mapped_column("resourceId", String(191), nullable=False)
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId", String(191), nullable=False
+    )
+    # Shadow: must remain REGULAR_FILE; composite FK enforces node kind.
+    source_node_physical_kind: Mapped[str] = mapped_column(
+        "sourceNodePhysicalKind",
+        String(32),
+        nullable=False,
+        default="REGULAR_FILE",
+        server_default="REGULAR_FILE",
+    )
+    published_run_id: Mapped[str | None] = mapped_column(
+        "publishedRunId",
+        String(191),
+        ForeignKey(
+            "LibraryImportRun.id",
+            ondelete="SET NULL",
+            onupdate="CASCADE",
+            use_alter=True,
+            name="fk_LibraryResourceAsset_publishedRunId",
+        ),
+        nullable=True,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    import_state: Mapped[str] = mapped_column(
+        "importState",
+        String(32),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    sequence_index: Mapped[int | None] = mapped_column(
+        "sequenceIndex", Integer, nullable=True
+    )
+    sort_key: Mapped[str | None] = mapped_column("sortKey", Text, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(
+        "failureReason", Text, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+class LibraryResourceAssetMetadata(Base):
+    __tablename__ = "LibraryResourceAssetMetadata"
+
+    asset_id: Mapped[str] = mapped_column(
+        "assetId",
+        String(191),
+        ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    mime_type: Mapped[str | None] = mapped_column("mimeType", String(191), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
+    codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sample_rate: Mapped[int | None] = mapped_column("sampleRate", Integer, nullable=True)
+    channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disc_number: Mapped[int | None] = mapped_column("discNumber", Integer, nullable=True)
+    track_number: Mapped[int | None] = mapped_column(
+        "trackNumber", Integer, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
+__all__ = [
+    "LibraryBook",
+    "LibraryBookMetadata",
+    "LibraryReadableResource",
+    "LibraryReadableResourceMetadata",
+    "LibraryResourceAsset",
+    "LibraryResourceAssetMetadata",
+    "LibrarySourceNode",
+    "LibrarySourceNodeInterpretation",
+    "LibrarySourceNodeMetadata",
+]

@@ -543,9 +543,39 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
   - `uv run --no-sync pytest -q` → **6 failed, 942 passed**（同既有 6 失败；通过数含新增单测）
   - `uv run --no-sync ruff format --check …` / `ruff check …` → **不可用**（`Failed to spawn: ruff`；未安装依赖）
 
+### 阶段 1B：目标 ORM schema — 已完成（速度优先，未跑测试）
+
+- 实现（未接入运行时读写）：
+  - `apps/api-python/app/modules/library/infrastructure/readable_resource_schema.py`
+    - 表：`LibrarySourceNode`、`LibrarySourceNodeMetadata`、`LibrarySourceNodeInterpretation`、
+      `LibraryBook`、`LibraryBookMetadata`、`LibraryReadableResource`、
+      `LibraryReadableResourceMetadata`、`LibraryResourceAsset`、`LibraryResourceAssetMetadata`
+  - `apps/api-python/app/modules/imports/infrastructure/readable_resource_import_schema.py`
+    - 表：`LibraryImportRun`、`ResourceCandidate`、`AssetCandidate`、`LibraryImportTask`
+  - 注册：`apps/api-python/app/models/__init__.py`（仅 import 注册，无双写/兼容服务）
+  - 迁移：`apps/api-python/app/db/alembic/versions/0003_readable_resource_overlay_schema.py`
+    - `down_revision = "0002_version_covers"`；临时增量 revision，目标导入流稳定后才压平 fresh baseline
+- 关键约束（库可表达部分）：
+  - SourceNode `(libraryId, pathKey)` 唯一；`pathKey` 长度 67 且 `v1:` 前缀；`physicalKind` CHECK
+  - 同 Library 父子复合 FK；`parentPhysicalKind` shadow + DIRECTORY 复合 FK；parent 成对 CHECK；禁止直接 self-parent
+  - DIRECTORY 的 `observedSizeBytes` 必须 NULL，其它类型非负
+  - Book / Resource `sourceNodeId` 唯一且同 Library 复合 FK
+  - Asset `(resourceId, sourceNodeId)` 唯一；`sourceNodePhysicalKind` shadow 强制 REGULAR_FILE
+  - enablement / import / run / task / role 状态 CHECK
+  - Resource `activeImportRunId` 部分唯一；ImportRun 每 Resource 至多一个非终态 run
+  - ImportTask run-owned `(ownerImportRunId, sourceNodeId, role)` 与增量 `(resourceId, sourceNodeId)` 部分唯一
+  - 当前 published Asset 组合索引；candidate 与稳定行隔离
+- Shadow 列理由：`parentPhysicalKind`、`sourceNodePhysicalKind`（及实体上的 `libraryId`）仅服务 SQLite 复合 FK/CHECK，不进入领域/API DTO
+- 应用层保留：父路径一致性、跨层级子树范围、无环（超出直接 self-parent）
+- Legacy：`LibraryWork` / `LibraryVersion` / `LibraryVolume` / `LibraryFile` 暂时保留，无双写
+- 测试代码已写、**本批未执行**：
+  - `tests/integration/modules/library/test_readable_resource_schema.py`
+  - `tests/test_sqlite_database.py`（断言 fresh schema 含新表）
+- 按速度优先策略，本批未运行 pytest / Ruff / 全量门禁，等待阶段 7 统一验证；仅做 `compileall` 语法检查
+- 明确未接入：API、scanner、worker、composition root 读写路径
+
 ### 后续阶段 — 未完成
 
-- 阶段 1B：SourceNode / Interpretation / Book / Resource / Asset / ImportRun / candidate / Task 的 ORM schema 与约束
 - 阶段 2：扫描与分类
 - 阶段 3：首个单文件闭环
 - 阶段 4：首个目录闭环

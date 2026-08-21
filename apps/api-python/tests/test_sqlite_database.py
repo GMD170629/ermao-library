@@ -63,6 +63,14 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "LibraryFile",
             "ImportScanJob",
             "ImportTask",
+            "LibrarySourceNode",
+            "LibraryBook",
+            "LibraryReadableResource",
+            "LibraryResourceAsset",
+            "LibraryImportRun",
+            "LibraryImportTask",
+            "ResourceCandidate",
+            "AssetCandidate",
         } <= table_names
         assert {
             "MonitorFolder",
