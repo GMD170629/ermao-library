@@ -7,7 +7,7 @@ export type BookshelfBookSummary = Readonly<{
   projection: 'bookshelf';
   id: string;
   title: string;
-  author: string;
+  author: string | null;
   coverUrl: string;
   availableMediaKinds: MediaKind[];
   progress: number;
@@ -17,7 +17,7 @@ export type ManagementBookSummary = Readonly<{
   projection: 'management';
   id: string;
   title: string;
-  author: string;
+  author: string | null;
   gradient: string;
   coverStatus: string;
   coverUrl: string;
@@ -81,7 +81,7 @@ function mapBookshelfBook(value: unknown): BookshelfBookSummary {
     projection: 'bookshelf',
     id: requiredString(item.id, 'id'),
     title: requiredString(item.title, 'title'),
-    author: requiredString(item.author, 'author'),
+    author: optionalString(item.author),
     coverUrl: requiredString(item.coverUrl, 'coverUrl'),
     availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
     progress: progressPercent(item.progress)
@@ -98,8 +98,8 @@ function mapManagementBook(value: unknown): ManagementBookSummary {
     projection: 'management',
     id: requiredString(item.id, 'id'),
     title: requiredString(item.title, 'title'),
-    author: requiredString(item.author, 'author'),
-    gradient: requiredString(item.gradient, 'gradient'),
+    author: optionalString(item.author),
+    gradient: optionalString(item.gradient) ?? '',
     coverStatus: requiredString(item.coverStatus, 'coverStatus'),
     coverUrl: requiredString(item.coverUrl, 'coverUrl'),
     seriesName: optionalString(item.seriesName),

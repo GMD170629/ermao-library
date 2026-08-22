@@ -10,7 +10,7 @@ import type { MediaKind } from '../../types/book';
 export type CoverBook = {
   id?: string | number;
   title: string;
-  author: string;
+  author: string | null;
   coverUrl?: string;
   format?: string;
   gradient?: string;

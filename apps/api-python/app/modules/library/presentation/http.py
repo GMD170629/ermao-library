@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
@@ -38,7 +39,11 @@ from app.modules.library.application.asset_commands import (
     ResourceAssetNotFoundError,
 )
 from app.modules.library.application.book_commands import UpdateBookCommand
-from app.modules.library.application.book_list import BookListQuery
+from app.modules.library.application.book_list import BookListQuery, parse_media_kinds
+from app.modules.library.application.filter_ast import (
+    InvalidFilterExpression,
+    parse_filter_expression,
+)
 from app.modules.library.application.resource_commands import (
     BookNotFoundError,
     InvalidResourceChangeError,
@@ -60,9 +65,11 @@ from app.modules.library.presentation.schemas import (
     AssetsResponse,
     BookPayload,
     BookResponse,
+    BookshelfBookSummary,
     BooksPayload,
     BooksResponse,
     BookView,
+    ManagementBookListSummary,
     ReadingUnitsResponse,
     ReclassifyResourceRequest,
     ResourceAssetView,
@@ -82,8 +89,10 @@ from app.modules.library.presentation.schemas import (
 )
 from app.modules.library.presentation.views import (
     book_view,
+    bookshelf_book_list_view,
     get_book,
     list_resource_views,
+    management_book_list_view,
     resource_view,
 )
 from app.schemas.responses import fail, ok
@@ -116,6 +125,14 @@ def _require_manager(user: User):
 
 def _book_contract(value: object) -> BookView:
     return BookView.model_validate(value)
+
+
+def _bookshelf_book_contract(value: object) -> BookshelfBookSummary:
+    return BookshelfBookSummary.model_validate(value)
+
+
+def _management_book_contract(value: object) -> ManagementBookListSummary:
+    return ManagementBookListSummary.model_validate(value)
 
 
 def _resource_contract(value: object) -> ResourceView:
@@ -176,33 +193,74 @@ def list_library_books(
     db: DatabaseSession,
     settings: ApplicationSettings,
     page: int = Query(default=1, ge=1),
-    pageSize: int = Query(default=50, ge=1, le=500),
+    pageSize: int = Query(default=50, ge=0, le=500),
     search: str | None = None,
     sort: str = "updated",
+    sortDirection: Literal["asc", "desc"] | None = None,
+    visibility: Literal["active", "ignored"] = "active",
+    type_filter: str = Query(default="", alias="type"),
+    media: str | None = None,
+    status: str | None = None,
+    seriesName: str | None = None,
+    facetKind: str | None = None,
+    facetId: str | None = None,
+    filters: str | None = None,
+    view: Literal["full", "bookshelf", "management", "search"] = "full",
 ) -> BooksResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return _books_response(auth_error)
+    filter_expression = None
+    if filters:
+        try:
+            filter_payload = json.loads(filters)
+            filter_expression = parse_filter_expression(filter_payload)
+        except (InvalidFilterExpression, json.JSONDecodeError, TypeError, ValueError):
+            return _books_response(
+                fail(
+                    "筛选参数无效",
+                    status_code=422,
+                    code="INVALID_LIBRARY_FILTER",
+                )
+            )
     result = list_books(
         db,
         user,
         BookListQuery(
             page=page,
-            requested_page_size=pageSize,
+            requested_page_size=pageSize if pageSize > 0 else None,
             search=search,
             keyword=None,
             sort=sort,
+            sort_direction=sortDirection,
+            visibility=visibility,
+            type_filter=type_filter,
+            media_kinds=parse_media_kinds(media or ""),
+            status=status,
+            series_name=seriesName,
+            facet_kind=facetKind,
+            facet_id=facetId,
+            filter_expression=filter_expression,
+            projection=view,
         ),
     )
-    books = [
-        _book_contract(book_view(db, dict(item), user.id)) for item in result.books
-    ]
+    books: list[BookView | BookshelfBookSummary | ManagementBookListSummary] = []
+    if view in {"bookshelf", "search"}:
+        for item in result.books:
+            books.append(_bookshelf_book_contract(bookshelf_book_list_view(item)))
+    elif view == "management":
+        for item in result.books:
+            books.append(_management_book_contract(management_book_list_view(item)))
+    else:
+        for item in result.books:
+            books.append(_book_contract(book_view(db, dict(item), user.id)))
     return BooksResponse(
         data=BooksPayload(
             books=books,
             page=result.page,
             pageSize=result.page_size,
             total=result.total,
+            totalPages=result.total_pages,
         )
     )
 

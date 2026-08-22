@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import cast
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, cast
 
 from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.models import (
     LibraryBookMetadata,
     LibraryFacet,
     LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     ReaderResourceProgress,
 )
 from app.models.auth import User
@@ -32,6 +35,21 @@ from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     resolve_library_roots,
 )
+from app.modules.reader.public import (
+    MediaKind,
+    ResourceReadingState,
+    choose_continue_resource_id,
+    completed_for_available_resources,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _ResourceSummary:
+    resource_id: str
+    media_kind: MediaKind
+    sort_order: int
+    percent: float
+    last_read_at: datetime | None
 
 
 def _resource_exists(
@@ -120,6 +138,10 @@ def _predicates(
     )
     for status in statuses:
         normalized = status.upper()
+        ready_resource = (
+            LibraryReadableResource.book_id == LibraryBook.id,
+            resource_visibility_predicate(context),
+        )
         started = exists(
             select(ReaderResourceProgress.id)
             .join(
@@ -133,12 +155,30 @@ def _predicates(
                 resource_visibility_predicate(context),
             )
         )
+        unfinished = exists(
+            select(LibraryReadableResource.id)
+            .outerjoin(
+                ReaderResourceProgress,
+                and_(
+                    ReaderResourceProgress.resource_id == LibraryReadableResource.id,
+                    ReaderResourceProgress.user_id == user.id,
+                ),
+            )
+            .where(
+                *ready_resource,
+                or_(
+                    ReaderResourceProgress.id.is_(None),
+                    ReaderResourceProgress.percent < 100,
+                ),
+            )
+        )
+        available = exists(select(LibraryReadableResource.id).where(*ready_resource))
         if normalized == "READING":
-            predicates.append(started)
+            predicates.extend((started, unfinished))
         elif normalized == "UNREAD":
             predicates.append(~started)
         elif normalized == "FINISHED":
-            predicates.append(_resource_exists(book_id=LibraryBook.id))
+            predicates.extend((available, ~unfinished))
     if query.publication_status:
         predicates.append(
             LibraryBookMetadata.publication_status == query.publication_status
@@ -199,7 +239,12 @@ def _predicates(
     return predicates
 
 
-def _order(query: BookListQuery) -> list[ColumnElement[object]]:
+def _order(
+    query: BookListQuery,
+    *,
+    user: User,
+    context: AuthorizationContext,
+) -> list[ColumnElement[object]]:
     descending = (query.sort_direction or "").lower() == "desc" or (
         not query.sort_direction
         and query.sort in {"updated", "recent_read", "recent_import", "progress"}
@@ -232,7 +277,215 @@ def _order(query: BookListQuery) -> list[ColumnElement[object]]:
             ascending(LibraryBookMetadata.title),
             ascending(LibraryBook.id),
         ]
+    if query.sort == "recent_read":
+        latest_read_at = (
+            select(func.max(ReaderResourceProgress.updated_at))
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == ReaderResourceProgress.resource_id,
+            )
+            .where(
+                LibraryReadableResource.book_id == LibraryBook.id,
+                ReaderResourceProgress.user_id == user.id,
+                resource_visibility_predicate(context),
+            )
+            .correlate(LibraryBook)
+            .scalar_subquery()
+        )
+        return [direction(latest_read_at), ascending(LibraryBook.id)]
     return [direction(LibraryBook.updated_at), direction(LibraryBook.id)]
+
+
+def _resource_summaries(
+    db: Session,
+    *,
+    context: AuthorizationContext,
+    user: User,
+    book_ids: tuple[str, ...],
+) -> dict[str, list[_ResourceSummary]]:
+    if not book_ids:
+        return {}
+    rows = db.execute(
+        select(
+            LibraryReadableResource.book_id,
+            LibraryReadableResource.id.label("resource_id"),
+            LibraryReadableResource.media_kind,
+            LibraryReadableResourceMetadata.resource_index,
+            ReaderResourceProgress.percent,
+            ReaderResourceProgress.updated_at.label("progress_updated_at"),
+        )
+        .select_from(LibraryReadableResource)
+        .outerjoin(
+            LibraryReadableResourceMetadata,
+            LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+        )
+        .outerjoin(
+            ReaderResourceProgress,
+            and_(
+                ReaderResourceProgress.resource_id == LibraryReadableResource.id,
+                ReaderResourceProgress.user_id == user.id,
+            ),
+        )
+        .where(
+            LibraryReadableResource.book_id.in_(book_ids),
+            resource_visibility_predicate(context),
+        )
+        .order_by(
+            LibraryReadableResource.book_id.asc(),
+            LibraryReadableResourceMetadata.resource_index.asc().nulls_last(),
+            LibraryReadableResource.id.asc(),
+        )
+    ).all()
+    result: dict[str, list[_ResourceSummary]] = {book_id: [] for book_id in book_ids}
+    for row in rows:
+        try:
+            media_kind = MediaKind(str(row.media_kind))
+        except ValueError:
+            continue
+        percent = min(100.0, max(0.0, float(row.percent or 0)))
+        result[str(row.book_id)].append(
+            _ResourceSummary(
+                resource_id=str(row.resource_id),
+                media_kind=media_kind,
+                sort_order=int(row.resource_index or 0),
+                percent=percent,
+                last_read_at=row.progress_updated_at,
+            )
+        )
+    return result
+
+
+def _tag_names(
+    db: Session,
+    *,
+    book_ids: tuple[str, ...],
+) -> dict[str, list[str]]:
+    if not book_ids:
+        return {}
+    rows = db.execute(
+        select(LibraryBookFacet.book_id, LibraryFacet.name)
+        .join(LibraryFacet, LibraryFacet.id == LibraryBookFacet.facet_id)
+        .where(
+            LibraryBookFacet.book_id.in_(book_ids),
+            LibraryFacet.kind == "TAG",
+        )
+        .order_by(
+            LibraryBookFacet.book_id.asc(),
+            LibraryBookFacet.sort_order.asc(),
+            LibraryFacet.name.asc(),
+            LibraryFacet.id.asc(),
+        )
+    ).all()
+    result: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
+    for row in rows:
+        result[str(row.book_id)].append(str(row.name))
+    return result
+
+
+def _reading_summary(
+    resources: list[_ResourceSummary],
+) -> tuple[str, float, datetime | None]:
+    states = [
+        ResourceReadingState(
+            resource_id=resource.resource_id,
+            media_kind=resource.media_kind,
+            sort_order=resource.sort_order,
+            percent=int(resource.percent),
+            last_read_at=resource.last_read_at,
+        )
+        for resource in resources
+    ]
+    if not states:
+        return "UNREAD", 0.0, None
+    status = (
+        "FINISHED"
+        if completed_for_available_resources(states)
+        else (
+            "READING"
+            if any(resource.percent > 0 for resource in resources)
+            else "UNREAD"
+        )
+    )
+    continue_resource_id = choose_continue_resource_id(states)
+    progress = next(
+        (
+            resource.percent
+            for resource in resources
+            if resource.resource_id == continue_resource_id
+        ),
+        0.0,
+    )
+    last_read_at = max(
+        (resource.last_read_at for resource in resources if resource.last_read_at),
+        default=None,
+    )
+    return status, progress, last_read_at
+
+
+def _project_books(
+    db: Session,
+    *,
+    context: AuthorizationContext,
+    user: User,
+    rows: list[tuple[LibraryBook, LibraryBookMetadata | None]],
+    projection: str,
+) -> list[dict[str, Any]]:
+    if projection == "full":
+        return [_book_record(book, metadata) for book, metadata in rows]
+    book_ids = tuple(str(book.id) for book, _metadata in rows)
+    resources_by_book = _resource_summaries(
+        db,
+        context=context,
+        user=user,
+        book_ids=book_ids,
+    )
+    tags_by_book = _tag_names(db, book_ids=book_ids)
+    projected: list[dict[str, Any]] = []
+    media_priority = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
+    for book, metadata in rows:
+        book_id = str(book.id)
+        resources = resources_by_book[book_id]
+        status, progress, last_read_at = _reading_summary(resources)
+        media_kinds = sorted(
+            {resource.media_kind.value for resource in resources},
+            key=lambda kind: (media_priority.get(kind, 99), kind),
+        )
+        title = (
+            str(metadata.title).strip()
+            if metadata is not None and str(metadata.title).strip()
+            else book_id
+        )
+        author = metadata.author if metadata is not None else None
+        common: dict[str, object] = {
+            "id": book_id,
+            "title": title,
+            "author": author,
+            "coverPath": metadata.cover_path if metadata is not None else None,
+            "coverStatus": (
+                metadata.cover_status if metadata is not None else "PENDING"
+            ),
+            "seriesName": metadata.series_name if metadata is not None else None,
+            "tags": tags_by_book[book_id],
+            "availableMediaKinds": media_kinds,
+        }
+        if projection == "bookshelf":
+            projected.append(
+                {
+                    **common,
+                    "progress": progress,
+                }
+            )
+        else:
+            projected.append(
+                {
+                    **common,
+                    "gradient": "",
+                    "statusValue": status,
+                    "lastReadAt": last_read_at,
+                    "importedAt": book.created_at,
+                }
+            )
+    return projected
 
 
 def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
@@ -248,12 +501,29 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
     page = max(1, query.page)
     page_size = resolve_page_size(query.requested_page_size, total)
     rows = db.execute(
-        base.order_by(*_order(query)).limit(page_size).offset((page - 1) * page_size)
+        base.order_by(
+            *_order(
+                query,
+                user=user,
+                context=context,
+            )
+        )
+        .limit(page_size)
+        .offset((page - 1) * page_size)
     ).all()
+    normalized_rows = [(book, metadata) for book, metadata in rows]
+    total_pages = max(1, (total + page_size - 1) // page_size)
     return BookListResult(
-        books=[_book_record(book, metadata) for book, metadata in rows],
+        books=_project_books(
+            db,
+            context=context,
+            user=user,
+            rows=normalized_rows,
+            projection=query.projection,
+        ),
         total=total,
         page=page,
         page_size=page_size,
+        total_pages=total_pages,
         progress_sort=query.sort == "progress",
     )

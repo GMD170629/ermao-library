@@ -357,6 +357,50 @@ def bookshelf_item_views(
     return [bookshelf_item_view(item) for item in items]
 
 
+def bookshelf_book_list_view(item: dict[str, object]) -> dict[str, object]:
+    """Map the ORM list projection to the public bookshelf wire shape."""
+
+    book_id = str(item["id"])
+    media_kinds = item.get("availableMediaKinds")
+    progress = item.get("progress")
+    return {
+        "id": book_id,
+        "title": str(item["title"]),
+        "author": item.get("author"),
+        "coverUrl": _cover_url("books", book_id, size="medium"),
+        "availableMediaKinds": (
+            list(media_kinds) if isinstance(media_kinds, (list, tuple)) else []
+        ),
+        "progress": (
+            float(progress) if isinstance(progress, (int, float, str)) else 0.0
+        ),
+    }
+
+
+def management_book_list_view(item: dict[str, object]) -> dict[str, object]:
+    """Map the ORM list projection to the public management wire shape."""
+
+    book_id = str(item["id"])
+    tags = item.get("tags")
+    media_kinds = item.get("availableMediaKinds")
+    return {
+        "id": book_id,
+        "title": str(item["title"]),
+        "author": item.get("author"),
+        "gradient": str(item.get("gradient") or ""),
+        "coverStatus": str(item.get("coverStatus") or "PENDING"),
+        "coverUrl": _cover_url("books", book_id, size="medium"),
+        "seriesName": item.get("seriesName"),
+        "tags": list(tags) if isinstance(tags, (list, tuple)) else [],
+        "availableMediaKinds": (
+            list(media_kinds) if isinstance(media_kinds, (list, tuple)) else []
+        ),
+        "statusValue": str(item.get("statusValue") or "UNREAD"),
+        "lastReadAt": item.get("lastReadAt"),
+        "importedAt": item.get("importedAt"),
+    }
+
+
 def preferred_book_cover_path(book: dict[str, Any]) -> str | None:
     value = book.get("coverPath")
     return str(value) if value else None
@@ -365,10 +409,12 @@ def preferred_book_cover_path(book: dict[str, Any]) -> str | None:
 __all__ = [
     "_cover_url",
     "book_view",
+    "bookshelf_book_list_view",
     "bookshelf_item_view",
     "bookshelf_item_views",
     "get_book",
     "list_resource_views",
+    "management_book_list_view",
     "preferred_book_cover_path",
     "resource_view",
 ]

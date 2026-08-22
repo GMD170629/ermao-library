@@ -1030,6 +1030,7 @@
   "扫描规则": "Scanning rules",
   "扫描书库": "Scan library",
   "筛选建议加载失败，可继续使用当前输入值": "Suggestions could not be loaded. You can keep using the current value.",
+  "筛选参数无效": "Invalid filter parameters",
   "筛选条件修改后实时更新": "Updates live when filter conditions change",
   "筛选条件组合方式": "Filter Conditional Grouping",
   "删除": "Delete",

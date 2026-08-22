@@ -5,7 +5,6 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.authorization import authorization_context
 from app.core.config import Settings
 from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
@@ -13,10 +12,6 @@ from app.modules.library.application.asset_commands import DeleteResourceAsset
 from app.modules.library.application.book_commands import UpdateBook
 from app.modules.library.application.book_list import BookListQuery, BookListResult
 from app.modules.library.application.bookshelf import ListBookshelfItems
-from app.modules.library.application.catalog import (
-    CatalogBookFilter,
-    ListCatalogBooks,
-)
 from app.modules.library.application.facet_sync import (
     prepare_book_facet,
 )
@@ -27,6 +22,7 @@ from app.modules.library.application.filter_options import (
 from app.modules.library.application.queries import (
     SmartShelfCriteria,
 )
+from app.modules.library.infrastructure import book_list as library_book_list
 from app.modules.library.infrastructure import books as library_books
 from app.modules.library.infrastructure import dashboard as library_dashboard
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
@@ -135,43 +131,7 @@ def load_metadata_apply_job_ids(db: Session, book_id: str) -> tuple[str, ...]:
 
 
 def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
-    context = authorization_context(db, user)
-    page = max(1, query.page)
-    size = min(500, max(1, query.requested_page_size or 50))
-    filters = CatalogBookFilter(
-        search=(query.search or query.keyword or "").strip(),
-        sort="recent" if query.sort in {"recent", "updated"} else "title",
-        book_ids=None,
-    )
-    result = ListCatalogBooks(SqlAlchemyCatalogQueries(db)).execute(
-        context=context, filters=filters, page=page, page_size=size
-    )
-    records = [
-        {
-            "id": item.id,
-            "title": item.title,
-            "author": item.author,
-            "description": item.description,
-            "seriesName": item.series_name,
-            "seriesIndex": item.series_index,
-            "libraryId": book.library_id
-            if (book := db.get(LibraryBook, item.id))
-            else None,
-            "sourceNodeId": book.source_node_id if book else None,
-            "visibilityState": book.visibility_state if book else "VISIBLE",
-            "curationState": book.curation_state if book else "PENDING",
-            "updatedAt": item.updated_at,
-            "coverPath": None,
-            "coverStatus": "PENDING",
-            "metadataQuality": 0,
-            "publicationStatus": "UNKNOWN",
-            "trackingStatus": "NOT_TRACKING",
-        }
-        for item in result.books
-    ]
-    return BookListResult(
-        books=records, total=result.total, page=result.page, page_size=result.page_size
-    )
+    return library_book_list.list_books(db, user, query)
 
 
 __all__ = [

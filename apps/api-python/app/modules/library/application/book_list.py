@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from app.modules.library.application.filter_ast import FilterExpression
 
 MAX_LIBRARY_PAGE_SIZE = 500
+BookListProjection = Literal["full", "bookshelf", "management", "search"]
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class BookListQuery:
     missing_cover: bool = False
     new_import: bool = False
     filter_expression: FilterExpression | None = None
+    projection: BookListProjection = "full"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class BookListResult:
     total: int
     page: int
     page_size: int
+    total_pages: int = 1
     progress_sort: bool = False
 
 

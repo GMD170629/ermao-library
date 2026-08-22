@@ -173,6 +173,34 @@ class ManagementBookSummary(HttpContractModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
+class BookshelfBookSummary(HttpContractModel):
+    """The lightweight projection used by the Web bookshelf grid."""
+
+    id: str
+    title: str
+    author: str | None = None
+    cover_url: str = Field(alias="coverUrl")
+    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
+    progress: float = Field(ge=0, le=100)
+
+
+class ManagementBookListSummary(HttpContractModel):
+    """The metadata/progress projection used by the Web management table."""
+
+    id: str
+    title: str
+    author: str | None = None
+    gradient: str = ""
+    cover_status: str = Field(alias="coverStatus")
+    cover_url: str = Field(alias="coverUrl")
+    series_name: str | None = Field(default=None, alias="seriesName")
+    tags: list[str] = Field(default_factory=list)
+    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
+    status_value: Literal["UNREAD", "READING", "FINISHED"] = Field(alias="statusValue")
+    last_read_at: datetime | None = Field(default=None, alias="lastReadAt")
+    imported_at: datetime | None = Field(default=None, alias="importedAt")
+
+
 class DashboardSummaryPayload(HttpContractModel):
     total_books: int = Field(alias="totalBooks")
     ebook_books: int = Field(alias="ebookBooks")
@@ -241,10 +269,11 @@ class ResourceBatchRequest(HttpContractModel):
 
 
 class BooksPayload(HttpContractModel):
-    books: list[BookView]
+    books: list[BookView | BookshelfBookSummary | ManagementBookListSummary]
     page: int
     page_size: int = Field(alias="pageSize")
     total: int
+    total_pages: int = Field(alias="totalPages")
 
 
 class BookPayload(HttpContractModel):

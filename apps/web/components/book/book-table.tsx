@@ -166,7 +166,7 @@ export function BookTable({
     <>
       <div className="space-y-3 md:hidden">
         {books.map((book) => {
-          const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
+          const authorLabel = book.author?.trim() && book.author !== '未知作者' ? book.author.trim() : i18nAttribute("未知作者");
 
           return (
             <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`relative overflow-hidden rounded-2xl border bg-white/70 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
@@ -184,7 +184,7 @@ export function BookTable({
                   </button>
                   <span className="min-w-0 flex-1">
                     <button data-i18n-skip type="button" onClick={(event) => openMobileBookDetails(event, book)} className="line-clamp-2 w-full rounded-sm text-left font-medium leading-5 text-[#272421] outline-none transition hover:text-[#D94724] hover:underline focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》详情", { value0: book.title })}>{book.title}</button>
-                    {authorLabel ? <span data-i18n-skip className="mt-1 block truncate text-xs text-[#8A847E]">{authorLabel}</span> : null}
+                    <span data-i18n-skip className="mt-1 block truncate text-xs text-[#8A847E]">{authorLabel}</span>
                     <span data-testid="book-list-mobile-metadata" className="mt-2 flex min-w-0 flex-nowrap gap-1.5 overflow-hidden">
                       <Badge className="shrink-0 whitespace-nowrap">{mediaLabel(book)}</Badge>
                       <Badge className="shrink-0 whitespace-nowrap" tone={statusTone(book)}>{statusLabel(book)}</Badge>
@@ -215,7 +215,7 @@ export function BookTable({
         </thead>
         <tbody className="divide-y divide-black/[0.05]">
           {books.map((book, index) => {
-            const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
+            const authorLabel = book.author?.trim() && book.author !== '未知作者' ? book.author.trim() : i18nAttribute("未知作者");
 
             return (
               <tr
@@ -238,7 +238,7 @@ export function BookTable({
                     </div>
                   </div>
                 </td>
-                <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{authorLabel ?? '—'}</td>
+                <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{authorLabel}</td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]" title={book.seriesName?.trim() || undefined}>{book.seriesName?.trim() || '—'}</td>
                 <td className="truncate px-2">{mediaLabel(book)}</td>
                 <td className="overflow-hidden px-2">

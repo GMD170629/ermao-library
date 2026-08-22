@@ -1,6 +1,7 @@
 """Stable public contracts for the Book/ReadableResource capability."""
 
 from app.modules.library.application.book_list import (
+    BookListProjection,
     BookListQuery,
     BookListResult,
     parse_media_kinds,
@@ -132,6 +133,7 @@ __all__ = [
     "BookAnchorDecision",
     "BookFacetProjection",
     "BookFacetReferences",
+    "BookListProjection",
     "BookListQuery",
     "BookListResult",
     "BookResourceRepositoryPort",

@@ -33,6 +33,19 @@ test('bookshelf projection validates and preserves cover progress', () => {
   assert.equal(book.progress, 42.5);
 });
 
+test('bookshelf projection preserves a missing author as null', () => {
+  const book = mapLibraryBookSummary({
+    id: 'book-without-author',
+    title: 'Untitled',
+    author: null,
+    coverUrl: '/api/books/book-without-author/cover?size=medium',
+    availableMediaKinds: ['EBOOK'],
+    progress: 0
+  }, 'bookshelf');
+
+  assert.equal(book.author, null);
+});
+
 test('management projection maps media and progress summaries', () => {
   const book = mapLibraryBookSummary({
     id: 'book-1',
@@ -57,6 +70,25 @@ test('management projection maps media and progress summaries', () => {
   assert.deepEqual(book.availableMediaKinds, ['EBOOK', 'AUDIOBOOK']);
   assert.equal(book.statusValue, 'READING');
   assert.equal(book.availableMediaKinds.length, 2);
+});
+
+test('management projection accepts nullable author and an omitted gradient', () => {
+  const book = mapLibraryBookSummary({
+    id: 'book-without-author',
+    title: 'Untitled',
+    author: null,
+    coverStatus: 'PENDING',
+    coverUrl: '/api/books/book-without-author/cover?size=medium',
+    availableMediaKinds: ['EBOOK'],
+    statusValue: 'UNREAD',
+    lastReadAt: null,
+    importedAt: null
+  }, 'management');
+
+  if (book.projection !== 'management') assert.fail('expected management projection');
+  assert.equal(book.author, null);
+  assert.equal(book.gradient, '');
+  assert.equal(book.statusValue, 'UNREAD');
 });
 
 test('management projection rejects a malformed media summary at the API boundary', () => {

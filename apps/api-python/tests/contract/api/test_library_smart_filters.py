@@ -15,6 +15,9 @@ from app.models import (
     LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
     LibrarySourceNode,
 )
 from app.models.auth import User
@@ -84,6 +87,55 @@ def _login(client: TestClient, db: Session) -> User:
     return user
 
 
+def _ready_resource(
+    db: Session,
+    *,
+    book_id: str,
+    resource_id: str,
+) -> LibraryReadableResource:
+    resource_path = f"{book_id}/{resource_id}.pdf"
+    node = LibrarySourceNode(
+        id=f"{resource_id}-node",
+        library_id="test-library",
+        relative_path=resource_path,
+        path_key="v1:" + hashlib.sha256(resource_path.encode()).hexdigest(),
+        name=f"{resource_id}.pdf",
+        physical_kind="REGULAR_FILE",
+        observed_size_bytes=1,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
+    )
+    resource = LibraryReadableResource(
+        id=resource_id,
+        library_id="test-library",
+        book_id=book_id,
+        source_node_id=node.id,
+        adapter_id="pdf-file",
+        adapter_version="1",
+        media_kind="EBOOK",
+        format="PDF",
+        import_state="READY",
+    )
+    db.add(node)
+    db.flush()
+    db.add(resource)
+    db.flush()
+    db.add(LibraryReadableResourceMetadata(resource_id=resource_id, title="PDF"))
+    db.add(
+        LibraryResourceAsset(
+            id=f"{resource_id}-asset",
+            library_id="test-library",
+            resource_id=resource_id,
+            source_node_id=node.id,
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+        )
+    )
+    db.flush()
+    return resource
+
+
 def test_book_list_search_is_deterministic_and_keeps_empty_books(
     client: TestClient, db_session: Session
 ) -> None:
@@ -93,14 +145,74 @@ def test_book_list_search_is_deterministic_and_keeps_empty_books(
     _book(db_session, book_id="empty", title="Empty Book", author=None)
     db_session.commit()
 
-    response = client.get("/api/books", params={"search": "Book", "pageSize": 100})
+    response = client.get(
+        "/api/books",
+        params={"search": "Book", "pageSize": 100, "view": "management"},
+    )
 
     assert response.status_code == 200, response.text
     payload = response.json()["data"]
     assert [item["id"] for item in payload["books"]] == ["empty"]
     assert payload["total"] == 1
-    assert payload["books"][0]["resources"] == []
-    assert payload["books"][0]["completed"] is False
+    assert payload["books"][0]["author"] is None
+    assert payload["books"][0]["statusValue"] == "UNREAD"
+    assert payload["books"][0]["availableMediaKinds"] == []
+
+
+def test_book_list_projections_expose_nullable_author_and_ready_media(
+    client: TestClient, db_session: Session
+) -> None:
+    _login(client, db_session)
+    _book(db_session, book_id="ready-book", title="Ready Book", author=None)
+    _ready_resource(db_session, book_id="ready-book", resource_id="ready-resource")
+    db_session.commit()
+
+    bookshelf = client.get(
+        "/api/books",
+        params={"view": "bookshelf", "pageSize": 100},
+    )
+    assert bookshelf.status_code == 200, bookshelf.text
+    bookshelf_item = bookshelf.json()["data"]["books"][0]
+    assert bookshelf_item == {
+        "id": "ready-book",
+        "title": "Ready Book",
+        "author": None,
+        "coverUrl": "/api/books/ready-book/cover?size=medium",
+        "availableMediaKinds": ["EBOOK"],
+        "progress": 0.0,
+    }
+
+    search = client.get(
+        "/api/books",
+        params={"view": "search", "pageSize": 100},
+    )
+    assert search.status_code == 200, search.text
+    assert search.json()["data"]["books"][0] == bookshelf_item
+
+    management = client.get(
+        "/api/books",
+        params={"view": "management", "pageSize": 100},
+    )
+    assert management.status_code == 200, management.text
+    management_item = management.json()["data"]["books"][0]
+    assert management_item["author"] is None
+    assert management_item["availableMediaKinds"] == ["EBOOK"]
+    assert management_item["statusValue"] == "UNREAD"
+    assert management_item["gradient"] == ""
+    assert management_item["coverStatus"] == "PENDING"
+
+    full = client.get("/api/books", params={"pageSize": 100})
+    assert full.status_code == 200, full.text
+    full_item = full.json()["data"]["books"][0]
+    assert full_item["author"] is None
+    assert [resource["id"] for resource in full_item["resources"]] == ["ready-resource"]
+    assert full_item["availableMediaKinds"] == ["EBOOK"]
+
+
+def test_book_list_rejects_unknown_projection(client: TestClient) -> None:
+    response = client.get("/api/books", params={"view": "unknown"})
+
+    assert response.status_code == 422
 
 
 def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(
