@@ -146,10 +146,10 @@ FILTER_FIELD_DEFINITIONS = (
         unit="%",
     ),
     LibraryFilterFieldDefinition(
-        "resourceTitle", "卷册名称", "卷册元数据", "text", TEXT_OPERATORS
+        "resourceTitle", "资源名称", "资源元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
-        "narrator", "演播者", "卷册元数据", "text", TEXT_OPERATORS
+        "narrator", "演播者", "资源元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "mediaKind",
@@ -193,7 +193,7 @@ FILTER_FIELD_DEFINITIONS = (
         value_scale=60000,
     ),
     LibraryFilterFieldDefinition(
-        "volumeCount", "卷册数量", "格式与文件", "number", NUMBER_OPERATORS
+        "resourceCount", "资源数量", "格式与文件", "number", NUMBER_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "readingStatus",

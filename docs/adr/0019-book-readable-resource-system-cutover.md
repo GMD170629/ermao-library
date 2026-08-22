@@ -610,9 +610,8 @@ fresh-only、无双轨、无兼容层和最终生产状态一次性切换的架�
 - Backend：Ruff format/check 通过，mypy 411 个源文件零错误，compileall 通过，完整 pytest
   **851 passed**（包含固定源码编译的 MOBI runtime）；
 - Web/reader-core：reader-core typecheck、Web typecheck、ESLint 通过，Web tests
-  **338 passed**；
+  **339 passed**；
 - API 合同复验 **143 passed**；导入单元/集成复验 **138 passed**；
-- 正式 `pnpm i18n:check` 仍暴露仓库既有的 catalog 生成器范围问题：它会把后端正则、内部
-  提示词及未通过稳定错误码暴露的中文字符串一并当作 Web message key。该问题不通过机械
-  填充英文词典掩盖，也不属于本 ADR 身份切换的兼容债；在修复生成器语义边界和后端稳定
-  错误码之前，不以该门禁宣称全仓 i18n 验收完成。
+- i18n catalog 生成器只提取显式用户可见的后端错误、事件、健康状态、筛选与 provider
+  元数据边界，不再把正则、内部 prompt 和普通实现异常当作 Web message key；
+  `pnpm i18n:check` 验证 zh-CN/en-US **2017 条**消息及占位符完全对齐。

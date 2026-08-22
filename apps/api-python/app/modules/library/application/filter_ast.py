@@ -83,7 +83,7 @@ FIELD_OPERATORS = {
             "pageCount",
             "chapterCount",
             "duration",
-            "volumeCount",
+            "resourceCount",
             "progress",
         )
     },

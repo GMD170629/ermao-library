@@ -149,7 +149,7 @@ def _service(db: Session, settings: Settings) -> ResourceReaderService:
 
 def _not_found() -> ReaderNotFoundError:
     return ReaderNotFoundError(
-        ReaderErrorBody(message="卷册不存在", code="RESOURCE_NOT_FOUND")
+        ReaderErrorBody(message="资源不存在", code="RESOURCE_NOT_FOUND")
     )
 
 
@@ -197,7 +197,7 @@ def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderAssetDto, str]:
     if source_format not in _COMIC_SOURCE_FORMATS:
         raise ReaderValidationError(
             ReaderErrorBody(
-                message="当前卷不是漫画 Publication",
+                message="当前资源不是漫画 Publication",
                 code="READER_LOCATION_FORMAT_MISMATCH",
             )
         )
@@ -226,7 +226,7 @@ def _reader_type(resource_format: str) -> ReaderType:
     if reader_type is None:
         raise ReaderValidationError(
             ReaderErrorBody(
-                message="卷册格式不支持直接阅读",
+                message="资源格式不支持直接阅读",
                 code="RESOURCE_FORMAT_UNSUPPORTED",
             )
         )
