@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from zipfile import ZipFile
 
+from app.modules.imports.application.local_metadata import LocalCoverPayload
 from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     ResourceAdapterId,
@@ -72,3 +74,43 @@ def test_registry_image_page_uses_stem(tmp_path: Path) -> None:
     assert result.asset is not None
     assert result.asset.role is AssetRole.PAGE
     assert result.asset.sort_key == "001.png"
+
+
+def test_registry_epub_merges_sidecar_embedded_path_and_cover(tmp_path: Path) -> None:
+    path = tmp_path / "路径书名.epub"
+    cover = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+        b"\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d"
+        b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    with ZipFile(path, "w") as archive:
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "OPS/book.opf",
+            """<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>
+            <dc:title>内嵌标题</dc:title><dc:creator>内嵌作者</dc:creator>
+            <meta name="cover" content="cover-image"/></metadata>
+            <manifest><item id="cover-image" href="cover.png" media-type="image/png"/></manifest></package>""",
+        )
+        archive.writestr("OPS/cover.png", cover)
+    path.with_suffix(".opf").write_text(
+        '<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>旁车标题</dc:title></metadata></package>',
+        encoding="utf-8",
+    )
+    adapter = unique_adapter_or_none(match_file_adapters(path.name))
+    assert adapter is not None
+
+    result = RegistryResourceAdapterExecutor().parse_file(
+        absolute_path=path,
+        adapter=adapter,
+        role=AssetRole.PRIMARY,
+    )
+
+    assert result.local_metadata is not None
+    assert result.local_metadata.metadata.title == "旁车标题"
+    assert result.local_metadata.metadata.author == "内嵌作者"
+    assert result.local_metadata.cover == LocalCoverPayload(cover)

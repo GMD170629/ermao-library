@@ -6,6 +6,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import (
@@ -301,7 +302,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         engine.dispose()
 
 
-def test_alembic_script_directory_has_single_fresh_baseline_head() -> None:
+def test_alembic_script_directory_has_one_linear_head() -> None:
     from alembic.script import ScriptDirectory
 
     from app.db.runner import alembic_config_for_engine, head_revision
@@ -309,11 +310,39 @@ def test_alembic_script_directory_has_single_fresh_baseline_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 1
-    assert script.get_heads() == ["0001_library_topology_baseline"]
-    assert head_revision() == "0001_library_topology_baseline"
-    assert revisions[0].revision == "0001_library_topology_baseline"
-    assert revisions[0].down_revision is None
+    assert len(revisions) == 2
+    assert script.get_heads() == ["0002_source_node_writeback"]
+    assert head_revision() == "0002_source_node_writeback"
+    assert [revision.revision for revision in revisions] == [
+        "0002_source_node_writeback",
+        "0001_library_topology_baseline",
+    ]
+    assert revisions[0].down_revision == "0001_library_topology_baseline"
+    assert revisions[1].down_revision is None
+
+
+def test_apply_schema_upgrades_the_supported_baseline(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    config = runner_module.alembic_config_for_engine(engine)
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0001_library_topology_baseline")
+        assert _current_revision(engine) == "0001_library_topology_baseline"
+
+        runner_module.apply_schema(engine, settings)
+
+        assert _current_revision(engine) == "0002_source_node_writeback"
+        operation_columns = {
+            column["name"]: column
+            for column in inspect(engine).get_columns("MetadataWritebackOperation")
+        }
+        assert operation_columns["sourceNodeId"]["nullable"] is False
+        assert operation_columns["resourceId"]["nullable"] is True
+    finally:
+        engine.dispose()
 
 
 def test_apply_schema_rejects_former_development_revisions(tmp_path) -> None:

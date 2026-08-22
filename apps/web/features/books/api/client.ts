@@ -1,5 +1,7 @@
 import type { ClassificationSource, MediaKind, ReaderType, ReadableResourceView, ResourceFormat, BookView } from '../../../types/book';
 import type { ChapterDetailUnit, EbookChapterDetail } from '../model/chapter-detail';
+import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate } from '../model/book-contents';
+import { bookContentSortQuery } from '../model/book-contents';
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -213,6 +215,128 @@ export async function fetchAllBookResources(
     resources.push(...nextPage.resources);
   }
   return resources;
+}
+
+function mapBookContentEntry(value: unknown): BookContentEntry | null {
+  const item = record(value);
+  const sourceNodeId = stringValue(item.sourceNodeId).trim();
+  const kind = item.kind === 'FOLDER' || item.kind === 'FILE' ? item.kind : null;
+  const physicalKind = item.physicalKind === 'REGULAR_FILE' || item.physicalKind === 'DIRECTORY' || item.physicalKind === 'SYMLINK' || item.physicalKind === 'OTHER' ? item.physicalKind : null;
+  if (!sourceNodeId || !kind || !physicalKind) return null;
+  return {
+    sourceNodeId,
+    parentSourceNodeId: nullableString(item.parentSourceNodeId),
+    name: stringValue(item.name, sourceNodeId),
+    title: stringValue(item.title, stringValue(item.name, sourceNodeId)),
+    description: nullableString(item.description),
+    kind,
+    physicalKind,
+    sizeBytes: nullableNumber(item.sizeBytes),
+    observedAt: stringValue(item.observedAt),
+    hasChildren: item.hasChildren === true,
+    resourceId: nullableString(item.resourceId),
+    representativeResourceId: nullableString(item.representativeResourceId),
+    coverUrl: nullableString(item.coverUrl)
+  };
+}
+
+export async function fetchBookContents(
+  bookId: string,
+  sourceNodeId: string | null,
+  sortOption: BookContentSort,
+  page: number,
+  signal?: AbortSignal
+): Promise<BookContentsPage> {
+  const sort = bookContentSortQuery(sortOption);
+  const query = new URLSearchParams({
+    sort: sort.sort,
+    direction: sort.direction,
+    page: String(page),
+    pageSize: '100'
+  });
+  if (sourceNodeId) query.set('sourceNodeId', sourceNodeId);
+  const data = await apiJson(`/api/books/${encodeURIComponent(bookId)}/contents?${query}`, { signal });
+  return mapBookContentsPage(bookId, page, data);
+}
+
+export function mapBookContentsPage(bookId: string, page: number, value: unknown): BookContentsPage {
+  const data = record(value);
+  if (stringValue(data.bookId) !== bookId) throw new Error('图书目录响应与请求不匹配');
+  const entries = (Array.isArray(data.entries) ? data.entries : []).map(mapBookContentEntry).filter((entry): entry is BookContentEntry => entry !== null);
+  const breadcrumbs = (Array.isArray(data.breadcrumbs) ? data.breadcrumbs : []).map(mapBookContentEntry).filter((entry): entry is BookContentEntry => entry !== null);
+  const currentNode = mapBookContentEntry(data.currentNode);
+  return {
+    bookId,
+    currentSourceNodeId: nullableString(data.currentSourceNodeId),
+    currentResourceId: nullableString(data.currentResourceId),
+    currentNode,
+    currentResourceIds: (Array.isArray(data.currentResourceIds) ? data.currentResourceIds : []).flatMap((value) => {
+      const id = stringValue(value).trim();
+      return id ? [id] : [];
+    }),
+    parentSourceNodeId: nullableString(data.parentSourceNodeId),
+    breadcrumbs,
+    entries,
+    page: positiveInteger(data.page, page),
+    pageSize: positiveInteger(data.pageSize, 100),
+    total: Math.max(0, finiteNumber(data.total)),
+    totalPages: positiveInteger(data.totalPages, 1)
+  };
+}
+
+export async function updateSourceNodeMetadata(bookId: string, sourceNodeId: string, body: Readonly<{ title: string; description: string | null }>): Promise<void> {
+  await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function updateSourceNodePresentation(
+  bookId: string,
+  sourceNodeId: string,
+  body: Readonly<{
+    title: string;
+    description: string | null;
+    cover: File | null;
+    removeCover: boolean;
+  }>
+): Promise<void> {
+  const form = new FormData();
+  form.set('title', body.title);
+  if (body.description) form.set('description', body.description);
+  form.set('removeCover', String(body.removeCover));
+  if (body.cover) form.set('cover', body.cover);
+  await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}`, {
+    method: 'PUT',
+    body: form
+  });
+}
+
+export async function continueSourceNode(sourceNodeId: string): Promise<void> {
+  await apiJson(`/api/source-nodes/${encodeURIComponent(sourceNodeId)}/continue`, { method: 'POST' });
+}
+
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
+  const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId, query })
+  }));
+  const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {
+    const item = record(value);
+    const id = stringValue(item.id).trim();
+    if (!id) return [];
+    return [{
+      id,
+      source: stringValue(item.source, providerId),
+      title: nullableString(item.title),
+      description: nullableString(item.description),
+      coverUrl: nullableString(item.coverUrl),
+      confidence: finiteNumber(item.confidence)
+    } satisfies SourceNodeMetadataCandidate];
+  });
+  return { message: nullableString(data.message), candidates };
 }
 
 function mapChapterUnit(value: unknown): ChapterDetailUnit | null {

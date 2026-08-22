@@ -30,6 +30,7 @@ class MetadataWritebackImportProjection:
 class MetadataWritebackResourceProjection:
     id: str
     resource_id: str
+    source_node_id: str
     title: str
     description: str | None
     resource_index: float | None
@@ -65,7 +66,8 @@ class PreparedWritebackIntent:
     operation_id: str
     preparation_id: str
     book_id: str
-    resource_id: str
+    source_node_id: str
+    resource_id: str | None
     lookup_task_id: str | None
     asset_id: str | None
     source: str
@@ -118,7 +120,9 @@ def prepare_metadata_writeback_intents(
             }
         )
     resources_by_book: dict[str, list[dict[str, object]]] = {}
+    source_node_ids_by_resource: dict[str, str] = {}
     for resource in projection.resources:
+        source_node_ids_by_resource[resource.resource_id] = resource.source_node_id
         resources_by_book.setdefault(resource.resource_id, []).append(
             {
                 "resourceId": resource.id,
@@ -175,6 +179,7 @@ def prepare_metadata_writeback_intents(
                 operation_id=f"metadata_writeback_{digest}",
                 preparation_id=f"metadata_writeback_preparation_{digest}",
                 book_id=projection.book_id,
+                source_node_id=source_node_ids_by_resource[current_resource_id],
                 asset_id=resource_id,
                 lookup_task_id=lookup_task_id,
                 resource_id=current_resource_id,
@@ -187,6 +192,56 @@ def prepare_metadata_writeback_intents(
     return tuple(intents)
 
 
+def prepare_source_node_metadata_writeback_intent(
+    *,
+    book_id: str,
+    source_node_id: str,
+    source_directory: str,
+    title: str,
+    description: str | None,
+    cover_path: str | None,
+    source_revision: datetime,
+    source: str = "MANUAL",
+) -> PreparedWritebackIntent:
+    """Create one immutable sidecar-OPF intent for a Book directory node."""
+
+    revision = source_revision.isoformat()
+    snapshot_json = json.dumps(
+        {
+            "resources": [
+                {
+                    "resourceId": source_node_id,
+                    "payload": {
+                        "title": title.strip(),
+                        "description": (description or "").strip() or None,
+                        "coverPath": cover_path,
+                    },
+                    "assets": [],
+                    "importTasks": [{"sourcePath": source_directory}],
+                }
+            ]
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    key_input = f"{book_id}\0{source_node_id}\0{source}\0{revision}\0{snapshot_json}"
+    digest = hashlib.sha256(key_input.encode()).hexdigest()
+    return PreparedWritebackIntent(
+        operation_id=f"metadata_writeback_{digest}",
+        preparation_id=f"metadata_writeback_preparation_{digest}",
+        book_id=book_id,
+        source_node_id=source_node_id,
+        resource_id=None,
+        lookup_task_id=None,
+        asset_id=None,
+        source=source,
+        idempotency_key=digest,
+        source_revision=revision,
+        snapshot_json=snapshot_json,
+    )
+
+
 __all__ = [
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
@@ -194,4 +249,5 @@ __all__ = [
     "MetadataWritebackResourceProjection",
     "PreparedWritebackIntent",
     "prepare_metadata_writeback_intents",
+    "prepare_source_node_metadata_writeback_intent",
 ]

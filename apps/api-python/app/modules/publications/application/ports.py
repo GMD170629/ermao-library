@@ -28,6 +28,7 @@ class PublicationSource:
     mtime_ms: int
     title: str
     author: str | None
+    library_root: str | None = None
 
 
 class PublicationSourceRepository(Protocol):

@@ -54,7 +54,10 @@ def _path_key(path: str) -> str:
 
 
 def _seed_resource(
-    db_session: Session, source_path: Path
+    db_session: Session,
+    source_path: Path,
+    *,
+    observed_mtime_ns: int = 1_000_000,
 ) -> tuple[LibraryReadableResource, LibraryResourceAsset]:
     path = str(source_path)
     book_node = LibrarySourceNode(
@@ -76,7 +79,7 @@ def _seed_resource(
         name=source_path.name,
         physical_kind="REGULAR_FILE",
         observed_size_bytes=1,
-        observed_mtime_ns=1_000_000,
+        observed_mtime_ns=observed_mtime_ns,
         observed_at=datetime.now(UTC),
     )
     book = LibraryBook(
@@ -211,6 +214,33 @@ _ADMIN = PublicationAccessScope(
     can_view_manual_imports=True,
     library_ids=(),
 )
+
+
+def test_manifest_generation_ignores_source_revision_differences(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    resource, _asset = _seed_resource(db_session, tmp_path / "changed.epub")
+    adapter = _Adapter(
+        _publication(
+            toc=(PublicationTocEntry(href="Text/one.xhtml", title="第一章"),),
+            source_size_bytes=77,
+            source_mtime_ms=99,
+        )
+    )
+
+    result = _ensure(db_session, adapter).open_and_ensure(
+        resource_id=resource.id,
+        access_scope=_ADMIN,
+    )
+
+    assert result.navigation.outcome == EnsurePublicationNavigationOutcome.GENERATED
+    assert result.publication is adapter.publication
+    db_session.expire_all()
+    cache = db_session.get(PublicationNavigationCache, resource.id)
+    assert cache is not None
+    assert cache.source_size_bytes == 77
+    assert cache.source_mtime_ms == 99
 
 
 def test_first_access_replaces_legacy_chapters_and_second_access_hits_cache(
@@ -428,11 +458,11 @@ def test_manifest_parse_failure_invalidates_a_matching_cache_before_reraising(
     assert metadata.chapter_count is None
 
 
-def test_source_revision_change_during_parse_cannot_publish_stale_projection(
+def test_source_revision_change_during_parse_does_not_block_navigation(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
-    resource, asset = _seed_resource(db_session, tmp_path / "changing.epub")
+    resource, _asset = _seed_resource(db_session, tmp_path / "changing.epub")
     publication = _publication(
         toc=(PublicationTocEntry(href="Text/one.xhtml", title="第一章"),)
     )
@@ -457,14 +487,14 @@ def test_source_revision_change_during_parse_cannot_publish_stale_projection(
         access_scope=_ADMIN,
     )
 
-    assert result.outcome == EnsurePublicationNavigationOutcome.SOURCE_CHANGED
+    assert result.outcome == EnsurePublicationNavigationOutcome.GENERATED
     db_session.expire_all()
-    assert db_session.scalars(select(ReadableResourceNavigationUnit)).all() == []
-    assert db_session.get(PublicationNavigationCache, resource.id) is None
+    chapters = db_session.scalars(select(ReadableResourceNavigationUnit)).all()
+    assert [chapter.title for chapter in chapters] == ["第一章"]
+    assert db_session.get(PublicationNavigationCache, resource.id) is not None
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None
-    assert metadata.chapter_count is None
-    assert asset.id == "navigation-asset"
+    assert metadata.chapter_count == 1
 
 
 def test_selected_asset_change_regenerates_navigation_for_the_new_asset(

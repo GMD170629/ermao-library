@@ -112,6 +112,7 @@ class StubOkAdapter(ResourceAdapterExecutorPort):
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        **_kwargs: object,
     ) -> FileParseResult:
         return FileParseResult(
             ok=True,

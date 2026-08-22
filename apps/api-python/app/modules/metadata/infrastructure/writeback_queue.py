@@ -284,6 +284,7 @@ def load_metadata_writeback_projection(
             MetadataWritebackResourceProjection(
                 id=resource.id,
                 resource_id=resource.id,
+                source_node_id=resource.source_node_id,
                 title=resource_metadata_by_id[resource.id].title,
                 description=resource_metadata_by_id[resource.id].description,
                 resource_index=resource_metadata_by_id[resource.id].resource_index,
@@ -343,6 +344,7 @@ def enqueue_prepared_writeback_intents(
         {
             "id": intent.operation_id,
             "book_id": intent.book_id,
+            "source_node_id": intent.source_node_id,
             "resource_id": intent.resource_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,
@@ -360,6 +362,7 @@ def enqueue_prepared_writeback_intents(
             "id": intent.preparation_id,
             "operation_id": intent.operation_id,
             "book_id": intent.book_id,
+            "source_node_id": intent.source_node_id,
             "resource_id": intent.resource_id,
             "lookup_task_id": intent.lookup_task_id,
             "source": intent.source,
@@ -407,14 +410,14 @@ def enqueue_prepared_writeback_intents(
                 for intent in intents
                 if intent.idempotency_key in existing_keys
             )
-        for chunk in sqlite_parameter_chunks(operation_rows, parameters_per_row=11):
+        for chunk in sqlite_parameter_chunks(operation_rows, parameters_per_row=12):
             db.execute(
                 sqlite_insert(MetadataWritebackOperation)
                 .values(list(chunk))
                 .on_conflict_do_nothing(index_elements=[MetadataWritebackOperation.id])
             )
         inserted_preparations = 0
-        for chunk in sqlite_parameter_chunks(preparation_rows, parameters_per_row=14):
+        for chunk in sqlite_parameter_chunks(preparation_rows, parameters_per_row=15):
             result = cast(
                 CursorResult[Any],
                 db.execute(
@@ -616,6 +619,8 @@ def claim_next_preparation(
             MetadataWritebackPreparation.id,
             MetadataWritebackPreparation.operation_id,
             MetadataWritebackPreparation.book_id,
+            MetadataWritebackPreparation.source_node_id,
+            MetadataWritebackPreparation.resource_id,
             MetadataWritebackPreparation.source_revision,
             MetadataWritebackPreparation.snapshot_json,
             MetadataWritebackPreparation.attempts,
@@ -633,6 +638,8 @@ def claim_next_preparation(
         "id": row.id,
         "operationId": row.operation_id,
         "bookId": row.book_id,
+        "sourceNodeId": row.source_node_id,
+        "resourceId": row.resource_id,
         "sourceRevision": row.source_revision,
         "snapshotJson": row.snapshot_json,
         "attempts": row.attempts,
@@ -645,6 +652,7 @@ def prepare_targets_from_snapshot(
 ) -> tuple[PreparedTargetInsert, ...]:
     """Perform path resolution and filesystem inspection without a transaction."""
 
+    source_node_form = preparation.get("resourceId") is None
     parsed = json.loads(str(preparation["snapshotJson"]))
     resources = parsed.get("resources") if isinstance(parsed, dict) else None
     if not isinstance(resources, list):
@@ -683,6 +691,10 @@ def prepare_targets_from_snapshot(
             sources = [str(path) for path in assets_by_path]
         for source_value in sources:
             target_path = Path(source_value).expanduser().resolve()
+            if source_node_form and not target_path.is_dir():
+                raise ValueError(
+                    "source-node OPF writeback requires a directory target"
+                )
             if target_path in seen:
                 continue
             seen.add(target_path)
@@ -722,7 +734,9 @@ def prepare_targets_from_snapshot(
                     ).hexdigest(),
                     source_path=str(target_path),
                     format=(
-                        target_path.suffix.removeprefix(".") or "DIRECTORY"
+                        "DIRECTORY"
+                        if source_node_form
+                        else target_path.suffix.removeprefix(".") or "DIRECTORY"
                     ).upper(),
                     payload_json=json.dumps(payload, ensure_ascii=False),
                 )

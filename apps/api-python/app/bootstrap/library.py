@@ -10,6 +10,7 @@ from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
 from app.modules.library.application.asset_commands import DeleteResourceAsset
 from app.modules.library.application.book_commands import UpdateBook
+from app.modules.library.application.book_contents import BrowseBookContents
 from app.modules.library.application.book_list import BookListQuery, BookListResult
 from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.application.facet_sync import (
@@ -21,6 +22,13 @@ from app.modules.library.application.filter_options import (
 )
 from app.modules.library.application.queries import (
     SmartShelfCriteria,
+)
+from app.modules.library.application.source_node_commands import (
+    UpdateSourceNodeMetadata,
+    UpdateSourceNodePresentation,
+)
+from app.modules.library.application.source_node_metadata_recognition import (
+    RecognizeSourceNodeMetadata,
 )
 from app.modules.library.infrastructure import book_list as library_book_list
 from app.modules.library.infrastructure import books as library_books
@@ -36,6 +44,9 @@ from app.modules.library.infrastructure.asset_commands import (
     SqlAlchemyResourceAssetMutation,
 )
 from app.modules.library.infrastructure.book_commands import SqlAlchemyBookMutation
+from app.modules.library.infrastructure.book_contents import (
+    SqlAlchemyBookContentsQueries,
+)
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
@@ -50,6 +61,15 @@ from app.modules.library.infrastructure.filter_options import (
 )
 from app.modules.library.infrastructure.resource_commands import (
     SqlAlchemyResourceMetadata,
+)
+from app.modules.library.infrastructure.source_node_commands import (
+    SqlAlchemySourceNodeMetadata,
+)
+from app.modules.library.infrastructure.source_node_cover import (
+    FilesystemSourceNodeCoverPublication,
+)
+from app.modules.library.infrastructure.source_node_metadata_recognition import (
+    ProviderSourceNodeMetadataRecognition,
 )
 
 
@@ -111,6 +131,28 @@ def update_book(db: Session) -> UpdateBook:
     return UpdateBook(SqlAlchemyBookMutation(db), db)
 
 
+def browse_book_contents(db: Session) -> BrowseBookContents:
+    return BrowseBookContents(SqlAlchemyBookContentsQueries(db))
+
+
+def update_source_node_metadata(db: Session) -> UpdateSourceNodeMetadata:
+    return UpdateSourceNodeMetadata(SqlAlchemySourceNodeMetadata(db), db)
+
+
+def update_source_node_presentation(
+    db: Session, settings: Settings
+) -> UpdateSourceNodePresentation:
+    return UpdateSourceNodePresentation(
+        SqlAlchemySourceNodeMetadata(db),
+        FilesystemSourceNodeCoverPublication(settings.resolved_storage_root),
+        db,
+    )
+
+
+def recognize_source_node_metadata(db: Session) -> RecognizeSourceNodeMetadata:
+    return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db))
+
+
 def delete_resource_asset(db: Session) -> DeleteResourceAsset:
     return DeleteResourceAsset(SqlAlchemyResourceAssetMutation(db), db)
 
@@ -137,6 +179,7 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
 __all__ = [
     "PreparedBookFacetWrite",
     "bookshelf_items",
+    "browse_book_contents",
     "delete_resource_asset",
     "execute_book_facet_write",
     "get_book",
@@ -156,7 +199,10 @@ __all__ = [
     "load_metadata_apply_job_ids",
     "prepare_book_facet",
     "prepare_book_facet_write",
+    "recognize_source_node_metadata",
     "resource_metadata",
     "smart_shelf_book_ids",
     "update_book",
+    "update_source_node_metadata",
+    "update_source_node_presentation",
 ]

@@ -5,10 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from io import BytesIO
+from pathlib import Path
+
+from PIL import Image
+from sqlalchemy import select
 
 from app.core.auth import hash_password
 from app.main import create_app
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
@@ -16,10 +22,14 @@ from app.models import (
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
+    LibrarySourceNodeMetadata,
     ReadableResourceNavigationUnit,
     ReaderResourceProgress,
 )
 from app.models.auth import User
+from app.models.organize import MetadataWritebackOperation, OrganizePolicy
+from app.modules.metadata.application.opf import parse_opf_metadata
+from app.services.metadata_file_writeback import process_next_metadata_writeback
 
 
 def _path_key(relative_path: str) -> str:
@@ -32,10 +42,13 @@ def _source_node(
     *,
     physical_kind: str = "REGULAR_FILE",
     size: int | None = 100,
+    parent_id: str | None = None,
 ) -> LibrarySourceNode:
     return LibrarySourceNode(
         id=node_id,
         library_id="test-library",
+        parent_id=parent_id,
+        parent_physical_kind="DIRECTORY" if parent_id else None,
         relative_path=relative_path,
         path_key=_path_key(relative_path),
         name=relative_path.rsplit("/", 1)[-1],
@@ -147,6 +160,12 @@ def _login(client, db_session, *, email: str = "detail@example.com") -> User:
     return user
 
 
+def _png_cover() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (40, 60), color=(201, 92, 48)).save(output, format="PNG")
+    return output.getvalue()
+
+
 def test_book_detail_is_bounded_and_projects_resource_assets(
     client, db_session
 ) -> None:
@@ -217,6 +236,142 @@ def test_book_resource_query_pages_deterministically(client, db_session) -> None
     ]
 
 
+def test_book_contents_browses_source_tree_with_resource_overlay(
+    client, db_session
+) -> None:
+    _login(client, db_session, email="contents@example.com")
+    book, resources = _add_book(db_session, resource_count=1)
+    root_id = book.source_node_id
+    folder = _source_node(
+        "contents-folder",
+        "detail-book/第一卷",
+        physical_kind="DIRECTORY",
+        size=None,
+        parent_id=root_id,
+    )
+    outside = _source_node(
+        "outside-folder", "outside", physical_kind="DIRECTORY", size=None
+    )
+    db_session.add_all([folder, outside])
+    db_session.flush()
+    resource_node = db_session.get(LibrarySourceNode, resources[0].source_node_id)
+    assert resource_node is not None
+    resource_node.parent_id = folder.id
+    resource_node.parent_physical_kind = "DIRECTORY"
+    resource_node.relative_path = "detail-book/第一卷/resource-01.epub"
+    resource_node.path_key = _path_key(resource_node.relative_path)
+    db_session.commit()
+
+    root_response = client.get("/api/books/detail-book/contents")
+    assert root_response.status_code == 200, root_response.text
+    root_payload = root_response.json()["data"]
+    assert root_payload["currentSourceNodeId"] == root_id
+    assert root_payload["breadcrumbs"] == []
+    assert [entry["sourceNodeId"] for entry in root_payload["entries"]] == [folder.id]
+    assert root_payload["entries"][0]["kind"] == "FOLDER"
+    assert root_payload["entries"][0]["hasChildren"] is True
+    assert root_payload["entries"][0]["representativeResourceId"] == resources[0].id
+
+    folder_response = client.get(
+        "/api/books/detail-book/contents", params={"sourceNodeId": folder.id}
+    )
+    assert folder_response.status_code == 200, folder_response.text
+    folder_payload = folder_response.json()["data"]
+    assert [crumb["sourceNodeId"] for crumb in folder_payload["breadcrumbs"]] == [
+        folder.id
+    ]
+    assert folder_payload["parentSourceNodeId"] == root_id
+    assert folder_payload["currentNode"]["title"] == "第一卷"
+    assert folder_payload["currentResourceIds"] == [resources[0].id]
+    assert folder_payload["entries"][0]["resourceId"] == resources[0].id
+
+    update_response = client.patch(
+        f"/api/books/detail-book/source-nodes/{folder.id}",
+        json={"title": "彩色珍藏版", "description": "测试版本简介"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    db_session.expire_all()
+    metadata = db_session.get(LibrarySourceNodeMetadata, folder.id)
+    assert metadata is not None
+    assert (metadata.title, metadata.description) == ("彩色珍藏版", "测试版本简介")
+    renamed_response = client.get(
+        "/api/books/detail-book/contents", params={"sourceNodeId": folder.id}
+    )
+    assert renamed_response.json()["data"]["currentNode"]["title"] == "彩色珍藏版"
+
+    outside_response = client.get(
+        "/api/books/detail-book/contents", params={"sourceNodeId": outside.id}
+    )
+    assert outside_response.status_code == 404
+    assert outside_response.json()["error"]["code"] == "BOOK_CONTENTS_NOT_FOUND"
+
+
+def test_source_node_edit_respects_opf_setting_and_publishes_its_own_cover(
+    client, db_session, test_settings, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="directory-cover@example.com")
+    book, _resources = _add_book(db_session, resource_count=0)
+    library_root = tmp_path / "library"
+    directory_path = library_root / "detail-book" / "第一卷"
+    directory_path.mkdir(parents=True)
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(library_root)
+    folder = _source_node(
+        "directory-cover-folder",
+        "detail-book/第一卷",
+        physical_kind="DIRECTORY",
+        size=None,
+        parent_id=book.source_node_id,
+    )
+    db_session.add(folder)
+    db_session.commit()
+
+    disabled_response = client.patch(
+        f"/api/books/{book.id}/source-nodes/{folder.id}",
+        json={"title": "关闭写回", "description": "只保存数据库"},
+    )
+    assert disabled_response.status_code == 200, disabled_response.text
+    assert db_session.scalar(select(MetadataWritebackOperation)) is None
+
+    db_session.add(OrganizePolicy(id="default", write_metadata_to_files=True))
+    db_session.commit()
+    response = client.put(
+        f"/api/books/{book.id}/source-nodes/{folder.id}",
+        data={"title": "彩色珍藏版", "description": "目录自己的简介"},
+        files={"cover": ("directory.png", _png_cover(), "image/png")},
+    )
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    metadata = db_session.get(LibrarySourceNodeMetadata, folder.id)
+    assert metadata is not None
+    assert metadata.title == "彩色珍藏版"
+    assert metadata.description == "目录自己的简介"
+    assert metadata.cover_status == "READY"
+    assert metadata.cover_path == f"covers/source-nodes/{folder.id}.png"
+    assert (test_settings.resolved_storage_root / metadata.cover_path).is_file()
+    operation = db_session.scalar(select(MetadataWritebackOperation))
+    assert operation is not None
+    assert operation.source_node_id == folder.id
+    assert operation.resource_id is None
+
+    contents = client.get(f"/api/books/{book.id}/contents").json()["data"]
+    entry = next(
+        item for item in contents["entries"] if item["sourceNodeId"] == folder.id
+    )
+    assert entry["coverUrl"] == (f"/api/books/{book.id}/source-nodes/{folder.id}/cover")
+    cover_response = client.get(entry["coverUrl"])
+    assert cover_response.status_code == 200
+    assert cover_response.headers["content-type"] == "image/png"
+
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    opf = parse_opf_metadata((directory_path / "metadata.opf").read_bytes())
+    assert opf.title == "彩色珍藏版"
+    assert opf.description == "目录自己的简介"
+    assert (directory_path / "metadata.cover.png").is_file()
+
+
 def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> None:
     _login(client, db_session, email="units@example.com")
     _add_book(db_session, resource_count=2)
@@ -277,6 +432,7 @@ def test_openapi_exposes_only_canonical_book_resource_reader_paths() -> None:
     paths = create_app().openapi()["paths"]
     assert "/api/books/{book_id}" in paths
     assert "/api/books/{book_id}/resources" in paths
+    assert "/api/books/{book_id}/contents" in paths
     assert "/api/resources/{resource_id}" in paths
     assert "/api/reader/v4/resources/{resource_id}/bootstrap" in paths
     assert not any(

@@ -42,6 +42,12 @@ def persist_metadata_writeback_intents(
     return writeback_queue.enqueue_prepared_writeback_intents(db, intents)
 
 
+def metadata_writeback_enabled(db: Session) -> bool:
+    """Return whether new metadata sidecar tasks may be scheduled."""
+
+    return writeback_queue.write_metadata_to_files_enabled(db)
+
+
 def enqueue_metadata_writeback(
     db: Session,
     *,

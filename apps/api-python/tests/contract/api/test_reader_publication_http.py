@@ -320,6 +320,27 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     }
 
 
+def test_epub_manifest_ignores_recorded_file_revision(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    resource = _seed_epub(db_session, test_settings)
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    source_node.observed_size_bytes = 1
+    source_node.observed_mtime_ns = 1
+    db_session.commit()
+
+    response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["title"] == "跨端出版物"
+
+
 def test_book_detail_and_reader_manifest_share_publication_navigation(
     client: TestClient,
     db_session: Session,

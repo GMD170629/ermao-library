@@ -24,9 +24,6 @@ from app.core.authorization import authorization_context
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.publications.application.ensure_navigation import (
-    PublicationNavigationSourceChangedError,
-)
 from app.modules.publications.application.ports import PublicationAccessScope
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -199,7 +196,6 @@ def publication_manifest(
         PublicationNotFoundError,
         PublicationUnsupportedError,
         PublicationCorruptError,
-        PublicationNavigationSourceChangedError,
     ) as error:
         raise _not_found() from error
     return _manifest(publication)
@@ -228,7 +224,6 @@ def publication_positions(
         PublicationNotFoundError,
         PublicationUnsupportedError,
         PublicationCorruptError,
-        PublicationNavigationSourceChangedError,
     ) as error:
         raise _not_found() from error
     total = len(publication.reading_order)

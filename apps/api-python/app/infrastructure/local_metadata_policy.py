@@ -57,3 +57,16 @@ __all__ = [
     "load_raw_local_metadata_priority_projection",
     "prepare_local_metadata_priority",
 ]
+
+
+class SqlAlchemyLocalMetadataPriority:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def load(self) -> tuple[LocalMetadataSource, ...]:
+        return prepare_local_metadata_priority(
+            load_raw_local_metadata_priority_projection(self._db)
+        )
+
+
+__all__.append("SqlAlchemyLocalMetadataPriority")

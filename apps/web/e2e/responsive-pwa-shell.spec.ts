@@ -1,8 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
-async function mockWebAppApi(page: Page) {
+type ApiRouteOverride = (route: Route, url: URL) => Promise<boolean>;
+
+async function mockWebAppApi(page: Page, override?: ApiRouteOverride) {
   await page.route('**/api/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
+    if (override && await override(route, url)) return;
     if (pathname.endsWith('/api/auth/me')) {
       await route.fulfill({
         json: {
@@ -157,6 +161,7 @@ test('book detail resource covers support selection, keyboard-accessible context
     assets: [{ id: `${id}-asset`, resourceId: id, path: `${id}.cbz`, mimeType: 'application/zip', kind: 'publication', sortOrder: 0, sizeBytes: 1024, size: '1 KB' }]
   });
   const resources = [resource('context-resource-1', '第一资源', 0), resource('context-resource-2', '第二资源', 1)];
+  const versionEntry = { sourceNodeId: 'context-version-node', parentSourceNodeId: 'context-book-node', name: '测试版本目录', title: '测试版本标题', description: '版本简介', kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: '2026-08-03T08:00:00.000Z', hasChildren: true, resourceId: null, representativeResourceId: resources[0].id };
   const book = {
     id: 'context-book',
     title: '右键菜单测试图书',
@@ -182,13 +187,62 @@ test('book detail resource covers support selection, keyboard-accessible context
     completed: false,
     resources
   };
-  await page.route('**/api/books/context-book*', async (route) => {
+  await page.unroute('**/api/**');
+  await mockWebAppApi(page, async (route, url) => {
+    if (!url.pathname.includes('/api/books/context-book')) return false;
+    if (url.pathname.includes('/contents')) {
+      const nested = url.searchParams.get('sourceNodeId') === versionEntry.sourceNodeId;
+      const resourceEntries = resources.map((resource, index) => ({
+        sourceNodeId: `context-node-${index + 1}`,
+        parentSourceNodeId: nested ? versionEntry.sourceNodeId : 'context-book-node',
+        name: resource.title,
+        title: resource.title,
+        description: null,
+        kind: 'FILE',
+        physicalKind: 'REGULAR_FILE',
+        sizeBytes: 0,
+        observedAt: book.updatedAt,
+        hasChildren: false,
+        resourceId: resource.id,
+        representativeResourceId: resource.id
+      }));
+      await route.fulfill({ json: { ok: true, data: {
+        bookId: book.id,
+        currentSourceNodeId: nested ? versionEntry.sourceNodeId : 'context-book-node',
+        currentResourceId: null,
+        currentNode: nested ? versionEntry : { sourceNodeId: 'context-book-node', parentSourceNodeId: null, name: book.title, title: book.title, description: null, kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: book.updatedAt, hasChildren: true, resourceId: null, representativeResourceId: resources[0].id },
+        currentResourceIds: resources.map((resource) => resource.id),
+        parentSourceNodeId: null,
+        breadcrumbs: nested ? [versionEntry] : [],
+        entries: nested ? resourceEntries : [versionEntry, ...resourceEntries],
+        page: 1,
+        pageSize: 100,
+        total: resources.length + (nested ? 0 : 1),
+        totalPages: 1
+      } } });
+      return true;
+    }
     await route.fulfill({ json: { ok: true, data: book } });
+    return true;
   });
 
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
-  const first = page.getByRole('button', { name: '第 1 资源，进度 80%' });
-  const second = page.getByRole('button', { name: '第 2 资源，进度 100%' });
+  const versionActions = page.getByRole('button', { name: '管理 测试版本标题', exact: true });
+  await versionActions.click();
+  const versionMenu = page.getByRole('menu', { name: '管理版本' });
+  await expect(versionMenu.getByRole('menuitem')).toHaveCount(4);
+  await expect(versionMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
+  await expect(versionMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
+  await expect(versionMenu.getByRole('menuitem', { name: /^识别元数据/ })).toBeVisible();
+  await expect(versionMenu.getByRole('menuitem', { name: /^重新扫描文件/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '打开版本 测试版本标题' }).click();
+  await expect(page.getByRole('heading', { name: '测试版本标题', level: 1 })).toBeVisible();
+  await expect(page.getByText('版本简介', { exact: true })).toBeVisible();
+  await expect(page.getByText('90%', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: book.title, exact: true }).click();
+  const first = page.getByRole('button', { name: '第 1 卷，阅读进度 80%' });
+  const second = page.getByRole('button', { name: '第 2 卷，阅读进度 100%' });
   const resourceProgress = page.locator('[data-resource-progress]');
   await expect(resourceProgress).toHaveCount(2);
   await expect(resourceProgress.nth(0)).toHaveAttribute('data-resource-progress-state', 'reading');
@@ -203,7 +257,7 @@ test('book detail resource covers support selection, keyboard-accessible context
 
   const firstActions = page.getByRole('button', { name: '管理 第一资源', exact: true });
   await firstActions.click();
-  const cardMenu = page.getByRole('menu', { name: '管理资源' });
+  const cardMenu = page.getByRole('menu', { name: '管理图书卷' });
   await expect(cardMenu.getByRole('menuitem')).toHaveCount(4);
   await expect(cardMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
@@ -219,38 +273,19 @@ test('book detail resource covers support selection, keyboard-accessible context
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(/\/books\/context-book\?/);
 
-  await page.getByRole('button', { name: '管理资源', exact: true }).click();
-  await first.click();
-  await expect(first).toHaveAttribute('aria-pressed', 'true');
-  await expect(second).toHaveAttribute('aria-pressed', 'false');
-
-  const selectionSurface = page.locator('[data-resource-wall-selection-surface="true"]');
-  const selectionSurfaceBounds = await selectionSurface.boundingBox();
-  if (!selectionSurfaceBounds) throw new Error('Resource selection surface is not visible');
-  await selectionSurface.click({ position: { x: selectionSurfaceBounds.width - 4, y: selectionSurfaceBounds.height / 2 } });
-  await expect(first).toHaveAttribute('aria-pressed', 'false');
-  await expect(second).toHaveAttribute('aria-pressed', 'false');
-
-  await first.click();
-  await expect(first).toHaveAttribute('aria-pressed', 'true');
-
-  await second.click({ button: 'right' });
-  await expect(second).toHaveAttribute('aria-pressed', 'true');
-  const menu = page.getByRole('menu', { name: '管理资源' });
-  await expect(menu).toBeVisible();
-  await menu.getByRole('menuitem', { name: /设置媒体类型/ }).hover();
-  await expect(menu.getByRole('menuitem', { name: /设置为电子书/ })).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: /设置为有声书/ })).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: /设置为漫画/ })).toHaveCount(0);
-
-  await page.keyboard.press('Escape');
-  await expect(menu).toBeHidden();
+  await expect(page.getByRole('button', { name: '管理资源', exact: true })).toHaveCount(0);
+  const gridControl = page.getByRole('button', { name: '网格显示' });
+  const listControl = page.getByRole('button', { name: '列表显示' });
+  await expect(gridControl).toHaveAttribute('aria-pressed', 'true');
+  await listControl.click();
+  await expect(listControl).toHaveAttribute('aria-pressed', 'true');
+  await gridControl.click();
+  await expect(first).toBeVisible();
   await page.getByRole('button', { name: '返回全部图书', exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === '/library' && url.searchParams.get('status') === 'READING' && url.searchParams.get('sort') === 'title');
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   await expect(page.getByRole('button', { name: '返回全部图书', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '管理资源', exact: true }).click();
-  await second.dblclick();
+  await second.click();
   await expect(page).toHaveURL(/\/reader\/context-resource-2$/);
 });
 
@@ -286,8 +321,27 @@ test('book detail requests a selected readable resource through the direct contr
     assets: [{ id: 'resource-2-asset', resourceId: 'resource-2', path: 'second.pdf', mimeType: 'application/pdf', kind: 'publication', sortOrder: 0, sizeBytes: 1024, size: '1 KB' }]
   };
   const requestedResourceIds: Array<string | null> = [];
-  await page.route('**/api/books/direct-book*', async (route) => {
-    requestedResourceIds.push(new URL(route.request().url()).searchParams.get('resourceId'));
+  await page.unroute('**/api/**');
+  await mockWebAppApi(page, async (route, url) => {
+    if (!url.pathname.includes('/api/books/direct-book')) return false;
+    if (url.pathname.includes('/contents')) {
+      await route.fulfill({ json: { ok: true, data: {
+        bookId: 'direct-book',
+        currentSourceNodeId: 'direct-book-node',
+        currentResourceId: null,
+        currentNode: { sourceNodeId: 'direct-book-node', parentSourceNodeId: null, name: '直接资源图书', title: '直接资源图书', description: null, kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: '2026-08-03T08:00:00.000Z', hasChildren: true, resourceId: null, representativeResourceId: selectedResource.id },
+        currentResourceIds: [selectedResource.id],
+        parentSourceNodeId: null,
+        breadcrumbs: [],
+        entries: [{ sourceNodeId: 'resource-2-node', parentSourceNodeId: 'direct-book-node', name: selectedResource.title, title: selectedResource.title, description: null, kind: 'FILE', physicalKind: 'REGULAR_FILE', sizeBytes: 1024, observedAt: '2026-08-03T08:00:00.000Z', hasChildren: false, resourceId: selectedResource.id, representativeResourceId: selectedResource.id }],
+        page: 1,
+        pageSize: 100,
+        total: 1,
+        totalPages: 1
+      } } });
+      return true;
+    }
+    requestedResourceIds.push(url.searchParams.get('resourceId'));
     await route.fulfill({
       json: {
         ok: true,
@@ -318,11 +372,12 @@ test('book detail requests a selected readable resource through the direct contr
         }
       }
     });
+    return true;
   });
 
   await page.goto('/books/direct-book?resourceId=resource-2');
   await expect(page.getByRole('heading', { name: '直接资源图书' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '第 2 资源' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '第 1 卷' })).toBeVisible();
   expect(requestedResourceIds).toContain('resource-2');
 });
 

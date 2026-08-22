@@ -26,7 +26,6 @@ from app.models.auth import User
 from app.modules.publications.public import (
     PublicationAccessScope,
     PublicationCorruptError,
-    PublicationNavigationSourceChangedError,
     PublicationNotFoundError,
     PublicationUnsupportedError,
 )
@@ -507,7 +506,6 @@ def reader_bootstrap_v4(
         OSError,
         PublicationCorruptError,
         PublicationNotFoundError,
-        PublicationNavigationSourceChangedError,
         PublicationUnsupportedError,
     ) as error:
         LOGGER.warning(

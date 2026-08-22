@@ -227,7 +227,7 @@ class _Filesystem(SourceTreeFilesystemPort):
 
 
 class _Adapters(ResourceAdapterExecutorPort):
-    def parse_file(self, *, absolute_path, adapter, role):
+    def parse_file(self, *, absolute_path, adapter, role, **_kwargs):
         return FileParseResult(
             ok=True,
             adapter=adapter,

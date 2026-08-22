@@ -104,6 +104,7 @@ def _seed_claim_rows(engine, source: Path) -> None:
                 MetadataWritebackOperation(
                     id="claim-operation",
                     book_id=book.id,
+                    source_node_id=resource_node.id,
                     resource_id=resource.id,
                     source="TEST",
                     status="PENDING",
@@ -118,6 +119,7 @@ def _seed_claim_rows(engine, source: Path) -> None:
                     id="claim-preparation",
                     operation_id="claim-operation",
                     book_id=book.id,
+                    source_node_id=resource_node.id,
                     resource_id=resource.id,
                     source="TEST",
                     idempotency_key="claim-preparation-key",

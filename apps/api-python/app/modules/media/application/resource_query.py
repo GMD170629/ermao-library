@@ -13,6 +13,12 @@ class MediaAssetResource:
     mime_type: str
 
 
+@dataclass(frozen=True, slots=True)
+class SourceNodeCoverResource:
+    found: bool
+    path: str | None
+
+
 class MediaResourceRepository(Protocol):
     def get_asset(self, asset_id: str) -> MediaAssetResource | None: ...
 
@@ -21,6 +27,10 @@ class MediaResourceRepository(Protocol):
     def book_cover_path(self, book_id: str) -> str | None: ...
 
     def resource_cover_path(self, resource_id: str) -> str | None: ...
+
+    def source_node_cover(
+        self, *, book_id: str, source_node_id: str
+    ) -> SourceNodeCoverResource: ...
 
 
 class MediaResourceQuery:
@@ -44,3 +54,11 @@ class MediaResourceQuery:
         if resource_id is not None:
             return self._repository.resource_cover_path(resource_id)
         return None
+
+    def source_node_cover(
+        self, *, book_id: str, source_node_id: str
+    ) -> SourceNodeCoverResource:
+        return self._repository.source_node_cover(
+            book_id=book_id,
+            source_node_id=source_node_id,
+        )

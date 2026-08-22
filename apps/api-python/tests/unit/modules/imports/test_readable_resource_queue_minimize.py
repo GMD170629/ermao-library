@@ -146,6 +146,7 @@ class BoomAdapters:
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        **_kwargs: object,
     ) -> FileParseResult:
         del absolute_path, adapter, role
         raise RuntimeError("boom")
@@ -158,6 +159,7 @@ class ParseFailAdapters:
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        **_kwargs: object,
     ) -> FileParseResult:
         del absolute_path
         return FileParseResult(

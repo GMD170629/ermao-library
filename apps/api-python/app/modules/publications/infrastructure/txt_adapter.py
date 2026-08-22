@@ -25,6 +25,7 @@ from app.modules.publications.domain.model import (
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
+    select_publication_source_root,
 )
 
 TXT_PARSER_IDENTIFIER = "shuku-txt-parser-v1"
@@ -276,7 +277,10 @@ class TxtPublicationAdapter(PublicationAdapter):
     def _require_snapshot(self, source: PublicationSource) -> _TxtSnapshot:
         if source.source_format != "txt":
             raise PublicationUnsupportedError(source.source_format)
-        source_path = resolve_publication_source(source.path, self._storage_root)
+        source_path = resolve_publication_source(
+            source.path,
+            select_publication_source_root(source.library_root, self._storage_root),
+        )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_TXT_SOURCE_BYTES:
             raise PublicationCorruptError("TXT source exceeds the size limit")

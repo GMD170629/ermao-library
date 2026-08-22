@@ -6,18 +6,23 @@ import json
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import (
+    browse_book_contents,
     delete_resource_asset,
     list_books,
+    recognize_source_node_metadata,
     resource_metadata,
     update_book,
+    update_source_node_metadata,
+    update_source_node_presentation,
 )
 from app.bootstrap.library_resource_actions import regenerate_resource_cover
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
@@ -39,6 +44,10 @@ from app.modules.library.application.asset_commands import (
     ResourceAssetNotFoundError,
 )
 from app.modules.library.application.book_commands import UpdateBookCommand
+from app.modules.library.application.book_contents import (
+    BookContentNode,
+    BookContentsNotFoundError,
+)
 from app.modules.library.application.book_list import BookListQuery, parse_media_kinds
 from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
@@ -59,10 +68,17 @@ from app.modules.library.application.resource_commands import (
 from app.modules.library.application.resource_cover import (
     RegenerateResourceCoverCommand,
 )
+from app.modules.library.application.source_node_commands import (
+    MAX_SOURCE_NODE_COVER_BYTES,
+    SourceNodeMetadataChanges,
+)
 from app.modules.library.presentation.schemas import (
     AssetDeletedResponse,
     AssetsPayload,
     AssetsResponse,
+    BookContentEntryView,
+    BookContentsPayload,
+    BookContentsResponse,
     BookPayload,
     BookResponse,
     BookshelfBookSummary,
@@ -84,8 +100,15 @@ from app.modules.library.presentation.schemas import (
     ResourcesPayload,
     ResourcesResponse,
     ResourceView,
+    SourceNodeMetadataCandidateView,
+    SourceNodeMetadataSearchPayload,
+    SourceNodeMetadataSearchRequest,
+    SourceNodeMetadataSearchResponse,
+    SourceNodeMetadataUpdatedPayload,
+    SourceNodeMetadataUpdatedResponse,
     UpdateBookRequest,
     UpdateResourceRequest,
+    UpdateSourceNodeMetadataRequest,
 )
 from app.modules.library.presentation.views import (
     book_view,
@@ -153,6 +176,22 @@ def _books_response(value: object) -> BooksResponse:
 
 def _resources_response(value: object) -> ResourcesResponse:
     return cast(ResourcesResponse, value)
+
+
+def _book_contents_response(value: object) -> BookContentsResponse:
+    return cast(BookContentsResponse, value)
+
+
+def _source_node_updated_response(value: object) -> SourceNodeMetadataUpdatedResponse:
+    return cast(SourceNodeMetadataUpdatedResponse, value)
+
+
+def _source_node_search_response(value: object) -> SourceNodeMetadataSearchResponse:
+    return cast(SourceNodeMetadataSearchResponse, value)
+
+
+def _book_content_entry(value: object) -> BookContentEntryView:
+    return BookContentEntryView.model_validate(value)
 
 
 def _resource_response(value: object) -> ResourceResponse:
@@ -286,6 +325,241 @@ def get_library_book(
         )
     return BookResponse(
         data=BookPayload(book=_book_contract(book_view(db, dict(book), user.id)))
+    )
+
+
+@router.get("/books/{book_id}/contents", response_model=BookContentsResponse)
+def browse_library_book_contents(
+    book_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    sourceNodeId: str | None = None,
+    sort: Literal["name", "type", "updated", "size"] = "name",
+    direction: Literal["asc", "desc"] = "asc",
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=100, ge=1, le=200),
+) -> BookContentsResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _book_contents_response(auth_error)
+    if not can_access_book(db, user, book_id):
+        return _book_contents_response(
+            fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
+        )
+    try:
+        result = browse_book_contents(db).execute(
+            book_id=book_id,
+            source_node_id=sourceNodeId,
+            sort=sort,
+            direction=direction,
+            page=page,
+            page_size=pageSize,
+        )
+    except BookContentsNotFoundError:
+        return _book_contents_response(
+            fail("图书目录不存在", status_code=404, code="BOOK_CONTENTS_NOT_FOUND")
+        )
+
+    def entry(node: BookContentNode) -> BookContentEntryView:
+        values = asdict(node)
+        physical_kind = str(values.pop("physical_kind"))
+        cover_path = values.pop("cover_path", None)
+        values["kind"] = "FOLDER" if physical_kind == "DIRECTORY" else "FILE"
+        values["physicalKind"] = physical_kind
+        values["coverUrl"] = (
+            f"/api/books/{quote(book_id, safe='')}/source-nodes/"
+            f"{quote(str(values['source_node_id']), safe='')}/cover"
+            if cover_path
+            else None
+        )
+        values.pop("library_id", None)
+        return _book_content_entry(values)
+
+    return BookContentsResponse(
+        data=BookContentsPayload(
+            bookId=result.book_id,
+            currentSourceNodeId=result.current_source_node_id,
+            currentResourceId=result.current_resource_id,
+            currentNode=entry(result.current_node),
+            currentResourceIds=list(result.current_resource_ids),
+            parentSourceNodeId=result.parent_source_node_id,
+            breadcrumbs=[entry(node) for node in result.breadcrumbs],
+            entries=[entry(node) for node in result.entries],
+            page=result.page,
+            pageSize=result.page_size,
+            total=result.total,
+            totalPages=max(
+                1, (result.total + result.page_size - 1) // result.page_size
+            ),
+        )
+    )
+
+
+@router.patch(
+    "/books/{book_id}/source-nodes/{source_node_id}",
+    response_model=SourceNodeMetadataUpdatedResponse,
+)
+def update_book_source_node_metadata(
+    book_id: str,
+    source_node_id: str,
+    payload: UpdateSourceNodeMetadataRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> SourceNodeMetadataUpdatedResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _source_node_updated_response(auth_error)
+    manager_error = _require_manager(user)
+    if manager_error:
+        return _source_node_updated_response(manager_error)
+    if not can_access_book(db, user, book_id):
+        return _source_node_updated_response(
+            fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
+        )
+    try:
+        updated = update_source_node_metadata(db).execute(
+            book_id=book_id,
+            source_node_id=source_node_id,
+            changes=SourceNodeMetadataChanges(
+                title=payload.title,
+                description=payload.description,
+            ),
+        )
+    except ValueError:
+        return _source_node_updated_response(
+            fail("版本标题不能为空", status_code=400, code="INVALID_SOURCE_NODE_TITLE")
+        )
+    if not updated:
+        return _source_node_updated_response(
+            fail("版本不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
+        )
+    return SourceNodeMetadataUpdatedResponse(
+        data=SourceNodeMetadataUpdatedPayload(
+            sourceNodeId=source_node_id,
+            updated=True,
+        )
+    )
+
+
+@router.put(
+    "/books/{book_id}/source-nodes/{source_node_id}",
+    response_model=SourceNodeMetadataUpdatedResponse,
+)
+async def update_book_source_node_presentation(
+    book_id: str,
+    source_node_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    title: Annotated[str, Form(min_length=1, max_length=500)],
+    description: Annotated[str | None, Form(max_length=10_000)] = None,
+    removeCover: Annotated[bool, Form()] = False,
+    cover: Annotated[UploadFile | None, File()] = None,
+) -> SourceNodeMetadataUpdatedResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _source_node_updated_response(auth_error)
+    manager_error = _require_manager(user)
+    if manager_error:
+        return _source_node_updated_response(manager_error)
+    if not can_access_book(db, user, book_id):
+        return _source_node_updated_response(
+            fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
+        )
+    cover_content = None
+    if cover is not None:
+        cover_content = await cover.read(MAX_SOURCE_NODE_COVER_BYTES + 1)
+        await cover.close()
+    try:
+        updated = update_source_node_presentation(db, settings).execute(
+            book_id=book_id,
+            source_node_id=source_node_id,
+            title=title,
+            description=description,
+            cover_content=cover_content,
+            remove_cover=removeCover,
+        )
+    except ValueError:
+        return _source_node_updated_response(
+            fail(
+                "目录封面必须是不超过 10 MB 的 JPEG、PNG 或 WebP 图片",
+                status_code=400,
+                code="INVALID_SOURCE_NODE_COVER",
+            )
+        )
+    if not updated:
+        return _source_node_updated_response(
+            fail("版本不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
+        )
+    return SourceNodeMetadataUpdatedResponse(
+        data=SourceNodeMetadataUpdatedPayload(
+            sourceNodeId=source_node_id,
+            updated=True,
+        )
+    )
+
+
+@router.post(
+    "/books/{book_id}/source-nodes/{source_node_id}/metadata/search",
+    response_model=SourceNodeMetadataSearchResponse,
+)
+def search_book_source_node_metadata(
+    book_id: str,
+    source_node_id: str,
+    payload: SourceNodeMetadataSearchRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> SourceNodeMetadataSearchResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _source_node_search_response(auth_error)
+    manager_error = _require_manager(user)
+    if manager_error:
+        return _source_node_search_response(manager_error)
+    if not can_access_book(db, user, book_id):
+        return _source_node_search_response(
+            fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
+        )
+    try:
+        result = recognize_source_node_metadata(db).execute(
+            book_id=book_id,
+            source_node_id=source_node_id,
+            provider_id=payload.provider_id,
+            query=payload.query,
+        )
+    except (LookupError, ValueError) as exc:
+        return _source_node_search_response(
+            fail(
+                str(exc) or "元数据识别失败",
+                status_code=400,
+                code="METADATA_SEARCH_FAILED",
+            )
+        )
+    if result is None:
+        return _source_node_search_response(
+            fail("版本不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
+        )
+    return SourceNodeMetadataSearchResponse(
+        data=SourceNodeMetadataSearchPayload(
+            sourceNodeId=result.source_node_id,
+            providerId=result.provider_id,
+            query=result.query,
+            message=result.message,
+            candidates=[
+                SourceNodeMetadataCandidateView(
+                    id=candidate.id,
+                    source=candidate.source,
+                    title=candidate.title,
+                    description=candidate.description,
+                    coverUrl=candidate.cover_url,
+                    confidence=candidate.confidence,
+                )
+                for candidate in result.candidates
+            ],
+        )
     )
 
 

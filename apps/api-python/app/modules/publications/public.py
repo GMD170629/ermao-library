@@ -5,7 +5,6 @@ from app.modules.publications.application.ensure_navigation import (
     EnsurePublicationNavigationOutcome,
     EnsurePublicationNavigationResult,
     OpenPublicationNavigationResult,
-    PublicationNavigationSourceChangedError,
 )
 from app.modules.publications.application.open_publication import OpenPublication
 from app.modules.publications.application.ports import PublicationAccessScope
@@ -25,7 +24,6 @@ __all__ = [
     "OpenPublicationNavigationResult",
     "PublicationAccessScope",
     "PublicationCorruptError",
-    "PublicationNavigationSourceChangedError",
     "PublicationNotFoundError",
     "PublicationUnsupportedError",
 ]

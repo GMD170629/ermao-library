@@ -33,6 +33,7 @@ from app.modules.publications.domain.model import (
 from app.modules.publications.infrastructure.locator_dom import parse_safe_markup_root
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
+    select_publication_source_root,
 )
 
 EPUB_PARSER_IDENTIFIER = "epub-package:1"
@@ -530,7 +531,10 @@ class EpubPublicationAdapter(PublicationAdapter):
     def _index(self, source: PublicationSource) -> _IndexedEpub:
         if source.source_format != "epub":
             raise PublicationUnsupportedError(source.source_format)
-        path = resolve_publication_source(source.path, self._storage_root)
+        path = resolve_publication_source(
+            source.path,
+            select_publication_source_root(source.library_root, self._storage_root),
+        )
         stat_result = path.stat()
         return _index_epub(
             str(path),

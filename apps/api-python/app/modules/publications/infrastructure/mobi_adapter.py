@@ -28,6 +28,7 @@ from app.modules.publications.domain.model import (
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
+    select_publication_source_root,
 )
 
 _OK = 0
@@ -482,7 +483,10 @@ class MobiPublicationAdapter(PublicationAdapter):
         descriptor = snapshot.resources_by_href.get(safe_href)
         if descriptor is None:
             raise PublicationResourceNotFoundError
-        source_path = resolve_publication_source(source.path, self._storage_root)
+        source_path = resolve_publication_source(
+            source.path,
+            select_publication_source_root(source.library_root, self._storage_root),
+        )
         book = core.open(source_path)
         try:
             content = core.read_resource(book, descriptor)
@@ -497,7 +501,10 @@ class MobiPublicationAdapter(PublicationAdapter):
 
     def _snapshot(self, source: PublicationSource) -> _MobiSnapshot:
         core = self._require_core(source)
-        source_path = resolve_publication_source(source.path, self._storage_root)
+        source_path = resolve_publication_source(
+            source.path,
+            select_publication_source_root(source.library_root, self._storage_root),
+        )
         stat_result = source_path.stat()
         return _snapshot(
             core,

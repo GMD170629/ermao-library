@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
+from app.contracts.local_metadata import LocalMetadataSource
+from app.modules.imports.application.local_metadata import ResolvedLocalMetadata
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
     ProbeTerminationReason,
@@ -43,9 +45,12 @@ __all__ = [
     "LibraryImportTaskQueuePort",
     "LibraryImportTaskRecord",
     "LibrarySourceTreeConfig",
+    "LocalCoverPublicationPort",
+    "LocalMetadataPriorityPort",
     "ObservedSourceEntry",
     "ParsedAssetPayload",
     "PipelineLogPort",
+    "PreparedLocalCover",
     "ReadableResourceRecord",
     "ResourceAdapterExecutorPort",
     "ResourceAdapterSpec",
@@ -114,6 +119,14 @@ class FileParseResult:
     asset: ParsedAssetPayload | None
     error_code: str | None
     error_summary: str | None
+    local_metadata: ResolvedLocalMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedLocalCover:
+    temporary_path: Path
+    final_path: Path
+    stored_path: str
 
 
 DirectoryEntry = tuple[str, SourceNodePhysicalKind, int | None, int]
@@ -215,7 +228,20 @@ class ResourceAdapterExecutorPort(Protocol):
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        local_metadata_priority: tuple[LocalMetadataSource, ...],
     ) -> FileParseResult: ...
+
+
+class LocalMetadataPriorityPort(Protocol):
+    def load(self) -> tuple[LocalMetadataSource, ...]: ...
+
+
+class LocalCoverPublicationPort(Protocol):
+    def prepare(self, *, book_id: str, content: bytes) -> PreparedLocalCover: ...
+
+    def publish(self, prepared: PreparedLocalCover) -> None: ...
+
+    def discard(self, prepared: PreparedLocalCover) -> None: ...
 
 
 class PipelineLogPort(Protocol):

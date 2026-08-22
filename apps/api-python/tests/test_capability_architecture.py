@@ -379,9 +379,10 @@ def test_readable_resource_overlay_migration_is_immutable_and_self_contained() -
     versions_dir = APP_ROOT / "db" / "alembic" / "versions"
     revision_files = sorted(versions_dir.glob("*.py"))
     assert [path.name for path in revision_files] == [
-        "0001_library_topology_baseline.py"
+        "0001_library_topology_baseline.py",
+        "0002_source_node_writeback.py",
     ]
-    path = revision_files[0]
+    path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")
     assert 'revision: str = "0001_library_topology_baseline"' in source
     assert "down_revision: str | Sequence[str] | None = None" in source

@@ -6,6 +6,7 @@ from sqlalchemy import false, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.models.library import Library
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -45,6 +46,7 @@ class SqlAlchemyPublicationSourceRepository:
                 LibraryResourceAsset,
                 LibraryResourceAssetMetadata,
                 LibrarySourceNode,
+                Library,
             )
             .join(
                 LibraryReadableResource,
@@ -71,6 +73,7 @@ class SqlAlchemyPublicationSourceRepository:
                 LibrarySourceNode,
                 LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
+            .join(Library, Library.id == LibraryReadableResource.library_id)
             .where(
                 LibraryReadableResource.id == resource_id,
                 LibraryReadableResource.enablement_state == "ENABLED",
@@ -97,6 +100,7 @@ class SqlAlchemyPublicationSourceRepository:
             asset,
             _asset_metadata,
             source_node,
+            library,
         ) = row
         return PublicationSource(
             resource_id=resource.id,
@@ -113,4 +117,5 @@ class SqlAlchemyPublicationSourceRepository:
                 else source_node.name
             ),
             author=book_metadata.author if book_metadata is not None else None,
+            library_root=library.root_path,
         )

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
 from app.modules.library.domain.readable_resource_states import (
     AssetImportState,
@@ -190,6 +191,16 @@ class BookResourceRepositoryPort(Protocol):
         resource_id: str,
         title: str | None = None,
     ) -> None: ...
+
+    def apply_local_metadata(
+        self,
+        *,
+        resource_id: str,
+        metadata: PublicationMetadata,
+        cover_path: str | None = None,
+    ) -> None: ...
+
+    def clear_local_cover(self, *, resource_id: str, expected_path: str) -> None: ...
 
     def mark_resource_failed(self, resource_id: str) -> None: ...
 

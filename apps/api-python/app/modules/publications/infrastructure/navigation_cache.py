@@ -11,8 +11,6 @@ from sqlalchemy.orm import Session
 from app.models import ReadableResourceNavigationUnit
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResourceMetadata,
-    LibraryResourceAsset,
-    LibrarySourceNode,
 )
 from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.navigation import (
@@ -96,21 +94,14 @@ class SqlAlchemyPublicationNavigationWriteRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def replace_if_source_current(
+    def replace(
         self,
         *,
         source: PublicationSource,
         identity: PublicationNavigationCacheIdentity,
         entries: tuple[PublicationNavigationEntry, ...],
-    ) -> bool:
-        """Acquire the write lock through source CAS, then replace atomically."""
-
-        cas_result = self._source_cas_update(
-            source=source,
-            chapter_count=len(entries),
-        )
-        if not cas_result:
-            return False
+    ) -> None:
+        """Replace the materialized navigation projection atomically."""
 
         self._delete_projection(resource_id=source.resource_id)
         self._session.add_all(
@@ -140,43 +131,21 @@ class SqlAlchemyPublicationNavigationWriteRepository:
         cache.normalization = identity.normalization
         cache.projection_version = CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
         cache.chapter_count = len(entries)
-        return True
-
-    def invalidate_if_source_current(self, *, source: PublicationSource) -> bool:
-        if not self._source_cas_update(source=source, chapter_count=None):
-            return False
-        self._delete_projection(resource_id=source.resource_id)
-        return True
-
-    def _source_cas_update(
-        self,
-        *,
-        source: PublicationSource,
-        chapter_count: int | None,
-    ) -> bool:
-        current_source = exists(
-            select(LibraryResourceAsset.id)
-            .join(
-                LibrarySourceNode,
-                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
-            )
-            .where(
-                LibraryResourceAsset.id == source.asset_id,
-                LibraryResourceAsset.resource_id == source.resource_id,
-                LibraryResourceAsset.import_state == "READY",
-                LibrarySourceNode.observed_size_bytes == source.size_bytes,
-                LibrarySourceNode.observed_mtime_ns == source.mtime_ms * 1_000_000,
-            )
-        )
-        if not self._session.scalar(select(current_source)):
-            return False
         metadata = self._session.get(
             LibraryReadableResourceMetadata,
             source.resource_id,
         )
         if metadata is not None:
-            metadata.chapter_count = chapter_count
-        return True
+            metadata.chapter_count = len(entries)
+
+    def invalidate(self, *, resource_id: str) -> None:
+        self._delete_projection(resource_id=resource_id)
+        metadata = self._session.get(
+            LibraryReadableResourceMetadata,
+            resource_id,
+        )
+        if metadata is not None:
+            metadata.chapter_count = None
 
     def _delete_projection(self, *, resource_id: str) -> None:
         self._session.execute(

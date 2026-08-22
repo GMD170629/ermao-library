@@ -289,6 +289,74 @@ class ResourcesPayload(HttpContractModel):
     total_pages: int = Field(alias="totalPages")
 
 
+class BookContentEntryView(HttpContractModel):
+    source_node_id: str = Field(alias="sourceNodeId")
+    parent_source_node_id: str | None = Field(alias="parentSourceNodeId")
+    name: str
+    title: str
+    description: str | None = None
+    kind: Literal["FOLDER", "FILE"]
+    physical_kind: Literal["REGULAR_FILE", "DIRECTORY", "SYMLINK", "OTHER"] = Field(
+        alias="physicalKind"
+    )
+    size_bytes: int | None = Field(default=None, alias="sizeBytes", ge=0)
+    observed_at: datetime = Field(alias="observedAt")
+    has_children: bool = Field(alias="hasChildren")
+    resource_id: str | None = Field(default=None, alias="resourceId")
+    representative_resource_id: str | None = Field(
+        default=None,
+        alias="representativeResourceId",
+    )
+    cover_url: str | None = Field(default=None, alias="coverUrl")
+
+
+class BookContentsPayload(HttpContractModel):
+    book_id: str = Field(alias="bookId")
+    current_source_node_id: str | None = Field(alias="currentSourceNodeId")
+    current_resource_id: str | None = Field(alias="currentResourceId")
+    current_node: BookContentEntryView = Field(alias="currentNode")
+    current_resource_ids: list[str] = Field(alias="currentResourceIds")
+    parent_source_node_id: str | None = Field(alias="parentSourceNodeId")
+    breadcrumbs: list[BookContentEntryView]
+    entries: list[BookContentEntryView]
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+
+
+class UpdateSourceNodeMetadataRequest(HttpContractModel):
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=10_000)
+
+
+class SourceNodeMetadataUpdatedPayload(HttpContractModel):
+    source_node_id: str = Field(alias="sourceNodeId")
+    updated: Literal[True] = True
+
+
+class SourceNodeMetadataSearchRequest(HttpContractModel):
+    provider_id: str = Field(alias="providerId", min_length=1, max_length=100)
+    query: str | None = Field(default=None, max_length=500)
+
+
+class SourceNodeMetadataCandidateView(HttpContractModel):
+    id: str
+    source: str
+    title: str | None = None
+    description: str | None = None
+    cover_url: str | None = Field(default=None, alias="coverUrl")
+    confidence: float = 0
+
+
+class SourceNodeMetadataSearchPayload(HttpContractModel):
+    source_node_id: str = Field(alias="sourceNodeId")
+    provider_id: str = Field(alias="providerId")
+    query: str
+    message: str | None = None
+    candidates: list[SourceNodeMetadataCandidateView]
+
+
 class ResourcePayload(HttpContractModel):
     resource: ResourceView
 
@@ -379,6 +447,22 @@ class BookResponse(SuccessEnvelope[BookPayload]):
 
 
 class ResourcesResponse(SuccessEnvelope[ResourcesPayload]):
+    pass
+
+
+class BookContentsResponse(SuccessEnvelope[BookContentsPayload]):
+    pass
+
+
+class SourceNodeMetadataUpdatedResponse(
+    SuccessEnvelope[SourceNodeMetadataUpdatedPayload]
+):
+    pass
+
+
+class SourceNodeMetadataSearchResponse(
+    SuccessEnvelope[SourceNodeMetadataSearchPayload]
+):
     pass
 
 

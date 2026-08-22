@@ -81,6 +81,14 @@ def _upgrade_head(engine: Engine) -> None:
     LOGGER.info("database alembic upgraded to head=%s", head_revision(engine))
 
 
+def _is_upgradeable_revision(current_revision: str, head: str) -> bool:
+    script = ScriptDirectory.from_config(_default_config())
+    return any(
+        revision.revision == current_revision
+        for revision in script.iterate_revisions(head, "base")
+    )
+
+
 def _unsupported_database_error(
     current_revision: str | None, head: str
 ) -> RuntimeError:
@@ -103,6 +111,10 @@ def _apply_schema_once(engine: Engine, _settings: Settings | None = None) -> Non
         _upgrade_head(engine)
     elif current_revision == head:
         pass
+    elif current_revision is not None and _is_upgradeable_revision(
+        current_revision, head
+    ):
+        _upgrade_head(engine)
     else:
         raise _unsupported_database_error(current_revision, head)
 

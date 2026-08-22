@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
+from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
     ContinueImportResult,
@@ -22,6 +24,9 @@ from app.modules.imports.application.readable_resource.process_import_task impor
 )
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
+)
+from app.modules.imports.infrastructure.local_cover_publication import (
+    FilesystemLocalCoverPublication,
 )
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
@@ -117,6 +122,8 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
         clock=clock,
         log=log,
         sidecar=sidecar,
+        metadata_priority=SqlAlchemyLocalMetadataPriority(session),
+        covers=FilesystemLocalCoverPublication(get_settings().resolved_storage_root),
     )
     continue_import = ContinueImport(
         libraries=libraries,

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.contracts.local_metadata import DEFAULT_LOCAL_METADATA_PRIORITY
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
     LibraryConfigPort,
     LibraryImportTaskQueuePort,
+    LocalCoverPublicationPort,
+    LocalMetadataPriorityPort,
     PipelineLogPort,
     ResourceAdapterExecutorPort,
     SidecarWritebackPort,
@@ -43,6 +46,8 @@ class ProcessReadableResourceImportTask:
         clock: ClockPort,
         log: PipelineLogPort,
         sidecar: SidecarWritebackPort,
+        metadata_priority: LocalMetadataPriorityPort | None = None,
+        covers: LocalCoverPublicationPort | None = None,
     ) -> None:
         self._libraries = libraries
         self._filesystem = filesystem
@@ -54,6 +59,8 @@ class ProcessReadableResourceImportTask:
         self._clock = clock
         self._log = log
         self._sidecar = sidecar
+        self._metadata_priority = metadata_priority
+        self._covers = covers
 
     def execute(self, task_id: str) -> ProcessTaskResult:
         with self._uow.transaction():
@@ -95,6 +102,11 @@ class ProcessReadableResourceImportTask:
             resource_id = resource.id
             library_id = resource.library_id
             source_node_id = task.source_node_id
+            local_metadata_priority = (
+                self._metadata_priority.load()
+                if self._metadata_priority is not None
+                else DEFAULT_LOCAL_METADATA_PRIORITY
+            )
 
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
@@ -102,7 +114,29 @@ class ProcessReadableResourceImportTask:
             absolute_path=absolute,
             adapter=adapter,
             role=role,
+            local_metadata_priority=local_metadata_priority,
         )
+        prepared_cover = None
+        if (
+            parsed.local_metadata is not None
+            and parsed.local_metadata.cover is not None
+            and self._covers is not None
+        ):
+            try:
+                prepared_cover = self._covers.prepare(
+                    book_id=resource.book_id,
+                    content=parsed.local_metadata.cover.content,
+                )
+            except ValueError:
+                self._log.emit(
+                    "readable_resource.local_cover.rejected",
+                    library_id=library_id,
+                    resource_id=resource_id,
+                    task_id=task_id,
+                    stage="local_metadata",
+                    outcome="invalid",
+                )
+                prepared_cover = None
 
         schedule_sidecar = False
         with self._uow.transaction():
@@ -118,6 +152,16 @@ class ProcessReadableResourceImportTask:
                     failure_reason=None,
                 )
                 title = parsed.resource_title or parsed.asset.title
+                if parsed.local_metadata is not None:
+                    self._books_resources.apply_local_metadata(
+                        resource_id=resource_id,
+                        metadata=parsed.local_metadata.metadata,
+                        cover_path=(
+                            prepared_cover.stored_path
+                            if prepared_cover is not None
+                            else None
+                        ),
+                    )
                 if self._books_resources.count_ready_assets(resource_id) >= 1:
                     self._books_resources.mark_resource_ready(
                         resource_id=resource_id,
@@ -146,6 +190,25 @@ class ProcessReadableResourceImportTask:
                     finished_at=self._clock.now(),
                 )
                 outcome = "failed"
+
+        if prepared_cover is not None and self._covers is not None:
+            try:
+                self._covers.publish(prepared_cover)
+            except OSError:
+                self._covers.discard(prepared_cover)
+                with self._uow.transaction():
+                    self._books_resources.clear_local_cover(
+                        resource_id=resource_id,
+                        expected_path=prepared_cover.stored_path,
+                    )
+                self._log.emit(
+                    "readable_resource.local_cover.publish_failed",
+                    library_id=library_id,
+                    resource_id=resource_id,
+                    task_id=task_id,
+                    stage="local_metadata",
+                    outcome="infrastructure_failure",
+                )
 
         if schedule_sidecar:
             self._sidecar.schedule_after_commit(resource_id)

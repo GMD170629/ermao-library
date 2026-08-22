@@ -337,6 +337,7 @@ class MetadataWritebackOperation(Base):
     __table_args__ = (
         Index("MetadataWritebackOperation_status_createdAt_idx", "status", "createdAt"),
         Index("MetadataWritebackOperation_bookId_createdAt_idx", "bookId", "createdAt"),
+        Index("MetadataWritebackOperation_sourceNodeId_idx", "sourceNodeId"),
         Index("MetadataWritebackOperation_resourceId_idx", "resourceId"),
         Index("MetadataWritebackOperation_assetId_idx", "assetId"),
     )
@@ -348,13 +349,19 @@ class MetadataWritebackOperation(Base):
         ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    resource_id: Mapped[str] = mapped_column(
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId",
+        String(191),
+        ForeignKey("LibrarySourceNode.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    resource_id: Mapped[str | None] = mapped_column(
         "resourceId",
         String(191),
         ForeignKey(
             "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
         ),
-        nullable=False,
+        nullable=True,
     )
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
@@ -425,6 +432,10 @@ class MetadataWritebackPreparation(Base):
             "resourceId",
         ),
         Index(
+            "MetadataWritebackPreparation_sourceNodeId_idx",
+            "sourceNodeId",
+        ),
+        Index(
             "MetadataWritebackPreparation_assetId_idx",
             "assetId",
         ),
@@ -449,6 +460,12 @@ class MetadataWritebackPreparation(Base):
         "bookId",
         String(191),
         ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    source_node_id: Mapped[str] = mapped_column(
+        "sourceNodeId",
+        String(191),
+        ForeignKey("LibrarySourceNode.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
     resource_id: Mapped[str | None] = mapped_column(

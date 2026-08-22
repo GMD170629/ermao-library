@@ -206,12 +206,17 @@ def download_resource(
 
 @router.get("/books/{book_id}/cover", response_class=MediaImageResponse)
 @router.get("/resources/{resource_id}/cover", response_class=MediaImageResponse)
+@router.get(
+    "/books/{book_id}/source-nodes/{source_node_id}/cover",
+    response_class=MediaImageResponse,
+)
 def get_cover(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
     book_id: str | None = None,
     resource_id: str | None = None,
+    source_node_id: str | None = None,
 ) -> Annotated[
     Response,
     ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
@@ -231,12 +236,24 @@ def get_cover(
         )
         if not resource_book_id or not can_access_book(db, user, str(resource_book_id)):
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
-    cover_path_value = media_resource_query(db).cover_path(
-        book_id=book_id,
-        resource_id=resource_id,
-    )
-    cover_id = book_id or resource_id or "cover"
-    if not book_id and not resource_id:
+    if source_node_id is not None:
+        if book_id is None:
+            return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
+        source_node_cover = media_resource_query(db).source_node_cover(
+            book_id=book_id,
+            source_node_id=source_node_id,
+        )
+        if not source_node_cover.found:
+            return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
+        cover_path_value = source_node_cover.path
+        cover_id = source_node_id
+    else:
+        cover_path_value = media_resource_query(db).cover_path(
+            book_id=book_id,
+            resource_id=resource_id,
+        )
+        cover_id = book_id or resource_id or "cover"
+    if not book_id and not resource_id and not source_node_id:
         return fail("条目不存在", status_code=404)
     cover_path = media_streaming.stored_path(
         cover_path_value, settings, database_backed=True

@@ -67,6 +67,7 @@ class StubAlwaysOkAdapter(ResourceAdapterExecutorPort):
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        **_kwargs: object,
     ) -> FileParseResult:
         return FileParseResult(
             ok=True,
@@ -97,6 +98,7 @@ class StubFailOnceAdapter(StubAlwaysOkAdapter):
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        **_kwargs: object,
     ) -> FileParseResult:
         if absolute_path.name in self._fail_names:
             return FileParseResult(
@@ -432,6 +434,7 @@ def test_no_db_transaction_during_file_parse(tmp_path: Path) -> None:
                     absolute_path: Path,
                     adapter: ResourceAdapterSpec,
                     role: AssetRole,
+                    **_kwargs: object,
                 ) -> FileParseResult:
                     assert not self._session.in_transaction()
                     return super().parse_file(
@@ -484,6 +487,7 @@ class StubBoomAdapter(StubAlwaysOkAdapter):
         absolute_path: Path,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
+        **_kwargs: object,
     ) -> FileParseResult:
         del absolute_path, adapter, role
         raise RuntimeError("simulated adapter crash")

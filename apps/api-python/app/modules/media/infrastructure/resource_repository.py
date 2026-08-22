@@ -10,13 +10,18 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Library,
+    LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
+    LibrarySourceNodeMetadata,
 )
-from app.modules.media.application.resource_query import MediaAssetResource
+from app.modules.media.application.resource_query import (
+    MediaAssetResource,
+    SourceNodeCoverResource,
+)
 
 
 class SqlAlchemyMediaResourceRepository:
@@ -92,6 +97,30 @@ class SqlAlchemyMediaResourceRepository:
             select(LibraryReadableResourceMetadata.cover_path).where(
                 LibraryReadableResourceMetadata.resource_id == resource_id
             )
+        )
+
+    def source_node_cover(
+        self, *, book_id: str, source_node_id: str
+    ) -> SourceNodeCoverResource:
+        book = self._session.get(LibraryBook, book_id)
+        node = self._session.get(LibrarySourceNode, source_node_id)
+        if book is None or node is None or node.physical_kind != "DIRECTORY":
+            return SourceNodeCoverResource(found=False, path=None)
+        root = self._session.get(LibrarySourceNode, book.source_node_id)
+        if root is None or node.library_id != root.library_id:
+            return SourceNodeCoverResource(found=False, path=None)
+        root_relative = root.relative_path.rstrip("/")
+        inside_root = (
+            node.id == root.id
+            or not root_relative
+            or node.relative_path.startswith(f"{root_relative}/")
+        )
+        if not inside_root:
+            return SourceNodeCoverResource(found=False, path=None)
+        metadata = self._session.get(LibrarySourceNodeMetadata, node.id)
+        return SourceNodeCoverResource(
+            found=True,
+            path=metadata.cover_path if metadata is not None else None,
         )
 
     @staticmethod

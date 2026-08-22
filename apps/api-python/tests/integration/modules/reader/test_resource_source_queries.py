@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.models.library import Library
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -324,6 +325,40 @@ def test_reader_source_lookup_uses_resource_without_legacy_version_layer(
     assert source.path == str(source_path)
     assert [asset.id for asset in assets] == ["asset-orphan"]
     assert [item.id for item in visible] == [resource.id]
+
+
+def test_reader_source_resolves_relative_path_against_library_root(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "relative.epub"
+    source_path.write_bytes(b"epub")
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(tmp_path)
+    resource = _seed_catalog(
+        db_session,
+        book_id="book-relative",
+        resource_id="resource-relative",
+        title="相对路径资源",
+        fmt="EPUB",
+        assets=(
+            ("asset-relative", source_path.name, "PRIMARY", "application/epub+zip", 0),
+        ),
+    )
+
+    source = SqlAlchemyPublicationSourceRepository(db_session).find_source(
+        resource_id=resource.id,
+        access_scope=_ADMIN_PUBLICATION,
+    )
+
+    assert source is not None
+    assert source.path == source_path.name
+    assert source.library_root == str(tmp_path)
+    assert (
+        resolve_publication_source(source.path, Path(source.library_root))
+        == source_path
+    )
 
 
 def test_missing_source_file_keeps_unavailable_error(
