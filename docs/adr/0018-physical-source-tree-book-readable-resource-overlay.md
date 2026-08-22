@@ -431,8 +431,8 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 
 ## 11. 实施路径
 
-目标实现放在未激活的 target composition root 中。每个阶段从 fresh database 验收并保持
-全仓可构建、适用测试为绿色。
+目标实现最初在独立 composition root 中构造，并由 ADR 0019 完成生产切换。每个阶段从
+fresh database 验收并保持全仓可构建、适用测试为绿色。
 
 Alembic 已压平为唯一 fresh-install baseline
 （`0001_library_topology_baseline`，含 version covers 与 ADR 0018 overlay 表）。
@@ -482,9 +482,9 @@ Alembic 已压平为唯一 fresh-install baseline
 - 自动文件变化检测、MISSING 对账、移动/重命名识别和自动删除；
 - 自动重试失败路径、lease/CAS/多消费者保护；
 - 修改元数据优先级和旁车内容规则；
-- Reader/API/Web/Mobile 等上层契约；
+- Reader/API/Web 等上层契约由 ADR 0019 决定；Mobile 仍不在本批范围；
 - 派生 EPUB、ZIP、目录打包、持久解包或把压缩包内部内容建成 SourceNode/Asset；
-- 激活 production target root（本批仍未激活）。
+- ADR 0018 本身不决定生产切换；实际激活由 ADR 0019 完成。
 
 ## 14. 结果
 
@@ -499,48 +499,23 @@ Alembic 已压平为唯一 fresh-install baseline
 
 非规范性实施台账。本节不改变上文规范。
 
-### 产品决定：单消费者继续导入（本批）
+### 当前状态（ADR 0019 切换完成后）
 
-相对父提交 `6524281`（lease/fencing/Run/candidate 实现）：
+- 生产 composition root 已接入 `ContinueImport`、`ScanSourceTree`、
+  `ProcessReadableResourceImportTask` 与简单 `LibraryImportTask` 单消费者队列；
+- legacy importer、Run/candidate/lease/heartbeat/fencing/WorkItem bridge、自动 retry 与旧队列
+  控制入口已从生产路径删除；
+- Library、Reader、Publication、Media、Metadata、Organize、Kindle、Backup、OPDS、System、
+  Web 与 reader-core 已由 ADR 0019 切换到 Book/ReadableResource/ResourceAsset 身份；
+- fresh baseline 仅保留 `0001_library_topology_baseline`，不提供旧数据升级或兼容接口；
+- Mobile 未纳入本次实现和验收。
 
-- 产品模型改为单一 ContinueImport；删除 Run、candidate、lease、fencing、CAS、
-  discovery barrier、WorkItem bridge、Reimport/Retry 分用例；
-- 新 schema：仅上述 10 张目标表；Resource/Asset 不再持有 run 发布字段；
-- 新代码：简单 `LibraryImportTask` 队列、`ContinueImport`、直接 upsert Asset、
-  启动时 RUNNING→FAILED(`WORKER_INTERRUPTED`)；
-- 旁车：提交后 best-effort 调用公开端口，失败只记日志；删除 DurableSidecarWriteback
-  状态机与 `touch_updated_at` 冒充队列；
-- **不得继续声称旧阶段 3～7A 的竞争/发布隔离机制是已完成目标**；那些机制已被删除。
+### 最终后端验证（2026-08-22，于 `apps/api-python`）
 
-### 仍有效的前置基础
-
-- SourceNode 纯领域（pathKey、树不变量）仍有效；
-- FLAT/VOLUMES、目录探测、adapter 后缀边界、filesystem 流式扫描仍有效；
-- manage_source_tree（删除/模式切换/根迁移/启停）仍有效，且已去掉 run 依赖。
-
-### Target composition root — 已构造，仍未激活
-
-- 入口：`apps/api-python/app/bootstrap/readable_resource_pipeline.py`
-- **未**注册到现有生产 API / router / worker 启动路径
-
-### 下一步
-
-- 最终接线（是否激活 target composition root）；
-- 规模验收收尾。
-
-### 本批验证（于 `apps/api-python`）
-
-- `.venv/bin/pytest -q tests/unit/modules/imports tests/unit/modules/library/test_source_nodes.py tests/unit/modules/library/test_book_placement.py tests/unit/modules/library/test_readable_resource_states.py tests/unit/modules/library/test_manage_source_tree.py tests/integration/modules/imports tests/integration/modules/library/test_readable_resource_schema.py tests/test_capability_architecture.py tests/test_sqlite_database.py` → **252 passed**
-- `.venv/bin/pytest -q` → **6 failed, 1021 passed**（仅既有 6 项；无新增失败）
-- `.venv/bin/python -m compileall -q app tests` → exit 0
-- 仓库根 `git diff --check` → exit 0
-- Ruff：环境不可用（`ruff not found` / venv 未安装）；本批未改依赖
-
-既有 6 项失败（本批不修）：
-
-- `tests/contract/api/test_reader_publication_http.py::test_mobi_publication_uses_pinned_runtime_without_materializing_epub`
-- `tests/integration/modules/library/test_volume_metadata_commands.py::test_volume_metadata_update_preserves_directory_owned_fields`
-- `tests/integration/modules/library/test_volume_metadata_commands.py::test_batch_media_kind_override_preserves_work_version_volume_topology`
-- `tests/test_audiobook_support.py::test_three_media_filters_tabs_preferences_and_completion_are_user_scoped`
-- `tests/test_library_groupings_api.py::test_grouping_api_and_exact_facet_work_filter`
-- `tests/test_multi_user_authorization.py::test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection`
+- `ruff format --check .` → **560 files already formatted**；
+- `ruff check .` → **All checks passed**；
+- `mypy app` → **411 source files, no issues**；
+- `python -m compileall -q app tests` → exit 0；
+- 使用仓库固定源码编译的 MOBI runtime 执行 `pytest -q --tb=short` →
+  **851 passed in 431.80s**；
+- 事务、架构、OpenAPI、授权、备份、导入、Reader 与 schema 守卫包含在上述完整套件中。

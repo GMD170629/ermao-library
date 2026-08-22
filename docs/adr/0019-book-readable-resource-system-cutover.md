@@ -592,3 +592,27 @@ capability-specific import/worker/API/runtime smoke
 - Mobile 相关 ADR 继续约束未来 Mobile 重建，但不扩大本批次范围；
 - 旧 ADR、历史 migration 和历史 commit 可以描述旧身份，但不得被当前运行时导入或作为
   当前产品契约。
+
+## 15. 实施结果（非规范性台账）
+
+截至 2026-08-22，本 ADR 的生产切换已完成：后端、API、Web 与 reader-core 使用
+Book/ReadableResource/ResourceAsset 身份；生产导入只使用 ADR 0018 的 ContinueImport 与
+简单单消费者 LibraryImportTask 队列；旧表、旧路由、旧 DTO、旧 importer 与兼容层由架构
+守卫持续禁止。Mobile 按本 ADR 范围明确未修改。
+
+为防止开发环境再次丢失修改，用户在实施期间明确要求每个完整子任务使用 Windows Git
+提交并立即推送。该交付安全要求取代第 9 节“仅一个最终 commit”的流程约束，但不改变
+fresh-only、无双轨、无兼容层和最终生产状态一次性切换的架构决定；这些提交不是可部署的
+旧/新兼容阶段。
+
+最终验证证据：
+
+- Backend：Ruff format/check 通过，mypy 411 个源文件零错误，compileall 通过，完整 pytest
+  **851 passed**（包含固定源码编译的 MOBI runtime）；
+- Web/reader-core：reader-core typecheck、Web typecheck、ESLint 通过，Web tests
+  **338 passed**；
+- API 合同复验 **143 passed**；导入单元/集成复验 **138 passed**；
+- 正式 `pnpm i18n:check` 仍暴露仓库既有的 catalog 生成器范围问题：它会把后端正则、内部
+  提示词及未通过稳定错误码暴露的中文字符串一并当作 Web message key。该问题不通过机械
+  填充英文词典掩盖，也不属于本 ADR 身份切换的兼容债；在修复生成器语义边界和后端稳定
+  错误码之前，不以该门禁宣称全仓 i18n 验收完成。
