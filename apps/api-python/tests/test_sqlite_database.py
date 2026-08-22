@@ -91,6 +91,53 @@ def _application_tables(engine) -> set[str]:
     return set(inspect(engine).get_table_names()) - {"alembic_version"}
 
 
+def _sqlite_journal_mode(engine) -> str:
+    raw_connection = engine.raw_connection()
+    try:
+        cursor = raw_connection.cursor()
+        try:
+            row = cursor.execute("PRAGMA journal_mode").fetchone()
+        finally:
+            cursor.close()
+    finally:
+        raw_connection.close()
+    assert row is not None
+    return str(row[0]).lower()
+
+
+def test_sqlite_engine_enables_persistent_wal_mode(tmp_path) -> None:
+    database_path = tmp_path / "wal-mode.sqlite3"
+    metadata = MetaData()
+    probe = Table(
+        "WalModeProbe",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("value", String(32), nullable=False),
+    )
+    default_engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    try:
+        metadata.create_all(default_engine)
+        with default_engine.begin() as connection:
+            connection.execute(probe.insert().values(id=1, value="preserved"))
+        assert _sqlite_journal_mode(default_engine) == "delete"
+    finally:
+        default_engine.dispose()
+
+    engine = create_sqlite_engine(database_path)
+    try:
+        assert _sqlite_journal_mode(engine) == "wal"
+        with engine.connect() as connection:
+            assert connection.scalar(select(probe.c.value)) == "preserved"
+    finally:
+        engine.dispose()
+
+    independent_engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    try:
+        assert _sqlite_journal_mode(independent_engine) == "wal"
+    finally:
+        independent_engine.dispose()
+
+
 def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
