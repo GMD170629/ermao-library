@@ -26,7 +26,7 @@ from app.models import (
     ReadableResourceNavigationUnit,
     ReaderResourceProgress,
 )
-from app.models.auth import User
+from app.models.auth import User, UserLibraryAccess
 from app.models.organize import MetadataWritebackOperation, OrganizePolicy
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.services.metadata_file_writeback import process_next_metadata_writeback
@@ -146,15 +146,25 @@ def _add_book(
     return book, resources
 
 
-def _login(client, db_session, *, email: str = "detail@example.com") -> User:
+def _login(
+    client,
+    db_session,
+    *,
+    email: str = "detail@example.com",
+    role: str = "admin",
+    grant_library: bool = False,
+) -> User:
     user = User(
         id=f"user-{email.split('@', 1)[0]}",
         email=email,
         name="Detail reader",
         password_hash=hash_password("detail-password"),
-        role="admin",
+        role=role,
     )
     db_session.add(user)
+    db_session.flush()
+    if grant_library:
+        db_session.add(UserLibraryAccess(user_id=user.id, library_id="test-library"))
     db_session.commit()
     response = client.post(
         "/api/auth/login",
@@ -457,6 +467,266 @@ def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> No
     assert data["bookId"] == "detail-book"
     assert data["resourceId"] == "detail-resource-01"
     assert [unit["id"] for unit in data["units"]] == ["unit-one"]
+    assert data["units"][0] == {
+        "id": "unit-one",
+        "unitType": "chapter",
+        "title": "Chapter 1",
+        "href": "chapter-1.xhtml",
+        "sortOrder": 0,
+        "assetId": None,
+        "pageNumber": None,
+        "mediaType": "application/xhtml+xml",
+        "previewUrl": None,
+        "level": None,
+        "durationMs": None,
+        "discNumber": None,
+        "trackNumber": None,
+        "metadataJson": '{"chapter": 1}',
+    }
+    assert data["page"] == {"page": 1, "pageSize": 50, "total": 1, "totalPages": 1}
+
+
+def test_reading_units_project_exact_current_chapter_for_read_states(
+    client, db_session
+) -> None:
+    user = _login(client, db_session, email="chapter-state@example.com")
+    _add_book(db_session, resource_count=1)
+    db_session.add_all(
+        [
+            ReadableResourceNavigationUnit(
+                id=f"chapter-state-{index}",
+                resource_id="detail-resource-01",
+                unit_type="chapter",
+                title=f"Chapter {index + 1}",
+                href=f"OEBPS/Text/chapter-{index + 1}.xhtml",
+                media_type="application/xhtml+xml",
+                sort_order=index,
+                metadata_json=json.dumps({"readingOrderPosition": index + 1}),
+            )
+            for index in range(5)
+        ]
+    )
+    progress = ReaderResourceProgress(
+        id="chapter-state-progress",
+        user_id=user.id,
+        resource_id="detail-resource-01",
+        reader_type="reflowable",
+        position="0",
+        percent=1,
+        extra="{}",
+        location_json=json.dumps(
+            {
+                "kind": "reflowable",
+                "engineLocator": {
+                    "engine": "readium",
+                    "platform": "web",
+                    "version": "readium-test:1",
+                    "payload": {
+                        "href": "OEBPS/Text/chapter-4.xhtml",
+                        "locations": {},
+                    },
+                },
+            }
+        ),
+        progressed_at=datetime.now(UTC),
+        source_protocol="SHUKU_WEB",
+    )
+    db_session.add(progress)
+    db_session.commit()
+
+    response = client.get(
+        "/api/books/detail-book/resources/detail-resource-01/reading-units"
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["currentHref"] == "OEBPS/Text/chapter-4.xhtml"
+    assert data["currentChapterIndex"] == 3
+    assert data["currentChapterTitle"] == "Chapter 4"
+    assert data["currentChapterSortOrder"] == 3
+
+    progress.location_json = json.dumps(
+        {
+            "kind": "reflowable",
+            "engineLocator": {
+                "engine": "readium",
+                "platform": "web",
+                "version": "readium-test:1",
+                "payload": {
+                    "href": "OEBPS/Text/split-resource.xhtml",
+                    "locations": {"position": 4},
+                },
+            },
+        }
+    )
+    db_session.commit()
+    position_response = client.get(
+        "/api/books/detail-book/resources/detail-resource-01/reading-units"
+    )
+    position_data = position_response.json()["data"]
+    assert position_data["currentChapterIndex"] == 3
+    assert position_data["currentChapterTitle"] == "Chapter 4"
+
+    db_session.add(
+        ReadableResourceNavigationUnit(
+            id="chapter-state-ambiguous",
+            resource_id="detail-resource-01",
+            unit_type="chapter",
+            title="Ambiguous anchor",
+            href="OEBPS/Text/split-resource.xhtml#anchor",
+            media_type="application/xhtml+xml",
+            sort_order=30,
+            metadata_json=json.dumps({"readingOrderPosition": 4}),
+        )
+    )
+    db_session.commit()
+    ambiguous_response = client.get(
+        "/api/books/detail-book/resources/detail-resource-01/reading-units"
+    )
+    ambiguous_data = ambiguous_response.json()["data"]
+    assert ambiguous_data["currentChapterIndex"] is None
+    assert ambiguous_data["currentChapterTitle"] is None
+
+
+def test_resource_details_preserve_member_scope_and_anti_enumeration(
+    client, db_session
+) -> None:
+    _add_book(db_session, resource_count=1)
+    db_session.commit()
+    path = "/api/books/detail-book/resources/detail-resource-01/reading-units"
+    assert client.get(path).status_code == 401
+
+    _login(
+        client,
+        db_session,
+        email="member-with-access@example.com",
+        role="member",
+        grant_library=True,
+    )
+    assert client.get(path).status_code == 200
+
+    _login(
+        client,
+        db_session,
+        email="member-without-access@example.com",
+        role="member",
+    )
+    denied = client.get(path)
+    assert denied.status_code == 404
+    assert denied.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
+
+
+def test_image_directory_details_and_previews_are_naturally_sorted_and_cached(
+    client, db_session, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="image-dir@example.com")
+    _book, resources = _add_book(db_session, resource_count=1)
+    resource = resources[0]
+    resource.format = "IMAGE_DIR"
+    resource.adapter_id = "image-directory"
+    resource.media_kind = "COMIC"
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    library.root_path = str(library_root)
+
+    for sequence, filename in enumerate(("page10.png", "page2.png", "page1.png")):
+        relative_path = f"detail-book/images/{filename}"
+        path = library_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(_png_cover())
+        node = _source_node(
+            f"image-node-{sequence}", relative_path, size=path.stat().st_size
+        )
+        asset_id = f"image-asset-{sequence}"
+        db_session.add(node)
+        db_session.flush()
+        db_session.add(
+            LibraryResourceAsset(
+                id=asset_id,
+                library_id="test-library",
+                resource_id=resource.id,
+                source_node_id=node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PAGE",
+                import_state="READY",
+                sequence_index=sequence,
+                sort_key=filename,
+            )
+        )
+        db_session.flush()
+        db_session.add(
+            LibraryResourceAssetMetadata(asset_id=asset_id, mime_type="image/png")
+        )
+    db_session.commit()
+
+    detail_response = client.get(
+        f"/api/books/detail-book/resources/{resource.id}/reading-units",
+        params={"page": 1, "pageSize": 2},
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    detail = detail_response.json()["data"]
+    assert detail["page"] == {"page": 1, "pageSize": 2, "total": 3, "totalPages": 2}
+    assert [unit["title"] for unit in detail["units"]] == ["page1.png", "page2.png"]
+    assert [unit["pageNumber"] for unit in detail["units"]] == [1, 2]
+
+    first = client.get(f"/api/resources/{resource.id}/previews/0")
+    assert first.status_code == 200, first.text
+    assert first.headers["content-type"] == "image/webp"
+    assert first.headers["etag"]
+    with Image.open(BytesIO(first.content)) as preview:
+        assert preview.format == "WEBP"
+        assert max(preview.size) <= 480
+
+    cached = client.get(
+        f"/api/resources/{resource.id}/previews/0",
+        headers={"If-None-Match": first.headers["etag"]},
+    )
+    assert cached.status_code == 304
+    assert client.get(f"/api/resources/{resource.id}/previews/99").status_code == 404
+
+
+def test_pdf_details_synthesize_pages_and_render_zero_based_preview(
+    client, db_session, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="pdf-preview@example.com")
+    _book, resources = _add_book(db_session, resource_count=1)
+    resource = resources[0]
+    resource.format = "PDF"
+    resource.adapter_id = "pdf-file"
+    pdf_path = tmp_path / "preview.pdf"
+    Image.new("RGB", (600, 800), color=(245, 238, 224)).save(pdf_path, format="PDF")
+    library = db_session.get(Library, "test-library")
+    source = db_session.get(LibrarySourceNode, resource.source_node_id)
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    asset_metadata = db_session.get(
+        LibraryResourceAssetMetadata, f"{resource.id}-asset"
+    )
+    assert library is not None and source is not None and metadata is not None
+    assert asset_metadata is not None
+    library.root_path = str(tmp_path)
+    source.relative_path = pdf_path.name
+    source.path_key = _path_key(pdf_path.name)
+    source.name = pdf_path.name
+    source.observed_size_bytes = pdf_path.stat().st_size
+    source.observed_mtime_ns = pdf_path.stat().st_mtime_ns
+    metadata.page_count = 1
+    asset_metadata.mime_type = "application/pdf"
+    db_session.commit()
+
+    details = client.get(
+        f"/api/books/detail-book/resources/{resource.id}/reading-units"
+    )
+    assert details.status_code == 200, details.text
+    unit = details.json()["data"]["units"][0]
+    assert unit["pageNumber"] == 1
+    assert unit["previewUrl"].endswith(f"/{resource.id}/previews/0")
+
+    preview = client.get(f"/api/resources/{resource.id}/previews/0")
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["content-type"] == "image/webp"
+    assert client.get(f"/api/resources/{resource.id}/previews/1").status_code == 404
 
 
 def test_book_resource_contract_preserves_auth_and_retires_old_routes(

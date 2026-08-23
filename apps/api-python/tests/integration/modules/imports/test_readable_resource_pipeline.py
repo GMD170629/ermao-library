@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import select
@@ -54,6 +55,7 @@ from app.modules.library.infrastructure.persistence.source_tree_repository impor
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
@@ -111,6 +113,31 @@ class StubFailOnceAdapter(StubAlwaysOkAdapter):
             )
         return super().parse_file(
             absolute_path=absolute_path, adapter=adapter, role=role
+        )
+
+
+class StubPdfPageCountAdapter(StubAlwaysOkAdapter):
+    def parse_file(
+        self,
+        *,
+        absolute_path: Path,
+        adapter: ResourceAdapterSpec,
+        role: AssetRole,
+        **kwargs: object,
+    ) -> FileParseResult:
+        result = super().parse_file(
+            absolute_path=absolute_path,
+            adapter=adapter,
+            role=role,
+            **kwargs,
+        )
+        assert result.asset is not None
+        return replace(
+            result,
+            asset=replace(
+                result.asset,
+                technical=AssetTechnicalMetadata(page_count=7),
+            ),
         )
 
 
@@ -211,6 +238,26 @@ def test_single_consumer_processes_by_created_at_order(tmp_path: Path) -> None:
             ).all()
             assert [t.state for t in tasks] == ["SUCCEEDED", "SUCCEEDED"]
             assert tasks[0].created_at <= tasks[1].created_at
+    finally:
+        engine.dispose()
+
+
+def test_pdf_import_persists_inspected_page_count(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db, adapters=StubPdfPageCountAdapter())
+            (root / "book.pdf").write_bytes(b"%PDF-test")
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            metadata = db.scalar(select(LibraryReadableResourceMetadata))
+            assert metadata is not None
+            assert metadata.page_count == 7
     finally:
         engine.dispose()
 

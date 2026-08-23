@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.core.natural_sort import natural_sort_key
+
 
 @dataclass(frozen=True)
 class ResourcePageUnit:
@@ -28,12 +30,15 @@ class ResourcePageUnit:
 class ResourcePageSource:
     id: str
     path: str
+    title: str
+    mime_type: str | None
     source_root: str
     role: str
     import_state: str
     size_bytes: int
     sort_order: int
     mtime_ms: int
+    sort_key: str | None
 
 
 @dataclass(frozen=True)
@@ -77,8 +82,37 @@ class ReadOnlyResourcePageIndex:
         self,
         projection: ResourcePageIndexProjection,
     ) -> ResolvedResourcePageIndex:
+        if projection.persisted_pages:
+            pages = projection.persisted_pages
+        else:
+            page_sources = sorted(
+                (source for source in projection.sources if source.role == "PAGE"),
+                key=lambda source: (
+                    natural_sort_key(source.sort_key or source.title),
+                    source.id,
+                ),
+            )
+            pages = tuple(
+                ResourcePageUnit(
+                    id=source.id,
+                    resource_id=projection.resource_id,
+                    asset_id=source.id,
+                    unit_type="page",
+                    title=source.title,
+                    href=source.path,
+                    media_type=source.mime_type,
+                    sort_order=index,
+                    width=None,
+                    height=None,
+                    size=source.size_bytes,
+                    metadata_json="{}",
+                    created_at=None,
+                    updated_at=None,
+                )
+                for index, source in enumerate(page_sources)
+            )
         return ResolvedResourcePageIndex(
-            pages=projection.persisted_pages,
+            pages=pages,
             sources=projection.sources,
         )
 

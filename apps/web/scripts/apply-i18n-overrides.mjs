@@ -313,6 +313,22 @@ const exactOverrides = {
   '重新扫描该来源目录下的文件变化': 'Rescan file changes under this source directory',
   '下载附件': 'Download attachment',
   '源资产': 'Source asset',
+  '返回图书内容': 'Back to book content',
+  '音轨': 'Tracks',
+  '共 {value0} 条音轨': '{value0} tracks',
+  '打开播放器': 'Open player',
+  '正在加载资源详情…': 'Loading resource details…',
+  '资源详情加载失败': 'Failed to load resource details',
+  '资源详情响应与请求不匹配': 'The resource detail response did not match the request',
+  '暂无可播放音轨': 'No playable tracks',
+  '当前资源没有可预览页面': 'This resource has no previewable pages',
+  '资源详情分页': 'Resource detail pagination',
+  '第 {value0} 页预览': 'Preview of page {value0}',
+  '预览暂不可用': 'Preview unavailable',
+  '预览暂时不可用': 'Preview temporarily unavailable',
+  '预览不存在': 'Preview not found',
+  '碟 {value0}': 'Disc {value0}',
+  '音轨 {value0}': 'Track {value0}',
 };
 
 for (const source of Object.keys(catalog)) {

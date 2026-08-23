@@ -20,7 +20,6 @@ class ShelfCondition(HttpContractModel):
 class ShelfRules(HttpContractModel):
     search: str | None = None
     statuses: list[str] | None = None
-    media_kinds: list[str] | None = Field(default=None, alias="mediaKinds")
     tags: list[str] | None = None
     authors: list[str] | None = None
     publishers: list[str] | None = None

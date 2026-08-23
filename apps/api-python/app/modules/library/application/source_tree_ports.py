@@ -206,6 +206,8 @@ class BookResourceRepositoryPort(Protocol):
         title: str | None = None,
     ) -> None: ...
 
+    def set_resource_page_count(self, resource_id: str, page_count: int) -> None: ...
+
     def apply_local_metadata(
         self,
         *,

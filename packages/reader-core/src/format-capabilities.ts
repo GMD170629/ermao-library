@@ -1,6 +1,6 @@
 import type { ReaderKind, ReflowableFormat } from './types';
 
-export type SupportedReaderSourceFormat = Exclude<ReflowableFormat, 'fb2'> | 'cbz' | 'zip' | 'cbr' | 'rar' | 'pdf';
+export type SupportedReaderSourceFormat = ReflowableFormat | 'cbz' | 'zip' | 'cbr' | 'rar' | 'image_dir' | 'pdf';
 
 export type ReaderFormatCapability = Readonly<{
   sourceFormat: SupportedReaderSourceFormat;
@@ -15,10 +15,12 @@ export const READER_FORMAT_CAPABILITIES: readonly ReaderFormatCapability[] = [
   { sourceFormat: 'azw3', extension: '.azw3', readerKind: 'reflowable' },
   { sourceFormat: 'prc', extension: '.prc', readerKind: 'reflowable' },
   { sourceFormat: 'txt', extension: '.txt', readerKind: 'reflowable' },
+  { sourceFormat: 'fb2', extension: '.fb2', readerKind: 'reflowable' },
   { sourceFormat: 'cbz', extension: '.cbz', readerKind: 'comic' },
   { sourceFormat: 'zip', extension: '.zip', readerKind: 'comic' },
   { sourceFormat: 'cbr', extension: '.cbr', readerKind: 'comic' },
   { sourceFormat: 'rar', extension: '.rar', readerKind: 'comic' },
+  { sourceFormat: 'image_dir', extension: '.image-dir', readerKind: 'comic' },
   { sourceFormat: 'pdf', extension: '.pdf', readerKind: 'pdf' }
 ] as const;
 

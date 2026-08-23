@@ -1,5 +1,12 @@
 import type { ClassificationSource, MediaKind, ReaderType, ReadableResourceView, ResourceFormat, BookView } from '../../../types/book';
-import type { ChapterDetailUnit, EbookChapterDetail } from '../model/chapter-detail';
+import { withBasePath } from '../../../lib/base-path';
+import type {
+  ResourceChapterDetailUnit,
+  ResourceDetailPage,
+  ResourceDetailUnit,
+  ResourcePageDetailUnit,
+  ResourceTrackDetailUnit
+} from '../model/resource-detail';
 import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate } from '../model/book-contents';
 import { bookContentSortQuery } from '../model/book-contents';
 
@@ -25,6 +32,10 @@ function nullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function nullableInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) ? value : null;
+}
+
 function positiveInteger(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
@@ -34,14 +45,14 @@ function mediaKind(value: unknown): MediaKind | null {
 }
 
 function resourceFormat(value: unknown): ResourceFormat | null {
-  return value === 'COMIC' || value === 'CBZ' || value === 'CBR' || value === 'RAR' || value === 'ZIP' || value === 'EPUB' || value === 'PDF' || value === 'AUDIO' || value === 'MP3' || value === 'M4A' || value === 'M4B' || value === 'MOBI' || value === 'AZW' || value === 'AZW3' || value === 'PRC' || value === 'FB2' || value === 'TXT' ? value : null;
+  return value === 'COMIC' || value === 'CBZ' || value === 'CBR' || value === 'RAR' || value === 'ZIP' || value === 'EPUB' || value === 'PDF' || value === 'AUDIO' || value === 'MP3' || value === 'M4A' || value === 'M4B' || value === 'MOBI' || value === 'AZW' || value === 'AZW3' || value === 'PRC' || value === 'FB2' || value === 'TXT' || value === 'IMAGE_DIR' || value === 'AUDIOBOOK_DIR' ? value : null;
 }
 
 function readerType(value: unknown, format: ResourceFormat): ReaderType {
   if (value === 'reflowable' || value === 'comic' || value === 'pdf' || value === 'audio') return value;
   if (format === 'PDF') return 'pdf';
-  if (format === 'COMIC' || format === 'CBZ' || format === 'CBR' || format === 'RAR' || format === 'ZIP') return 'comic';
-  if (format === 'AUDIO' || format === 'MP3' || format === 'M4A' || format === 'M4B') return 'audio';
+  if (format === 'COMIC' || format === 'CBZ' || format === 'CBR' || format === 'RAR' || format === 'ZIP' || format === 'IMAGE_DIR') return 'comic';
+  if (format === 'AUDIO' || format === 'MP3' || format === 'M4A' || format === 'M4B' || format === 'AUDIOBOOK_DIR') return 'audio';
   return 'reflowable';
 }
 
@@ -396,35 +407,52 @@ export async function fetchMetadataProviders(
   return { providers, pipelines };
 }
 
-function mapChapterUnit(value: unknown): ChapterDetailUnit | null {
+function mapResourceDetailUnit(value: unknown): ResourceDetailUnit | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
-  if (!id) return null;
-  const metadata = record(item.metadataJson);
-  return {
+  const unitType = stringValue(item.unitType).trim();
+  if (!id || (unitType !== 'chapter' && unitType !== 'page' && unitType !== 'track')) return null;
+  const base = {
     id,
     title: nullableString(item.title) ?? '',
-    href: nullableString(item.href),
     sortOrder: finiteNumber(item.sortOrder),
-    unitType: stringValue(item.unitType, 'chapter'),
-    pageNumber: nullableNumber(metadata.pageNumber)
+    assetId: nullableString(item.assetId),
+    mediaType: nullableString(item.mediaType)
   };
+  if (unitType === 'chapter') {
+    const level = nullableInteger(item.level);
+    return { ...base, unitType, href: nullableString(item.href), level: level !== null && level >= 0 ? level : null } satisfies ResourceChapterDetailUnit;
+  }
+  if (unitType === 'page') {
+    const pageNumber = nullableInteger(item.pageNumber);
+    if (pageNumber === null || pageNumber < 1) return null;
+    const previewUrl = nullableString(item.previewUrl);
+    return { ...base, unitType, pageNumber, previewUrl: previewUrl ? withBasePath(previewUrl) : null } satisfies ResourcePageDetailUnit;
+  }
+  return {
+    ...base,
+    unitType,
+    durationMs: nullableNumber(item.durationMs),
+    discNumber: nullableInteger(item.discNumber),
+    trackNumber: nullableInteger(item.trackNumber)
+  } satisfies ResourceTrackDetailUnit;
 }
 
-export async function fetchEbookChapterDetail(
+export async function fetchResourceDetail(
   bookId: string,
   resourceId: string,
   page: number,
   pageSize: number,
   signal?: AbortSignal
-): Promise<EbookChapterDetail> {
+): Promise<ResourceDetailPage> {
   const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/reading-units?${query}`, { signal }));
+  if (stringValue(data.bookId) !== bookId || stringValue(data.resourceId) !== resourceId) throw new Error('资源详情响应与请求不匹配');
   const pageData = record(data.page);
   const pageSizeValue = positiveInteger(pageData.pageSize, pageSize);
   const total = Math.max(0, finiteNumber(pageData.total));
   return {
-    units: (Array.isArray(data.units) ? data.units : []).map(mapChapterUnit).filter((unit): unit is ChapterDetailUnit => unit !== null),
+    units: (Array.isArray(data.units) ? data.units : []).map(mapResourceDetailUnit).filter((unit): unit is ResourceDetailUnit => unit !== null),
     page: {
       page: positiveInteger(pageData.page, page),
       pageSize: pageSizeValue,

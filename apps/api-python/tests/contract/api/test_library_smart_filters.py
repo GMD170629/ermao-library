@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -19,10 +20,30 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
+    ReaderResourceProgress,
 )
 from app.models.auth import User
 from app.modules.library.application.catalog import CatalogBookFilter, ListCatalogBooks
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
+
+REMOVED_LIBRARY_FILTER_FIELDS = {
+    "metadataQuality",
+    "volumeTitle",
+    "resourceTitle",
+    "narrator",
+    "mediaKind",
+    "fileSize",
+    "pageCount",
+    "chapterCount",
+    "duration",
+    "resourceCount",
+    "publicationStatus",
+    "trackingStatus",
+    "organizeStatus",
+    "organized",
+    "createdAt",
+    "updatedAt",
+}
 
 
 def _book(
@@ -213,6 +234,108 @@ def test_book_list_rejects_unknown_projection(client: TestClient) -> None:
     response = client.get("/api/books", params={"view": "unknown"})
 
     assert response.status_code == 422
+
+
+def test_library_filter_contract_removes_retired_dimensions_and_media_queries(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+
+    schema_response = client.get("/api/library/filter-schema")
+
+    assert schema_response.status_code == 200, schema_response.text
+    fields = schema_response.json()["data"]["fields"]
+    field_keys = {field["key"] for field in fields}
+    assert "readingStatus" in field_keys
+    assert field_keys.isdisjoint(REMOVED_LIBRARY_FILTER_FIELDS)
+    assert {field["group"] for field in fields}.isdisjoint({"资源元数据"})
+
+    openapi_response = client.get("/openapi.json")
+    assert openapi_response.status_code == 200, openapi_response.text
+    book_query_parameters = {
+        parameter["name"]
+        for parameter in openapi_response.json()["paths"]["/api/books"]["get"][
+            "parameters"
+        ]
+    }
+    assert book_query_parameters.isdisjoint({"type", "media"})
+    shelf_rule_properties = openapi_response.json()["components"]["schemas"][
+        "ShelfRules"
+    ]["properties"]
+    assert "mediaKinds" not in shelf_rule_properties
+
+    for field in REMOVED_LIBRARY_FILTER_FIELDS:
+        response = client.get(
+            "/api/books",
+            params={
+                "filters": json.dumps(
+                    {
+                        "combinator": "ALL",
+                        "conditions": [
+                            {"field": field, "operator": "is_empty"},
+                        ],
+                    }
+                )
+            },
+        )
+        assert response.status_code == 422, (field, response.text)
+
+
+def test_book_list_filters_by_the_three_supported_reading_states(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login(client, db_session)
+    for book_id in ("unread-book", "reading-book", "finished-book"):
+        _book(db_session, book_id=book_id, title=book_id, author="Author")
+        _ready_resource(
+            db_session,
+            book_id=book_id,
+            resource_id=f"{book_id}-resource",
+        )
+    now = datetime.now(UTC)
+    db_session.add_all(
+        [
+            ReaderResourceProgress(
+                id="reading-progress",
+                user_id=user.id,
+                resource_id="reading-book-resource",
+                reader_type="reflowable",
+                position="chapter-1",
+                percent=50,
+                extra="{}",
+                progressed_at=now,
+                source_protocol="SHUKU_WEB",
+            ),
+            ReaderResourceProgress(
+                id="finished-progress",
+                user_id=user.id,
+                resource_id="finished-book-resource",
+                reader_type="reflowable",
+                position="chapter-2",
+                percent=100,
+                extra="{}",
+                progressed_at=now,
+                source_protocol="SHUKU_WEB",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    for status, expected_book_id in (
+        ("UNREAD", "unread-book"),
+        ("READING", "reading-book"),
+        ("FINISHED", "finished-book"),
+    ):
+        response = client.get(
+            "/api/books",
+            params={"status": status, "view": "management", "pageSize": 100},
+        )
+        assert response.status_code == 200, response.text
+        assert [book["id"] for book in response.json()["data"]["books"]] == [
+            expected_book_id
+        ]
 
 
 def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(

@@ -568,11 +568,18 @@ class ResourceBatchPayload(HttpContractModel):
 class ReadingUnitView(HttpContractModel):
     id: str
     title: str
-    href: str
+    href: str | None = None
     sort_order: int = Field(alias="sortOrder")
     unit_type: str = Field(alias="unitType")
     asset_id: str | None = Field(default=None, alias="assetId")
-    metadata_json: str = Field(alias="metadataJson")
+    page_number: int | None = Field(default=None, alias="pageNumber")
+    media_type: str | None = Field(default=None, alias="mediaType")
+    preview_url: str | None = Field(default=None, alias="previewUrl")
+    level: int | None = None
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+    disc_number: int | None = Field(default=None, alias="discNumber")
+    track_number: int | None = Field(default=None, alias="trackNumber")
+    metadata_json: str = Field(default="{}", alias="metadataJson")
 
 
 class ReadingUnitsPage(HttpContractModel):

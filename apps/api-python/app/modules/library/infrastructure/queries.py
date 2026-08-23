@@ -6,14 +6,12 @@ from sqlalchemy.orm import Session, aliased
 from app.core.authorization import (
     authorization_context,
     book_visibility_predicate,
-    resource_visibility_predicate,
 )
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
-    LibraryReadableResource,
 )
 from app.models.auth import User
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
@@ -84,16 +82,6 @@ class SqlAlchemyLibraryQueries:
             )
             if dynamic is not None:
                 predicates.append(dynamic)
-        if criteria.media_kinds:
-            predicates.append(
-                exists(
-                    select(LibraryReadableResource.id).where(
-                        LibraryReadableResource.book_id == LibraryBook.id,
-                        LibraryReadableResource.media_kind.in_(criteria.media_kinds),
-                        resource_visibility_predicate(context),
-                    )
-                )
-            )
         for tag in criteria.tags:
             link = aliased(LibraryBookFacet)
             facet = aliased(LibraryFacet)

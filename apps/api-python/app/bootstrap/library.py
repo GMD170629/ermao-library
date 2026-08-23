@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
+from app.bootstrap.publications import ensure_publication_navigation
 from app.core.config import Settings
 from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
@@ -37,6 +38,11 @@ from app.modules.library.application.management_commands import (
 )
 from app.modules.library.application.queries import (
     SmartShelfCriteria,
+)
+from app.modules.library.application.resource_details import (
+    ListResourceDetails,
+    ResourceDetailAccessScope,
+    ResourceNavigationPreparer,
 )
 from app.modules.library.application.source_node_commands import (
     UpdateSourceNodeMetadata,
@@ -90,6 +96,9 @@ from app.modules.library.infrastructure.operation_management import (
 from app.modules.library.infrastructure.resource_commands import (
     SqlAlchemyResourceMetadata,
 )
+from app.modules.library.infrastructure.resource_details import (
+    SqlAlchemyResourceDetailQueries,
+)
 from app.modules.library.infrastructure.source_node_commands import (
     SqlAlchemySourceNodeMetadata,
 )
@@ -99,6 +108,40 @@ from app.modules.library.infrastructure.source_node_cover import (
 from app.modules.library.infrastructure.source_node_metadata_recognition import (
     ProviderSourceNodeMetadataRecognition,
 )
+from app.modules.publications.public import (
+    PublicationAccessScope,
+    PublicationCorruptError,
+    PublicationNotFoundError,
+    PublicationUnsupportedError,
+)
+
+
+class _PublicationResourceNavigationPreparer(ResourceNavigationPreparer):
+    def __init__(
+        self,
+        factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        self._factory = factory
+        self._settings = settings
+
+    def prepare(self, *, resource_id: str, context: ResourceDetailAccessScope) -> None:
+        access = PublicationAccessScope(
+            is_admin=context.is_admin,
+            can_view_manual_imports=context.can_view_manual_imports,
+            library_ids=tuple(context.library_ids),
+        )
+        try:
+            ensure_publication_navigation(self._factory, self._settings).execute(
+                resource_id=resource_id,
+                access_scope=access,
+            )
+        except (
+            PublicationCorruptError,
+            PublicationNotFoundError,
+            PublicationUnsupportedError,
+        ):
+            return
 
 
 def bookshelf_items(db: Session) -> ListBookshelfItems:
@@ -216,6 +259,19 @@ def browse_book_contents(db: Session) -> BrowseBookContents:
     return BrowseBookContents(SqlAlchemyBookContentsQueries(db))
 
 
+def resource_details(
+    db: Session,
+    *,
+    user_id: str,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+) -> ListResourceDetails:
+    return ListResourceDetails(
+        SqlAlchemyResourceDetailQueries(db, user_id),
+        _PublicationResourceNavigationPreparer(session_factory, settings),
+    )
+
+
 def update_source_node_metadata(db: Session) -> UpdateSourceNodeMetadata:
     return UpdateSourceNodeMetadata(SqlAlchemySourceNodeMetadata(db), db)
 
@@ -290,6 +346,7 @@ __all__ = [
     "prepare_book_facet_write",
     "recognize_source_node_metadata",
     "rename_library_facet",
+    "resource_details",
     "resource_metadata",
     "smart_shelf_book_ids",
     "update_book",

@@ -14,7 +14,7 @@ export const compatibilityAudiobookExtensions = [
 
 export const importFormatGroups = [
   { id: 'ebook', formats: READER_FORMAT_CAPABILITIES.filter((entry) => entry.readerKind === 'reflowable').map((entry) => entry.extension) },
-  { id: 'document-comic', formats: READER_FORMAT_CAPABILITIES.filter((entry) => entry.readerKind !== 'reflowable').map((entry) => entry.extension) },
+  { id: 'document-comic', formats: READER_FORMAT_CAPABILITIES.filter((entry) => entry.readerKind !== 'reflowable' && entry.sourceFormat !== 'image_dir').map((entry) => entry.extension) },
   { id: 'common-audio', formats: commonAudiobookExtensions },
   { id: 'compatibility-audio', formats: compatibilityAudiobookExtensions }
 ] as const;

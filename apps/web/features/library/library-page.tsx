@@ -46,18 +46,11 @@ import {
 } from './model/library-sort-preference';
 import { bookDetailHrefFromLibrary } from './model/library-navigation';
 
-const formatOptions = [
-  { value: '全部', label: '全部' },
-  { value: 'ebook', label: '电子书' },
-  { value: 'COMIC', label: '漫画' },
-  { value: 'AUDIOBOOK', label: '有声书' }
-];
-
 const statusOptions = [
-  { value: '全部', label: '全部状态' },
-  { value: 'UNREAD', label: '未开始' },
-  { value: 'READING', label: '进行中' },
-  { value: 'FINISHED', label: '已完成' }
+  { value: '全部', label: '全部' },
+  { value: 'READING', label: '在读' },
+  { value: 'UNREAD', label: '未读' },
+  { value: 'FINISHED', label: '已读' }
 ];
 
 const pageSizeOptions = [
@@ -83,6 +76,7 @@ export function LibraryPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
+  const routeFilterParam = searchParams.get('filters');
   const seriesNameFilter = searchParams.get('seriesName')?.trim() ?? '';
   const rawFacetKind = searchParams.get('facetKind')?.trim().toUpperCase() ?? '';
   const facetKindFilter = rawFacetKind === 'SERIES' || rawFacetKind === 'AUTHOR'
@@ -91,7 +85,6 @@ export function LibraryPage() {
   const facetIdFilter = facetKindFilter ? searchParams.get('facetId')?.trim() ?? '' : '';
   const facetNameFilter = facetIdFilter ? searchParams.get('facetName')?.trim() ?? '' : '';
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [formatFilter, setFormatFilter] = useState('全部');
   const [statusFilter, setStatusFilter] = useState(() => routeStatus(searchParams.get('status')));
   const initialRouteSort = librarySortPreferenceFromRoute(searchParams.get('sort'), searchParams.get('sortDirection'));
   const initialSortPreference = initialRouteSort ?? DEFAULT_LIBRARY_SORT_PREFERENCE;
@@ -99,7 +92,7 @@ export function LibraryPage() {
   const [sortDirection, setSortDirection] = useState<LibrarySortDirection>(initialSortPreference.direction);
   const [sortPreferenceLoaded, setSortPreferenceLoaded] = useState(initialRouteSort !== null);
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
-  const [smartFilterRules, setSmartFilterRules] = useState<SmartFilterRules>(() => parseSmartFilterRules(searchParams.get('filters')));
+  const [smartFilterRules, setSmartFilterRules] = useState<SmartFilterRules>(() => parseSmartFilterRules(routeFilterParam));
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
   const [filterSchemaLoading, setFilterSchemaLoading] = useState(false);
   const [filterSchemaLoaded, setFilterSchemaLoaded] = useState(false);
@@ -134,12 +127,20 @@ export function LibraryPage() {
   }), [search, smartFilterQuery]);
   const [settledQuery, setSettledQuery] = useState<LibraryQueryDraft>(queryDraft);
   const queryDraftSettled = libraryQueryDraftIsSettled(queryDraft, settledQuery);
+  const selectedLibraryCondition = smartFilterRules.conditions.find((condition) => (
+    condition.field === 'library'
+    && condition.operator === 'equals'
+    && typeof condition.value === 'string'
+    && condition.value.trim() !== ''
+  ));
+  const selectedLibraryName = selectedLibraryCondition
+    ? searchParams.get('libraryName')?.trim() ?? ''
+    : '';
   const isSeriesFacet = facetKindFilter === 'SERIES' && Boolean(facetIdFilter);
   const isAuthorFacet = facetKindFilter === 'AUTHOR' && Boolean(facetIdFilter);
   const queryBase = useMemo(() => {
     const params = new URLSearchParams();
     if (settledQuery.search) params.set('search', settledQuery.search);
-    if (formatFilter !== '全部') params.set('type', formatFilter);
     if (statusFilter !== '全部') params.set('status', statusFilter);
     if (seriesNameFilter) params.set('seriesName', seriesNameFilter);
     if (facetKindFilter && facetIdFilter) {
@@ -151,7 +152,7 @@ export function LibraryPage() {
     params.set('sort', isSeriesFacet ? 'series_index' : isAuthorFacet ? 'updated' : sort);
     params.set('sortDirection', isSeriesFacet ? 'asc' : isAuthorFacet ? 'desc' : sortDirection);
     return params.toString();
-  }, [facetIdFilter, facetKindFilter, formatFilter, isAuthorFacet, isSeriesFacet, seriesNameFilter, settledQuery.search, settledQuery.smartFilterQuery, sort, sortDirection, statusFilter]);
+  }, [facetIdFilter, facetKindFilter, isAuthorFacet, isSeriesFacet, seriesNameFilter, settledQuery.search, settledQuery.smartFilterQuery, sort, sortDirection, statusFilter]);
   const requestPageSize = view === 'grid'
     ? String(BROWSE_LIBRARY_PAGE_SIZE)
     : pageSize === 'all'
@@ -165,6 +166,10 @@ export function LibraryPage() {
     debouncer.update(queryDraft);
     return () => debouncer.dispose();
   }, [queryDraft]);
+
+  useEffect(() => {
+    setSmartFilterRules(parseSmartFilterRules(routeFilterParam));
+  }, [routeFilterParam]);
 
   useEffect(() => {
     setPage(1);
@@ -319,17 +324,19 @@ export function LibraryPage() {
     setSelectedBookIds((current) => current.filter((id) => visibleIds.has(id)));
   }, [books]);
 
-  const advancedFilterCount = [statusFilter !== '全部', seriesNameFilter, facetIdFilter].filter(Boolean).length + smartFilterRules.conditions.length;
-  const pageTitle = facetNameFilter
+  const advancedFilterCount = [seriesNameFilter, facetIdFilter].filter(Boolean).length + smartFilterRules.conditions.length;
+  const pageTitle = selectedLibraryName
+    ? selectedLibraryName
+    : facetNameFilter
     ? facetNameFilter
     : seriesNameFilter
     ? seriesNameFilter
     : statusFilter === 'UNREAD'
-    ? '未开始'
+    ? '未读'
     : statusFilter === 'READING'
-      ? '进行中'
+      ? '在读'
       : statusFilter === 'FINISHED'
-        ? '已完成'
+        ? '已读'
         : '全部图书';
 
   function updateView(nextView: 'grid' | 'list') {
@@ -405,15 +412,14 @@ export function LibraryPage() {
   }
 
   function clearAdvancedFilters() {
-    setStatusFilter('全部');
     setSmartFilterRules({ combinator: 'ALL', conditions: [] });
     replaceRoute((params) => {
-      params.delete('status');
       params.delete('seriesName');
       params.delete('facetKind');
       params.delete('facetId');
       params.delete('facetName');
       params.delete('filters');
+      params.delete('libraryName');
     });
   }
 
@@ -493,23 +499,23 @@ export function LibraryPage() {
 
         <div className="flex min-w-0 items-center gap-2">
           <Select
-            value={formatFilter}
-            options={formatOptions}
-            onChange={setFormatFilter}
-            ariaLabel={i18nAttribute("图书类型")}
+            value={statusFilter}
+            options={statusOptions}
+            onChange={updateStatus}
+            ariaLabel={i18nAttribute("阅读状态")}
             className="w-28 !min-w-0 shrink-0 sm:hidden"
             triggerClassName="!h-12 !rounded-xl !border-black/[0.09] !bg-white/65 !px-4 !text-sm"
           />
-          <div className="hidden h-12 self-start rounded-xl bg-black/[0.035] p-1 sm:inline-flex sm:w-auto sm:self-auto" role="group" aria-label={i18nAttribute("图书类型")}>
-            {formatOptions.map((option) => (
+          <div className="hidden h-12 self-start rounded-xl bg-black/[0.035] p-1 sm:inline-flex sm:w-auto sm:self-auto" role="group" aria-label={i18nAttribute("阅读状态")}>
+            {statusOptions.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setFormatFilter(option.value)}
-                aria-pressed={formatFilter === option.value}
+                onClick={() => updateStatus(option.value)}
+                aria-pressed={statusFilter === option.value}
                 className={cn(
                   'min-w-0 flex-1 rounded-lg px-2 text-sm transition sm:min-w-[70px] sm:flex-none sm:px-3',
-                  formatFilter === option.value ? 'bg-[#F9DED4] font-medium text-[#EF4D2F] shadow-sm' : 'text-[#706A64] hover:text-[#34312E]'
+                  statusFilter === option.value ? 'bg-[#F9DED4] font-medium text-[#EF4D2F] shadow-sm' : 'text-[#706A64] hover:text-[#34312E]'
                 )}
               >
                 {i18nAttribute(option.label)}
@@ -535,7 +541,7 @@ export function LibraryPage() {
 
       {view === 'list' && filtersOpen ? (
         <>
-          {seriesNameFilter || facetIdFilter || statusFilter !== '全部' ? <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-black/[0.055] bg-black/[0.018] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          {seriesNameFilter || facetIdFilter ? <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-black/[0.055] bg-black/[0.018] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2 text-xs text-[#7B746E]">
               <span><I18nText>来自当前入口的基础条件</I18nText></span>
               {seriesNameFilter ? <span className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#FFF2ED] px-2.5 font-medium text-[#D7462B]"><I18nText>丛书：</I18nText><span data-i18n-skip>{seriesNameFilter}</span><button type="button" aria-label={i18nAttribute("清除丛书筛选")} onClick={() => replaceRoute((params) => params.delete('seriesName'))}><X size={13} /></button></span> : null}
@@ -544,7 +550,6 @@ export function LibraryPage() {
                 params.delete('facetId');
                 params.delete('facetName');
               })}><X size={13} /></button></span> : null}
-              {statusFilter !== '全部' ? <span className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#FFF2ED] px-2.5 font-medium text-[#D7462B]"><I18nText>状态：</I18nText>{statusOptions.find((item) => item.value === statusFilter)?.label}<button type="button" aria-label={i18nAttribute("清除阅读状态筛选")} onClick={() => updateStatus('全部')}><X size={13} /></button></span> : null}
             </div>
             <button type="button" disabled={advancedFilterCount === 0} onClick={clearAdvancedFilters} className="h-9 self-start rounded-lg px-2.5 text-xs font-medium text-[#77716B] transition hover:bg-white hover:text-[#EF4D2F] disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto"><I18nText>清除全部筛选</I18nText></button>
           </div> : null}

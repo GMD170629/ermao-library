@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BookView, ReadableResourceView } from '../../types/book';
-import { allVisibleResources, selectedResourceForBook, bookDetailHref } from './book-detail';
+import { allVisibleResources, selectedResourceForBook, bookDetailHref, resourcePageFromQuery, singleReadableResourceForBook } from './book-detail';
 
 function resource(id: string, progress = 0, hidden = false): ReadableResourceView {
   return {
@@ -69,6 +69,10 @@ test('deep links use only bookId and resourceId', () => {
   assert.equal(bookDetailHref('book/下一部', 'resource/1'), '/books/book%2F%E4%B8%8B%E4%B8%80%E9%83%A8?resourceId=resource%2F1');
   assert.equal(bookDetailHref('book-1', null, '/library?status=READING&sort=title'), '/books/book-1?returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   assert.equal(new URL(bookDetailHref('book-1'), 'https://example.test').searchParams.has('resourceId'), false);
+  assert.equal(bookDetailHref('book-1', 'resource-1', '/library?status=READING', 3), '/books/book-1?resourceId=resource-1&resourcePage=3&returnTo=%2Flibrary%3Fstatus%3DREADING');
+  assert.equal(bookDetailHref('book-1', null, '/library?status=READING', 8), '/books/book-1?returnTo=%2Flibrary%3Fstatus%3DREADING');
+  assert.equal(resourcePageFromQuery('4'), 4);
+  assert.equal(resourcePageFromQuery('-1'), 1);
 });
 
 test('resource selection prefers URL, continue, first unfinished, then first resource', () => {
@@ -77,4 +81,11 @@ test('resource selection prefers URL, continue, first unfinished, then first res
   assert.equal(selectedResourceForBook(value)?.id, 'continue');
   assert.equal(selectedResourceForBook({ ...value, continueResourceId: null })?.id, 'unfinished');
   assert.deepEqual(allVisibleResources({ ...value, resources: [...value.resources, resource('hidden', 0, true)] }).map((item) => item.id), ['finished', 'continue', 'unfinished']);
+});
+
+test('single readable resource is the default detail only when it is the sole visible readable resource', () => {
+  assert.equal(singleReadableResourceForBook(book([resource('only')]))?.id, 'only');
+  assert.equal(singleReadableResourceForBook(book([resource('only'), resource('hidden', 0, true)]))?.id, 'only');
+  assert.equal(singleReadableResourceForBook(book([resource('first'), resource('second')])), null);
+  assert.equal(singleReadableResourceForBook(book([{ ...resource('not-readable'), readable: false }])), null);
 });

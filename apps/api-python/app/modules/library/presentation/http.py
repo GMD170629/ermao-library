@@ -9,8 +9,8 @@ from typing import Annotated, Literal, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
@@ -32,6 +32,7 @@ from app.bootstrap.library import (
     merge_library_facets,
     recognize_source_node_metadata,
     rename_library_facet,
+    resource_details,
     resource_metadata,
     undo_library_operation,
     update_book,
@@ -52,10 +53,7 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.models import (
-    LibraryReadableResource,
-    ReadableResourceNavigationUnit,
-)
+from app.models import LibraryReadableResource
 from app.models.auth import User
 from app.modules.library.application.asset_commands import (
     ResourceAssetNotFoundError,
@@ -65,7 +63,7 @@ from app.modules.library.application.book_contents import (
     BookContentNode,
     BookContentsNotFoundError,
 )
-from app.modules.library.application.book_list import BookListQuery, parse_media_kinds
+from app.modules.library.application.book_list import BookListQuery
 from app.modules.library.application.bulk_operations import (
     BulkBookAccessError,
     BulkBookAuthorizationError,
@@ -100,6 +98,10 @@ from app.modules.library.application.resource_commands import (
 )
 from app.modules.library.application.resource_cover import (
     RegenerateResourceCoverCommand,
+)
+from app.modules.library.application.resource_details import (
+    ResourceDetailAccessScope,
+    ResourceDetailNotFoundError,
 )
 from app.modules.library.application.source_node_commands import (
     MAX_SOURCE_NODE_COVER_BYTES,
@@ -944,9 +946,7 @@ def list_library_books(
     sort: str = "updated",
     sortDirection: Literal["asc", "desc"] | None = None,
     visibility: Literal["active", "ignored"] = "active",
-    type_filter: str = Query(default="", alias="type"),
-    media: str | None = None,
-    status: str | None = None,
+    status: Literal["UNREAD", "READING", "FINISHED"] | None = None,
     seriesName: str | None = None,
     facetKind: str | None = None,
     facetId: str | None = None,
@@ -980,8 +980,6 @@ def list_library_books(
             sort=sort,
             sort_direction=sortDirection,
             visibility=visibility,
-            type_filter=type_filter,
-            media_kinds=parse_media_kinds(media or ""),
             status=status,
             series_name=seriesName,
             facet_kind=facetKind,
@@ -1661,37 +1659,32 @@ def list_library_reading_units(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return _reading_units_response(auth_error)
-    if not can_access_book(db, user, book_id) or not can_access_resource(
-        db, user, resource_id
-    ):
-        return _reading_units_response(
-            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-        )
-    resource = resource_view(db, resource_id, user.id)
-    if resource is None or resource["bookId"] != book_id:
-        return _reading_units_response(
-            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-        )
-    total = int(
-        db.scalar(
-            select(func.count())
-            .select_from(ReadableResourceNavigationUnit)
-            .where(ReadableResourceNavigationUnit.resource_id == resource_id)
-        )
-        or 0
+    authorization = authorization_context(db, user)
+    context = ResourceDetailAccessScope(
+        is_admin=authorization.is_admin,
+        can_view_manual_imports=authorization.can_view_manual_imports,
+        library_ids=authorization.library_ids,
     )
-    normalized_page = max(1, page)
-    normalized_size = min(500, max(1, pageSize))
-    rows = db.scalars(
-        select(ReadableResourceNavigationUnit)
-        .where(ReadableResourceNavigationUnit.resource_id == resource_id)
-        .order_by(
-            ReadableResourceNavigationUnit.sort_order.asc(),
-            ReadableResourceNavigationUnit.id.asc(),
+    factory: object = request.app.state.session_factory
+    if not isinstance(factory, sessionmaker):
+        raise TypeError("application session factory is unavailable")
+    try:
+        result = resource_details(
+            db,
+            user_id=user.id,
+            session_factory=factory,
+            settings=settings,
+        ).execute(
+            context=context,
+            book_id=book_id,
+            resource_id=resource_id,
+            page=page,
+            page_size=pageSize,
         )
-        .offset((normalized_page - 1) * normalized_size)
-        .limit(normalized_size)
-    ).all()
+    except ResourceDetailNotFoundError:
+        return _reading_units_response(
+            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
+        )
     return _reading_units_response(
         ok(
             {
@@ -1699,30 +1692,38 @@ def list_library_reading_units(
                 "resourceId": resource_id,
                 "units": [
                     {
-                        "id": row.id,
-                        "title": row.title,
-                        "href": row.href,
-                        "sortOrder": row.sort_order,
-                        "unitType": row.unit_type,
-                        "assetId": row.asset_id,
-                        "metadataJson": row.metadata_json,
+                        "id": unit.id,
+                        "title": unit.title,
+                        "href": unit.href,
+                        "sortOrder": unit.sort_order,
+                        "unitType": unit.unit_type,
+                        "assetId": unit.asset_id,
+                        "pageNumber": unit.page_number,
+                        "mediaType": unit.media_type,
+                        "previewUrl": unit.preview_url,
+                        "level": unit.level,
+                        "durationMs": unit.duration_ms,
+                        "discNumber": unit.disc_number,
+                        "trackNumber": unit.track_number,
+                        "metadataJson": unit.metadata_json or "{}",
                     }
-                    for row in rows
+                    for unit in result.units
                 ],
                 "page": {
-                    "page": normalized_page,
-                    "pageSize": normalized_size,
-                    "total": total,
+                    "page": result.page,
+                    "pageSize": result.page_size,
+                    "total": result.total,
                     "totalPages": max(
-                        1, (total + normalized_size - 1) // normalized_size
+                        1,
+                        (result.total + result.page_size - 1) // result.page_size,
                     ),
                 },
-                "currentHref": None,
-                "currentChapterIndex": None,
-                "currentChapterTitle": None,
-                "currentChapterSortOrder": None,
-                "currentPageNumber": None,
-                "progress": float(resource.get("progress") or 0),
+                "currentHref": result.current_href,
+                "currentChapterIndex": result.current_chapter_index,
+                "currentChapterTitle": result.current_chapter_title,
+                "currentChapterSortOrder": result.current_chapter_sort_order,
+                "currentPageNumber": result.current_page_number,
+                "progress": result.progress,
             }
         )
     )

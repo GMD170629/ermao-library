@@ -1,6 +1,6 @@
 import type { ReadableResourceView } from '../../../types/book';
 import { formatDuration } from '../book-detail';
-import type { EbookChapterDetail } from './chapter-detail';
+import type { ResourceDetailPage } from './resource-detail';
 
 type Translate = (
   source: string,
@@ -10,7 +10,7 @@ type Translate = (
 /** Display only positions derived from the Reader's exact persisted locator. */
 export function currentPositionLabel(
   resource: ReadableResourceView,
-  detail: EbookChapterDetail | null,
+  detail: ResourceDetailPage | null,
   translate: Translate
 ): string {
   if (resource.readerType === 'audio' && resource.durationMs) {

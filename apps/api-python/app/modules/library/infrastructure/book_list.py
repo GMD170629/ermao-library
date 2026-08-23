@@ -37,6 +37,7 @@ from app.modules.library.infrastructure.book_covers import (
 from app.modules.library.infrastructure.books import _book_record
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
+    reading_status_predicate,
     resolve_library_roots,
 )
 from app.modules.reader.public import (
@@ -59,8 +60,6 @@ class _ResourceSummary:
 def _resource_exists(
     *,
     book_id: object,
-    media_kinds: tuple[str, ...] = (),
-    formats: tuple[str, ...] = (),
 ) -> ColumnElement[bool]:
     """Match readable resources belonging to an already-authorized Book.
 
@@ -71,16 +70,13 @@ def _resource_exists(
     ``LibraryReadableResource_bookId_idx`` instead of rescanning every resource
     through the separate library index for each Book.
     """
-    predicates: list[ColumnElement[bool]] = [
-        LibraryReadableResource.book_id == book_id,
-        LibraryReadableResource.enablement_state == "ENABLED",
-        LibraryReadableResource.import_state == "READY",
-    ]
-    if media_kinds:
-        predicates.append(LibraryReadableResource.media_kind.in_(media_kinds))
-    if formats:
-        predicates.append(LibraryReadableResource.format.in_(formats))
-    return exists(select(LibraryReadableResource.id).where(*predicates))
+    return exists(
+        select(LibraryReadableResource.id).where(
+            LibraryReadableResource.book_id == book_id,
+            LibraryReadableResource.enablement_state == "ENABLED",
+            LibraryReadableResource.import_state == "READY",
+        )
+    )
 
 
 def _predicates(
@@ -113,82 +109,8 @@ def _predicates(
                 ),
             )
         )
-    if query.type_filter:
-        normalized = query.type_filter.strip().upper()
-        media_values = {
-            "EBOOK": "EBOOK",
-            "AUDIO": "AUDIOBOOK",
-            "AUDIOBOOK": "AUDIOBOOK",
-            "COMIC": "COMIC",
-        }
-        if normalized in media_values:
-            predicates.append(
-                _resource_exists(
-                    book_id=LibraryBook.id, media_kinds=(media_values[normalized],)
-                )
-            )
-        else:
-            predicates.append(
-                _resource_exists(book_id=LibraryBook.id, formats=(normalized,))
-            )
-    if query.media_kinds:
-        predicates.append(
-            _resource_exists(book_id=LibraryBook.id, media_kinds=query.media_kinds)
-        )
-    statuses = tuple(
-        dict.fromkeys(
-            (*query.statuses, query.status) if query.status else query.statuses
-        )
-    )
-    for status in statuses:
-        normalized = status.upper()
-        ready_resource = (
-            LibraryReadableResource.book_id == LibraryBook.id,
-            resource_visibility_predicate(context),
-        )
-        started = exists(
-            select(ReaderResourceProgress.id)
-            .join(
-                LibraryReadableResource,
-                LibraryReadableResource.id == ReaderResourceProgress.resource_id,
-            )
-            .where(
-                LibraryReadableResource.book_id == LibraryBook.id,
-                ReaderResourceProgress.user_id == user.id,
-                ReaderResourceProgress.percent > 0,
-                resource_visibility_predicate(context),
-            )
-        )
-        unfinished = exists(
-            select(LibraryReadableResource.id)
-            .outerjoin(
-                ReaderResourceProgress,
-                and_(
-                    ReaderResourceProgress.resource_id == LibraryReadableResource.id,
-                    ReaderResourceProgress.user_id == user.id,
-                ),
-            )
-            .where(
-                *ready_resource,
-                or_(
-                    ReaderResourceProgress.id.is_(None),
-                    ReaderResourceProgress.percent < 100,
-                ),
-            )
-        )
-        available = exists(select(LibraryReadableResource.id).where(*ready_resource))
-        if normalized == "READING":
-            predicates.extend((started, unfinished))
-        elif normalized == "UNREAD":
-            predicates.append(~started)
-        elif normalized == "FINISHED":
-            predicates.extend((available, ~unfinished))
-    if query.publication_status:
-        predicates.append(
-            LibraryBookMetadata.publication_status == query.publication_status
-        )
-    if query.tracking_status:
-        predicates.append(LibraryBookMetadata.tracking_status == query.tracking_status)
+    if query.status:
+        predicates.append(reading_status_predicate(context, user.id, query.status))
     if query.tag:
         predicates.append(
             exists(

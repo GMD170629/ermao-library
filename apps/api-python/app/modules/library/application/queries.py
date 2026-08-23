@@ -26,7 +26,6 @@ def _strings(value: object, *, upper: bool = False) -> tuple[str, ...]:
 class SmartShelfCriteria:
     search: str
     statuses: tuple[str, ...]
-    media_kinds: tuple[str, ...]
     tags: tuple[str, ...]
     authors: tuple[str, ...]
     included_book_ids: tuple[str, ...]
@@ -41,15 +40,9 @@ class SmartShelfCriteria:
             for item in _strings(value.get("statuses"), upper=True)
             if item in {"UNREAD", "READING", "FINISHED"}
         )
-        media_kinds = tuple(
-            item
-            for item in _strings(value.get("mediaKinds"), upper=True)
-            if item in {"EBOOK", "COMIC", "AUDIOBOOK"}
-        )
         return cls(
             search=str(value.get("search") or "").strip(),
             statuses=statuses,
-            media_kinds=media_kinds,
             tags=_strings(value.get("tags")),
             authors=_strings(value.get("authors")),
             included_book_ids=_strings(value.get("includedBookIds")),

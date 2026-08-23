@@ -109,6 +109,7 @@ class AssetTechnicalMetadata:
     channels: int | None = None
     disc_number: int | None = None
     track_number: int | None = None
+    page_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -275,8 +275,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
                 visibility="active",
                 sort="recent_import",
                 sort_direction="desc",
-                type_filter="EPUB",
-                media_kinds=("EBOOK",),
+                status="UNREAD",
             ),
         ),
     )

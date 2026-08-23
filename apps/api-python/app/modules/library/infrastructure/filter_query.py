@@ -31,10 +31,8 @@ from app.models import (
     LibraryBookMetadata,
     LibraryFacet,
     LibraryReadableResource,
-    LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    OrganizeJob,
     ReaderResourceProgress,
 )
 from app.models.shelf import Shelf, ShelfBook
@@ -47,20 +45,11 @@ BOOK_TEXT_FIELDS = {
     "author": LibraryBookMetadata.author,
     "description": LibraryBookMetadata.description,
     "series": LibraryBookMetadata.series_name,
-    "publicationStatus": LibraryBookMetadata.publication_status,
-    "trackingStatus": LibraryBookMetadata.tracking_status,
 }
 BOOK_NUMBER_FIELDS = {
     "seriesIndex": LibraryBookMetadata.series_index,
-    "metadataQuality": LibraryBookMetadata.metadata_quality,
-}
-BOOK_DATE_FIELDS = {
-    "createdAt": LibraryBook.created_at,
-    "updatedAt": LibraryBook.updated_at,
 }
 RESOURCE_TEXT_FIELDS = {
-    "resourceTitle": "title",
-    "narrator": "narrator",
     "format": "format",
     "importStatus": "import_state",
 }
@@ -223,8 +212,10 @@ def _normalized_library_root(root_path: str) -> str:
     return normalized.rstrip("/\\")
 
 
-def _reading_status(
-    context: AuthorizationContext, user_id: str, condition: FilterCondition
+def reading_status_predicate(
+    context: AuthorizationContext,
+    user_id: str,
+    status: str,
 ) -> ColumnElement[bool]:
     resource = aliased(LibraryReadableResource)
     progress = aliased(ReaderResourceProgress)
@@ -232,31 +223,63 @@ def _reading_status(
         resource_visibility_predicate(context, resource),
         resource.book_id == LibraryBook.id,
     )
-    has_resource = exists(select(resource.id).where(visible))
+    has_resource = exists(select(resource.id).where(visible).correlate(LibraryBook))
+    started = exists(
+        select(progress.id)
+        .where(
+            progress.user_id == user_id,
+            progress.percent > 0,
+            exists(
+                select(resource.id)
+                .where(
+                    visible,
+                    resource.id == progress.resource_id,
+                )
+                .correlate(LibraryBook, progress)
+            ),
+        )
+        .correlate(LibraryBook)
+    )
+    completed = exists(
+        select(progress.id)
+        .where(
+            progress.user_id == user_id,
+            progress.resource_id == resource.id,
+            progress.percent >= 100,
+        )
+        .correlate(resource)
+    )
+    unfinished = exists(
+        select(resource.id).where(visible, ~completed).correlate(LibraryBook)
+    )
+    normalized = status.upper()
+    return (
+        and_(has_resource, ~unfinished)
+        if normalized == "FINISHED"
+        else and_(started, unfinished)
+        if normalized == "READING"
+        else ~started
+    )
+
+
+def _reading_status(
+    context: AuthorizationContext, user_id: str, condition: FilterCondition
+) -> ColumnElement[bool]:
+    resource = aliased(LibraryReadableResource)
+    has_resource = exists(
+        select(resource.id).where(
+            resource_visibility_predicate(context, resource),
+            resource.book_id == LibraryBook.id,
+        )
+    )
     if condition.operator == "is_empty":
         return ~has_resource
     if condition.operator == "is_not_empty":
         return has_resource
-    started = exists(
-        select(progress.id)
-        .join(resource, resource.id == progress.resource_id)
-        .where(visible, progress.user_id == user_id, progress.percent > 0)
-    )
-    unfinished = exists(
-        select(resource.id)
-        .outerjoin(
-            progress,
-            and_(progress.resource_id == resource.id, progress.user_id == user_id),
-        )
-        .where(visible, func.coalesce(progress.percent, 0) < 100)
-    )
-    status = str(condition.value or "UNREAD").upper()
-    predicate = (
-        and_(has_resource, ~unfinished)
-        if status == "FINISHED"
-        else and_(started, unfinished)
-        if status == "READING"
-        else ~started
+    predicate = reading_status_predicate(
+        context,
+        user_id,
+        str(condition.value or "UNREAD"),
     )
     return not_(predicate) if condition.operator == "not_equals" else predicate
 
@@ -283,30 +306,17 @@ def _condition(
         return _text(BOOK_TEXT_FIELDS[field], condition)
     if field in BOOK_NUMBER_FIELDS:
         return _number(BOOK_NUMBER_FIELDS[field], condition)
-    if field in BOOK_DATE_FIELDS:
-        return _date(BOOK_DATE_FIELDS[field], condition)
 
     resource = aliased(LibraryReadableResource)
-    resource_metadata = aliased(LibraryReadableResourceMetadata)
     source_node = aliased(LibrarySourceNode)
     visible = _visible_resource(context, resource, LibraryBook)
-    resource_base = (
-        select(resource.id)
-        .join(resource_metadata, resource_metadata.resource_id == resource.id)
-        .where(visible)
-    )
-    if field in RESOURCE_TEXT_FIELDS or field == "mediaKind":
-        expression = (
-            resource.media_kind
-            if field == "mediaKind"
-            else getattr(
-                resource_metadata
-                if field in {"resourceTitle", "narrator"}
-                else resource,
-                RESOURCE_TEXT_FIELDS[field],
-            )
+    resource_base = select(resource.id).where(visible)
+    if field in RESOURCE_TEXT_FIELDS:
+        return _relation_text(
+            resource_base,
+            getattr(resource, RESOURCE_TEXT_FIELDS[field]),
+            condition,
         )
-        return _relation_text(resource_base, expression, condition)
     if field == "tag":
         link = aliased(LibraryBookFacet)
         facet = aliased(LibraryFacet)
@@ -347,38 +357,6 @@ def _condition(
             condition,
         )
 
-    scalar = {
-        "fileSize": (
-            select(func.sum(source_node.observed_size_bytes))
-            .select_from(LibraryResourceAsset)
-            .join(resource, resource.id == LibraryResourceAsset.resource_id)
-            .join(source_node, source_node.id == LibraryResourceAsset.source_node_id)
-            .where(visible, LibraryResourceAsset.import_state == "READY")
-            .scalar_subquery()
-        ),
-        "pageCount": select(func.max(resource_metadata.page_count))
-        .where(resource_base.exists())
-        .scalar_subquery(),
-        "chapterCount": select(func.max(resource_metadata.chapter_count))
-        .where(resource_base.exists())
-        .scalar_subquery(),
-        "duration": select(func.max(resource_metadata.duration_ms))
-        .where(resource_base.exists())
-        .scalar_subquery(),
-        "resourceCount": select(func.count(resource.id))
-        .where(visible)
-        .scalar_subquery(),
-    }
-    if field in scalar:
-        return _number(
-            scalar[field],
-            condition,
-            scale=1048576
-            if field == "fileSize"
-            else 60000
-            if field == "duration"
-            else 1,
-        )
     if field in {"progress", "lastReadAt"}:
         progress = aliased(ReaderResourceProgress)
         statement = (
@@ -400,24 +378,6 @@ def _condition(
             func.max(progress.updated_at)
         ).scalar_subquery()
         return _date(value, condition)
-    if field == "organizeStatus":
-        job = aliased(OrganizeJob)
-        return _relation_text(
-            select(job.book_id).where(job.book_id == LibraryBook.id),
-            job.status,
-            condition,
-        )
-    if field == "organized":
-        organized_value = ~exists(
-            select(OrganizeJob.id).where(
-                OrganizeJob.book_id == LibraryBook.id, OrganizeJob.status != "COMPLETED"
-            )
-        )
-        return (
-            organized_value
-            if condition.operator == "is_true"
-            else not_(organized_value)
-        )
     if field == "hasCover":
         cover_value = effective_book_cover_exists(LibraryBook.id)
         return cover_value if condition.operator == "is_true" else not_(cover_value)

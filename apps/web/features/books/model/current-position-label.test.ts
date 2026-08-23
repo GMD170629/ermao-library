@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ReadableResourceView } from '../../../types/book';
-import type { EbookChapterDetail } from './chapter-detail';
 import { currentPositionLabel } from './current-position-label';
+import type { ResourceDetailPage } from './resource-detail';
 
 const resource = {
   id: 'resource-1',
@@ -27,7 +27,7 @@ test('shows the exact Publication chapter title instead of estimating from perce
     currentChapterSortOrder: 4,
     currentPageNumber: null,
     progress: 15
-  } satisfies EbookChapterDetail;
+  } satisfies ResourceDetailPage;
 
   assert.equal(currentPositionLabel(resource, detail, translate), '第四部 事件');
 });

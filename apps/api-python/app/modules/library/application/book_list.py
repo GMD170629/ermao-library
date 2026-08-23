@@ -23,12 +23,7 @@ class BookListQuery:
     facet_id: str | None = None
     sort: str = "updated"
     sort_direction: str | None = None
-    type_filter: str = ""
-    media_kinds: tuple[str, ...] = ()
     status: str | None = None
-    statuses: tuple[str, ...] = ()
-    publication_status: str | None = None
-    tracking_status: str | None = None
     tag: str | None = None
     missing_cover: bool = False
     new_import: bool = False
@@ -50,12 +45,3 @@ def resolve_page_size(requested_page_size: int | None, total: int) -> int:
     if requested_page_size is None:
         return max(1, total)
     return min(MAX_LIBRARY_PAGE_SIZE, max(1, requested_page_size))
-
-
-def parse_media_kinds(raw: str) -> tuple[str, ...]:
-    kinds: list[str] = []
-    for raw_kind in raw.split(","):
-        kind = raw_kind.strip().upper()
-        if kind in {"EBOOK", "COMIC", "AUDIOBOOK"} and kind not in kinds:
-            kinds.append(kind)
-    return tuple(kinds)

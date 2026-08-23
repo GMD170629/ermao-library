@@ -283,7 +283,7 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
       bookId,
       resourceId: resource.id,
       kind: 'comic',
-      sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar',
+      sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar' | 'image_dir',
       contentUrl: contentAsset?.url ?? '',
       comicManifestUrl: withBasePath(comicManifestUrl ?? ''),
       comicPageUrlTemplate: withBasePath(comicPageUrlTemplate ?? ''),

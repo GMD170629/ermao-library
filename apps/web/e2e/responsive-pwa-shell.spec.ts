@@ -38,6 +38,28 @@ async function mockWebAppApi(page: Page, override?: ApiRouteOverride) {
       await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读' }] } } });
       return;
     }
+    if (pathname.endsWith('/api/library/filter-schema')) {
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            fields: [{
+              key: 'library',
+              label: '书库',
+              group: '来源与归档',
+              type: 'select',
+              operators: ['equals'],
+              options: [
+                { value: 'main-library', label: '主书库' },
+                { value: 'comic-library', label: '漫画库' }
+              ]
+            }],
+            maxConditions: 30
+          }
+        }
+      });
+      return;
+    }
     await route.fulfill({ json: { ok: true, data: {} } });
   });
 }
@@ -453,20 +475,31 @@ test('mobile drawer supports focus, escape, browser back, and route navigation',
   await expect(drawer).toBeHidden();
 });
 
-test('desktop and mobile library navigation expose all, reading, series, and authors', async ({ page }) => {
+test('desktop and mobile library navigation expose all and readable library sources', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
   const sidebar = page.locator('aside');
   await expect(sidebar.getByRole('link', { name: '全部', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('link', { name: '在读', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('link', { name: '系列', exact: true })).toHaveAttribute('href', '/library/series');
-  await expect(sidebar.getByRole('link', { name: '作者', exact: true })).toHaveAttribute('href', '/library/authors');
-  await expect(sidebar.getByRole('link', { name: '未读', exact: true })).toHaveCount(0);
-  await expect(sidebar.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
+  const mainLibraryLink = sidebar.getByRole('link', { name: '主书库', exact: true });
+  await expect(mainLibraryLink).toHaveAttribute('data-library-id', 'main-library');
+  await expect(sidebar.getByRole('link', { name: '漫画库', exact: true })).toHaveAttribute('data-library-id', 'comic-library');
+  await expect(sidebar.getByRole('link', { name: '在读', exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('link', { name: '系列', exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('link', { name: '作者', exact: true })).toHaveCount(0);
+
+  const mainLibraryUrl = new URL(await mainLibraryLink.getAttribute('href') ?? '', 'http://example.test');
+  expect(mainLibraryUrl.searchParams.get('libraryName')).toBe('主书库');
+  expect(JSON.parse(mainLibraryUrl.searchParams.get('filters') ?? '')).toEqual({
+    combinator: 'ALL',
+    conditions: [{ field: 'library', operator: 'equals', value: 'main-library' }]
+  });
   const accountLink = sidebar.getByRole('link', { name: '进入账户与设置' });
   await expect(accountLink.getByText('Web', { exact: true })).toBeVisible();
   await expect(accountLink.getByText('账户与设置', { exact: true })).toBeVisible();
+
+  await mainLibraryLink.click();
+  await expect(page.getByRole('heading', { name: '主书库', exact: true })).toBeVisible();
 });
 
 test('desktop sidebar search results match the search field width', async ({ page }) => {
@@ -515,85 +548,10 @@ test('shelf collections and unassigned shelves are the only top-level sidebar en
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: '打开导航菜单' }).click();
   const drawer = page.getByTestId('mobile-navigation');
-  await expect(drawer.getByRole('link', { name: '系列', exact: true })).toBeVisible();
+  await expect(drawer.getByRole('link', { name: '主书库', exact: true })).toHaveAttribute('data-library-id', 'main-library');
   await expect(drawer.getByRole('link', { name: '独立书架', exact: true })).toBeVisible();
   await expect(drawer.getByRole('link', { name: '旅行合集', exact: true })).toHaveAttribute('data-shelf-kind', 'COLLECTION');
   await expect(drawer.getByRole('link', { name: '合集成员', exact: true })).toHaveCount(0);
-});
-
-test('series and author groupings open the existing library with exact facet filters', async ({ page }) => {
-  const requestedBookQueries: URL[] = [];
-  await page.route('**/api/library/groupings?**', async (route) => {
-    const url = new URL(route.request().url());
-    const isSeries = url.searchParams.get('kind') === 'SERIES';
-    await route.fulfill({
-      json: {
-        ok: true,
-        data: {
-          groups: [{
-            id: isSeries ? 'series-facet' : 'author-facet',
-            name: isSeries ? '星海丛书' : '林川',
-            bookCount: isSeries ? 2 : 1,
-            updatedAt: '2026-07-29T00:00:00Z'
-          }],
-          page: 1,
-          pageSize: 48,
-          total: 1,
-          totalPages: 1
-        }
-      }
-    });
-  });
-  await page.route('**/api/books?**', async (route) => {
-    requestedBookQueries.push(new URL(route.request().url()));
-    await route.fulfill({
-      json: {
-        ok: true,
-        data: {
-          books: [],
-          total: 0,
-          page: 1,
-          pageSize: 50,
-          totalPages: 1
-        }
-      }
-    });
-  });
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/library/series');
-  await expect(page.getByRole('heading', { name: '系列' })).toBeVisible();
-  await page.getByRole('button', { name: /打开“星海丛书”/ }).click();
-  await expect(page).toHaveURL(/facetKind=SERIES/);
-  await expect(page.getByRole('heading', { name: '星海丛书' })).toBeVisible();
-  await expect.poll(() => requestedBookQueries.some((url) => (
-    url.searchParams.get('facetKind') === 'SERIES'
-    && url.searchParams.get('facetId') === 'series-facet'
-    && url.searchParams.get('sort') === 'series_index'
-    && url.searchParams.get('sortDirection') === 'asc'
-  ))).toBe(true);
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/library/authors');
-  await expect(page.getByRole('heading', { name: '作者' })).toBeVisible();
-  await page.getByRole('button', { name: /打开“林川”/ }).click();
-  await expect(page).toHaveURL(/facetKind=AUTHOR/);
-  await expect(page.getByRole('heading', { name: '林川' })).toBeVisible();
-  await expect.poll(() => requestedBookQueries.some((url) => (
-    url.searchParams.get('facetKind') === 'AUTHOR'
-    && url.searchParams.get('facetId') === 'author-facet'
-    && url.searchParams.get('sort') === 'updated'
-    && url.searchParams.get('sortDirection') === 'desc'
-  ))).toBe(true);
-  await page.getByRole('button', { name: '管理图书', exact: true }).click();
-  const authorMoreFilters = page.getByRole('button', { name: '更多筛选', exact: true });
-  await expect(authorMoreFilters).toHaveCSS('width', '48px');
-  const authorFilterCount = page.getByTestId('library-advanced-filter-count');
-  await expect(authorFilterCount).toHaveText('1');
-  await expect(authorFilterCount).toHaveCSS('position', 'absolute');
-  await authorMoreFilters.click();
-  await page.getByRole('button', { name: '清除作者筛选', exact: true }).click();
-  await expect(page).toHaveURL(/\/library$/);
 });
 
 test('collection creation can select standard and smart shelf members', async ({ page }) => {
@@ -1051,30 +1009,34 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
 
   await page.goto('/library');
   await page.getByRole('button', { name: '管理图书', exact: true }).click();
-  const mobileTypeSelect = page.getByRole('button', { name: '图书类型', exact: true });
-  await expect(mobileTypeSelect).toBeVisible();
-  await expect(page.getByRole('group', { name: '图书类型', exact: true })).toBeHidden();
-  await mobileTypeSelect.click();
-  await page.getByRole('option', { name: '电子书', exact: true }).click();
-  await expect(mobileTypeSelect).toContainText('电子书');
-  await mobileTypeSelect.click();
+  const mobileStatusSelect = page.getByRole('button', { name: '阅读状态', exact: true });
+  await expect(mobileStatusSelect).toBeVisible();
+  await expect(page.getByRole('group', { name: '阅读状态', exact: true })).toBeHidden();
+  await mobileStatusSelect.click();
+  await page.getByRole('option', { name: '在读', exact: true }).click();
+  await expect(mobileStatusSelect).toContainText('在读');
+  await expect(page).toHaveURL(/status=READING/);
+  await mobileStatusSelect.click();
+  await expect(page.getByRole('option', { name: '未读', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: '已读', exact: true })).toBeVisible();
   await page.getByRole('option', { name: '全部', exact: true }).click();
+  await expect(page).not.toHaveURL(/status=/);
   const mobileMoreFilters = page.getByRole('button', { name: '更多筛选', exact: true });
   const mobileSearch = page.getByPlaceholder('搜索书名、作者或标签');
-  const [searchBox, typeSelectBox, moreFiltersBox] = await Promise.all([
+  const [searchBox, statusSelectBox, moreFiltersBox] = await Promise.all([
     mobileSearch.boundingBox(),
-    mobileTypeSelect.boundingBox(),
+    mobileStatusSelect.boundingBox(),
     mobileMoreFilters.boundingBox()
   ]);
   expect(searchBox?.width).toBeGreaterThan(0);
-  expect(typeSelectBox?.width).toBe(112);
+  expect(statusSelectBox?.width).toBe(112);
   expect(moreFiltersBox?.width).toBe(48);
   expect(moreFiltersBox?.height).toBe(48);
   const searchCenter = (searchBox?.y ?? 0) + (searchBox?.height ?? 0) / 2;
-  const typeSelectCenter = (typeSelectBox?.y ?? 0) + (typeSelectBox?.height ?? 0) / 2;
+  const statusSelectCenter = (statusSelectBox?.y ?? 0) + (statusSelectBox?.height ?? 0) / 2;
   const moreFiltersCenter = (moreFiltersBox?.y ?? 0) + (moreFiltersBox?.height ?? 0) / 2;
-  expect(Math.abs(searchCenter - typeSelectCenter)).toBeLessThan(1);
-  expect(Math.abs(typeSelectCenter - moreFiltersCenter)).toBeLessThan(1);
+  expect(Math.abs(searchCenter - statusSelectCenter)).toBeLessThan(1);
+  expect(Math.abs(statusSelectCenter - moreFiltersCenter)).toBeLessThan(1);
   await mobileMoreFilters.click();
   await expect(page.getByText('智能组合筛选', { exact: true })).toBeVisible();
   await expect(page.getByText('所有图书、资源、资产、阅读和书架维度都可以自由组合，修改后实时生效。', { exact: true })).toHaveCount(0);
@@ -1105,7 +1067,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.waitForTimeout(550);
   await page.getByRole('button', { name: `查看《${mobileBook.title}》详情`, exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/books/${mobileBook.id}$`));
+  await expect.poll(() => new URL(page.url()).pathname).toBe(`/books/${mobileBook.id}`);
 
   const organizePage = await context.newPage();
   await mockWebAppApi(organizePage);
@@ -1278,6 +1240,8 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect(page.getByRole('button', { name: '保存筛选' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '更多筛选' })).toHaveCount(0);
   await page.getByRole('button', { name: '管理图书', exact: true }).click();
+  const readingStatusGroup = page.getByRole('group', { name: '阅读状态', exact: true });
+  await expect(readingStatusGroup.getByRole('button')).toHaveText(['全部', '在读', '未读', '已读']);
   const desktopMoreFilters = page.getByRole('button', { name: '更多筛选' });
   await expect(desktopMoreFilters).toHaveCSS('height', '48px');
   await desktopMoreFilters.click();

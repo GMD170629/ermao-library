@@ -9,7 +9,7 @@ import {
 test('reader format registry is the single supported visual format matrix', () => {
   assert.deepEqual(
     READER_FORMAT_CAPABILITIES.map((entry) => entry.sourceFormat),
-    ['epub', 'mobi', 'azw', 'azw3', 'prc', 'txt', 'cbz', 'zip', 'cbr', 'rar', 'pdf']
+    ['epub', 'mobi', 'azw', 'azw3', 'prc', 'txt', 'fb2', 'cbz', 'zip', 'cbr', 'rar', 'image_dir', 'pdf']
   );
   assert.equal(readerFormatCapability('txt').readerKind, 'reflowable');
   assert.equal(readerFormatCapability('cbz').readerKind, 'comic');
@@ -22,7 +22,9 @@ test('format parsing is case insensitive and includes comic archive aliases', ()
   assert.equal(parseSupportedReaderSourceFormat('ZIP'), 'zip');
   assert.equal(parseSupportedReaderSourceFormat('cbr'), 'cbr');
   assert.equal(parseSupportedReaderSourceFormat('rar'), 'rar');
-  for (const value of ['fb2', '', null]) {
+  assert.equal(parseSupportedReaderSourceFormat('FB2'), 'fb2');
+  assert.equal(parseSupportedReaderSourceFormat('IMAGE_DIR'), 'image_dir');
+  for (const value of ['', null]) {
     assert.equal(parseSupportedReaderSourceFormat(value), null);
   }
 });

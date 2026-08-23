@@ -677,6 +677,36 @@ def test_reader_v4_validates_audio_asset_chapter_and_position(
     assert out_of_range.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
 
 
+def test_reader_v4_bootstraps_audiobook_directory_assets(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    source_path = Path(__file__).parent / "directory-track-01.mp3"
+    resource, asset = _add_resource(
+        db_session,
+        book_id="book-reader-audio-directory",
+        resource_id="resource-reader-audio-directory",
+        asset_id="asset-reader-audio-directory",
+        source_path=source_path,
+        fmt="AUDIOBOOK_DIR",
+        mime_type="audio/mpeg",
+        title="目录有声书",
+        duration_ms=60_000,
+    )
+    resource.media_kind = "AUDIOBOOK"
+    asset.role = "TRACK"
+    db_session.commit()
+
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+
+    assert response.status_code == 200, response.text
+    bootstrap = response.json()["data"]
+    assert bootstrap["readerType"] == "audio"
+    assert bootstrap["sourceFormat"] == "audiobook_dir"
+    assert [item["id"] for item in bootstrap["assets"]] == [asset.id]
+
+
 def test_reader_v4_rejects_position_only_reflow_anchor(
     client: TestClient,
     db_session: Session,

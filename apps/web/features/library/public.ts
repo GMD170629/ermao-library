@@ -1,5 +1,4 @@
 export { UploadBookDialog } from './upload-book-dialog';
-export { LibraryGroupingPage } from './library-grouping-page';
 export {
   SmartFilterBuilder,
   type SmartFilterCondition,
@@ -27,4 +26,9 @@ export type {
   LibraryBookSummary,
   ManagementBookSummary
 } from './api/books';
+export { fetchLibraryNavigationSources } from './api/library-sources';
+export {
+  librarySourceHref,
+  type LibraryNavigationSource
+} from './model/library-source-navigation';
 export { mediaKindsLabel, orderedMediaKinds } from './model/media-kind-label';

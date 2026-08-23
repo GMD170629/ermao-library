@@ -470,6 +470,13 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 metadata.title = title
         self._session.flush()
 
+    def set_resource_page_count(self, resource_id: str, page_count: int) -> None:
+        metadata = self._session.get(LibraryReadableResourceMetadata, resource_id)
+        if metadata is None:
+            raise LookupError(resource_id)
+        metadata.page_count = max(0, page_count)
+        self._session.flush()
+
     def apply_local_metadata(
         self,
         *,

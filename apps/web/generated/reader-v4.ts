@@ -128,7 +128,7 @@ export type ReaderBootstrapData = {
   schemaVersion?: 4;
   userId: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
-  sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "zip" | "cbr" | "rar" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
+  sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "fb2" | "cbz" | "zip" | "cbr" | "rar" | "image_dir" | "pdf" | "audio" | "audiobook" | "audiobook_dir" | "m4b" | "m4a" | "mp3";
   book: ReaderBookSummary;
   resource: ReaderResourceSummary;
   availableResources: Array<ReaderResourceSummary>;
@@ -169,7 +169,7 @@ export type ReaderComicManifestData = {
   schemaVersion?: 1;
   kind?: "comic";
   resourceId: string;
-  sourceFormat: "cbz" | "zip" | "cbr" | "rar";
+  sourceFormat: "cbz" | "zip" | "cbr" | "rar" | "image_dir";
   pageCount: number;
   readingOrder: Array<ReaderComicManifestPage>;
 };

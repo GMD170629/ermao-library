@@ -173,6 +173,11 @@ class ProcessReadableResourceImportTask:
                         resource_id=resource_id,
                         title=title,
                     )
+                    if parsed.asset.technical.page_count is not None:
+                        self._books_resources.set_resource_page_count(
+                            resource_id,
+                            parsed.asset.technical.page_count,
+                        )
                 self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
                 schedule_sidecar = True
                 outcome = "ok"

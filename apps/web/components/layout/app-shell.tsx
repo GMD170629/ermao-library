@@ -10,7 +10,6 @@ import {
   LibraryBig,
   Plus,
   Search,
-  UsersRound,
   X
 } from 'lucide-react';
 import Image from 'next/image';
@@ -42,7 +41,12 @@ import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
 import { cn } from '../ui/cn';
 import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
-import { mediaKindsLabel } from '../../features/library/public';
+import {
+  fetchLibraryNavigationSources,
+  librarySourceHref,
+  mediaKindsLabel,
+  type LibraryNavigationSource
+} from '../../features/library/public';
 import type { MediaKind } from '../../types/book';
 import {
   fetchShelves,
@@ -67,10 +71,7 @@ const primaryNavItems = [
 ];
 
 const libraryNavItems = [
-  { href: '/library', icon: Grid2X2, label: '全部' },
-  { href: '/library?status=READING', icon: BookOpen, label: '在读' },
-  { href: '/library/series', icon: LibraryBig, label: '系列' },
-  { href: '/library/authors', icon: UsersRound, label: '作者' }
+  { href: '/library', icon: Grid2X2, label: '全部', translate: true, libraryId: null }
 ];
 
 const shellSurfaces = {
@@ -125,7 +126,9 @@ function isActive(pathname: string, currentSearch: URLSearchParams, href: string
   }
 
   if (targetPath === '/library') {
-    return pathname === '/library' && !currentSearch.get('status');
+    return pathname === '/library'
+      && !currentSearch.get('status')
+      && !currentSearch.get('filters');
   }
   if (targetPath === '/shelves') return !currentSearch.get('shelf') && currentSearch.get('create') !== '1';
   return true;
@@ -142,6 +145,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shelves, setShelves] = useState<ShelfView[]>([]);
   const visibleShelves = useMemo(() => topLevelShelves(shelves), [shelves]);
+  const [librarySources, setLibrarySources] = useState<LibraryNavigationSource[]>([]);
+  const visibleLibraryNavItems = useMemo(() => [
+    ...libraryNavItems,
+    ...librarySources.map((source) => ({
+      href: librarySourceHref(source),
+      icon: LibraryBig,
+      label: source.name,
+      translate: false,
+      libraryId: source.id
+    }))
+  ], [librarySources]);
   const [librarySearch, setLibrarySearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
@@ -421,6 +435,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isReader || isAuthPage || isOffline || sessionStatus === 'checking' || sessionStatus === 'redirecting') return;
     let active = true;
+    let librarySourcesRequest = 0;
+    const controller = new AbortController();
     const refreshShelves = () => {
       fetchShelves()
         .then((nextShelves) => {
@@ -428,11 +444,21 @@ export function AppShell({ children }: { children: ReactNode }) {
         })
         .catch(() => undefined);
     };
+    const refreshLibrarySources = () => {
+      const request = ++librarySourcesRequest;
+      fetchLibraryNavigationSources(controller.signal)
+        .then((sources) => {
+          if (active && request === librarySourcesRequest) setLibrarySources(sources);
+        })
+        .catch(() => undefined);
+    };
     fetchShelves().catch(() => null).then((nextShelves) => {
       if (!active) return;
       setShelves(nextShelves ?? []);
     });
+    refreshLibrarySources();
     window.addEventListener('shuku:shelves-changed', refreshShelves);
+    window.addEventListener('shuku:libraries-changed', refreshLibrarySources);
     const refreshAccount = (event: Event) => {
       const nextUser = (event as CustomEvent<AppSessionUser | undefined>).detail;
         if (active && nextUser?.email && nextUser.name) {
@@ -446,7 +472,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener('shuku:account-changed', refreshAccount);
     return () => {
       active = false;
+      controller.abort();
       window.removeEventListener('shuku:shelves-changed', refreshShelves);
+      window.removeEventListener('shuku:libraries-changed', refreshLibrarySources);
       window.removeEventListener('shuku:account-changed', refreshAccount);
     };
   }, [authorization, isAuthPage, isOffline, isReader, sessionStatus]);
@@ -849,17 +877,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           <section className="mt-7">
             <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>书库</I18nText></div>
             <nav className="space-y-1">
-              {libraryNavItems.map(({ href, icon: Icon, label }) => (
+              {visibleLibraryNavItems.map(({ href, icon: Icon, label, translate, libraryId }) => (
                 <Link
                   key={href}
                   href={href}
+                  data-library-id={libraryId ?? undefined}
                   className={cn(
                     'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition',
                     isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
                   )}
                 >
                   <Icon size={20} strokeWidth={1.75} />
-                  {i18nAttribute(label)}
+                  {translate ? i18nAttribute(label) : <span data-i18n-skip className="truncate">{label}</span>}
                 </Link>
               ))}
             </nav>
@@ -1016,10 +1045,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <section className="mt-6">
               <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]"><I18nText>书库</I18nText></div>
               <nav aria-label={i18nAttribute("书库")} className="space-y-1">
-                {libraryNavItems.map(({ href, icon: Icon, label }) => (
+                {visibleLibraryNavItems.map(({ href, icon: Icon, label, translate, libraryId }) => (
                   <Link
                     key={`${href}-drawer`}
                     href={href}
+                    data-library-id={libraryId ?? undefined}
                     onClick={(event) => handleMobileDrawerLink(event, href)}
                     aria-current={isActive(pathname, currentSearch, href) ? 'page' : undefined}
                     className={cn(
@@ -1028,7 +1058,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     )}
                   >
                     <Icon size={21} strokeWidth={1.75} aria-hidden="true" />
-                    {i18nAttribute(label)}
+                    {translate ? i18nAttribute(label) : <span data-i18n-skip className="truncate">{label}</span>}
                   </Link>
                 ))}
               </nav>

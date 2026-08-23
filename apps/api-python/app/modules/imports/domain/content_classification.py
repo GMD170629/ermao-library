@@ -39,8 +39,8 @@ class ContentClassification:
     suggested_media_kind: str | None = None
 
 
-_AUDIO_FORMATS = frozenset({"AUDIO", "AUDIOBOOK", "MP3", "M4A", "M4B"})
-_COMIC_ARCHIVES = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP"})
+_AUDIO_FORMATS = frozenset({"AUDIO", "AUDIOBOOK", "AUDIOBOOK_DIR", "MP3", "M4A", "M4B"})
+_COMIC_ARCHIVES = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP", "IMAGE_DIR"})
 _COMIC_TERMS = frozenset(
     {
         "comic",

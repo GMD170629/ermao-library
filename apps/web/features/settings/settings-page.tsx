@@ -69,6 +69,10 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function notifyLibrarySourcesChanged() {
+  window.dispatchEvent(new Event('shuku:libraries-changed'));
+}
+
 export function SettingsPage({ embedded = false, initialSection }: { embedded?: boolean; initialSection?: string }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
@@ -149,6 +153,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setMessage('书库已保存');
     toast.success('书库已保存');
     await loadPaths();
+    notifyLibrarySourcesChanged();
     setShowCreateFolder(false);
     setPathBusy('');
   }
@@ -167,6 +172,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       body: JSON.stringify({ enabled: !path.enabled })
     });
     await loadPaths();
+    notifyLibrarySourcesChanged();
     toast.success(path.enabled ? '书库已停用' : '书库已启用');
     setPathBusy('');
   }
@@ -182,6 +188,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setPathBusy(`delete:${path.id}`);
     await fetch(`/api/libraries/${path.id}`, { method: 'DELETE' });
     await loadPaths();
+    notifyLibrarySourcesChanged();
     toast.success('书库已删除');
     setPathBusy('');
   }
@@ -206,6 +213,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setMessage('书库设置已保存');
     toast.success('书库设置已保存');
     await loadPaths();
+    notifyLibrarySourcesChanged();
     setRuleBusy('');
   }
 

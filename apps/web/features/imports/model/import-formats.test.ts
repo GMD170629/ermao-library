@@ -30,10 +30,8 @@ test('does not admit generic video or DRM containers', () => {
 
 test('exposes the unified reader formats including comic archive aliases', () => {
   const supported: readonly string[] = allImportExtensions;
-  for (const extension of ['.epub', '.mobi', '.azw', '.azw3', '.prc', '.txt', '.cbz', '.zip', '.cbr', '.rar', '.pdf']) {
+  for (const extension of ['.epub', '.mobi', '.azw', '.azw3', '.prc', '.txt', '.fb2', '.cbz', '.zip', '.cbr', '.rar', '.pdf']) {
     assert.equal(supported.includes(extension), true);
   }
-  for (const extension of ['.fb2']) {
-    assert.equal(supported.includes(extension), false);
-  }
+  assert.equal(supported.includes('.image-dir'), false);
 });

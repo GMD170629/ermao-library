@@ -119,7 +119,18 @@ class NormalizedPublicationLocatorIndex:
 
 
 _AUDIO_FORMATS = frozenset(
-    {"audio", "audiobook", "mp3", "m4b", "m4a", "flac", "ogg", "opus", "wav"}
+    {
+        "audio",
+        "audiobook",
+        "audiobook_dir",
+        "mp3",
+        "m4b",
+        "m4a",
+        "flac",
+        "ogg",
+        "opus",
+        "wav",
+    }
 )
 
 
@@ -131,4 +142,4 @@ def _is_reflowable_markup(media_type: str) -> bool:
     }
 
 
-_COMIC_FORMATS = frozenset({"cbz", "cbr", "zip", "rar"})
+_COMIC_FORMATS = frozenset({"cbz", "cbr", "zip", "rar", "image_dir"})

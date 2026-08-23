@@ -119,9 +119,12 @@ _LOCATION_ADAPTER: TypeAdapter[ReaderLocation] = TypeAdapter(ReaderLocation)
 _METADATA_ADAPTER = TypeAdapter(dict[str, ReaderJsonValue])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
-_PUBLICATION_SERVER_FORMATS = frozenset({"epub", "mobi", "azw", "azw3", "prc", "txt"})
+_PUBLICATION_SERVER_FORMATS = frozenset(
+    {"epub", "mobi", "azw", "azw3", "prc", "txt", "fb2"}
+)
 LOGGER = logging.getLogger(__name__)
-_COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar"})
+_COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar", "image_dir"})
+_COMIC_ARCHIVE_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar"})
 _COMIC_IMAGE_VARIANTS: list[Literal["original", "data-saver"]] = [
     "original",
     "data-saver",
@@ -194,7 +197,7 @@ def _authorized_bootstrap(
 def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderAssetDto, str]:
     context = bootstrap.context
     source_format = context.resource.format.strip().lower()
-    if source_format not in _COMIC_SOURCE_FORMATS:
+    if source_format not in _COMIC_ARCHIVE_SOURCE_FORMATS:
         raise ReaderValidationError(
             ReaderErrorBody(
                 message="当前资源不是漫画 Publication",
@@ -542,15 +545,12 @@ def reader_bootstrap_v4(
             ),
         )
     elif normalized_format in _COMIC_SOURCE_FORMATS:
-        comic_source, comic_source_format = _comic_source(bootstrap)
-        publication_access = ReaderPublicationAccess(
-            kind="comic",
-            manifestUrl=f"/api/reader/v4/resources/{resource_id}/comic/manifest",
-            pageUrlTemplate=(
-                f"/api/reader/v4/resources/{resource_id}/comic/pages/{{pageIndex}}"
-            ),
-            imageVariants=_COMIC_IMAGE_VARIANTS,
-            downloadArtifact=ReaderComicDownloadArtifact(
+        comic_source = None
+        comic_source_format = normalized_format
+        download_artifact = None
+        if normalized_format in _COMIC_ARCHIVE_SOURCE_FORMATS:
+            comic_source, comic_source_format = _comic_source(bootstrap)
+            download_artifact = ReaderComicDownloadArtifact(
                 url=f"/api/reader/v4/resources/{resource_id}/comic/archive",
                 sourceFormat=cast(
                     Literal["cbz", "zip", "cbr", "rar"], comic_source_format
@@ -560,7 +560,15 @@ def reader_bootstrap_v4(
                     or _COMIC_ARCHIVE_MIME_TYPES[comic_source_format]
                 ),
                 sizeBytes=comic_source.size_bytes,
+            )
+        publication_access = ReaderPublicationAccess(
+            kind="comic",
+            manifestUrl=f"/api/reader/v4/resources/{resource_id}/comic/manifest",
+            pageUrlTemplate=(
+                f"/api/reader/v4/resources/{resource_id}/comic/pages/{{pageIndex}}"
             ),
+            imageVariants=_COMIC_IMAGE_VARIANTS,
+            downloadArtifact=download_artifact,
         )
     return ReaderBootstrapResponse(
         data=ReaderBootstrapData(
@@ -658,7 +666,14 @@ def get_comic_manifest_v4(
     ),
 ]:
     _user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
-    _source, source_format = _comic_source(bootstrap)
+    source_format = bootstrap.context.resource.format.strip().lower()
+    if source_format not in _COMIC_SOURCE_FORMATS:
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="当前资源不是漫画 Publication",
+                code="READER_LOCATION_FORMAT_MISMATCH",
+            )
+        )
     index = media_page_index.resolve_read_only(
         media_page_index.load_read_only(db, resource_id)
     )
@@ -698,7 +713,10 @@ def get_comic_manifest_v4(
             schemaVersion=1,
             kind="comic",
             resourceId=resource_id,
-            sourceFormat=cast(Literal["cbz", "zip", "cbr", "rar"], source_format),
+            sourceFormat=cast(
+                Literal["cbz", "zip", "cbr", "rar", "image_dir"],
+                source_format,
+            ),
             pageCount=len(pages),
             readingOrder=pages,
         )
@@ -733,19 +751,34 @@ def get_comic_page_v4(
         )
     page = index.pages[page_index]
     source = index.source_for(page.asset_id)
-    if source is None or source.role != "PRIMARY":
+    if source is None or source.role not in {"PRIMARY", "PAGE"}:
         raise _not_found()
     _ = image_variant
-    page_response = media_streaming.send_comic_page_zip_entry(
-        media_streaming.stored_path(source.path, settings, (Path(source.source_root),)),
-        page.href,
-        request,
-        user.id,
-        settings,
-        page.media_type,
-        route="reader-v4-comic-page",
-        asset_id=page.id,
-    )
+    if source.role == "PRIMARY":
+        page_response = media_streaming.send_comic_page_zip_entry(
+            media_streaming.stored_path(
+                source.path, settings, (Path(source.source_root),)
+            ),
+            page.href,
+            request,
+            user.id,
+            settings,
+            page.media_type,
+            route="reader-v4-comic-page",
+            asset_id=page.id,
+        )
+    else:
+        page_response = media_streaming.send_comic_page_file(
+            media_streaming.stored_path(
+                page.href, settings, (Path(source.source_root),)
+            ),
+            request,
+            user.id,
+            settings,
+            media_type=page.media_type,
+            route="reader-v4-comic-page",
+            asset_id=page.id,
+        )
     page_response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
     page_response.headers["X-Comic-Page-Index"] = str(page_index)
     page_response.headers["X-Comic-Resource-Href"] = f"pages/{page_index}"

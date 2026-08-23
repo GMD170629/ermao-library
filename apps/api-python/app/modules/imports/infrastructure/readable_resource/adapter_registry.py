@@ -62,7 +62,13 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 error_code="FILE_MISSING",
                 error_summary="source file is not a regular file",
             )
-        embedded = self._inspect_embedded(absolute_path, adapter)
+        pdf_page_count: int | None = None
+        if adapter.adapter_id is ResourceAdapterId.PDF:
+            pdf_inspection = self._inspect_pdf(absolute_path)
+            embedded = pdf_inspection[0] if pdf_inspection is not None else None
+            pdf_page_count = pdf_inspection[1] if pdf_inspection is not None else None
+        else:
+            embedded = self._inspect_embedded(absolute_path, adapter)
         sidecar = discover_sidecar_opf(absolute_path)
         path_titles = titles_from_local_source(absolute_path.stem)
         candidates = [
@@ -138,7 +144,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             mime_type=None,
             duration_ms=None,
             failure_reason=None,
-            technical=AssetTechnicalMetadata(),
+            technical=AssetTechnicalMetadata(page_count=pdf_page_count),
             navigation_units=navigation_units,
         )
         return FileParseResult(
@@ -156,8 +162,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
     ) -> LocalMetadataCandidate | None:
         if adapter.adapter_id is ResourceAdapterId.EPUB:
             return self._inspect_epub(path)
-        if adapter.adapter_id is ResourceAdapterId.PDF:
-            return self._inspect_pdf(path)
         if adapter.adapter_id in {ResourceAdapterId.TXT, ResourceAdapterId.KINDLE}:
             return self._inspect_reflowable(path, adapter.format_label)
         return None
@@ -185,23 +189,26 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             cover=LocalCoverPayload(cover) if cover is not None else None,
         )
 
-    def _inspect_pdf(self, path: Path) -> LocalMetadataCandidate | None:
+    def _inspect_pdf(self, path: Path) -> tuple[LocalMetadataCandidate, int] | None:
         from app.modules.imports.infrastructure.pdf_inspection import inspect_pdf
 
         try:
             inspection = inspect_pdf(path)
         except (OSError, RuntimeError, ValueError):
             return None
-        return LocalMetadataCandidate(
-            source="EMBEDDED",
-            metadata=PublicationMetadata(
-                title=inspection.embedded_title,
-                authors=(inspection.embedded_author,)
-                if inspection.embedded_author
-                else (),
-                description=inspection.description,
-                subjects=inspection.tags,
+        return (
+            LocalMetadataCandidate(
+                source="EMBEDDED",
+                metadata=PublicationMetadata(
+                    title=inspection.embedded_title,
+                    authors=(inspection.embedded_author,)
+                    if inspection.embedded_author
+                    else (),
+                    description=inspection.description,
+                    subjects=inspection.tags,
+                ),
             ),
+            inspection.page_count,
         )
 
     def _inspect_reflowable(

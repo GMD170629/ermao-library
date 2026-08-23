@@ -138,7 +138,7 @@ export type ReaderSource = ReaderSourceBase & (
   | {
       kind: 'comic';
       contentUrl: string;
-      sourceFormat: 'cbz' | 'zip' | 'cbr' | 'rar';
+      sourceFormat: 'cbz' | 'zip' | 'cbr' | 'rar' | 'image_dir';
       comicManifestUrl: string;
       comicPageUrlTemplate: string;
     }

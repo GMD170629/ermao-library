@@ -5,7 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
+
 from app.modules.imports.application.local_metadata import LocalCoverPayload
+from app.modules.imports.application.pdf_types import PdfInspection
+from app.modules.imports.domain.pdf_content import PdfContentKind, PdfTextEvidence
 from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     ResourceAdapterId,
@@ -57,6 +61,49 @@ def test_registry_missing_file(tmp_path: Path) -> None:
     )
     assert result.ok is False
     assert result.error_code == "FILE_MISSING"
+
+
+def test_registry_preserves_inspected_pdf_page_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "book.pdf"
+    path.write_bytes(b"%PDF-test")
+    adapter = unique_adapter_or_none(match_file_adapters(path.name))
+    assert adapter is not None
+    inspection = PdfInspection(
+        title="book",
+        author="author",
+        embedded_title=None,
+        embedded_author=None,
+        description=None,
+        tags=(),
+        page_count=7,
+        chapters=(),
+        raw_metadata={},
+        content_kind=PdfContentKind.TEXTUAL,
+        text_evidence=PdfTextEvidence(
+            inspected_pages=1,
+            total_pages=7,
+            maximum_effective_characters=20,
+            completed=False,
+            reason="TEXT_FOUND",
+            elapsed_ms=1,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.modules.imports.infrastructure.pdf_inspection.inspect_pdf",
+        lambda _path: inspection,
+    )
+
+    result = RegistryResourceAdapterExecutor().parse_file(
+        absolute_path=path,
+        adapter=adapter,
+        role=AssetRole.PRIMARY,
+    )
+
+    assert result.ok is True
+    assert result.asset is not None
+    assert result.asset.technical.page_count == 7
 
 
 def test_registry_image_page_uses_stem(tmp_path: Path) -> None:

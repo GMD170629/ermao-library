@@ -1,96 +1,63 @@
 ---
 name: python-backend-quality-refactor
-description: Audit, plan, implement, and verify code-quality refactors for the Shuku Starship Python 3.11 FastAPI backend under apps/api-python. Use when Codex is asked to reduce backend complexity or duplication, split large routes/services/workers, improve typing or error handling, introduce Python quality tooling, reorganize SQLite migrations, or review backend architecture while preserving API, worker, database, authorization, and zh-CN/en-US compatibility.
+description: Guide maintainable architecture and bounded refactors for the Shuku Starship Python 3.11 FastAPI backend under apps/api-python. Use when changing backend code organization, capability layering, typing and error boundaries, SQLAlchemy ORM persistence, or SQLite schema migrations while preserving established application contracts.
 ---
 
 # Python Backend Quality Refactor
 
-Refactor the backend in behavior-preserving increments. Treat API compatibility, SQLite data safety, worker behavior, authorization, and bilingual user-facing contracts as quality requirements rather than follow-up work.
+Improve the touched backend capability toward the repository's target architecture without turning a bounded change into a flag-day rewrite.
 
-## Start With Evidence
+## Authoritative Project Rules
 
-1. Read the repository `AGENTS.md`, `docs/business-code-layering-and-refactoring.md`, and the matching files under `.cursor/rules/` (especially `architecture.mdc`, `python-backend.mdc`, `python-orm-migrations.mdc`, `refactoring.mdc`).
-2. Read `apps/api-python/pyproject.toml`, the affected modules, and their tests.
-3. Run `python scripts/quality_snapshot.py` from this skill directory for a read-only hotspot snapshot.
-4. Read [references/project-map.md](references/project-map.md) when choosing module boundaries.
-5. Inspect `git status` without modifying or discarding unrelated work. If the intended hotspot overlaps existing user changes, inspect the diff and either work around it or choose another safe slice; do not overwrite, reformat, or absorb it silently.
-6. State the intended behavior surface and expected adjacent variants before editing. Follow the repository's broad capability audit rule when the request reports a broken interaction.
+Before changing backend architecture or persistence, read:
 
-Do not use line count alone to justify extraction. Identify business capability, dependencies, state ownership, transaction boundary, error contract, and tests first.
+- the repository `AGENTS.md`;
+- `docs/business-code-layering-and-refactoring.md`;
+- the relevant rules in `.cursor/rules/`, especially `architecture.mdc`, `python-backend.mdc`, `python-orm-migrations.mdc`, and `refactoring.mdc`.
 
-## Classify the Task
+Treat those files as authoritative when they are more specific than this skill. Preserve unrelated user changes in the worktree.
 
-- For analysis or review, report evidence, risks, and a staged recommendation; do not edit application code.
-- For tooling setup, add quality checks gradually and keep the existing test/runtime commands working.
-- For a behavior-preserving refactor, add or strengthen characterization tests before moving logic.
-- For a bug plus refactor, establish the failing behavior and adjacent capability variants, fix them, then improve structure without mixing unrelated redesign.
-- For schema or data migration work, treat backup, repeat execution, upgrades from older versions, and partially migrated databases as explicit test cases.
+## Organize by Business Capability
 
-## Establish the Baseline
+- Prefer `app/modules/<capability>/` with `domain`, `application`, `infrastructure`, and `presentation` layers. Add directories only when they contain real code.
+- Keep dependencies directed from presentation to application to domain. Infrastructure implements application ports and maps persistence or external-system data into explicit domain or application types.
+- Put dependency construction and process lifecycle in composition roots. Do not hide dependency wiring in routes, models, or import-time side effects.
+- Collaborate across capabilities through a named public API, stable contract, or application port. Do not deep-import another capability's private files or introduce circular/runtime imports.
+- Do not create generic dumping grounds such as `utils`, `helpers`, `managers`, or a universal repository/service module. Shared code must have stable, business-neutral meaning and real consumers.
 
-Run the narrowest relevant tests first, then the broader gates. Record pre-existing failures separately from regressions. See [references/quality-gates.md](references/quality-gates.md) for commands and escalation rules.
+## Keep Responsibilities Explicit
 
-For read-only audits, do not let a test command install or synchronize dependencies. Discover the existing environment first and use the no-sync form documented in the quality gates. If the environment is unavailable, report the command that would be run instead of mutating it.
+- Domain code owns deterministic entities, value objects, invariants, policies, and state transitions without FastAPI, SQLAlchemy, filesystem, queue, or network dependencies.
+- Application code owns named user intentions, authorization policy calls, orchestration, transaction boundaries, and side-effect ordering.
+- FastAPI handlers validate transport input, acquire the actor and dependencies, invoke one application command or query, and map named outcomes to the established HTTP contract.
+- Workers and CLIs call application use cases rather than route code. Keep polling, leases, retry decisions, shutdown, and containment at the process boundary.
+- Use Python 3.11 typing throughout public boundaries. Prefer explicit dataclasses, value objects, DTOs, protocols, and Pydantic boundary models over `dict[str, Any]` or ORM-shaped data.
+- Prefer pure functions for pure behavior and classes only for injected dependencies, lifecycle, or meaningful state. Avoid boolean mode flags that combine unrelated workflows.
+- Translate errors only when adding context or mapping them to a named domain/application outcome, and preserve the original exception as the cause. Never expose secrets, internal paths, SQL details, or stack traces to clients.
 
-Before changing public behavior, capture:
+## Use SQLAlchemy ORM and Typed Expressions
 
-- route path, method, status, response envelope, field names, and error codes;
-- authentication and authorization behavior for admin, scoped, ordinary, and anonymous users;
-- transaction and filesystem side effects;
-- worker retry, lease, shutdown, and recovery behavior;
-- locale-sensitive or user-visible messages;
-- database versions and upgrade paths affected.
+- All application database access must use SQLAlchemy 2.x ORM models or typed expression APIs. Do not add handwritten SQL, `sqlalchemy.text()`, raw cursors, direct `sqlite3`, or string-built query fragments.
+- Define models with `Mapped[...]` and `mapped_column()`. Express reads with `select()`, relationships, loader options, `Session.scalars()`, and typed projections.
+- Encapsulate persistence behind capability-specific repositories or query objects named after aggregates or use cases. Return domain objects or explicit DTOs; ORM entities must not escape into HTTP schemas or unrelated capabilities.
+- Prevent N+1 access deliberately and give pagination a deterministic order and a documented maximum page size.
+- Let repositories `flush()` when needed, but keep `commit()` and `rollback()` ownership in the application use case through an explicit unit-of-work boundary.
+- Scope queries by the authenticated actor and preserve anti-enumeration behavior where forbidden and missing resources are intentionally indistinguishable.
 
-Prefer API-level characterization tests for route extraction and focused unit tests for pure logic. Do not make snapshot tests so broad that intentional internal changes become impossible.
+## Evolve SQLite Safely
 
-## Refactor in Safe Slices
+- Implement schema changes with SQLAlchemy schema objects and migration operations, including explicit tables, columns, indexes, constraints, foreign keys, and defaults.
+- For SQLite table rebuilds, use supported batch/table-copy operations or SQLAlchemy schema APIs instead of manual DDL, `INSERT ... SELECT`, or PRAGMA strings.
+- Keep migrations ordered, deterministic, restart-aware, and immutable after release. Do not import runtime application services into migration code.
+- Separate expensive data backfills from schema changes. Use typed ORM or SQLAlchemy expressions, bounded batches, and explicit progress or recovery state.
+- Discover the supported SQLite upgrade matrix from existing migration code, fixtures, release documentation, and deployed compatibility requirements before changing it.
 
-Use one bounded capability per slice:
+## Refactor Legacy Code in a Bounded Slice
 
-1. Define the target boundary and invariants.
-2. Add characterization coverage for happy path, validation, authorization, not-found, conflict, and failure behavior as applicable.
-3. Extract pure normalization, parsing, mapping, or policy logic first.
-4. Move database access behind a clearly named query/repository function when it reduces duplication or clarifies transaction ownership.
-5. Move orchestration into a service only when the service owns a coherent use case.
-6. Keep FastAPI route functions responsible for HTTP translation and dependency acquisition.
-7. Preserve commits/rollbacks and avoid hidden commits inside low-level helpers.
-8. Run focused tests after each move; run broad gates after completing the slice.
+- Inventory the affected entry points, callers, contracts, state changes, authorization, persistence, and side effects before choosing a boundary.
+- Extract pure rules and explicit types first, then introduce capability-specific ports and adapters, move orchestration into an application use case, and leave routes or workers as thin adapters.
+- When touching legacy raw SQL, migrate the affected query to ORM within the same bounded capability. If that would require unsafe scope expansion, stop and explain the conflict instead of extending the raw-SQL path.
+- Treat `app/api/routes/compat.py`, `app/worker/importer.py`, and `app/db/bootstrap.py` as legacy migration surfaces, not templates for new code. Preserve their mounted API paths, import recovery behavior, and supported database upgrade contracts while moving touched responsibilities toward capability modules.
+- Preserve API envelopes, authorization behavior, worker coordination, filesystem safety, user data, and `zh-CN`/`en-US` contracts unless the user explicitly requests a contract change.
 
-Do not create generic `utils.py`, `helpers.py`, or a universal repository. Prefer domain names such as `works`, `monitor_folders`, `metadata`, `imports`, or `reader_progress`.
-
-## Project-Specific Boundaries
-
-- Split `app/api/routes/compat.py` by API capability while preserving the mounted paths and response envelope. Do not rename it away in one large change.
-- Split `app/worker/importer.py` by pipeline stage: eligibility/identity, media parsing, conversion, persistence, cover handling, and event reporting. Keep import idempotency and recovery visible.
-- Split `app/db/bootstrap.py` into ordered version migrations and post-migration backfills only with tests for fresh databases and supported upgrade paths.
-- Discover the supported SQLite upgrade matrix from migration code, fixtures, tests, and release/migration documentation before editing migrations; do not invent or silently narrow it.
-- Replace `dict[str, Any]` selectively at stable boundaries with Pydantic models, dataclasses, TypedDicts, or protocols. Do not type unstable database-shaped dictionaries merely to satisfy a checker.
-- Narrow `except Exception` where recovery differs by failure type. Keep broad catches at worker/process containment boundaries when they record context and preserve liveness.
-- Treat EPUB.js as immutable; backend reader work must not patch or vendor it.
-- Preserve application-owned version consistency when release metadata is touched.
-
-## Introduce Quality Tooling Gradually
-
-Prefer Ruff for formatting and linting, a gradual mypy or Pyright configuration for stable modules, and pytest-cov for visibility. Introduce each as a separate, reviewable change:
-
-1. Configure deterministic versions and commands.
-2. Measure the existing baseline.
-3. Fix high-signal violations in touched modules.
-4. Use narrow, documented exclusions for legacy hotspots.
-5. Add CI enforcement only after the repository passes the agreed baseline.
-
-Never hide broad areas with blanket `noqa`, `type: ignore`, or disabled rule families. Every suppression must be local and explain why the checker cannot model the code safely.
-
-## Verify and Report
-
-Run all applicable gates from [references/quality-gates.md](references/quality-gates.md). For user-visible or generated messages, audit both locales and run the Web i18n check.
-
-Report:
-
-- the capability area and invariants preserved;
-- files and boundaries changed;
-- tests and gates run with results;
-- remaining hotspots or deliberately deferred risks;
-- any pre-existing failures that prevented a full green baseline.
-
-Do not claim improved quality solely from smaller files. Tie the claim to reduced responsibility, clearer dependency direction, stronger typing at a boundary, fewer duplicated rules, or better executable coverage.
+Judge an improvement by clearer ownership, valid dependency direction, explicit types, and controlled persistence boundaries—not by file count or line count alone.

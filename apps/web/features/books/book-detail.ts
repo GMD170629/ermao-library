@@ -16,13 +16,23 @@ export function bookDetailReturnHref(value: unknown): string {
 export function bookDetailHref(
   bookId: string,
   resourceId?: string | null,
-  returnTo?: string | null
+  returnTo?: string | null,
+  resourcePage?: number | null
 ): string {
   const query = new URLSearchParams();
-  if (resourceId) query.set('resourceId', resourceId);
+  if (resourceId) {
+    query.set('resourceId', resourceId);
+    if (resourcePage !== null && resourcePage !== undefined) query.set('resourcePage', String(Math.max(1, Math.floor(resourcePage))));
+  }
   if (returnTo) query.set('returnTo', bookDetailReturnHref(returnTo));
   const suffix = query.size > 0 ? `?${query}` : '';
   return `/books/${encodeURIComponent(bookId)}${suffix}`;
+}
+
+export function resourcePageFromQuery(value: unknown): number {
+  if (typeof value !== 'string') return 1;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
 export function displayResourceNumber(resource: ReadableResourceView, position: number): number {
@@ -51,6 +61,11 @@ export function selectedResourceForBook(book: BookView, requestedResourceId?: st
 
 export function allVisibleResources(book: BookView): ReadableResourceView[] {
   return book.resources.filter((resource) => !resource.hidden);
+}
+
+export function singleReadableResourceForBook(book: BookView): ReadableResourceView | null {
+  const readableResources = allVisibleResources(book).filter((resource) => resource.readable);
+  return readableResources.length === 1 ? readableResources[0] ?? null : null;
 }
 
 export function mediaKindOfResource(resource: ReadableResourceView): MediaKind {

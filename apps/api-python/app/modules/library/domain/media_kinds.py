@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-_AUDIO_FORMATS = frozenset({"AUDIO", "AUDIOBOOK", "MP3", "M4A", "M4B"})
-_COMIC_FORMATS = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP"})
+_AUDIO_FORMATS = frozenset({"AUDIO", "AUDIOBOOK", "AUDIOBOOK_DIR", "MP3", "M4A", "M4B"})
+_COMIC_FORMATS = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP", "IMAGE_DIR"})
 _ASSIGNED_KINDS = frozenset({"EBOOK", "COMIC", "AUDIOBOOK"})
 
 

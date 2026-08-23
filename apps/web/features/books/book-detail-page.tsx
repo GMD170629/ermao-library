@@ -16,7 +16,7 @@ import {
   continueSourceNode,
   fetchBook,
   fetchBookContents,
-  fetchEbookChapterDetail,
+  fetchResourceDetail,
   regenerateBookCover,
   regenerateResourceCover,
   updateResource,
@@ -26,12 +26,13 @@ import {
 import { BookMetadataEditor } from './ui/book-metadata-editor';
 import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
-import { allVisibleResources, selectedResourceForBook, bookDetailReturnHref } from './book-detail';
-import { CHAPTER_DETAIL_PAGE_SIZE, singleResourceEbook, type EbookChapterDetail } from './model/chapter-detail';
+import { allVisibleResources, selectedResourceForBook, bookDetailHref, bookDetailReturnHref, resourcePageFromQuery, singleReadableResourceForBook } from './book-detail';
+import { resourceDetailPageSize, type ResourceDetailPage } from './model/resource-detail';
 import type { BookContentLayout, BookContentSort, BookContentsPage } from './model/book-contents';
 import type { BookContentEntry } from './model/book-contents';
 import { currentPositionLabel } from './model/current-position-label';
 import { BookContentBrowser } from './ui/book-content-browser';
+import { ResourceDetailView } from './ui/resource-detail-view';
 import { SourceNodeMetadataEditor, SourceNodeMetadataRecognitionDialog } from './ui/source-node-metadata-dialogs';
 import { bookActionIds, type BookActionId } from './model/book-action-menu';
 
@@ -191,9 +192,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [sourceNodeEditorTarget, setSourceNodeEditorTarget] = useState<BookContentEntry | null>(null);
   const [sourceNodeRecognitionTarget, setSourceNodeRecognitionTarget] = useState<BookContentEntry | null>(null);
   const [readingStatusBusy, setReadingStatusBusy] = useState(false);
-  const [chapter, setChapter] = useState<EbookChapterDetail | null>(null);
+  const [resourceDetail, setResourceDetail] = useState<ResourceDetailPage | null>(null);
+  const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
+  const [resourceDetailError, setResourceDetailError] = useState('');
   const coverInputRef = useRef<HTMLInputElement>(null);
   const requestedResourceId = searchParams.get('resourceId')?.trim() || null;
+  const requestedResourcePage = resourcePageFromQuery(searchParams.get('resourcePage'));
   const returnHref = bookDetailReturnHref(searchParams.get('returnTo'));
 
   const refresh = useCallback(async () => {
@@ -226,10 +230,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }, [bookId, contentPage, contentSort, contentSourceNodeId, contentsRevision, t]);
 
   const resources = useMemo(() => book ? allVisibleResources(book) : [], [book]);
+  const singleReadableResource = book ? singleReadableResourceForBook(book) : null;
   const bookAnchoredResource = book
     ? resources.find((resource) => resource.sourceNodeId === book.sourceNodeId) ?? null
     : null;
   const selectedBookResource = book ? selectedResourceForBook(book, requestedResourceId) : null;
+  const requestedResource = requestedResourceId
+    ? resources.find((resource) => resource.id === requestedResourceId && resource.readable) ?? null
+    : singleReadableResource;
   const nestedNode = contentSourceNodeId
     ? contents?.currentNode?.sourceNodeId === contentSourceNodeId
       ? contents.currentNode
@@ -256,7 +264,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const displayedCompleted = nestedNode
     ? nestedResources.length > 0 && nestedResources.every((resource) => resource.progress >= 100)
     : book?.completed === true;
-  const singleEbook = singleResourceEbook(resources);
   const activeCopy = activeResource ? consumptionCopy(activeResource.readerType) : null;
   const activeReaderHref = activeResource?.readable ? readerHref(activeResource) : null;
   const activeProgress = displayedProgress;
@@ -264,13 +271,34 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const actions = book ? bookActionIds({ canManage, canRegenerateCover: bookAnchoredResource !== null, kindleSendAvailable: resources.some((resource) => resource.kindleSendAvailable) }) : [];
 
   useEffect(() => {
-    if (!book || !singleEbook) { setChapter(null); return; }
+    if (!book || requestedResourceId || !singleReadableResource) return;
+    router.replace(bookDetailHref(book.id, singleReadableResource.id, searchParams.get('returnTo'), 1));
+  }, [book, requestedResourceId, router, searchParams, singleReadableResource]);
+
+  useEffect(() => {
+    if (!book || !requestedResource) {
+      setResourceDetail(null);
+      setResourceDetailError('');
+      setResourceDetailLoading(false);
+      return;
+    }
     const controller = new AbortController();
-    void fetchEbookChapterDetail(book.id, singleEbook.id, 1, CHAPTER_DETAIL_PAGE_SIZE, controller.signal)
-      .then(setChapter)
-      .catch(() => { if (!controller.signal.aborted) setChapter(null); });
+    setResourceDetailLoading(true);
+    setResourceDetailError('');
+    void fetchResourceDetail(book.id, requestedResource.id, requestedResourcePage, resourceDetailPageSize(requestedResource), controller.signal)
+      .then((next) => { setResourceDetail(next); setResourceDetailError(''); })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setResourceDetail(null);
+        setResourceDetailError(reason instanceof Error ? reason.message : t('资源详情加载失败'));
+      })
+      .finally(() => { if (!controller.signal.aborted) setResourceDetailLoading(false); });
     return () => controller.abort();
-  }, [book, singleEbook]);
+  }, [book, requestedResource, requestedResourcePage, t]);
+
+  const updateResourceLocation = (resourceId: string | null, page?: number) => {
+    router.push(bookDetailHref(bookId, resourceId, searchParams.get('returnTo'), resourceId ? page ?? 1 : null));
+  };
 
   const changeReadingStatus = async (status: string) => {
     if (!activeResource || (status !== 'UNREAD' && status !== 'FINISHED')) return;
@@ -395,7 +423,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           {displayedDescription ? <p data-i18n-skip className="mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600">{displayedDescription}</p> : <p className="mt-5 text-sm text-stone-400"><I18nText>暂无简介</I18nText></p>}
           {activeCopy ? <div className="mt-7 max-w-3xl">
             <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-stone-700">{t(activeCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200"><div className="h-full rounded-full bg-[#ff4f26]" style={{ width: `${activeProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-stone-700">{Math.round(activeProgress)}%</span></div>
-            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(activeCopy.position)}</span><span data-i18n-skip className="text-stone-800">{activeResource ? currentPositionLabel(activeResource, chapter, t) : ''}</span></div>
+            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(activeCopy.position)}</span><span data-i18n-skip className="text-stone-800">{activeResource ? currentPositionLabel(activeResource, requestedResource?.id === activeResource.id ? resourceDetail : null, t) : ''}</span></div>
           </div> : null}
           {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         </div>
@@ -412,7 +440,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void uploadBookCover(book, file).then(() => { setCoverRevision(Date.now()); return refresh(); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))); event.currentTarget.value = ''; }} />
     <BookMetadataEditor book={book} open={metadataOpen} onClose={() => setMetadataOpen(false)} onSaved={(nextBook) => { setBook(nextBook); setMetadataOpen(false); }} />
 
-    <BookContentBrowser
+    {requestedResource ? <ResourceDetailView
+      resource={requestedResource}
+      detail={resourceDetail}
+      loading={resourceDetailLoading}
+      error={resourceDetailError}
+      requestedPage={requestedResourcePage}
+      onBack={singleReadableResource ? null : () => updateResourceLocation(null)}
+      onPageChange={(page) => updateResourceLocation(requestedResource.id, page)}
+    /> : <BookContentBrowser
       book={book}
       contents={contents}
       resources={resources}
@@ -429,7 +465,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         setContentPage(1);
       }}
       onPageChange={setContentPage}
-      onOpenResource={(resource) => router.push(readerHref(resource))}
+      onOpenResource={(resource) => updateResourceLocation(resource.id, 1)}
       onManageResource={(resource, anchor) => {
         const bounds = anchor.getBoundingClientRect();
         setResourceActionTarget({ resourceId: resource.id, title: resource.title, assetCount: resource.assets.length });
@@ -442,7 +478,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         setSourceNodeMenuAnchor(anchor);
         setSourceNodeMenuPosition({ x: bounds.right, y: bounds.bottom + 6 });
       }}
-    />
+    />}
 
     {canManage && sourceNodeActionTarget ? <ContextActionMenu<SourceNodeActionId>
       position={sourceNodeMenuPosition}

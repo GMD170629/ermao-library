@@ -1,6 +1,7 @@
 export type ResourceFormat =
   | 'COMIC' | 'CBZ' | 'CBR' | 'RAR' | 'ZIP' | 'EPUB' | 'PDF' | 'AUDIO'
-  | 'MP3' | 'M4A' | 'M4B' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT';
+  | 'MP3' | 'M4A' | 'M4B' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT'
+  | 'IMAGE_DIR' | 'AUDIOBOOK_DIR';
 export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 export type ReaderType = 'reflowable' | 'comic' | 'pdf' | 'audio';
 export type ClassificationSource = 'AUTO' | 'LIBRARY_RULE' | 'USER';

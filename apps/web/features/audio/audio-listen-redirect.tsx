@@ -15,6 +15,7 @@ export function AudioListenRedirect({ resourceId }: { resourceId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const chapterId = searchParams.get('chapter')?.trim() || null;
+  const assetId = searchParams.get('assetId')?.trim() || null;
   const trackParam = searchParams.get('track');
   const appliedTrackRef = useRef('');
 
@@ -28,16 +29,16 @@ export function AudioListenRedirect({ resourceId }: { resourceId: string }) {
   useEffect(() => {
     const bootstrap = playerBootstrap?.resource.id === resourceId ? playerBootstrap : null;
     if (!bootstrap) return;
-    const targetKey = `${resourceId}:${trackParam ?? ''}`;
-    if (!chapterId && trackParam !== null && appliedTrackRef.current !== targetKey) {
-      const trackIndex = Number(trackParam);
-      if (Number.isInteger(trackIndex) && trackIndex >= 0 && trackIndex < bootstrap.tracks.length) {
-        selectTrack(trackIndex, false);
-      }
+    const targetKey = `${resourceId}:${assetId ?? ''}:${trackParam ?? ''}`;
+    if (!chapterId && appliedTrackRef.current !== targetKey) {
+      const assetTrackIndex = assetId ? bootstrap.tracks.findIndex((track) => track.assetId === assetId) : -1;
+      const numericTrackIndex = trackParam === null ? -1 : Number(trackParam);
+      const trackIndex = assetTrackIndex >= 0 ? assetTrackIndex : numericTrackIndex;
+      if (Number.isInteger(trackIndex) && trackIndex >= 0 && trackIndex < bootstrap.tracks.length) selectTrack(trackIndex, false);
       appliedTrackRef.current = targetKey;
     }
     router.replace(`/books/${encodeURIComponent(bootstrap.book.id)}?resourceId=${encodeURIComponent(bootstrap.resource.id)}`);
-  }, [chapterId, playerBootstrap, router, selectTrack, trackParam, resourceId]);
+  }, [assetId, chapterId, playerBootstrap, router, selectTrack, trackParam, resourceId]);
 
   const failed = player.pendingResourceId === resourceId && Boolean(player.loadError);
   if (failed) {

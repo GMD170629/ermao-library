@@ -54,20 +54,29 @@ from app.services.library_filters import normalize_filter_rules
 
 router = APIRouter(tags=["shelf"], route_class=TypedContractRoute)
 
-UNSUPPORTED_SMART_SHELF_FIELDS = frozenset(
-    {"publishedYear", "publisher", "language", "isbn", "identifier"}
+SMART_SHELF_RULE_KEYS = frozenset(
+    {
+        "search",
+        "statuses",
+        "tags",
+        "authors",
+        "combinator",
+        "conditions",
+        "includedBookIds",
+    }
 )
 
 
 def _unsupported_rule_fields(rules: dict[str, Any]) -> list[str]:
-    fields = {
-        str(condition.get("field"))
-        for condition in rules.get("conditions") or []
-        if isinstance(condition, dict)
-        and str(condition.get("field")) in UNSUPPORTED_SMART_SHELF_FIELDS
-    }
-    if rules.get("publishers"):
-        fields.add("publisher")
+    fields = {str(key) for key in rules if str(key) not in SMART_SHELF_RULE_KEYS}
+    for condition in rules.get("conditions") or []:
+        if not isinstance(condition, dict):
+            continue
+        _normalized, error = normalize_filter_rules(
+            {"combinator": "ALL", "conditions": [condition]}
+        )
+        if error and error.startswith("不支持的筛选维度："):
+            fields.add(str(condition.get("field") or ""))
     return sorted(fields)
 
 
@@ -409,11 +418,6 @@ def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | Non
         return {}, "阅读状态规则无效"
     if statuses:
         rules["statuses"] = list(dict.fromkeys(statuses))
-    media_kinds = [str(item).upper() for item in value.get("mediaKinds") or []]
-    if any(item not in {"EBOOK", "COMIC", "AUDIOBOOK"} for item in media_kinds):
-        return {}, "媒介类型规则无效"
-    if media_kinds:
-        rules["mediaKinds"] = list(dict.fromkeys(media_kinds))
     if value.get("publishers"):
         return {}, "不支持的筛选维度：publisher"
     for key in ("tags", "authors"):

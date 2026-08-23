@@ -43,13 +43,16 @@ ReaderSourceFormat = Literal[
     "azw3",
     "prc",
     "txt",
+    "fb2",
     "cbz",
     "zip",
     "cbr",
     "rar",
+    "image_dir",
     "pdf",
     "audio",
     "audiobook",
+    "audiobook_dir",
     "m4b",
     "m4a",
     "mp3",
@@ -454,6 +457,7 @@ class ReaderPublicationAccess(ReaderWireModel):
     download_artifact: ReaderComicDownloadArtifact | None = Field(
         default=None,
         alias="downloadArtifact",
+        exclude_if=lambda value: value is None,
     )
 
     @model_validator(mode="after")
@@ -467,7 +471,6 @@ class ReaderPublicationAccess(ReaderWireModel):
             self.positions_url is not None
             or self.page_url_template is None
             or self.image_variants != ["original", "data-saver"]
-            or self.download_artifact is None
         ):
             raise ValueError("Invalid comic publication access")
         return self
@@ -487,7 +490,9 @@ class ReaderComicManifestData(ReaderWireModel):
     schema_version: Literal[1] = Field(1, alias="schemaVersion")
     kind: Literal["comic"] = "comic"
     resource_id: str = Field(alias="resourceId", min_length=1)
-    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(alias="sourceFormat")
+    source_format: Literal["cbz", "zip", "cbr", "rar", "image_dir"] = Field(
+        alias="sourceFormat"
+    )
     page_count: int = Field(alias="pageCount", gt=0)
     reading_order: list[ReaderComicManifestPage] = Field(alias="readingOrder")
 

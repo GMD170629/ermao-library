@@ -96,7 +96,6 @@ function parseRules(value: unknown): SmartShelfRules | undefined {
   return {
     search: optionalString(value.search),
     statuses: stringList(value.statuses),
-    mediaKinds: stringList(value.mediaKinds),
     tags: stringList(value.tags),
     authors: stringList(value.authors),
     publishers: stringList(value.publishers),

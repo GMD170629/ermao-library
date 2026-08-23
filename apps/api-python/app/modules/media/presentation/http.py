@@ -24,6 +24,7 @@ from app.bootstrap.media import (
     media_page_index,
     media_resource_query,
     media_streaming,
+    resource_preview,
 )
 from app.contracts.http_errors import (
     BasicBadRequestError,
@@ -32,6 +33,7 @@ from app.contracts.http_errors import (
     ErrorResponses,
 )
 from app.core.authorization import (
+    authorization_context,
     can_access_asset,
     can_access_book,
     can_access_resource,
@@ -43,6 +45,11 @@ from app.modules.media.application.cover_proxy import (
     UnsafeCoverUrl,
     configured_cover_origins,
     validate_cover_url,
+)
+from app.modules.media.application.resource_preview import (
+    ResourcePreviewAccessScope,
+    ResourcePreviewNotFoundError,
+    ResourcePreviewUnavailableError,
 )
 from app.modules.media.presentation.schemas import (
     MediaAssetResponse,
@@ -183,6 +190,48 @@ def get_resource_asset(
         route="resource-asset",
         asset_id=asset.id if asset else resource_id,
         as_attachment=download,
+    )
+
+
+@router.get(
+    "/resources/{resource_id}/previews/{page_index}",
+    response_class=MediaImageResponse,
+)
+def get_resource_preview(
+    resource_id: str,
+    page_index: int,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> Response:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    authorization = authorization_context(db, user)
+    try:
+        preview = resource_preview(db, settings).execute(
+            scope=ResourcePreviewAccessScope(
+                is_admin=authorization.is_admin,
+                library_ids=authorization.library_ids,
+            ),
+            resource_id=resource_id,
+            page_index=page_index,
+        )
+    except ResourcePreviewNotFoundError:
+        return fail("预览不存在", status_code=404, code="PREVIEW_NOT_FOUND")
+    except ResourcePreviewUnavailableError:
+        return fail("预览暂时不可用", status_code=422, code="PREVIEW_UNAVAILABLE")
+    headers = {
+        "Cache-Control": "private, max-age=86400",
+        "ETag": preview.etag,
+        "Vary": "Cookie",
+    }
+    if request.headers.get("if-none-match") == preview.etag:
+        return Response(status_code=304, headers=headers)
+    return Response(
+        content=preview.content,
+        media_type=preview.media_type,
+        headers=headers,
     )
 
 

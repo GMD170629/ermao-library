@@ -10,7 +10,6 @@ from app.modules.library.application.book_list import (
     BookListProjection,
     BookListQuery,
     BookListResult,
-    parse_media_kinds,
 )
 from app.modules.library.application.bookshelf import (
     BookshelfItemQueryPort,
@@ -219,7 +218,6 @@ __all__ = [
     "is_strict_descendant_path",
     "meets_minimum_ready_assets",
     "parse_filter_expression",
-    "parse_media_kinds",
     "parse_source_node_relative_path",
     "parse_target_organization_mode",
     "preferred_book_cover_path",

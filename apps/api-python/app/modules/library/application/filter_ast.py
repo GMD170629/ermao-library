@@ -51,8 +51,6 @@ FIELD_OPERATORS = {
         for field in (
             "title",
             "description",
-            "volumeTitle",
-            "narrator",
             "sourcePath",
         )
     },
@@ -62,12 +60,8 @@ FIELD_OPERATORS = {
             "author",
             "tag",
             "series",
-            "mediaKind",
             "format",
             "readingStatus",
-            "publicationStatus",
-            "trackingStatus",
-            "organizeStatus",
             "shelf",
             "library",
             "origin",
@@ -78,17 +72,11 @@ FIELD_OPERATORS = {
         field: NUMBER_OPERATORS
         for field in (
             "seriesIndex",
-            "metadataQuality",
-            "fileSize",
-            "pageCount",
-            "chapterCount",
-            "duration",
-            "resourceCount",
             "progress",
         )
     },
-    **{field: DATE_OPERATORS for field in ("lastReadAt", "createdAt", "updatedAt")},
-    **{field: BOOLEAN_OPERATORS for field in ("organized", "hasCover")},
+    "lastReadAt": DATE_OPERATORS,
+    "hasCover": BOOLEAN_OPERATORS,
 }
 
 

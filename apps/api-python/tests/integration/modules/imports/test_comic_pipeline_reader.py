@@ -40,6 +40,12 @@ def _write_cbz(path: Path) -> None:
         archive.writestr("002.png", _ONE_PIXEL_PNG)
 
 
+def _write_image_directory(path: Path) -> None:
+    path.mkdir()
+    (path / "page10.png").write_bytes(_ONE_PIXEL_PNG)
+    (path / "page2.png").write_bytes(_ONE_PIXEL_PNG)
+
+
 def _drain_worker(pipeline) -> None:
     worker = build_readable_resource_worker(pipeline)
     for _ in range(20):
@@ -123,6 +129,63 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert manifest["kind"] == "comic"
     assert manifest["sourceFormat"] == "cbz"
     assert len(manifest["readingOrder"]) == 2
+
+    page_response = client.get(f"/api/reader/v4/resources/{resource.id}/comic/pages/0")
+    assert page_response.status_code == 200, page_response.text
+    assert page_response.headers["content-type"].startswith("image/")
+    assert page_response.content
+
+
+def test_scan_import_image_directory_reuses_comic_manifest_without_download(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    root = tmp_path / "image-library"
+    root.mkdir()
+    library.root_path = str(root)
+    db_session.commit()
+    _write_image_directory(root / "pages")
+
+    pipeline = build_readable_resource_pipeline(db_session)
+    pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
+    _drain_worker(pipeline)
+    db_session.expire_all()
+    resource = db_session.scalar(
+        select(LibraryReadableResource).where(
+            LibraryReadableResource.format == "IMAGE_DIR"
+        )
+    )
+    assert resource is not None
+    assert resource.media_kind == "COMIC"
+    page_assets = db_session.scalars(
+        select(LibraryResourceAsset).where(
+            LibraryResourceAsset.resource_id == resource.id,
+            LibraryResourceAsset.role == "PAGE",
+        )
+    ).all()
+    assert len(page_assets) == 2
+
+    _login(client, db_session)
+    bootstrap_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+    assert bootstrap_response.status_code == 200, bootstrap_response.text
+    bootstrap = bootstrap_response.json()["data"]
+    assert bootstrap["readerType"] == "comic"
+    assert bootstrap["sourceFormat"] == "image_dir"
+    assert "downloadArtifact" not in bootstrap["publication"]
+
+    manifest_response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/comic/manifest"
+    )
+    assert manifest_response.status_code == 200, manifest_response.text
+    manifest = manifest_response.json()["data"]
+    assert manifest["sourceFormat"] == "image_dir"
+    assert [page["title"] for page in manifest["readingOrder"]] == [
+        "page2.png",
+        "page10.png",
+    ]
 
     page_response = client.get(f"/api/reader/v4/resources/{resource.id}/comic/pages/0")
     assert page_response.status_code == 200, page_response.text

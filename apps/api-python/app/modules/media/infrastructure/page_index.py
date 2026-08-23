@@ -13,6 +13,7 @@ from app.core.config import Settings
 from app.models import (
     Library,
     LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
     LibrarySourceNode,
     ReadableResourceNavigationUnit,
 )
@@ -166,18 +167,25 @@ def load_read_only_page_index_projection(
         select(
             LibraryResourceAsset.id,
             LibrarySourceNode.relative_path,
+            LibrarySourceNode.name,
+            LibraryResourceAssetMetadata.mime_type,
             LibraryResourceAsset.role,
             LibraryResourceAsset.import_state,
             LibrarySourceNode.observed_size_bytes,
             LibraryResourceAsset.sequence_index,
             LibrarySourceNode.observed_mtime_ns,
             Library.root_path,
+            LibraryResourceAsset.sort_key,
         )
         .join(
             LibrarySourceNode,
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
+        .outerjoin(
+            LibraryResourceAssetMetadata,
+            LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+        )
         .where(
             LibraryResourceAsset.resource_id == resource_id,
             LibraryResourceAsset.import_state == "READY",
@@ -193,12 +201,15 @@ def load_read_only_page_index_projection(
             ResourcePageSource(
                 id=row.id,
                 path=row.relative_path,
+                title=row.name,
+                mime_type=row.mime_type,
                 source_root=row.root_path,
                 role=row.role,
                 import_state=row.import_state,
                 size_bytes=int(row.observed_size_bytes or 0),
                 sort_order=int(row.sequence_index or 0),
                 mtime_ms=int(row.observed_mtime_ns // 1_000_000),
+                sort_key=row.sort_key,
             )
             for row in source_rows
         ),

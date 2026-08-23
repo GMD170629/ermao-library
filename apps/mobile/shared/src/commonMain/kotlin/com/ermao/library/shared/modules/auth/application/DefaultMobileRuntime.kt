@@ -443,10 +443,6 @@ class DefaultMobileRuntime(
         return when (val probe = serverProbe.probe(provisional)) {
             is ServerProbeResult.Failure -> handleProbeFailure(draft, probe.error)
             is ServerProbeResult.Compatible -> {
-                if (matchingByAddress != null && matchingByAddress.serverIdentity != probe.serverIdentity) {
-                    transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
-                    return failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
-                }
                 val existingProfile = matchingByAddress
                     ?: cachedProfiles.firstOrNull { it.serverIdentity == probe.serverIdentity }
                 val candidate = (existingProfile ?: provisional).copy(
