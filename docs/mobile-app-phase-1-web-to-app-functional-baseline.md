@@ -95,14 +95,14 @@ P0 必须形成以下连续闭环：
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| 书库浏览 | `/library`；`GET /api/works` | 分页；按关键词、媒介、阅读状态、出版/追踪状态、标签等过滤；只返回当前用户可见作品 | P0 | 原生搜索、Grid/List、下拉刷新、无限分页、稳定恢复滚动位置；禁止复制桌面管理表和页码器 |
-| 基础筛选与排序 | `/library`；`GET /api/library/filter-schema`、`filter-options`、`GET /api/works` | schema/options 可加载失败；选择项可能随权限变化失效 | P0 | Filter Sheet + Sort Menu；顶部仅展示少量活动条件；必须提供清除、应用、无结果和失效条件恢复 |
+| 书库浏览 | `/library`；`GET /api/books` | 分页；按关键词、媒介、阅读状态、出版/追踪状态、标签等过滤；只返回当前用户可见图书 | P0 | 原生搜索、Grid/List、下拉刷新、无限分页、稳定恢复滚动位置；禁止复制桌面管理表和页码器 |
+| 基础筛选与排序 | `/library`；`GET /api/library/filter-schema`、`filter-options`、`GET /api/books` | schema/options 可加载失败；选择项可能随权限变化失效 | P0 | Filter Sheet + Sort Menu；顶部仅展示少量活动条件；必须提供清除、应用、无结果和失效条件恢复 |
 | 高级动态规则编辑 | Web 高级过滤器与智能书架规则 | 规则表达式和 options 真实存在，但手机编辑复杂 | P1 | 以后使用全屏条件编辑器；P0 可读取并显示规则摘要，不压缩桌面 builder |
 | 系列 / 作者 | `/library/series`、`/library/authors`；`GET /api/library/groupings?kind=SERIES|AUTHOR` | 搜索、分页、空/错；仍受作品范围授权 | P0 | 书库二级入口；列表 → 带 facet 的作品列表 → 详情，保留返回上下文 |
 | 静态书架 | `/shelves`；书架 CRUD API | 按 `ownerUserId` 隔离；用户手动管理作品 | P0 | “书架”Tab；详情 Stack；创建/编辑 Sheet；明确选择模式加入作品；禁止依赖右键和桌面拖放 |
 | 智能书架 | `/shelves`；书架 CRUD 与过滤规则 | 规则计算；可能出现不支持规则 | P0 浏览，P1 编辑 | P0 展示规则摘要和计算结果，不能允许手工增删作品；不支持规则必须显式提示 |
 | 书架集合 | `/shelves`；书架 CRUD | `COLLECTION` 只能包含书架，不能直接放作品；非空集合删除冲突 | P0 浏览，P1 复杂整理 | 集合 → 书架 → 作品的层级导航；删除使用系统确认并呈现 `409` 原因 |
-| 作品详情 | `/works/[id]`；work、directory versions、volumes、reading units API | Version 由书库目录直接决定；一个 Version 可包含不同格式和多个 volume，媒介种类由当前 volume 派生；部分章节/卷可失败 | P0 | 折叠头部、目录版本选择、可横向滚动并分页加载的多卷封面轨道、随选中卷册更新的格式/媒介与元数据、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
+| 图书详情 | `/books/[bookId]`；Book、Resource、Asset、reading units API | Resource 是可独立打开的阅读资源；Asset 是 Resource 使用的真实常规文件；部分章节或资源可失败 | P0 | 折叠头部、可横向滚动并分页加载的 Resource 轨道、随选中 Resource 更新的格式/媒介与元数据、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
 | 阅读状态 | 作品详情；Reader v4 `PUT .../reading-status` | `UNREAD / READING / FINISHED`；用户级状态 | P0 | 详情动作 Sheet；开始阅读可推进到 READING；标记完成提供可撤销反馈 |
 | 批量加入个人书架 | Web 书库选择模式 | 普通用户可操作自己的书架 | P1 | 原生明确“选择”模式和底部操作栏；不复刻 Ctrl/Cmd 多选、右键菜单 |
 
@@ -110,27 +110,27 @@ P0 必须形成以下连续闭环：
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| Reader bootstrap | `/reader/[volumeId]`；`GET /api/reader/v4/volumes/{volumeId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot 与 publication | P0 | 只使用 `volumeId` 与 Reader v4；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
-| 可重排电子书 | Reader v4 + `GET/HEAD /api/files/{fileId}` 或 volume file | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；完整工件、fingerprint、下载失败和内容版本变化 | P0 | 在线入口始终请求 Bootstrap；已有本地完整工件时由原生解析器决定能否打开，fingerprint、版本和声明长度差异仅作诊断。在线章节优先，离线使用缓存章节并由书内 TOC 补充。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
+| Reader bootstrap | `/reader/[resourceId]`；`GET /api/reader/v4/resources/{resourceId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot、Book、Resource、Assets 与 publication | P0 | 只使用 `resourceId` 与 Reader v4；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
+| 可重排电子书 | Reader v4 + `GET/HEAD /api/assets/{assetId}` 或 resource asset | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；完整工件、fingerprint、下载失败和内容版本变化 | P0 | 在线入口始终请求 Bootstrap；已有本地完整工件时由原生解析器决定能否打开，fingerprint、版本和声明长度差异仅作诊断。在线章节优先，离线使用缓存章节并由书内 TOC 补充。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
 | 漫画 | Reader v4 + pages list/page API | LTR/RTL、页列表、图片加载失败、内存与预取窗口 | P0 | 在线默认按页流式阅读，原生图片管线只做有限预取，禁止一次加载全部页；有完整本地工件时可离线打开，不要求在线阅读前下载整包 |
 | PDF | Reader v4 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 在线使用系统/原生 PDF renderer 通过 Range 流式读取，不要求先下载整份；完整本地工件可离线打开；捏合缩放、页码 scrubber，连续模式不在未验证前承诺 |
 | 书签 | Reader v4 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
-| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `workId + volumeId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作诊断 | P0 | 本地事务先保存，再同步；文件或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复；进度模块异常不得阻止内容打开或退出 |
-| 音频书 | `/listen/[volumeId]` 仅为瞬时深链；bootstrap + file API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
-| 本地下载内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、命名空间、volume 和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按作品聚合任务与完整工件，并直接搜索本地已下载书名、作者和卷名；只承诺显式完成的 volume，不把普通缓存、服务器 `/download-tasks` 或 `/api/works` 筛选冒充下载事实；不得宣称全量本地书库 |
+| 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `bookId + resourceId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作诊断 | P0 | 本地事务先保存，再同步；Asset 或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复；进度模块异常不得阻止内容打开或退出 |
+| 音频书 | `/listen/[resourceId]` 仅为瞬时深链；bootstrap + Asset API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
+| 本地下载内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有设备下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、Book/Resource/Asset 身份和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按图书聚合任务与完整工件，并直接搜索本地已下载书名、作者和资源名；只承诺显式完成的 Resource，不把普通缓存或服务器任务冒充下载事实；不得宣称全量本地书库 |
 | 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有下载工件是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示本地副本和文件导出 |
 
 ### 4.4 导入、发送与系统管理
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| 手工文件导入 | 首页/书库上传；`POST /api/works/import` | 当前受 `canManageSystem` 保护；目标必须位于已启用书库根目录并符合其组织方式；multipart；无分块或断点续传 | P1 | 系统 Document Picker / Share Extension；选择合法的服务器书库路径，前台上传进度、取消、失败重试；上传完成后由扫描器绑定 Work / Version / Volume，手机文件名或表单元数据不能另建结构 |
+| 手工文件导入 | 首页/书库上传；`POST /api/books/import` | 当前受 `canManageSystem` 保护；目标必须位于已启用书库根目录并符合其组织方式；multipart；无分块或断点续传 | P1 | 系统 Document Picker / Share Extension；选择合法的服务器书库路径，前台上传进度、取消、失败重试；上传完成后由扫描器绑定 SourceNode / Book / Resource / Asset，手机文件名或表单元数据不能另建结构 |
 | 导入任务 | `/settings/library`；import task 与 scan job API | `PENDING / PARSING / COMPLETED / FAILED` 等；当前管理入口要求 `canManageSystem` | P2 只读候选 | 若以后进入 App，采用任务时间线和失败摘要；扫描、清队列、删源文件保留 Web |
 | Kindle | `/settings/email` 与作品详情；kindle settings/task API | 个人任务按用户隔离；SMTP 是系统配置 | P1 | 作品动作 Sheet + 个人发送队列；SMTP 配置 Web-only |
 | 用户管理 | `/settings/users`；`/api/admin/users*` | 只有 `isAdmin`；创建、停用、授权、重置密码、删除 | Web-only | 不进入首阶段 App；`canManageSystem` 不能代替 admin |
-| 书库根目录 | `/settings/library`；library root 与设置 API | 服务器路径、NAS、`FLAT / VOLUMES / AUDIOBOOK` 组织方式、扫描策略；系统管理权限和资源范围 | Web-only | App 不复制服务器目录树；最多跳转 Web 管理后台 |
-| 整理与元数据治理 | `/settings/organize`；organize、duplicates、categories、provider API | 批量、长任务、可破坏写操作、失败与回滚 | Web-only；以后可 P2 只读 | P0/P1 不出现 Work / Version / Volume 的合并、拆分、移动、创建或删除，也不提供元数据源配置；详情页只允许不改变目录身份的内容分类修正 |
+| 书库根目录 | `/settings/library`；library root 与设置 API | 服务器路径、NAS、`FLAT / VOLUMES` 组织方式、扫描策略；系统管理权限和资源范围 | Web-only | App 不复制服务器目录树；最多跳转 Web 管理后台 |
+| 整理与元数据治理 | `/settings/organize`；organize、duplicates、facets、provider API | 批量、长任务、可破坏写操作、失败与回滚 | Web-only；以后可 P2 只读 | P0/P1 不提供 Book/Resource 的合并、拆分、移动、创建或删除，也不提供元数据源配置；详情页只允许不改变 SourceNode 身份的内容分类修正 |
 | OPDS 配置 | `/settings/opds`；system settings | 系统管理；OPDS 是第三方客户端协议 | Web-only | 官方 App 内部数据层禁止改用 OPDS |
 | 备份、健康、队列、日志 | settings 对应入口和 system/management API | 系统管理；含高风险与运维状态 | Web-only；以后可 P2 健康摘要 | 不复制桌面日志、备份恢复、队列操作台；高风险动作继续在 Web 完成 |
 
@@ -196,7 +196,7 @@ authzVersion
 | 系统管理成员 | 普通成员能力 + `canManageSystem` 保护的系统动作 | 不等于 admin；不等于自动拥有全书库 |
 | 管理员 | 系统管理 + 用户管理 | 仍应遵守资源读取和防枚举契约 |
 
-资源范围由 `allLibraryScopes`、`libraryIds` 与 `canViewManualImports` 共同决定。作品、卷、封面、媒体和 Reader bootstrap 都必须由服务端重新授权。无权访问通常与不存在一样返回 `404`；App 只能显示“内容不存在或当前不可访问”，不能泄露资源是否真实存在。
+资源范围由 `allLibraryScopes`、`libraryIds` 与 `canViewManualImports` 共同决定。Book、Resource、封面、Asset 和 Reader bootstrap 都必须由服务端重新授权。无权访问通常与不存在一样返回 `404`；App 只能显示“内容不存在或当前不可访问”，不能泄露资源是否真实存在。
 
 ### 5.4 私有数据命名空间
 
@@ -209,7 +209,7 @@ serverIdentity + userId + authzVersion
 Reader 媒体和书签按内容版本隔离；Reader 阅读进度单独使用：
 
 ```text
-workId + volumeId
+bookId + resourceId
 ```
 
 服务器切换、用户切换、登出、账户停用或 `authzVersion` 变化时，必须清理不再授权的封面、详情、媒体、搜索历史与播放状态。待同步进度先隔离，只有在确认不可恢复后才允许删除。
@@ -262,11 +262,11 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 ### 7.3 本地下载工件边界
 
-格式访问策略固定为：可重排格式缺少 completed 本地工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，同一命名空间和 volume 存在 completed 本地工件时优先 `LocalArtifact`，网络不可用且无工件时为 `Unavailable`。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
+格式访问策略固定为：可重排格式缺少 completed 本地工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，同一命名空间和 Resource/Asset 存在 completed 本地工件时优先 `LocalArtifact`，网络不可用且无工件时为 `Unavailable`。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
 
 第一阶段可以承诺：
 
-- 已显式下载或已经可靠缓存的单个 volume；
+- 已显式下载或已经可靠缓存的单个 Resource；
 - 最近使用的作品详情、封面与必要 bootstrap 快照；
 - 本地进度 durable outbox；
 - 本地书签；
@@ -298,7 +298,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 - `/listen/{id}` 不是独立一级页面。
 - `/management`、`/organize*`、`/import-tasks` 等兼容入口不是 App IA。
 - 首页与书库目前不一致的上传按钮显隐不是权限规范；以 `/me.authorization` 和真实后端 guard 为准。
-- Reader v1–v3 与 edition 路由均为 `410` 退役契约；App 只使用 Reader v4 + `volumeId`。
+- Reader v1–v3 与 edition 路由均为 `410` 退役契约；App 只使用 Reader v4 + `resourceId`。
 - 外部来源 `sources/source-search-records` 是 tombstone，不设计“移动端书源搜索”。
 - OPDS 面向第三方客户端，不作为官方 App 内部 API。
 - Web PWA Service Worker 不是原生 Download Center。

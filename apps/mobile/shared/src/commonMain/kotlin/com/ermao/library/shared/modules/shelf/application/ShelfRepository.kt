@@ -8,7 +8,7 @@ import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
 interface ShelfRepository {
     suspend fun loadShelves(
         context: ShelfRequestContext,
-        workId: String,
+        bookId: String,
     ): ShelfResult<List<ShelfSummary>>
 
     suspend fun updateMembership(

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
+from app.models.library import Library
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -47,6 +48,9 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         </section></body></FictionBook>""",
         encoding="utf-8",
     )
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(test_settings.resolved_storage_root)
     book_node = LibrarySourceNode(
         id="book-fb2-publication-node",
         library_id="test-library",
@@ -61,8 +65,8 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     source_node = LibrarySourceNode(
         id="asset-fb2-publication-node",
         library_id="test-library",
-        relative_path=str(relative_path),
-        path_key=_path_key(str(relative_path)),
+        relative_path=relative_path.as_posix(),
+        path_key=_path_key(relative_path.as_posix()),
         name=relative_path.name,
         physical_kind="REGULAR_FILE",
         observed_size_bytes=source_path.stat().st_size,

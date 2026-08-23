@@ -23,30 +23,23 @@ type SendOption = {
   assetId: string;
   resourceId: string;
   resourceTitle: string;
-  assetName: string;
   format: string;
   size: string;
 };
 
-function assetName(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-}
-
-function supported(path: string, format: string) {
-  const suffix = path.toLowerCase().split('.').at(-1);
-  return (format === 'EPUB' && suffix === 'epub') || (format === 'PDF' && suffix === 'pdf');
+function supported(format: string) {
+  return format === 'EPUB' || format === 'PDF';
 }
 
 export function KindleSendModal({ book, open, preferredResourceId, onClose }: { book: BookView; open: boolean; preferredResourceId: string | null; onClose: () => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
   const options = useMemo<SendOption[]>(() => book.resources.flatMap((resource) => resource.assets
-    .filter((asset) => supported(asset.path, resource.format))
+    .filter((asset) => resource.kindleSendAvailable && supported(resource.format) && asset.role === 'PRIMARY')
     .map((asset) => ({
       assetId: asset.id,
       resourceId: resource.id,
       resourceTitle: resource.title,
-      assetName: assetName(asset.path),
       format: resource.format,
       size: asset.size
     }))), [book.resources]);
@@ -131,7 +124,7 @@ export function KindleSendModal({ book, open, preferredResourceId, onClose }: { 
               return (
                 <button key={option.assetId} type="button" onClick={() => setSelectedAssetId(option.assetId)} className={cn('flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition', selected ? 'border-orange-200 bg-[#FFF5F1]' : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50')}>
                   <span className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl', selected ? 'bg-[#ED4D2D] text-white' : 'bg-stone-100 text-stone-500')}>{selected ? <CheckCircle2 size={17} /> : <FileText size={17} />}</span>
-                  <span className="min-w-0 flex-1"><span className="block font-medium text-stone-900">{option.resourceTitle}</span><span className="mt-1 block break-all text-xs leading-5 text-stone-500">{option.format} · {option.size} · {option.assetName}</span></span>
+                  <span className="min-w-0 flex-1"><span className="block font-medium text-stone-900">{option.resourceTitle}</span><span className="mt-1 block break-all text-xs leading-5 text-stone-500">{option.format} · {option.size}</span></span>
                 </button>
               );
             })}

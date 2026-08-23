@@ -87,6 +87,7 @@ class CatalogFacet:
     kind: CatalogFacetKind
     name: str
     normalized_name: str
+    aliases: tuple[str, ...]
     book_count: int
     updated_at: datetime
 

@@ -62,6 +62,7 @@ def get_mobile_compatibility(
                 ),
             ),
             readerSchemaVersion=compatibility.reader_schema_version,
+            librarySchemaVersion=compatibility.library_schema_version,
             capabilities=MobileCapabilitiesPayload(
                 setup=compatibility.capabilities.setup,
                 cookieSession=compatibility.capabilities.cookie_session,
@@ -70,7 +71,10 @@ def get_mobile_compatibility(
                 managedOfflineDownloads=(
                     compatibility.capabilities.managed_offline_downloads
                 ),
-                workDetailManagement=True,
+                bookResourceAsset=compatibility.capabilities.book_resource_asset,
+                bookDetailManagement=(
+                    compatibility.capabilities.book_detail_management
+                ),
             ),
         )
     )

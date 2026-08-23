@@ -217,7 +217,7 @@ struct AdministrativeLibraryScope: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let serverPath: String
-    let workCount: Int
+    let bookCount: Int
 }
 
 enum MediaKind: String, CaseIterable, Hashable, Sendable {
@@ -431,7 +431,7 @@ struct GovernedCategory: Identifiable, Equatable, Sendable {
     let kind: CategoryKind
     let name: String
     let aliases: [String]
-    let workCount: Int
+    let bookCount: Int
 }
 
 struct MergeCategoryRequest: Equatable, Sendable {
@@ -498,9 +498,9 @@ struct BackupRecord: Identifiable, Equatable, Sendable {
     let kind: String
     let sizeBytes: Int64
     let createdAt: Date
-    let workCount: Int
+    let bookCount: Int
     let progressCount: Int
-    let directoryCount: Int
+    let libraryCount: Int
 }
 
 enum AdministrativeWorkDetailSection: String, CaseIterable, Hashable, Sendable {

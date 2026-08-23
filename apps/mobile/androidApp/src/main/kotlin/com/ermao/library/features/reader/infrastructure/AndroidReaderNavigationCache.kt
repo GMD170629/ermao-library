@@ -6,6 +6,7 @@ import com.ermao.library.shared.modules.reader.ReaderBootstrap
 import com.ermao.library.shared.modules.reader.ReaderComicPage
 import com.ermao.library.shared.modules.reader.ReaderNavigationUnit
 import com.ermao.library.shared.modules.reader.ReaderPdfPage
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -19,9 +20,9 @@ data class AndroidReaderNavigationSnapshot(
 
 /** Best-effort navigation hints. Publication parsers remain authoritative. */
 class AndroidReaderNavigationCache(context: Context) {
-    private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
 
-    fun save(serverIdentity: String, userId: String, volumeId: String, bootstrap: ReaderBootstrap) {
+    fun save(namespace: ReaderSyncNamespace, resourceId: String, bootstrap: ReaderBootstrap) {
         val payload = JSONObject().apply {
             put("schema", SCHEMA_VERSION)
             put("units", JSONArray().apply {
@@ -56,14 +57,14 @@ class AndroidReaderNavigationCache(context: Context) {
             })
             bootstrap.pageCount?.let { put("pageCount", it) }
         }
-        preferences.edit {
-            putString(key(serverIdentity, userId, volumeId), payload.toString())
+        preferences(namespace).edit {
+            putString(key(namespace, resourceId), payload.toString())
         }
     }
 
-    fun load(serverIdentity: String, userId: String, volumeId: String): AndroidReaderNavigationSnapshot? =
+    fun load(namespace: ReaderSyncNamespace, resourceId: String): AndroidReaderNavigationSnapshot? =
         runCatching {
-            val payload = preferences.getString(key(serverIdentity, userId, volumeId), null)
+            val payload = preferences(namespace).getString(key(namespace, resourceId), null)
                 ?: return@runCatching null
             val root = JSONObject(payload)
             if (root.optInt("schema") != SCHEMA_VERSION) return@runCatching null
@@ -100,18 +101,26 @@ class AndroidReaderNavigationCache(context: Context) {
             )
         }.getOrNull()
 
-    private fun key(serverIdentity: String, userId: String, volumeId: String): String {
+    private fun preferences(namespace: ReaderSyncNamespace) = appContext.getSharedPreferences(
+        "reader-navigation-v3-${sha256(readerAccountStorageKey(namespace))}",
+        Context.MODE_PRIVATE,
+    )
+
+    private fun key(namespace: ReaderSyncNamespace, resourceId: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest("$serverIdentity\u0000$userId\u0000$volumeId".toByteArray(Charsets.UTF_8))
+            .digest("${namespace.stableKey}\u0000$resourceId".toByteArray(Charsets.UTF_8))
         return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until minOf(length(), MAX_ENTRIES)).mapNotNull { index -> optJSONObject(index) }
 
-    private companion object {
-        const val FILE_NAME = "reader-navigation-v1"
-        const val SCHEMA_VERSION = 1
+    companion object {
+        const val SCHEMA_VERSION = 2
         const val MAX_ENTRIES = 20_000
+
+        internal fun clearNamespace(context: Context, namespace: ReaderSyncNamespace) {
+            context.deleteSharedPreferences("reader-navigation-v3-${sha256(readerAccountStorageKey(namespace))}")
+        }
     }
 }

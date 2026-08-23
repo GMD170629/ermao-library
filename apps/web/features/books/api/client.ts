@@ -53,18 +53,24 @@ function mapResource(value: unknown): ReadableResourceView | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
   const bookId = stringValue(item.bookId).trim();
+  const sourceNodeId = stringValue(item.sourceNodeId).trim();
   const format = resourceFormat(item.format);
-  if (!id || !bookId || !format) return null;
+  if (!id || !bookId || !sourceNodeId || !format) return null;
   const assets = (Array.isArray(item.assets) ? item.assets : []).flatMap((rawAsset) => {
     const asset = record(rawAsset);
     const assetId = stringValue(asset.id).trim();
-    if (!assetId) return [];
+    const assetResourceId = stringValue(asset.resourceId).trim();
+    const assetSourceNodeId = stringValue(asset.sourceNodeId).trim();
+    const role = stringValue(asset.role).trim();
+    const url = stringValue(asset.url).trim();
+    const downloadUrl = stringValue(asset.downloadUrl).trim();
+    if (!assetId || assetResourceId !== id || !assetSourceNodeId || !role || !url || !downloadUrl) return [];
     return [{
       id: assetId,
-      resourceId: id,
-      path: stringValue(asset.path),
+      resourceId: assetResourceId,
+      sourceNodeId: assetSourceNodeId,
+      role,
       mimeType: stringValue(asset.mimeType),
-      kind: stringValue(asset.kind),
       sortOrder: finiteNumber(asset.sortOrder),
       sizeBytes: finiteNumber(asset.sizeBytes),
       size: stringValue(asset.size),
@@ -75,14 +81,17 @@ function mapResource(value: unknown): ReadableResourceView | null {
       channels: nullableNumber(asset.channels),
       discNumber: nullableNumber(asset.discNumber),
       trackNumber: nullableNumber(asset.trackNumber),
-      url: nullableString(asset.url) ?? undefined
+      url,
+      downloadUrl
     }];
   });
   const classification = record(item.classification);
   return {
     id,
     bookId,
+    sourceNodeId,
     title: stringValue(item.title, id),
+    description: stringValue(item.description),
     resourceIndex: nullableNumber(item.resourceIndex),
     sortOrder: finiteNumber(item.sortOrder),
     format,
@@ -128,12 +137,14 @@ export type BookResourcePage = Readonly<{
 export function mapBookView(value: unknown): BookView {
   const root = record(value);
   const id = stringValue(root.id).trim();
-  if (!id || !Array.isArray(root.resources)) throw new Error('图书响应缺少资源结构');
+  const sourceNodeId = stringValue(root.sourceNodeId).trim();
+  if (!id || !sourceNodeId || !Array.isArray(root.resources)) throw new Error('图书响应缺少资源结构或来源节点身份');
   const resources = root.resources.map(mapResource).filter((item): item is ReadableResourceView => item !== null);
   const publicationStatus = root.publicationStatus === 'ONGOING' || root.publicationStatus === 'COMPLETED' || root.publicationStatus === 'HIATUS' || root.publicationStatus === 'CANCELLED' ? root.publicationStatus : 'UNKNOWN';
   const trackingStatus = root.trackingStatus === 'TRACKING' || root.trackingStatus === 'PAUSED' || root.trackingStatus === 'IGNORED' ? root.trackingStatus : 'NOT_TRACKING';
   return {
     id,
+    sourceNodeId,
     title: stringValue(root.title, '未命名图书'),
     author: stringValue(root.author, '未知作者'),
     description: stringValue(root.description),
@@ -339,6 +350,52 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
   return { message: nullableString(data.message), candidates };
 }
 
+export type MetadataProviderOption = Readonly<{
+  id: string;
+  name: string;
+  enabled: boolean;
+  mediaKinds: string[];
+  mode: string;
+}>;
+
+export type MetadataProviderPipeline = Readonly<{
+  mediaKind: string;
+  providers: ReadonlyArray<Readonly<{ providerId: string; enabled: boolean }>>;
+}>;
+
+export async function fetchMetadataProviders(
+  signal?: AbortSignal,
+): Promise<Readonly<{ providers: MetadataProviderOption[]; pipelines: MetadataProviderPipeline[] }>> {
+  const data = record(await apiJson('/api/metadata/providers', { signal }));
+  const providers = (Array.isArray(data.providers) ? data.providers : []).flatMap((value) => {
+    const item = record(value);
+    const id = stringValue(item.id).trim();
+    const name = stringValue(item.name, id);
+    if (!id) return [];
+    return [{
+      id,
+      name,
+      enabled: item.enabled === true,
+      mediaKinds: Array.isArray(item.mediaKinds)
+        ? item.mediaKinds.filter((kind): kind is string => typeof kind === 'string')
+        : [],
+      mode: stringValue(item.mode)
+    }];
+  });
+  const pipelines = (Array.isArray(data.pipelines) ? data.pipelines : []).flatMap((value) => {
+    const item = record(value);
+    const mediaKind = stringValue(item.mediaKind).trim();
+    if (!mediaKind) return [];
+    const pipelineProviders = (Array.isArray(item.providers) ? item.providers : []).flatMap((providerValue) => {
+      const provider = record(providerValue);
+      const providerId = stringValue(provider.providerId).trim();
+      return providerId ? [{ providerId, enabled: provider.enabled === true }] : [];
+    });
+    return [{ mediaKind, providers: pipelineProviders }];
+  });
+  return { providers, pipelines };
+}
+
 function mapChapterUnit(value: unknown): ChapterDetailUnit | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
@@ -468,24 +525,26 @@ export type BookMetadataInput = Readonly<{
   description: string;
   seriesName: string | null;
   seriesIndex: number | null;
-  tags: string[];
 }>;
 
 export async function updateBookMetadata(bookId: string, input: BookMetadataInput): Promise<BookView> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...input, organized: true })
+    body: JSON.stringify(input)
   }));
   return mapBookView(data.book ?? data);
 }
 
-export async function uploadBookCover(bookId: string, file: File): Promise<void> {
-  const body = new FormData();
-  body.append('cover', file);
-  await apiJson(`/api/books/${encodeURIComponent(bookId)}/cover/upload`, { method: 'POST', body });
+export async function uploadBookCover(book: Pick<BookView, 'id' | 'sourceNodeId' | 'title' | 'description'>, file: File): Promise<void> {
+  await updateSourceNodePresentation(book.id, book.sourceNodeId, {
+    title: book.title,
+    description: book.description || null,
+    cover: file,
+    removeCover: false
+  });
 }
 
-export async function regenerateBookCover(bookId: string): Promise<void> {
-  await apiJson(`/api/books/${encodeURIComponent(bookId)}/cover/regenerate`, { method: 'POST' });
+export async function regenerateBookCover(bookId: string, anchoredResourceId: string): Promise<void> {
+  await regenerateResourceCover(bookId, anchoredResourceId);
 }

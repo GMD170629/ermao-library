@@ -16,16 +16,16 @@ class LibraryDiscoveryRuntimeTest {
     @Test
     fun scopeSelectionPreservesIndependentQueriesAndAnchors() {
         val runtime = LibraryDiscoveryRuntime()
-        runtime.updateQuery(LibraryScope.Works, "三体")
-        runtime.rememberScrollAnchor(LibraryScope.Works, LibraryScrollAnchor("work-9", 18))
+        runtime.updateQuery(LibraryScope.Books, "三体")
+        runtime.rememberScrollAnchor(LibraryScope.Books, LibraryScrollAnchor("book-9", 18))
         runtime.updateQuery(LibraryScope.Series, "基地")
         runtime.rememberScrollAnchor(LibraryScope.Series, LibraryScrollAnchor("series-2", 4))
 
         runtime.selectScope(LibraryScope.Series)
-        runtime.selectScope(LibraryScope.Works)
+        runtime.selectScope(LibraryScope.Books)
 
         assertEquals("三体", runtime.state.current.snapshot.query)
-        assertEquals("work-9", runtime.state.current.snapshot.scrollAnchor?.itemId)
+        assertEquals("book-9", runtime.state.current.snapshot.scrollAnchor?.itemId)
         assertEquals("基地", runtime.state.scopes.getValue(LibraryScope.Series).snapshot.query)
         assertEquals("series-2", runtime.state.scopes.getValue(LibraryScope.Series).snapshot.scrollAnchor?.itemId)
     }
@@ -33,10 +33,10 @@ class LibraryDiscoveryRuntimeTest {
     @Test
     fun obsoleteResponseCannotOverwriteNewQuery() {
         val runtime = LibraryDiscoveryRuntime()
-        runtime.updateQuery(LibraryScope.Works, "old")
-        val oldRequest = runtime.beginInitialRequest(LibraryScope.Works, retainsVisibleContent = false)
-        runtime.updateQuery(LibraryScope.Works, "new")
-        val newRequest = runtime.beginInitialRequest(LibraryScope.Works, retainsVisibleContent = false)
+        runtime.updateQuery(LibraryScope.Books, "old")
+        val oldRequest = runtime.beginInitialRequest(LibraryScope.Books, retainsVisibleContent = false)
+        runtime.updateQuery(LibraryScope.Books, "new")
+        val newRequest = runtime.beginInitialRequest(LibraryScope.Books, retainsVisibleContent = false)
 
         assertFalse(runtime.acceptPage(oldRequest, isEmpty = false, ContentSource.Network, isStale = false))
         assertTrue(runtime.acceptPage(newRequest, isEmpty = false, ContentSource.Network, isStale = false))
@@ -52,19 +52,19 @@ class LibraryDiscoveryRuntimeTest {
         val result = runtime.applyFilters(LibraryFilters(downloadedOnly = true))
 
         assertIs<FilterCommitResult.Rejected>(result)
-        assertFalse(runtime.state.scopes.getValue(LibraryScope.Works).snapshot.filters.downloadedOnly)
+        assertFalse(runtime.state.scopes.getValue(LibraryScope.Books).snapshot.filters.downloadedOnly)
     }
 
     @Test
     fun duplicatePaginationRequestIsRejectedAndRetryKeepsSameRequestKey() {
         val runtime = LibraryDiscoveryRuntime()
-        val initial = runtime.beginInitialRequest(LibraryScope.Works, retainsVisibleContent = false)
+        val initial = runtime.beginInitialRequest(LibraryScope.Books, retainsVisibleContent = false)
         assertTrue(runtime.acceptPage(initial, isEmpty = false, ContentSource.Network, isStale = false))
 
-        val first = requireNotNull(runtime.beginNextPage(LibraryScope.Works, 2))
-        assertNull(runtime.beginNextPage(LibraryScope.Works, 2))
+        val first = requireNotNull(runtime.beginNextPage(LibraryScope.Books, 2))
+        assertNull(runtime.beginNextPage(LibraryScope.Books, 2))
         assertTrue(runtime.fail(first, "NETWORK_UNAVAILABLE", hasVisibleContent = true))
-        val retry = requireNotNull(runtime.beginNextPage(LibraryScope.Works, 2))
+        val retry = requireNotNull(runtime.beginNextPage(LibraryScope.Books, 2))
 
         assertEquals(first.requestKey, retry.requestKey)
     }
@@ -72,7 +72,7 @@ class LibraryDiscoveryRuntimeTest {
     @Test
     fun firstPageFailureDoesNotKeepOldServerContent() {
         val runtime = LibraryDiscoveryRuntime()
-        val request = runtime.beginInitialRequest(LibraryScope.Works, retainsVisibleContent = false)
+        val request = runtime.beginInitialRequest(LibraryScope.Books, retainsVisibleContent = false)
 
         runtime.fail(request, "NETWORK_UNAVAILABLE", hasVisibleContent = true)
 
@@ -83,16 +83,16 @@ class LibraryDiscoveryRuntimeTest {
     @Test
     fun permissionRevalidationDropsPrivateStateAndInvalidatesOutstandingRequests() {
         val runtime = LibraryDiscoveryRuntime()
-        runtime.rememberScrollAnchor(LibraryScope.Works, LibraryScrollAnchor("private-work"))
-        runtime.selectWork(LibraryScope.Works, "private-work")
-        val request = runtime.beginInitialRequest(LibraryScope.Works, retainsVisibleContent = false)
+        runtime.rememberScrollAnchor(LibraryScope.Books, LibraryScrollAnchor("private-book"))
+        runtime.selectBook(LibraryScope.Books, "private-book")
+        val request = runtime.beginInitialRequest(LibraryScope.Books, retainsVisibleContent = false)
 
         runtime.beginPermissionRevalidation()
 
-        val state = runtime.state.scopes.getValue(LibraryScope.Works)
+        val state = runtime.state.scopes.getValue(LibraryScope.Books)
         assertIs<LibraryContentPhase.PermissionRevalidating>(state.contentPhase)
         assertNull(state.snapshot.scrollAnchor)
-        assertNull(state.snapshot.selectedWorkId)
+        assertNull(state.snapshot.selectedBookId)
         assertFalse(runtime.acceptPage(request, isEmpty = false, ContentSource.Network, isStale = false))
     }
 

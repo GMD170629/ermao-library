@@ -12,12 +12,12 @@ import org.junit.Test
 
 class AndroidDownloadCatalogTest {
     @Test
-    fun newerTaskReplacesOlderTaskForSameVolume() = runTest {
+    fun newerTaskReplacesOlderTaskForSameAsset() = runTest {
         val root = Files.createTempDirectory("download-catalog-version-test").toFile()
         try {
             val catalog = AndroidDownloadCatalog(root)
-            val old = record("old-task", "old.bin", 1)
-            val current = record("current-task", "current.bin", 2)
+            val old = record("old-task", "old.bin", 1, assetId = "asset-1")
+            val current = record("current-task", "current.bin", 2, assetId = "asset-1")
 
             catalog.upsert(old)
             val replaced = catalog.upsert(current)
@@ -50,21 +50,25 @@ class AndroidDownloadCatalogTest {
         }
     }
 
-    private fun record(taskId: String, localReference: String, updatedAt: Long) =
+    private fun record(
+        taskId: String,
+        localReference: String,
+        updatedAt: Long,
+        assetId: String = "asset-$taskId",
+    ) =
         AndroidDownloadRecord(
             taskId = taskId,
             namespace = AndroidDownloadNamespace("server", "user", 3),
-            workId = "work",
-            workTitle = "Book",
+            bookId = "book",
+            bookTitle = "Book",
             author = "Author",
-            coverUrl = "/api/works/work/cover",
-            volumeId = "volume",
-            volumeTitle = "Volume",
+            coverUrl = "/api/books/book/cover",
+            resourceId = "resource",
+            resourceTitle = "Resource",
             format = "EPUB",
             readerType = "reflowable",
-            versionId = "version",
-            versionSourceKey = "__implicit__",
-            sourceApiPath = "/api/volumes/volume/file",
+            assetId = assetId,
+            sourceApiPath = "/api/resources/resource/asset",
             sourceMimeType = "application/epub+zip",
             expectedBytes = 4,
             transferredBytes = 4,

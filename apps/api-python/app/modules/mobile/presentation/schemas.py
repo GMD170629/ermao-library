@@ -11,9 +11,9 @@ from app.contracts.http_errors import HttpContractError
 
 
 class MobileProtocolPayload(HttpContractModel):
-    version: Literal[2] = 2
-    minimum_supported_client_version: Literal[2] = Field(
-        default=2,
+    version: Literal[3] = 3
+    minimum_supported_client_version: Literal[3] = Field(
+        default=3,
         alias="minimumSupportedClientVersion",
     )
 
@@ -23,13 +23,17 @@ class MobileCapabilitiesPayload(HttpContractModel):
     cookie_session: Literal[True] = Field(default=True, alias="cookieSession")
     reader_v4: Literal[True] = Field(default=True, alias="readerV4")
     media_range: Literal[True] = Field(default=True, alias="mediaRange")
-    managed_offline_downloads: Literal[False] = Field(
-        default=False,
+    managed_offline_downloads: Literal[True] = Field(
+        default=True,
         alias="managedOfflineDownloads",
     )
-    work_detail_management: Literal[True] = Field(
+    book_resource_asset: Literal[True] = Field(
         default=True,
-        alias="workDetailManagement",
+        alias="bookResourceAsset",
+    )
+    book_detail_management: Literal[False] = Field(
+        default=False,
+        alias="bookDetailManagement",
     )
 
 
@@ -39,6 +43,7 @@ class MobileCompatibilityPayload(HttpContractModel):
     server_version: str = Field(alias="serverVersion", min_length=1)
     protocol: MobileProtocolPayload
     reader_schema_version: Literal[4] = Field(default=4, alias="readerSchemaVersion")
+    library_schema_version: Literal[1] = Field(default=1, alias="librarySchemaVersion")
     capabilities: MobileCapabilitiesPayload
 
 

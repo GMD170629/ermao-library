@@ -2,9 +2,11 @@ import Foundation
 
 actor ManagedDownloadStore {
     private struct Manifest: Codable {
+        let contractVersion: Int
         var records: [ManagedDownloadRecord]
     }
 
+    private static let currentContractVersion = 3
     private let rootDirectory: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -13,14 +15,15 @@ actor ManagedDownloadStore {
         if let rootDirectory {
             self.rootDirectory = rootDirectory
         } else {
-            let applicationSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask
-            ).first ?? FileManager.default.temporaryDirectory
-            self.rootDirectory = applicationSupport.appendingPathComponent(
-                "com.ermao.library/managed-downloads-v2",
-                isDirectory: true
-            )
+            let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+            self.rootDirectory = applicationSupport.appendingPathComponent("com.ermao.library/managed-downloads-v3", isDirectory: true)
+        }
+        // The old manifest cannot be mapped from Work/Version/Volume/File to
+        // Book/Resource/Asset. Destructive reset is intentional at contract 3.
+        if self.rootDirectory.lastPathComponent == "managed-downloads-v3" {
+            let parent = self.rootDirectory.deletingLastPathComponent()
+            try? FileManager.default.removeItem(at: parent.appendingPathComponent("managed-downloads-v1", isDirectory: true))
+            try? FileManager.default.removeItem(at: parent.appendingPathComponent("managed-downloads-v2", isDirectory: true))
         }
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -32,22 +35,16 @@ actor ManagedDownloadStore {
         var manifest = try loadManifest(namespace: namespace)
         var changed = false
         for index in manifest.records.indices where manifest.records[index].isVerifiedOfflineCopy {
-            guard let relativePath = manifest.records[index].localRelativePath else { continue }
-            guard let fileURL = resolvedContentURL(relativePath, namespace: namespace) else {
+            guard let relativePath = manifest.records[index].localRelativePath,
+                  let fileURL = resolvedContentURL(relativePath, namespace: namespace),
+                  let size = fileSize(at: fileURL),
+                  size == manifest.records[index].receivedBytes else {
                 manifest.records[index].state = .failedTerminal
                 manifest.records[index].verification = .invalid
                 manifest.records[index].stableErrorCode = "DOWNLOAD_LOCAL_FILE_INVALID"
                 manifest.records[index].updatedAt = Date()
                 changed = true
                 continue
-            }
-            let fileSize = fileSize(at: fileURL)
-            if fileSize == nil || fileSize != manifest.records[index].receivedBytes {
-                manifest.records[index].state = .failedTerminal
-                manifest.records[index].verification = .invalid
-                manifest.records[index].stableErrorCode = "DOWNLOAD_LOCAL_FILE_INVALID"
-                manifest.records[index].updatedAt = Date()
-                changed = true
             }
         }
         if changed { try saveManifest(manifest, namespace: namespace) }
@@ -56,52 +53,31 @@ actor ManagedDownloadStore {
 
     func enqueue(
         namespace: String,
-        work: WorkCard,
-        volume: WorkVolume,
-        versionID: String,
-        versionSourceKey: String,
-        versionSourceName: String?,
-        versionCompleted: Bool?,
+        book: BookCard,
+        resource: BookResource,
+        assetID: String,
         readerType: ManagedDownloadReaderType,
         expectedBytes: Int64?,
         now: Date = Date()
     ) throws -> ManagedDownloadRecord {
-        precondition(!versionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        precondition(!versionSourceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        precondition(!book.id.isEmpty && !resource.id.isEmpty && !assetID.isEmpty)
         var manifest = try loadManifest(namespace: namespace)
-        if let existingIndex = manifest.records.firstIndex(where: { $0.volumeID == volume.id }) {
+        if let existingIndex = manifest.records.firstIndex(where: { $0.resourceID == resource.id && $0.assetID == assetID }) {
             let existing = manifest.records[existingIndex]
-            if existing.versionID == versionID,
-               existing.versionSourceKey == versionSourceKey,
-               existing.readerType == readerType {
-                return existing
-            }
-            if let path = existing.localRelativePath,
-               let fileURL = resolvedContentURL(path, namespace: namespace),
-               FileManager.default.fileExists(atPath: fileURL.path) {
-                try FileManager.default.removeItem(at: fileURL)
-            }
-            let partialURL = namespaceDirectory(namespace)
-                .appendingPathComponent("staging", isDirectory: true)
-                .appendingPathComponent(existing.id + ".part", isDirectory: false)
-            if FileManager.default.fileExists(atPath: partialURL.path) {
-                try FileManager.default.removeItem(at: partialURL)
-            }
+            if existing.readerType == readerType && existing.expectedBytes == expectedBytes { return existing }
+            try removeFiles(for: existing, namespace: namespace)
             manifest.records.remove(at: existingIndex)
         }
         let record = ManagedDownloadRecord(
             id: UUID().uuidString,
             namespace: namespace,
-            workID: work.id,
-            workTitle: work.title,
-            workAuthor: work.author,
-            versionID: versionID,
-            versionSourceKey: versionSourceKey,
-            versionSourceName: versionSourceName,
-            versionCompleted: versionCompleted,
-            volumeID: volume.id,
-            volumeTitle: volume.title,
-            format: volume.formatLabel,
+            bookID: book.id,
+            bookTitle: book.title,
+            bookAuthor: book.author,
+            resourceID: resource.id,
+            resourceTitle: resource.title,
+            assetID: assetID,
+            format: resource.format,
             readerType: readerType,
             state: .queued,
             verification: .pending,
@@ -121,57 +97,36 @@ actor ManagedDownloadStore {
 
     func update(_ record: ManagedDownloadRecord) throws {
         var manifest = try loadManifest(namespace: record.namespace)
-        if let index = manifest.records.firstIndex(where: { $0.id == record.id }) {
-            manifest.records[index] = record
-        } else {
-            manifest.records.append(record)
-        }
+        if let index = manifest.records.firstIndex(where: { $0.id == record.id }) { manifest.records[index] = record }
+        else { manifest.records.append(record) }
         try saveManifest(manifest, namespace: record.namespace)
     }
 
     func destination(for record: ManagedDownloadRecord) throws -> ManagedDownloadDestination {
         let namespaceURL = namespaceDirectory(record.namespace)
         let staging = namespaceURL.appendingPathComponent("staging", isDirectory: true)
-        let contentDirectory = namespaceURL
-            .appendingPathComponent("content", isDirectory: true)
-            .appendingPathComponent(stableFileName(record.volumeID), isDirectory: true)
+        let contentDirectory = namespaceURL.appendingPathComponent("content", isDirectory: true).appendingPathComponent(stableFileName(record.assetID), isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
         let ext = safeExtension(record.format)
-        let fileName = "publication.\(ext)"
+        let fileName = "asset.\(ext)"
         let finalURL = contentDirectory.appendingPathComponent(fileName, isDirectory: false)
-        let relativePath = "content/\(stableFileName(record.volumeID))/\(fileName)"
         return ManagedDownloadDestination(
-            partialFileURL: staging.appendingPathComponent(record.id + ".part", isDirectory: false),
+            partialFileURL: staging.appendingPathComponent(record.id + ".part"),
             finalFileURL: finalURL,
-            finalRelativePath: relativePath
+            finalRelativePath: "content/\(stableFileName(record.assetID))/\(fileName)"
         )
     }
 
-    func publish(
-        record: ManagedDownloadRecord,
-        destination: ManagedDownloadDestination,
-        receipt: ManagedDownloadReceipt,
-        now: Date = Date()
-    ) throws -> ManagedDownloadRecord {
-        guard receipt.receivedBytes > 0,
-              fileSize(at: destination.partialFileURL) == receipt.receivedBytes,
+    func publish(record: ManagedDownloadRecord, destination: ManagedDownloadDestination, receipt: ManagedDownloadReceipt, now: Date = Date()) throws -> ManagedDownloadRecord {
+        guard receipt.receivedBytes > 0, fileSize(at: destination.partialFileURL) == receipt.receivedBytes,
               receipt.expectedBytes.map({ $0 == receipt.receivedBytes }) ?? true else {
-            if FileManager.default.fileExists(atPath: destination.partialFileURL.path) {
-                try? FileManager.default.removeItem(at: destination.partialFileURL)
-            }
+            try? FileManager.default.removeItem(at: destination.partialFileURL)
             throw ManagedDownloadTransferError.invalidResponse
         }
         if FileManager.default.fileExists(atPath: destination.finalFileURL.path) {
-            _ = try FileManager.default.replaceItemAt(
-                destination.finalFileURL,
-                withItemAt: destination.partialFileURL,
-                backupItemName: nil,
-                options: []
-            )
-        } else {
-            try FileManager.default.moveItem(at: destination.partialFileURL, to: destination.finalFileURL)
-        }
+            _ = try FileManager.default.replaceItemAt(destination.finalFileURL, withItemAt: destination.partialFileURL, backupItemName: nil, options: [])
+        } else { try FileManager.default.moveItem(at: destination.partialFileURL, to: destination.finalFileURL) }
         var completed = record
         completed.state = .completed
         completed.verification = .verified
@@ -188,18 +143,7 @@ actor ManagedDownloadStore {
     func remove(_ record: ManagedDownloadRecord) throws {
         var manifest = try loadManifest(namespace: record.namespace)
         manifest.records.removeAll { $0.id == record.id }
-        if let path = record.localRelativePath {
-            if let fileURL = resolvedContentURL(path, namespace: record.namespace),
-               FileManager.default.fileExists(atPath: fileURL.path) {
-                try FileManager.default.removeItem(at: fileURL)
-            }
-        }
-        let partialURL = namespaceDirectory(record.namespace)
-            .appendingPathComponent("staging", isDirectory: true)
-            .appendingPathComponent(record.id + ".part", isDirectory: false)
-        if FileManager.default.fileExists(atPath: partialURL.path) {
-            try FileManager.default.removeItem(at: partialURL)
-        }
+        try removeFiles(for: record, namespace: record.namespace)
         try saveManifest(manifest, namespace: record.namespace)
     }
 
@@ -210,89 +154,75 @@ actor ManagedDownloadStore {
     }
 
     func fileURL(for record: ManagedDownloadRecord) -> URL? {
-        guard record.isVerifiedOfflineCopy, let relativePath = record.localRelativePath else { return nil }
-        guard let url = resolvedContentURL(relativePath, namespace: record.namespace) else { return nil }
-        return fileSize(at: url) > 0 ? url : nil
+        guard record.isVerifiedOfflineCopy, let relativePath = record.localRelativePath,
+              let url = resolvedContentURL(relativePath, namespace: record.namespace), fileSize(at: url) ?? 0 > 0 else { return nil }
+        return url
     }
 
     func verifiedReaderArtifact(recordID: String, namespace: String) throws -> IosReaderDownloadArtifact? {
         let manifest = try loadManifest(namespace: namespace)
         guard let record = manifest.records.first(where: { $0.id == recordID }),
               record.namespace == namespace,
-              ManagedReaderAccessPolicy.supportsNativeReader(
-                  readerType: record.readerType,
-                  format: record.format
-              ),
-              let fileURL = fileURL(for: record)
-        else { return nil }
+              ManagedReaderAccessPolicy.supportsNativeReader(readerType: record.readerType, format: record.format),
+              let fileURL = fileURL(for: record) else { return nil }
         return IosReaderDownloadArtifact(
             fileURL: fileURL,
-            sourceID: record.volumeID,
-            displayTitle: record.workTitle,
-            workID: record.workID,
-            volumeID: record.volumeID,
+            assetID: record.assetID,
+            displayTitle: record.resourceTitle,
+            bookID: record.bookID,
+            resourceID: record.resourceID,
             sourceFormat: record.format
         )
     }
 
     private func loadManifest(namespace: String) throws -> Manifest {
         let url = manifestURL(namespace)
-        guard FileManager.default.fileExists(atPath: url.path) else { return Manifest(records: []) }
+        guard FileManager.default.fileExists(atPath: url.path) else { return Manifest(contractVersion: Self.currentContractVersion, records: []) }
         do {
-            return try decoder.decode(Manifest.self, from: Data(contentsOf: url))
+            let manifest = try decoder.decode(Manifest.self, from: Data(contentsOf: url))
+            guard manifest.contractVersion == Self.currentContractVersion else { throw CocoaError(.fileReadCorruptFile) }
+            return manifest
         } catch {
             let directory = namespaceDirectory(namespace)
-            if FileManager.default.fileExists(atPath: directory.path) {
-                try FileManager.default.removeItem(at: directory)
-            }
-            return Manifest(records: [])
+            if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+            return Manifest(contractVersion: Self.currentContractVersion, records: [])
         }
     }
 
     private func saveManifest(_ manifest: Manifest, namespace: String) throws {
         let directory = namespaceDirectory(namespace)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try encoder.encode(manifest).write(to: manifestURL(namespace), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let output = Manifest(contractVersion: Self.currentContractVersion, records: manifest.records)
+        try encoder.encode(output).write(to: manifestURL(namespace), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
-    private func namespaceDirectory(_ namespace: String) -> URL {
-        rootDirectory.appendingPathComponent(stableFileName(namespace), isDirectory: true)
-    }
-
-    private func manifestURL(_ namespace: String) -> URL {
-        namespaceDirectory(namespace).appendingPathComponent("manifest.json", isDirectory: false)
-    }
+    private func namespaceDirectory(_ namespace: String) -> URL { rootDirectory.appendingPathComponent(stableFileName(namespace), isDirectory: true) }
+    private func manifestURL(_ namespace: String) -> URL { namespaceDirectory(namespace).appendingPathComponent("manifest.json") }
 
     private func resolvedContentURL(_ relativePath: String, namespace: String) -> URL? {
-        guard !relativePath.hasPrefix("/"), !relativePath.contains("\\") else { return nil }
-        let namespaceRoot = namespaceDirectory(namespace).standardizedFileURL
-        let candidate = namespaceRoot.appendingPathComponent(relativePath).standardizedFileURL
-        let rootPrefix = namespaceRoot.path.hasSuffix("/") ? namespaceRoot.path : namespaceRoot.path + "/"
-        guard candidate.path.hasPrefix(rootPrefix), candidate.path != namespaceRoot.path else { return nil }
-        let resolvedCandidate = candidate.resolvingSymlinksInPath()
-        let resolvedRoot = namespaceRoot.resolvingSymlinksInPath()
-        let resolvedPrefix = resolvedRoot.path.hasSuffix("/") ? resolvedRoot.path : resolvedRoot.path + "/"
-        guard resolvedCandidate.path.hasPrefix(resolvedPrefix),
-              resolvedCandidate.path != resolvedRoot.path else { return nil }
-        return resolvedCandidate
+        guard !relativePath.isEmpty, !relativePath.hasPrefix("/"), !relativePath.contains("..") else { return nil }
+        let root = namespaceDirectory(namespace).standardizedFileURL
+        let candidate = root.appendingPathComponent(relativePath).standardizedFileURL
+        return candidate.path.hasPrefix(root.path + "/") ? candidate : nil
+    }
+
+    private func removeFiles(for record: ManagedDownloadRecord, namespace: String) throws {
+        if let path = record.localRelativePath, let fileURL = resolvedContentURL(path, namespace: namespace) { try? FileManager.default.removeItem(at: fileURL) }
+        let partial = namespaceDirectory(namespace).appendingPathComponent("staging", isDirectory: true).appendingPathComponent(record.id + ".part")
+        try? FileManager.default.removeItem(at: partial)
     }
 
     private func fileSize(at url: URL) -> Int64? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
-        return (attributes[.size] as? NSNumber)?.int64Value
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attributes[.size] as? NSNumber else { return nil }
+        return size.int64Value
+    }
+
+    private func stableFileName(_ value: String) -> String {
+        value.data(using: .utf8)?.base64EncodedString().replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "+", with: "-") ?? UUID().uuidString
     }
 
     private func safeExtension(_ value: String) -> String {
         let normalized = value.lowercased().filter { $0.isLetter || $0.isNumber }
-        return normalized.isEmpty ? "bin" : String(normalized.prefix(12))
-    }
-
-    private func stableFileName(_ value: String) -> String {
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
+        return normalized.isEmpty ? "bin" : String(normalized.prefix(8))
     }
 }

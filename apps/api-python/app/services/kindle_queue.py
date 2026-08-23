@@ -54,20 +54,18 @@ class KindleSendError(RuntimeError):
         self.transient = transient
 
 
-def _stored_path(path_value: Any, settings: Settings) -> Path | None:
-    if not path_value:
+def _library_asset_path(file_row: dict[str, Any]) -> Path | None:
+    root_value = file_row.get("libraryRoot")
+    relative_value = file_row.get("sourceRelativePath")
+    if not root_value or not relative_value:
         return None
-    path = Path(str(path_value))
-    if not path.is_absolute():
-        path = settings.resolved_storage_root / path
+    relative_path = Path(str(relative_value))
+    if relative_path.is_absolute():
+        return None
     try:
-        resolved = path.expanduser().resolve()
-        storage_root = settings.resolved_storage_root.resolve()
-        if (
-            resolved == storage_root
-            or storage_root in resolved.parents
-            or path.is_absolute()
-        ):
+        library_root = Path(str(root_value)).expanduser().resolve()
+        resolved = (library_root / relative_path).resolve()
+        if resolved == library_root or library_root in resolved.parents:
             return resolved
     except OSError:
         return None
@@ -175,7 +173,7 @@ def _update_send_snapshot(
     return task or {"id": task_id}
 
 
-def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
+def _send_task(db: Session, _settings: Settings, task: dict[str, Any]) -> None:
     asset_id = task.get("assetId")
     if not asset_id:
         raise KindleSendError("附件记录已不存在")
@@ -186,7 +184,7 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
     if not file_row:
         raise KindleSendError("附件记录已不存在")
     config = smtp_connection_settings(values)
-    path = _stored_path(file_row.get("sourcePath"), settings)
+    path = _library_asset_path(file_row)
     if path is None or not path.is_file():
         raise KindleSendError("附件文件已不存在或不在受管理目录中")
     file_format = str(

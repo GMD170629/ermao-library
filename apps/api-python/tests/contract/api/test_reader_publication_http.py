@@ -7,6 +7,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models import ReadableResourceNavigationUnit
 from app.models.auth import User
+from app.models.library import Library
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -23,6 +25,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
 )
+from app.modules.publications.infrastructure.mobi_adapter import load_mobi_core
 
 
 def _path_key(path: str) -> str:
@@ -45,6 +48,13 @@ def _login(client: TestClient, db: Session) -> User:
     )
     assert response.status_code == 200
     return user
+
+
+def _use_storage_root_as_library_root(db: Session, settings: Settings) -> None:
+    library = db.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(settings.resolved_storage_root)
+    db.flush()
 
 
 def _source_node(
@@ -73,12 +83,13 @@ def _seed_resource(
     *,
     resource_id: str,
     book_id: str,
-    path: str,
+    source_path: str,
+    relative_path: str,
     title: str,
     fmt: str,
     mime_type: str,
 ) -> LibraryReadableResource:
-    source = Path(path)
+    source = Path(source_path)
     mtime_ms = int(source.stat().st_mtime * 1000)
     book_node = _source_node(
         f"{book_id}-node",
@@ -88,7 +99,7 @@ def _seed_resource(
     )
     source_node = _source_node(
         f"{resource_id}-node",
-        path,
+        relative_path,
         size_bytes=source.stat().st_size,
         mtime_ms=mtime_ms,
     )
@@ -207,11 +218,13 @@ def _seed_epub(
     relative_path = Path("library") / f"exact{user_suffix}.epub"
     source_path = settings.resolved_storage_root / relative_path
     _write_epub(source_path)
+    _use_storage_root_as_library_root(db, settings)
     return _seed_resource(
         db,
         resource_id=f"resource-publication{user_suffix}",
         book_id=f"book-publication{user_suffix}",
-        path=str(source_path),
+        source_path=str(source_path),
+        relative_path=relative_path.as_posix(),
         title="跨端出版物",
         fmt="EPUB",
         mime_type="application/epub+zip",
@@ -226,11 +239,13 @@ def _seed_txt(db: Session, settings: Settings) -> LibraryReadableResource:
         b"\xff\xfe"
         + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
     )
+    _use_storage_root_as_library_root(db, settings)
     return _seed_resource(
         db,
         resource_id="resource-txt-publication",
         book_id="book-txt-publication",
-        path=str(source_path),
+        source_path=str(source_path),
+        relative_path=relative_path.as_posix(),
         title="确定性文本出版物",
         fmt="TXT",
         mime_type="text/plain",
@@ -478,8 +493,21 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     client: TestClient,
     db_session: Session,
     test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     _login(client, db_session)
+    runtime = (
+        Path(__file__).parents[5]
+        / "build"
+        / "mobi-core-runtime"
+        / "libermao_mobi_core.so"
+    )
+    if not runtime.is_file():
+        pytest.skip("pinned libmobi test runtime is not built")
+    monkeypatch.setenv("ERMAO_MOBI_CORE_LIBRARY", str(runtime))
+    load_mobi_core.cache_clear()
+    request.addfinalizer(load_mobi_core.cache_clear)
     fixture = (
         Path(__file__).parents[5] / "test-data" / "library" / "mobi" / "08-zh-hans.azw3"
     )
@@ -487,11 +515,13 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixture, target)
     source_hash_before = hashlib.sha256(target.read_bytes()).hexdigest()
+    _use_storage_root_as_library_root(db_session, test_settings)
     resource = _seed_resource(
         db_session,
         resource_id="resource-mobi-publication",
         book_id="book-mobi-publication",
-        path=str(target),
+        source_path=str(target),
+        relative_path="library/exact.azw3",
         title="中文字符完整性验证",
         fmt="AZW3",
         mime_type="application/x-mobipocket-ebook",

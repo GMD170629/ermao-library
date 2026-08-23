@@ -53,17 +53,17 @@ struct IosMobiPublicationFactory: Sendable {
 
     func open(
         fileURL: URL,
-        sourceID: String,
+        resourceID: String,
         displayTitle: String? = nil
     ) async throws -> IosMobiPublicationResult {
-        guard Self.isValidSourceIdentity(sourceID) else {
+        guard Self.isValidSourceIdentity(resourceID) else {
             throw IosMobiPublicationError.invalidSourceIdentity
         }
         let book = try IosMobiBook.open(fileURL: fileURL)
         do {
             return try await build(
                 book: book,
-                sourceID: sourceID,
+                resourceID: resourceID,
                 displayTitle: displayTitle
             )
         } catch {
@@ -74,10 +74,10 @@ struct IosMobiPublicationFactory: Sendable {
 
     func build(
         book: any IosMobiBookAccess,
-        sourceID: String,
+        resourceID: String,
         displayTitle: String? = nil
     ) async throws -> IosMobiPublicationResult {
-        guard Self.isValidSourceIdentity(sourceID) else {
+        guard Self.isValidSourceIdentity(resourceID) else {
             throw IosMobiPublicationError.invalidSourceIdentity
         }
 
@@ -158,11 +158,11 @@ struct IosMobiPublicationFactory: Sendable {
         let description = try await book.metadata(.description)
 
         let metadata = Metadata(
-            identifier: "urn:shuku:publication:\(sourceID)",
+            identifier: "urn:shuku:publication:\(resourceID)",
             conformsTo: [.epub],
             title: title.flatMap { $0.isEmpty ? nil : $0 }
                 ?? fallbackTitle.flatMap { $0.isEmpty ? nil : $0 }
-                ?? sourceID,
+                ?? resourceID,
             languages: language.flatMap { $0.isEmpty ? nil : [$0] } ?? [],
             authors: author.flatMap { $0.isEmpty ? nil : [Contributor(name: $0)] } ?? [],
             publishers: publisher.flatMap { $0.isEmpty ? nil : [Contributor(name: $0)] } ?? [],

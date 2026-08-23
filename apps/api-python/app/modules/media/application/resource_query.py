@@ -10,6 +10,7 @@ from typing import Protocol
 class MediaAssetResource:
     id: str
     path: str
+    source_root: str
     mime_type: str
 
 

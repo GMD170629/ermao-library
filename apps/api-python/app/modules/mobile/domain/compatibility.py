@@ -7,15 +7,16 @@ from typing import Literal
 
 SERVER_IDENTITY_SETTING_KEY = "mobile.serverIdentity"
 MOBILE_SERVICE_NAME: Literal["ermao-books"] = "ermao-books"
-MOBILE_PROTOCOL_VERSION: Literal[2] = 2
-MINIMUM_SUPPORTED_MOBILE_CLIENT_VERSION: Literal[2] = 2
+MOBILE_PROTOCOL_VERSION: Literal[3] = 3
+MINIMUM_SUPPORTED_MOBILE_CLIENT_VERSION: Literal[3] = 3
 MOBILE_READER_SCHEMA_VERSION: Literal[4] = 4
+MOBILE_LIBRARY_SCHEMA_VERSION: Literal[1] = 1
 
 
 @dataclass(frozen=True, slots=True)
 class MobileProtocolCompatibility:
-    version: Literal[2]
-    minimum_supported_client_version: Literal[2]
+    version: Literal[3]
+    minimum_supported_client_version: Literal[3]
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +25,9 @@ class MobileCapabilities:
     cookie_session: Literal[True]
     reader_v4: Literal[True]
     media_range: Literal[True]
-    managed_offline_downloads: Literal[False]
+    managed_offline_downloads: Literal[True]
+    book_resource_asset: Literal[True]
+    book_detail_management: Literal[False]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +37,7 @@ class MobileCompatibility:
     server_version: str
     protocol: MobileProtocolCompatibility
     reader_schema_version: Literal[4]
+    library_schema_version: Literal[1]
     capabilities: MobileCapabilities
 
 
@@ -53,11 +57,14 @@ def mobile_compatibility(
             minimum_supported_client_version=MINIMUM_SUPPORTED_MOBILE_CLIENT_VERSION,
         ),
         reader_schema_version=MOBILE_READER_SCHEMA_VERSION,
+        library_schema_version=MOBILE_LIBRARY_SCHEMA_VERSION,
         capabilities=MobileCapabilities(
             setup=True,
             cookie_session=True,
             reader_v4=True,
             media_range=True,
-            managed_offline_downloads=False,
+            managed_offline_downloads=True,
+            book_resource_asset=True,
+            book_detail_management=False,
         ),
     )

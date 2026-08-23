@@ -128,9 +128,9 @@ class VisualFixtureActivityTest {
     fun workDetailContinuousStatesCaptureForExternalReview() {
         val outputDirectory = visualFixtureOutputDirectory()
         val variants = listOf(
-            VisualFixtureScenario.WorkAbout,
-            VisualFixtureScenario.WorkVolumes,
-            VisualFixtureScenario.WorkSingleEbook,
+            VisualFixtureScenario.BookAbout,
+            VisualFixtureScenario.BookResources,
+            VisualFixtureScenario.BookSingleEbook,
         ).map { scenario ->
             VisualFixtureVariant(
                 scenario = scenario,
@@ -148,7 +148,7 @@ class VisualFixtureActivityTest {
     @Test
     fun englishWorkDetailPopupsKeepTheRequestedLocaleOutsideTheActivityWindow() {
         val variant = VisualFixtureVariant(
-            scenario = VisualFixtureScenario.WorkActions,
+            scenario = VisualFixtureScenario.BookActions,
             locale = VisualFixtureLocale.EnUs,
             appearance = VisualFixtureAppearance.Light,
         )
@@ -179,7 +179,7 @@ class VisualFixtureActivityTest {
     fun workDetailQuickControlsAndFullPathDialogAreInteractive() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val variant = VisualFixtureVariant(
-            scenario = VisualFixtureScenario.WorkVolumes,
+            scenario = VisualFixtureScenario.BookResources,
             locale = VisualFixtureLocale.ZhCn,
             appearance = VisualFixtureAppearance.Light,
         )
@@ -201,7 +201,7 @@ class VisualFixtureActivityTest {
             awaitTextDisplayed(scenario.localizedString(variant, R.string.downloads_remove_title))
         }
 
-        val pathVariant = variant.copy(scenario = VisualFixtureScenario.WorkAbout)
+        val pathVariant = variant.copy(scenario = VisualFixtureScenario.BookAbout)
         ActivityScenario.launch<VisualFixtureActivity>(
             VisualFixtureContract.intent(instrumentation.targetContext, pathVariant),
         ).use { scenario ->
@@ -280,8 +280,8 @@ class VisualFixtureActivityTest {
                 composeRule.onNodeWithTag(tag).assertIsDisplayed()
             }
             LIBRARY_FILTER_LARGE_FONT_APPLY_TAG -> assertFilterApplyReachable()
-            WORK_VOLUME_LARGE_FONT_LAST_ITEM_TAG -> {
-                composeRule.onNodeWithTag("work-detail-list").performScrollToIndex(WORK_VOLUME_GRID_ITEM_INDEX)
+            BOOK_RESOURCE_LARGE_FONT_LAST_ITEM_TAG -> {
+                composeRule.onNodeWithTag("work-detail-list").performScrollToIndex(BOOK_RESOURCE_GRID_ITEM_INDEX)
                 composeRule.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
             }
             else -> composeRule.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
@@ -302,13 +302,13 @@ class VisualFixtureActivityTest {
     private fun assertScenarioRoot(variant: VisualFixtureVariant) {
         val rootTag = when (variant.scenario) {
             VisualFixtureScenario.HomeDefault -> "home-continue"
-            VisualFixtureScenario.LibraryWorks,
+            VisualFixtureScenario.LibraryBooks,
             VisualFixtureScenario.LibraryFilter,
             -> "tab-library"
-            VisualFixtureScenario.WorkAbout,
-            VisualFixtureScenario.WorkVolumes,
-            VisualFixtureScenario.WorkSingleEbook,
-            VisualFixtureScenario.WorkActions,
+            VisualFixtureScenario.BookAbout,
+            VisualFixtureScenario.BookResources,
+            VisualFixtureScenario.BookSingleEbook,
+            VisualFixtureScenario.BookActions,
             -> "work-detail"
         }
         composeRule.onNodeWithTag(rootTag).assertIsDisplayed()
@@ -325,14 +325,14 @@ class VisualFixtureActivityTest {
                 awaitTagDisplayed("library-filter-title")
                 composeRule.onNodeWithTag("library-filter-title").assertTextEquals(filterTitle)
             }
-            VisualFixtureScenario.WorkActions -> {
+            VisualFixtureScenario.BookActions -> {
                 composeRule.onNodeWithTag("work-more-action").performClick()
                 composeRule.waitForIdle()
                 awaitTagDisplayed("work-book-control-menu")
             }
-            VisualFixtureScenario.WorkAbout,
-            VisualFixtureScenario.WorkVolumes,
-            VisualFixtureScenario.WorkSingleEbook,
+            VisualFixtureScenario.BookAbout,
+            VisualFixtureScenario.BookResources,
+            VisualFixtureScenario.BookSingleEbook,
             -> Unit
             else -> Unit
         }
@@ -370,9 +370,9 @@ private fun largeFontOutputName(variant: VisualFixtureVariant): String =
 
 private fun largeFontReachabilityTag(scenario: VisualFixtureScenario): String = when (scenario) {
     VisualFixtureScenario.HomeDefault -> HOME_LARGE_FONT_LAST_ITEM_TAG
-    VisualFixtureScenario.LibraryWorks -> LIBRARY_LARGE_FONT_LAST_ITEM_TAG
+    VisualFixtureScenario.LibraryBooks -> LIBRARY_LARGE_FONT_LAST_ITEM_TAG
     VisualFixtureScenario.LibraryFilter -> LIBRARY_FILTER_LARGE_FONT_APPLY_TAG
-    VisualFixtureScenario.WorkVolumes -> WORK_VOLUME_LARGE_FONT_LAST_ITEM_TAG
+    VisualFixtureScenario.BookResources -> BOOK_RESOURCE_LARGE_FONT_LAST_ITEM_TAG
     else -> error("No large-font reachability target for ${scenario.wireValue}")
 }
 
@@ -382,8 +382,8 @@ private const val LIBRARY_LARGE_FONT_LAST_ITEM_TAG = "work-work-6"
 private const val LIBRARY_LARGE_FONT_LAST_ITEM_INDEX = 5
 private const val LIBRARY_FILTER_LARGE_FONT_APPLY_TAG = "library-filter-apply"
 private const val FILTER_SCROLL_GESTURE_ATTEMPTS = 4
-private const val WORK_VOLUME_LARGE_FONT_LAST_ITEM_TAG = "work-volume-volume-4"
-private const val WORK_VOLUME_GRID_ITEM_INDEX = 3
+private const val BOOK_RESOURCE_LARGE_FONT_LAST_ITEM_TAG = "work-resource-resource-4"
+private const val BOOK_RESOURCE_GRID_ITEM_INDEX = 3
 
 private fun android.app.Instrumentation.movePointerToSystemBar() {
     val now = SystemClock.uptimeMillis()
@@ -420,15 +420,15 @@ private fun android.app.Instrumentation.movePointerToSystemBar() {
 
 private val visualFixtureScenarioOrder: List<VisualFixtureScenario> =
     listOf(
-        VisualFixtureScenario.WorkAbout,
-        VisualFixtureScenario.WorkVolumes,
-        VisualFixtureScenario.WorkSingleEbook,
+        VisualFixtureScenario.BookAbout,
+        VisualFixtureScenario.BookResources,
+        VisualFixtureScenario.BookSingleEbook,
         VisualFixtureScenario.HomeDefault,
-        VisualFixtureScenario.LibraryWorks,
+        VisualFixtureScenario.LibraryBooks,
         // Modal fixtures run last so their exit transitions cannot cover the
         // first frame of a subsequent full-screen golden.
         VisualFixtureScenario.LibraryFilter,
-        VisualFixtureScenario.WorkActions,
+        VisualFixtureScenario.BookActions,
     )
 
 private val visualFixtureVariants: List<VisualFixtureVariant> =
@@ -443,9 +443,9 @@ private val visualFixtureVariants: List<VisualFixtureVariant> =
 private val largeFontFixtureVariants: List<VisualFixtureVariant> =
     listOf(
         VisualFixtureScenario.HomeDefault,
-        VisualFixtureScenario.LibraryWorks,
+        VisualFixtureScenario.LibraryBooks,
         VisualFixtureScenario.LibraryFilter,
-        VisualFixtureScenario.WorkVolumes,
+        VisualFixtureScenario.BookResources,
     ).flatMap { scenario ->
         VisualFixtureLocale.entries.map { locale ->
             VisualFixtureVariant(scenario, locale, VisualFixtureAppearance.Light)

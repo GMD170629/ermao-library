@@ -64,9 +64,13 @@ def _add_book(
     *,
     book_id: str = "detail-book",
     resource_count: int = 3,
+    book_physical_kind: str = "DIRECTORY",
 ) -> tuple[LibraryBook, list[LibraryReadableResource]]:
     book_node = _source_node(
-        f"{book_id}-node", f"{book_id}/", physical_kind="DIRECTORY", size=None
+        f"{book_id}-node",
+        f"{book_id}/" if book_physical_kind == "DIRECTORY" else f"{book_id}.epub",
+        physical_kind=book_physical_kind,
+        size=None if book_physical_kind == "DIRECTORY" else 100,
     )
     book = LibraryBook(
         id=book_id,
@@ -212,6 +216,10 @@ def test_book_detail_is_bounded_and_projects_resource_assets(
     assert selected["progress"] == 42.5
     assert selected["assets"][0]["resourceId"] == selected["id"]
     assert selected["assets"][0]["url"] == "/api/assets/detail-resource-02-asset"
+    assert selected["assets"][0]["downloadUrl"] == (
+        "/api/assets/detail-resource-02-asset?download=true"
+    )
+    assert "path" not in selected["assets"][0]
 
 
 def test_book_resource_query_pages_deterministically(client, db_session) -> None:
@@ -349,6 +357,10 @@ def test_source_node_edit_respects_opf_setting_and_publishes_its_own_cover(
     assert metadata.description == "目录自己的简介"
     assert metadata.cover_status == "READY"
     assert metadata.cover_path == f"covers/source-nodes/{folder.id}.png"
+    book_metadata = db_session.get(LibraryBookMetadata, book.id)
+    assert book_metadata is not None
+    assert book_metadata.title == "Detail book"
+    assert book_metadata.cover_path is None
     assert (test_settings.resolved_storage_root / metadata.cover_path).is_file()
     operation = db_session.scalar(select(MetadataWritebackOperation))
     assert operation is not None
@@ -370,6 +382,42 @@ def test_source_node_edit_respects_opf_setting_and_publishes_its_own_cover(
     assert opf.title == "彩色珍藏版"
     assert opf.description == "目录自己的简介"
     assert (directory_path / "metadata.cover.png").is_file()
+
+
+def test_book_anchor_file_presentation_projects_explicit_cover_to_book(
+    client, db_session, test_settings
+) -> None:
+    _login(client, db_session, email="file-book-cover@example.com")
+    book, _resources = _add_book(
+        db_session,
+        book_id="flat-file-book",
+        resource_count=0,
+        book_physical_kind="REGULAR_FILE",
+    )
+    db_session.commit()
+
+    response = client.put(
+        f"/api/books/{book.id}/source-nodes/{book.source_node_id}",
+        data={"title": "显式书名", "description": "显式简介"},
+        files={"cover": ("book.png", _png_cover(), "image/png")},
+    )
+    assert response.status_code == 200, response.text
+
+    db_session.expire_all()
+    source_metadata = db_session.get(LibrarySourceNodeMetadata, book.source_node_id)
+    book_metadata = db_session.get(LibraryBookMetadata, book.id)
+    assert source_metadata is not None
+    assert book_metadata is not None
+    expected_path = f"covers/source-nodes/{book.source_node_id}.png"
+    assert source_metadata.cover_path == expected_path
+    assert book_metadata.cover_path == expected_path
+    assert book_metadata.cover_status == "READY"
+    assert (test_settings.resolved_storage_root / expected_path).is_file()
+
+    payload = client.get(f"/api/books/{book.id}").json()["data"]["book"]
+    assert payload["title"] == "显式书名"
+    assert payload["description"] == "显式简介"
+    assert payload["coverStatus"] == "READY"
 
 
 def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> None:

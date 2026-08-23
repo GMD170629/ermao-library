@@ -1,35 +1,27 @@
 'use client';
 
 import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
-import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
-import { withBasePath } from '../../lib/base-path';
 import type { MediaKind, ReadableResourceView, BookView } from '../../types/book';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { completeMetadataApply } from './application/metadata-apply-completion';
+import {
+  fetchMetadataProviders,
+  searchSourceNodeMetadata,
+  updateResource,
+  updateSourceNodeMetadata
+} from './api/client';
 import { mediaKindOfResource } from './book-detail';
+import type { SourceNodeMetadataCandidate } from './model/book-contents';
 
 type MetadataSource = string;
-type MetadataField = 'coverUrl' | 'title' | 'author' | 'description' | 'tags' | 'seriesName' | 'publisher' | 'publishedAt' | 'language' | 'isbn';
-
-type MetadataCandidate = {
-  id: string;
-  source: MetadataSource;
-  title?: string | null;
-  author?: string | null;
-  description?: string | null;
-  tags?: string[];
-  seriesName?: string | null;
-  resourceMetadata?: { publisher?: string | null; publishedAt?: string | null; language?: string | null; isbn?: string | null } | null;
-  coverUrl?: string | null;
-  confidence: number;
-  raw: unknown;
-};
+type MetadataField = 'title' | 'description';
+type MetadataCandidate = SourceNodeMetadataCandidate;
 
 type MetadataLookupModalProps = {
   book: BookView;
@@ -41,21 +33,11 @@ type MetadataLookupModalProps = {
 };
 
 const fieldLabels: Record<MetadataField, string> = {
-  coverUrl: '封面',
   title: '标题',
-  author: '作者',
-  description: '简介',
-  tags: '标签',
-  seriesName: '系列',
-  publisher: '出版社',
-  publishedAt: '出版时间',
-  language: '语言',
-  isbn: 'ISBN'
+  description: '简介'
 };
 
-const fields: MetadataField[] = ['coverUrl', 'title', 'author', 'description', 'tags', 'seriesName', 'publisher', 'publishedAt', 'language', 'isbn'];
-const resourceFields = new Set<MetadataField>(['publisher', 'publishedAt', 'language', 'isbn']);
-const ALL_RESOURCES = '__all_resources__';
+const fields: MetadataField[] = ['title', 'description'];
 
 function valueLabel(value: unknown) {
   if (Array.isArray(value)) return value.join(', ');
@@ -69,19 +51,12 @@ function normalized(value: unknown) {
 
 function candidateValue(candidate: MetadataCandidate | null, field: MetadataField) {
   if (!candidate) return null;
-  if (field === 'publisher' || field === 'publishedAt' || field === 'language' || field === 'isbn') {
-    return candidate.resourceMetadata?.[field] ?? null;
-  }
   return candidate[field];
 }
 
-function bookValue(book: BookView, field: MetadataField, targetResource?: ReadableResourceView) {
-  if (field === 'coverUrl') return book.coverStatus === 'READY' ? book.coverUrl : null;
-  if (field === 'author') return book.author === '未知作者' ? null : book.author;
-  if (field === 'description') return book.description || null;
-  if (field === 'publisher' || field === 'publishedAt' || field === 'language' || field === 'isbn') return targetResource?.[field] ?? null;
-  if (field === 'tags') return book.tags;
-  return field === 'title' || field === 'seriesName' ? book[field] : null;
+function currentValueForField(book: BookView, field: MetadataField, targetResource?: ReadableResourceView) {
+  if (field === 'title') return targetResource?.title ?? book.title;
+  return targetResource?.description || book.description || null;
 }
 
 function hasCandidateValue(value: unknown) {
@@ -89,22 +64,12 @@ function hasCandidateValue(value: unknown) {
   return value !== null && value !== undefined && value !== '';
 }
 
-function isCoverField(field: MetadataField) {
-  return field === 'coverUrl';
-}
-
-function previewCoverUrl(value: string) {
-  if (value.startsWith('/')) return withBasePath(value);
-  return withBasePath(`/api/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
-}
-
 function defaultFields(book: BookView, candidate: MetadataCandidate | null, availableFields: MetadataField[], targetResource?: ReadableResourceView) {
   if (!candidate) return [];
   return availableFields.filter((field) => {
     const next = candidateValue(candidate, field);
     if (!hasCandidateValue(next)) return false;
-    if (isCoverField(field)) return book.coverStatus !== 'READY';
-    return normalized(next) !== normalized(bookValue(book, field, targetResource));
+    return normalized(next) !== normalized(currentValueForField(book, field, targetResource));
   });
 }
 
@@ -113,39 +78,22 @@ function initialSource(resource: ReadableResourceView | undefined): MetadataSour
 }
 
 type MetadataProviderOption = { id: string; name: string; enabled: boolean; mediaKinds: string[]; mode: string };
-type MetadataProviderPipeline = { mediaKind: string; providers: Array<{ providerId: string; enabled: boolean }> };
 function selectedMediaKind(resource: ReadableResourceView | undefined): MediaKind {
   return resource ? mediaKindOfResource(resource) : 'EBOOK';
 }
 
 export function MetadataLookupModal({ book, currentResourceId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
-  const { t: i18nAttribute, formatDate } = useAttributeI18n();
+  const { t: i18nAttribute } = useAttributeI18n();
   const targetResource = useMemo(() => book.resources.find((resource) => resource.id === currentResourceId)
     ?? book.resources.find((resource) => resource.id === book.continueResourceId)
     ?? book.resources[0] ?? null, [book.continueResourceId, book.resources, currentResourceId]);
-  const availableFields = useMemo(() => fixedScope === 'resource' ? fields.filter((field) => resourceFields.has(field)) : fields, [fixedScope]);
   const [source, setSource] = useState<MetadataSource>(() => initialSource(targetResource ?? undefined));
   const [query, setQuery] = useState(book.title);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<MetadataField[]>([]);
-  const [targetResources, setTargetResources] = useState<ReadableResourceView[]>(book.resources);
-  const [resourceTarget, setResourceTarget] = useState(ALL_RESOURCES);
-  const selectedTargetResource = resourceTarget === ALL_RESOURCES
-    ? targetResources[0]
-    : targetResources.find((resource) => resource.id === resourceTarget);
+  const selectedTargetResource = fixedScope === 'resource' ? targetResource : undefined;
   const kindResource = selectedTargetResource ?? targetResource;
-  const targetResourceId = selectedTargetResource?.id ?? null;
-  const resourceTargetOptions = useMemo(() => fixedScope === 'resource'
-    ? targetResources.filter((resource) => resource.id === currentResourceId).map((resource) => ({ value: resource.id, label: resource.title, translate: false }))
-    : [
-    {
-      value: ALL_RESOURCES,
-      label: i18nAttribute('当前图书的全部 {value0} 个资源', { value0: targetResources.length }),
-      translate: false
-    },
-    ...targetResources.map((resource) => ({ value: resource.id, label: resource.title, translate: false }))
-  ], [currentResourceId, fixedScope, i18nAttribute, targetResources]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -171,48 +119,42 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setSelectedFields([]);
     setMessage('');
     setError('');
-    fetch('/api/metadata/providers', { cache: 'no-store' })
-      .then((response) => response.json() as Promise<{ ok: boolean; data?: { providers: MetadataProviderOption[]; pipelines?: MetadataProviderPipeline[] }; error?: { message: string } }>)
-      .then((payload) => {
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取元数据插件失败');
-        const nextProviders = payload.data?.providers ?? [];
+    const controller = new AbortController();
+    void fetchMetadataProviders(controller.signal)
+      .then(({ providers: nextProviders, pipelines }) => {
         const mediaKind = selectedMediaKind(kindResource);
-        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.mediaKind === mediaKind);
+        const pipeline = pipelines.find((item) => item.mediaKind === mediaKind);
         const nextEnabledProviderIds = (pipeline?.providers ?? []).filter((item) => item.enabled).map((item) => item.providerId);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
         const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.mediaKinds.includes(mediaKind));
         if (applicable) setSource(applicable.id);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : '读取元数据插件失败'));
+      .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '读取元数据插件失败'); });
+    return () => controller.abort();
   }, [book, kindResource, open]);
 
   useEffect(() => {
     if (!open) return;
-    setResourceTarget(fixedScope === 'resource' && currentResourceId ? currentResourceId : ALL_RESOURCES);
-    setTargetResources(book.resources);
-  }, [book.id, book.resources, currentResourceId, fixedScope, open]);
+    setSelectedFields([]);
+  }, [book.id, currentResourceId, fixedScope, open]);
 
   useEffect(() => {
-    setSelectedFields(defaultFields(book, selected, availableFields, selectedTargetResource));
-  }, [availableFields, book, selected, selectedTargetResource]);
+    setSelectedFields(defaultFields(book, selected, fields, selectedTargetResource));
+  }, [book, selected, selectedTargetResource]);
 
   async function searchCandidates() {
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/books/${book.id}/metadata/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, query })
-      });
-      const payload = (await response.json()) as { ok: boolean; data?: { candidates: MetadataCandidate[]; message?: string | null }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '元数据查询失败');
-      const nextCandidates = payload.data?.candidates ?? [];
+      const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
+      if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim());
+      const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
       setSelectedId(nextCandidates[0]?.id ?? '');
-      setMessage(nextCandidates.length ? `找到 ${nextCandidates.length} 条候选` : payload.data?.message ?? '没有找到候选');
+      setMessage(nextCandidates.length ? `找到 ${nextCandidates.length} 条候选` : result.message ?? '没有找到候选');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据查询失败');
     } finally {
@@ -226,18 +168,18 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/books/${book.id}/metadata/apply?applyToAllResources=${resourceTarget === ALL_RESOURCES ? 'true' : 'false'}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source,
-          candidate: selected,
-          fields: selectedFields,
-          resourceId: selectedFields.some((field) => resourceFields.has(field)) ? targetResourceId : null
-        })
-      });
-      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
+      const title = selectedFields.includes('title') ? selected.title?.trim() : undefined;
+      const description = selectedFields.includes('description') ? selected.description?.trim() || null : undefined;
+      if (fixedScope === 'resource') {
+        if (!targetResource) throw new Error('元数据目标资源不存在');
+        await updateResource(book.id, targetResource.id, { ...(title ? { title } : {}), ...(description !== undefined ? { description } : {}) });
+      } else {
+        if (!book.sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
+        await updateSourceNodeMetadata(book.id, book.sourceNodeId, {
+          title: title || book.title,
+          description: description !== undefined ? description : book.description || null
+        });
+      }
       setMessage(i18nAttribute('已应用所选字段'));
       await completeMetadataApply({ close: onClose, refresh: onApplied });
     } catch (reason) {
@@ -251,30 +193,9 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setSelectedFields((current) => checked ? [...new Set([...current, field])] : current.filter((item) => item !== field));
   }
 
-  function renderFieldValue(field: MetadataField, value: unknown, kind: 'current' | 'candidate') {
+  function renderFieldValue(value: unknown, kind: 'current' | 'candidate') {
     if (!hasCandidateValue(value) && kind === 'candidate') return i18nAttribute('候选未提供该字段');
-    if (field === 'publishedAt' && typeof value === 'string') {
-      try {
-        return formatDate(value, { dateStyle: 'medium' });
-      } catch {
-        return value;
-      }
-    }
-    if (!isCoverField(field)) return valueLabel(value);
-    if (typeof value !== 'string' || !value.trim()) return '未生成';
-    return (
-      <div className="flex items-center gap-3">
-        <Image
-          src={previewCoverUrl(value)}
-          alt=""
-          width={56}
-          height={80}
-          unoptimized
-          className="h-20 w-14 rounded-lg border border-slate-200 object-cover"
-        />
-        <span className="text-xs text-slate-500">{kind === 'current' ? i18nAttribute("当前封面") : i18nAttribute("候选封面")}</span>
-      </div>
-    );
+    return valueLabel(value);
   }
 
   if (!open) return null;
@@ -322,22 +243,12 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                 className={cn('w-full rounded-2xl border p-3 text-left transition', selected?.id === candidate.id ? 'border-blue-200 bg-blue-50' : 'border-slate-200 hover:bg-slate-50')}
               >
                 <div className="flex gap-3">
-                  {candidate.coverUrl ? (
-                    <Image
-                      src={previewCoverUrl(candidate.coverUrl)}
-                      alt=""
-                      width={56}
-                      height={80}
-                      unoptimized
-                      className="h-20 w-14 shrink-0 rounded-lg border border-slate-200 object-cover"
-                    />
-                  ) : null}
                   <div data-i18n-skip className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
                       <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                     </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.author || candidate.seriesName || valueLabel(candidate.resourceMetadata?.isbn)}</div>
+                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.source}</div>
                     {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                   </div>
                 </div>
@@ -347,12 +258,6 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
           </div>
 
           <div className="min-w-0 rounded-2xl border border-slate-200">
-            {selectedFields.some((field) => resourceFields.has(field)) ? (
-              <div className="border-b border-slate-100 bg-slate-50 px-3 py-3">
-                <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>资源元数据应用范围</I18nText></div>
-                <Select value={resourceTarget} options={resourceTargetOptions} onChange={setResourceTarget} ariaLabel={i18nAttribute('资源元数据应用范围')} className="w-full" />
-              </div>
-            ) : null}
             <div className="hidden grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 md:grid">
               <div />
               <div><I18nText>字段</I18nText></div>
@@ -360,8 +265,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
               <div><I18nText>候选值</I18nText></div>
             </div>
             <div className="divide-y divide-slate-100">
-              {availableFields.map((field) => {
-                const currentValue = bookValue(book, field, selectedTargetResource);
+              {fields.map((field) => {
+                const currentValue = currentValueForField(book, field, selectedTargetResource);
                 const nextValue = candidateValue(selected, field);
                 const available = hasCandidateValue(nextValue);
                 return (
@@ -376,11 +281,11 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                     <div className="font-medium">{fieldLabels[field]}</div>
                     <div className="col-span-2 min-w-0 break-words pl-7 text-slate-500 md:col-auto md:pl-0">
                       <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>当前值</I18nText></span>
-                      {renderFieldValue(field, currentValue, 'current')}
+                      {renderFieldValue(currentValue, 'current')}
                     </div>
                     <div className="col-span-2 min-w-0 break-words pl-7 text-slate-900 md:col-auto md:pl-0">
                       <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>候选值</I18nText></span>
-                      {renderFieldValue(field, nextValue, 'candidate')}
+                      {renderFieldValue(nextValue, 'candidate')}
                     </div>
                   </label>
                 );
@@ -391,7 +296,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
 
         <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
-          <Button disabled={busy || !selected || selectedFields.length === 0 || (selectedFields.some((field) => resourceFields.has(field)) && !targetResourceId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
+          <Button disabled={busy || !selected || selectedFields.length === 0 || (fixedScope === 'resource' && !targetResource)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
     </div>

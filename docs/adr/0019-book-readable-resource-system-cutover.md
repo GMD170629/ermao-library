@@ -4,6 +4,8 @@
 - 日期：2026-08-22
 - 依据：ADR 0018、ADR 0012、ADR 0014、ADR 0016
 - 类型：fresh-only、破坏性身份切换
+- 后续：Mobile 排除条款已由 [ADR 0020](0020-mobile-book-resource-asset-cutover.md)
+  完成其独立切换决策；本文件仍记录 0019 批次当时的范围边界
 
 ## 1. 决策摘要
 

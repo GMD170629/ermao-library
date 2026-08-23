@@ -92,10 +92,10 @@ struct FacetView: View {
         case .ready(let page, let cached):
             identityHeader(page.facet, count: page.total, isCached: cached)
             if kind == .series {
-                seriesWorks(page.works)
+                seriesWorks(page.books)
             } else {
                 WorkGrid(
-                    works: page.works,
+                    works: page.books,
                     context: context,
                     client: client,
                     cache: cache,
@@ -137,7 +137,7 @@ struct FacetView: View {
         .padding(.top, .space1)
     }
 
-    private func seriesWorks(_ works: [WorkCard]) -> some View {
+    private func seriesWorks(_ works: [BookCard]) -> some View {
         LazyVStack(spacing: 0) {
             ForEach(Array(works.enumerated()), id: \.element.id) { index, work in
                 Button { openWork(work.id) } label: {
@@ -155,7 +155,7 @@ struct FacetView: View {
                                 .appTextStyle(.headline)
                                 .foregroundStyle(theme.textPrimary)
                                 .lineLimit(2)
-                            Text(work.author)
+                            Text(work.author ?? "—")
                                 .appTextStyle(.label)
                                 .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)
@@ -185,13 +185,13 @@ struct FacetView: View {
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(Text(seriesAccessibilityLabel(index: index, work: work)))
-                .onAppear { store.loadNextPageIfNeeded(workID: work.id) }
+                .onAppear { store.loadNextPageIfNeeded(bookID: work.id) }
                 Divider()
             }
         }
     }
 
-    private func mediaSummary(for work: WorkCard) -> String {
+    private func mediaSummary(for work: BookCard) -> String {
         work.availableMediaKinds.map { kind in
             switch kind {
             case .ebook: String(localized: "library.media.ebook")
@@ -202,13 +202,13 @@ struct FacetView: View {
         .joined(separator: " · ")
     }
 
-    private func seriesAccessibilityLabel(index: Int, work: WorkCard) -> String {
+    private func seriesAccessibilityLabel(index: Int, work: BookCard) -> String {
         String(
-            format: String(localized: "facet.series.work.accessibility.format"),
+            format: String(localized: "facet.series.book.accessibility.format"),
             locale: .current,
             index + 1,
             work.title,
-            work.author
+            work.author ?? "—"
         )
     }
 }

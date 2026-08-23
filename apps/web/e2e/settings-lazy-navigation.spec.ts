@@ -46,8 +46,8 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { providers: [], pipelines: [] } } });
       return;
     }
-    if (pathname.endsWith('/api/library/categories')) {
-      await route.fulfill({ json: { ok: true, data: { categories: [], page: 1, pageSize: 20, total: 0, totalPages: 1 } } });
+    if (pathname.endsWith('/api/library/facets')) {
+      await route.fulfill({ json: { ok: true, data: { facets: [], page: 1, pageSize: 20, total: 0, totalPages: 1 } } });
       return;
     }
     if (pathname.endsWith('/api/organize/policy')) {
@@ -152,14 +152,14 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   const initialAuthRequests = requestCount(counts, '/api/auth/me');
   const initialShelfRequests = requestCount(counts, '/api/shelves');
   expect(requestCount(counts, '/api/metadata/providers')).toBe(0);
-  expect(requestCount(counts, '/api/library/categories')).toBe(0);
+  expect(requestCount(counts, '/api/library/facets')).toBe(0);
   expect(requestCount(counts, '/api/organize/policy')).toBe(0);
   expect(requestCount(counts, '/api/organize/candidates')).toBe(0);
 
   await page.locator('a[href="/settings/organize?tab=providers"]').click();
   await expect.poll(() => requestCount(counts, '/api/metadata/providers')).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=categories"]').click();
-  await expect.poll(() => requestCount(counts, '/api/library/categories')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/library/facets')).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=recognition"]').click();
   await expect.poll(() => requestCount(counts, '/api/organize/policy')).toBeGreaterThan(0);
   await expect.poll(() => requestCount(counts, '/api/organize/candidates')).toBeGreaterThan(0);

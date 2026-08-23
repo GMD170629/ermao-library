@@ -277,7 +277,6 @@ final class SessionStore: ObservableObject {
         guard let namespace = currentPrivateNamespace else { return }
         do {
             try await privateContentCache.removeNamespace(namespace)
-            try IosPdfRangeCache.clearAll()
         } catch {
             throw RuntimeOperationFailure(
                 errorKind: "StorageFailure",
@@ -343,6 +342,10 @@ final class SessionStore: ObservableObject {
     }
 
     private var currentPrivateNamespace: String? {
+        privateNamespace(for: snapshot)
+    }
+
+    private func privateNamespace(for snapshot: RuntimeSessionSnapshot) -> String? {
         guard
             let profile = snapshot.profile,
             let userID = snapshot.userID,
@@ -352,6 +355,24 @@ final class SessionStore: ObservableObject {
     }
 
     private func receive(_ newSnapshot: RuntimeSessionSnapshot) {
+        let previousNamespace = privateNamespace(for: snapshot)
+        let nextNamespace = privateNamespace(for: newSnapshot)
+        if let previousNamespace, previousNamespace != nextNamespace {
+            // Logout, server switch, and account replacement all cross a
+            // private boundary. Cleanup is scoped and idempotent.
+            Task { @MainActor [weak self] in
+                do {
+                    try await self?.privateContentCache.removeNamespace(previousNamespace)
+                } catch {
+                    self?.operationFailure = RuntimeOperationFailure(
+                        errorKind: "StorageFailure",
+                        errorCode: "CACHE_PURGE_FAILED",
+                        fieldViolations: [],
+                        parameters: [:]
+                    )
+                }
+            }
+        }
         if newSnapshot.phase == .sessionExpired {
             captureReauthenticationIdentity(from: newSnapshot)
         }

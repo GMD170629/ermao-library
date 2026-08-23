@@ -10,9 +10,9 @@ export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
 export type ResourceAssetView = Readonly<{
   id: string;
   resourceId: string;
-  path: string;
+  sourceNodeId: string;
+  role: string;
   mimeType: string;
-  kind: string;
   sortOrder: number;
   sizeBytes: number;
   size: string;
@@ -23,13 +23,16 @@ export type ResourceAssetView = Readonly<{
   channels?: number | null;
   discNumber?: number | null;
   trackNumber?: number | null;
-  url?: string;
+  url: string;
+  downloadUrl: string;
 }>;
 
 export type ReadableResourceView = Readonly<{
   id: string;
   bookId: string;
+  sourceNodeId: string;
   title: string;
+  description: string;
   resourceIndex: number | null;
   sortOrder: number;
   format: ResourceFormat;
@@ -64,6 +67,7 @@ export type ReadableResourceView = Readonly<{
 
 export type BookView = Readonly<{
   id: string;
+  sourceNodeId: string;
   title: string;
   author: string;
   description: string;
@@ -87,12 +91,6 @@ export type BookView = Readonly<{
   completed: boolean;
   resources: ReadableResourceView[];
   availableMediaKinds?: MediaKind[];
-}>;
-
-export type SeriesSummary = Readonly<{
-  name: string;
-  bookCount: number;
-  latestUpdatedAt: string | null;
 }>;
 
 export function allBookResources(book: BookView): ReadableResourceView[] {

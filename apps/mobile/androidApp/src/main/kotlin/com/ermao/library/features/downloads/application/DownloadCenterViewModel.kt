@@ -9,7 +9,7 @@ import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalo
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
-import com.ermao.library.features.downloads.model.DownloadedWorkGroup
+import com.ermao.library.features.downloads.model.DownloadedBookGroup
 import com.ermao.library.features.downloads.model.groupReadableDownloads
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -24,7 +24,7 @@ data class DownloadCenterUiState(
     val query: String = "",
     val isLoading: Boolean = true,
     val active: List<AndroidDownloadRecord> = emptyList(),
-    val completedWorks: List<DownloadedWorkGroup> = emptyList(),
+    val completedBooks: List<DownloadedBookGroup> = emptyList(),
     val failed: List<AndroidDownloadRecord> = emptyList(),
     val totalCompletedBytes: Long = 0,
     val errorCode: String? = null,
@@ -87,9 +87,9 @@ class DownloadCenterViewModel(
             current.copy(
                 isLoading = false,
                 active = records.filter { it.status in ACTIVE_STATUSES }.sortedBy(AndroidDownloadRecord::createdAtEpochMillis),
-                completedWorks = completed,
+                completedBooks = completed,
                 failed = records.filter { it.status in FAILED_STATUSES }.sortedByDescending(AndroidDownloadRecord::updatedAtEpochMillis),
-                totalCompletedBytes = completed.sumOf(DownloadedWorkGroup::totalBytes),
+                totalCompletedBytes = completed.sumOf(DownloadedBookGroup::totalBytes),
                 errorCode = null,
             )
         }
@@ -114,32 +114,32 @@ class DownloadCenterViewModel(
     }
 }
 
-data class DownloadedWorkUiState(
+data class DownloadedBookUiState(
     val isLoading: Boolean = true,
-    val work: DownloadedWorkGroup? = null,
+    val book: DownloadedBookGroup? = null,
     val errorCode: String? = null,
 )
 
-class DownloadedWorkViewModel(
+class DownloadedBookViewModel(
     private val catalog: AndroidDownloadCatalog,
     private val namespace: AndroidDownloadNamespace,
-    private val workId: String,
+    private val bookId: String,
     private val localArtifactIsValid: (AndroidDownloadRecord) -> Boolean,
 ) : ViewModel() {
-    private val mutableUiState = MutableStateFlow(DownloadedWorkUiState())
-    val uiState: StateFlow<DownloadedWorkUiState> = mutableUiState.asStateFlow()
+    private val mutableUiState = MutableStateFlow(DownloadedBookUiState())
+    val uiState: StateFlow<DownloadedBookUiState> = mutableUiState.asStateFlow()
 
     init {
         viewModelScope.launch {
             try {
                 catalog.observe(namespace).collectLatest { records ->
-                    val work = groupReadableDownloads(records, "", localArtifactIsValid).firstOrNull { it.workId == workId }
-                    mutableUiState.value = DownloadedWorkUiState(isLoading = false, work = work)
+                    val book = groupReadableDownloads(records, "", localArtifactIsValid).firstOrNull { it.bookId == bookId }
+                    mutableUiState.value = DownloadedBookUiState(isLoading = false, book = book)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                mutableUiState.value = DownloadedWorkUiState(isLoading = false, errorCode = "DOWNLOAD_CATALOG_UNAVAILABLE")
+                mutableUiState.value = DownloadedBookUiState(isLoading = false, errorCode = "DOWNLOAD_CATALOG_UNAVAILABLE")
             }
         }
     }
@@ -148,10 +148,10 @@ class DownloadedWorkViewModel(
         fun factory(
             catalog: AndroidDownloadCatalog,
             namespace: AndroidDownloadNamespace,
-            workId: String,
+            bookId: String,
             localArtifactIsValid: (AndroidDownloadRecord) -> Boolean,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { DownloadedWorkViewModel(catalog, namespace, workId, localArtifactIsValid) }
+            initializer { DownloadedBookViewModel(catalog, namespace, bookId, localArtifactIsValid) }
         }
     }
 }

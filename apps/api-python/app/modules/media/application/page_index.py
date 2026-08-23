@@ -28,6 +28,7 @@ class ResourcePageUnit:
 class ResourcePageSource:
     id: str
     path: str
+    source_root: str
     role: str
     import_state: str
     size_bytes: int

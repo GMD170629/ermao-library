@@ -25,16 +25,27 @@ final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressSyncStateStore, @u
         )
     }
 
+    func load(resourceId: String) async throws -> ErmaoShared.ReaderProgress? {
+        try await worker.load(resourceID: resourceId).value
+    }
+
+    // ReaderProgressStore keeps the historical Swift/Kotlin label `sourceId`.
+    // The value is now the resource identity; retain this forwarding entry
+    // point until the generated shared API label is migrated as well.
     func load(sourceId: String) async throws -> ErmaoShared.ReaderProgress? {
-        try await worker.load(sourceID: sourceId).value
+        try await load(resourceId: sourceId)
     }
 
     func save(progress: ErmaoShared.ReaderProgress) async throws {
         try await worker.save(SendableReaderProgress(progress))
     }
 
+    func delete(resourceId: String) async throws {
+        try await worker.delete(resourceID: resourceId)
+    }
+
     func delete(sourceId: String) async throws {
-        try await worker.delete(sourceID: sourceId)
+        try await delete(resourceId: sourceId)
     }
 
     func loadSyncState() async throws -> ErmaoShared.ReaderProgressDurableState {
@@ -75,6 +86,127 @@ final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressSyncStateStore, @u
     func recordTerminalFailure(mutationId: String, failureCode: String) async throws {
         try await worker.recordTerminalFailure(mutationID: mutationId, code: failureCode)
     }
+
+    /// Purges all exact progress and pending-sync rows owned by one account.
+    /// The DB intentionally omits authorizationVersion from owner keys, so a
+    /// reauthentication does not strand the account's local position.
+    static func purgeNamespace(
+        _ namespace: String,
+        databaseURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) throws {
+        try IosReaderLocalDatabaseNamespacePurger.purge(
+            namespace,
+            databaseURL: databaseURL,
+            fileManager: fileManager
+        )
+    }
+}
+
+private enum IosReaderLocalDatabaseNamespacePurger {
+    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    static func purge(
+        _ namespace: String,
+        databaseURL: URL?,
+        fileManager: FileManager
+    ) throws {
+        guard let (serverIdentity, userID) = accountComponents(namespace) else {
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+        let url: URL
+        if let databaseURL {
+            url = databaseURL
+        } else {
+            let support = try fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            url = support
+                .appendingPathComponent("Reader", isDirectory: true)
+                .appendingPathComponent("Reader.sqlite3")
+        }
+        guard fileManager.fileExists(atPath: url.path) else { return }
+
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            url.path,
+            &database,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK else {
+            if let database { sqlite3_close(database) }
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+        defer { if let database { sqlite3_close(database) } }
+
+        do {
+            try exec(database, "BEGIN IMMEDIATE")
+            // A newly installed app can have the SQLite file without having
+            // initialized the Reader tables yet; these no-op schemas make the
+            // purge safe in that state.
+            try exec(database, """
+                CREATE TABLE IF NOT EXISTS reader_local_exact (
+                    owner_key TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    progress_document TEXT NOT NULL,
+                    updated_at_epoch_millis INTEGER NOT NULL,
+                    PRIMARY KEY (owner_key, source_id)
+                )
+                """)
+            try exec(database, """
+                CREATE TABLE IF NOT EXISTS reader_progress_sync_v4 (
+                    owner_key TEXT PRIMARY KEY NOT NULL,
+                    state_document TEXT NOT NULL
+                )
+                """)
+            let prefix = lengthPrefixed(serverIdentity, userID)
+            try delete(database, table: "reader_local_exact", prefix: prefix)
+            try delete(database, table: "reader_progress_sync_v4", prefix: prefix)
+            try exec(database, "COMMIT")
+        } catch {
+            try? exec(database, "ROLLBACK")
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+    }
+
+    private static func accountComponents(_ namespace: String) -> (String, String)? {
+        let parts = namespace.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count >= 2,
+              !parts[0].isEmpty,
+              !parts[1].isEmpty else { return nil }
+        return (String(parts[0]), String(parts[1]))
+    }
+
+    private static func lengthPrefixed(_ values: String...) -> String {
+        values.map { "\($0.utf16.count):\($0)" }.joined()
+    }
+
+    private static func exec(_ database: OpaquePointer?, _ sql: String) throws {
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+    }
+
+    private static func delete(_ database: OpaquePointer?, table: String, prefix: String) throws {
+        let sql = "DELETE FROM \(table) WHERE owner_key LIKE ? ESCAPE '\\'"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+        defer { sqlite3_finalize(statement) }
+        let escapedPrefix = prefix
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        guard sqlite3_bind_text(statement, 1, (escapedPrefix + "%"), -1, transient) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
+            throw IosReaderFailure(code: .persistenceFailed)
+        }
+    }
 }
 
 private struct SendableFileManager: @unchecked Sendable {
@@ -107,7 +239,7 @@ private actor IosReaderLocalDatabaseWorker {
 
     private let ownerKey: String
     private let clientID: String
-    private let sourceID: String
+    private let resourceID: String
     private let legacyProgressRoot: URL
     private let databaseURL: URL
     private let fileManager: FileManager
@@ -125,7 +257,7 @@ private actor IosReaderLocalDatabaseWorker {
         guard !identity.stableKey.isEmpty else { throw IosReaderFailure(code: .persistenceFailed) }
         ownerKey = identity.stableKey
         clientID = identity.clientId
-        sourceID = identity.volumeId
+        resourceID = identity.resourceId
         let manager = fileManager.value
         self.fileManager = manager
 
@@ -169,16 +301,16 @@ private actor IosReaderLocalDatabaseWorker {
         if let database { sqlite3_close(database) }
     }
 
-    func load(sourceID: String) throws -> SendableOptionalReaderProgress {
+    func load(resourceID: String) throws -> SendableOptionalReaderProgress {
         try initializeIfNeeded()
-        guard sourceID == self.sourceID else { throw IosReaderFailure(code: .persistenceFailed) }
+        guard resourceID == self.resourceID else { throw IosReaderFailure(code: .persistenceFailed) }
         if let payload = try scalarText(
             "SELECT progress_document FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-            bindings: [.text(ownerKey), .text(sourceID)]
+            bindings: [.text(ownerKey), .text(resourceID)]
         ) {
             let progress: ErmaoShared.ReaderProgress
             do {
-                progress = try decodeProgress(payload, expectedSourceID: sourceID)
+                progress = try decodeProgress(payload, expectedSourceID: resourceID)
             } catch {
                 try discardCurrentContractState()
                 return SendableOptionalReaderProgress(value: nil)
@@ -186,7 +318,7 @@ private actor IosReaderLocalDatabaseWorker {
             try requireIdentity(progress)
             return SendableOptionalReaderProgress(value: progress)
         }
-        return SendableOptionalReaderProgress(value: try migrateLegacyProgressFile(sourceID: sourceID))
+        return SendableOptionalReaderProgress(value: try migrateLegacyProgressFile(resourceID: resourceID))
     }
 
     func save(_ progressTransfer: SendableReaderProgress) throws {
@@ -208,7 +340,7 @@ private actor IosReaderLocalDatabaseWorker {
         try initializeIfNeeded()
         let progress = progressTransfer.value
         try requireIdentity(progress)
-        guard pending.value.sourceId == sourceID, pending.value.clientId == clientID else {
+        guard pending.value.resourceId == resourceID, pending.value.clientId == clientID else {
             throw IosReaderFailure(code: .persistenceFailed)
         }
         try withTransaction {
@@ -229,7 +361,7 @@ private actor IosReaderLocalDatabaseWorker {
             let pending: ErmaoShared.ReaderProgressMutation?
             if let existing = current.pending, existing.mutationId != mutationID {
                 pending = ErmaoShared.ReaderProgressMutation(
-                    sourceId: existing.sourceId,
+                    resourceId: existing.resourceId,
                     clientId: existing.clientId,
                     mutationId: existing.mutationId,
                     baseRevision: snapshot.value.revision,
@@ -254,7 +386,7 @@ private actor IosReaderLocalDatabaseWorker {
             let pending: ErmaoShared.ReaderProgressMutation?
             if let existing = current.pending, existing.mutationId != mutationID {
                 pending = ErmaoShared.ReaderProgressMutation(
-                    sourceId: existing.sourceId,
+                    resourceId: existing.resourceId,
                     clientId: existing.clientId,
                     mutationId: existing.mutationId,
                     baseRevision: serverRevision,
@@ -302,13 +434,13 @@ private actor IosReaderLocalDatabaseWorker {
         }
     }
 
-    func delete(sourceID: String) throws {
+    func delete(resourceID: String) throws {
         try initializeIfNeeded()
-        guard sourceID == self.sourceID else { throw IosReaderFailure(code: .persistenceFailed) }
+        guard resourceID == self.resourceID else { throw IosReaderFailure(code: .persistenceFailed) }
         try withTransaction {
             try run(
                 "DELETE FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-                bindings: [.text(ownerKey), .text(sourceID)]
+                bindings: [.text(ownerKey), .text(resourceID)]
             )
             try run(
                 "DELETE FROM reader_progress_sync_v4 WHERE owner_key = ?",
@@ -368,7 +500,9 @@ private actor IosReaderLocalDatabaseWorker {
             "SELECT CAST(contract_version AS TEXT) FROM reader_contract_metadata WHERE singleton = 1",
             bindings: []
         )
-        guard version != "6" else { return }
+        // Contract 7 is the destructive Book/Resource/Asset boundary. The
+        // previous Work/Version/Volume owner keys cannot be migrated safely.
+        guard version != "7" else { return }
         try withTransaction {
             try execute("DELETE FROM reader_local_exact")
             try execute("DELETE FROM reader_progress_sync_v4")
@@ -376,7 +510,7 @@ private actor IosReaderLocalDatabaseWorker {
             try discardObsoleteSyncTables()
             try run(
                 """
-                INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 6)
+                INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 7)
                 ON CONFLICT(singleton) DO UPDATE SET contract_version = excluded.contract_version
                 """,
                 bindings: []
@@ -391,7 +525,7 @@ private actor IosReaderLocalDatabaseWorker {
     ) throws {
         try requireIdentity(progress)
         let payload = try progressCodec.encode(progress: progress)
-        _ = try decodeProgress(payload, expectedSourceID: progress.sourceId)
+        _ = try decodeProgress(payload, expectedSourceID: progress.resourceId)
         try run(
             """
             INSERT INTO reader_local_exact(
@@ -404,7 +538,7 @@ private actor IosReaderLocalDatabaseWorker {
             """,
             bindings: [
                 .text(ownerKey),
-                .text(progress.sourceId),
+                .text(progress.resourceId),
                 .text(payload),
                 .int64(progress.updatedAtEpochMillis),
             ]
@@ -455,7 +589,7 @@ private actor IosReaderLocalDatabaseWorker {
     private func discardCurrentContractState() throws {
         try run(
             "DELETE FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-            bindings: [.text(ownerKey), .text(sourceID)]
+            bindings: [.text(ownerKey), .text(resourceID)]
         )
         try run(
             "DELETE FROM reader_progress_sync_v4 WHERE owner_key = ?",
@@ -464,8 +598,8 @@ private actor IosReaderLocalDatabaseWorker {
     }
 
     /// The pre-union file namespace is deliberately discarded, never imported.
-    private func migrateLegacyProgressFile(sourceID: String) throws -> ErmaoShared.ReaderProgress? {
-        let legacyURL = legacyProgressURL(sourceID)
+    private func migrateLegacyProgressFile(resourceID: String) throws -> ErmaoShared.ReaderProgress? {
+        let legacyURL = legacyProgressURL(resourceID)
         guard fileManager.fileExists(atPath: legacyURL.path) else { return nil }
         try requireLegacyContained(legacyURL)
         let values = try legacyURL.resourceValues(
@@ -485,14 +619,14 @@ private actor IosReaderLocalDatabaseWorker {
     ) throws -> ErmaoShared.ReaderProgress {
         try requireDocumentSize(payload)
         let projection = try IosReaderProgressContractDecoder.decode(payload)
-        guard projection.sourceID == expectedSourceID else {
+        guard projection.resourceID == expectedSourceID else {
             throw IosReaderFailure(code: .persistenceFailed)
         }
         return try progressCodec.decode(payload: payload)
     }
 
     private func requireIdentity(_ progress: ErmaoShared.ReaderProgress) throws {
-        guard progress.sourceId == sourceID,
+        guard progress.resourceId == resourceID,
               matchesIdentity(progress)
         else { throw IosReaderFailure(code: .persistenceFailed) }
     }
@@ -501,8 +635,8 @@ private actor IosReaderLocalDatabaseWorker {
         progress.deviceId == clientID
     }
 
-    private func legacyProgressURL(_ sourceID: String) -> URL {
-        let key = SHA256.hash(data: Data(sourceID.utf8))
+    private func legacyProgressURL(_ resourceID: String) -> URL {
+        let key = SHA256.hash(data: Data(resourceID.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         return legacyProgressRoot.appendingPathComponent(key).appendingPathExtension("json")

@@ -14,7 +14,6 @@ type BookForm = Readonly<{
   description: string;
   seriesName: string;
   seriesIndex: string;
-  tags: string;
 }>;
 
 function formForBook(book: BookView): BookForm {
@@ -23,8 +22,7 @@ function formForBook(book: BookView): BookForm {
     author: book.author,
     description: book.description,
     seriesName: book.seriesName ?? '',
-    seriesIndex: book.seriesIndex === null ? '' : String(book.seriesIndex),
-    tags: book.tags.join(', ')
+    seriesIndex: book.seriesIndex === null ? '' : String(book.seriesIndex)
   };
 }
 
@@ -65,8 +63,7 @@ export function BookMetadataEditor({
         author: form.author.trim(),
         description: form.description.trim(),
         seriesName: form.seriesName.trim() || null,
-        seriesIndex: form.seriesIndex.trim() ? Number(form.seriesIndex) : null,
-        tags: form.tags.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean)
+        seriesIndex: form.seriesIndex.trim() ? Number(form.seriesIndex) : null
       });
       onSaved(nextBook);
       feedback.success(t('图书信息已保存'));
@@ -91,7 +88,6 @@ export function BookMetadataEditor({
         <label className="text-sm text-stone-600"><I18nText>作者</I18nText><input value={form.author} onChange={(event) => setForm({ ...form, author: event.target.value })} className={inputClassName} /></label>
         <label className="text-sm text-stone-600"><I18nText>系列名</I18nText><input value={form.seriesName} onChange={(event) => setForm({ ...form, seriesName: event.target.value })} className={inputClassName} /></label>
         <label className="text-sm text-stone-600"><I18nText>系列序号</I18nText><input value={form.seriesIndex} onChange={(event) => setForm({ ...form, seriesIndex: event.target.value })} inputMode="decimal" className={inputClassName} /></label>
-        <label className="text-sm text-stone-600 md:col-span-2"><I18nText>标签</I18nText><input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder={t('标签，用逗号分隔')} className={inputClassName} /></label>
         <label className="text-sm text-stone-600 md:col-span-2"><I18nText>简介</I18nText><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={5} className={inputClassName} /></label>
       </div>
       <div className="mt-6 flex justify-end gap-2">

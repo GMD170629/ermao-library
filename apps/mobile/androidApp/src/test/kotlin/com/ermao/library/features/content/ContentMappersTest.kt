@@ -3,13 +3,12 @@ package com.ermao.library.features.content
 import com.ermao.library.features.content.model.toUiContent
 import com.ermao.library.features.content.model.toEpochMillisOrNull
 import com.ermao.library.shared.modules.library.domain.AppliedFacet
+import com.ermao.library.shared.modules.library.domain.Asset
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.MediaKind
-import com.ermao.library.shared.modules.library.domain.Volume
-import com.ermao.library.shared.modules.library.domain.VolumeClassification
-import com.ermao.library.shared.modules.library.domain.VolumeFile
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkVersion
+import com.ermao.library.shared.modules.library.domain.Resource
+import com.ermao.library.shared.modules.library.domain.ResourceClassification
 import java.time.Instant
 import kotlin.test.assertEquals
 import org.junit.Test
@@ -26,8 +25,9 @@ class ContentMappersTest {
 
     @Test
     fun detailUsesStableFacetIdentifiers() {
-        val detail = WorkDetailSummary(
-            id = "work-1",
+        val detail = BookDetailSummary(
+            id = "book-1",
+            sourceNodeId = "source-book-1",
             title = "Title",
             author = "Author",
             description = null,
@@ -37,31 +37,35 @@ class ContentMappersTest {
             authorFacets = listOf(AppliedFacet("author-1", FacetKind.Author, "Author")),
             seriesIndex = 1.0,
             coverStatus = "ready",
-            coverUrl = "/api/works/work-1/cover",
-            continueVolumeId = null,
-            continueVolumeProgress = 0.0,
+            coverUrl = "/api/books/book-1/cover",
+            continueResourceId = null,
+            continueResourceProgress = 0.0,
             completed = false,
-            versions = emptyList(),
+            availableMediaKinds = listOf(MediaKind.Ebook),
+            resources = emptyList(),
         )
 
         val mapped = detail.toUiContent()
 
         assertEquals("series-1", mapped.seriesId)
         assertEquals("author-1", mapped.authorFacetId)
-        assertEquals(emptyList(), mapped.versions)
+        assertEquals(emptyList(), mapped.resources)
     }
 
     @Test
-    fun detailProgressUsesTheContinueVolumeProjectionInsteadOfAnotherSelectedVolume() {
-        val completedVolume = Volume(
-            id = "volume-completed",
-            versionId = "version-1",
-            title = "Completed volume",
-            volumeIndex = 1.0,
+    fun detailProgressUsesTheContinueResourceProjectionInsteadOfAnotherSelectedResource() {
+        val completedResource = Resource(
+            id = "resource-completed",
+            bookId = "book-1",
+            sourceNodeId = "source-resource-1",
+            title = "Completed resource",
+            description = null,
+            resourceIndex = 1.0,
             sortOrder = 0,
             format = "EPUB",
+            mediaKind = MediaKind.Ebook,
             readerType = "reflowable",
-            classification = VolumeClassification("AUTO", "epub", MediaKind.Ebook),
+            classification = ResourceClassification("AUTO", "epub", MediaKind.Ebook),
             readable = true,
             kindleSendAvailable = true,
             publisher = null,
@@ -71,10 +75,10 @@ class ContentMappersTest {
             identifier = null,
             narrator = null,
             abridged = null,
-            origin = "Embedded metadata",
-            importStatus = null,
+            importStatus = "READY",
             importError = null,
-            coverStatus = null,
+            coverStatus = "ready",
+            coverPath = null,
             coverUrl = "",
             sizeBytes = 0,
             pageCount = 428,
@@ -83,17 +87,18 @@ class ContentMappersTest {
             trackCount = null,
             progress = 100.0,
             completed = true,
+            hidden = false,
             lastReadAt = null,
-            files = listOf(
-                VolumeFile(
-                    id = "file-1",
-                    volumeId = "volume-completed",
-                    path = "library/golden-dream.epub",
+            assets = listOf(
+                Asset(
+                    id = "asset-1",
+                    resourceId = "resource-completed",
+                    sourceNodeId = "source-asset-1",
+                    role = "publication",
                     mimeType = "application/epub+zip",
-                    kind = "publication",
-                    sortOrder = 0,
                     sizeBytes = 1024,
                     displaySize = "1 KB",
+                    mtimeMillis = null,
                     durationMillis = null,
                     codec = null,
                     bitrate = null,
@@ -101,12 +106,15 @@ class ContentMappersTest {
                     channels = null,
                     discNumber = null,
                     trackNumber = null,
+                    sortOrder = 0,
                     url = null,
+                    downloadUrl = "library/golden-dream.epub",
                 ),
             ),
         )
-        val detail = WorkDetailSummary(
-            id = "work-1",
+        val detail = BookDetailSummary(
+            id = "book-1",
+            sourceNodeId = "source-book-1",
             title = "Title",
             author = "Author",
             description = null,
@@ -115,34 +123,22 @@ class ContentMappersTest {
             seriesIndex = null,
             coverStatus = "ready",
             coverUrl = "",
-            continueVolumeId = "volume-reading",
-            continueVolumeProgress = 75.0,
+            continueResourceId = "resource-reading",
+            continueResourceProgress = 75.0,
             completed = false,
-            versions = listOf(
-                WorkVersion(
-                    id = "version-1",
-                    sourceKey = "__implicit__",
-                    sourceName = null,
-                    completed = false,
-                    volumeCount = 1,
-                    sizeBytes = 0,
-                    volumes = listOf(completedVolume),
-                ),
-            ),
+            availableMediaKinds = listOf(MediaKind.Ebook),
+            resources = listOf(completedResource),
         )
 
         val content = detail.toUiContent()
-        val mappedVolume = content.versions.single().volumes.single()
+        val mappedResource = content.resources.single()
 
-        assertEquals(75, content.work.progressPercent)
-        assertEquals("version-1", content.versions.single().id)
-        assertEquals("__implicit__", content.versions.single().sourceKey)
-        assertEquals(1, content.versions.single().volumeCount)
-        assertEquals("version-1", mappedVolume.versionId)
-        assertEquals("2010-11-01", mappedVolume.publishedAt)
-        assertEquals("zh-CN", mappedVolume.language)
-        assertEquals(428, mappedVolume.pageCount)
-        assertEquals("Embedded metadata", mappedVolume.metadataSource)
-        assertEquals("library/golden-dream.epub", mappedVolume.files.single().path)
+        assertEquals(75, content.book.progressPercent)
+        assertEquals("resource-completed", content.resources.single().id)
+        assertEquals("2010-11-01", mappedResource.publishedAt)
+        assertEquals("zh-CN", mappedResource.language)
+        assertEquals(428, mappedResource.pageCount)
+        assertEquals("AUTO", mappedResource.metadataSource)
+        assertEquals("library/golden-dream.epub", mappedResource.assets.single().path)
     }
 }

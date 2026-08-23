@@ -9,6 +9,7 @@ from app.modules.library.domain.readable_resource_anchors import (
     is_resource_anchor_within_book_scope,
     is_same_or_descendant_path,
     is_strict_descendant_path,
+    resource_owns_book_metadata,
 )
 from app.modules.library.domain.source_nodes import (
     SourceNodePhysicalKind,
@@ -18,6 +19,15 @@ from app.modules.library.domain.source_nodes import (
 
 def _path(raw: str) -> SourceNodeRelativePath:
     return SourceNodeRelativePath(raw)
+
+
+def test_only_same_source_anchor_owns_book_metadata() -> None:
+    assert resource_owns_book_metadata(
+        book_source_node_id="node-1", resource_source_node_id="node-1"
+    )
+    assert not resource_owns_book_metadata(
+        book_source_node_id="node-1", resource_source_node_id="node-2"
+    )
 
 
 def test_same_node_is_within_book_and_same_scope() -> None:

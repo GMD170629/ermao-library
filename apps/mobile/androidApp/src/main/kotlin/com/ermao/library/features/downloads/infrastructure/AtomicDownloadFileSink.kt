@@ -18,17 +18,20 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
                 request.namespace.userId,
                 request.namespace.authorizationVersion,
             ),
-            volumeId = request.volumeId,
+            resourceId = request.resourceId,
+            assetId = request.assetId,
         )
     }
 
     suspend fun begin(
         namespace: AndroidDownloadNamespace,
-        volumeId: String,
+        resourceId: String,
+        assetId: String,
     ): Session = withContext(Dispatchers.IO) {
-        require(volumeId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(assetId.isNotBlank())
         val namespaceKey = sha256("${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}")
-        val artifactKey = sha256(volumeId)
+        val artifactKey = sha256("$resourceId:$assetId")
         val relativeDirectory = "$namespaceKey/artifacts"
         val directory = File(rootDirectory, relativeDirectory).apply { mkdirs() }
         val part = File(directory, "$artifactKey.part")

@@ -21,34 +21,15 @@ from app.modules.media.application.page_index import (
     ResourcePageSource,
     ResourcePageUnit,
 )
+from app.modules.media.infrastructure.http_streaming import stored_path
 
 
 def _stored_path(
     path_value: str | None,
     settings: Settings,
     allowed_source_roots: Iterable[Path] = (),
-    *,
-    database_backed: bool = False,
 ) -> Path | None:
-    if not path_value:
-        return None
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = settings.resolved_storage_root / path
-    try:
-        resolved = path.expanduser().resolve()
-        storage = settings.resolved_storage_root.resolve()
-        if resolved == storage or storage in resolved.parents:
-            return resolved
-        if database_backed and path.is_absolute():
-            return resolved
-        for source_root in allowed_source_roots:
-            root = source_root.resolve()
-            if resolved == root or root in resolved.parents:
-                return resolved
-    except OSError:
-        return None
-    return None
+    return stored_path(path_value, settings, allowed_source_roots)
 
 
 def _unit_columns():
@@ -161,7 +142,8 @@ def get_resource_asset(db: Session, asset_id: str) -> dict[str, Any] | None:
         "id": row.id,
         "resourceId": row.resource_id,
         "role": row.role,
-        "path": str(Path(row.root_path) / row.relative_path),
+        "path": row.relative_path,
+        "sourceRoot": row.root_path,
         "sizeBytes": int(row.observed_size_bytes or 0),
         "mtimeMs": int(row.observed_mtime_ns // 1_000_000),
         "sortOrder": int(row.sequence_index or 0),
@@ -210,7 +192,8 @@ def load_read_only_page_index_projection(
         sources=tuple(
             ResourcePageSource(
                 id=row.id,
-                path=str(Path(row.root_path) / row.relative_path),
+                path=row.relative_path,
+                source_root=row.root_path,
                 role=row.role,
                 import_state=row.import_state,
                 size_bytes=int(row.observed_size_bytes or 0),

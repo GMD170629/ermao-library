@@ -80,6 +80,8 @@ private fun JsonObject.requiredStringList(name: String): List<String> =
     requiredArray(name).mapIndexed { index, value ->
         (value as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull ?: contract("INVALID_${name}_$index")
     }
+private fun JsonObject.optionalStringList(name: String): List<String> =
+    if (containsKey(name)) requiredStringList(name) else emptyList()
 private fun JsonObject.stringIntMap(name: String): Map<String, Int> =
     requiredObject(name).mapValues { (key, value) ->
         (value as? JsonPrimitive)?.takeUnless(JsonPrimitive::isString)?.intOrNull
@@ -126,18 +128,18 @@ internal fun JsonElement.toKindleSettings(): KindleSettings {
 
 internal fun JsonElement.toKindleTask(): KindleTask {
     val value = objectValue("INVALID_KINDLE_TASK").expectKeys(
-        "id", "userId", "workId", "volumeId", "fileId", "bookTitle", "volumeTitle", "fileName",
+        "id", "userId", "bookId", "resourceId", "assetId", "bookTitle", "resourceTitle", "fileName",
         "format", "mimeType", "sizeBytes", "senderEmail", "recipientEmail", "subject", "smtpHost",
         "smtpPort", "smtpSecurity", "smtpUsername", "messageId", "status", "attemptCount", "nextAttemptAt",
         "errorMessage", "startedAt", "sentAt", "createdAt", "updatedAt", "canCancel", "canRetry", "canDelete",
     )
     return KindleTask(
         id = value.requiredString("id"),
-        workId = value.optionalString("workId"),
-        volumeId = value.optionalString("volumeId"),
-        fileId = value.optionalString("fileId"),
+        bookId = value.optionalString("bookId"),
+        resourceId = value.optionalString("resourceId"),
+        assetId = value.optionalString("assetId"),
         bookTitle = value.requiredString("bookTitle"),
-        volumeTitle = value.optionalString("volumeTitle"),
+        resourceTitle = value.optionalString("resourceTitle"),
         fileName = value.requiredString("fileName"),
         format = value.requiredString("format"),
         mimeType = value.requiredString("mimeType"),
@@ -164,8 +166,11 @@ internal fun JsonElement.toKindleTask(): KindleTask {
     )
 }
 
-internal fun JsonElement.toKindleTaskPayload(): KindleTask =
-    objectValue("INVALID_KINDLE_TASK_PAYLOAD").expectKeys("task").requiredObject("task").toKindleTask()
+internal fun JsonElement.toKindleTaskPayload(): KindleTask {
+    val root = objectValue("INVALID_KINDLE_TASK_PAYLOAD").expectKeys("task", "alreadyQueued")
+    root.optionalBoolean("alreadyQueued")
+    return root.requiredObject("task").toKindleTask()
+}
 
 internal fun JsonElement.toKindleTaskPage(): KindleTaskPage {
     val root = objectValue("INVALID_KINDLE_TASKS").expectKeys("tasks", "total", "page", "pageSize", "totalPages")
@@ -247,7 +252,8 @@ internal fun JsonElement.toManagedPasswordChange(): ManagedPasswordChange {
 }
 
 internal fun JsonElement.toDeletedFlag(expectedId: String): Boolean {
-    val root = objectValue("INVALID_DELETION").expectKeys("deleted", "id", "workId")
+    val root = objectValue("INVALID_DELETION").expectKeys("deleted", "id", "bookId")
+    root.optionalString("bookId")
     if (root.requiredString("id") != expectedId) contract("DELETION_ID_MISMATCH")
     return root.requiredBoolean("deleted")
 }
@@ -307,57 +313,31 @@ internal fun JsonElement.toDirectoryNode(): DirectoryNode {
 
 internal fun JsonElement.toImportTask(): ImportTask {
     val task = objectValue("INVALID_IMPORT_TASK").expectKeys(
-        "id", "libraryId", "workId", "volumeId", "origin", "mediaKindPolicy", "status", "originalName",
-        "requestedTitle", "requestedAuthor", "recognizedMetadata", "sourcePath", "taskKind", "bundleKey",
-        "assetCount", "processedAssetCount", "progress", "duration", "errorSummary", "errorCode", "retryable",
-        "attempts", "leaseOwner", "leaseExpiresAt", "message", "startedAt", "finishedAt", "createdAt", "updatedAt",
-        "sourceFileExists", "friendlyError", "library", "book", "logs",
+        "id", "kind", "libraryId", "resourceId", "sourceNodeId", "role", "state", "errorSummary",
+        "createdAt", "startedAt", "finishedAt",
     )
-    task.requiredNullableObject("recognizedMetadata")
-    task.requiredNullableString("bundleKey")
-    task.requiredNullableString("leaseOwner")
-    task.requiredNullableString("leaseExpiresAt")
-    task.requiredNullableString("message")
-    task.requiredNullableString("friendlyError")
-    task.requiredNullableObject("library")
-    task.requiredNullableObject("book")
-    task.validateRequiredArray("logs")
     return ImportTask(
         id = task.requiredString("id"),
-        libraryId = task.requiredNullableString("libraryId"),
-        workId = task.requiredNullableString("workId"),
-        volumeId = task.requiredNullableString("volumeId"),
-        origin = task.requiredString("origin"),
-        mediaKindPolicy = enumValue(task.requiredString("mediaKindPolicy"), MediaKindPolicy.entries, MediaKindPolicy::wireValue, "UNSUPPORTED_MEDIA_POLICY"),
-        status = enumValue(task.requiredString("status"), ImportTaskStatus.entries, ImportTaskStatus::wireValue, "UNSUPPORTED_IMPORT_STATUS"),
-        originalName = task.requiredNullableString("originalName"),
-        requestedTitle = task.requiredNullableString("requestedTitle"),
-        requestedAuthor = task.requiredNullableString("requestedAuthor"),
-        sourcePath = task.requiredString("sourcePath"),
-        taskKind = task.requiredString("taskKind"),
-        assetCount = task.requiredInt("assetCount"),
-        processedAssetCount = task.requiredInt("processedAssetCount"),
-        progress = task.requiredInt("progress"),
-        durationMilliseconds = task.requiredLong("duration"),
-        errorCode = task.requiredNullableString("errorCode"),
+        kind = task.requiredString("kind"),
+        libraryId = task.requiredString("libraryId"),
+        resourceId = task.requiredNullableString("resourceId"),
+        sourceNodeId = task.requiredNullableString("sourceNodeId"),
+        role = task.requiredNullableString("role"),
+        state = enumValue(task.requiredString("state"), ImportTaskState.entries, ImportTaskState::wireValue, "UNSUPPORTED_IMPORT_STATE"),
         errorSummary = task.requiredNullableString("errorSummary"),
-        retryable = task.requiredBoolean("retryable"),
-        attempts = task.requiredInt("attempts"),
+        createdAt = task.requiredString("createdAt"),
         startedAt = task.requiredNullableString("startedAt"),
         finishedAt = task.requiredNullableString("finishedAt"),
-        createdAt = task.requiredString("createdAt"),
-        updatedAt = task.requiredString("updatedAt"),
-        sourceFileExists = task.requiredBoolean("sourceFileExists"),
     )
 }
 
 internal fun JsonElement.toImportTaskPage(): ImportTaskPage {
-    val root = objectValue("INVALID_IMPORT_TASKS").expectKeys("tasks", "summary", "page", "pageSize", "total", "totalPages")
-    val summary = root.requiredObject("summary").expectKeys("completed", "failed")
+    val root = objectValue("INVALID_IMPORT_TASKS").expectKeys("tasks", "page", "pageSize", "total", "totalPages", "completed", "failed")
     return ImportTaskPage(
         tasks = root.requiredArray("tasks").map(JsonElement::toImportTask),
-        summary = ImportTaskSummary(summary.requiredInt("completed"), summary.requiredInt("failed")),
         pageInfo = root.toPageInfo(),
+        completed = root.requiredInt("completed"),
+        failed = root.requiredInt("failed"),
     )
 }
 
@@ -436,10 +416,10 @@ internal fun JsonElement.toImportRescanRequest(): ImportRescanRequest {
     )
 }
 
-private fun JsonObject.toOrganizeWork(): OrganizeWorkSummary = OrganizeWorkSummary(
+private fun JsonObject.toOrganizeBook(): OrganizeBookSummary = OrganizeBookSummary(
     id = requiredString("id"),
     title = requiredString("title"),
-    author = requiredString("author"),
+    author = requiredNullableString("author"),
     availableMediaKinds = requiredStringList("availableMediaKinds").map {
         enumValue(it, MediaKind.entries, MediaKind::wireValue, "UNSUPPORTED_MEDIA_KIND")
     },
@@ -447,23 +427,23 @@ private fun JsonObject.toOrganizeWork(): OrganizeWorkSummary = OrganizeWorkSumma
 
 internal fun JsonElement.toOrganizeJob(): OrganizeJob {
     val job = objectValue("INVALID_ORGANIZE_JOB").expectKeys(
-        "id", "runId", "volumeId", "versionId", "trigger", "status", "statusCategory", "issueCodes",
+        "id", "runId", "resourceId", "trigger", "status", "statusCategory", "issueCodes",
         "reasonCodes", "summary", "errorSummary", "metadataLookupStatus", "metadataLookupSource",
         "metadataLookupProviders", "metadataSources", "metadataLookupError", "providerExecutions", "metadataWriteback",
         "startedAt", "finishedAt", "createdAt", "updatedAt", "book",
     )
-    job.requiredNullableString("runId")
-    job.requiredNullableString("volumeId")
-    job.requiredNullableString("summary")
-    job.requiredNullableString("errorSummary")
-    job.requiredNullableString("metadataLookupStatus")
-    job.requiredNullableString("metadataLookupSource")
-    job.requiredNullableString("metadataLookupError")
-    job.requiredNullableString("startedAt")
-    job.requiredNullableString("finishedAt")
-    job.requiredString("status")
-    job.validateRequiredArray("metadataLookupProviders")
-    job.validateRequiredArray("providerExecutions")
+    job.optionalString("runId")
+    job.optionalString("resourceId")
+    job.optionalString("summary")
+    job.optionalString("errorSummary")
+    job.optionalString("metadataLookupStatus")
+    job.optionalString("metadataLookupSource")
+    job.optionalString("metadataLookupError")
+    job.optionalString("startedAt")
+    job.optionalString("finishedAt")
+    job.optionalString("status")
+    job.optionalStringList("metadataLookupProviders")
+    if (job.containsKey("providerExecutions")) job.validateRequiredArray("providerExecutions")
     return OrganizeJob(
         id = job.requiredString("id"),
         trigger = job.requiredString("trigger"),
@@ -473,7 +453,8 @@ internal fun JsonElement.toOrganizeJob(): OrganizeJob {
         metadataSources = job.requiredStringList("metadataSources"),
         createdAt = job.requiredNullableString("createdAt"),
         updatedAt = job.requiredNullableString("updatedAt"),
-        work = job.requiredObject("book").toOrganizeWork(),
+        resourceId = job.optionalString("resourceId"),
+        book = job.requiredObject("book").toOrganizeBook(),
     )
 }
 
@@ -502,7 +483,7 @@ internal fun JsonElement.toPendingOrganizeJobs(): PendingOrganizeJobs {
     val root = objectValue("INVALID_PENDING_ORGANIZE_JOBS").expectKeys("jobs", "books", "total")
     return PendingOrganizeJobs(
         jobs = root.requiredArray("jobs").map(JsonElement::toOrganizeJob),
-        works = root.requiredArray("books").map { it.objectValue("INVALID_ORGANIZE_BOOK").toOrganizeWork() },
+        books = root.requiredArray("books").map { it.objectValue("INVALID_ORGANIZE_BOOK").toOrganizeBook() },
         total = root.requiredInt("total"),
     )
 }
@@ -513,14 +494,14 @@ internal fun JsonElement.toOrganizeRuns(): List<OrganizeRun> =
             "id", "trigger", "scope", "status", "queuedCount", "completedCount", "reviewCount", "failedCount",
             "startedAt", "finishedAt", "createdAt", "updatedAt",
         )
-        val scope = run.requiredObject("scope").expectKeys("workIds", "rules")
+        val scope = run.requiredObject("scope").expectKeys("bookIds", "rules")
         val rules = scope.requiredObject("rules").expectKeys("unrecognized", "missingMetadata")
         OrganizeRun(
             id = run.requiredString("id"),
             trigger = run.requiredString("trigger"),
             status = run.requiredString("status"),
             scope = OrganizeRunScope(
-                workIds = scope.requiredStringList("workIds"),
+                bookIds = scope.requiredStringList("bookIds"),
                 rules = OrganizeRules(
                     unrecognized = rules.requiredBoolean("unrecognized"),
                     missingMetadata = rules.requiredBoolean("missingMetadata"),
@@ -539,11 +520,11 @@ internal fun JsonElement.toOrganizeRuns(): List<OrganizeRun> =
 
 internal fun JsonElement.toOrganizeCandidates(): OrganizeCandidates {
     val candidates = objectValue("INVALID_CANDIDATES_PAYLOAD").expectKeys("candidates").requiredObject("candidates")
-        .expectKeys("total", "reasonCounts", "works")
+        .expectKeys("total", "reasonCounts", "books")
     return OrganizeCandidates(
         total = candidates.requiredInt("total"),
         reasonCounts = candidates.stringIntMap("reasonCounts"),
-        works = candidates.requiredArray("works").map { element ->
+        books = candidates.requiredArray("books").map { element ->
             val work = element.objectValue("INVALID_CANDIDATE").expectKeys(
                 "id", "title", "author", "availableMediaKinds", "coverPath", "metadataQuality", "reasonCodes", "createdAt",
             )
@@ -584,9 +565,9 @@ internal fun JsonElement.toUndoOperation(): LibraryOperation =
     objectValue("INVALID_UNDO_OPERATION").expectKeys("operation", "restored").requiredObject("operation").toLibraryOperation()
 
 internal fun JsonElement.toCategoryPage(): CategoryPage {
-    val root = objectValue("INVALID_CATEGORIES").expectKeys("categories", "page", "pageSize", "total", "totalPages")
+    val root = objectValue("INVALID_CATEGORIES").expectKeys("facets", "page", "pageSize", "total", "totalPages")
     return CategoryPage(
-        categories = root.requiredArray("categories").map(JsonElement::toLibraryCategory),
+        categories = root.requiredArray("facets").map(JsonElement::toLibraryCategory),
         pageInfo = root.toPageInfo(),
     )
 }
@@ -623,19 +604,14 @@ internal fun JsonElement.toOrganizePolicy(): OrganizePolicy {
 
 internal fun JsonElement.toLibraryOperation(): LibraryOperation {
     val operation = objectValue("INVALID_LIBRARY_OPERATION").expectKeys(
-        "id", "action", "status", "summary", "targetType", "targetId", "expiresAt", "undoneAt", "createdAt", "updatedAt", "undoAvailable",
+        "id", "action", "status", "summary", "expiresAt", "undoAvailable",
     )
     return LibraryOperation(
         id = operation.requiredString("id"),
         action = operation.requiredString("action"),
         status = operation.requiredString("status"),
         summary = operation.requiredString("summary"),
-        targetType = operation.optionalString("targetType"),
-        targetId = operation.optionalString("targetId"),
         expiresAt = operation.optionalString("expiresAt"),
-        undoneAt = operation.optionalString("undoneAt"),
-        createdAt = operation.optionalString("createdAt"),
-        updatedAt = operation.optionalString("updatedAt"),
         undoAvailable = operation.requiredBoolean("undoAvailable"),
     )
 }

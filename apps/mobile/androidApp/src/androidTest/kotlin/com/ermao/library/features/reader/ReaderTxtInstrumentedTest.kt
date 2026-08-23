@@ -43,11 +43,10 @@ class ReaderTxtInstrumentedTest {
             "第一章 开始\r\n正文 & <内容>\r\n\r\nChapter 2: Next\r\nSecond chapter".toByteArray(),
         ).use { input ->
             publicationStore.publishLocalPublication(
-                sourceId = sourceId,
+                resourceId = sourceId,
                 displayTitle = "TXT Book",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Txt,
-                volumeId = sourceId,
             )
         }
     }

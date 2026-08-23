@@ -35,7 +35,7 @@ struct IosTxtPublicationFactory: Sendable {
         return Publication(
             manifest: Manifest(
                 metadata: Metadata(
-                    identifier: "urn:shuku:txt:\(managed.sourceID)",
+                    identifier: "urn:shuku:txt:\(managed.resourceID)",
                     conformsTo: [.epub],
                     title: normalized.title,
                     layout: .reflowable,

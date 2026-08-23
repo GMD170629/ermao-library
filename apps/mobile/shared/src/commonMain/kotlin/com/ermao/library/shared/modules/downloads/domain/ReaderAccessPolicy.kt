@@ -2,12 +2,12 @@ package com.ermao.library.shared.modules.downloads.domain
 
 data class ReaderAccessRequest(
     val namespace: DownloadNamespace,
-    val volumeId: String,
+    val resourceId: String,
     val readerType: DownloadReaderType,
     val isOnline: Boolean,
 ) {
     init {
-        require(volumeId.isNotBlank())
+        require(resourceId.isNotBlank())
     }
 }
 
@@ -25,7 +25,7 @@ class ReaderAccessPolicy {
     ): ReaderAccessDecision {
         val local = completedArtifacts.firstOrNull { artifact ->
             artifact.identity.namespace == request.namespace &&
-                artifact.identity.volumeId == request.volumeId
+                artifact.identity.resourceId == request.resourceId
         }
         if (local != null) return ReaderAccessDecision.LocalArtifact(local)
         return when (request.readerType) {

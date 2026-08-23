@@ -5,9 +5,14 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import continue_source_import
+from app.core.config import Settings
+from app.modules.library.application.bulk_operations import ExecuteBulkCovers
 from app.modules.library.application.resource_cover import (
     RegenerateResourceCover,
     ResourceSourceContinuationPort,
+)
+from app.modules.library.infrastructure.bulk_operations import (
+    SqlAlchemyBulkBookOperations,
 )
 from app.modules.library.infrastructure.resource_cover import SqlAlchemyResourceCover
 
@@ -32,4 +37,21 @@ def regenerate_resource_cover(db: Session) -> RegenerateResourceCover:
     )
 
 
-__all__ = ["ReadableResourceSourceContinuation", "regenerate_resource_cover"]
+def bulk_covers(db: Session, settings: Settings) -> ExecuteBulkCovers:
+    return ExecuteBulkCovers(
+        SqlAlchemyBulkBookOperations(
+            db,
+            storage_root=settings.resolved_storage_root,
+            enqueue_source_import=lambda source_node_id: continue_source_import(
+                db, source_node_id
+            ),
+        ),
+        db,
+    )
+
+
+__all__ = [
+    "ReadableResourceSourceContinuation",
+    "bulk_covers",
+    "regenerate_resource_cover",
+]

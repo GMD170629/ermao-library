@@ -116,6 +116,7 @@ def get_asset(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
+    download: bool = False,
 ) -> Annotated[
     Response,
     ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
@@ -128,7 +129,9 @@ def get_asset(
     asset = media_resource_query(db).get_asset(asset_id)
     return media_streaming.send_file(
         media_streaming.stored_path(
-            asset.path if asset else None, settings, database_backed=True
+            asset.path if asset else None,
+            settings,
+            (Path(asset.source_root),) if asset else (),
         ),
         request,
         user.id,
@@ -136,6 +139,7 @@ def get_asset(
         name=Path(asset.path if asset else "asset").name,
         route="assets",
         asset_id=asset_id,
+        as_attachment=download,
     )
 
 
@@ -167,7 +171,9 @@ def get_resource_asset(
     asset = media_resource_query(db).first_resource_asset(resource_id)
     return media_streaming.send_file(
         media_streaming.stored_path(
-            asset.path if asset else None, settings, database_backed=True
+            asset.path if asset else None,
+            settings,
+            (Path(asset.source_root),) if asset else (),
         ),
         request,
         user.id,
@@ -255,9 +261,7 @@ def get_cover(
         cover_id = book_id or resource_id or "cover"
     if not book_id and not resource_id and not source_node_id:
         return fail("条目不存在", status_code=404)
-    cover_path = media_streaming.stored_path(
-        cover_path_value, settings, database_backed=True
-    )
+    cover_path = media_streaming.stored_path(cover_path_value, settings)
     if (
         cover_path is None
         or not cover_path.is_file()
@@ -409,7 +413,9 @@ def get_resource_page(
         metadata = _parse_json(unit.metadata_json, {})
         entry_name = metadata.get("zipEntryName") or unit.href
         return media_streaming.send_comic_page_zip_entry(
-            media_streaming.stored_path(source.path, settings, database_backed=True),
+            media_streaming.stored_path(
+                source.path, settings, (Path(source.source_root),)
+            ),
             entry_name,
             request,
             actor_id,
@@ -419,7 +425,11 @@ def get_resource_page(
             asset_id=unit.id or f"{resource_id}:{page_index}",
         )
     return media_streaming.send_comic_page_file(
-        media_streaming.stored_path(unit.href, settings, database_backed=True),
+        media_streaming.stored_path(
+            unit.href if source is not None else None,
+            settings,
+            (Path(source.source_root),) if source is not None else (),
+        ),
         request,
         actor_id,
         settings,

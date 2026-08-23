@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
@@ -88,7 +88,11 @@ class ReadableResourcePipeline:
     clock: UtcClock
 
 
-def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeline:
+def build_readable_resource_pipeline(
+    session: Session,
+    settings: Settings | None = None,
+) -> ReadableResourcePipeline:
+    runtime_settings = settings or get_settings()
     libraries = SqlAlchemyLibraryConfigAdapter(session)
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(session)
@@ -123,7 +127,7 @@ def build_readable_resource_pipeline(session: Session) -> ReadableResourcePipeli
         log=log,
         sidecar=sidecar,
         metadata_priority=SqlAlchemyLocalMetadataPriority(session),
-        covers=FilesystemLocalCoverPublication(get_settings().resolved_storage_root),
+        covers=FilesystemLocalCoverPublication(runtime_settings.resolved_storage_root),
     )
     continue_import = ContinueImport(
         libraries=libraries,

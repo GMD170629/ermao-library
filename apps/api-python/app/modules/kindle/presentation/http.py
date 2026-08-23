@@ -361,7 +361,7 @@ def create_kindle_send_task(
     if not file_row or (book_id and str(file_row["bookId"]) != book_id):
         return fail("选择的图书文件不存在", status_code=404)
     file_format = str(file_row.get("resourceFormat") or "").upper()
-    file_name = Path(str(file_row.get("sourcePath") or "")).name
+    file_name = Path(str(file_row.get("sourceRelativePath") or "")).name
     if (
         file_format not in SUPPORTED_FORMATS
         or Path(file_name).suffix.lower() not in SUPPORTED_EXTENSIONS

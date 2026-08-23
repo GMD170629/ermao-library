@@ -124,7 +124,7 @@ class ProcessReadableResourceImportTask:
         ):
             try:
                 prepared_cover = self._covers.prepare(
-                    book_id=resource.book_id,
+                    resource_id=resource.id,
                     content=parsed.local_metadata.cover.content,
                 )
             except ValueError:
@@ -141,7 +141,7 @@ class ProcessReadableResourceImportTask:
         schedule_sidecar = False
         with self._uow.transaction():
             if parsed.ok and parsed.asset is not None:
-                self._books_resources.upsert_asset(
+                asset_id = self._books_resources.upsert_asset(
                     library_id=library_id,
                     resource_id=resource_id,
                     source_node_id=source_node_id,
@@ -161,6 +161,12 @@ class ProcessReadableResourceImportTask:
                             if prepared_cover is not None
                             else None
                         ),
+                    )
+                if parsed.asset.navigation_units:
+                    self._books_resources.replace_navigation_units(
+                        resource_id=resource_id,
+                        asset_id=asset_id,
+                        units=parsed.asset.navigation_units,
                     )
                 if self._books_resources.count_ready_assets(resource_id) >= 1:
                     self._books_resources.mark_resource_ready(

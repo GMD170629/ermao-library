@@ -63,15 +63,15 @@ internal class KtorAdministrativeSettingsRepository(
         )
     }
 
-    override suspend fun createKindleTask(context: AdministrativeSettingsContext, fileId: String, workId: String?): AdministrativeSettingsResult<KindleTask> {
-        if (fileId.isBlank()) return invalid("INVALID_FILE_ID", "fileId")
+    override suspend fun createKindleTask(context: AdministrativeSettingsContext, assetId: String, bookId: String?): AdministrativeSettingsResult<KindleTask> {
+        if (assetId.isBlank()) return invalid("INVALID_ASSET_ID", "assetId")
         return call(
             context,
             ApiMethod.Post,
             "/api/kindle-send-tasks",
             body = buildJsonObject {
-                put("fileId", fileId.trim())
-                workId?.trim()?.takeIf(String::isNotEmpty)?.let { put("workId", it) }
+                put("assetId", assetId.trim())
+                bookId?.trim()?.takeIf(String::isNotEmpty)?.let { put("bookId", it) }
             },
             transform = JsonElement::toKindleTaskPayload,
         )
@@ -166,23 +166,11 @@ internal class KtorAdministrativeSettingsRepository(
         )
 
     override suspend fun listImportTasks(context: AdministrativeSettingsContext, filter: ImportTaskFilter): AdministrativeSettingsResult<ImportTaskPage> {
-        validatePage(filter.page, filter.pageSize, 100)?.let { return it }
-        return call(
-            context,
-            ApiMethod.Get,
-            "/api/import-tasks",
-            query = queryOf(
-                "page" to filter.page.toString(),
-                "pageSize" to filter.pageSize.toString(),
-                "status" to filter.status?.wireValue,
-                "keyword" to filter.keyword?.trim()?.takeIf(String::isNotEmpty),
-            ),
-            transform = JsonElement::toImportTaskPage,
-        )
+        return unavailable("IMPORT_TASK_LIST_UNAVAILABLE")
     }
 
     override suspend fun loadImportTask(context: AdministrativeSettingsContext, taskId: String) =
-        idCall(context, ApiMethod.Get, "/api/import-tasks", taskId, transform = JsonElement::toImportTaskPayload)
+        idCall(context, ApiMethod.Get, "/api/library-import-tasks", taskId, transform = JsonElement::toImportTaskPayload)
 
     override suspend fun listImportTaskLogs(
         context: AdministrativeSettingsContext,
@@ -190,65 +178,38 @@ internal class KtorAdministrativeSettingsRepository(
         page: Int,
         pageSize: Int,
     ): AdministrativeSettingsResult<ImportTaskLogPage> {
-        if (taskId.isBlank()) return invalid("INVALID_ID", "taskId")
-        validatePage(page, pageSize, 100)?.let { return it }
-        return call(
-            context,
-            ApiMethod.Get,
-            "/api/import-tasks/${taskId.encodeURLPathPart()}/logs",
-            query = queryOf("page" to page.toString(), "pageSize" to pageSize.toString()),
-            transform = JsonElement::toImportTaskLogPage,
-        )
+        return unavailable("IMPORT_TASK_LOGS_UNAVAILABLE")
     }
 
     override suspend fun retryImportTask(context: AdministrativeSettingsContext, taskId: String) =
-        idCall(context, ApiMethod.Post, "/api/import-tasks", taskId, "/retry", JsonElement::toImportTaskPayload)
+        unavailable<ImportTask>("IMPORT_TASK_RETRY_UNAVAILABLE")
 
     override suspend fun deleteImportTask(
         context: AdministrativeSettingsContext,
         taskId: String,
-    ) = idCall(
-        context,
-        ApiMethod.Delete,
-        "/api/import-tasks",
-        taskId,
-        transform = JsonElement::toImportTaskDeletion,
-    )
+    ) = unavailable<ImportTaskDeletion>("IMPORT_TASK_DELETE_UNAVAILABLE")
 
     override suspend fun clearCompletedImportTasks(context: AdministrativeSettingsContext) =
-        call(context, ApiMethod.Delete, "/api/import-tasks", transform = JsonElement::toDeletedCount)
+        unavailable<Int>("IMPORT_TASK_CLEAR_UNAVAILABLE")
 
     override suspend fun clearImportQueue(context: AdministrativeSettingsContext) =
-        call(context, ApiMethod.Post, "/api/import-tasks/clear", transform = JsonElement::toQueueOperationPayload)
+        unavailable<QueueOperation>("IMPORT_QUEUE_CLEAR_UNAVAILABLE")
 
     override suspend fun rescanImportFolders(context: AdministrativeSettingsContext) =
-        call(context, ApiMethod.Post, "/api/import-tasks/rescan", transform = JsonElement::toImportRescanRequest)
+        unavailable<ImportRescanRequest>("IMPORT_RESCAN_UNAVAILABLE")
 
     override suspend fun scanDirectory(context: AdministrativeSettingsContext, path: String): AdministrativeSettingsResult<ImportScanJob> {
-        if (path.isBlank()) return invalid("INVALID_DIRECTORY", "path")
-        return call(
-            context,
-            ApiMethod.Post,
-            "/api/import-tasks/scan-directory",
-            body = buildJsonObject { put("path", path.trim()) },
-            transform = JsonElement::toImportScanJobPayload,
-        )
+        return unavailable("IMPORT_DIRECTORY_SCAN_UNAVAILABLE")
     }
 
     override suspend fun listImportScanJobs(context: AdministrativeSettingsContext, status: ImportScanStatus?) =
-        call(
-            context,
-            ApiMethod.Get,
-            "/api/import-scan-jobs",
-            query = queryOf("status" to status?.wireValue),
-            transform = JsonElement::toImportScanJobs,
-        )
+        unavailable<List<ImportScanJob>>("IMPORT_SCAN_JOBS_UNAVAILABLE")
 
     override suspend fun loadImportScanJob(context: AdministrativeSettingsContext, jobId: String) =
-        idCall(context, ApiMethod.Get, "/api/import-scan-jobs", jobId, transform = JsonElement::toImportScanJobPayload)
+        unavailable<ImportScanJob>("IMPORT_SCAN_JOB_UNAVAILABLE")
 
     override suspend fun cancelImportScanJob(context: AdministrativeSettingsContext, jobId: String) =
-        idCall(context, ApiMethod.Post, "/api/import-scan-jobs", jobId, "/cancel", JsonElement::toImportScanJobPayload)
+        unavailable<ImportScanJob>("IMPORT_SCAN_CANCEL_UNAVAILABLE")
 
     override suspend fun loadImportPreferences(context: AdministrativeSettingsContext): AdministrativeSettingsResult<ImportPreferences> =
         mapSettingsResult(loadSystemSettings(context), ::importPreferencesFrom)
@@ -316,7 +277,7 @@ internal class KtorAdministrativeSettingsRepository(
         call(context, ApiMethod.Get, "/api/metadata/opf-sync/status", transform = JsonElement::toOpfQueueStatus)
 
     override suspend fun listLibraryOperations(context: AdministrativeSettingsContext) =
-        call(context, ApiMethod.Get, "/api/library/operations", transform = JsonElement::toLibraryOperations)
+        unavailable<List<LibraryOperation>>("LIBRARY_OPERATION_HISTORY_UNAVAILABLE")
 
     override suspend fun undoLibraryOperation(context: AdministrativeSettingsContext, operationId: String) =
         idCall(context, ApiMethod.Post, "/api/library/operations", operationId, "/undo", JsonElement::toUndoOperation)
@@ -326,7 +287,7 @@ internal class KtorAdministrativeSettingsRepository(
         return call(
             context,
             ApiMethod.Get,
-            "/api/library/categories",
+            "/api/library/facets",
             query = queryOf(
                 "kind" to filter.kind.wireValue,
                 "search" to filter.search?.trim()?.takeIf(String::isNotEmpty),
@@ -346,7 +307,7 @@ internal class KtorAdministrativeSettingsRepository(
         return idCall(
             context,
             ApiMethod.Patch,
-            "/api/library/categories",
+            "/api/library/facets",
             categoryId,
             body = buildJsonObject { put("name", name.trim()) },
             transform = JsonElement::toCategoryOperation,
@@ -365,7 +326,7 @@ internal class KtorAdministrativeSettingsRepository(
         return call(
             context,
             ApiMethod.Post,
-            "/api/library/categories/merge",
+            "/api/library/facets/merge",
             body = buildJsonObject {
                 put("kind", kind.wireValue)
                 put("targetId", targetId)
@@ -376,7 +337,7 @@ internal class KtorAdministrativeSettingsRepository(
     }
 
     override suspend fun deleteCategory(context: AdministrativeSettingsContext, categoryId: String) =
-        idCall(context, ApiMethod.Delete, "/api/library/categories", categoryId, transform = JsonElement::toCategoryOperation)
+        idCall(context, ApiMethod.Delete, "/api/library/facets", categoryId, transform = JsonElement::toCategoryOperation)
 
     override suspend fun loadMetadataProviders(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/metadata/providers", transform = JsonElement::toMetadataProviders)
@@ -842,6 +803,11 @@ internal class KtorAdministrativeSettingsRepository(
                 code,
                 listOf(AdministrativeSettingsFieldViolation(field, "INVALID_FIELD")),
             ),
+        )
+
+    private fun <T> unavailable(code: String): AdministrativeSettingsResult<T> =
+        AdministrativeSettingsResult.Failure(
+            AdministrativeSettingsError(AdministrativeSettingsErrorKind.Unavailable, code),
         )
 
     private fun <T> protocol(code: String): AdministrativeSettingsResult<T> =

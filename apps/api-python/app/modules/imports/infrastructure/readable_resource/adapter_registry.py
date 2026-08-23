@@ -13,6 +13,10 @@ from app.contracts.local_metadata import (
 )
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
+from app.infrastructure.comic_archives import (
+    ComicArchiveError,
+    inspect_comic_archive,
+)
 from app.modules.imports.application.local_metadata import (
     LocalCoverPayload,
     LocalMetadataCandidate,
@@ -23,6 +27,7 @@ from app.modules.imports.application.readable_resource.ports import (
     FileParseResult,
     ParsedAssetPayload,
     ResourceAdapterExecutorPort,
+    ResourceNavigationUnitInput,
 )
 from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
@@ -90,8 +95,35 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             or resolved.metadata.title
             or absolute_path.stem
         )
+        navigation_units: tuple[ResourceNavigationUnitInput, ...] = ()
         if adapter.adapter_id is ResourceAdapterId.COMIC_ARCHIVE:
-            title = self._inspect_comic_title(absolute_path) or title
+            try:
+                inspection = inspect_comic_archive(
+                    absolute_path,
+                    original_name=absolute_path.name,
+                )
+            except (ComicArchiveError, OSError, ValueError) as exc:
+                return FileParseResult(
+                    ok=False,
+                    adapter=adapter,
+                    resource_title=None,
+                    asset=None,
+                    error_code="COMIC_ARCHIVE_INVALID",
+                    error_summary=str(exc),
+                    local_metadata=resolved,
+                )
+            title = str(inspection["title"]) or title
+            navigation_units = tuple(
+                ResourceNavigationUnitInput(
+                    unit_type="page",
+                    title=str(page["title"]),
+                    href=str(page["entryPath"]),
+                    media_type=str(page["mediaType"]),
+                    sort_order=int(page["index"]) - 1,
+                    size=int(page["size"]),
+                )
+                for page in inspection["pages"]
+            )
         elif adapter.adapter_id in {
             ResourceAdapterId.AUDIO_FILE,
             ResourceAdapterId.AUDIOBOOK_DIRECTORY,
@@ -107,6 +139,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             duration_ms=None,
             failure_reason=None,
             technical=AssetTechnicalMetadata(),
+            navigation_units=navigation_units,
         )
         return FileParseResult(
             ok=True,
@@ -231,12 +264,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a")
         ) or (prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP")
         return content if valid else None
-
-    def _inspect_comic_title(self, path: Path) -> str | None:
-        # Archive metadata is optional for the target identity.  The source
-        # filename remains the deterministic fallback; media delivery owns
-        # archive inspection separately.
-        return path.stem
 
     def _inspect_audio_title(self, path: Path) -> str | None:
         from app.services.audio_metadata import parse_audio_metadata

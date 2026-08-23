@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Library,
     LibraryBook,
+    LibraryBookMetadata,
     LibrarySourceNode,
     LibrarySourceNodeMetadata,
 )
@@ -32,7 +33,7 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
     def get_state(
         self, *, book_id: str, source_node_id: str
     ) -> SourceNodePresentationState | None:
-        scoped = self._scoped_directory(book_id=book_id, source_node_id=source_node_id)
+        scoped = self._scoped_node(book_id=book_id, source_node_id=source_node_id)
         if scoped is None:
             return None
         node, _book, _library = scoped
@@ -48,7 +49,7 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
         source_node_id: str,
         changes: SourceNodeMetadataChanges,
     ) -> bool:
-        scoped = self._scoped_directory(book_id=book_id, source_node_id=source_node_id)
+        scoped = self._scoped_node(book_id=book_id, source_node_id=source_node_id)
         if scoped is None:
             return False
         node, book, library = scoped
@@ -61,6 +62,23 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
         if changes.replace_cover:
             metadata.cover_path = changes.cover_path
             metadata.cover_status = "READY" if changes.cover_path else "PENDING"
+        if node.id == book.source_node_id:
+            book_metadata = self._db.get(LibraryBookMetadata, book.id)
+            if book_metadata is None:
+                book_metadata = LibraryBookMetadata(
+                    book_id=book.id,
+                    title=changes.title,
+                    normalized_title=changes.title.casefold(),
+                )
+                self._db.add(book_metadata)
+            book_metadata.title = changes.title
+            book_metadata.normalized_title = changes.title.casefold()
+            book_metadata.description = changes.description
+            if changes.replace_cover:
+                book_metadata.cover_path = changes.cover_path
+                book_metadata.cover_status = (
+                    "READY" if changes.cover_path else "PENDING"
+                )
         self._db.flush()
         if metadata_writeback_enabled(self._db):
             source_directory = self._source_directory(library=library, node=node)
@@ -76,7 +94,7 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
             persist_metadata_writeback_intents(self._db, (intent,))
         return True
 
-    def _scoped_directory(
+    def _scoped_node(
         self, *, book_id: str, source_node_id: str
     ) -> tuple[LibrarySourceNode, LibraryBook, Library] | None:
         book = self._db.get(LibraryBook, book_id)
@@ -95,7 +113,7 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
         )
         if (
             node.library_id != root.library_id
-            or node.physical_kind != "DIRECTORY"
+            or (node.id != root.id and node.physical_kind != "DIRECTORY")
             or not inside_root
         ):
             return None

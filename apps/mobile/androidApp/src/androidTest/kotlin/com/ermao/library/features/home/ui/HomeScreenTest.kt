@@ -16,7 +16,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.R
 import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.HomeContent
-import com.ermao.library.features.content.model.WorkCard
+import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.library.AuthenticatedCover
@@ -30,9 +30,10 @@ import com.ermao.library.shared.modules.library.GroupingQuery
 import com.ermao.library.shared.modules.library.GroupingSummary
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.LibraryPage
-import com.ermao.library.shared.modules.library.WorksQuery
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
+import com.ermao.library.shared.modules.library.BooksQuery
+import com.ermao.library.shared.modules.library.BookDetailQuery
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -54,8 +55,8 @@ class HomeScreenTest {
 
     @Test
     fun dailyStateUsesCompactGutterThreeScanTargetsAndOneTruthfulPrimaryAction() {
-        var openedWorkId: String? = null
-        var continuedVolumeId: String? = null
+        var openedBookId: String? = null
+        var continuedResourceId: String? = null
         compose.setContent {
             WarmPageTheme {
                 HomeScreen(
@@ -65,8 +66,8 @@ class HomeScreenTest {
                     ),
                     repository = StubContentRepository,
                     context = contentRequestContext(),
-                    onOpenWork = { openedWorkId = it },
-                    onContinueReading = { continuedVolumeId = it.resumeVolumeId },
+                    onOpenBook = { openedBookId = it },
+                    onContinueReading = { continuedResourceId = it.resumeResourceId },
                     onOpenLibrary = {},
                     onRetry = {},
                     onRefresh = {},
@@ -79,16 +80,16 @@ class HomeScreenTest {
         compose.onNodeWithTag("home-continue")
             .assertIsDisplayed()
             .assertLeftPositionInRootIsEqualTo(16.dp)
-        compose.onNodeWithTag("work-recent-1").assertIsDisplayed()
-        compose.onNodeWithTag("work-recent-2").assertIsDisplayed()
-        compose.onNodeWithTag("work-recent-3").assertIsDisplayed()
+        compose.onNodeWithTag("book-recent-1").assertIsDisplayed()
+        compose.onNodeWithTag("book-recent-2").assertIsDisplayed()
+        compose.onNodeWithTag("book-recent-3").assertIsDisplayed()
         compose.onNodeWithTag("home-continue-action")
             .assertIsDisplayed()
             .assertHeightIsAtLeast(48.dp)
             .performClick()
 
-        assertEquals("resume-volume", continuedVolumeId)
-        assertEquals(null, openedWorkId)
+        assertEquals("resume-resource", continuedResourceId)
+        assertEquals(null, openedBookId)
     }
 
     @Test
@@ -102,11 +103,11 @@ class HomeScreenTest {
                         isLoading = false,
                         content = HomeContent(
                             continueReading = ContinueReadingCard(
-                                work = work("long-work", longTitle, progress = 72),
-                                volumeTitle = "  $longTitle  ",
+                                book = book("long-book", longTitle, progress = 72),
+                                resourceTitle = "  $longTitle  ",
                                 positionLabel = " $longTitle ",
                                 lastReadAtEpochMillis = Instant.parse(wireTimestamp).toEpochMilli(),
-                                resumeVolumeId = "long-volume",
+                                resumeResourceId = "long-resource",
                             ),
                             recentReading = emptyList(),
                             recentAdded = emptyList(),
@@ -114,7 +115,7 @@ class HomeScreenTest {
                     ),
                     repository = StubContentRepository,
                     context = contentRequestContext(),
-                    onOpenWork = {},
+                    onOpenBook = {},
                     onContinueReading = {},
                     onOpenLibrary = {},
                     onRetry = {},
@@ -150,21 +151,21 @@ private val FixedHomeTestClock: Clock = Clock.fixed(
 
 private fun dailyHomeContent(): HomeContent = HomeContent(
     continueReading = ContinueReadingCard(
-        work = work("continue-work", "The Three-Body Problem", progress = 34),
-        volumeTitle = "Volume 1",
+        book = book("continue-book", "The Three-Body Problem", progress = 34),
+        resourceTitle = "Resource 1",
         positionLabel = "Chapter 2",
         lastReadAtEpochMillis = Instant.parse("2026-08-15T01:18:00Z").toEpochMilli(),
-        resumeVolumeId = "resume-volume",
+        resumeResourceId = "resume-resource",
     ),
     recentReading = listOf(
-        work("recent-1", "Dune", progress = 12),
-        work("recent-2", "Sapiens", progress = 8),
-        work("recent-3", "The Milky Way", progress = 18),
+        book("recent-1", "Dune", progress = 12),
+        book("recent-2", "Sapiens", progress = 8),
+        book("recent-3", "The Milky Way", progress = 18),
     ),
     recentAdded = emptyList(),
 )
 
-private fun work(id: String, title: String, progress: Int?): WorkCard = WorkCard(
+private fun book(id: String, title: String, progress: Int?): BookCard = BookCard(
     id = id,
     title = title,
     author = "Author",
@@ -200,17 +201,17 @@ private object StubContentRepository : ContentRepository {
     override suspend fun loadRecentReading(
         context: ContentRequestContext,
         limit: Int,
-    ): ContentResult<List<WorkSummary>> = unused()
+    ): ContentResult<List<BookSummary>> = unused()
 
     override suspend fun loadRecentAdded(
         context: ContentRequestContext,
         limit: Int,
-    ): ContentResult<List<WorkSummary>> = unused()
+    ): ContentResult<List<BookSummary>> = unused()
 
-    override suspend fun loadWorks(
+    override suspend fun loadBooks(
         context: ContentRequestContext,
-        query: WorksQuery,
-    ): ContentResult<LibraryPage<WorkSummary>> = unused()
+        query: BooksQuery,
+    ): ContentResult<LibraryPage<BookSummary>> = unused()
 
     override suspend fun loadGroupings(
         context: ContentRequestContext,
@@ -222,10 +223,10 @@ private object StubContentRepository : ContentRepository {
         query: FacetQuery,
     ): ContentResult<FacetPage> = unused()
 
-    override suspend fun loadWorkDetail(
+    override suspend fun loadBookDetail(
         context: ContentRequestContext,
-        query: com.ermao.library.shared.modules.library.WorkDetailQuery,
-    ): ContentResult<WorkDetailSummary> = unused()
+        query: BookDetailQuery,
+    ): ContentResult<BookDetailSummary> = unused()
 
     override suspend fun loadCover(
         context: ContentRequestContext,

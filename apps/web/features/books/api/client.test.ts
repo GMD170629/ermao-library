@@ -5,7 +5,9 @@ import { assetDownloadUrl, fetchBook, mapBookView } from './client';
 const resource = (id: string, bookId = 'book-1') => ({
   id,
   bookId,
+  sourceNodeId: `${id}-source-node`,
   title: 'Resource',
+  description: '',
   resourceIndex: null,
   sortOrder: 0,
   format: 'COMIC',
@@ -42,11 +44,29 @@ test('full book responses reject summary projections before reaching detail UI',
   assert.throws(() => mapBookView({ id: 'book-1', title: 'Summary only' }), /资源结构/);
 });
 
-test('maps a direct book resource collection', () => {
-  const book = mapBookView({ id: 'book-1', title: 'Book', resources: [resource('resource-1')] });
+test('maps a direct book resource collection with physical identities', () => {
+  const mappedResource = {
+    ...resource('resource-1'),
+    assets: [{
+      id: 'asset-1',
+      resourceId: 'resource-1',
+      sourceNodeId: 'asset-source-node',
+      role: 'PRIMARY',
+      mimeType: 'application/zip',
+      sortOrder: 0,
+      sizeBytes: 1024,
+      size: '1 KB',
+      url: '/api/assets/asset-1',
+      downloadUrl: '/api/assets/asset-1?download=true'
+    }]
+  };
+  const book = mapBookView({ id: 'book-1', sourceNodeId: 'book-source-node', title: 'Book', resources: [mappedResource] });
+  assert.equal(book.sourceNodeId, 'book-source-node');
   assert.equal(book.resources.length, 1);
   assert.equal(book.resources[0]?.readable, true);
   assert.equal(book.resources[0]?.bookId, 'book-1');
+  assert.equal(book.resources[0]?.assets[0]?.downloadUrl, '/api/assets/asset-1?download=true');
+  assert.equal('path' in (book.resources[0]?.assets[0] ?? {}), false);
 });
 
 test('requests book detail with an optional resource selector', async () => {
@@ -54,7 +74,7 @@ test('requests book detail with an optional resource selector', async () => {
   let requestedUrl = '';
   globalThis.fetch = async (input) => {
     requestedUrl = String(input);
-    return new Response(JSON.stringify({ ok: true, data: { book: { id: 'book-1', resources: [] } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: true, data: { book: { id: 'book-1', sourceNodeId: 'book-source-node', resources: [] } } }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   try {
     await fetchBook('book/1', undefined, 'resource/3');

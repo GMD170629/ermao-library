@@ -416,6 +416,6 @@ class KtorPersonalSettingsRepositoryTest {
         const val PREFERENCES_ZH =
             """{"ok":true,"data":{"preferences":{"locale":"zh-CN"}}}"""
         const val COMPATIBILITY =
-            """{"ok":true,"data":{"service":"ermao-books","serverIdentity":"server-fixture","serverVersion":"2.4.0","protocol":{"version":1,"minimumSupportedClientVersion":1},"readerSchemaVersion":4,"capabilities":{"setup":true,"cookieSession":true,"readerV4":true,"mediaRange":true,"managedOfflineDownloads":false}}}"""
+            """{"ok":true,"data":{"service":"ermao-books","serverIdentity":"server-fixture","serverVersion":"2.4.0","protocol":{"version":3,"minimumSupportedClientVersion":3},"readerSchemaVersion":4,"librarySchemaVersion":1,"capabilities":{"setup":true,"cookieSession":true,"readerV4":true,"mediaRange":true,"managedOfflineDownloads":true,"bookResourceAsset":true,"bookDetailManagement":false}}}"""
     }
 }

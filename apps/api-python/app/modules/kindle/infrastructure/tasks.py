@@ -14,6 +14,7 @@ from sqlalchemy.sql.dml import Insert, Update
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import timestamp_ms_to_datetime
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
@@ -341,7 +342,8 @@ def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] |
             LibraryResourceAsset,
             LibraryReadableResource.book_id.label("bookId"),
             LibraryReadableResource.format.label("resourceFormat"),
-            LibrarySourceNode.relative_path.label("sourcePath"),
+            Library.root_path.label("libraryRoot"),
+            LibrarySourceNode.relative_path.label("sourceRelativePath"),
             LibrarySourceNode.observed_size_bytes.label("sizeBytes"),
         )
         .join(
@@ -352,6 +354,7 @@ def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] |
             LibrarySourceNode,
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
+        .join(Library, Library.id == LibraryResourceAsset.library_id)
         .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:
@@ -359,7 +362,8 @@ def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] |
     file_row = entity_record(row[0])
     file_row["bookId"] = row.bookId
     file_row["resourceFormat"] = row.resourceFormat
-    file_row["sourcePath"] = row.sourcePath
+    file_row["libraryRoot"] = row.libraryRoot
+    file_row["sourceRelativePath"] = row.sourceRelativePath
     file_row["sizeBytes"] = int(row.sizeBytes or 0)
     return file_row
 
@@ -374,7 +378,8 @@ def get_library_asset_details_for_kindle(
             LibraryReadableResource.format.label("resourceFormat"),
             LibraryBookMetadata.title.label("bookTitle"),
             LibraryReadableResourceMetadata.title.label("resourceTitle"),
-            LibrarySourceNode.relative_path.label("sourcePath"),
+            Library.root_path.label("libraryRoot"),
+            LibrarySourceNode.relative_path.label("sourceRelativePath"),
             LibrarySourceNode.observed_size_bytes.label("sizeBytes"),
         )
         .join(
@@ -391,6 +396,7 @@ def get_library_asset_details_for_kindle(
             LibrarySourceNode,
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
+        .join(Library, Library.id == LibraryResourceAsset.library_id)
         .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:
@@ -400,6 +406,7 @@ def get_library_asset_details_for_kindle(
     file_row["resourceFormat"] = row.resourceFormat
     file_row["bookTitle"] = row.bookTitle
     file_row["resourceTitle"] = row.resourceTitle
-    file_row["sourcePath"] = row.sourcePath
+    file_row["libraryRoot"] = row.libraryRoot
+    file_row["sourceRelativePath"] = row.sourceRelativePath
     file_row["sizeBytes"] = int(row.sizeBytes or 0)
     return file_row

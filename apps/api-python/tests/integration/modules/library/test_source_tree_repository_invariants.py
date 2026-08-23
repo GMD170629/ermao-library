@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.contracts.publication_metadata import PublicationMetadata
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
@@ -64,13 +65,19 @@ def _bootstrap(tmp_path: Path):
     return engine
 
 
-def _add_library(db: Session, tmp_path: Path, library_id: str = "lib-1") -> None:
+def _add_library(
+    db: Session,
+    tmp_path: Path,
+    library_id: str = "lib-1",
+    *,
+    organization_mode: str = "FLAT",
+) -> None:
     db.add(
         Library(
             id=library_id,
             name=library_id,
             root_path=str(tmp_path / library_id),
-            organization_mode="FLAT",
+            organization_mode=organization_mode,
         )
     )
 
@@ -391,6 +398,202 @@ def test_book_and_resource_library_and_anchor_scope(tmp_path: Path) -> None:
                 dup.value.code
                 is ReadableResourceAnchorViolationCode.RESOURCE_ALREADY_ANCHORED
             )
+    finally:
+        engine.dispose()
+
+
+def test_local_metadata_projects_to_flat_book_with_same_source_anchor(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    try:
+        with Session(engine) as db:
+            _add_library(db, tmp_path)
+            db.commit()
+            nodes = SqlAlchemySourceNodeRepository(db)
+            books = SqlAlchemyBookResourceRepository(db)
+            source, _ = nodes.insert_if_absent(
+                library_id="lib-1",
+                parent_id=None,
+                entry=_entry("solo.epub", SourceNodePhysicalKind.REGULAR_FILE),
+            )
+            book_id = books.ensure_book(
+                library_id="lib-1", source_node_id=source.id, title="solo"
+            )
+            resource = books.create_pending_resource(
+                library_id="lib-1",
+                book_id=book_id,
+                source_node_id=source.id,
+                adapter=_adapter(),
+            )
+
+            books.apply_local_metadata(
+                resource_id=resource.id,
+                metadata=PublicationMetadata(
+                    title="Embedded Title",
+                    authors=("Author One", "Author Two"),
+                    description="Description",
+                    series_name="Series",
+                    series_index=2.0,
+                    language="zh-CN",
+                    publisher="Publisher",
+                    identifier="book-id",
+                ),
+                cover_path="covers/solo.jpg",
+            )
+
+            book_metadata = db.get(LibraryBookMetadata, book_id)
+            assert book_metadata is not None
+            assert book_metadata.title == "Embedded Title"
+            assert book_metadata.normalized_title == "embedded title"
+            assert book_metadata.author == "Author One / Author Two"
+            assert book_metadata.normalized_author == "author one / author two"
+            assert book_metadata.description == "Description"
+            assert book_metadata.series_name == "Series"
+            assert book_metadata.series_index == 2.0
+            assert book_metadata.metadata_quality > 0
+            assert book_metadata.cover_path == "covers/solo.jpg"
+            assert book_metadata.cover_status == "READY"
+
+            resource_metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+            assert resource_metadata is not None
+            assert resource_metadata.title == "Embedded Title"
+            assert resource_metadata.description == "Description"
+            assert resource_metadata.language == "zh-CN"
+            assert resource_metadata.publisher == "Publisher"
+            assert resource_metadata.identifier == "book-id"
+            assert resource_metadata.cover_path == "covers/solo.jpg"
+            assert resource_metadata.cover_status == "READY"
+
+            books.clear_local_cover(
+                resource_id=resource.id,
+                expected_path="covers/stale.jpg",
+            )
+            assert book_metadata.cover_path == "covers/solo.jpg"
+            assert resource_metadata.cover_path == "covers/solo.jpg"
+
+            books.clear_local_cover(
+                resource_id=resource.id,
+                expected_path="covers/solo.jpg",
+            )
+            assert book_metadata.cover_path is None
+            assert book_metadata.cover_status == "FAILED"
+            assert resource_metadata.cover_path is None
+            assert resource_metadata.cover_status == "FAILED"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("import_order", ((0, 1), (1, 0)))
+def test_descendant_resource_metadata_never_overwrites_volume_book(
+    tmp_path: Path,
+    import_order: tuple[int, int],
+) -> None:
+    engine = _bootstrap(tmp_path)
+    try:
+        with Session(engine) as db:
+            _add_library(db, tmp_path, organization_mode="VOLUMES")
+            db.commit()
+            nodes = SqlAlchemySourceNodeRepository(db)
+            books = SqlAlchemyBookResourceRepository(db)
+            directory, _ = nodes.insert_if_absent(
+                library_id="lib-1",
+                parent_id=None,
+                entry=_entry("Series", SourceNodePhysicalKind.DIRECTORY),
+            )
+            children = [
+                nodes.insert_if_absent(
+                    library_id="lib-1",
+                    parent_id=directory.id,
+                    entry=_entry(
+                        f"Series/{index}.epub",
+                        SourceNodePhysicalKind.REGULAR_FILE,
+                    ),
+                )[0]
+                for index in (1, 2)
+            ]
+            book_id = books.ensure_book(
+                library_id="lib-1", source_node_id=directory.id, title="Series"
+            )
+            book_metadata = db.get(LibraryBookMetadata, book_id)
+            assert book_metadata is not None
+            book_metadata.author = "Curated Author"
+            book_metadata.normalized_author = "curated author"
+            book_metadata.description = "Curated Description"
+            book_metadata.series_name = "Curated Series"
+            book_metadata.series_index = 9.0
+            book_metadata.metadata_quality = 91
+            book_metadata.cover_path = "covers/curated.jpg"
+            book_metadata.cover_status = "READY"
+
+            resources = [
+                books.create_pending_resource(
+                    library_id="lib-1",
+                    book_id=book_id,
+                    source_node_id=child.id,
+                    adapter=_adapter(),
+                )
+                for child in children
+            ]
+            publications = [
+                PublicationMetadata(
+                    title="Embedded One",
+                    volume_title="Volume One",
+                    authors=("File Author One",),
+                    description="File Description One",
+                    series_name="File Series One",
+                    series_index=1.0,
+                    language="en",
+                ),
+                PublicationMetadata(
+                    title="Embedded Two",
+                    volume_title="Volume Two",
+                    authors=("File Author Two",),
+                    description="File Description Two",
+                    series_name="File Series Two",
+                    series_index=2.0,
+                    language="zh-CN",
+                ),
+            ]
+            for index in import_order:
+                books.apply_local_metadata(
+                    resource_id=resources[index].id,
+                    metadata=publications[index],
+                    cover_path=f"covers/child-{index + 1}.jpg",
+                )
+
+            assert book_metadata.title == "Series"
+            assert book_metadata.normalized_title == "series"
+            assert book_metadata.author == "Curated Author"
+            assert book_metadata.normalized_author == "curated author"
+            assert book_metadata.description == "Curated Description"
+            assert book_metadata.series_name == "Curated Series"
+            assert book_metadata.series_index == 9.0
+            assert book_metadata.metadata_quality == 91
+            assert book_metadata.cover_path == "covers/curated.jpg"
+            assert book_metadata.cover_status == "READY"
+
+            first_metadata = db.get(LibraryReadableResourceMetadata, resources[0].id)
+            second_metadata = db.get(LibraryReadableResourceMetadata, resources[1].id)
+            assert first_metadata is not None
+            assert first_metadata.title == "Volume One"
+            assert first_metadata.description == "File Description One"
+            assert first_metadata.language == "en"
+            assert first_metadata.cover_path == "covers/child-1.jpg"
+            assert second_metadata is not None
+            assert second_metadata.title == "Volume Two"
+            assert second_metadata.description == "File Description Two"
+            assert second_metadata.language == "zh-CN"
+            assert second_metadata.cover_path == "covers/child-2.jpg"
+
+            books.clear_local_cover(
+                resource_id=resources[0].id,
+                expected_path="covers/child-1.jpg",
+            )
+            assert first_metadata.cover_path is None
+            assert first_metadata.cover_status == "FAILED"
+            assert book_metadata.cover_path == "covers/curated.jpg"
+            assert book_metadata.cover_status == "READY"
     finally:
         engine.dispose()
 

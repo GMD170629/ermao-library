@@ -31,25 +31,21 @@ import {
   canUseLibraryBatchAction,
   type LibraryBatchAction
 } from './model/library-batch-action';
+import {
+  applyBulkBookFindReplace,
+  previewBulkBookFindReplace,
+  updateBulkBookMetadata,
+  updateBulkBookCovers,
+  updateBulkBookReadingStatus,
+  updateBulkBookShelfMembership,
+  type BulkFindReplaceInput,
+  type BulkFindReplacePreview
+} from './api/bulk-operations';
 
 export type { LibraryBatchAction } from './model/library-batch-action';
 
 type ContextPosition = { x: number; y: number };
 type ShelfOption = { id: string; name: string; kind?: 'STATIC' | 'SMART' };
-type BulkResponse = {
-  ok: boolean;
-  data?: {
-    updated?: number;
-    changedValues?: number;
-    skipped?: Array<{ bookId: string; reason: string }>;
-  };
-  error?: { message?: string };
-};
-type FindReplacePreview = {
-  changedBooks: number;
-  changedValues: number;
-  items: Array<{ bookId: string; title: string; before: string | string[]; after: string | string[] }>;
-};
 
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
   { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、标签和系列', icon: Tags },
@@ -68,6 +64,15 @@ function splitValues(value: string) {
 
 function valueLabel(value: string | string[]) {
   return Array.isArray(value) ? value.join('、') : value || '（空）';
+}
+
+function isBulkFindReplaceField(value: string): value is BulkFindReplaceInput['field'] {
+  return value === 'title'
+    || value === 'author'
+    || value === 'description'
+    || value === 'seriesName'
+    || value === 'tags'
+    || value === 'resourceTitle';
 }
 
 export function LibraryBatchContextMenu({
@@ -159,13 +164,13 @@ export function LibraryBatchDialog({
   const [seriesName, setSeriesName] = useState('');
   const [addTags, setAddTags] = useState('');
   const [removeTags, setRemoveTags] = useState('');
-  const [findField, setFindField] = useState('title');
+  const [findField, setFindField] = useState<BulkFindReplaceInput['field']>('title');
   const [findText, setFindText] = useState('');
   const [replacement, setReplacement] = useState('');
   const [regex, setRegex] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [startNumber, setStartNumber] = useState('1');
-  const [preview, setPreview] = useState<FindReplacePreview | null>(null);
+  const [preview, setPreview] = useState<BulkFindReplacePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewSignature, setPreviewSignature] = useState('');
   const [shelves, setShelves] = useState<ShelfOption[]>([]);
@@ -226,23 +231,12 @@ export function LibraryBatchDialog({
 
   if (!action || typeof document === 'undefined') return null;
 
-  async function postJson(body: Record<string, unknown>) {
-    const response = await fetch('/api/books/bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds, ...body })
-    });
-    const payload = await response.json() as BulkResponse;
-    if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量操作失败');
-    return payload;
-  }
-
   async function applyMetadata() {
     const fields: Record<string, string> = {};
     if (authorEnabled) fields.author = author;
     if (seriesEnabled) fields.seriesName = seriesName;
-    const payload = await postJson({ action: 'update_metadata', fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
-    return `已更新 ${payload.data?.updated ?? selectedIds.length} 本图书的元数据`;
+    const result = await updateBulkBookMetadata({ ids: selectedIds, fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
+    return `已更新 ${result.updated} 本图书的元数据`;
   }
 
   function findReplaceBody() {
@@ -261,14 +255,8 @@ export function LibraryBatchDialog({
     setPreviewing(true);
     try {
       const signature = findReplaceSignature;
-      const response = await fetch('/api/books/bulk/find-replace/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedIds, ...findReplaceBody() })
-      });
-      const payload = await response.json() as { ok: boolean; data?: FindReplacePreview; error?: { message?: string } };
-      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '生成预览失败');
-      setPreview(payload.data);
+      const result = await previewBulkBookFindReplace({ ids: selectedIds, ...findReplaceBody() });
+      setPreview(result);
       setPreviewSignature(signature);
     } catch (reason) {
       setPreview(null);
@@ -279,37 +267,34 @@ export function LibraryBatchDialog({
   }
 
   async function applyFindReplace() {
-    const payload = await postJson({ action: 'find_replace', ...findReplaceBody() });
-    return `已替换 ${payload.data?.changedValues ?? 0} 处元数据`;
+    const result = await applyBulkBookFindReplace({ ids: selectedIds, ...findReplaceBody() });
+    return `已替换 ${result.changedValues} 处元数据`;
   }
 
   async function applyShelves() {
-    const payload = await postJson({ action: 'shelf_membership', membership, shelfId });
+    const result = await updateBulkBookShelfMembership({ ids: selectedIds, membership, shelfId });
     return membership === 'ADD'
-      ? `已将 ${payload.data?.updated ?? selectedIds.length} 本图书加入书架`
-      : `已从书架移除 ${payload.data?.updated ?? selectedIds.length} 本图书`;
+      ? `已将 ${result.updated} 本图书加入书架`
+      : `已从书架移除 ${result.updated} 本图书`;
   }
 
   async function applyReadingStatus() {
-    const payload = await postJson({ action: 'reading_status', status: readingStatus });
+    const result = await updateBulkBookReadingStatus({ ids: selectedIds, status: readingStatus });
     return readingStatus === 'UNREAD'
-      ? `已清空 ${payload.data?.updated ?? selectedIds.length} 本图书的阅读记录`
-      : `已将 ${payload.data?.updated ?? selectedIds.length} 本图书设为已读`;
+      ? `已清空 ${result.updated} 本图书的阅读记录`
+      : `已将 ${result.updated} 本图书设为已读`;
   }
 
   async function applyCovers() {
-    const form = new FormData();
-    form.append('ids', JSON.stringify(selectedIds));
-    form.append('action', coverAction);
-    form.append('ratio', coverRatio);
-    form.append('quality', coverQuality);
-    form.append('maxDimension', coverMaxDimension);
-    if (coverFile) form.append('cover', coverFile);
-    const response = await fetch('/api/books/bulk/cover', { method: 'POST', body: form });
-    const payload = await response.json() as BulkResponse;
-    if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量处理封面失败');
-    const skipped = payload.data?.skipped?.length ?? 0;
-    return `已处理 ${payload.data?.updated ?? selectedIds.length} 本图书的封面${skipped ? `，跳过 ${skipped} 本` : ''}`;
+    const result = await updateBulkBookCovers({
+      ids: selectedIds,
+      action: coverAction,
+      ratio: coverRatio,
+      quality: Number(coverQuality),
+      maxDimension: Number(coverMaxDimension),
+      ...(coverFile ? { cover: coverFile } : {})
+    });
+    return `已处理 ${result.updated} 本图书的封面${result.skipped.length ? `，跳过 ${result.skipped.length} 本` : ''}`;
   }
 
   async function submit() {
@@ -400,7 +385,7 @@ export function LibraryBatchDialog({
           {action === 'find_replace' ? (
             <div className="space-y-5">
               <div className="grid gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找字段</I18nText><Select value={findField} onChange={(value) => setFindField(value)} options={findFieldOptions} className="mt-2 w-full" menuWidth={320} ariaLabel={i18nAttribute("查找字段")} />
+                <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找字段</I18nText><Select value={findField} onChange={(value) => { if (isBulkFindReplaceField(value)) setFindField(value); }} options={findFieldOptions} className="mt-2 w-full" menuWidth={320} ariaLabel={i18nAttribute("查找字段")} />
                 </label>
                 <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找内容</I18nText><input value={findText} onChange={(event) => setFindText(event.target.value)} className={cn(inputClass, 'mt-2')} placeholder={regex ? i18nAttribute("例如：第\\s*(\\d+)\\s*卷") : i18nAttribute("输入要查找的关键字")} />
                 </label>

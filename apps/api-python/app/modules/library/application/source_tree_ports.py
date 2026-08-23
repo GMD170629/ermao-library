@@ -33,6 +33,20 @@ class AdapterIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceNavigationUnitInput:
+    """Parser-owned navigation data materialized for one Resource asset."""
+
+    unit_type: str
+    title: str
+    href: str
+    media_type: str | None
+    sort_order: int
+    size: int | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class LibrarySourceTreeConfig:
     library_id: str
     root_path: Path
@@ -218,6 +232,14 @@ class BookResourceRepositoryPort(Protocol):
     ) -> str: ...
 
     def count_ready_assets(self, resource_id: str) -> int: ...
+
+    def replace_navigation_units(
+        self,
+        *,
+        resource_id: str,
+        asset_id: str,
+        units: Sequence[ResourceNavigationUnitInput],
+    ) -> None: ...
 
     def find_outermost_directory_resource(
         self,

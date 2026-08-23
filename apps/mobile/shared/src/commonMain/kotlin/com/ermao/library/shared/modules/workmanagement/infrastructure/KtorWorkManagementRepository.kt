@@ -3,13 +3,13 @@ package com.ermao.library.shared.modules.workmanagement.infrastructure
 import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
-import com.ermao.library.shared.core.network.ApiMultipartFile
-import com.ermao.library.shared.core.network.ApiMultipartRequest
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.core.network.AppError
 import com.ermao.library.shared.core.network.AppErrorKind
-import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
+import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
+import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
@@ -19,20 +19,17 @@ import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataProvider
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataSearchResult
-import com.ermao.library.shared.modules.workmanagement.domain.VolumeMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.ResourceMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementError
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementErrorKind
+import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
-import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
 import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -47,91 +44,95 @@ class KtorWorkManagementRepository(
     private val encoder = Json { explicitNulls = false; encodeDefaults = true }
 
     override suspend fun supportsNativeManagement(
-        context: WorkManagementContext,
-    ): WorkManagementResult<Boolean> = call(context, ApiMethod.Get, "/api/mobile/compatibility") { data ->
-        val capabilities = data.objectValue("capabilities") ?: return@call protocolFailure("CAPABILITIES_MISSING")
-        WorkManagementResult.Content(capabilities.boolean("workDetailManagement") == true)
-    }
+        context: BookManagementContext,
+    ): WorkManagementResult<Boolean> = compatibility(context)
 
-    override suspend fun updateWork(
-        context: WorkManagementContext,
-        workId: String,
-        draft: WorkMetadataDraft,
-    ): WorkManagementResult<Unit> = callUnit(
-        context,
-        ApiMethod.Patch,
-        workPath(workId),
-        encoder.encodeToString(
-            WorkMetadataRequest(
-                title = draft.title.trim(),
-                author = draft.author.trim(),
-                description = draft.description.trim(),
-                seriesName = draft.seriesName?.trim()?.ifBlank { null },
-                seriesIndex = draft.seriesIndex,
-                tags = draft.tags.map(String::trim).filter(String::isNotBlank).distinct(),
+    override suspend fun updateBook(
+        context: BookManagementContext,
+        bookId: String,
+        draft: BookMetadataDraft,
+    ): WorkManagementResult<Unit> {
+        if (draft.tags.isNotEmpty()) return unavailable("BOOK_TAG_UPDATE_UNAVAILABLE")
+        return callUnit(
+            context,
+            ApiMethod.Patch,
+            bookPath(bookId),
+            encoder.encodeToString(
+                BookMetadataRequest(
+                    title = draft.title.trim(),
+                    author = draft.author?.trim()?.ifBlank { null },
+                    description = draft.description?.trim()?.ifBlank { null },
+                    seriesName = draft.seriesName?.trim()?.ifBlank { null },
+                    seriesIndex = draft.seriesIndex,
+                ),
             ),
-        ),
-    )
+        )
+    }
 
     override suspend fun uploadCover(
-        context: WorkManagementContext,
-        workId: String,
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
+        title: String,
+        description: String?,
         upload: CoverUpload,
-    ): WorkManagementResult<Unit> {
-        val client = clientProvider(context.profile)
-        return when (val result = client.executeMultipart(
-            ApiMultipartRequest(
-                apiPath = "${workPath(workId)}/cover/upload",
-                responseDeserializer = JsonElement.serializer(),
-                file = ApiMultipartFile("cover", upload.fileName, upload.mimeType, upload.bytes),
-            ),
-        )) {
-            is ApiResult.Failure -> WorkManagementResult.Failure(result.error.toManagementError())
-            is ApiResult.Success -> WorkManagementResult.Content(Unit)
-        }
-    }
+    ): WorkManagementResult<Unit> =
+        // The current source-node presentation endpoint requires title/description form fields
+        // in addition to the file. The shared multipart client cannot express those fields yet;
+        // keep this operation explicitly disabled instead of issuing a guaranteed 422 request.
+        unavailable("BOOK_COVER_UPLOAD_UNAVAILABLE")
 
-    override suspend fun regenerateCover(
-        context: WorkManagementContext,
-        workId: String,
-    ): WorkManagementResult<Unit> = callUnit(context, ApiMethod.Post, "${workPath(workId)}/cover/regenerate")
+    override suspend fun regenerateResourceCover(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
+    ): WorkManagementResult<Unit> = callUnit(
+        context,
+        ApiMethod.Post,
+        "${resourcePath(bookId, resourceId)}/cover/regenerate",
+    )
 
-    override suspend fun updateVolume(
-        context: WorkManagementContext,
-        workId: String,
-        volumeId: String,
-        draft: VolumeMetadataDraft,
-    ): WorkManagementResult<WorkMutationOutcome> = mutationCall(
+    override suspend fun updateResource(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
+        draft: ResourceMetadataDraft,
+    ): WorkManagementResult<BookMutationOutcome> = mutationCall(
         context,
         ApiMethod.Patch,
-        volumePath(workId, volumeId),
-        workId,
+        resourcePath(bookId, resourceId),
+        bookId,
         encoder.encodeToString(
-            VolumeMetadataRequest(
+            ResourceMetadataRequest(
+                title = draft.title.normalized(),
+                description = draft.description.normalized(),
                 publisher = draft.publisher.normalized(),
+                publishedAt = draft.publishedAt.normalized(),
                 language = draft.language.normalized(),
                 isbn = draft.isbn.normalized(),
                 identifier = draft.identifier.normalized(),
                 narrator = draft.narrator.normalized(),
+                abridged = draft.abridged,
+                resourceIndex = draft.resourceIndex,
             ),
         ),
     )
 
-    override suspend fun reclassifyVolume(
-        context: WorkManagementContext,
-        workId: String,
-        volumeId: String,
+    override suspend fun reclassifyResource(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
         mediaKind: ManagedMediaKind,
-    ): WorkManagementResult<WorkMutationOutcome> = mutationCall(
+    ): WorkManagementResult<BookMutationOutcome> = mutationCall(
         context,
         ApiMethod.Post,
-        "${volumePath(workId, volumeId)}/reclassify",
-        workId,
+        "${resourcePath(bookId, resourceId)}/reclassify",
+        bookId,
         encoder.encodeToString(ReclassifyRequest(mediaKind.wireValue)),
     )
 
     override suspend fun loadMetadataProviders(
-        context: WorkManagementContext,
+        context: BookManagementContext,
         mediaKind: ManagedMediaKind,
     ): WorkManagementResult<List<MetadataProvider>> = call(
         context,
@@ -139,16 +140,6 @@ class KtorWorkManagementRepository(
         "/api/metadata/providers",
     ) { data ->
         val providers = data.array("providers") ?: return@call protocolFailure("METADATA_PROVIDERS_MISSING")
-        val enabledIds = data.array("pipelines")
-            ?.mapNotNull { it as? JsonObject }
-            ?.firstOrNull { it.string("mediaKind") == mediaKind.wireValue }
-            ?.array("providers")
-            ?.mapNotNull { item ->
-                val value = item as? JsonObject ?: return@mapNotNull null
-                value.string("providerId")?.takeIf { value.boolean("enabled") == true }
-            }
-            ?.toSet()
-            .orEmpty()
         WorkManagementResult.Content(
             providers.mapNotNull { element ->
                 val provider = element as? JsonObject ?: return@mapNotNull null
@@ -157,26 +148,28 @@ class KtorWorkManagementRepository(
                     .orEmpty()
                     .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.toManagedMediaKind() }
                     .toSet()
+                if (mediaKind !in mediaKinds) return@mapNotNull null
                 MetadataProvider(
                     id = id,
                     name = provider.string("name") ?: id,
-                    enabled = provider.boolean("enabled") == true && id in enabledIds,
+                    enabled = provider.boolean("enabled") == true,
                     mediaKinds = mediaKinds,
                 )
-            }.filter { mediaKind in it.mediaKinds },
+            },
         )
     }
 
     override suspend fun searchMetadata(
-        context: WorkManagementContext,
-        workId: String,
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
         providerId: String,
         query: String,
     ): WorkManagementResult<MetadataSearchResult> = call(
         context,
         ApiMethod.Post,
-        "${workPath(workId)}/metadata/search",
-        encoder.encodeToString(MetadataSearchRequest(providerId, query.trim())),
+        "${bookPath(bookId)}/source-nodes/${sourceNodeId.encodeURLPathPart()}/metadata/search",
+        encoder.encodeToString(MetadataSearchRequest(providerId, query.trim().ifBlank { null })),
     ) { data ->
         val candidates = data.array("candidates") ?: return@call protocolFailure("METADATA_CANDIDATES_MISSING")
         WorkManagementResult.Content(
@@ -188,34 +181,26 @@ class KtorWorkManagementRepository(
     }
 
     override suspend fun applyMetadata(
-        context: WorkManagementContext,
-        workId: String,
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
         providerId: String,
         candidate: MetadataCandidate,
         fields: Set<MetadataField>,
-        volumeId: String?,
-        applyToAllVolumes: Boolean,
-    ): WorkManagementResult<Unit> {
-        require(fields.isNotEmpty())
-        return callUnit(
-            context,
-            ApiMethod.Post,
-            "${workPath(workId)}/metadata/apply",
-            encoder.encodeToString(
-                MetadataApplyRequest(
-                    source = providerId,
-                    candidate = candidate.toRequest(),
-                    fields = fields.map(MetadataField::wireValue),
-                    volumeId = volumeId,
-                ),
-            ),
-            queryParameters = mapOf("applyToAllVolumes" to listOf(applyToAllVolumes.toString())),
-        )
-    }
+        resourceId: String?,
+        applyToAllResources: Boolean,
+    ): WorkManagementResult<Unit> =
+        // There is no current apply-candidate endpoint. Do not emulate it with multiple patches.
+        unavailable("METADATA_APPLY_UNAVAILABLE")
 
     override suspend fun loadKindleSettings(
-        context: WorkManagementContext,
-    ): WorkManagementResult<KindleSettings> = call(context, ApiMethod.Get, "/api/kindle-settings") { data ->
+        context: BookManagementContext,
+    ): WorkManagementResult<KindleSettings> = call(
+        context,
+        ApiMethod.Get,
+        "/api/kindle-settings",
+        requiresBookManagement = false,
+    ) { data ->
         val kindle = data.objectValue("kindle") ?: return@call protocolFailure("KINDLE_SETTINGS_MISSING")
         val smtp = data.objectValue("smtp")
         WorkManagementResult.Content(
@@ -228,138 +213,165 @@ class KtorWorkManagementRepository(
     }
 
     override suspend fun sendToKindle(
-        context: WorkManagementContext,
-        workId: String,
-        fileId: String,
+        context: BookManagementContext,
+        bookId: String,
+        assetId: String,
     ): WorkManagementResult<KindleSendOutcome> = call(
         context,
         ApiMethod.Post,
         "/api/kindle-send-tasks",
-        encoder.encodeToString(KindleSendRequest(workId, fileId)),
+        encoder.encodeToString(KindleSendRequest(bookId = bookId, assetId = assetId)),
+        requiresBookManagement = false,
     ) { data -> WorkManagementResult.Content(KindleSendOutcome(data.boolean("alreadyQueued") == true)) }
 
     override suspend fun setReadingStatus(
-        context: WorkManagementContext,
-        volumeId: String,
+        context: BookManagementContext,
+        resourceId: String,
         status: ManagedReadingStatus,
     ): WorkManagementResult<Unit> = callUnit(
         context,
         ApiMethod.Put,
-        "/api/reader/v4/volumes/${volumeId.encodeURLPathPart()}/reading-status",
+        "/api/reader/v4/resources/${resourceId.encodeURLPathPart()}/reading-status",
         encoder.encodeToString(ReadingStatusRequest(status.wireValue)),
+        requiresBookManagement = false,
     )
 
     private suspend fun mutationCall(
-        context: WorkManagementContext,
+        context: BookManagementContext,
         method: ApiMethod,
         path: String,
-        workId: String,
+        bookId: String,
         body: String? = null,
-    ): WorkManagementResult<WorkMutationOutcome> = call(context, method, path, body) { data ->
+    ): WorkManagementResult<BookMutationOutcome> = call(context, method, path, body) { data ->
         WorkManagementResult.Content(
-            WorkMutationOutcome(
-                workId = data.string("workId") ?: workId,
+            BookMutationOutcome(
+                bookId = data.string("bookId") ?: bookId,
                 operationId = data.objectValue("operation")?.string("id"),
             ),
         )
     }
 
     private suspend fun callUnit(
-        context: WorkManagementContext,
+        context: BookManagementContext,
         method: ApiMethod,
         path: String,
         body: String? = null,
-        queryParameters: Map<String, List<String>> = emptyMap(),
-    ): WorkManagementResult<Unit> = call(context, method, path, body, queryParameters) {
-        WorkManagementResult.Content(Unit)
-    }
+        requiresBookManagement: Boolean = true,
+    ): WorkManagementResult<Unit> = call(
+        context,
+        method,
+        path,
+        body,
+        requiresBookManagement = requiresBookManagement,
+    ) { WorkManagementResult.Content(Unit) }
 
     private suspend fun <T> call(
-        context: WorkManagementContext,
+        context: BookManagementContext,
         method: ApiMethod,
         path: String,
         body: String? = null,
-        queryParameters: Map<String, List<String>> = emptyMap(),
+        requiresBookManagement: Boolean = true,
         transform: (JsonObject) -> WorkManagementResult<T>,
-    ): WorkManagementResult<T> = when (val result = clientProvider(context.profile).execute(
-        ApiRequest(
-            method = method,
-            apiPath = path,
-            responseDeserializer = JsonElement.serializer(),
-            requestBody = body,
-            queryParameters = queryParameters,
-        ),
-    )) {
-        is ApiResult.Failure -> WorkManagementResult.Failure(result.error.toManagementError())
-        is ApiResult.Success -> {
-            val data = result.value as? JsonObject ?: return protocolFailure("MANAGEMENT_RESPONSE_INVALID")
-            transform(data)
+    ): WorkManagementResult<T> {
+        if (requiresBookManagement) {
+            when (val capability = checkBookManagement(context)) {
+                is WorkManagementResult.Failure -> return WorkManagementResult.Failure(capability.error)
+                is WorkManagementResult.Content -> Unit
+            }
+        }
+        val client = clientProvider(context.profile)
+        return when (val result = try {
+            client.execute(
+                ApiRequest(
+                    method = method,
+                    apiPath = path,
+                    responseDeserializer = JsonElement.serializer(),
+                    requestBody = body,
+                ),
+            )
+        } finally {
+            client.close()
+        }) {
+            is ApiResult.Failure -> WorkManagementResult.Failure(result.error.toManagementError())
+            is ApiResult.Success -> {
+                val data = result.value as? JsonObject ?: return protocolFailure("MANAGEMENT_RESPONSE_INVALID")
+                transform(data)
+            }
         }
     }
 
-    private fun workPath(workId: String) = "/api/works/${workId.encodeURLPathPart()}"
-    private fun volumePath(workId: String, volumeId: String) =
-        "${workPath(workId)}/volumes/${volumeId.encodeURLPathPart()}"
+    private suspend fun compatibility(context: BookManagementContext): WorkManagementResult<Boolean> {
+        val client = clientProvider(context.profile)
+        return when (val result = try {
+            client.execute(
+                ApiRequest(
+                    method = ApiMethod.Get,
+                    apiPath = "/api/mobile/compatibility",
+                    responseDeserializer = JsonElement.serializer(),
+                ),
+            )
+        } finally {
+            client.close()
+        }) {
+            is ApiResult.Failure -> WorkManagementResult.Failure(result.error.toManagementError())
+            is ApiResult.Success -> {
+                val data = result.value as? JsonObject ?: return protocolFailure("COMPATIBILITY_RESPONSE_INVALID")
+                val capabilities = data.objectValue("capabilities")
+                    ?: return protocolFailure("CAPABILITIES_MISSING")
+                WorkManagementResult.Content(capabilities.boolean("bookDetailManagement") == true)
+            }
+        }
+    }
+
+    private suspend fun checkBookManagement(context: BookManagementContext): WorkManagementResult<Unit> =
+        when (val result = compatibility(context)) {
+            is WorkManagementResult.Failure -> WorkManagementResult.Failure(result.error)
+            is WorkManagementResult.Content -> if (result.value) {
+                WorkManagementResult.Content(Unit)
+            } else {
+                unavailable("BOOK_DETAIL_MANAGEMENT_UNAVAILABLE")
+            }
+        }
+
+    private fun bookPath(bookId: String) = "/api/books/${bookId.encodeURLPathPart()}"
+    private fun resourcePath(bookId: String, resourceId: String) =
+        "${bookPath(bookId)}/resources/${resourceId.encodeURLPathPart()}"
 }
 
 @Serializable
-private data class WorkMetadataRequest(
-    val title: String,
-    val author: String,
-    val description: String,
-    val seriesName: String?,
-    val seriesIndex: Double?,
-    val tags: List<String>,
-    val organized: Boolean = true,
+private data class BookMetadataRequest(
+    val title: String? = null,
+    val author: String? = null,
+    val description: String? = null,
+    val seriesName: String? = null,
+    val seriesIndex: Double? = null,
 )
 
 @Serializable
-private data class VolumeMetadataRequest(
-    val publisher: String?,
-    val language: String?,
-    val isbn: String?,
-    val identifier: String?,
-    val narrator: String?,
+private data class ResourceMetadataRequest(
+    val title: String? = null,
+    val description: String? = null,
+    val publisher: String? = null,
+    val publishedAt: String? = null,
+    val language: String? = null,
+    val isbn: String? = null,
+    val identifier: String? = null,
+    val narrator: String? = null,
+    val abridged: Boolean? = null,
+    val resourceIndex: Double? = null,
 )
 
 @Serializable
-private data class ReclassifyRequest(val targetMediaKind: String, val applyTo: String = "VOLUME")
-
-@Serializable
-private data class MetadataSearchRequest(val source: String, val query: String)
-
-@Serializable
-private data class MetadataApplyRequest(
-    val source: String,
-    val candidate: MetadataCandidateRequest,
-    val fields: List<String>,
-    val volumeId: String?,
+private data class ReclassifyRequest(
+    val targetMediaKind: String,
+    val applyTo: String = "RESOURCE",
 )
 
 @Serializable
-private data class MetadataCandidateRequest(
-    val id: String,
-    val source: String,
-    val title: String?,
-    val author: String?,
-    val description: String?,
-    val tags: List<String>,
-    val seriesName: String?,
-    val volumeMetadata: VolumeMetadataCandidateRequest,
-    val coverUrl: String?,
-    val confidence: Double,
-)
+private data class MetadataSearchRequest(val providerId: String, val query: String?)
 
 @Serializable
-private data class VolumeMetadataCandidateRequest(
-    val publisher: String?,
-    val publishedAt: String?,
-    val language: String?,
-    val isbn: String?,
-)
-
-@Serializable
-private data class KindleSendRequest(val workId: String, val fileId: String)
+private data class KindleSendRequest(val bookId: String, val assetId: String)
 
 @Serializable
 private data class ReadingStatusRequest(val status: String)
@@ -368,7 +380,6 @@ private fun metadataCandidate(element: JsonElement): MetadataCandidate? {
     val value = element as? JsonObject ?: return null
     val id = value.string("id") ?: return null
     val source = value.string("source") ?: return null
-    val volume = value.objectValue("volumeMetadata")
     return MetadataCandidate(
         id = id,
         source = source,
@@ -377,42 +388,21 @@ private fun metadataCandidate(element: JsonElement): MetadataCandidate? {
         description = value.string("description"),
         tags = value.array("tags").orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
         seriesName = value.string("seriesName"),
-        publisher = volume?.string("publisher") ?: value.string("publisher"),
-        publishedAt = volume?.string("publishedAt") ?: value.string("publishedAt"),
-        language = volume?.string("language") ?: value.string("language"),
-        isbn = volume?.string("isbn") ?: value.string("isbn"),
+        publisher = value.string("publisher"),
+        publishedAt = value.string("publishedAt"),
+        language = value.string("language"),
+        isbn = value.string("isbn"),
         coverUrl = value.string("coverUrl"),
         confidence = (value["confidence"] as? JsonPrimitive)?.doubleOrNull ?: 0.0,
     )
 }
 
-private fun MetadataCandidate.toRequest() = MetadataCandidateRequest(
-    id = id,
-    source = source,
-    title = title,
-    author = author,
-    description = description,
-    tags = tags,
-    seriesName = seriesName,
-    volumeMetadata = VolumeMetadataCandidateRequest(publisher, publishedAt, language, isbn),
-    coverUrl = coverUrl,
-    confidence = confidence,
-)
-
-private fun JsonObject.string(name: String): String? =
-    (this[name] as? JsonPrimitive)?.contentOrNull
-
-private fun JsonObject.boolean(name: String): Boolean? =
-    (this[name] as? JsonPrimitive)?.booleanOrNull
-
+private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
+private fun JsonObject.boolean(name: String): Boolean? = (this[name] as? JsonPrimitive)?.booleanOrNull
 private fun JsonObject.array(name: String): JsonArray? = this[name] as? JsonArray
-
 private fun JsonObject.objectValue(name: String): JsonObject? = this[name] as? JsonObject
-
 private fun String?.normalized(): String? = this?.trim()?.ifBlank { null }
-
-private fun String.toManagedMediaKind(): ManagedMediaKind? =
-    ManagedMediaKind.entries.firstOrNull { it.wireValue == this }
+private fun String.toManagedMediaKind(): ManagedMediaKind? = ManagedMediaKind.entries.firstOrNull { it.wireValue == this }
 
 private fun AppError.toManagementError() = WorkManagementError(
     kind = when (kind) {
@@ -429,6 +419,9 @@ private fun AppError.toManagementError() = WorkManagementError(
     code = code,
     fieldErrors = fieldErrors,
 )
+
+private fun <T> unavailable(code: String): WorkManagementResult<T> =
+    WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Unavailable, code))
 
 private fun <T> protocolFailure(code: String): WorkManagementResult<T> =
     WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Protocol, code))

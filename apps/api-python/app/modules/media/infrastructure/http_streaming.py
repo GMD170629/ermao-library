@@ -8,6 +8,7 @@ import logging
 import mimetypes
 import os
 import re
+import stat as stat_module
 import threading
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -45,31 +46,83 @@ PSE_PAGE_CACHE_VERSION = 1
 PSE_PAGE_JPEG_QUALITY = 88
 
 
+def _revalidate_regular_file(path: Path | None) -> Path | None:
+    """Reject paths that became symlinks after the initial root check."""
+
+    if path is None:
+        return None
+    try:
+        candidate = path.expanduser()
+        resolved = candidate.resolve(strict=True)
+    except OSError:
+        return None
+    if resolved != candidate or not resolved.is_file():
+        return None
+    return resolved
+
+
+def _read_regular_file(
+    path: Path | None,
+) -> tuple[Path, os.stat_result, bytes] | None:
+    """Read a regular file through a descriptor after symlink revalidation."""
+
+    resolved = _revalidate_regular_file(path)
+    if resolved is None:
+        return None
+    open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    open_flags |= getattr(os, "O_NOFOLLOW", 0)
+    handle = None
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(resolved, open_flags)
+        handle = os.fdopen(descriptor, "rb")
+        descriptor = None
+        stat_result = os.fstat(handle.fileno())
+        if not stat_module.S_ISREG(stat_result.st_mode):
+            return None
+        return resolved, stat_result, handle.read()
+    except OSError:
+        return None
+    finally:
+        if handle is not None:
+            handle.close()
+        elif descriptor is not None:
+            os.close(descriptor)
+
+
 def _stored_path(
     path_value: str | None,
     settings: Settings,
     allowed_source_roots: Iterable[Path] = (),
-    *,
-    database_backed: bool = False,
 ) -> Path | None:
     if not path_value:
         return None
     path = Path(path_value)
-    if not path.is_absolute():
-        path = settings.resolved_storage_root / path
     try:
-        resolved = path.expanduser().resolve()
-        storage = settings.resolved_storage_root.resolve()
-        if resolved == storage or storage in resolved.parents:
-            return resolved
-        if database_backed and path.is_absolute():
-            return resolved
-        for source_root in allowed_source_roots:
-            root = source_root.resolve()
-            if resolved == root or root in resolved.parents:
-                return resolved
+        storage = settings.resolved_storage_root.expanduser().resolve()
+        source_roots = tuple(
+            source_root.expanduser().resolve() for source_root in allowed_source_roots
+        )
     except OSError:
         return None
+
+    # Relative source-node paths belong to their owning Library root. Only
+    # managed-storage paths (covers, caches, etc.) fall back to STORAGE_ROOT.
+    # Absolute paths are never trusted on their own: they must still be inside
+    # one of the configured roots after resolving symlinks.
+    candidates = (
+        tuple(root / path for root in source_roots)
+        if not path.is_absolute() and source_roots
+        else (path if path.is_absolute() else storage / path,)
+    )
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            continue
+        roots = source_roots if source_roots else (storage,)
+        if any(resolved == root or root in resolved.parents for root in roots):
+            return resolved
     return None
 
 
@@ -427,8 +480,12 @@ def _image_for_webp(image: Image.Image) -> Image.Image:
 
 
 def _small_cover_webp_bytes(path: Path) -> bytes | None:
+    payload = _read_regular_file(path)
+    if payload is None:
+        return None
+    _resolved, _stat_result, content = payload
     try:
-        with Image.open(path) as source:
+        with Image.open(io.BytesIO(content)) as source:
             if getattr(source, "is_animated", False):
                 source.seek(0)
             prepared = _image_for_webp(ImageOps.exif_transpose(source))
@@ -459,6 +516,10 @@ def _small_cover_webp_bytes(path: Path) -> bytes | None:
 def _small_cover_response(
     path: Path, request: Request, user_id: str, settings: Settings
 ) -> Response | None:
+    resolved_path = _revalidate_regular_file(path)
+    if resolved_path is None:
+        return None
+    path = resolved_path
     stat = path.stat()
     cache_key = _small_cover_cache_key(path, stat)
     cache_path = _small_cover_cache_path(settings, cache_key)
@@ -613,10 +674,34 @@ def _file_response(
     *,
     as_attachment: bool = False,
 ) -> Response:
-    if path is None or not path.exists() or not path.is_file():
+    path = _revalidate_regular_file(path)
+    if path is None:
         return fail(missing_message, status_code=404)
     request.state.user_id = user_id
-    stat = path.stat()
+    handle = None
+    if request.method == "HEAD":
+        try:
+            stat = path.stat()
+        except OSError:
+            return fail(missing_message, status_code=404)
+    else:
+        # Resolve-and-check happens before this function. Open the already
+        # checked path without following a final symlink and stream this file
+        # descriptor, so a replacement symlink cannot redirect the response
+        # between validation and the first read.
+        open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        open_flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, open_flags)
+            handle = os.fdopen(descriptor, "rb")
+            stat = os.fstat(handle.fileno())
+        except OSError:
+            if handle is not None:
+                handle.close()
+            return fail(missing_message, status_code=404)
+        if not stat_module.S_ISREG(stat.st_mode):
+            handle.close()
+            return fail(missing_message, status_code=404)
     resolved_media_type = (
         media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     )
@@ -631,6 +716,8 @@ def _file_response(
     if not request.headers.get("range") and _not_modified(
         request, headers["ETag"], headers["Last-Modified"]
     ):
+        if handle is not None:
+            handle.close()
         return Response(status_code=304, headers=headers)
     byte_range = None
     range_header = request.headers.get("range")
@@ -639,6 +726,8 @@ def _file_response(
     ):
         kind, parsed = _parse_byte_range(range_header, stat.st_size)
         if kind == "invalid":
+            if handle is not None:
+                handle.close()
             response = fail(
                 "Range 请求格式不正确",
                 status_code=416,
@@ -647,6 +736,8 @@ def _file_response(
             response.headers["Content-Range"] = f"bytes */{stat.st_size}"
             return response
         if kind == "unsatisfiable":
+            if handle is not None:
+                handle.close()
             response = fail(
                 "Range 超出文件大小",
                 status_code=416,
@@ -682,23 +773,23 @@ def _file_response(
     ):
         try:
             remaining = None if end is None else end - start + 1
-            with path.open("rb") as handle:
-                handle.seek(start)
-                while True:
-                    chunk_size = (
-                        1024 * 1024
-                        if remaining is None
-                        else min(1024 * 1024, remaining)
-                    )
-                    if chunk_size <= 0:
-                        break
-                    chunk = handle.read(chunk_size)
-                    if not chunk:
-                        break
-                    if remaining is not None:
-                        remaining -= len(chunk)
-                    yield chunk
+            assert handle is not None
+            handle.seek(start)
+            while True:
+                chunk_size = (
+                    1024 * 1024 if remaining is None else min(1024 * 1024, remaining)
+                )
+                if chunk_size <= 0:
+                    break
+                chunk = handle.read(chunk_size)
+                if not chunk:
+                    break
+                if remaining is not None:
+                    remaining -= len(chunk)
+                yield chunk
         finally:
+            if handle is not None:
+                handle.close()
             release()
             _log_slow_file_request(
                 request,
@@ -712,6 +803,8 @@ def _file_response(
 
     release = _acquire_file_stream_slot(user_id)
     if release is None:
+        if handle is not None:
+            handle.close()
         return _file_stream_limit_response()
     started_at = monotonic()
     if byte_range:
@@ -765,17 +858,16 @@ def _send_zip_entry(
     route: str = "zip-entry",
     asset_id: str | None = None,
 ) -> Response:
-    if (
-        archive_path is None
-        or not archive_path.exists()
-        or not archive_path.is_file()
-        or not entry_name
-    ):
+    archive_path = _revalidate_regular_file(archive_path)
+    if archive_path is None or not entry_name:
         return fail("页面不存在", status_code=404)
+    archive = None
     try:
-        with open_comic_archive(archive_path) as archive:
-            info = archive.getinfo(entry_name)
+        archive = open_comic_archive(archive_path)
+        info = archive.getinfo(entry_name)
     except (KeyError, OSError, ComicArchiveError):
+        if archive is not None:
+            archive.close()
         return fail("页面不存在", status_code=404)
     request.state.user_id = user_id
     resolved_media_type = (
@@ -792,6 +884,7 @@ def _send_zip_entry(
     if not request.headers.get("range") and _not_modified(
         request, headers["ETag"], headers["Last-Modified"]
     ):
+        archive.close()
         return Response(status_code=304, headers=headers)
     byte_range = None
     range_header = request.headers.get("range")
@@ -800,10 +893,12 @@ def _send_zip_entry(
     ):
         kind, parsed = _parse_byte_range(range_header, size)
         if kind == "invalid":
+            archive.close()
             response = fail("Range 请求格式不正确", status_code=416)
             response.headers["Content-Range"] = f"bytes */{size}"
             return response
         if kind == "unsatisfiable":
+            archive.close()
             response = fail("Range 超出文件大小", status_code=416)
             response.headers["Content-Range"] = f"bytes */{size}"
             return response
@@ -818,10 +913,7 @@ def _send_zip_entry(
         end: int | None = None,
     ):
         try:
-            with (
-                open_comic_archive(archive_path) as archive,
-                archive.open(entry_name, "r") as handle,
-            ):
+            with archive, archive.open(entry_name, "r") as handle:
                 remaining_skip = start
                 while remaining_skip > 0:
                     skipped = handle.read(min(1024 * 1024, remaining_skip))
@@ -857,6 +949,7 @@ def _send_zip_entry(
 
     release = _acquire_file_stream_slot(user_id)
     if release is None:
+        archive.close()
         return _file_stream_limit_response()
     started_at = monotonic()
     if byte_range:
@@ -937,7 +1030,8 @@ def _send_comic_page_file(
     asset_id: str | None = None,
 ) -> Response:
     variant = _comic_page_image_variant(request)
-    if path is None or not path.exists() or not path.is_file():
+    path = _revalidate_regular_file(path)
+    if path is None:
         return fail("文件不存在", status_code=404)
     resolved_media_type = (
         media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
@@ -972,10 +1066,10 @@ def _send_comic_page_file(
             stat.st_size,
             cache_key,
         )
-    try:
-        source = path.read_bytes()
-    except OSError:
+    payload = _read_regular_file(path)
+    if payload is None:
         return fail("文件不存在", status_code=404)
+    _resolved, _source_stat, source = payload
     optimized = _comic_page_webp_bytes(source)
     if optimized is None:
         return _send_original_comic_page_file(
@@ -1003,12 +1097,8 @@ def _send_comic_page_zip_entry(
     asset_id: str | None = None,
 ) -> Response:
     variant = _comic_page_image_variant(request)
-    if (
-        archive_path is None
-        or not archive_path.exists()
-        or not archive_path.is_file()
-        or not entry_name
-    ):
+    archive_path = _revalidate_regular_file(archive_path)
+    if archive_path is None or not entry_name:
         return fail("页面不存在", status_code=404)
     if variant != COMIC_PAGE_DATA_SAVER_VARIANT:
         return _send_original_comic_page_zip_entry(
@@ -1087,14 +1177,11 @@ def stored_path(
     path_value: str | None,
     settings: Settings,
     allowed_source_roots: Iterable[Path] = (),
-    *,
-    database_backed: bool = False,
 ) -> Path | None:
     return _stored_path(
         path_value,
         settings,
         allowed_source_roots,
-        database_backed=database_backed,
     )
 
 
@@ -1179,16 +1266,20 @@ def send_pse_page_file(
     asset_id: str,
     output_media_type: str = "image/jpeg",
 ) -> Response:
-    if path is None or not path.is_file():
+    path = _revalidate_regular_file(path)
+    if path is None:
         return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
-    stat = path.stat()
+    payload = _read_regular_file(path)
+    if payload is None:
+        return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
+    _resolved, stat, source = payload
     cache_key = (
         f"file:{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:"
         f"pse-v{PSE_PAGE_CACHE_VERSION}:{output_media_type}:w-{max_width or 'original'}:"
         f"q-{PSE_PAGE_JPEG_QUALITY}"
     )
     return _pse_image_response(
-        source=path.read_bytes(),
+        source=source,
         request=request,
         user_id=user_id,
         settings=settings,
@@ -1211,7 +1302,8 @@ def send_pse_page_zip_entry(
     asset_id: str,
     output_media_type: str = "image/jpeg",
 ) -> Response:
-    if archive_path is None or not archive_path.is_file() or not entry_name:
+    archive_path = _revalidate_regular_file(archive_path)
+    if archive_path is None or not entry_name:
         return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
     try:
         with open_comic_archive(archive_path) as archive:

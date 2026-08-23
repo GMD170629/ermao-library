@@ -158,10 +158,10 @@ test('book detail resource covers support selection, keyboard-accessible context
     readerType: 'comic',
     kindleSendAvailable: false,
     classification: { suggestedMediaKind: 'COMIC', source: 'USER', reason: 'USER_SELECTED' },
-    assets: [{ id: `${id}-asset`, resourceId: id, path: `${id}.cbz`, mimeType: 'application/zip', kind: 'publication', sortOrder: 0, sizeBytes: 1024, size: '1 KB' }]
+    assets: [{ id: `${id}-asset`, resourceId: id, sourceNodeId: `${id}-source-node`, role: 'PRIMARY', mimeType: 'application/zip', sortOrder: 0, sizeBytes: 1024, size: '1 KB', url: `/api/assets/${id}-asset`, downloadUrl: `/api/assets/${id}-asset?download=true` }]
   });
   const resources = [resource('context-resource-1', '第一资源', 0), resource('context-resource-2', '第二资源', 1)];
-  const versionEntry = { sourceNodeId: 'context-version-node', parentSourceNodeId: 'context-book-node', name: '测试版本目录', title: '测试版本标题', description: '版本简介', kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: '2026-08-03T08:00:00.000Z', hasChildren: true, resourceId: null, representativeResourceId: resources[0].id };
+  const sourceNodeEntry = { sourceNodeId: 'context-source-node', parentSourceNodeId: 'context-book-node', name: '测试来源目录', title: '测试目录标题', description: '目录简介', kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: '2026-08-03T08:00:00.000Z', hasChildren: true, resourceId: null, representativeResourceId: resources[0].id };
   const book = {
     id: 'context-book',
     title: '右键菜单测试图书',
@@ -191,10 +191,10 @@ test('book detail resource covers support selection, keyboard-accessible context
   await mockWebAppApi(page, async (route, url) => {
     if (!url.pathname.includes('/api/books/context-book')) return false;
     if (url.pathname.includes('/contents')) {
-      const nested = url.searchParams.get('sourceNodeId') === versionEntry.sourceNodeId;
+      const nested = url.searchParams.get('sourceNodeId') === sourceNodeEntry.sourceNodeId;
       const resourceEntries = resources.map((resource, index) => ({
         sourceNodeId: `context-node-${index + 1}`,
-        parentSourceNodeId: nested ? versionEntry.sourceNodeId : 'context-book-node',
+        parentSourceNodeId: nested ? sourceNodeEntry.sourceNodeId : 'context-book-node',
         name: resource.title,
         title: resource.title,
         description: null,
@@ -208,13 +208,13 @@ test('book detail resource covers support selection, keyboard-accessible context
       }));
       await route.fulfill({ json: { ok: true, data: {
         bookId: book.id,
-        currentSourceNodeId: nested ? versionEntry.sourceNodeId : 'context-book-node',
+        currentSourceNodeId: nested ? sourceNodeEntry.sourceNodeId : 'context-book-node',
         currentResourceId: null,
-        currentNode: nested ? versionEntry : { sourceNodeId: 'context-book-node', parentSourceNodeId: null, name: book.title, title: book.title, description: null, kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: book.updatedAt, hasChildren: true, resourceId: null, representativeResourceId: resources[0].id },
+        currentNode: nested ? sourceNodeEntry : { sourceNodeId: 'context-book-node', parentSourceNodeId: null, name: book.title, title: book.title, description: null, kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: book.updatedAt, hasChildren: true, resourceId: null, representativeResourceId: resources[0].id },
         currentResourceIds: resources.map((resource) => resource.id),
         parentSourceNodeId: null,
-        breadcrumbs: nested ? [versionEntry] : [],
-        entries: nested ? resourceEntries : [versionEntry, ...resourceEntries],
+        breadcrumbs: nested ? [sourceNodeEntry] : [],
+        entries: nested ? resourceEntries : [sourceNodeEntry, ...resourceEntries],
         page: 1,
         pageSize: 100,
         total: resources.length + (nested ? 0 : 1),
@@ -227,22 +227,22 @@ test('book detail resource covers support selection, keyboard-accessible context
   });
 
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
-  const versionActions = page.getByRole('button', { name: '管理 测试版本标题', exact: true });
-  await versionActions.click();
-  const versionMenu = page.getByRole('menu', { name: '管理版本' });
-  await expect(versionMenu.getByRole('menuitem')).toHaveCount(4);
-  await expect(versionMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
-  await expect(versionMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
-  await expect(versionMenu.getByRole('menuitem', { name: /^识别元数据/ })).toBeVisible();
-  await expect(versionMenu.getByRole('menuitem', { name: /^重新扫描文件/ })).toBeVisible();
+  const sourceNodeActions = page.getByRole('button', { name: '管理 测试目录标题', exact: true });
+  await sourceNodeActions.click();
+  const sourceNodeMenu = page.getByRole('menu', { name: '管理来源目录' });
+  await expect(sourceNodeMenu.getByRole('menuitem')).toHaveCount(4);
+  await expect(sourceNodeMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
+  await expect(sourceNodeMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
+  await expect(sourceNodeMenu.getByRole('menuitem', { name: /^识别元数据/ })).toBeVisible();
+  await expect(sourceNodeMenu.getByRole('menuitem', { name: /^重新扫描文件/ })).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: '打开版本 测试版本标题' }).click();
-  await expect(page.getByRole('heading', { name: '测试版本标题', level: 1 })).toBeVisible();
-  await expect(page.getByText('版本简介', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '打开来源目录 测试目录标题' }).click();
+  await expect(page.getByRole('heading', { name: '测试目录标题', level: 1 })).toBeVisible();
+  await expect(page.getByText('目录简介', { exact: true })).toBeVisible();
   await expect(page.getByText('90%', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: book.title, exact: true }).click();
-  const first = page.getByRole('button', { name: '第 1 卷，阅读进度 80%' });
-  const second = page.getByRole('button', { name: '第 2 卷，阅读进度 100%' });
+  const first = page.getByRole('button', { name: '可读资源 1，阅读进度 80%' });
+  const second = page.getByRole('button', { name: '可读资源 2，阅读进度 100%' });
   const resourceProgress = page.locator('[data-resource-progress]');
   await expect(resourceProgress).toHaveCount(2);
   await expect(resourceProgress.nth(0)).toHaveAttribute('data-resource-progress-state', 'reading');
@@ -257,7 +257,7 @@ test('book detail resource covers support selection, keyboard-accessible context
 
   const firstActions = page.getByRole('button', { name: '管理 第一资源', exact: true });
   await firstActions.click();
-  const cardMenu = page.getByRole('menu', { name: '管理图书卷' });
+  const cardMenu = page.getByRole('menu', { name: '管理可读资源' });
   await expect(cardMenu.getByRole('menuitem')).toHaveCount(4);
   await expect(cardMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
@@ -318,7 +318,7 @@ test('book detail requests a selected readable resource through the direct contr
     readerType: 'pdf',
     kindleSendAvailable: false,
     classification: { suggestedMediaKind: 'EBOOK', source: 'USER', reason: 'USER_SELECTED' },
-    assets: [{ id: 'resource-2-asset', resourceId: 'resource-2', path: 'second.pdf', mimeType: 'application/pdf', kind: 'publication', sortOrder: 0, sizeBytes: 1024, size: '1 KB' }]
+    assets: [{ id: 'resource-2-asset', resourceId: 'resource-2', sourceNodeId: 'resource-2-source-node', role: 'PRIMARY', mimeType: 'application/pdf', sortOrder: 0, sizeBytes: 1024, size: '1 KB', url: '/api/assets/resource-2-asset', downloadUrl: '/api/assets/resource-2-asset?download=true' }]
   };
   const requestedResourceIds: Array<string | null> = [];
   await page.unroute('**/api/**');

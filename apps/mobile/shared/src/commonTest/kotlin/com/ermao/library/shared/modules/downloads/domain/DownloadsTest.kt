@@ -6,127 +6,40 @@ import kotlin.test.assertFailsWith
 
 class DownloadsTest {
     @Test
-    fun completedCatalogIsNamespaceScopedGroupedByWorkAndSearchable() {
+    fun completedCatalogIsNamespaceScopedAndGroupedBookResourceAsset() {
         val primary = namespace("server-a", "user-a", 3)
         val artifacts = listOf(
-            artifact(primary, "work-1", "volume-1", "星海纪事", "林青", "上册", 20),
-            artifact(primary, "work-1", "volume-2", "星海纪事", "林青", "终章", 30),
-            artifact(primary, "work-2", "volume-3", "Quiet Pages", "Mira", "Volume One", 40),
-            artifact(namespace("server-a", "user-b", 3), "work-1", "volume-private", "星海纪事", "林青", "私有", 10),
+            artifact(primary, "book-1", "resource-2", "asset-2", "星海纪事", "林青", "终章", 30, sortOrder = 2),
+            artifact(primary, "book-1", "resource-1", "asset-1", "星海纪事", "林青", "上册", 20, sortOrder = 1),
+            artifact(primary, "book-1", "resource-1", "asset-0", "星海纪事", "林青", "上册", 10, sortOrder = 1),
+            artifact(primary, "book-2", "resource-3", "asset-3", "Quiet Pages", "Mira", "Volume One", 40),
+            artifact(namespace("server-a", "user-b", 3), "book-1", "private", "asset-private", "星海纪事", "林青", "私有", 10),
         )
 
-        val all = completedDownloadsByWork(primary, artifacts)
-        assertEquals(listOf("work-2", "work-1"), all.map { it.workId })
-        val firstWork = all.first { it.workId == "work-1" }
-        assertEquals(2, firstWork.artifacts.size)
-        assertEquals(50, firstWork.totalBytes)
-        assertEquals(listOf("work-1"), completedDownloadsByWork(primary, artifacts, "林青").map { it.workId })
-        assertEquals(listOf("work-1"), completedDownloadsByWork(primary, artifacts, "终章").map { it.workId })
-        assertEquals(listOf("work-2"), completedDownloadsByWork(primary, artifacts, "quiet").map { it.workId })
+        val all = completedDownloadsByBook(primary, artifacts)
+        assertEquals(listOf("book-2", "book-1"), all.map { it.bookId })
+        val firstBook = all.first { it.bookId == "book-1" }
+        assertEquals(listOf("resource-1", "resource-2"), firstBook.resources.map { it.resourceId })
+        assertEquals(listOf("asset-0", "asset-1", "asset-2"), firstBook.artifacts.map { it.identity.assetId })
+        assertEquals(60, firstBook.totalBytes)
+        assertEquals(listOf("book-1"), completedDownloadsByBook(primary, artifacts, "林青").map { it.bookId })
+        assertEquals(listOf("book-1"), completedDownloadsByBook(primary, artifacts, "终章").map { it.bookId })
+        assertEquals(listOf("book-2"), completedDownloadsByBook(primary, artifacts, "quiet").map { it.bookId })
     }
 
     @Test
-    fun completedCatalogGroupsByWorkThenVersionAndKeepsVolumeOrder() {
-        val primary = namespace("server", "user", 1)
-        val implicitFirst = descriptor(primary, "work", "volume-2", 20, volumeTitle = "Second").copy(
-            versionId = "version-implicit",
-            versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
-            versionSourceName = null,
-            versionCompleted = true,
-            volumeIndex = 2.0,
-            volumeSortOrder = 2,
-        )
-        val implicitSecond = descriptor(primary, "work", "volume-1", 10, volumeTitle = "First").copy(
-            versionId = "version-implicit",
-            versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
-            versionCompleted = true,
-            volumeIndex = 1.0,
-            volumeSortOrder = 1,
-        )
-        val named = descriptor(primary, "work", "volume-named", 30, volumeTitle = "Named").copy(
-            versionId = "version-named",
-            versionSourceKey = "kindle",
-            versionSourceName = "Kindle",
-            readerType = DownloadReaderType.Pdf,
-        )
-        val laterNamed = descriptor(primary, "work", "volume-later", 40, volumeTitle = "Later").copy(
-            versionId = "version-later",
-            versionSourceKey = "web",
-            versionSourceName = "Web",
+    fun resourcesSortByExplicitOrderAndAssetsSortByStableAssetId() {
+        val ns = namespace("server", "user", 1)
+        val resources = listOf(
+            artifact(ns, "book", "resource-z", "asset-z", "Book", null, "Z", 10, sortOrder = 2),
+            artifact(ns, "book", "resource-a", "asset-b", "Book", null, "A", 10, sortOrder = 1),
+            artifact(ns, "book", "resource-a", "asset-a", "Book", null, "A", 10, sortOrder = 1),
         )
 
-        val work = completedDownloadsByWork(
-            primary,
-            listOf(
-                artifact(implicitFirst, 20),
-                artifact(implicitSecond, 10),
-                artifact(named, 30),
-                artifact(laterNamed, 40),
-            ),
-        ).single()
-
-        assertEquals(
-            listOf("version-implicit", "version-named", "version-later"),
-            work.versions.map { it.versionId },
-        )
-        assertEquals(listOf("volume-1", "volume-2"), work.versions.first().artifacts.map { it.identity.volumeId })
-        assertEquals("__implicit__", work.versions.first().sourceKey)
-        assertEquals("Kindle", work.versions[1].sourceName)
-        assertEquals(work.versions.flatMap { it.artifacts }, work.artifacts)
-    }
-
-    @Test
-    fun sameVersionKeepsEpubPdfComicAndAudioTogetherWithoutMediaKindGroups() {
-        val primary = namespace("server", "user", 1)
-        val versionId = "version-shared"
-        val artifacts = listOf(
-            DownloadReaderType.Reflowable to "EPUB",
-            DownloadReaderType.Pdf to "PDF",
-            DownloadReaderType.Comic to "CBZ",
-            DownloadReaderType.Audio to "AUDIO",
-        ).mapIndexed { index, (readerType, format) ->
-            artifact(
-                descriptor(
-                    primary,
-                    "work",
-                    "volume-$index",
-                    10L + index,
-                    volumeTitle = format,
-                ).copy(
-                    format = format,
-                    readerType = readerType,
-                    versionId = versionId,
-                    versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
-                    volumeSortOrder = index,
-                ),
-                10L + index,
-            )
-        }
-
-        val work = completedDownloadsByWork(primary, artifacts).single()
-        assertEquals(listOf(versionId), work.versions.map { it.versionId })
-        assertEquals(4, work.versions.single().artifacts.size)
-        assertEquals(listOf("EPUB", "PDF", "CBZ", "AUDIO"), work.versions.single().artifacts.map { it.descriptor.format })
-    }
-
-    @Test
-    fun productionDownloadsCodeDoesNotUseMediaVersionContract() {
-        val directory = java.io.File("src/commonMain/kotlin/com/ermao/library/shared/modules/downloads")
-        val forbidden = listOf(
-            "mediaVersionId",
-            "mediaVersionCompleted",
-            "DownloadedMediaVersion",
-            "effectiveMediaVersionId",
-            "DownloadMediaKind",
-            "parseDownloadMediaKind",
-            "legacyMediaVersionId",
-            "legacyMediaKind",
-        )
-        val hits = directory.walkTopDown().filter { it.isFile && it.extension == "kt" }.flatMap { file ->
-            val text = file.readText()
-            forbidden.filter { token -> token in text }.map { token -> "${file.name}: $token" }
-        }.toList()
-        assertEquals(emptyList(), hits)
+        val book = completedDownloadsByBook(ns, resources).single()
+        assertEquals(listOf("resource-a", "resource-z"), book.resources.map { it.resourceId })
+        assertEquals(listOf("asset-a", "asset-b", "asset-z"), book.artifacts.map { it.identity.assetId })
+        assertEquals(book.resources.flatMap { it.artifacts }, book.artifacts)
     }
 
     @Test
@@ -142,7 +55,7 @@ class DownloadsTest {
 
     @Test
     fun taskStateMachineAcceptsExplicitRecoveryAndRejectsIllegalTransitions() {
-        val descriptor = descriptor(namespace("server", "user", 1), "work", "volume", 10)
+        val descriptor = descriptor(namespace("server", "user", 1), "book", "resource", "asset", 10)
         val queued = DownloadTask("task", descriptor)
         val downloading = queued.transition(DownloadTaskEvent.Start)
             .transition(DownloadTaskEvent.BytesTransferred(4))
@@ -162,44 +75,61 @@ class DownloadsTest {
         }
     }
 
+    @Test
+    fun mediaSourceAcceptsOnlyResourceOrAssetApiRoutes() {
+        assertFailsWith<IllegalArgumentException> {
+            DownloadSource("/api/volumes/resource/file", "application/epub+zip", 10)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            DownloadSource("/api/assets/asset?download=true", "application/epub+zip", 10)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            DownloadSource("/api/reader/v4/resources/resource/comic/archive", "application/zip", 10)
+        }
+    }
+
     private fun namespace(server: String, user: String, version: Long) = DownloadNamespace(server, user, version)
 
     private fun descriptor(
         namespace: DownloadNamespace,
-        workId: String,
-        volumeId: String,
+        bookId: String,
+        resourceId: String,
+        assetId: String,
         bytes: Long,
-        title: String = workId,
+        title: String = bookId,
         author: String? = null,
-        volumeTitle: String = volumeId,
+        resourceTitle: String = resourceId,
+        sortOrder: Int? = null,
     ) = DownloadDescriptor(
-        identity = DownloadIdentity(namespace, workId, volumeId),
-        workTitle = title,
-        workAuthor = author,
-        coverApiPath = "/api/works/$workId/cover",
-        volumeTitle = volumeTitle,
-        format = "EPUB",
+        identity = DownloadIdentity(namespace, bookId, resourceId, assetId),
+        bookTitle = title,
+        bookAuthor = author,
+        coverApiPath = "/api/books/$bookId/cover",
+        resourceTitle = resourceTitle,
+        format = "epub",
         readerType = DownloadReaderType.Reflowable,
-        source = DownloadSource("/api/volumes/$volumeId/file", "application/epub+zip", bytes),
-        versionId = "version-$volumeId",
-        versionSourceKey = IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY,
-        versionSourceName = null,
-        versionCompleted = false,
+        source = DownloadSource("/api/assets/$assetId", "application/epub+zip", bytes),
+        resourceSortOrder = sortOrder,
     )
 
     private fun artifact(
         namespace: DownloadNamespace,
-        workId: String,
-        volumeId: String,
+        bookId: String,
+        resourceId: String,
+        assetId: String,
         title: String,
         author: String?,
-        volumeTitle: String,
+        resourceTitle: String,
         bytes: Long,
-    ) = artifact(descriptor(namespace, workId, volumeId, bytes, title, author, volumeTitle), bytes)
+        sortOrder: Int? = null,
+    ) = artifact(
+        descriptor(namespace, bookId, resourceId, assetId, bytes, title, author, resourceTitle, sortOrder),
+        bytes,
+    )
 
     private fun artifact(descriptor: DownloadDescriptor, bytes: Long) = CompletedDownloadArtifact(
         descriptor = descriptor,
-        localReference = "local://${descriptor.identity.volumeId}",
+        localReference = "local://${descriptor.identity.assetId}",
         verifiedBytes = bytes,
         completedAtEpochMillis = 1,
     )

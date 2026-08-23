@@ -298,8 +298,6 @@ export function ShelvesPage() {
         return i18nAttribute("合集仍有书架，请先移除全部书架");
       case 'INVALID_COLLECTION_MEMBER':
         return i18nAttribute("合集只能包含自己的普通或智能书架");
-      case 'COLLECTION_CANNOT_CONTAIN_WORKS':
-        return i18nAttribute("合集不能包含图书");
       case 'COLLECTION_CANNOT_HAVE_RULES':
         return i18nAttribute("合集不能设置智能书架规则");
       default:

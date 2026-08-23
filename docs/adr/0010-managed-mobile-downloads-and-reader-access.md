@@ -1,6 +1,6 @@
 # ADR 0010: Managed mobile downloads and reader access
 
-- Status: Superseded in part by ADR 0014 for Reader-opening eligibility
+- Status: Superseded in identity and local-contract terms by ADR 0020; Reader-opening eligibility remains governed by ADR 0014
 - Date: 2026-08-13
 - Owner: Mobile Downloads capability
 

@@ -141,15 +141,22 @@ def create_operation(
 
 def operation_summary(operation: dict[str, Any]) -> OperationSummary:
     expires_at = operation.get("expiresAt")
-    if not isinstance(expires_at, datetime):
-        raise TypeError("Operation expiry is missing")
+    if expires_at is not None and not isinstance(expires_at, datetime):
+        raise TypeError("Operation expiry is invalid")
+    now = datetime.now(expires_at.tzinfo) if isinstance(expires_at, datetime) else None
+    undo_available = (
+        str(operation.get("status") or "") == "COMPLETED"
+        and isinstance(expires_at, datetime)
+        and now is not None
+        and expires_at >= now
+    )
     return OperationSummary(
         id=str(operation["id"]),
         action=str(operation["action"]),
         status=str(operation["status"]),
         summary=str(operation["summary"]),
         expires_at=expires_at,
-        undo_available=True,
+        undo_available=undo_available,
     )
 
 
@@ -178,12 +185,16 @@ def list_operations_for_user(
     return [entity_record(row) for row in rows]
 
 
-def mark_operation_undone(db: Session, *, operation_id: str, now: datetime) -> None:
-    db.execute(
+def mark_operation_undone(db: Session, *, operation_id: str, now: datetime) -> bool:
+    result = db.execute(
         update(LibraryOperation)
-        .where(LibraryOperation.id == operation_id)
+        .where(
+            LibraryOperation.id == operation_id,
+            LibraryOperation.status == "COMPLETED",
+        )
         .values(status="UNDONE", undone_at=now, updated_at=now)
     )
+    return getattr(result, "rowcount", 0) == 1
 
 
 def insert_snapshot(db: Session, table: str, row: dict[str, Any]) -> None:
@@ -223,10 +234,18 @@ def restore_book_metadata(db: Session, row: dict[str, Any]) -> None:
     if not book_id:
         raise ValueError("Book metadata snapshot is missing its id")
     field_map = {
+        "title": "title",
+        "normalizedTitle": "normalized_title",
         "author": "author",
         "normalizedAuthor": "normalized_author",
+        "description": "description",
         "seriesName": "series_name",
         "seriesIndex": "series_index",
+        "coverPath": "cover_path",
+        "coverStatus": "cover_status",
+        "metadataQuality": "metadata_quality",
+        "publicationStatus": "publication_status",
+        "trackingStatus": "tracking_status",
         "updatedAt": "updated_at",
     }
     values = {
@@ -250,6 +269,8 @@ def restore_resource_metadata(db: Session, row: dict[str, Any]) -> None:
     if not resource_id:
         raise ValueError("Resource metadata snapshot is missing its id")
     field_map = {
+        "title": "title",
+        "description": "description",
         "publisher": "publisher",
         "language": "language",
         "publishedAt": "published_at",

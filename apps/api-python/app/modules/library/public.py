@@ -74,6 +74,7 @@ from app.modules.library.application.source_tree_ports import (
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
+    ResourceNavigationUnitInput,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
 )
@@ -184,6 +185,7 @@ __all__ = [
     "ReadableResourceTopologyError",
     "ResourceEnablementState",
     "ResourceImportState",
+    "ResourceNavigationUnitInput",
     "SearchLibraryFilterOptions",
     "SmartShelfCriteria",
     "SmartShelfQueryPort",

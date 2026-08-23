@@ -3,20 +3,24 @@ import Foundation
 
 final class IosPublicationDownloadSinkFactory: ErmaoShared.PublicationDownloadSinkFactory, @unchecked Sendable {
     private let store: IosManagedPublicationStore
+    private let namespace: String
 
-    init(store: IosManagedPublicationStore) {
+    init(store: IosManagedPublicationStore, namespace: String) {
         self.store = store
+        self.namespace = namespace
     }
 
     func open(download: ErmaoShared.ReaderPublicationDownload) async throws -> ErmaoShared.PublicationDownloadSink {
         let staging = try await store.prepareDownload(
-            sourceID: download.sourceId,
-            expectedSize: download.expectedSizeBytes
+            resourceID: download.resourceId,
+            expectedSize: download.expectedSizeBytes,
+            namespace: namespace
         )
         return IosPublicationDownloadSink(
             store: store,
             staging: staging,
-            download: download
+            download: download,
+            namespace: namespace
         )
     }
 }
@@ -49,6 +53,7 @@ private actor IosPublicationDownloadWorker {
     private let store: IosManagedPublicationStore
     private let staging: URL
     private let download: ErmaoShared.ReaderPublicationDownload
+    private let namespace: String
     private var output: FileHandle?
     private var byteCount: Int64 = 0
     private var completed = false
@@ -56,11 +61,13 @@ private actor IosPublicationDownloadWorker {
     init(
         store: IosManagedPublicationStore,
         staging: URL,
-        download: ErmaoShared.ReaderPublicationDownload
+        download: ErmaoShared.ReaderPublicationDownload,
+        namespace: String
     ) {
         self.store = store
         self.staging = staging
         self.download = download
+        self.namespace = namespace
     }
 
     func write(bytes: KotlinByteArray, count: Int32) throws {
@@ -86,23 +93,22 @@ private actor IosPublicationDownloadWorker {
             output = nil
             let managed = try await store.commitDownload(
                 staging: staging,
-                sourceID: download.sourceId,
+                resourceID: download.resourceId,
                 displayTitle: download.displayTitle,
                 byteCount: byteCount,
                 expectedSize: download.expectedSizeBytes,
                 parserVersion: "reader-v4",
                 normalizationVersion: "reader-v4",
                 sourceFormat: download.sourceFormat,
-                workID: download.workId,
-                volumeID: download.volumeId,
+                bookID: download.bookId,
+                namespace: namespace,
                 validateWithReaderParser: true
             )
             return ErmaoShared.LocalReaderSource(
-                sourceId: managed.sourceID,
+                resourceId: managed.resourceID,
                 displayTitle: managed.displayTitle,
                 format: managed.sourceFormat.readerFormat,
-                workId: managed.workID,
-                volumeId: managed.volumeID,
+                bookId: managed.bookID,
                 sourceFormat: managed.sourceFormat
             )
         } catch {

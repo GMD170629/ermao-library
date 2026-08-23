@@ -8,10 +8,10 @@ actor SharedShelfClient: ShelfClient {
         self.repository = repository
     }
 
-    func fetchShelves(context: ContentRequestContext, workID: String) async throws -> [ShelfOption] {
+    func fetchShelves(context: ContentRequestContext, bookID: String) async throws -> [ShelfOption] {
         let result = try await repository.loadShelves(
             context: sharedContext(context),
-            workId: workID
+            bookId: bookID
         )
         if let content = result as? ErmaoShared.ShelfResultContent<NSArray> {
             return (content.value ?? []).compactMap { value in
@@ -22,11 +22,11 @@ actor SharedShelfClient: ShelfClient {
         throw mapFailure(result)
     }
 
-    func updateShelf(context: ContentRequestContext, workID: String, shelfID: String, add: Bool) async throws {
+    func updateShelf(context: ContentRequestContext, bookID: String, shelfID: String, add: Bool) async throws {
         let result = try await repository.updateMembership(
             context: sharedContext(context),
             change: ErmaoShared.ShelfMembershipChange(
-                workId: workID,
+                bookId: bookID,
                 shelfId: shelfID,
                 membership: add ? .add : .remove
             )

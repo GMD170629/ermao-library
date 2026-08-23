@@ -99,8 +99,8 @@ final class ReaderProgressContractTests: XCTestCase {
             sourceId: sourceID,
             displayTitle: "Fixture",
             format: .epub,
-            workId: "work-42",
-            volumeId: sourceID,
+            bookId: "work-42",
+            resourceId: sourceID,
             sourceFormat: .epub
         )
     }

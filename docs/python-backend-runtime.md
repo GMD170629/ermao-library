@@ -21,14 +21,15 @@ flowchart LR
   Api --> Roots
 ```
 
-The scanner interprets each root's `FLAT`, `VOLUMES`, or `AUDIOBOOK` directory topology,
-materializes Work/Version/Volume identity, and only then enqueues original-file parsing.
+The scanner interprets each root's `FLAT` or `VOLUMES` directory topology,
+materializes Book/ReadableResource/ResourceAsset identity, and only then enqueues
+original-file parsing.
 See [Library Root Layout](library-root-layout.md).
 
 ## Fresh schema baseline
 
 Alembic has one current revision:
-`0001_library_topology_baseline` (library topology, version covers, and ADR 0018
+`0001_library_topology_baseline` (library topology, source-node covers, and ADR 0018
 readable-resource overlay tables). Startup behavior is intentionally narrow:
 
 - an empty database is created at the current head;

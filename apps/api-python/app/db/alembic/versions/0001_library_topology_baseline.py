@@ -3,9 +3,8 @@
 Revision ID: 0001_library_topology_baseline
 Revises: None
 
-Single fresh-install baseline only. Prior development revisions
-0002_version_covers and 0003_readable_resource_overlay_schema are not
-supported for upgrade. Downgrade is not supported.
+Single fresh-install baseline only. Prior development revisions are not supported
+for upgrade. Downgrade is not supported.
 """
 
 from __future__ import annotations
@@ -1994,7 +1993,8 @@ def upgrade() -> None:
         "MetadataWritebackOperation",
         sa.Column("id", sa.String(length=191), nullable=False),
         sa.Column("bookId", sa.String(length=191), nullable=False),
-        sa.Column("resourceId", sa.String(length=191), nullable=False),
+        sa.Column("sourceNodeId", sa.String(length=191), nullable=False),
+        sa.Column("resourceId", sa.String(length=191), nullable=True),
         sa.Column("assetId", sa.String(length=191), nullable=True),
         sa.Column("lookupTaskId", sa.String(length=191), nullable=True),
         sa.Column("source", sa.String(length=32), nullable=False),
@@ -2028,6 +2028,12 @@ def upgrade() -> None:
             ["bookId"], ["LibraryBook.id"], onupdate="CASCADE", ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
+            ["sourceNodeId"],
+            ["LibrarySourceNode.id"],
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
             ["assetId"],
             ["LibraryResourceAsset.id"],
             onupdate="CASCADE",
@@ -2047,6 +2053,11 @@ def upgrade() -> None:
             unique=False,
         )
         batch_op.create_index(
+            "MetadataWritebackOperation_sourceNodeId_idx",
+            ["sourceNodeId"],
+            unique=False,
+        )
+        batch_op.create_index(
             "MetadataWritebackOperation_resourceId_idx", ["resourceId"], unique=False
         )
         batch_op.create_index(
@@ -2058,6 +2069,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=191), nullable=False),
         sa.Column("operationId", sa.String(length=191), nullable=True),
         sa.Column("bookId", sa.String(length=191), nullable=False),
+        sa.Column("sourceNodeId", sa.String(length=191), nullable=False),
         sa.Column("resourceId", sa.String(length=191), nullable=True),
         sa.Column("assetId", sa.String(length=191), nullable=True),
         sa.Column("lookupTaskId", sa.String(length=191), nullable=True),
@@ -2108,6 +2120,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["bookId"], ["LibraryBook.id"], onupdate="CASCADE", ondelete="CASCADE"
         ),
+        sa.ForeignKeyConstraint(
+            ["sourceNodeId"],
+            ["LibrarySourceNode.id"],
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "idempotencyKey", name="MetadataWritebackPreparation_idempotency_key"
@@ -2129,6 +2147,11 @@ def upgrade() -> None:
         )
         batch_op.create_index(
             "MetadataWritebackPreparation_resourceId_idx", ["resourceId"], unique=False
+        )
+        batch_op.create_index(
+            "MetadataWritebackPreparation_sourceNodeId_idx",
+            ["sourceNodeId"],
+            unique=False,
         )
         batch_op.create_index(
             "MetadataWritebackPreparation_assetId_idx", ["assetId"], unique=False

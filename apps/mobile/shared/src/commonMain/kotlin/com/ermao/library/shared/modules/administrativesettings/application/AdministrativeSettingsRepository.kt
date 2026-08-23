@@ -67,7 +67,7 @@ interface AdministrativeSettingsRepository {
     suspend fun loadKindleSettings(context: AdministrativeSettingsContext): AdministrativeSettingsResult<KindleSettings>
     suspend fun updateKindleEmail(context: AdministrativeSettingsContext, email: String): AdministrativeSettingsResult<KindleSettings>
     suspend fun listKindleTasks(context: AdministrativeSettingsContext, filter: KindleTaskFilter): AdministrativeSettingsResult<KindleTaskPage>
-    suspend fun createKindleTask(context: AdministrativeSettingsContext, fileId: String, workId: String?): AdministrativeSettingsResult<KindleTask>
+    suspend fun createKindleTask(context: AdministrativeSettingsContext, assetId: String, bookId: String?): AdministrativeSettingsResult<KindleTask>
     suspend fun cancelKindleTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<KindleTask>
     suspend fun retryKindleTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<KindleTask>
     suspend fun deleteKindleTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<Boolean>

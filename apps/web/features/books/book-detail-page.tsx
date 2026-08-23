@@ -51,19 +51,19 @@ type ResourceCardActionTarget = Readonly<{
   assetCount: number;
 }>;
 
-type VersionCardActionId = 'edit' | 'regenerate-cover' | 'recognize' | 'rescan';
+type SourceNodeActionId = 'edit' | 'regenerate-cover' | 'recognize' | 'rescan';
 
-const VERSION_CARD_ACTION_DETAILS: Record<VersionCardActionId, { label: string; description: string; icon: LucideIcon }> = {
-  edit: { label: '编辑', description: '修改所选版本的标题、简介和封面', icon: Edit3 },
-  'regenerate-cover': { label: '重新生成封面', description: '从版本中的图书卷重新提取或生成封面', icon: RefreshCw },
-  recognize: { label: '识别元数据', description: '从元数据来源搜索并应用版本信息', icon: Sparkles },
-  rescan: { label: '重新扫描文件', description: '重新扫描该版本下的文件变化', icon: ScanSearch }
+const SOURCE_NODE_ACTION_DETAILS: Record<SourceNodeActionId, { label: string; description: string; icon: LucideIcon }> = {
+  edit: { label: '编辑', description: '修改所选来源目录的标题、简介和封面', icon: Edit3 },
+  'regenerate-cover': { label: '重新生成封面', description: '从来源目录中的可读资源重新提取或生成封面', icon: RefreshCw },
+  recognize: { label: '识别元数据', description: '从元数据来源搜索并应用来源目录信息', icon: Sparkles },
+  rescan: { label: '重新扫描文件', description: '重新扫描该来源目录下的文件变化', icon: ScanSearch }
 };
 
 const RESOURCE_CARD_ACTION_DETAILS: Record<ResourceCardActionId, { label: string; description: string; icon: LucideIcon; destructive?: boolean }> = {
-  edit: { label: '编辑', description: '修改所选图书卷的出版元数据', icon: Edit3 },
-  'regenerate-cover': { label: '重新生成封面', description: '从图书卷内容重新提取或生成封面', icon: RefreshCw },
-  recognize: { label: '识别', description: '识别所选图书卷的出版元数据', icon: Sparkles },
+  edit: { label: '编辑', description: '修改所选可读资源的出版元数据', icon: Edit3 },
+  'regenerate-cover': { label: '重新生成封面', description: '从可读资源内容重新提取或生成封面', icon: RefreshCw },
+  recognize: { label: '识别', description: '识别所选可读资源的出版元数据', icon: Sparkles },
   delete: { label: '删除', description: '永久删除对应的真实源资产', icon: Trash2, destructive: true }
 };
 
@@ -86,7 +86,7 @@ function readerHref(resource: ReadableResourceView): string {
 
 function consumptionCopy(readerType: ReaderType) {
   if (readerType === 'audio') return { progress: '收听进度', position: '当前收听', start: '开始听', resume: '继续听', status: '收听状态' } as const;
-  if (readerType === 'comic') return { progress: '阅读进度', position: '当前图书卷', start: '开始看', resume: '继续看', status: '阅读状态' } as const;
+  if (readerType === 'comic') return { progress: '阅读进度', position: '当前位置', start: '开始看', resume: '继续看', status: '阅读状态' } as const;
   return { progress: '阅读进度', position: '当前位置', start: '开始阅读', resume: '继续阅读', status: '阅读状态' } as const;
 }
 
@@ -121,7 +121,7 @@ function ResourceEditor({
         narrator: form.narrator.trim() || null
       });
       await onSaved();
-      feedback.success(t('图书卷信息已保存'));
+      feedback.success(t('可读资源信息已保存'));
       onClose();
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
@@ -130,9 +130,9 @@ function ResourceEditor({
     }
   };
 
-  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('编辑图书卷')}>
+  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('编辑可读资源')}>
     <div className="w-full max-w-xl rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
-      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑图书卷</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
+      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑可读资源</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
       <p data-i18n-skip className="mt-1 text-sm text-stone-500">{resource.title}</p>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <label className="text-sm text-stone-600"><I18nText>出版社</I18nText><input value={form.publisher} onChange={(event) => setForm({ ...form, publisher: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -184,12 +184,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [resourceMenuAnchor, setResourceMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [resourceActionTarget, setResourceActionTarget] = useState<ResourceCardActionTarget | null>(null);
   const [resourceActionBusy, setResourceActionBusy] = useState<ResourceCardActionId | null>(null);
-  const [versionActionTarget, setVersionActionTarget] = useState<BookContentEntry | null>(null);
-  const [versionMenuPosition, setVersionMenuPosition] = useState<ContextMenuPosition | null>(null);
-  const [versionMenuAnchor, setVersionMenuAnchor] = useState<HTMLButtonElement | null>(null);
-  const [versionActionBusy, setVersionActionBusy] = useState<VersionCardActionId | null>(null);
-  const [versionEditorTarget, setVersionEditorTarget] = useState<BookContentEntry | null>(null);
-  const [versionRecognitionTarget, setVersionRecognitionTarget] = useState<BookContentEntry | null>(null);
+  const [sourceNodeActionTarget, setSourceNodeActionTarget] = useState<BookContentEntry | null>(null);
+  const [sourceNodeMenuPosition, setSourceNodeMenuPosition] = useState<ContextMenuPosition | null>(null);
+  const [sourceNodeMenuAnchor, setSourceNodeMenuAnchor] = useState<HTMLButtonElement | null>(null);
+  const [sourceNodeActionBusy, setSourceNodeActionBusy] = useState<SourceNodeActionId | null>(null);
+  const [sourceNodeEditorTarget, setSourceNodeEditorTarget] = useState<BookContentEntry | null>(null);
+  const [sourceNodeRecognitionTarget, setSourceNodeRecognitionTarget] = useState<BookContentEntry | null>(null);
   const [readingStatusBusy, setReadingStatusBusy] = useState(false);
   const [chapter, setChapter] = useState<EbookChapterDetail | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -220,12 +220,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         setContents(next);
         if (contentSourceNodeId && next.currentNode) setSelectedContentNode(next.currentNode);
       })
-      .catch((reason) => { if (!controller.signal.aborted) setContentsError(reason instanceof Error ? reason.message : t('读取卷册内容失败')); })
+      .catch((reason) => { if (!controller.signal.aborted) setContentsError(reason instanceof Error ? reason.message : t('读取图书内容失败')); })
       .finally(() => { if (!controller.signal.aborted) setContentsLoading(false); });
     return () => controller.abort();
   }, [bookId, contentPage, contentSort, contentSourceNodeId, contentsRevision, t]);
 
   const resources = useMemo(() => book ? allVisibleResources(book) : [], [book]);
+  const bookAnchoredResource = book
+    ? resources.find((resource) => resource.sourceNodeId === book.sourceNodeId) ?? null
+    : null;
   const selectedBookResource = book ? selectedResourceForBook(book, requestedResourceId) : null;
   const nestedNode = contentSourceNodeId
     ? contents?.currentNode?.sourceNodeId === contentSourceNodeId
@@ -258,7 +261,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const activeReaderHref = activeResource?.readable ? readerHref(activeResource) : null;
   const activeProgress = displayedProgress;
   const activeStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
-  const actions = book ? bookActionIds({ canManage, kindleSendAvailable: resources.some((resource) => resource.kindleSendAvailable) }) : [];
+  const actions = book ? bookActionIds({ canManage, canRegenerateCover: bookAnchoredResource !== null, kindleSendAvailable: resources.some((resource) => resource.kindleSendAvailable) }) : [];
 
   useEffect(() => {
     if (!book || !singleEbook) { setChapter(null); return; }
@@ -290,7 +293,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     if (action === 'upload-cover') { coverInputRef.current?.click(); return; }
     if (action === 'kindle') { setKindleOpen(true); return; }
     try {
-      if (action === 'regenerate-cover') { await regenerateBookCover(book.id); setCoverRevision(Date.now()); feedback.success(t('封面已重新生成')); }
+      if (action === 'regenerate-cover') {
+        if (!bookAnchoredResource) throw new Error(t('图书来源节点没有可重新提取封面的资源'));
+        await regenerateBookCover(book.id, bookAnchoredResource.id);
+        setCoverRevision(Date.now());
+        feedback.success(t('封面已重新生成'));
+      }
       await refresh();
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
@@ -339,23 +347,23 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }
   };
 
-  const invokeVersionCardAction = async (action: VersionCardActionId) => {
-    const target = versionActionTarget;
+  const invokeSourceNodeAction = async (action: SourceNodeActionId) => {
+    const target = sourceNodeActionTarget;
     if (!book || !target) return;
-    setVersionMenuPosition(null);
-    setVersionActionTarget(null);
+    setSourceNodeMenuPosition(null);
+    setSourceNodeActionTarget(null);
     if (action === 'edit') {
-      setVersionEditorTarget(target);
+      setSourceNodeEditorTarget(target);
       return;
     }
     if (action === 'recognize') {
-      setVersionRecognitionTarget(target);
+      setSourceNodeRecognitionTarget(target);
       return;
     }
-    setVersionActionBusy(action);
+    setSourceNodeActionBusy(action);
     try {
       if (action === 'regenerate-cover') {
-        if (!target.representativeResourceId) throw new Error(t('该版本还没有可生成封面的图书卷'));
+        if (!target.representativeResourceId) throw new Error(t('该来源目录还没有可用于生成封面的可读资源'));
         await regenerateResourceCover(book.id, target.representativeResourceId);
         setCoverRevision(Date.now());
         feedback.success(t('封面已重新生成'));
@@ -368,7 +376,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
     } finally {
-      setVersionActionBusy(null);
+      setSourceNodeActionBusy(null);
     }
   };
 
@@ -401,7 +409,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       </div>
     </section>
 
-    <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void uploadBookCover(book.id, file).then(() => { setCoverRevision(Date.now()); return refresh(); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))); event.currentTarget.value = ''; }} />
+    <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void uploadBookCover(book, file).then(() => { setCoverRevision(Date.now()); return refresh(); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))); event.currentTarget.value = ''; }} />
     <BookMetadataEditor book={book} open={metadataOpen} onClose={() => setMetadataOpen(false)} onSaved={(nextBook) => { setBook(nextBook); setMetadataOpen(false); }} />
 
     <BookContentBrowser
@@ -428,33 +436,33 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         setResourceMenuAnchor(anchor);
         setResourceMenuPosition({ x: bounds.right, y: bounds.bottom + 6 });
       }}
-      onManageVersion={(entry, anchor) => {
+      onManageSourceNode={(entry, anchor) => {
         const bounds = anchor.getBoundingClientRect();
-        setVersionActionTarget(entry);
-        setVersionMenuAnchor(anchor);
-        setVersionMenuPosition({ x: bounds.right, y: bounds.bottom + 6 });
+        setSourceNodeActionTarget(entry);
+        setSourceNodeMenuAnchor(anchor);
+        setSourceNodeMenuPosition({ x: bounds.right, y: bounds.bottom + 6 });
       }}
     />
 
-    {canManage && versionActionTarget ? <ContextActionMenu<VersionCardActionId>
-      position={versionMenuPosition}
-      ariaLabel={t('管理版本')}
-      title={versionActionTarget.title}
-      items={(Object.entries(VERSION_CARD_ACTION_DETAILS) as Array<[VersionCardActionId, (typeof VERSION_CARD_ACTION_DETAILS)[VersionCardActionId]]>).map(([action, details]) => ({
+    {canManage && sourceNodeActionTarget ? <ContextActionMenu<SourceNodeActionId>
+      position={sourceNodeMenuPosition}
+      ariaLabel={t('管理来源目录')}
+      title={sourceNodeActionTarget.title}
+      items={(Object.entries(SOURCE_NODE_ACTION_DETAILS) as Array<[SourceNodeActionId, (typeof SOURCE_NODE_ACTION_DETAILS)[SourceNodeActionId]]>).map(([action, details]) => ({
         action,
         label: t(details.label),
         description: t(details.description),
         icon: details.icon,
-        disabled: versionActionBusy !== null || (action === 'regenerate-cover' && !versionActionTarget.representativeResourceId)
+        disabled: sourceNodeActionBusy !== null || (action === 'regenerate-cover' && !sourceNodeActionTarget.representativeResourceId)
       }))}
-      returnFocusTo={versionMenuAnchor}
-      onClose={() => { setVersionMenuPosition(null); setVersionActionTarget(null); }}
-      onSelect={(action) => { void invokeVersionCardAction(action); }}
+      returnFocusTo={sourceNodeMenuAnchor}
+      onClose={() => { setSourceNodeMenuPosition(null); setSourceNodeActionTarget(null); }}
+      onSelect={(action) => { void invokeSourceNodeAction(action); }}
     /> : null}
 
     {canManage && resourceActionTarget ? <ContextActionMenu<ResourceCardActionId>
       position={resourceMenuPosition}
-      ariaLabel={t('管理图书卷')}
+      ariaLabel={t('管理可读资源')}
       title={resourceActionTarget.title}
       items={(Object.entries(RESOURCE_CARD_ACTION_DETAILS) as Array<[ResourceCardActionId, (typeof RESOURCE_CARD_ACTION_DETAILS)[ResourceCardActionId]]>).map(([action, details]) => ({
         action,
@@ -474,12 +482,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     <SourceNodeMetadataEditor
       bookId={book.id}
       book={book}
-      entry={versionEditorTarget}
-      fallbackCoverUrl={resources.find((resource) => resource.id === versionEditorTarget?.representativeResourceId)?.coverUrl ?? book.coverUrl}
-      onClose={() => setVersionEditorTarget(null)}
+      entry={sourceNodeEditorTarget}
+      fallbackCoverUrl={resources.find((resource) => resource.id === sourceNodeEditorTarget?.representativeResourceId)?.coverUrl ?? book.coverUrl}
+      onClose={() => setSourceNodeEditorTarget(null)}
       onSaved={() => setContentsRevision((value) => value + 1)}
     />
-    <SourceNodeMetadataRecognitionDialog bookId={book.id} entry={versionRecognitionTarget} onClose={() => setVersionRecognitionTarget(null)} onSaved={() => setContentsRevision((value) => value + 1)} />
+    <SourceNodeMetadataRecognitionDialog bookId={book.id} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={() => setContentsRevision((value) => value + 1)} />
     <MetadataLookupModal book={book} currentResourceId={metadataResourceId ?? activeResource?.id ?? null} fixedScope={metadataResourceId ? 'resource' : null} open={metadataLookupOpen} onClose={() => { setMetadataLookupOpen(false); setMetadataResourceId(null); }} onApplied={refresh} />
     <KindleSendModal book={book} open={kindleOpen} preferredResourceId={activeResource?.id ?? null} onClose={() => setKindleOpen(false)} />
   </div>;

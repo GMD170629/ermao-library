@@ -227,7 +227,7 @@ internal class ReadiumComicSession(
                 val targetLocation = target?.locator as? ComicPublicationLocation
                 if (targetLocation?.pageIndex == location.pageIndex && targetLocation.resourceHref == location.resourceHref) {
                     progressCoordinator?.acceptVerifiedRemoteProgress(
-                        ReaderProgress(source.sourceId, location, nowEpochMillis(), deviceIdentity.stableDeviceId()),
+                        ReaderProgress(source.resourceId, location, nowEpochMillis(), deviceIdentity.stableDeviceId()),
                         target,
                     )
                     remoteTarget = null
@@ -336,7 +336,7 @@ internal class ReadiumComicSession(
     )
 
     private suspend fun loadProgressSafely(): ReaderProgress? = try {
-        progressStore.load(source.sourceId)
+        progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
@@ -353,7 +353,7 @@ internal class ReadiumComicSession(
             location.pageIndex.toDouble() / canonicalPages.lastIndex * 100.0
         }
         val progress = ReaderProgress(
-            sourceId = source.sourceId,
+            resourceId = source.resourceId,
             location = location,
             updatedAtEpochMillis = capturedAt,
             deviceId = deviceIdentity.stableDeviceId(),
@@ -368,12 +368,12 @@ internal class ReadiumComicSession(
         }
         lastPersistedLocation = location
         val namespace = presentationNamespaceKey ?: return@withLock
-        val workId = source.workId ?: return@withLock
+        val bookId = source.bookId ?: return@withLock
         publishProgressUpdate(
             createReaderProgressPresentationUpdate(
                 namespaceKey = namespace,
-                workId = workId,
-                volumeId = source.volumeId ?: source.sourceId,
+                bookId = bookId,
+                resourceId = source.resourceId,
                 percent = percent,
                 progress = progress,
                 chapterTitle = location.resourceHref.substringAfterLast('/'),

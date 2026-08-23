@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class DownloadStoreTests: XCTestCase {
-    func testLiveStylesVolumeTransferDiagnostic() async throws {
+    func testLiveStylesResourceTransferDiagnostic() async throws {
         let profileID = "03139ac0-7820-4e10-9f9e-73f177327398"
         let context = ContentRequestContext(
             profileID: profileID,
@@ -19,11 +19,12 @@ final class DownloadStoreTests: XCTestCase {
         let cookieStore = KeychainCookiePayloadStore()
         XCTAssertNotNil(try cookieStore.load(profileID: profileID), "The live device session cookie must be available")
         let transfer = SharedManagedDownloadTransfer(cookieStore: cookieStore)
-        let volume = WorkVolume(
+        let resource = BookResource(
             id: "imp_2dfdb3d04f8b7238152bec2373f57213b5681dc2",
-            versionID: "imp_0e42263b2877d99f6ae9387edf572c2d8f777d7e",
+            bookID: "imp_8a0849cd61b719a802a30f1d655a0e4bc05ecf3b",
+            sourceNodeID: "imp_0e42263b2877d99f6ae9387edf572c2d8f777d7e",
             title: "Styles",
-            formatLabel: "EPUB",
+            format: "EPUB",
             sizeLabel: nil,
             progress: nil,
             isReadable: true,
@@ -46,18 +47,18 @@ final class DownloadStoreTests: XCTestCase {
             userId: context.userID,
             authorizationVersion: context.authorizationVersion
         )
-        let gatewayResult = try await gateway.load(context: sharedContext, volumeId: volume.id)
-        if let failure = gatewayResult as? DownloadBootstrapResultFailure {
+        let gatewayResult = try await gateway.load(context: sharedContext, resourceId: resource.id)
+        if let failure = gatewayResult as? DownloadBootstrapFailure {
             XCTFail("bootstrap \(failure.error.code): \(failure.error.diagnosticMessage ?? "no diagnostic")")
             return
         }
-        let bootstrap = try await transfer.prepare(context: context, volumeID: volume.id)
+        let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = ManagedDownloadStore(rootDirectory: root)
         let record = try await store.enqueue(
             namespace: context.namespaceKey,
-            work: WorkCard(
+            book: BookCard(
                 id: "imp_8a0849cd61b719a802a30f1d655a0e4bc05ecf3b",
                 title: "Styles",
                 author: "Agatha Christie",
@@ -65,11 +66,8 @@ final class DownloadStoreTests: XCTestCase {
                 progress: nil,
                 availableMediaKinds: [.ebook]
             ),
-            volume: volume,
-            versionID: bootstrap.versionID,
-            versionSourceKey: bootstrap.versionSourceKey,
-            versionSourceName: bootstrap.versionSourceName,
-            versionCompleted: bootstrap.versionCompleted,
+            resource: resource,
+            assetID: bootstrap.assetID,
             readerType: bootstrap.readerType,
             expectedBytes: bootstrap.expectedBytes
         )
@@ -164,25 +162,26 @@ final class DownloadStoreTests: XCTestCase {
 
     func testNamespacesRemainIsolatedAndCanBePurgedIndependently() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
-        _ = try await makeRecord(store: store, namespace: "server|one|1", volumeID: "one")
-        _ = try await makeRecord(store: store, namespace: "server|two|1", volumeID: "two")
+        _ = try await makeRecord(store: store, namespace: "server|one|1", resourceID: "one")
+        _ = try await makeRecord(store: store, namespace: "server|two|1", resourceID: "two")
 
         try await store.removeNamespace("server|one|1")
 
         let firstNamespaceRecords = try await store.records(namespace: "server|one|1")
         let secondNamespaceRecords = try await store.records(namespace: "server|two|1")
         XCTAssertTrue(firstNamespaceRecords.isEmpty)
-        XCTAssertEqual(secondNamespaceRecords.map(\.volumeID), ["two"])
+        XCTAssertEqual(secondNamespaceRecords.map(\.resourceID), ["two"])
     }
 
-    func testSameVolumeIdentityReusesQueuedRecord() async throws {
+    func testSameResourceAndAssetIdentityReusesQueuedRecord() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let original = try await makeRecord(store: store)
-        let volume = WorkVolume(
-            id: original.volumeID,
-            versionID: "media-version-ebook",
-            title: "Volume",
-            formatLabel: "EPUB",
+        let resource = BookResource(
+            id: original.resourceID,
+            bookID: original.bookID,
+            sourceNodeID: "source-node-ebook",
+            title: "Resource",
+            format: "EPUB",
             sizeLabel: "4 bytes",
             progress: nil,
             isReadable: true,
@@ -191,19 +190,16 @@ final class DownloadStoreTests: XCTestCase {
 
         let replacement = try await store.enqueue(
             namespace: namespace,
-            work: WorkCard(
-                id: "work",
-                title: "Work",
+            book: BookCard(
+                id: "book",
+                title: "Book",
                 author: "Author",
                 cover: nil,
                 progress: nil,
                 availableMediaKinds: [.ebook]
             ),
-            volume: volume,
-            versionID: original.versionID,
-            versionSourceKey: "__implicit__",
-            versionSourceName: nil,
-            versionCompleted: false,
+            resource: resource,
+            assetID: original.assetID,
             readerType: .reflowable,
             expectedBytes: 4
         )
@@ -213,14 +209,15 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(records.count, 1)
     }
 
-    func testChangedVersionIdentityReplacesVolumeRecord() async throws {
+    func testChangedAssetIdentityReplacesResourceRecord() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let original = try await makeRecord(store: store)
-        let volume = WorkVolume(
-            id: original.volumeID,
-            versionID: "media-version-new",
-            title: "Volume",
-            formatLabel: "EPUB",
+        let resource = BookResource(
+            id: original.resourceID,
+            bookID: original.bookID,
+            sourceNodeID: "source-node-new",
+            title: "Resource",
+            format: "EPUB",
             sizeLabel: "4 bytes",
             progress: nil,
             isReadable: true,
@@ -229,45 +226,41 @@ final class DownloadStoreTests: XCTestCase {
 
         let replacement = try await store.enqueue(
             namespace: namespace,
-            work: WorkCard(
-                id: "work",
-                title: "Work",
+            book: BookCard(
+                id: "book",
+                title: "Book",
                 author: "Author",
                 cover: nil,
                 progress: nil,
                 availableMediaKinds: [.ebook]
             ),
-            volume: volume,
-            versionID: volume.versionID,
-            versionSourceKey: "__implicit__",
-            versionSourceName: nil,
-            versionCompleted: false,
+            resource: resource,
+            assetID: "asset-new",
             readerType: .reflowable,
             expectedBytes: 4
         )
 
         XCTAssertNotEqual(replacement.id, original.id)
-        XCTAssertEqual(replacement.versionID, "media-version-new")
+        XCTAssertEqual(replacement.assetID, "asset-new")
     }
 
-    func testRealVersionIdentityPersistsAndGroupsVolumesBelowWork() async throws {
+    func testAssetIdentityPersistsAndGroupsResourcesBelowBook() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
-        let first = try await makeRecord(store: store, volumeID: "volume-1")
-        let second = try await makeRecord(store: store, volumeID: "volume-2")
+        let first = try await makeRecord(store: store, resourceID: "resource-1", assetID: "asset-1")
+        let second = try await makeRecord(store: store, resourceID: "resource-2", assetID: "asset-2")
         let firstCompleted = try await complete(first, in: store)
         let secondCompleted = try await complete(second, in: store)
 
         let reloaded = try await store.records(namespace: namespace)
-        XCTAssertEqual(Set(reloaded.map(\.versionID)), ["version-implicit"])
+        XCTAssertEqual(Set(reloaded.map(\.assetID)), ["asset-1", "asset-2"])
 
         let groups = ManagedDownloadGrouping.completed(
             records: [firstCompleted, secondCompleted],
-            query: "Work"
+            query: "Book"
         )
         XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups.single?.versions.count, 1)
-        XCTAssertEqual(groups.single?.versions.single?.versionID, "version-implicit")
-        XCTAssertEqual(groups.single?.versions.single?.records.count, 2)
+        XCTAssertEqual(groups.single?.resources.count, 2)
+        XCTAssertEqual(groups.single?.resources.flatMap(\.records).count, 2)
     }
 
     func testDownloadLocalizationKeepsStorageAndImplicitVersionKeys() throws {
@@ -283,14 +276,14 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertNotNil(strings["downloads.version.implicit"])
     }
 
-    func testCatalogWithoutVersionFieldsIsDiscarded() async throws {
+    func testCatalogWithoutAssetIdentityIsDiscarded() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = ManagedDownloadStore(rootDirectory: root)
         let record = try await makeRecord(store: store)
         let encoded = try JSONEncoder().encode(record)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        object.removeValue(forKey: "versionID")
+        object.removeValue(forKey: "assetID")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
 
         XCTAssertThrowsError(try JSONDecoder().decode(ManagedDownloadRecord.self, from: legacyData))
@@ -301,13 +294,13 @@ final class DownloadStoreTests: XCTestCase {
         let queued = try await makeRecord(store: store)
         XCTAssertNil(ManagedReaderAccessPolicy.verifiedLocalHandoff(
             record: queued,
-            volumeID: queued.volumeID
+            resourceID: queued.resourceID
         ))
 
         let completed = try await complete(queued, in: store)
         let handoff = ManagedReaderAccessPolicy.verifiedLocalHandoff(
             record: completed,
-            volumeID: completed.volumeID
+            resourceID: completed.resourceID
         )
 
         XCTAssertEqual(handoff?.source, .verifiedLocal(recordID: completed.id))
@@ -334,32 +327,31 @@ final class DownloadStoreTests: XCTestCase {
     private func makeRecord(
         store: ManagedDownloadStore,
         namespace: String? = nil,
-        volumeID: String = "volume"
+        resourceID: String = "resource",
+        assetID: String = "asset"
     ) async throws -> ManagedDownloadRecord {
         try await store.enqueue(
             namespace: namespace ?? self.namespace,
-            work: WorkCard(
-                id: "work",
-                title: "Work",
+            book: BookCard(
+                id: "book",
+                title: "Book",
                 author: "Author",
                 cover: nil,
                 progress: nil,
                 availableMediaKinds: [.ebook]
             ),
-            volume: WorkVolume(
-                id: volumeID,
-                versionID: "media-version-ebook",
-                title: "Volume",
-                formatLabel: "EPUB",
+            resource: BookResource(
+                id: resourceID,
+                bookID: "book",
+                sourceNodeID: "source-node-ebook",
+                title: "Resource",
+                format: "EPUB",
                 sizeLabel: "4 bytes",
                 progress: nil,
                 isReadable: true,
                 isSelected: true
             ),
-            versionID: "version-implicit",
-            versionSourceKey: "__implicit__",
-            versionSourceName: nil,
-            versionCompleted: false,
+            assetID: assetID,
             readerType: .reflowable,
             expectedBytes: 4
         )

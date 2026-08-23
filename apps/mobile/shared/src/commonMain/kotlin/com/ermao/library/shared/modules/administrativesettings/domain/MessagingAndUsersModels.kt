@@ -23,11 +23,11 @@ data class KindleTaskFilter(
 
 data class KindleTask(
     val id: String,
-    val workId: String?,
-    val volumeId: String?,
-    val fileId: String?,
+    val bookId: String?,
+    val resourceId: String?,
+    val assetId: String?,
     val bookTitle: String,
-    val volumeTitle: String?,
+    val resourceTitle: String?,
     val fileName: String,
     val format: String,
     val mimeType: String,

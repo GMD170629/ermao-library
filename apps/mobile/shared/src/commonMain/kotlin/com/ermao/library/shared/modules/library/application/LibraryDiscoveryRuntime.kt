@@ -34,16 +34,16 @@ data class LibraryScopeSnapshot(
     val filters: LibraryFilters = LibraryFilters(),
     val loadedPageWindow: LoadedPageWindow? = null,
     val scrollAnchor: LibraryScrollAnchor? = null,
-    val selectedWorkId: String? = null,
+    val selectedBookId: String? = null,
 ) {
     fun queryFingerprint(scope: LibraryScope): String = listOf(
         scope.name,
         query.trim(),
-        if (scope == LibraryScope.Works) sort.name else "stable_name",
-        if (scope == LibraryScope.Works) viewMode.name else "list",
-        if (scope == LibraryScope.Works) filters.mediaKinds.map { it.wireValue }.sorted().joinToString(",") else "",
-        if (scope == LibraryScope.Works) filters.readingStatuses.map { it.wireValue }.sorted().joinToString(",") else "",
-        if (scope == LibraryScope.Works) filters.downloadedOnly.toString() else "false",
+        if (scope == LibraryScope.Books) sort.name else "stable_name",
+        if (scope == LibraryScope.Books) viewMode.name else "list",
+        if (scope == LibraryScope.Books) filters.mediaKinds.map { it.wireValue }.sorted().joinToString(",") else "",
+        if (scope == LibraryScope.Books) filters.readingStatuses.map { it.wireValue }.sorted().joinToString(",") else "",
+        if (scope == LibraryScope.Books) filters.downloadedOnly.toString() else "false",
     ).joinToString("|")
 }
 
@@ -75,7 +75,7 @@ data class LibraryDiscoveryScopeState(
 )
 
 data class LibraryDiscoveryState(
-    val selectedScope: LibraryScope = LibraryScope.Works,
+    val selectedScope: LibraryScope = LibraryScope.Books,
     val scopes: Map<LibraryScope, LibraryDiscoveryScopeState> = LibraryScope.entries.associateWith {
         LibraryDiscoveryScopeState()
     },
@@ -109,12 +109,12 @@ sealed interface LibraryRoute {
         override val entityId: String = id
     }
 
-    data class Work(val id: String) : LibraryRoute {
+    data class Book(val id: String) : LibraryRoute {
         init {
             require(id.isNotBlank())
         }
 
-        override val routeKey: String = "library.work"
+        override val routeKey: String = "library.book"
         override val entityId: String = id
     }
 }
@@ -160,25 +160,25 @@ class LibraryDiscoveryRuntime(
     fun updateQuery(scope: LibraryScope, query: String) = updateSnapshot(scope) { it.copy(query = query) }
 
     fun updateSort(scope: LibraryScope, sort: LibrarySort) {
-        if (scope == LibraryScope.Works) updateSnapshot(scope) { it.copy(sort = sort) }
+        if (scope == LibraryScope.Books) updateSnapshot(scope) { it.copy(sort = sort) }
     }
 
     fun updateViewMode(scope: LibraryScope, viewMode: LibraryViewMode) {
-        if (scope == LibraryScope.Works) updateSnapshot(scope) { it.copy(viewMode = viewMode) }
+        if (scope == LibraryScope.Books) updateSnapshot(scope) { it.copy(viewMode = viewMode) }
     }
 
     fun rememberScrollAnchor(scope: LibraryScope, anchor: LibraryScrollAnchor?) =
         updateSnapshot(scope) { it.copy(scrollAnchor = anchor) }
 
-    fun selectWork(scope: LibraryScope, workId: String?) =
-        updateSnapshot(scope) { it.copy(selectedWorkId = workId) }
+    fun selectBook(scope: LibraryScope, bookId: String?) =
+        updateSnapshot(scope) { it.copy(selectedBookId = bookId) }
 
     fun applyFilters(filters: LibraryFilters): FilterCommitResult {
         val availability = state.offlineFilterAvailability
         if (filters.downloadedOnly && availability is OfflineFilterAvailability.Unavailable) {
             return FilterCommitResult.Rejected(availability.reasonCode)
         }
-        updateSnapshot(LibraryScope.Works) { it.copy(filters = filters) }
+        updateSnapshot(LibraryScope.Books) { it.copy(filters = filters) }
         return FilterCommitResult.Applied
     }
 
@@ -248,7 +248,7 @@ class LibraryDiscoveryRuntime(
                     snapshot = scopeState.snapshot.copy(
                         loadedPageWindow = null,
                         scrollAnchor = null,
-                        selectedWorkId = null,
+                        selectedBookId = null,
                     ),
                     contentPhase = LibraryContentPhase.PermissionRevalidating,
                     refreshPhase = RefreshPhase.Idle,
@@ -262,7 +262,7 @@ class LibraryDiscoveryRuntime(
     fun markInaccessible(scope: LibraryScope) {
         updateScope(scope) {
             it.copy(
-                snapshot = it.snapshot.copy(loadedPageWindow = null, scrollAnchor = null, selectedWorkId = null),
+                snapshot = it.snapshot.copy(loadedPageWindow = null, scrollAnchor = null, selectedBookId = null),
                 contentPhase = LibraryContentPhase.Inaccessible,
                 refreshPhase = RefreshPhase.Idle,
                 paginationPhase = PaginationPhase.Idle,

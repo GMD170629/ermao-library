@@ -223,7 +223,7 @@ internal class ReadiumPdfSession(
             ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError))
         val identity = PdfRangeCacheIdentity(
             namespace = remoteSource.namespace,
-            volumeId = remoteSource.volumeId,
+            resourceId = remoteSource.resourceId,
         )
         val loader = AndroidPdfRangeLoader(
             scope = configuration.scope,
@@ -235,11 +235,11 @@ internal class ReadiumPdfSession(
         return try {
             val document = ShukuPdfiumDocument.open(
                 AndroidRemotePdfiumDataSource(remoteSource.expectedSizeBytes, loader),
-                remoteSource.volumeId,
+                remoteSource.resourceId,
             )
             nativeDocument = document
             createShukuPdfPublication(
-                identifier = remoteSource.volumeId,
+                identifier = remoteSource.resourceId,
                 title = remoteSource.displayTitle,
                 pages = pageHints(document.pageCount),
             )
@@ -315,7 +315,7 @@ internal class ReadiumPdfSession(
                 val targetLocation = target?.locator as? PdfPublicationLocation
                 if (targetLocation?.pageIndex == page) {
                     progressCoordinator?.acceptVerifiedRemoteProgress(
-                        ReaderProgress(source.sourceId, location, nowEpochMillis(), deviceIdentity.stableDeviceId()),
+                        ReaderProgress(source.resourceId, location, nowEpochMillis(), deviceIdentity.stableDeviceId()),
                         target,
                     )
                     remoteTarget = null
@@ -412,7 +412,7 @@ internal class ReadiumPdfSession(
     )
     private fun Locator.pageIndex(): Int? = locations.position?.minus(1)
     private suspend fun loadProgressSafely(): ReaderProgress? = try {
-        progressStore.load(source.sourceId)
+        progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
@@ -424,7 +424,7 @@ internal class ReadiumPdfSession(
         val capturedAt = nowEpochMillis()
         val percent = if (pageCount == 1) 100.0 else
             location.pageIndex.toDouble() / (pageCount - 1) * 100.0
-        val progress = ReaderProgress(source.sourceId, location, capturedAt, deviceIdentity.stableDeviceId(), percent)
+        val progress = ReaderProgress(source.resourceId, location, capturedAt, deviceIdentity.stableDeviceId(), percent)
         try {
             progressStore.save(progress)
         } catch (cancelled: CancellationException) {
@@ -434,11 +434,11 @@ internal class ReadiumPdfSession(
         }
         lastPersistedLocation = location
         val namespace = presentationNamespaceKey ?: return@withLock
-        val workId = source.workId ?: return@withLock
+        val bookId = source.bookId ?: return@withLock
         publishProgressUpdate(createReaderProgressPresentationUpdate(
             namespaceKey = namespace,
-            workId = workId,
-            volumeId = source.volumeId ?: source.sourceId,
+            bookId = bookId,
+            resourceId = source.resourceId,
             percent = percent,
             progress = progress,
             chapterTitle = null,

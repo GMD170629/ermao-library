@@ -26,6 +26,7 @@ from app.db.runner import head_revision
 from app.db.sqlite import create_sqlite_engine
 from app.modules.backup.application.restore import (
     ApplyValidatedBackupRestore,
+    BackupRecordValidationError,
     PreparedRestorePlan,
 )
 from app.modules.backup.infrastructure.persistence import (
@@ -41,13 +42,18 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("users", "User"),
     ("userPreferences", "UserPreference"),
     ("shelves", "Shelf"),
+    ("shelfCollectionMemberships", "ShelfCollectionMembership"),
     ("libraries", "Library"),
+    ("sourceNodes", "LibrarySourceNode"),
+    ("sourceNodeMetadata", "LibrarySourceNodeMetadata"),
+    ("sourceNodeInterpretations", "LibrarySourceNodeInterpretation"),
     ("userLibraryAccess", "UserLibraryAccess"),
     ("books", "LibraryBook"),
     ("bookMetadata", "LibraryBookMetadata"),
     ("resources", "LibraryReadableResource"),
     ("resourceMetadata", "LibraryReadableResourceMetadata"),
     ("assets", "LibraryResourceAsset"),
+    ("resourceAssetMetadata", "LibraryResourceAssetMetadata"),
     ("navigationUnits", "ReadableResourceNavigationUnit"),
     ("facets", "LibraryFacet"),
     ("bookFacets", "LibraryBookFacet"),
@@ -57,6 +63,7 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("bookPreferences", "BookDetailPreference"),
     ("importTasks", "LibraryImportTask"),
     ("organizeJobs", "OrganizeJob"),
+    ("organizeRuns", "OrganizeRun"),
     ("metadataSuggestions", "MetadataSuggestion"),
     ("metadataLookupTasks", "MetadataLookupTask"),
     ("externalMetadataCache", "ExternalMetadataCache"),
@@ -64,41 +71,18 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerBookPreferences", "ReaderBookPreference"),
     ("readerProgressCursors", "ReaderProgressCursor"),
     ("readerBookmarks", "ReaderBookmark"),
+    ("readerProgressMutations", "ReaderProgressMutation"),
+    ("libraryOperations", "LibraryOperation"),
     ("sources", "Source"),
     ("metadataProviderPipelines", "MetadataProviderPipeline"),
     ("systemSettings", "SystemSetting"),
 ]
+BACKUP_FORMAT_VERSION = 4
 
-RESTORE_ORDER = [
-    "MetadataProviderPipeline",
-    "Source",
-    "ReaderBookmark",
-    "UserLibraryAccess",
-    "UserPreference",
-    "ExternalMetadataCache",
-    "MetadataLookupTask",
-    "MetadataSuggestion",
-    "OrganizeJob",
-    "SystemSetting",
-    "ReaderBookPreference",
-    "ReaderProgressCursor",
-    "ReaderPreference",
-    "BookDetailPreference",
-    "LibraryImportTask",
-    "LibraryResourceAsset",
-    "ReaderResourceProgress",
-    "ShelfBook",
-    "Shelf",
-    "LibraryReadableResourceMetadata",
-    "LibraryBookMetadata",
-    "ReadableResourceNavigationUnit",
-    "LibraryReadableResourceFacet",
-    "LibraryBookFacet",
-    "LibraryFacet",
-    "LibraryReadableResource",
-    "LibraryBook",
-    "Library",
-]
+# The persistence adapter derives the actual order from ORM foreign keys.  This
+# list deliberately contains every exported table so the delete side clears
+# the same complete scope before inserting the parent-before-child projection.
+RESTORE_ORDER = [table_name for _export_key, table_name in BACKUP_TABLES]
 
 
 @dataclass(frozen=True)
@@ -173,6 +157,20 @@ def counts_for_export(
         "readerBookPreferences": len(database_export.get("readerBookPreferences", [])),
         "readerProgressCursors": len(database_export.get("readerProgressCursors", [])),
         "readerBookmarks": len(database_export.get("readerBookmarks", [])),
+        "readerProgressMutations": len(
+            database_export.get("readerProgressMutations", [])
+        ),
+        "sourceNodes": len(database_export.get("sourceNodes", [])),
+        "sourceNodeMetadata": len(database_export.get("sourceNodeMetadata", [])),
+        "sourceNodeInterpretations": len(
+            database_export.get("sourceNodeInterpretations", [])
+        ),
+        "resourceAssetMetadata": len(database_export.get("resourceAssetMetadata", [])),
+        "shelfCollectionMemberships": len(
+            database_export.get("shelfCollectionMemberships", [])
+        ),
+        "organizeRuns": len(database_export.get("organizeRuns", [])),
+        "libraryOperations": len(database_export.get("libraryOperations", [])),
         "sources": len(database_export.get("sources", [])),
         "metadataProviderPipelines": len(
             database_export.get("metadataProviderPipelines", [])
@@ -230,13 +228,13 @@ def create_backup(
         "id": backup_id_value,
         "kind": kind,
         "app": "ermao-books",
-        "version": 3,
+        "version": BACKUP_FORMAT_VERSION,
         "databaseRevision": database_revision,
         "createdAt": created_at.isoformat(),
         "format": "zip",
         "contents": ["metadata.json", "database-export.json", "settings.json"],
         "scope": [
-            "database-v3",
+            "database-v4",
             "system-settings",
             "library-metadata",
             "reading-metadata",
@@ -321,14 +319,20 @@ def delete_backup_file(settings: Settings, backup_id_value: str) -> bool:
 
 
 def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, object]]:
-    with zipfile.ZipFile(path) as archive:
-        metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
-        database_export = json.loads(
-            archive.read("database-export.json").decode("utf-8")
-        )
+    try:
+        with zipfile.ZipFile(path) as archive:
+            metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
+            database_export = json.loads(
+                archive.read("database-export.json").decode("utf-8")
+            )
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
+        raise BackupFormatError("BACKUP_FORMAT_INVALID") from exc
     if not isinstance(metadata, dict) or not isinstance(database_export, dict):
         raise BackupFormatError("BACKUP_FORMAT_INVALID")
-    if metadata.get("app") != "ermao-books" or metadata.get("version") != 3:
+    if (
+        metadata.get("app") != "ermao-books"
+        or metadata.get("version") != BACKUP_FORMAT_VERSION
+    ):
         raise ValueError("BACKUP_REVISION_UNSUPPORTED")
     return metadata, database_export
 
@@ -390,10 +394,15 @@ def _validate_restore_against_temporary_database(
         try:
             bootstrap_database(validation_engine, validation_settings)
             with Session(validation_engine) as validation_db:
-                ApplyValidatedBackupRestore(
-                    SqlAlchemyBackupRestoreWriter(validation_db),
-                    validation_db,
-                ).execute(plan)
+                try:
+                    ApplyValidatedBackupRestore(
+                        SqlAlchemyBackupRestoreWriter(validation_db),
+                        validation_db,
+                    ).execute(plan)
+                except BackupRecordValidationError:
+                    raise
+                except Exception as exc:
+                    raise BackupRecordValidationError("BACKUP_CONTENT_INVALID") from exc
         finally:
             validation_engine.dispose()
 

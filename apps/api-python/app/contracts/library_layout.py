@@ -5,7 +5,6 @@ from app.modules.library.domain.layout import (
     LayoutViolation,
     LibraryOrganizationMode,
     ParsedLayoutPath,
-    is_audiobook_disc_directory,
     parse_library_file_path,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "LayoutViolation",
     "LibraryOrganizationMode",
     "ParsedLayoutPath",
-    "is_audiobook_disc_directory",
     "parse_library_file_path",
 ]

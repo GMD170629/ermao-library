@@ -35,15 +35,15 @@ typealias DownloadTransferResult = com.ermao.library.shared.modules.downloads.ap
 typealias DownloadTransferSuccess = com.ermao.library.shared.modules.downloads.application.DownloadTransferResult.Success
 typealias DownloadTransferFailure = com.ermao.library.shared.modules.downloads.application.DownloadTransferResult.Failure
 typealias DownloadsGateway = com.ermao.library.shared.modules.downloads.application.DownloadsGateway
-typealias DownloadVolumeObservation = com.ermao.library.shared.modules.downloads.application.DownloadVolumeObservation
-typealias DownloadVolumeObservationKind = com.ermao.library.shared.modules.downloads.application.DownloadVolumeObservationKind
-typealias DownloadVolumeObserver = com.ermao.library.shared.modules.downloads.application.DownloadVolumeObserver
-typealias DownloadVolumeResult = com.ermao.library.shared.modules.downloads.application.DownloadVolumeResult
-typealias DownloadVolumeReadyToOpen = com.ermao.library.shared.modules.downloads.application.DownloadVolumeResult.ReadyToOpen
-typealias DownloadVolumeFailure = com.ermao.library.shared.modules.downloads.application.DownloadVolumeResult.Failure
-typealias DownloadVolumeRuntime = com.ermao.library.shared.modules.downloads.application.DownloadVolumeRuntime
-typealias DownloadedVersion = com.ermao.library.shared.modules.downloads.domain.DownloadedVersion
-typealias DownloadedWork = com.ermao.library.shared.modules.downloads.domain.DownloadedWork
+typealias DownloadResourceObservation = com.ermao.library.shared.modules.downloads.application.DownloadResourceObservation
+typealias DownloadResourceObservationKind = com.ermao.library.shared.modules.downloads.application.DownloadResourceObservationKind
+typealias DownloadResourceObserver = com.ermao.library.shared.modules.downloads.application.DownloadResourceObserver
+typealias DownloadResourceResult = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult
+typealias DownloadResourceReadyToOpen = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult.ReadyToOpen
+typealias DownloadResourceFailure = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult.Failure
+typealias DownloadResourceRuntime = com.ermao.library.shared.modules.downloads.application.DownloadResourceRuntime
+typealias DownloadedResource = com.ermao.library.shared.modules.downloads.domain.DownloadedResource
+typealias DownloadedBook = com.ermao.library.shared.modules.downloads.domain.DownloadedBook
 typealias DownloadsRuntime = com.ermao.library.shared.modules.downloads.application.DownloadsRuntime
 typealias InMemoryDownloadCatalogRepository = com.ermao.library.shared.modules.downloads.application.InMemoryDownloadCatalogRepository
 typealias KtorDownloadsGateway = com.ermao.library.shared.modules.downloads.infrastructure.KtorDownloadsGateway
@@ -130,7 +130,7 @@ fun createDownloadsGateway(
     profile: ServerProfile,
 ): KtorDownloadsGateway = KtorDownloadsGateway(apiClientFactory.create(profile))
 
-fun createDownloadVolumeRuntime(
+fun createDownloadResourceRuntime(
     catalog: DownloadCatalogRepository,
     gateway: DownloadsGateway,
-): DownloadVolumeRuntime = DownloadVolumeRuntime(catalog, gateway)
+): DownloadResourceRuntime = DownloadResourceRuntime(catalog, gateway)

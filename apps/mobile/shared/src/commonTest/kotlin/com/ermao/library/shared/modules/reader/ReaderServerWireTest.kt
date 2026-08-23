@@ -33,7 +33,7 @@ class ReaderServerWireTest {
             """{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":$PUBLICATION_LOCATION,"displayPercent":32.7,"receivedAtEpochMillis":1786500000100,"capturedAtEpochMillis":1786499999000}""",
         ).jsonObject
 
-        val snapshot = ReaderServerWireMapper().decodeSnapshot(root, "volume-1")
+        val snapshot = ReaderServerWireMapper().decodeSnapshot(root, "resource-1")
 
         assertEquals(18, snapshot.revision)
         assertEquals("ios-client", snapshot.clientId)
@@ -55,12 +55,12 @@ class ReaderServerWireTest {
     private fun upload() = ReaderProgressUpload(
         ReaderProgressSyncTarget(
             ReaderSyncNamespace("server", "user", 1),
-            "work-1",
-            "volume-1",
+            "book-1",
+            "resource-1",
             ReaderFormat.Epub,
         ),
         ReaderProgressMutation(
-            sourceId = "volume-1",
+            resourceId = "resource-1",
             clientId = "android-client",
             mutationId = "58a3ac3c-52d0-41ed-9c85-0524b532f25b",
             baseRevision = 17,

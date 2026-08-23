@@ -10,35 +10,15 @@ import { PageTitle } from '../../components/ui/page-title';
 import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
 import { ignoredImportEventSummary } from './system-event-presentation';
+import {
+  clearManagementEvents,
+  fetchManagementEvents,
+  updateSystemLogLimit,
+  type EventStorage,
+  type ManagementEvent
+} from './api/events';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type SystemEvent = {
-  id: string;
-  level: string;
-  source: string;
-  actorType: string;
-  action: string;
-  targetType?: string | null;
-  targetId?: string | null;
-  message: string;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-};
-
-type EventsData = {
-  events: SystemEvent[];
-  total: number;
-  totalPages?: number;
-  storage: { sizeBytes: number; maxBytes: number; lastPrunedAt?: string | null };
-  facets: { sources: Array<{ source: string; count: number }>; levels: Array<{ level: string; count: number }> };
-};
-
-type EventsPayload = {
-  ok: boolean;
-  data?: EventsData;
-  error?: { message: string };
-};
 
 function tone(level: string): BadgeTone {
   if (level === 'error') return 'red';
@@ -54,7 +34,7 @@ function sourceLabel(source: string) {
   return { import: '导入', download: '下载', folder: '书库', kindle: 'Kindle', library: '书库', system: '系统' }[source] ?? source;
 }
 
-function targetHref(event: SystemEvent) {
+function targetHref(event: ManagementEvent) {
   if (event.targetType === 'book' && event.targetId) return `/books/${event.targetId}`;
   if (event.targetType === 'kindleSendTask') return '/settings/email?tab=queue';
   if (event.targetType === 'importTask') return '/settings/library';
@@ -89,7 +69,7 @@ function localDateBoundary(value: string, nextDay = false) {
 export function ManagementLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
-  const [events, setEvents] = useState<SystemEvent[]>([]);
+  const [events, setEvents] = useState<ManagementEvent[]>([]);
   const [source, setSource] = useState('');
   const [level, setLevel] = useState('');
   const [search, setSearch] = useState('');
@@ -103,7 +83,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
-  const [storage, setStorage] = useState<{ sizeBytes: number; maxBytes: number; lastPrunedAt?: string | null }>({ sizeBytes: 0, maxBytes: 5 * 1024 * 1024 });
+  const [storage, setStorage] = useState<EventStorage>({ sizeBytes: 0, maxBytes: 5 * 1024 * 1024 });
   const [logMaxMb, setLogMaxMb] = useState(5);
   const [savingLimit, setSavingLimit] = useState(false);
   const toast = useToast();
@@ -126,16 +106,12 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     }
     setLoading(true);
     try {
-      const response = await fetch(`/api/management/events?${buildParams(page).toString()}`);
-      const payload = (await response.json()) as EventsPayload;
-      if (!payload.ok) throw new Error(payload.error?.message ?? '读取日志失败');
-      setEvents(payload.data?.events ?? []);
-      setTotal(payload.data?.total ?? 0);
-      setTotalPages(Math.max(1, Number(payload.data?.totalPages ?? 1)));
-      if (payload.data?.storage) {
-        setStorage(payload.data.storage);
-        setLogMaxMb(Math.round(payload.data.storage.maxBytes / 1024 / 1024));
-      }
+      const payload = await fetchManagementEvents(buildParams(page));
+      setEvents(payload.events);
+      setTotal(payload.total);
+      setTotalPages(Math.max(1, payload.totalPages));
+      setStorage(payload.storage);
+      setLogMaxMb(Math.round(payload.storage.maxBytes / 1024 / 1024));
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取日志失败');
@@ -146,13 +122,14 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
 
   async function clearLogs() {
     if (!window.confirm(i18nAttribute('清理信息和警告日志？错误与关键审计事件会保留。'))) return;
-    const response = await fetch('/api/management/events', { method: 'DELETE' });
-    const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { deleted: number }; error?: { message: string } } | null;
-    if (!payload?.ok) {
-      toast.error('清理日志失败', payload?.error?.message ?? '请稍后重试');
+    let deleted: number;
+    try {
+      deleted = await clearManagementEvents();
+    } catch (reason) {
+      toast.error('清理日志失败', reason instanceof Error ? reason.message : '请稍后重试');
       return;
     }
-    toast.success(`已清理 ${payload.data?.deleted ?? 0} 条日志`);
+    toast.success(`已清理 ${deleted} 条日志`);
     if (page === 1) await load();
     else setPage(1);
   }
@@ -166,14 +143,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     if (nextBytes < storage.maxBytes && !window.confirm(i18nAttribute('降低容量上限会立即删除最旧日志，是否继续？'))) return;
     setSavingLimit(true);
     try {
-      const response = await fetch('/api/system/log-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxBytes: nextBytes })
-      });
-      const payload = await response.json() as { ok?: boolean; data?: { storage?: typeof storage }; error?: { message?: string } };
-      if (!payload.ok || !payload.data?.storage) throw new Error(payload.error?.message ?? '保存日志容量失败');
-      setStorage(payload.data.storage);
+      setStorage(await updateSystemLogLimit(nextBytes));
       toast.success('日志容量上限已保存');
       await load();
     } catch (reason) {
@@ -196,15 +166,13 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   async function exportLogs() {
     setExporting(true);
     try {
-      const exported: SystemEvent[] = [];
+      const exported: ManagementEvent[] = [];
       let exportPage = 1;
       let exportPages = 1;
       do {
-        const response = await fetch(`/api/management/events?${buildParams(exportPage, 100).toString()}`);
-        const payload = (await response.json()) as EventsPayload;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '导出日志失败');
-        exported.push(...(payload.data?.events ?? []));
-        exportPages = Math.max(1, Number(payload.data?.totalPages ?? 1));
+        const payload = await fetchManagementEvents(buildParams(exportPage, 100));
+        exported.push(...payload.events);
+        exportPages = Math.max(1, payload.totalPages);
         exportPage += 1;
       } while (exportPage <= exportPages);
 

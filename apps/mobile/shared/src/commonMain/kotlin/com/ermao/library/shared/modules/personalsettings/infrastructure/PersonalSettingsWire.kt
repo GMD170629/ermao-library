@@ -99,6 +99,7 @@ internal data class PersonalCompatibilityWire(
     val serverVersion: String,
     val protocol: PersonalProtocolWire,
     val readerSchemaVersion: Int,
+    val librarySchemaVersion: Int,
     val capabilities: PersonalCapabilitiesWire,
 )
 
@@ -115,6 +116,8 @@ internal data class PersonalCapabilitiesWire(
     val readerV4: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
+    val bookResourceAsset: Boolean,
+    val bookDetailManagement: Boolean,
 )
 
 internal fun SettingsUserWire.toDomain(): PersonalAccount =

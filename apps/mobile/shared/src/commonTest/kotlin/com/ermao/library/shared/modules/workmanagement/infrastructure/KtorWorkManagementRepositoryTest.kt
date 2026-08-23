@@ -6,13 +6,18 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
+import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
+import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
+import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
+import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedMediaKind
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
-import com.ermao.library.shared.modules.workmanagement.domain.VolumeMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.ResourceMetadataDraft
+import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementErrorKind
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
-import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
@@ -33,186 +38,212 @@ import kotlinx.serialization.json.Json
 
 class KtorWorkManagementRepositoryTest {
     @Test
-    fun readsExplicitCompatibilityCapability() = runBlocking {
-        val repository = repository {
-            respond(
-                """{"ok":true,"data":{"capabilities":{"workDetailManagement":true}}}""",
-                HttpStatusCode.OK,
-                jsonHeaders,
-            )
-        }
+    fun readsBookDetailManagementCapability() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE)
 
         val result = assertIs<WorkManagementResult.Content<Boolean>>(
-            repository.supportsNativeManagement(context),
+            harness.repository.supportsNativeManagement(context),
         )
+
         assertTrue(result.value)
+        assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
     }
 
     @Test
-    fun volumeEditUsesTypedPatchContract() = runBlocking {
-        val repository = repository { request ->
-            assertEquals("PATCH", request.method.value)
-            assertTrue(request.url.encodedPath.endsWith("/api/works/work/volumes/volume"))
-            val body = assertIs<TextContent>(request.body).text
-            assertTrue(body.contains("\"publisher\":\"Publisher\""))
-            assertTrue(body.contains("\"language\":\"zh-CN\""))
-            assertFalse(body.contains("\"title\""))
-            assertFalse(body.contains("\"sortOrder\""))
-            respond("""{"ok":true,"data":{"workId":"work"}}""", HttpStatusCode.OK, jsonHeaders)
-        }
+    fun disabledBookManagementReturnsUnavailableWithoutExecutingMutation() = runBlocking {
+        val harness = Harness(CAPABILITY_FALSE)
 
-        val result = repository.updateVolume(
-            context,
-            "work",
-            "volume",
-            VolumeMetadataDraft("Publisher", "zh-CN", "isbn", null, null),
+        val result = assertIs<WorkManagementResult.Failure>(
+            harness.repository.updateBook(context, "book-1", BookMetadataDraft("Book", null, null, null, null)),
         )
 
-        assertEquals("work", assertIs<WorkManagementResult.Content<*>>(result).value.let {
-            (it as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome).workId
-        })
+        assertEquals(WorkManagementErrorKind.Unavailable, result.error.kind)
+        assertEquals("BOOK_DETAIL_MANAGEMENT_UNAVAILABLE", result.error.code)
+        assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
+        assertTrue(harness.requests.none { "/api/works" in it.path })
     }
 
     @Test
-    fun reclassifyReturnsOnlyOperationMetadata() = runBlocking {
-        val repository = repository {
-            respond(
-                """{"ok":true,"data":{"affectedVolumeIds":["volume"],"operation":{"id":"op"}}}""",
-                HttpStatusCode.OK,
-                jsonHeaders,
-            )
-        }
+    fun bookEditUsesCurrentBookPatchContract() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, OK)
+
+        assertIs<WorkManagementResult.Content<Unit>>(
+            harness.repository.updateBook(
+                context,
+                "book-1",
+                BookMetadataDraft("Updated", "Author", "Description", "Series", 2.0),
+            ),
+        )
+
+        val request = harness.requests[1]
+        assertEquals("PATCH", request.method)
+        assertEquals("/base/api/books/book-1", request.path)
+        assertTrue(request.body.contains("\"title\":\"Updated\""))
+        assertTrue(request.body.contains("\"seriesName\":\"Series\""))
+        assertFalse(request.body.contains("tags"))
+        assertFalse(request.body.contains("organized"))
+    }
+
+    @Test
+    fun resourceEditUsesCurrentBookResourcePatchContract() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, RESOURCE_RESPONSE)
+
+        val result = assertIs<WorkManagementResult.Content<BookMutationOutcome>>(
+            harness.repository.updateResource(
+                context,
+                "book-1",
+                "resource-1",
+                ResourceMetadataDraft(publisher = "Publisher", language = "zh-CN", isbn = "123"),
+            ),
+        )
+
+        val request = harness.requests[1]
+        assertEquals("PATCH", request.method)
+        assertEquals("/base/api/books/book-1/resources/resource-1", request.path)
+        assertTrue(request.body.contains("\"publisher\":\"Publisher\""))
+        assertTrue(request.body.contains("\"language\":\"zh-CN\""))
+        assertEquals("book-1", result.value.bookId)
+    }
+
+    @Test
+    fun resourceReclassificationUsesCurrentRouteAndFields() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, RECLASSIFY_RESPONSE)
+
+        val result = assertIs<WorkManagementResult.Content<BookMutationOutcome>>(
+            harness.repository.reclassifyResource(context, "book-1", "resource-1", ManagedMediaKind.Comic),
+        )
+
+        val request = harness.requests[1]
+        assertEquals("POST", request.method)
+        assertEquals("/base/api/books/book-1/resources/resource-1/reclassify", request.path)
+        assertTrue(request.body.contains("\"targetMediaKind\":\"COMIC\""))
+        assertTrue(request.body.contains("\"applyTo\":\"RESOURCE\""))
+        assertEquals("op-1", result.value.operationId)
+    }
+
+    @Test
+    fun metadataSearchUsesBookSourceNodeRoute() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, METADATA_SEARCH_RESPONSE)
 
         val result = assertIs<WorkManagementResult.Content<*>>(
-            repository.reclassifyVolume(context, "work", "volume", ManagedMediaKind.Comic),
-        ).value as com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
+            harness.repository.searchMetadata(context, "book-1", "source-1", "openlibrary", "Book"),
+        ).value
 
-        assertEquals("work", result.workId)
-        assertEquals("op", result.operationId)
+        val request = harness.requests[1]
+        assertEquals("POST", request.method)
+        assertEquals("/base/api/books/book-1/source-nodes/source-1/metadata/search", request.path)
+        assertTrue(request.body.contains("\"providerId\":\"openlibrary\""))
+        assertEquals("Candidate", (result as com.ermao.library.shared.modules.workmanagement.domain.MetadataSearchResult).candidates.single().title)
     }
 
     @Test
-    fun workEditUsesMetadataOnlyContract() = runBlocking {
-        val repository = repository { request ->
-            val body = assertIs<TextContent>(request.body).text
-            assertEquals("PATCH", request.method.value)
-            assertTrue(body.contains("\"title\":\"Updated\""))
-            assertTrue(body.contains("\"organized\":true"))
-            respond("""{"ok":true,"data":{"workId":"work"}}""", HttpStatusCode.OK, jsonHeaders)
-        }
+    fun metadataApplyAndCoverUploadAreExplicitlyUnavailable() = runBlocking {
+        val harness = Harness()
+        val candidate = com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate(
+            id = "candidate",
+            source = "openlibrary",
+            title = "Candidate",
+            author = null,
+            description = null,
+            tags = emptyList(),
+            seriesName = null,
+            publisher = null,
+            publishedAt = null,
+            language = null,
+            isbn = null,
+            coverUrl = null,
+            confidence = 1.0,
+        )
+
+        val apply = harness.repository.applyMetadata(
+            context,
+            "book-1",
+            "source-1",
+            "openlibrary",
+            candidate,
+            setOf(MetadataField.Title),
+        )
+        val upload = harness.repository.uploadCover(
+            context,
+            "book-1",
+            "source-1",
+            "Book",
+            null,
+            CoverUpload("cover.jpg", "image/jpeg", byteArrayOf(1)),
+        )
+
+        assertEquals(WorkManagementErrorKind.Unavailable, assertIs<WorkManagementResult.Failure>(apply).error.kind)
+        assertEquals(WorkManagementErrorKind.Unavailable, assertIs<WorkManagementResult.Failure>(upload).error.kind)
+        assertTrue(harness.requests.isEmpty())
+    }
+
+    @Test
+    fun kindleSendUsesBookAndAssetIdsWithoutBookManagementCapability() = runBlocking {
+        val harness = Harness(KINDLE_RESPONSE)
+
+        val result = assertIs<WorkManagementResult.Content<KindleSendOutcome>>(
+            harness.repository.sendToKindle(context, "book-1", "asset-1"),
+        )
+
+        val request = harness.requests.single()
+        assertEquals("POST", request.method)
+        assertEquals("/base/api/kindle-send-tasks", request.path)
+        assertEquals("{\"bookId\":\"book-1\",\"assetId\":\"asset-1\"}", request.body)
+        assertTrue(result.value.alreadyQueued)
+    }
+
+    @Test
+    fun readingStatusUsesResourceRouteWithoutLegacyVolumePath() = runBlocking {
+        val harness = Harness(OK)
 
         assertIs<WorkManagementResult.Content<Unit>>(
-            repository.updateWork(
-                context,
-                "work",
-                WorkMetadataDraft("Updated", "Author", "Description", null, null, listOf("tag")),
-            ),
+            harness.repository.setReadingStatus(context, "resource-1", ManagedReadingStatus.Finished),
         )
-        Unit
-    }
 
-    @Test
-    fun metadataQueriesAndApplyFollowProviderPipelineContract() = runBlocking {
-        var requestIndex = 0
-        val repository = repository { request ->
-            when (requestIndex++) {
-                0 -> respond(
-                    """{"ok":true,"data":{"providers":[{"id":"openlibrary","name":"Open Library","enabled":true,"mediaKinds":["EBOOK"]}],"pipelines":[{"mediaKind":"EBOOK","providers":[{"providerId":"openlibrary","enabled":true}]}]}}""",
-                    HttpStatusCode.OK,
-                    jsonHeaders,
-                )
-                1 -> {
-                    assertTrue(assertIs<TextContent>(request.body).text.contains("\"source\":\"openlibrary\""))
-                    respond(
-                        """{"ok":true,"data":{"candidates":[{"id":"candidate","source":"openlibrary","title":"Book","author":"Author","tags":[],"volumeMetadata":{"publisher":"Press","language":"en","isbn":"123"},"confidence":0.9}],"message":null}}""",
-                        HttpStatusCode.OK,
-                        jsonHeaders,
-                    )
-                }
-                else -> {
-                    assertEquals("true", request.url.parameters["applyToAllVolumes"])
-                    val body = assertIs<TextContent>(request.body).text
-                    assertTrue(body.contains("\"fields\":[\"title\",\"publisher\"]"))
-                    assertTrue(body.contains("\"volumeId\":\"volume\""))
-                    respond("""{"ok":true,"data":{"book":{},"appliedFields":[]}}""", HttpStatusCode.OK, jsonHeaders)
-                }
-            }
-        }
-
-        val providers = assertIs<WorkManagementResult.Content<*>>(
-            repository.loadMetadataProviders(context, ManagedMediaKind.Ebook),
-        ).value as List<*>
-        assertTrue((providers.single() as com.ermao.library.shared.modules.workmanagement.domain.MetadataProvider).enabled)
-        val search = assertIs<WorkManagementResult.Content<*>>(
-            repository.searchMetadata(context, "work", "openlibrary", "Book"),
-        ).value as com.ermao.library.shared.modules.workmanagement.domain.MetadataSearchResult
-        val candidate = search.candidates.single()
-        assertEquals("Press", candidate.publisher)
-        assertIs<WorkManagementResult.Content<Unit>>(
-            repository.applyMetadata(
-                context,
-                "work",
-                "openlibrary",
-                candidate,
-                linkedSetOf(MetadataField.Title, MetadataField.Publisher),
-                "volume",
-                true,
-            ),
-        )
-        Unit
-    }
-
-    @Test
-    fun missingSmtpConfigurationIsAUsableNotReadyState() = runBlocking {
-        val repository = repository {
-            respond(
-                """{"ok":true,"data":{"kindle":{"email":"reader@kindle.com"},"smtp":null}}""",
-                HttpStatusCode.OK,
-                jsonHeaders,
-            )
-        }
-
-        val settings = assertIs<WorkManagementResult.Content<*>>(
-            repository.loadKindleSettings(context),
-        ).value as com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
-        assertFalse(settings.ready)
-        assertEquals("reader@kindle.com", settings.recipientEmail)
-        assertEquals("", settings.senderEmail)
-    }
-
-    @Test
-    fun readingStatusUsesOnlyServerSupportedManualStates() = runBlocking {
-        val repository = repository { request ->
-            assertEquals("PUT", request.method.value)
-            assertTrue(request.url.encodedPath.endsWith("/api/reader/v4/volumes/volume/reading-status"))
-            assertTrue(assertIs<TextContent>(request.body).text.contains("\"status\":\"FINISHED\""))
-            respond(
-                """{"ok":true,"data":{"volumeId":"volume","status":"FINISHED","percent":100}}""",
-                HttpStatusCode.OK,
-                jsonHeaders,
-            )
-        }
-
-        assertIs<WorkManagementResult.Content<Unit>>(
-            repository.setReadingStatus(context, "volume", ManagedReadingStatus.Finished),
-        )
-        Unit
-    }
-
-    private fun repository(handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData):
-        KtorWorkManagementRepository {
-        val engine = MockEngine(handler)
-        val client = ApiClient(profile, HttpClient(engine), Json { ignoreUnknownKeys = true })
-        return KtorWorkManagementRepository { client }
+        val request = harness.requests.single()
+        assertEquals("PUT", request.method)
+        assertEquals("/base/api/reader/v4/resources/resource-1/reading-status", request.path)
+        assertEquals("{\"status\":\"FINISHED\"}", request.body)
+        assertTrue(harness.requests.none { "/volumes" in it.path })
     }
 
     private val profile = run {
-        val parsed = assertIs<ServerBaseUrlParseResult.Valid>(ServerBaseUrl.parse("https://library.example"))
+        val parsed = assertIs<ServerBaseUrlParseResult.Valid>(ServerBaseUrl.parse("https://library.example/base"))
         ServerProfile("profile", "Library", parsed.baseUrl, "server", true, TlsMode.SystemTrust)
     }
-    private val context = WorkManagementContext(profile, PrivateDataNamespace("server", "user", 1))
+    private val context = BookManagementContext(profile, PrivateDataNamespace("server", "user", 1))
+
+    private fun Harness(vararg responses: String) = HarnessFactory(responses.toList())
+
+    private inner class HarnessFactory(responses: List<String>) {
+        val requests = mutableListOf<Request>()
+        private val pending = ArrayDeque(responses)
+        val repository = KtorWorkManagementRepository {
+            ApiClient(
+                profile,
+                HttpClient(MockEngine { request ->
+                    val body = (request.body as? TextContent)?.text.orEmpty()
+                    requests += Request(request.method.value, request.url.encodedPath, body)
+                    respond(
+                        pending.removeFirstOrNull() ?: OK,
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }),
+                Json { ignoreUnknownKeys = false; explicitNulls = false },
+            )
+        }
+    }
+
+    private data class Request(val method: String, val path: String, val body: String)
 
     private companion object {
-        val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
+        const val CAPABILITY_TRUE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":true}}}"""
+        const val CAPABILITY_FALSE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":false}}}"""
+        const val OK = """{"ok":true,"data":{}}"""
+        const val RESOURCE_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1"}}}"""
+        const val RECLASSIFY_RESPONSE = """{"ok":true,"data":{"affectedResourceIds":["resource-1"],"operation":{"id":"op-1"}}}"""
+        const val METADATA_SEARCH_RESPONSE = """{"ok":true,"data":{"sourceNodeId":"source-1","providerId":"openlibrary","query":"Book","message":null,"candidates":[{"id":"candidate","source":"openlibrary","title":"Candidate","description":null,"coverUrl":null,"confidence":0.9}]}}"""
+        const val KINDLE_RESPONSE = """{"ok":true,"data":{"alreadyQueued":true}}"""
     }
 }

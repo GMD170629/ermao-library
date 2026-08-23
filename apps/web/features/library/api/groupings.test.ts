@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseLibraryGroupingPage } from './groupings';
+import { fetchLibraryGroupings, parseLibraryGroupingPage } from './groupings';
 
 test('parses paginated library groupings', () => {
   const page = parseLibraryGroupingPage({
@@ -37,4 +37,30 @@ test('rejects malformed library grouping counts', () => {
     }),
     /Invalid library grouping field/
   );
+});
+
+test('loads groupings only from the canonical library endpoint', async () => {
+  const requested: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    requested.push(String(input));
+    return new Response(JSON.stringify({
+      ok: true,
+      data: {
+        groups: [],
+        page: 1,
+        pageSize: 48,
+        total: 0,
+        totalPages: 1
+      }
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    await fetchLibraryGroupings({ kind: 'SERIES', page: 1, pageSize: 48 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requested, ['/api/library/groupings?kind=SERIES&page=1&pageSize=48']);
+  assert.equal(requested.some((url) => url.startsWith('/api/series')), false);
 });

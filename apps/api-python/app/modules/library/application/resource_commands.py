@@ -43,7 +43,7 @@ class OperationSummary:
     action: str
     status: str
     summary: str
-    expires_at: datetime
+    expires_at: datetime | None
     undo_available: bool
 
 

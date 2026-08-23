@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.models.common import cuid
-from app.models.library import Library
+from app.models.library import Library, ReadableResourceNavigationUnit
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
@@ -20,6 +20,7 @@ from app.modules.library.application.source_tree_ports import (
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
+    ResourceNavigationUnitInput,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
 )
@@ -32,6 +33,7 @@ from app.modules.library.domain.readable_resource_anchors import (
     ReadableResourceTopologyError,
     is_asset_path_within_resource_scope,
     is_resource_anchor_within_book_scope,
+    resource_owns_book_metadata,
 )
 from app.modules.library.domain.readable_resource_states import (
     AssetImportState,
@@ -69,8 +71,9 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
             raise LookupError(library_id)
         mode = parse_target_organization_mode(library.organization_mode)
         if not isinstance(mode, TargetLibraryOrganizationMode):
-            # Target pipeline rejects AUDIOBOOK; treat as FLAT for safety.
-            mode = TargetLibraryOrganizationMode.FLAT
+            raise TypeError(
+                f"unsupported library organization mode: {library.organization_mode}"
+            )
         return LibrarySourceTreeConfig(
             library_id=library.id,
             root_path=Path(library.root_path),
@@ -477,25 +480,33 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         resource = self._session.get(LibraryReadableResource, resource_id)
         if resource is None:
             raise LookupError(resource_id)
+        book = self._session.get(LibraryBook, resource.book_id)
+        if book is None:
+            raise LookupError(resource.book_id)
         book_metadata = self._session.get(LibraryBookMetadata, resource.book_id)
         if book_metadata is None:
             raise LookupError(resource.book_id)
-        if metadata.title:
-            book_metadata.title = metadata.title
-            book_metadata.normalized_title = metadata.title.casefold()
-        if metadata.author:
-            book_metadata.author = metadata.author
-            book_metadata.normalized_author = metadata.author.casefold()
-        if metadata.description:
-            book_metadata.description = metadata.description
-        if metadata.series_name:
-            book_metadata.series_name = metadata.series_name
-        if metadata.series_index is not None:
-            book_metadata.series_index = metadata.series_index
-        book_metadata.metadata_quality = max(
-            book_metadata.metadata_quality,
-            min(100, len(metadata.populated_fields) * 8),
+        projects_to_book = resource_owns_book_metadata(
+            book_source_node_id=book.source_node_id,
+            resource_source_node_id=resource.source_node_id,
         )
+        if projects_to_book:
+            if metadata.title:
+                book_metadata.title = metadata.title
+                book_metadata.normalized_title = metadata.title.casefold()
+            if metadata.author:
+                book_metadata.author = metadata.author
+                book_metadata.normalized_author = metadata.author.casefold()
+            if metadata.description:
+                book_metadata.description = metadata.description
+            if metadata.series_name:
+                book_metadata.series_name = metadata.series_name
+            if metadata.series_index is not None:
+                book_metadata.series_index = metadata.series_index
+            book_metadata.metadata_quality = max(
+                book_metadata.metadata_quality,
+                min(100, len(metadata.populated_fields) * 8),
+            )
 
         resource_metadata = self._session.get(
             LibraryReadableResourceMetadata, resource_id
@@ -530,8 +541,9 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         if metadata.volume_index is not None:
             resource_metadata.resource_index = metadata.volume_index
         if cover_path is not None:
-            book_metadata.cover_path = cover_path
-            book_metadata.cover_status = "READY"
+            if projects_to_book:
+                book_metadata.cover_path = cover_path
+                book_metadata.cover_status = "READY"
             resource_metadata.cover_path = cover_path
             resource_metadata.cover_status = "READY"
         self._session.flush()
@@ -543,6 +555,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         resource_metadata = self._session.get(
             LibraryReadableResourceMetadata, resource_id
         )
+        book = self._session.get(LibraryBook, resource.book_id)
         book_metadata = self._session.get(LibraryBookMetadata, resource.book_id)
         if (
             resource_metadata is not None
@@ -550,7 +563,15 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         ):
             resource_metadata.cover_path = None
             resource_metadata.cover_status = "FAILED"
-        if book_metadata is not None and book_metadata.cover_path == expected_path:
+        if (
+            book is not None
+            and book_metadata is not None
+            and resource_owns_book_metadata(
+                book_source_node_id=book.source_node_id,
+                resource_source_node_id=resource.source_node_id,
+            )
+            and book_metadata.cover_path == expected_path
+        ):
             book_metadata.cover_path = None
             book_metadata.cover_status = "FAILED"
         self._session.flush()
@@ -649,6 +670,47 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             )
             or 0
         )
+
+    def replace_navigation_units(
+        self,
+        *,
+        resource_id: str,
+        asset_id: str,
+        units: Sequence[ResourceNavigationUnitInput],
+    ) -> None:
+        self._session.execute(
+            delete(ReadableResourceNavigationUnit).where(
+                ReadableResourceNavigationUnit.resource_id == resource_id,
+                ReadableResourceNavigationUnit.unit_type == "page",
+            )
+        )
+        self._session.add_all(
+            [
+                ReadableResourceNavigationUnit(
+                    id=cuid(),
+                    resource_id=resource_id,
+                    asset_id=asset_id,
+                    unit_type=unit.unit_type,
+                    title=unit.title,
+                    href=unit.href,
+                    media_type=unit.media_type,
+                    sort_order=unit.sort_order,
+                    width=unit.width,
+                    height=unit.height,
+                    size=unit.size,
+                    metadata_json="{}",
+                )
+                for unit in units
+            ]
+        )
+        metadata = self._session.get(
+            LibraryReadableResourceMetadata,
+            resource_id,
+        )
+        if metadata is None:
+            raise LookupError(resource_id)
+        metadata.page_count = len(units)
+        self._session.flush()
 
     def find_outermost_directory_resource(
         self,

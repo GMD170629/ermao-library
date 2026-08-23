@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.models import (
+    Library,
     ReadableResourceNavigationUnit,
     ReaderBookmark,
     ReaderResourceProgress,
@@ -54,6 +56,19 @@ def _login(client: TestClient, db_session: Session) -> User:
     return user
 
 
+@pytest.fixture(autouse=True)
+def _reader_fixture_library_root(
+    db_session: Session,
+    test_settings,
+) -> None:
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    root = test_settings.resolved_storage_root / "reader-v4-library"
+    root.mkdir(parents=True, exist_ok=True)
+    library.root_path = str(root)
+    db_session.commit()
+
+
 def _source_node(
     node_id: str,
     path: str,
@@ -90,10 +105,22 @@ def _add_resource(
     duration_ms: int | None = None,
 ) -> tuple[LibraryReadableResource, LibraryResourceAsset]:
     source = Path(source_path)
-    path = str(source)
     exists = source.is_file()
     size_bytes = source.stat().st_size if exists else 4
     mtime_ms = source.stat().st_mtime_ns // 1_000_000 if exists else 1
+    library = db_session.get(Library, "test-library")
+    if library is None:
+        raise AssertionError("reader fixture library is missing")
+    library_root = Path(library.root_path)
+    library_root.mkdir(parents=True, exist_ok=True)
+    try:
+        relative_path = source.resolve().relative_to(library_root.resolve())
+    except ValueError:
+        fixture_copy = library_root / f"{resource_id}-{source.name}"
+        if exists:
+            shutil.copyfile(source, fixture_copy)
+        relative_path = fixture_copy.relative_to(library_root)
+    path = relative_path.as_posix()
     book = db_session.get(LibraryBook, book_id)
     if book is None:
         book_node = _source_node(
@@ -903,8 +930,11 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     _write_reader_epub(epub)
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
-    source_node.relative_path = str(epub)
-    source_node.path_key = _path_key(str(epub))
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(epub.parent)
+    source_node.relative_path = epub.name
+    source_node.path_key = _path_key(epub.name)
     source_node.name = epub.name
     source_node.observed_size_bytes = epub.stat().st_size
     source_node.observed_mtime_ns = (epub.stat().st_mtime_ns // 1_000_000) * 1_000_000
@@ -982,8 +1012,11 @@ def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
     _write_reader_epub(epub)
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
-    source_node.relative_path = str(epub)
-    source_node.path_key = _path_key(str(epub))
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(epub.parent)
+    source_node.relative_path = epub.name
+    source_node.path_key = _path_key(epub.name)
     source_node.name = epub.name
     source_node.observed_size_bytes = epub.stat().st_size
     source_node.observed_mtime_ns = (epub.stat().st_mtime_ns // 1_000_000) * 1_000_000
@@ -1100,8 +1133,11 @@ def test_resource_asset_route_streams_the_selected_asset_only(
     stored_file.write_bytes(b"reader-v4")
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
-    source_node.relative_path = str(stored_file)
-    source_node.path_key = _path_key(str(stored_file))
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(stored_file.parent)
+    source_node.relative_path = stored_file.name
+    source_node.path_key = _path_key(stored_file.name)
     source_node.observed_size_bytes = stored_file.stat().st_size
     source_node.observed_mtime_ns = (
         stored_file.stat().st_mtime_ns // 1_000_000
@@ -1109,10 +1145,52 @@ def test_resource_asset_route_streams_the_selected_asset_only(
     db_session.commit()
 
     response = client.get(f"/api/assets/{asset.id}")
+    download_response = client.get(f"/api/assets/{asset.id}?download=true")
+    range_response = client.get(
+        f"/api/assets/{asset.id}", headers={"Range": "bytes=1-4"}
+    )
 
     assert response.status_code == 200
     assert response.content == b"reader-v4"
     assert response.headers["content-type"] == "application/epub+zip"
+    assert download_response.status_code == 200
+    assert download_response.headers["content-disposition"].startswith("attachment;")
+    assert range_response.status_code == 206
+    assert range_response.content == b"eade"
+    assert range_response.headers["content-range"] == "bytes 1-4/9"
+
+
+def test_resource_asset_route_rejects_external_symlink_after_import(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login(client, db_session)
+    resource, asset = _ebook_resource(db_session)
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    source = library_root / "book.epub"
+    source.write_bytes(b"managed")
+    outside = tmp_path / "outside.epub"
+    outside.write_bytes(b"secret")
+    source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
+    assert source_node is not None
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(library_root)
+    source_node.relative_path = source.name
+    source_node.path_key = _path_key(source.name)
+    source_node.observed_size_bytes = source.stat().st_size
+    source_node.observed_mtime_ns = source.stat().st_mtime_ns
+    db_session.commit()
+
+    source.unlink()
+    source.symlink_to(outside)
+
+    response = client.get(f"/api/assets/{asset.id}")
+
+    assert response.status_code == 404
+    assert b"secret" not in response.content
 
 
 @pytest.mark.parametrize(
@@ -1139,8 +1217,11 @@ def test_resource_asset_download_mode_uses_attachment_for_every_media_format(
     stored_file.write_bytes(b"downloadable")
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
-    source_node.relative_path = str(stored_file)
-    source_node.path_key = _path_key(str(stored_file))
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(stored_file.parent)
+    source_node.relative_path = stored_file.name
+    source_node.path_key = _path_key(stored_file.name)
     source_node.observed_size_bytes = stored_file.stat().st_size
     source_node.observed_mtime_ns = (
         stored_file.stat().st_mtime_ns // 1_000_000

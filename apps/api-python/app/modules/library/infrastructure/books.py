@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import LibraryBook, LibraryBookMetadata
+from app.modules.library.domain.facets import normalize_facet_name
 
 STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
 
@@ -96,6 +97,7 @@ def _metadata_values(values: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "title",
         "author",
+        "normalized_author",
         "description",
         "series_name",
         "series_index",
@@ -131,6 +133,11 @@ def update_book_fields(
             update(LibraryBook).where(LibraryBook.id == book_id).values(**book_values)
         )
     metadata_values = _metadata_values(values)
+    if "author" in metadata_values:
+        author = metadata_values["author"]
+        metadata_values["normalized_author"] = (
+            normalize_facet_name(str(author)) if author is not None else None
+        )
     if metadata_values:
         metadata = db.get(LibraryBookMetadata, book_id)
         if metadata is None:

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.library import ReaderProgressMutation, ReaderResourceProgress
+from app.models.library import Library, ReaderProgressMutation, ReaderResourceProgress
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -42,6 +42,9 @@ def _login_and_resource(
     client: TestClient, session: Session
 ) -> LibraryReadableResource:
     source_path = _REPOSITORY_ROOT / "test-data" / "library" / "epub" / "reader-v2.epub"
+    library = session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(source_path.parent)
     user = User(
         id="reader-v4-exact-user",
         email="reader-v4-exact@example.com",
@@ -63,8 +66,8 @@ def _login_and_resource(
     source_node = LibrarySourceNode(
         id="exact-source-node",
         library_id="test-library",
-        relative_path=str(source_path),
-        path_key=_path_key(str(source_path)),
+        relative_path=source_path.name,
+        path_key=_path_key(source_path.name),
         name=source_path.name,
         physical_kind="REGULAR_FILE",
         observed_size_bytes=source_path.stat().st_size,

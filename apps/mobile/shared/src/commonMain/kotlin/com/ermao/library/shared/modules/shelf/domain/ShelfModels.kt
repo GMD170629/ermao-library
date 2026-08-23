@@ -18,13 +18,13 @@ data class ShelfSummary(
     val id: String,
     val name: String,
     val kind: ShelfKind,
-    val containsWork: Boolean,
+    val containsBook: Boolean,
 )
 
 enum class ShelfMembership { Add, Remove }
 
 data class ShelfMembershipChange(
-    val workId: String,
+    val bookId: String,
     val shelfId: String,
     val membership: ShelfMembership,
 )

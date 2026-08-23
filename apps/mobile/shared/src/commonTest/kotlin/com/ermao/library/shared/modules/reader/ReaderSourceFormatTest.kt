@@ -32,7 +32,7 @@ class ReaderSourceFormatTest {
         assertTrue(ReaderSourceFormat.Pdf.acceptsMimeType("application/pdf"))
         assertFailsWith<IllegalArgumentException> {
             LocalReaderSource(
-                sourceId = "volume-1",
+                resourceId = "resource-1",
                 displayTitle = "Book",
                 format = ReaderFormat.Epub,
                 sourceFormat = ReaderSourceFormat.Azw3,

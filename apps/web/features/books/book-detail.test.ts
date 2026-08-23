@@ -7,7 +7,9 @@ function resource(id: string, progress = 0, hidden = false): ReadableResourceVie
   return {
     id,
     bookId: 'book-1',
+    sourceNodeId: `${id}-source-node`,
     title: id,
+    description: '',
     resourceIndex: null,
     sortOrder: 0,
     format: 'EPUB',
@@ -40,6 +42,7 @@ function resource(id: string, progress = 0, hidden = false): ReadableResourceVie
 function book(resources: ReadableResourceView[], continueResourceId: string | null = null): BookView {
   return {
     id: 'book-1',
+    sourceNodeId: 'book-1-source-node',
     title: '书',
     author: '作者',
     description: '',

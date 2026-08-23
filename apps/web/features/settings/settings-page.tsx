@@ -13,7 +13,7 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
 
-type OrganizationMode = 'FLAT' | 'VOLUMES' | 'AUDIOBOOK';
+type OrganizationMode = 'FLAT' | 'VOLUMES';
 
 type Library = {
   id: string;
@@ -39,8 +39,7 @@ const ORGANIZATION_MODE_OPTIONS: Array<{
   description: string;
 }> = [
   { value: 'FLAT', label: '平铺', description: '平铺：根目录文件各自作为独立图书' },
-  { value: 'VOLUMES', label: '按目录归组', description: '按目录归组：图书 / 可读资源 / 资产' },
-  { value: 'AUDIOBOOK', label: '有声书', description: '有声书：按有声书目录组织' }
+  { value: 'VOLUMES', label: '按目录归组', description: '按目录归组：图书 / 可读资源 / 资产' }
 ];
 
 function organizationModeLabel(mode: OrganizationMode): string {

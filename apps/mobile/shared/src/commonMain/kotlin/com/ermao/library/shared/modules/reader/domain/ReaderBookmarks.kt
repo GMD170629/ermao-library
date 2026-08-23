@@ -31,11 +31,11 @@ data class ReaderBookmark(
 
 data class ReaderBookmarkSyncTarget(
     val serverIdentity: String,
-    val volumeId: String,
+    val resourceId: String,
 ) {
     init {
         require(serverIdentity.isNotBlank())
-        require(volumeId.isNotBlank())
+        require(resourceId.isNotBlank())
     }
 }
 

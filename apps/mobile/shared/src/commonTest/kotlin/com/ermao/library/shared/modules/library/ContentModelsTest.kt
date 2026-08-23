@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 class ContentModelsTest {
     @Test
     fun queryFingerprintIsStableAcrossFilterInsertionOrderAndDoesNotIncludePage() {
-        val first = WorksQuery(
+        val first = BooksQuery(
             query = "  三体  ",
             filters = LibraryFilters(
                 linkedSetOf(MediaKind.Comic, MediaKind.Ebook),
@@ -29,7 +29,7 @@ class ContentModelsTest {
 
     @Test
     fun downloadedOnlyParticipatesInTheQueryIdentity() {
-        val query = WorksQuery()
+        val query = BooksQuery()
 
         assertTrue(query.fingerprint() != query.copy(filters = LibraryFilters(downloadedOnly = true)).fingerprint())
     }

@@ -14,10 +14,10 @@ data class OrganizeJobFilter(
     val pageSize: Int = 20,
 )
 
-data class OrganizeWorkSummary(
+data class OrganizeBookSummary(
     val id: String,
     val title: String,
-    val author: String,
+    val author: String?,
     val availableMediaKinds: List<MediaKind>,
 )
 
@@ -30,7 +30,8 @@ data class OrganizeJob(
     val metadataSources: List<String>,
     val createdAt: String?,
     val updatedAt: String?,
-    val work: OrganizeWorkSummary,
+    val resourceId: String? = null,
+    val book: OrganizeBookSummary,
 )
 
 data class OrganizeJobPage(
@@ -42,12 +43,12 @@ data class OrganizeJobPage(
 
 data class PendingOrganizeJobs(
     val jobs: List<OrganizeJob>,
-    val works: List<OrganizeWorkSummary>,
+    val books: List<OrganizeBookSummary>,
     val total: Int,
 )
 
 data class OrganizeRunScope(
-    val workIds: List<String>,
+    val bookIds: List<String>,
     val rules: OrganizeRules,
 )
 
@@ -81,7 +82,7 @@ data class OrganizeCandidate(
 data class OrganizeCandidates(
     val total: Int,
     val reasonCounts: Map<String, Int>,
-    val works: List<OrganizeCandidate>,
+    val books: List<OrganizeCandidate>,
 )
 
 enum class OrganizeScheduleMode(val wireValue: String) {
@@ -128,12 +129,12 @@ data class LibraryOperation(
     val action: String,
     val status: String,
     val summary: String,
-    val targetType: String?,
-    val targetId: String?,
-    val expiresAt: String?,
-    val undoneAt: String?,
-    val createdAt: String?,
-    val updatedAt: String?,
+    val targetType: String? = null,
+    val targetId: String? = null,
+    val expiresAt: String? = null,
+    val undoneAt: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
     val undoAvailable: Boolean,
 )
 

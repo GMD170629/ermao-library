@@ -136,9 +136,8 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await addDialog.getByRole('button', { name: '添加', exact: true }).click();
   await expect(addDialog.getByRole('alert')).toHaveText('请选择文件组织方式');
   const organizationModes = page.getByRole('radiogroup', { name: '组织方式' });
-  const modeBoxes = await Promise.all(['单本', '按目录归组', '有声书'].map((name) => addDialog.getByRole('radio', { name }).boundingBox()));
+  const modeBoxes = await Promise.all(['单本', '按目录归组'].map((name) => addDialog.getByRole('radio', { name }).boundingBox()));
   expect(modeBoxes[0]?.y).toBe(modeBoxes[1]?.y);
-  expect(modeBoxes[1]?.y).toBe(modeBoxes[2]?.y);
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   await expect(selectedLibrary).toHaveAttribute('aria-selected', 'true');
   await expect(selectedLibrary).toBeInViewport();

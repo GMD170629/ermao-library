@@ -19,13 +19,13 @@ data class ReaderSyncNamespace(
 data class ReaderLocalProgressIdentity(
     val namespace: ReaderSyncNamespace,
     val clientId: String,
-    val workId: String,
-    val volumeId: String,
+    val bookId: String,
+    val resourceId: String,
 ) {
     init {
         require(clientId.isNotBlank()) { "Reader local client id is blank" }
-        require(workId.isNotBlank()) { "Reader local work id is blank" }
-        require(volumeId.isNotBlank()) { "Reader local volume id is blank" }
+        require(bookId.isNotBlank()) { "Reader local book id is blank" }
+        require(resourceId.isNotBlank()) { "Reader local resource id is blank" }
     }
 
     val stableKey: String
@@ -33,29 +33,29 @@ data class ReaderLocalProgressIdentity(
             namespace.serverIdentity,
             namespace.userId,
             clientId,
-            workId,
-            volumeId,
+            bookId,
+            resourceId,
         )
 }
 
 data class ReaderProgressSyncTarget(
     val namespace: ReaderSyncNamespace,
-    val workId: String,
-    val volumeId: String,
+    val bookId: String,
+    val resourceId: String,
     val sourceFormat: ReaderFormat,
 ) {
     init {
-        require(workId.isNotBlank()) { "Reader sync work id is blank" }
-        require(volumeId.isNotBlank()) { "Reader sync volume id is blank" }
+        require(bookId.isNotBlank()) { "Reader sync book id is blank" }
+        require(resourceId.isNotBlank()) { "Reader sync resource id is blank" }
     }
 
     val slotKey: String
-        get() = lengthPrefixed(namespace.stableKey, volumeId)
+        get() = lengthPrefixed(namespace.stableKey, resourceId)
 }
 
 /** Exact Reader v4 server state. Percent is a display projection only. */
 data class ReaderProgressSnapshotV4(
-    val sourceId: String,
+    val resourceId: String,
     val clientId: String,
     val revision: Long,
     val locator: PublicationLocation,
@@ -65,7 +65,7 @@ data class ReaderProgressSnapshotV4(
     val capturedAtEpochMillis: Long? = null,
 ) {
     constructor(
-        sourceId: String,
+        resourceId: String,
         clientId: String,
         revision: Long,
         locator: ReadiumLocatorEnvelope,
@@ -73,7 +73,7 @@ data class ReaderProgressSnapshotV4(
         receivedAtEpochMillis: Long,
         capturedAtEpochMillis: Long? = null,
     ) : this(
-        sourceId,
+        resourceId,
         clientId,
         revision,
         ReflowablePublicationLocation(locator.asEngineLocator()),
@@ -82,7 +82,7 @@ data class ReaderProgressSnapshotV4(
         capturedAtEpochMillis,
     )
     init {
-        require(sourceId.isNotBlank()) { "Reader snapshot source id is blank" }
+        require(resourceId.isNotBlank()) { "Reader snapshot resource id is blank" }
         require(clientId.isNotBlank()) { "Reader snapshot client id is blank" }
         require(revision > 0) { "Reader snapshot revision must be positive" }
         require(displayPercent.isFinite() && displayPercent in 0.0..100.0) {
@@ -107,7 +107,7 @@ data class ReaderRemoteProgressNotice(
 }
 
 data class ReaderProgressMutation(
-    val sourceId: String,
+    val resourceId: String,
     val clientId: String,
     val mutationId: String,
     val baseRevision: Long,
@@ -115,14 +115,14 @@ data class ReaderProgressMutation(
     val locator: PublicationLocation,
 ) {
     constructor(
-        sourceId: String,
+        resourceId: String,
         clientId: String,
         mutationId: String,
         baseRevision: Long,
         capturedAtEpochMillis: Long,
         locator: ReadiumLocatorEnvelope,
     ) : this(
-        sourceId,
+        resourceId,
         clientId,
         mutationId,
         baseRevision,
@@ -130,7 +130,7 @@ data class ReaderProgressMutation(
         ReflowablePublicationLocation(locator.asEngineLocator()),
     )
     init {
-        require(sourceId.isNotBlank()) { "Reader mutation source id is blank" }
+        require(resourceId.isNotBlank()) { "Reader mutation resource id is blank" }
         require(clientId.isNotBlank()) { "Reader mutation client id is blank" }
         require(mutationId.isNotBlank()) { "Reader mutation id is blank" }
         require(baseRevision >= 0) { "Reader mutation base revision is negative" }
@@ -154,7 +154,7 @@ fun ReaderProgress.exactPublicationLocation(): PublicationLocation = when (val e
         engineLocator = exact.engineLocator,
     )
     is AudioReaderLocation -> AudioPublicationLocation(
-        fileId = exact.fileId,
+        assetId = exact.assetId,
         chapterId = exact.chapterId,
         positionMillis = exact.positionMillis,
         engineLocator = exact.engineLocator,
@@ -170,7 +170,7 @@ fun ReaderProgress.toMutation(
     baseRevision: Long,
     mutationId: String,
 ): ReaderProgressMutation = ReaderProgressMutation(
-    sourceId = sourceId,
+    resourceId = resourceId,
     clientId = deviceId,
     mutationId = mutationId,
     baseRevision = baseRevision,

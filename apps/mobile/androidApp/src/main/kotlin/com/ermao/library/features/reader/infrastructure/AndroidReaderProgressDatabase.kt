@@ -1,3 +1,5 @@
+@file:Suppress("PARAMETER_NAME_CHANGED_ON_OVERRIDE")
+
 package com.ermao.library.features.reader.infrastructure
 
 import android.content.ContentValues
@@ -25,20 +27,20 @@ internal class AndroidReaderProgressDatabase(
     private val identity: ReaderLocalProgressIdentity,
     private val progressCodec: ReaderProgressJson = ReaderProgressJson(),
     private val syncCodec: ReaderProgressSyncStateJson = ReaderProgressSyncStateJson(),
-    private val legacyProgressStore: ReaderProgressStore? = AndroidReaderProgressStore(context),
+    private val legacyProgressStore: ReaderProgressStore? = AndroidReaderProgressStore(context, identity.namespace),
     databaseName: String = DATABASE_NAME,
 ) : ReaderProgressSyncStateStore {
     private val database = ReaderDatabaseHelper(context.applicationContext, databaseName)
     private val mutex = Mutex()
 
-    override suspend fun load(sourceId: String): ReaderProgress? {
-        require(sourceId == identity.volumeId) { "Reader progress source does not match its exact identity" }
-        val stored = io { readByKey(database.readableDatabase, progressStorageKey(), sourceId) }
+    override suspend fun load(resourceId: String): ReaderProgress? {
+        require(resourceId == identity.resourceId) { "Reader progress resource does not match its exact identity" }
+        val stored = io { readByKey(database.readableDatabase, progressStorageKey(), resourceId) }
         if (stored != null) return stored
 
         // The pre-union file namespace is intentionally invalidated with every
         // other old exact/pending/conflict representation.
-        legacyProgressStore?.delete(sourceId)
+        legacyProgressStore?.delete(resourceId)
         return null
     }
 
@@ -54,7 +56,7 @@ internal class AndroidReaderProgressDatabase(
         progress: ReaderProgress,
         pending: ReaderProgressMutation,
     ): Unit = io {
-        require(progress.sourceId == pending.sourceId)
+        require(progress.resourceId == pending.resourceId)
         val writable = database.writableDatabase
         writable.transaction {
             write(writable, progress)
@@ -129,8 +131,8 @@ internal class AndroidReaderProgressDatabase(
         }
     }
 
-    override suspend fun delete(sourceId: String) {
-        require(sourceId == identity.volumeId) { "Reader progress source does not match its exact identity" }
+    override suspend fun delete(resourceId: String) {
+        require(resourceId == identity.resourceId) { "Reader progress resource does not match its exact identity" }
         io {
             val writable = database.writableDatabase
             writable.transaction {
@@ -138,12 +140,12 @@ internal class AndroidReaderProgressDatabase(
                 writable.delete(SYNC_TABLE, "$SYNC_OWNER_KEY = ?", arrayOf(progressStorageKey()))
             }
         }
-        legacyProgressStore?.delete(sourceId)
+        legacyProgressStore?.delete(resourceId)
     }
 
     internal fun close() = database.close()
 
-    private fun readByKey(database: SQLiteDatabase, key: String, sourceId: String): ReaderProgress? =
+    private fun readByKey(database: SQLiteDatabase, key: String, resourceId: String): ReaderProgress? =
         database.query(
             PROGRESS_TABLE,
             arrayOf(PROGRESS_DOCUMENT),
@@ -155,7 +157,7 @@ internal class AndroidReaderProgressDatabase(
             "1",
         ).use { cursor ->
             if (!cursor.moveToFirst()) null else progressCodec.decode(cursor.getString(0)).also {
-                require(it.sourceId == sourceId && matchesIdentity(it)) {
+                require(it.resourceId == resourceId && matchesIdentity(it)) {
                     "Reader progress database identity mismatch"
                 }
             }
@@ -194,10 +196,13 @@ internal class AndroidReaderProgressDatabase(
             .also { rowId -> check(rowId != -1L) { "Reader sync state save failed" } }
     }
 
-    private fun progressStorageKey(): String = identity.stableKey
+    /** Include the auth generation for isolation, but keep the account prefix
+     * stable so logout/auth changes can evict every generation for this user. */
+    private fun progressStorageKey(): String =
+        "${readerAccountStorageKey(identity.namespace)}:${identity.namespace.authorizationVersion}:${identity.stableKey}"
 
     private fun matchesIdentity(progress: ReaderProgress): Boolean =
-        progress.sourceId == identity.volumeId &&
+        progress.resourceId == identity.resourceId &&
             progress.deviceId == identity.clientId
 
     private suspend fun <T> io(block: () -> T): T = mutex.withLock {
@@ -223,9 +228,10 @@ internal class AndroidReaderProgressDatabase(
             require(oldVersion in 1 until DATABASE_VERSION && newVersion == DATABASE_VERSION) {
                 "Unsupported Reader progress database upgrade $oldVersion to $newVersion"
             }
-            // Reader v4 was unreleased. Database version 4 is the destructive
-            // PublicationLocation-union boundary: no prior exact, pending, or
-            // conflict document may be interpreted as the new contract.
+            // Reader v4 was unreleased. Database version 6 is the destructive
+            // Book/Resource/Asset PublicationLocation boundary: no prior
+            // Work/Version/Volume exact, pending, or conflict document may be
+            // interpreted as the new contract.
             if (oldVersion < 4) {
                 database.delete(PROGRESS_TABLE, null, null)
             }
@@ -236,20 +242,51 @@ internal class AndroidReaderProgressDatabase(
                     "$SYNC_OWNER_KEY TEXT PRIMARY KEY NOT NULL," +
                     "$SYNC_DOCUMENT TEXT NOT NULL)",
             )
-            if (oldVersion < 4) database.delete(SYNC_TABLE, null, null)
+            if (oldVersion < 6) {
+                database.delete(PROGRESS_TABLE, null, null)
+                database.delete(SYNC_TABLE, null, null)
+            }
         }
     }
 
     companion object {
         internal const val DATABASE_NAME = "reader-progress.db"
-        internal const val DATABASE_VERSION = 5
+        internal const val DATABASE_VERSION = 6
         internal const val PROGRESS_TABLE = "reader_progress"
-        internal const val PROGRESS_SOURCE_ID = "source_id"
+        internal const val PROGRESS_SOURCE_ID = "resource_id"
         internal const val PROGRESS_DOCUMENT = "document_json"
         internal const val OUTBOX_TABLE = "reader_progress_sync"
         internal const val SEQUENCE_TABLE = "reader_progress_sequence"
         internal const val SYNC_TABLE = "reader_progress_sync_v4"
         internal const val SYNC_OWNER_KEY = "owner_key"
         internal const val SYNC_DOCUMENT = "document_json"
+
+        /** Deletes only rows written under the supplied ReaderSyncNamespace. */
+        internal suspend fun clearNamespace(context: android.content.Context, namespace: com.ermao.library.shared.modules.reader.ReaderSyncNamespace) {
+            val helper = ReaderDatabaseHelper(context.applicationContext, DATABASE_NAME)
+            try {
+                withContext(Dispatchers.IO) {
+                    val prefix = "${readerAccountStorageKey(namespace)}:"
+                    helper.writableDatabase.transaction {
+                        deleteKeysWithPrefix(PROGRESS_TABLE, PROGRESS_SOURCE_ID, prefix)
+                        deleteKeysWithPrefix(SYNC_TABLE, SYNC_OWNER_KEY, prefix)
+                    }
+                }
+            } finally {
+                helper.close()
+            }
+            AndroidReaderProgressStore.clearNamespace(context, namespace)
+        }
+
+        private fun SQLiteDatabase.deleteKeysWithPrefix(table: String, column: String, prefix: String) {
+            val keys = query(table, arrayOf(column), null, null, null, null, null).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        cursor.getString(0)?.takeIf { it.startsWith(prefix) }?.let(::add)
+                    }
+                }
+            }
+            keys.forEach { key -> delete(table, "$column = ?", arrayOf(key)) }
+        }
     }
 }

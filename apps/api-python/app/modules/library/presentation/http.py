@@ -16,15 +16,32 @@ from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import (
     browse_book_contents,
+    bulk_find_replace,
+    bulk_find_replace_preview,
+    bulk_metadata,
+    bulk_reading_status,
+    bulk_shelf_membership,
+    dashboard_queries,
+    delete_library_facet,
     delete_resource_asset,
+    library_catalog,
+    library_filter_options,
+    library_filter_schema,
+    library_groupings,
     list_books,
+    merge_library_facets,
     recognize_source_node_metadata,
+    rename_library_facet,
     resource_metadata,
+    undo_library_operation,
     update_book,
     update_source_node_metadata,
     update_source_node_presentation,
 )
-from app.bootstrap.library_resource_actions import regenerate_resource_cover
+from app.bootstrap.library_resource_actions import (
+    bulk_covers,
+    regenerate_resource_cover,
+)
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
     authorization_context,
@@ -49,9 +66,25 @@ from app.modules.library.application.book_contents import (
     BookContentsNotFoundError,
 )
 from app.modules.library.application.book_list import BookListQuery, parse_media_kinds
+from app.modules.library.application.bulk_operations import (
+    BulkBookAccessError,
+    BulkBookAuthorizationError,
+    BulkCoverCommand,
+    BulkFindReplaceCommand,
+    BulkMetadataCommand,
+    BulkReadingStatusCommand,
+    BulkShelfMembershipCommand,
+    InvalidBulkBookOperationError,
+)
+from app.modules.library.application.catalog import ListCatalogFacets
 from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
     parse_filter_expression,
+)
+from app.modules.library.application.management_commands import (
+    InvalidLibraryOperationError,
+    LibraryOperationAuthorizationError,
+    LibraryOperationNotFoundError,
 )
 from app.modules.library.application.resource_commands import (
     BookNotFoundError,
@@ -72,6 +105,10 @@ from app.modules.library.application.source_node_commands import (
     MAX_SOURCE_NODE_COVER_BYTES,
     SourceNodeMetadataChanges,
 )
+from app.modules.library.presentation.filter_mappers import (
+    filter_options_payload,
+    filter_schema_payload,
+)
 from app.modules.library.presentation.schemas import (
     AssetDeletedResponse,
     AssetsPayload,
@@ -85,9 +122,43 @@ from app.modules.library.presentation.schemas import (
     BooksPayload,
     BooksResponse,
     BookView,
+    BulkBookCoverPayload,
+    BulkBookCoverResponse,
+    BulkBookFindReplacePreviewPayload,
+    BulkBookFindReplacePreviewResponse,
+    BulkBookFindReplaceRequest,
+    BulkBookMetadataRequest,
+    BulkBookOperationPayload,
+    BulkBookOperationResponse,
+    BulkBookReadingStatusRequest,
+    BulkBookShelfMembershipRequest,
+    ContinueReadingItem,
+    ContinueReadingPayload,
+    ContinueReadingResponse,
+    DashboardBooksPayload,
+    DashboardBooksResponse,
+    FilterOptionsResponse,
+    FilterSchemaResponse,
+    LibraryFacetDeletePayload,
+    LibraryFacetDeleteResponse,
+    LibraryFacetMergePayload,
+    LibraryFacetMergeResponse,
+    LibraryFacetPagePayload,
+    LibraryFacetPageResponse,
+    LibraryFacetRenamePayload,
+    LibraryFacetRenameResponse,
+    LibraryFacetView,
+    LibraryGroupingBookView,
+    LibraryGroupingPagePayload,
+    LibraryGroupingPageResponse,
+    LibraryGroupingView,
+    LibraryOperationUndoPayload,
+    LibraryOperationUndoResponse,
     ManagementBookListSummary,
+    MergeLibraryFacetsRequest,
     ReadingUnitsResponse,
     ReclassifyResourceRequest,
+    RenameLibraryFacetRequest,
     ResourceAssetView,
     ResourceBatchRequest,
     ResourceBatchResponse,
@@ -113,6 +184,7 @@ from app.modules.library.presentation.schemas import (
 from app.modules.library.presentation.views import (
     book_view,
     bookshelf_book_list_view,
+    bookshelf_item_views,
     get_book,
     list_resource_views,
     management_book_list_view,
@@ -224,6 +296,641 @@ def _reading_units_response(value: object) -> ReadingUnitsResponse:
 
 def _asset_deleted_response(value: object) -> AssetDeletedResponse:
     return cast(AssetDeletedResponse, value)
+
+
+def _facet_page_response(value: object) -> LibraryFacetPageResponse:
+    return cast(LibraryFacetPageResponse, value)
+
+
+def _facet_merge_response(value: object) -> LibraryFacetMergeResponse:
+    return cast(LibraryFacetMergeResponse, value)
+
+
+def _facet_rename_response(value: object) -> LibraryFacetRenameResponse:
+    return cast(LibraryFacetRenameResponse, value)
+
+
+def _facet_delete_response(value: object) -> LibraryFacetDeleteResponse:
+    return cast(LibraryFacetDeleteResponse, value)
+
+
+def _bulk_operation_response(value: object) -> BulkBookOperationResponse:
+    return cast(BulkBookOperationResponse, value)
+
+
+def _bulk_preview_response(value: object) -> BulkBookFindReplacePreviewResponse:
+    return cast(BulkBookFindReplacePreviewResponse, value)
+
+
+def _bulk_cover_response(value: object) -> BulkBookCoverResponse:
+    return cast(BulkBookCoverResponse, value)
+
+
+def _operation_undo_response(value: object) -> LibraryOperationUndoResponse:
+    return cast(LibraryOperationUndoResponse, value)
+
+
+def _grouping_page_response(value: object) -> LibraryGroupingPageResponse:
+    return cast(LibraryGroupingPageResponse, value)
+
+
+def _filter_options_response(value: object) -> FilterOptionsResponse:
+    return cast(FilterOptionsResponse, value)
+
+
+def _dashboard_books_response(value: object) -> DashboardBooksResponse:
+    return cast(DashboardBooksResponse, value)
+
+
+def _continue_reading_response(value: object) -> ContinueReadingResponse:
+    return cast(ContinueReadingResponse, value)
+
+
+def _bulk_error(error: Exception):
+    if isinstance(error, BulkBookAuthorizationError):
+        return fail(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    if isinstance(error, BulkBookAccessError):
+        return fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
+    return fail(
+        str(error),
+        status_code=422,
+        code="INVALID_BULK_BOOK_OPERATION",
+    )
+
+
+@router.get("/dashboard/recent-books", response_model=DashboardBooksResponse)
+def get_dashboard_recent_books(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    limit: int = Query(default=10, ge=1, le=50),
+) -> DashboardBooksResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _dashboard_books_response(auth_error)
+    items = dashboard_queries(db).recent_books(
+        context=authorization_context(db, user),
+        limit=limit,
+    )
+    return DashboardBooksResponse(
+        data=DashboardBooksPayload.model_validate(
+            {"books": bookshelf_item_views(items)}
+        )
+    )
+
+
+@router.get("/dashboard/recent-reading", response_model=DashboardBooksResponse)
+def get_dashboard_recent_reading(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    limit: int = Query(default=10, ge=1, le=50),
+) -> DashboardBooksResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _dashboard_books_response(auth_error)
+    items = dashboard_queries(db).recent_reading(
+        context=authorization_context(db, user),
+        user_id=user.id,
+        limit=limit,
+    )
+    return DashboardBooksResponse(
+        data=DashboardBooksPayload.model_validate(
+            {"books": bookshelf_item_views(items)}
+        )
+    )
+
+
+@router.get("/dashboard/continue-reading", response_model=ContinueReadingResponse)
+def get_dashboard_continue_reading(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> ContinueReadingResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _continue_reading_response(auth_error)
+    item = dashboard_queries(db).continue_reading(
+        context=authorization_context(db, user),
+        user_id=user.id,
+    )
+    return ContinueReadingResponse(
+        data=ContinueReadingPayload(
+            item=(
+                ContinueReadingItem(
+                    bookId=item.book_id,
+                    title=item.title,
+                    author=item.author,
+                    coverUrl=f"/api/books/{quote(item.book_id, safe='')}/cover?size=medium",
+                    mediaKind=item.media_kind,
+                    resourceFormat=item.resource_format,
+                    readerType=item.reader_type,
+                    resumeResourceId=item.resource_id,
+                    progress=item.progress,
+                    lastReadAt=item.updated_at,
+                    chapter=None,
+                    resourceTitle=item.resource_title,
+                    narrator=item.narrator,
+                )
+                if item is not None
+                else None
+            )
+        )
+    )
+
+
+@router.post(
+    "/library/operations/books/metadata",
+    response_model=BulkBookOperationResponse,
+)
+def execute_bulk_book_metadata(
+    payload: BulkBookMetadataRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> BulkBookOperationResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_operation_response(auth_error)
+    try:
+        result = bulk_metadata(db).execute(
+            BulkMetadataCommand(
+                context=authorization_context(db, user),
+                book_ids=tuple(payload.ids),
+                fields=payload.fields,
+                add_tags=tuple(payload.add_tags),
+                remove_tags=tuple(payload.remove_tags),
+            )
+        )
+    except (
+        BulkBookAccessError,
+        BulkBookAuthorizationError,
+        InvalidBulkBookOperationError,
+    ) as error:
+        return _bulk_operation_response(_bulk_error(error))
+    return BulkBookOperationResponse(
+        data=BulkBookOperationPayload.model_validate(asdict(result))
+    )
+
+
+def _find_replace_command(
+    payload: BulkBookFindReplaceRequest,
+    *,
+    context,
+) -> BulkFindReplaceCommand:
+    return BulkFindReplaceCommand(
+        context=context,
+        book_ids=tuple(payload.ids),
+        field=payload.field,
+        find=payload.find,
+        replacement=payload.replacement,
+        regex=payload.regex,
+        case_sensitive=payload.case_sensitive,
+        start_number=payload.start_number,
+    )
+
+
+@router.post(
+    "/library/operations/books/find-replace-preview",
+    response_model=BulkBookFindReplacePreviewResponse,
+)
+def preview_bulk_book_find_replace(
+    payload: BulkBookFindReplaceRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> BulkBookFindReplacePreviewResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_preview_response(auth_error)
+    try:
+        result = bulk_find_replace_preview(db).execute(
+            _find_replace_command(
+                payload,
+                context=authorization_context(db, user),
+            )
+        )
+    except (
+        BulkBookAccessError,
+        BulkBookAuthorizationError,
+        InvalidBulkBookOperationError,
+    ) as error:
+        return _bulk_preview_response(_bulk_error(error))
+    return BulkBookFindReplacePreviewResponse(
+        data=BulkBookFindReplacePreviewPayload.model_validate(asdict(result))
+    )
+
+
+@router.post(
+    "/library/operations/books/find-replace",
+    response_model=BulkBookOperationResponse,
+)
+def execute_bulk_book_find_replace(
+    payload: BulkBookFindReplaceRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> BulkBookOperationResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_operation_response(auth_error)
+    try:
+        result = bulk_find_replace(db).execute(
+            _find_replace_command(
+                payload,
+                context=authorization_context(db, user),
+            )
+        )
+    except (
+        BulkBookAccessError,
+        BulkBookAuthorizationError,
+        InvalidBulkBookOperationError,
+    ) as error:
+        return _bulk_operation_response(_bulk_error(error))
+    return BulkBookOperationResponse(
+        data=BulkBookOperationPayload.model_validate(asdict(result))
+    )
+
+
+@router.post(
+    "/library/operations/books/shelf-membership",
+    response_model=BulkBookOperationResponse,
+)
+def execute_bulk_book_shelf_membership(
+    payload: BulkBookShelfMembershipRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> BulkBookOperationResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_operation_response(auth_error)
+    try:
+        result = bulk_shelf_membership(db).execute(
+            BulkShelfMembershipCommand(
+                context=authorization_context(db, user),
+                book_ids=tuple(payload.ids),
+                shelf_id=payload.shelf_id,
+                membership=payload.membership,
+            )
+        )
+    except (BulkBookAccessError, InvalidBulkBookOperationError) as error:
+        return _bulk_operation_response(_bulk_error(error))
+    return BulkBookOperationResponse(
+        data=BulkBookOperationPayload.model_validate(asdict(result))
+    )
+
+
+@router.post(
+    "/library/operations/books/reading-status",
+    response_model=BulkBookOperationResponse,
+)
+def execute_bulk_book_reading_status(
+    payload: BulkBookReadingStatusRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> BulkBookOperationResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_operation_response(auth_error)
+    try:
+        result = bulk_reading_status(db).execute(
+            BulkReadingStatusCommand(
+                context=authorization_context(db, user),
+                book_ids=tuple(payload.ids),
+                status=payload.status,
+            )
+        )
+    except (BulkBookAccessError, InvalidBulkBookOperationError) as error:
+        return _bulk_operation_response(_bulk_error(error))
+    return BulkBookOperationResponse(
+        data=BulkBookOperationPayload.model_validate(asdict(result))
+    )
+
+
+@router.post(
+    "/library/operations/books/covers",
+    response_model=BulkBookCoverResponse,
+)
+async def execute_bulk_book_covers(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    ids: Annotated[str, Form()],
+    action: Annotated[Literal["crop", "regenerate", "compress", "replace"], Form()],
+    ratio: Annotated[str, Form()] = "2:3",
+    quality: Annotated[int, Form(ge=40, le=95)] = 82,
+    maxDimension: Annotated[int, Form(ge=600, le=3200)] = 1600,
+    cover: Annotated[UploadFile | None, File()] = None,
+) -> BulkBookCoverResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_cover_response(auth_error)
+    try:
+        raw_ids = json.loads(ids)
+    except (json.JSONDecodeError, TypeError):
+        return _bulk_cover_response(
+            fail(
+                "图书选择无效",
+                status_code=422,
+                code="INVALID_BULK_BOOK_OPERATION",
+            )
+        )
+    if not isinstance(raw_ids, list) or any(
+        not isinstance(book_id, str) for book_id in raw_ids
+    ):
+        return _bulk_cover_response(
+            fail(
+                "图书选择无效",
+                status_code=422,
+                code="INVALID_BULK_BOOK_OPERATION",
+            )
+        )
+    cover_content = None
+    if cover is not None:
+        cover_content = await cover.read(12 * 1024 * 1024 + 1)
+        await cover.close()
+    try:
+        result = bulk_covers(db, settings).execute(
+            BulkCoverCommand(
+                context=authorization_context(db, user),
+                book_ids=tuple(raw_ids),
+                action=action,
+                ratio=ratio,
+                quality=quality,
+                max_dimension=maxDimension,
+                cover_content=cover_content,
+            )
+        )
+    except (
+        BulkBookAccessError,
+        BulkBookAuthorizationError,
+        InvalidBulkBookOperationError,
+    ) as error:
+        return _bulk_cover_response(_bulk_error(error))
+    return BulkBookCoverResponse(
+        data=BulkBookCoverPayload.model_validate(asdict(result))
+    )
+
+
+@router.post(
+    "/library/operations/{operation_id}/undo",
+    response_model=LibraryOperationUndoResponse,
+)
+def undo_operation(
+    operation_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> LibraryOperationUndoResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _operation_undo_response(auth_error)
+    try:
+        result = undo_library_operation(db).execute(
+            operation_id,
+            user.id,
+            can_manage_system=can_manage_system(user),
+        )
+    except LibraryOperationNotFoundError:
+        return _operation_undo_response(
+            fail("操作记录不存在", status_code=404, code="OPERATION_NOT_FOUND")
+        )
+    except LibraryOperationAuthorizationError:
+        return _operation_undo_response(
+            fail("无权撤销该操作", status_code=403, code="OPERATION_UNDO_FORBIDDEN")
+        )
+    except InvalidLibraryOperationError as error:
+        return _operation_undo_response(
+            fail(str(error), status_code=409, code="OPERATION_NOT_UNDOABLE")
+        )
+    return LibraryOperationUndoResponse(
+        data=LibraryOperationUndoPayload.model_validate(result)
+    )
+
+
+@router.get("/library/facets", response_model=LibraryFacetPageResponse)
+def list_library_facets(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    kind: str = Query(...),
+    search: str = "",
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=20, ge=1, le=100),
+) -> LibraryFacetPageResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _facet_page_response(auth_error)
+    try:
+        result = ListCatalogFacets(library_catalog(db)).execute(
+            context=authorization_context(db, user),
+            kind=kind,
+            search=search,
+            page=page,
+            page_size=pageSize,
+        )
+    except ValueError as error:
+        return _facet_page_response(
+            fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_QUERY")
+        )
+    return LibraryFacetPageResponse(
+        data=LibraryFacetPagePayload(
+            facets=[
+                LibraryFacetView(
+                    id=facet.id,
+                    kind=facet.kind,
+                    name=facet.name,
+                    normalizedName=facet.normalized_name,
+                    aliases=list(facet.aliases),
+                    bookCount=facet.book_count,
+                    updatedAt=facet.updated_at,
+                )
+                for facet in result.facets
+            ],
+            page=result.page,
+            pageSize=result.page_size,
+            total=result.total,
+            totalPages=max(
+                1, (result.total + result.page_size - 1) // result.page_size
+            ),
+        )
+    )
+
+
+@router.get("/library/groupings", response_model=LibraryGroupingPageResponse)
+def list_library_groupings(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    kind: str = Query(...),
+    search: str = "",
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=48, ge=1, le=100),
+) -> LibraryGroupingPageResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _grouping_page_response(auth_error)
+    try:
+        result = library_groupings(db).execute(
+            context=authorization_context(db, user),
+            kind=kind,
+            search=search,
+            page=page,
+            page_size=pageSize,
+        )
+    except ValueError as error:
+        return _grouping_page_response(
+            fail(str(error), status_code=422, code="INVALID_LIBRARY_GROUPING_QUERY")
+        )
+    return LibraryGroupingPageResponse(
+        data=LibraryGroupingPagePayload(
+            groups=[
+                LibraryGroupingView(
+                    id=group.id,
+                    name=group.name,
+                    bookCount=group.book_count,
+                    updatedAt=group.updated_at,
+                    representativeBooks=[
+                        LibraryGroupingBookView(
+                            id=book.id,
+                            title=book.title,
+                            author=book.author,
+                            coverUrl=(
+                                f"/api/books/{quote(book.id, safe='')}/cover?size=medium"
+                            ),
+                            updatedAt=book.updated_at,
+                        )
+                        for book in group.representative_books
+                    ],
+                )
+                for group in result.groups
+            ],
+            page=page,
+            pageSize=pageSize,
+            total=result.total,
+            totalPages=max(1, (result.total + pageSize - 1) // pageSize),
+        )
+    )
+
+
+@router.get("/library/filter-schema", response_model=FilterSchemaResponse)
+def get_library_filter_schema(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> FilterSchemaResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return cast(FilterSchemaResponse, auth_error)
+    schema = library_filter_schema(db).execute(authorization_context(db, user))
+    return FilterSchemaResponse(data=filter_schema_payload(schema))
+
+
+@router.get("/library/filter-options", response_model=FilterOptionsResponse)
+def get_library_filter_options(
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    source: Literal["authors", "tags", "series"] = Query(...),
+    query: str = "",
+    limit: int = Query(default=20, ge=1, le=50),
+) -> FilterOptionsResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _filter_options_response(auth_error)
+    try:
+        result = library_filter_options(db).execute(
+            authorization_context(db, user),
+            source=source,
+            query=query,
+            limit=limit,
+        )
+    except ValueError as error:
+        return _filter_options_response(
+            fail(str(error), status_code=422, code="INVALID_LIBRARY_FILTER_QUERY")
+        )
+    return FilterOptionsResponse(data=filter_options_payload(result))
+
+
+@router.post("/library/facets/merge", response_model=LibraryFacetMergeResponse)
+def merge_facets(
+    payload: MergeLibraryFacetsRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> LibraryFacetMergeResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _facet_merge_response(auth_error)
+    if manager_error := _require_manager(user):
+        return _facet_merge_response(manager_error)
+    try:
+        result = merge_library_facets(db).execute(
+            payload.kind,
+            payload.source_ids,
+            payload.target_id,
+            user.id,
+        )
+    except ValueError as error:
+        return _facet_merge_response(
+            fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
+        )
+    return LibraryFacetMergeResponse(
+        data=LibraryFacetMergePayload.model_validate(result)
+    )
+
+
+@router.patch("/library/facets/{facet_id}", response_model=LibraryFacetRenameResponse)
+def rename_facet(
+    facet_id: str,
+    payload: RenameLibraryFacetRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> LibraryFacetRenameResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _facet_rename_response(auth_error)
+    if manager_error := _require_manager(user):
+        return _facet_rename_response(manager_error)
+    try:
+        result = rename_library_facet(db).execute(facet_id, payload.name, user.id)
+    except ValueError as error:
+        return _facet_rename_response(
+            fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
+        )
+    return LibraryFacetRenameResponse(
+        data=LibraryFacetRenamePayload.model_validate(result)
+    )
+
+
+@router.delete("/library/facets/{facet_id}", response_model=LibraryFacetDeleteResponse)
+def delete_facet(
+    facet_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> LibraryFacetDeleteResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _facet_delete_response(auth_error)
+    if manager_error := _require_manager(user):
+        return _facet_delete_response(manager_error)
+    try:
+        result = delete_library_facet(db).execute(facet_id, user.id)
+    except ValueError as error:
+        return _facet_delete_response(
+            fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
+        )
+    return LibraryFacetDeleteResponse(
+        data=LibraryFacetDeletePayload.model_validate(result)
+    )
 
 
 @router.get("/books", response_model=BooksResponse)
@@ -429,11 +1136,15 @@ def update_book_source_node_metadata(
         )
     except ValueError:
         return _source_node_updated_response(
-            fail("版本标题不能为空", status_code=400, code="INVALID_SOURCE_NODE_TITLE")
+            fail(
+                "来源目录标题不能为空",
+                status_code=400,
+                code="INVALID_SOURCE_NODE_TITLE",
+            )
         )
     if not updated:
         return _source_node_updated_response(
-            fail("版本不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
+            fail("来源节点不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
     return SourceNodeMetadataUpdatedResponse(
         data=SourceNodeMetadataUpdatedPayload(
@@ -491,7 +1202,7 @@ async def update_book_source_node_presentation(
         )
     if not updated:
         return _source_node_updated_response(
-            fail("版本不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
+            fail("来源节点不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
     return SourceNodeMetadataUpdatedResponse(
         data=SourceNodeMetadataUpdatedPayload(
@@ -540,7 +1251,7 @@ def search_book_source_node_metadata(
         )
     if result is None:
         return _source_node_search_response(
-            fail("版本不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
+            fail("来源节点不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
     return SourceNodeMetadataSearchResponse(
         data=SourceNodeMetadataSearchPayload(

@@ -11,14 +11,12 @@ typealias PdfReaderErrorCode = ReaderErrorCode
 
 data class PdfRangeCacheIdentity(
     val namespace: ReaderSyncNamespace,
-    val volumeId: String,
+    val resourceId: String,
 ) {
-    init {
-        require(volumeId.isNotBlank())
-    }
+    init { require(resourceId.isNotBlank()) }
 
     val stableKey: String
-        get() = lengthPrefixed(namespace.stableKey, volumeId)
+        get() = lengthPrefixed(namespace.stableKey, resourceId)
 }
 
 data class PdfByteRange(val begin: Long, val endExclusive: Long) {

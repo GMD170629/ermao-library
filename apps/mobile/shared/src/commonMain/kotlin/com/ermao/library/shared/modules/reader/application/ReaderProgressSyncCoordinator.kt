@@ -43,12 +43,12 @@ class ReaderProgressSyncCoordinator(
     val remoteProgressNotices: StateFlow<ReaderRemoteProgressNotice?> = _remoteProgressNotices.asStateFlow()
 
     suspend fun saveLocalAndSubmit(target: ReaderProgressSyncTarget, progress: ReaderProgress) {
-        require(progress.sourceId == target.volumeId) { "Reader progress source does not match its volume" }
+        require(progress.resourceId == target.resourceId) { "Reader progress resource does not match its target" }
         require(target.sourceFormat.accepts(progress)) { "Reader progress morphology does not match its source format" }
         val state = stateStore.loadSyncState()
         val notice = remoteNotice
         if (notice != null) {
-            val previous = stateStore.load(progress.sourceId)
+            val previous = stateStore.load(progress.resourceId)
             val genuinelyMoved = previous == null || compareExactProgressLocations(
                 previous.exactPublicationLocation(),
                 progress.exactPublicationLocation(),
@@ -169,7 +169,7 @@ class ReaderProgressSyncCoordinator(
                     is ReaderProgressPushResult.Accepted -> stateStore.acknowledge(next.mutationId, result.snapshot)
                     is ReaderProgressPushResult.Conflict -> {
                         stateStore.discardPendingAfterConflict(next.mutationId, result.current.revision)
-                        observeRemoteProgress(result.current, next.clientId, stateStore.load(next.sourceId))
+                        observeRemoteProgress(result.current, next.clientId, stateStore.load(next.resourceId))
                         if (finishIfNotWoken(ownedWorker, observedWakeGeneration)) return
                     }
                     is ReaderProgressPushResult.RetryableFailure -> {

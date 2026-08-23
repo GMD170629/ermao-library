@@ -12,8 +12,8 @@ class LibraryManagementUnitOfWork(Protocol):
     def rollback(self) -> None: ...
 
 
-class LibraryManagementGateway(Protocol):
-    def merge_categories(
+class LibraryFacetManagementGateway(Protocol):
+    def merge_facets(
         self,
         kind: str,
         source_ids: list[str],
@@ -21,16 +21,20 @@ class LibraryManagementGateway(Protocol):
         user_id: str | None,
     ) -> dict[str, object]: ...
 
-    def rename_category(
+    def rename_facet(
         self, facet_id: str, name: str, user_id: str | None
     ) -> dict[str, object]: ...
 
-    def delete_category(
-        self, facet_id: str, user_id: str | None
-    ) -> dict[str, object]: ...
+    def delete_facet(self, facet_id: str, user_id: str | None) -> dict[str, object]: ...
 
+
+class LibraryOperationManagementGateway(Protocol):
     def undo_operation(
-        self, operation_id: str, user_id: str | None
+        self,
+        operation_id: str,
+        user_id: str,
+        *,
+        can_manage_system: bool,
     ) -> dict[str, object]: ...
 
 
@@ -40,9 +44,9 @@ class FacetSyncGateway(Protocol):
     def sync_books(self, book_ids: Iterable[str]) -> None: ...
 
 
-class MergeLibraryCategories:
+class MergeLibraryFacets:
     def __init__(
-        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+        self, gateway: LibraryFacetManagementGateway, uow: LibraryManagementUnitOfWork
     ) -> None:
         self._gateway = gateway
         self._uow = uow
@@ -55,9 +59,7 @@ class MergeLibraryCategories:
         user_id: str | None,
     ) -> dict[str, object]:
         try:
-            result = self._gateway.merge_categories(
-                kind, source_ids, target_id, user_id
-            )
+            result = self._gateway.merge_facets(kind, source_ids, target_id, user_id)
             self._uow.commit()
         except Exception:
             self._uow.rollback()
@@ -65,9 +67,9 @@ class MergeLibraryCategories:
         return result
 
 
-class RenameLibraryCategory:
+class RenameLibraryFacet:
     def __init__(
-        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+        self, gateway: LibraryFacetManagementGateway, uow: LibraryManagementUnitOfWork
     ) -> None:
         self._gateway = gateway
         self._uow = uow
@@ -76,7 +78,7 @@ class RenameLibraryCategory:
         self, facet_id: str, name: str, user_id: str | None
     ) -> dict[str, object]:
         try:
-            result = self._gateway.rename_category(facet_id, name, user_id)
+            result = self._gateway.rename_facet(facet_id, name, user_id)
             self._uow.commit()
         except Exception:
             self._uow.rollback()
@@ -84,16 +86,16 @@ class RenameLibraryCategory:
         return result
 
 
-class DeleteLibraryCategory:
+class DeleteLibraryFacet:
     def __init__(
-        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+        self, gateway: LibraryFacetManagementGateway, uow: LibraryManagementUnitOfWork
     ) -> None:
         self._gateway = gateway
         self._uow = uow
 
     def execute(self, facet_id: str, user_id: str | None) -> dict[str, object]:
         try:
-            result = self._gateway.delete_category(facet_id, user_id)
+            result = self._gateway.delete_facet(facet_id, user_id)
             self._uow.commit()
         except Exception:
             self._uow.rollback()
@@ -103,19 +105,43 @@ class DeleteLibraryCategory:
 
 class UndoLibraryOperation:
     def __init__(
-        self, gateway: LibraryManagementGateway, uow: LibraryManagementUnitOfWork
+        self,
+        gateway: LibraryOperationManagementGateway,
+        uow: LibraryManagementUnitOfWork,
     ) -> None:
         self._gateway = gateway
         self._uow = uow
 
-    def execute(self, operation_id: str, user_id: str | None) -> dict[str, object]:
+    def execute(
+        self,
+        operation_id: str,
+        user_id: str,
+        *,
+        can_manage_system: bool,
+    ) -> dict[str, object]:
         try:
-            result = self._gateway.undo_operation(operation_id, user_id)
+            result = self._gateway.undo_operation(
+                operation_id,
+                user_id,
+                can_manage_system=can_manage_system,
+            )
             self._uow.commit()
         except Exception:
             self._uow.rollback()
             raise
         return result
+
+
+class LibraryOperationNotFoundError(Exception):
+    """The operation does not exist or is intentionally hidden from the actor."""
+
+
+class LibraryOperationAuthorizationError(Exception):
+    """The actor cannot undo this operation."""
+
+
+class InvalidLibraryOperationError(Exception):
+    """The operation is finalized, expired, already undone, or malformed."""
 
 
 class SyncBookFacets:

@@ -202,6 +202,17 @@ class ClearedEventsPayload(HttpContractModel):
     storage: EventPruneStorage | None = None
 
 
+class ManagementOverviewCheck(HttpContractModel):
+    status: str
+    message: str
+
+
+class ManagementOverviewPayload(HttpContractModel):
+    cards: dict[str, int]
+    checks: dict[str, ManagementOverviewCheck]
+    recent_events: list[SystemEvent] = Field(alias="recentEvents")
+
+
 AppConfigResponse = SuccessEnvelope[AppConfigPayload]
 SystemSettingsResponse = SuccessEnvelope[SystemSettingsPayload]
 OpdsSystemSettingsResponse = SuccessEnvelope[OpdsSystemSettingsPayload]
@@ -212,3 +223,4 @@ BackupDeleteResponse = SuccessEnvelope[BackupDeletePayload]
 DashboardSystemStatusResponse = SuccessEnvelope[DashboardSystemStatusPayload]
 ManagementEventsResponse = SuccessEnvelope[ManagementEventsPayload]
 ClearedEventsResponse = SuccessEnvelope[ClearedEventsPayload]
+ManagementOverviewResponse = SuccessEnvelope[ManagementOverviewPayload]

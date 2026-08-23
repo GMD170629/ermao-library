@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from datetime import datetime
+from typing import Any, Literal, cast
 
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from app.models import (
     Library,
     LibraryBook,
     LibraryBookMetadata,
+    LibraryImportTask,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
@@ -26,6 +28,10 @@ from app.models import (
     OrganizeJob,
     ReaderResourceProgress,
     SystemEvent,
+)
+from app.modules.library.application.dashboard import (
+    DashboardActivityQueryPort,
+    DashboardContinueReading,
 )
 from app.modules.library.infrastructure.books import entity_record
 from app.modules.reader.public import MediaKind
@@ -264,6 +270,14 @@ def continue_reading_progress(
 
 
 def management_card_counts(db: Session) -> dict[str, int]:
+    failed_imports = int(
+        db.scalar(
+            select(func.count())
+            .select_from(LibraryImportTask)
+            .where(LibraryImportTask.state == "FAILED")
+        )
+        or 0
+    )
     failed_downloads = int(
         db.scalar(
             select(func.count())
@@ -305,7 +319,7 @@ def management_card_counts(db: Session) -> dict[str, int]:
         or 0
     )
     return {
-        "failedImports": 0,
+        "failedImports": failed_imports,
         "failedDownloads": failed_downloads,
         "pendingOrganize": pending_organize,
         "managedStorageBytes": storage,
@@ -364,3 +378,60 @@ def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]
         select(SystemEvent).order_by(SystemEvent.created_at.desc()).limit(limit)
     ).all()
     return [entity_record(row) for row in rows]
+
+
+class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def recent_book_ids(
+        self,
+        *,
+        context: AuthorizationContext,
+        limit: int,
+    ) -> tuple[str, ...]:
+        return tuple(
+            str(row["id"]) for row in recent_books(self._db, context, limit=limit)
+        )
+
+    def recent_reading_book_ids(
+        self,
+        *,
+        context: AuthorizationContext,
+        user_id: str,
+        limit: int,
+    ) -> tuple[str, ...]:
+        return tuple(
+            str(row["id"])
+            for row in recent_reading(self._db, context, user_id, limit=limit)
+        )
+
+    def continue_reading(
+        self,
+        *,
+        context: AuthorizationContext,
+        user_id: str,
+    ) -> DashboardContinueReading | None:
+        row = continue_reading_progress(self._db, context, user_id)
+        if row is None:
+            return None
+        return DashboardContinueReading(
+            book_id=str(row["bookId"]),
+            title=str(row["title"]),
+            author=str(row.get("author") or "未知作者"),
+            media_kind=cast(
+                Literal["EBOOK", "COMIC", "AUDIOBOOK"], str(row["mediaKind"])
+            ),
+            resource_format=str(row["resourceFormat"]),
+            reader_type=cast(
+                Literal["reflowable", "comic", "pdf", "audio"],
+                str(row["readerType"]),
+            ),
+            resource_id=str(row["resourceId"]),
+            resource_title=str(row.get("resourceTitle") or ""),
+            narrator=str(row["narrator"]) if row.get("narrator") else None,
+            progress=float(row.get("percent") or 0),
+            updated_at=(
+                row["updatedAt"] if isinstance(row.get("updatedAt"), datetime) else None
+            ),
+        )

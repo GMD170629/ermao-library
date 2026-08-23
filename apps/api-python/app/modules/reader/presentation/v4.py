@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Literal, Never, cast, overload
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -204,7 +205,8 @@ def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderAssetDto, str]:
         (
             item
             for item in bootstrap.assets
-            if item.role.strip().upper() in {"COMIC", "CBZ", "ZIP", "CBR", "RAR"}
+            if item.role.strip().upper()
+            in {"PRIMARY", "COMIC", "CBZ", "ZIP", "CBR", "RAR"}
         ),
         None,
     )
@@ -735,7 +737,7 @@ def get_comic_page_v4(
         raise _not_found()
     _ = image_variant
     page_response = media_streaming.send_comic_page_zip_entry(
-        media_streaming.stored_path(source.path, settings, database_backed=True),
+        media_streaming.stored_path(source.path, settings, (Path(source.source_root),)),
         page.href,
         request,
         user.id,
@@ -771,7 +773,7 @@ def download_comic_archive_v4(
         media_streaming.stored_path(
             indexed_source.path,
             settings,
-            database_backed=True,
+            (Path(indexed_source.source_root),),
         ),
         request,
         user.id,

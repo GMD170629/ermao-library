@@ -17,8 +17,6 @@ data class DownloadNamespace(
 
 enum class DownloadReaderType { Reflowable, Pdf, Comic, Audio }
 
-const val IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY = "__implicit__"
-
 data class DownloadSource(
     val apiPath: String,
     val mimeType: String,
@@ -31,42 +29,39 @@ data class DownloadSource(
     }
 }
 
+/** Stable completed-artifact identity: Book -> Resource -> Asset. */
 data class DownloadIdentity(
     val namespace: DownloadNamespace,
-    val workId: String,
-    val volumeId: String,
+    val bookId: String,
+    val resourceId: String,
+    val assetId: String,
 ) {
     init {
-        require(workId.isNotBlank())
-        require(volumeId.isNotBlank())
+        require(bookId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(assetId.isNotBlank())
     }
 }
 
 data class DownloadDescriptor(
     val identity: DownloadIdentity,
-    val workTitle: String,
-    val workAuthor: String?,
+    val bookTitle: String,
+    val bookAuthor: String?,
     val coverApiPath: String?,
-    val volumeTitle: String,
+    val resourceTitle: String,
     val format: String,
     val readerType: DownloadReaderType,
     val source: DownloadSource,
-    val versionId: String,
-    val versionSourceKey: String,
-    val versionSourceName: String?,
-    val versionCompleted: Boolean? = null,
-    val volumeIndex: Double? = null,
-    val volumeSortOrder: Int? = null,
+    val resourceIndex: Double? = null,
+    val resourceSortOrder: Int? = null,
 ) {
     init {
-        require(workTitle.isNotBlank())
-        require(volumeTitle.isNotBlank())
+        require(bookTitle.isNotBlank())
+        require(resourceTitle.isNotBlank())
         require(format.isNotBlank())
-        require(versionId.isNotBlank())
-        require(versionSourceKey.isNotBlank())
         require(coverApiPath == null || coverApiPath.isSafeApiPath())
-        require(volumeIndex == null || volumeIndex.isFinite())
-        require(volumeSortOrder == null || volumeSortOrder >= 0)
+        require(resourceIndex == null || resourceIndex.isFinite())
+        require(resourceSortOrder == null || resourceSortOrder >= 0)
     }
 }
 
@@ -178,103 +173,104 @@ fun DownloadTask.transition(event: DownloadTaskEvent): DownloadTask = when (even
     }
 }
 
-data class DownloadedWork(
-    val workId: String,
+data class DownloadedBook(
+    val bookId: String,
     val title: String,
     val author: String?,
     val coverApiPath: String?,
-    val versions: List<DownloadedVersion>,
+    val resources: List<DownloadedResource>,
     val artifacts: List<CompletedDownloadArtifact>,
 ) {
     init {
-        require(workId.isNotBlank())
+        require(bookId.isNotBlank())
         require(title.isNotBlank())
-        require(versions.isNotEmpty())
+        require(resources.isNotEmpty())
         require(artifacts.isNotEmpty())
-        require(artifacts.all { it.identity.workId == workId })
-        require(versions.flatMap(DownloadedVersion::artifacts) == artifacts)
+        require(artifacts.all { it.identity.bookId == bookId })
+        require(resources.flatMap(DownloadedResource::artifacts) == artifacts)
     }
 
     val totalBytes: Long = artifacts.sumOf { it.verifiedBytes }
     val lastOpenedAtEpochMillis: Long? = artifacts.mapNotNull { it.lastOpenedAtEpochMillis }.maxOrNull()
 }
 
-data class DownloadedVersion(
-    val versionId: String,
-    val sourceKey: String,
-    val sourceName: String?,
-    val isServerComplete: Boolean?,
+data class DownloadedResource(
+    val resourceId: String,
+    val title: String,
+    val format: String,
+    val readerType: DownloadReaderType,
+    val resourceIndex: Double?,
+    val resourceSortOrder: Int?,
     val artifacts: List<CompletedDownloadArtifact>,
 ) {
     init {
-        require(versionId.isNotBlank())
-        require(sourceKey.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(title.isNotBlank())
+        require(format.isNotBlank())
         require(artifacts.isNotEmpty())
-        require(artifacts.all { it.descriptor.versionId == versionId })
+        require(artifacts.all { it.identity.resourceId == resourceId })
     }
 
     val totalBytes: Long = artifacts.sumOf { it.verifiedBytes }
 }
 
-fun completedDownloadsByWork(
+fun completedDownloadsByBook(
     namespace: DownloadNamespace,
     artifacts: List<CompletedDownloadArtifact>,
     query: String = "",
-): List<DownloadedWork> {
+): List<DownloadedBook> {
     val normalizedQuery = query.trim().lowercase()
     return artifacts
         .asSequence()
         .filter { it.identity.namespace == namespace }
-        .groupBy { it.identity.workId }
+        .groupBy { it.identity.bookId }
         .values
-        .map { workArtifacts ->
-            val versions = workArtifacts
-                .groupBy { it.descriptor.versionId }
+        .map { bookArtifacts ->
+            val resources = bookArtifacts
+                .groupBy { it.identity.resourceId }
                 .values
-                .map { versionArtifacts ->
-                    val orderedVolumes = versionArtifacts.sortedWith(volumeArtifactComparator)
-                    val version = orderedVolumes.first().descriptor
-                    DownloadedVersion(
-                        versionId = version.versionId,
-                        sourceKey = version.versionSourceKey,
-                        sourceName = version.versionSourceName,
-                        isServerComplete = version.versionCompleted,
-                        artifacts = orderedVolumes,
+                .map { resourceArtifacts ->
+                    val orderedAssets = resourceArtifacts.sortedWith(assetArtifactComparator)
+                    val descriptor = orderedAssets.first().descriptor
+                    DownloadedResource(
+                        resourceId = descriptor.identity.resourceId,
+                        title = descriptor.resourceTitle,
+                        format = descriptor.format,
+                        readerType = descriptor.readerType,
+                        resourceIndex = descriptor.resourceIndex,
+                        resourceSortOrder = descriptor.resourceSortOrder,
+                        artifacts = orderedAssets,
                     )
                 }
-                .sortedWith(downloadedVersionComparator)
-            val ordered = versions.flatMap(DownloadedVersion::artifacts)
+                .sortedWith(resourceComparator)
+            val ordered = resources.flatMap(DownloadedResource::artifacts)
             val first = ordered.first().descriptor
-            DownloadedWork(
-                workId = first.identity.workId,
-                title = first.workTitle,
-                author = first.workAuthor,
+            DownloadedBook(
+                bookId = first.identity.bookId,
+                title = first.bookTitle,
+                author = first.bookAuthor,
                 coverApiPath = first.coverApiPath,
-                versions = versions,
+                resources = resources,
                 artifacts = ordered,
             )
         }
-        .filter { work ->
-            normalizedQuery.isEmpty() || (
-                listOfNotNull(work.title, work.author) + work.artifacts.map { it.descriptor.volumeTitle }
-                )
-                .any { normalizedQuery in it.lowercase() }
+        .filter { book ->
+            normalizedQuery.isEmpty() ||
+                (listOfNotNull(book.title, book.author) + book.resources.map(DownloadedResource::title))
+                    .any { normalizedQuery in it.lowercase() }
         }
-        .sortedWith(compareByDescending<DownloadedWork> { it.lastOpenedAtEpochMillis ?: 0 }.thenBy { it.title.lowercase() })
+        .sortedWith(compareByDescending<DownloadedBook> { it.lastOpenedAtEpochMillis ?: 0 }.thenBy { it.title.lowercase() })
         .toList()
 }
 
-private val volumeArtifactComparator =
-    compareBy<CompletedDownloadArtifact> { it.descriptor.volumeSortOrder ?: Int.MAX_VALUE }
-        .thenBy { it.descriptor.volumeIndex ?: Double.MAX_VALUE }
-        .thenBy { it.descriptor.volumeTitle.lowercase() }
-        .thenBy { it.identity.volumeId }
+private val assetArtifactComparator =
+    compareBy<CompletedDownloadArtifact> { it.identity.assetId }
 
-private val downloadedVersionComparator =
-    compareBy<DownloadedVersion> { if (it.sourceKey == IMPLICIT_DOWNLOAD_VERSION_SOURCE_KEY) 0 else 1 }
-        .thenBy(nullsLast(String.CASE_INSENSITIVE_ORDER)) { it.sourceName }
-        .thenBy { it.sourceKey.lowercase() }
-        .thenBy { it.versionId }
+private val resourceComparator =
+    compareBy<DownloadedResource> { it.resourceSortOrder ?: Int.MAX_VALUE }
+        .thenBy { it.resourceIndex ?: Double.MAX_VALUE }
+        .thenBy { it.title.lowercase() }
+        .thenBy { it.resourceId }
 
 private val activeStatuses = setOf(
     DownloadTaskStatus.Queued,
@@ -302,9 +298,8 @@ private fun String.encodeForKey(): String = encodeToByteArray().joinToString("")
 
 internal fun String.isSafeMediaApiPath(): Boolean =
     isSafeApiPath() && (
-        matches(Regex("^/api/files/[^/?#]+$")) ||
-            matches(Regex("^/api/volumes/[^/?#]+/file$")) ||
-            matches(Regex("^/api/reader/v4/volumes/[^/?#]+/comic/archive$"))
+        matches(Regex("^/api/assets/[^/?#]+$")) ||
+            matches(Regex("^/api/resources/[^/?#]+/asset$"))
         )
 
 internal fun String.isSafeApiPath(): Boolean =

@@ -80,9 +80,8 @@ async function main() {
     SESSION_SECRET: 'runtime-smoke-session-secret-32chars',
     STORAGE_ROOT: storageRoot,
     DOWNLOAD_INBOX_PATH: inbox,
-    SCAN_WORKER_READY_FILE: readyFile,
-    MONITOR_REFRESH_INTERVAL_MS: '10000',
-    MONITOR_FILE_STABLE_DELAY_MS: '100'
+    IMPORT_WORKER_READY_FILE: readyFile,
+    IMPORT_QUEUE_INTERVAL_SECONDS: '1'
   };
 
   let child;
@@ -112,9 +111,6 @@ async function main() {
     if (!/^\d+$/.test(pidText)) {
       throw new Error(`ready file did not contain a process id: ${pidText}`);
     }
-    if (!runtimeOutput.includes('[import-worker] ready')) {
-      throw new Error(`worker did not print ready marker. Output: ${runtimeOutput}`);
-    }
     if (!migrationOutput.includes('prestart outcome=success')) {
       throw new Error(`prestart did not report success. Output: ${migrationOutput}`);
     }
@@ -139,7 +135,7 @@ async function main() {
       .split(/\r?\n/)
       .filter((line) =>
         line.includes('data_migration') ||
-        line.includes('[import-worker] ready') ||
+        line.includes('readable_resource.worker.ready') ||
         line.includes('unavailable') ||
         line.includes('retrying later') ||
         line.includes('signal')

@@ -72,6 +72,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
 
   if (loading) return <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取整理任务...</I18nText></div>;
   if (!job) return <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error || i18nAttribute("整理任务不存在")}</div>;
+  const sourceAsset = job.book.resources.flatMap((resource) => resource.assets)[0];
 
   return (
     <div className={embedded ? 'space-y-5' : 'space-y-6'}>
@@ -101,7 +102,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
             </div>
           </div>
           <dl className="mt-5 space-y-3 text-sm">
-            <div><dt className="text-slate-500"><I18nText>文件路径</I18nText></dt><dd className="mt-1 break-all text-slate-800">{job.book.resources.flatMap((resource) => resource.assets)[0]?.path || i18nAttribute("未记录")}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>源资产</I18nText></dt><dd className="mt-1 break-all text-slate-800">{sourceAsset ? <a className="font-medium text-[#D94322] hover:underline" href={sourceAsset.downloadUrl}><I18nText>下载附件</I18nText></a> : i18nAttribute("未记录")}</dd></div>
             <div><dt className="text-slate-500"><I18nText>导入时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.book.addedAt).toLocaleString(locale)}</dd></div>
             <div><dt className="text-slate-500"><I18nText>任务更新时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.updatedAt).toLocaleString(locale)}</dd></div>
             <div><dt className="text-slate-500"><I18nText>整理摘要</I18nText></dt><dd className="mt-1 text-slate-800">{job.summary ?? i18nAttribute("暂无整理摘要")}</dd></div>

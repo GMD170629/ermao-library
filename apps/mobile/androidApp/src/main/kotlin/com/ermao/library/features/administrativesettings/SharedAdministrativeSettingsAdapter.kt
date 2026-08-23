@@ -16,7 +16,7 @@ import com.ermao.library.shared.modules.administrativesettings.HealthRun as Shar
 import com.ermao.library.shared.modules.administrativesettings.HealthRunStatus as SharedHealthRunStatus
 import com.ermao.library.shared.modules.administrativesettings.ImportPreferences as SharedImportPreferences
 import com.ermao.library.shared.modules.administrativesettings.ImportTaskFilter as SharedImportTaskFilter
-import com.ermao.library.shared.modules.administrativesettings.ImportTaskStatus as SharedImportTaskStatus
+import com.ermao.library.shared.modules.administrativesettings.ImportTaskState as SharedImportTaskState
 import com.ermao.library.shared.modules.administrativesettings.ImportScanStatus as SharedImportScanStatus
 import com.ermao.library.shared.modules.administrativesettings.KindleTaskFilter as SharedKindleTaskFilter
 import com.ermao.library.shared.modules.administrativesettings.KindleTaskStatus as SharedKindleTaskStatus
@@ -76,12 +76,16 @@ class SharedAdministrativeSettingsAdapter(
         }
         AdministrativeSettingsRoute.ImportTasks -> sharedRepository.listImportTasks(sharedContext, SharedImportTaskFilter(pageSize = 100)).map { page ->
             ImportTasksSnapshot(
-                queueHealthy = page.summary.failed == 0,
-                runningCount = page.tasks.count { it.status in setOf(SharedImportTaskStatus.Pending, SharedImportTaskStatus.Parsing) },
+                queueHealthy = page.failed == 0,
+                runningCount = page.tasks.count { it.state in setOf(SharedImportTaskState.Queued, SharedImportTaskState.Running) },
                 tasks = page.tasks.map { task ->
                     ImportTask(
-                        task.id, task.originalName ?: task.requestedTitle ?: task.sourcePath.substringAfterLast('/'), task.sourcePath,
-                        task.createdAt, task.status.toLocal(), task.progress.coerceIn(0, 100) / 100f, task.errorCode,
+                        id = task.id,
+                        fileName = task.kind,
+                        sourcePath = task.sourceNodeId ?: task.resourceId ?: task.libraryId,
+                        createdAtLabel = task.createdAt,
+                        status = task.state.toLocal(),
+                        statusCode = task.errorSummary,
                     )
                 },
             )
@@ -98,7 +102,7 @@ class SharedAdministrativeSettingsAdapter(
             OrganizeQueueSnapshot(pending.total, pending.jobs.map { it.toLocal() })
         }
         AdministrativeSettingsRoute.OrganizeCandidates -> sharedRepository.loadOrganizeCandidates(sharedContext).map { candidates ->
-            OrganizeCandidatesSnapshot(candidates.works.map {
+            OrganizeCandidatesSnapshot(candidates.books.map {
                 RecognitionCandidate(it.id, it.title.orEmpty(), it.author.orEmpty(), it.metadataQuality.coerceIn(0, 100))
             })
         }
@@ -286,12 +290,12 @@ class SharedAdministrativeSettingsAdapter(
         return sharedRepository.listImportTaskLogs(sharedContext, taskId).map { page ->
             ImportTaskDetailSnapshot(
                 task = task.toLocal(),
-                requestedTitle = task.requestedTitle,
-                requestedAuthor = task.requestedAuthor,
-                processedAssetCount = task.processedAssetCount,
-                assetCount = task.assetCount,
-                attempts = task.attempts,
-                retryable = task.retryable,
+                requestedTitle = null,
+                requestedAuthor = null,
+                processedAssetCount = 0,
+                assetCount = 0,
+                attempts = 0,
+                retryable = false,
                 errorSummary = task.errorSummary,
                 logs = page.logs.map { ImportTaskLogEntry(it.id, it.level, it.message, it.createdAt) },
             )
@@ -471,6 +475,7 @@ private fun SharedError.toLocal() = AdministrativeFailure(
         SharedErrorKind.Forbidden -> AdministrativeErrorKind.Forbidden
         SharedErrorKind.NotFound -> AdministrativeErrorKind.NotFound
         SharedErrorKind.Conflict -> AdministrativeErrorKind.Conflict
+        SharedErrorKind.Unavailable -> AdministrativeErrorKind.Unavailable
         SharedErrorKind.RateLimited -> AdministrativeErrorKind.RateLimited
         SharedErrorKind.Server, SharedErrorKind.Transport -> AdministrativeErrorKind.Unavailable
         SharedErrorKind.Protocol -> AdministrativeErrorKind.Unknown
@@ -493,21 +498,20 @@ private fun com.ermao.library.shared.modules.administrativesettings.KindleTaskSt
     SharedKindleTaskStatus.Cancelled -> QueueStatus.Cancelled
 }
 
-private fun SharedImportTaskStatus.toLocal(): QueueStatus = when (this) {
-    SharedImportTaskStatus.Pending -> QueueStatus.Queued
-    SharedImportTaskStatus.Parsing -> QueueStatus.Running
-    SharedImportTaskStatus.Completed -> QueueStatus.Completed
-    SharedImportTaskStatus.Failed -> QueueStatus.Failed
+private fun SharedImportTaskState.toLocal(): QueueStatus = when (this) {
+    SharedImportTaskState.Queued -> QueueStatus.Queued
+    SharedImportTaskState.Running -> QueueStatus.Running
+    SharedImportTaskState.Succeeded -> QueueStatus.Completed
+    SharedImportTaskState.Failed -> QueueStatus.Failed
 }
 
 private fun com.ermao.library.shared.modules.administrativesettings.ImportTask.toLocal() = ImportTask(
     id = id,
-    fileName = originalName ?: requestedTitle ?: sourcePath.substringAfterLast('/'),
-    sourcePath = sourcePath,
+    fileName = kind,
+    sourcePath = sourceNodeId ?: resourceId ?: libraryId,
     createdAtLabel = createdAt,
-    status = status.toLocal(),
-    progress = progress.coerceIn(0, 100) / 100f,
-    statusCode = errorCode,
+    status = state.toLocal(),
+    statusCode = errorSummary,
 )
 
 private fun com.ermao.library.shared.modules.administrativesettings.ImportScanJob.toLocal() = ImportScanJobSummary(
@@ -535,7 +539,7 @@ private fun com.ermao.library.shared.modules.administrativesettings.LibraryOpera
 )
 
 private fun com.ermao.library.shared.modules.administrativesettings.OrganizeJob.toLocal() = OrganizeTask(
-    id, work.title, work.author,
+    id, book.title, book.author.orEmpty(),
     when (statusCategory) {
         com.ermao.library.shared.modules.administrativesettings.OrganizeStatusCategory.Waiting -> OrganizeStatus.AwaitingRecognition
         com.ermao.library.shared.modules.administrativesettings.OrganizeStatusCategory.Recognizing -> OrganizeStatus.NeedsConfirmation

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 from sqlalchemy import func, or_, select
@@ -128,7 +129,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             book_visibility_predicate(context)
         )
         base = (
-            select(LibraryFacet, func.count(LibraryBookFacet.book_id))
+            select(LibraryFacet, func.count(LibraryBook.id))
             .outerjoin(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
             .outerjoin(
                 LibraryBook,
@@ -155,6 +156,11 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
                 kind=cast(CatalogFacetKind, facet.kind),
                 name=facet.name,
                 normalized_name=facet.normalized_name,
+                aliases=tuple(
+                    str(alias)
+                    for alias in json.loads(facet.aliases or "[]")
+                    if isinstance(alias, str)
+                ),
                 book_count=int(count or 0),
                 updated_at=facet.updated_at,
             )

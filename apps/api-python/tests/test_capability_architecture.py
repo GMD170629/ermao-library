@@ -375,12 +375,11 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
             assert token not in source, f"{path.name}: {token}"
 
 
-def test_readable_resource_overlay_migration_is_immutable_and_self_contained() -> None:
+def test_readable_resource_overlay_baseline_is_single_and_self_contained() -> None:
     versions_dir = APP_ROOT / "db" / "alembic" / "versions"
     revision_files = sorted(versions_dir.glob("*.py"))
     assert [path.name for path in revision_files] == [
         "0001_library_topology_baseline.py",
-        "0002_source_node_writeback.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

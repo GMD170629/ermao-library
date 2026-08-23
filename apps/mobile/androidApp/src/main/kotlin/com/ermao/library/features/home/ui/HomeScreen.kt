@@ -30,11 +30,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.R
 import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.ContinueReadingCard
-import com.ermao.library.features.content.model.WorkCard
+import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
-import com.ermao.library.features.content.ui.WorkCover
-import com.ermao.library.features.content.ui.WorkGridItem
+import com.ermao.library.features.content.ui.BookCover
+import com.ermao.library.features.content.ui.BookGridItem
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -59,7 +59,7 @@ fun HomeScreen(
     state: HomeUiState,
     repository: ContentRepository,
     context: ContentRequestContext,
-    onOpenWork: (String) -> Unit,
+    onOpenBook: (String) -> Unit,
     onContinueReading: (ContinueReadingCard) -> Unit,
     onOpenLibrary: () -> Unit,
     onRetry: () -> Unit,
@@ -115,7 +115,7 @@ fun HomeScreen(
                                     item = continueReading,
                                     repository = repository,
                                     context = context,
-                                    onOpenWork = onOpenWork,
+                                    onOpenBook = onOpenBook,
                                     onContinueReading = onContinueReading,
                                     lastReadClock = lastReadClock,
                                 )
@@ -140,10 +140,10 @@ fun HomeScreen(
                                     HomeShelf(
                                         title = stringResource(R.string.home_recent_reading),
                                         listTag = "home-recent-reading-list",
-                                        works = content.recentReading,
+                                        books = content.recentReading,
                                         repository = repository,
                                         context = context,
-                                        onOpenWork = onOpenWork,
+                                        onOpenBook = onOpenBook,
                                     )
                                 }
                             }
@@ -152,10 +152,10 @@ fun HomeScreen(
                                     HomeShelf(
                                         title = stringResource(R.string.home_recent_added),
                                         listTag = "home-recent-added-list",
-                                        works = content.recentAdded,
+                                        books = content.recentAdded,
                                         repository = repository,
                                         context = context,
-                                        onOpenWork = onOpenWork,
+                                        onOpenBook = onOpenBook,
                                     )
                                 }
                             }
@@ -182,23 +182,23 @@ private fun ContinueReadingTask(
     item: ContinueReadingCard,
     repository: ContentRepository,
     context: ContentRequestContext,
-    onOpenWork: (String) -> Unit,
+    onOpenBook: (String) -> Unit,
     onContinueReading: (ContinueReadingCard) -> Unit,
     lastReadClock: Clock,
 ) {
     val theme = WarmPageThemeValues
     val locale = LocalConfiguration.current.locales[0]
     val positionLabel = selectContinuePositionLabel(
-        workTitle = item.work.title,
+        bookTitle = item.book.title,
         positionLabel = item.positionLabel,
-        volumeTitle = item.volumeTitle,
+        resourceTitle = item.resourceTitle,
     )
     val lastReadLabel = homeLastReadPresentation(
         lastReadAtEpochMillis = item.lastReadAtEpochMillis,
         now = lastReadClock.instant(),
         zoneId = lastReadClock.zone,
     )?.localizedLabel(lastReadClock.zone)
-    val progress = item.work.progressPercent?.coerceIn(0, 100)
+    val progress = item.book.progressPercent?.coerceIn(0, 100)
     val progressLabel = progress?.let {
         NumberFormat.getPercentInstance(locale).apply {
             maximumFractionDigits = 0
@@ -228,12 +228,12 @@ private fun ContinueReadingTask(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenWork(item.work.id) },
+                        .clickable { onOpenBook(item.book.id) },
                     horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    WorkCover(
-                        work = item.work,
+                    BookCover(
+                        book = item.book,
                         repository = repository,
                         context = context,
                         role = CoverRole.Compact,
@@ -244,13 +244,13 @@ private fun ContinueReadingTask(
                         verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
                     ) {
                         Text(
-                            text = item.work.title,
+                            text = item.book.title,
                             style = theme.typography.sectionTitle,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = item.work.author,
+                            text = item.book.author,
                             style = theme.typography.callout,
                             color = theme.colors.textSecondary,
                             maxLines = 1,
@@ -320,10 +320,10 @@ private fun HomeLastReadPresentation.localizedLabel(zoneId: ZoneId): String {
 private fun HomeShelf(
     title: String,
     listTag: String,
-    works: List<WorkCard>,
+    books: List<BookCard>,
     repository: ContentRepository,
     context: ContentRequestContext,
-    onOpenWork: (String) -> Unit,
+    onOpenBook: (String) -> Unit,
 ) {
     val theme = WarmPageThemeValues
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
@@ -339,14 +339,14 @@ private fun HomeShelf(
                 modifier = Modifier.testTag(listTag),
                 horizontalArrangement = Arrangement.spacedBy(theme.components.grid.horizontalGap),
             ) {
-                items(works, key = WorkCard::id) { work ->
-                    WorkGridItem(
-                        work = work,
+                items(books, key = BookCard::id) { book ->
+                    BookGridItem(
+                        book = book,
                         repository = repository,
                         context = context,
                         modifier = Modifier
                             .width(itemWidth)
-                            .clickable { onOpenWork(work.id) },
+                            .clickable { onOpenBook(book.id) },
                     )
                 }
             }

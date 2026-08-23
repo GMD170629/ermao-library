@@ -560,7 +560,7 @@ class ScanLibrarySourceTree:
             library_id=config.library_id,
             book_id=book_id,
             source_node_id=node_id,
-            adapter=adapter_identity(adapter),
+            adapter=adapter_identity(adapter, source_name=relative_path.name),
         )
         self._source_nodes.upsert_interpretation(
             source_node_id=node_id,

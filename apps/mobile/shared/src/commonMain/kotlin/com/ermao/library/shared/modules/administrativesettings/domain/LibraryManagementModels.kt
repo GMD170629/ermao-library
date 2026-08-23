@@ -51,15 +51,15 @@ data class DirectoryNode(
     val children: List<DirectoryChild>,
 )
 
-enum class ImportTaskStatus(val wireValue: String) {
-    Pending("PENDING"),
-    Parsing("PARSING"),
-    Completed("COMPLETED"),
+enum class ImportTaskState(val wireValue: String) {
+    Queued("QUEUED"),
+    Running("RUNNING"),
+    Succeeded("SUCCEEDED"),
     Failed("FAILED"),
 }
 
 data class ImportTaskFilter(
-    val status: ImportTaskStatus? = null,
+    val state: ImportTaskState? = null,
     val keyword: String? = null,
     val page: Int = 1,
     val pageSize: Int = 20,
@@ -67,41 +67,23 @@ data class ImportTaskFilter(
 
 data class ImportTask(
     val id: String,
-    val libraryId: String?,
-    val workId: String?,
-    val volumeId: String?,
-    val origin: String,
-    val mediaKindPolicy: MediaKindPolicy,
-    val status: ImportTaskStatus,
-    val originalName: String?,
-    val requestedTitle: String?,
-    val requestedAuthor: String?,
-    val sourcePath: String,
-    val taskKind: String,
-    val assetCount: Int,
-    val processedAssetCount: Int,
-    val progress: Int,
-    val durationMilliseconds: Long,
-    val errorCode: String?,
+    val kind: String,
+    val libraryId: String,
+    val resourceId: String?,
+    val sourceNodeId: String?,
+    val role: String?,
+    val state: ImportTaskState,
     val errorSummary: String?,
-    val retryable: Boolean,
-    val attempts: Int,
+    val createdAt: String,
     val startedAt: String?,
     val finishedAt: String?,
-    val createdAt: String,
-    val updatedAt: String,
-    val sourceFileExists: Boolean,
-)
-
-data class ImportTaskSummary(
-    val completed: Int,
-    val failed: Int,
 )
 
 data class ImportTaskPage(
     val tasks: List<ImportTask>,
-    val summary: ImportTaskSummary,
     val pageInfo: PageInfo,
+    val completed: Int,
+    val failed: Int,
 )
 
 data class ImportTaskLog(

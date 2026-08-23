@@ -57,10 +57,9 @@ class ReaderEpubInstrumentedTest {
     fun publishRealEpub() = runBlocking {
         source = instrumentation.context.assets.open("reader-v2.epub").use { input ->
             publicationStore.publishLocalEpub(
-                sourceId = sourceId,
+                resourceId = sourceId,
                 displayTitle = "Reader v2 fixture",
                 input = input,
-                volumeId = "reader-v2",
             )
         }
     }
@@ -242,7 +241,7 @@ class ReaderEpubInstrumentedTest {
         val removedResource = "legacy/removed-chapter.xhtml"
         progressStore.save(
             ReaderProgress(
-                sourceId = sourceId,
+                resourceId = sourceId,
                 location = ReflowReaderLocation(
                     resourceKey = removedResource,
                     progression = 0.5,

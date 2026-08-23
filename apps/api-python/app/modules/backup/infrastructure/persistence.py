@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Float,
     Integer,
     String,
+    Table,
     Text,
     delete,
     insert,
@@ -34,19 +36,26 @@ from app.models import (
     LibraryBookMetadata,
     LibraryFacet,
     LibraryImportTask,
+    LibraryOperation,
     LibraryReadableResource,
     LibraryReadableResourceFacet,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
+    LibrarySourceNodeInterpretation,
+    LibrarySourceNodeMetadata,
     MetadataLookupTask,
     MetadataProviderPipeline,
     MetadataSuggestion,
     OrganizeJob,
+    OrganizeRun,
     ReadableResourceNavigationUnit,
     ReaderBookmark,
     ReaderBookPreference,
     ReaderPreference,
     ReaderProgressCursor,
+    ReaderProgressMutation,
     ReaderResourceProgress,
     Shelf,
     ShelfBook,
@@ -61,6 +70,7 @@ from app.modules.backup.application.restore import (
     BackupRecordValidationError,
     PreparedRestorePlan,
 )
+from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 
 def _legacy_column_to_attr(model: type[Base]) -> dict[str, str]:
@@ -72,11 +82,16 @@ TABLE_MODELS: dict[str, type[Base]] = {
     "User": User,
     "UserPreference": UserPreference,
     "Shelf": Shelf,
+    "ShelfCollectionMembership": ShelfCollectionMembership,
     "Library": Library,
     "UserLibraryAccess": UserLibraryAccess,
     "LibraryBook": LibraryBook,
     "LibraryReadableResource": LibraryReadableResource,
     "LibraryResourceAsset": LibraryResourceAsset,
+    "LibraryResourceAssetMetadata": LibraryResourceAssetMetadata,
+    "LibrarySourceNode": LibrarySourceNode,
+    "LibrarySourceNodeMetadata": LibrarySourceNodeMetadata,
+    "LibrarySourceNodeInterpretation": LibrarySourceNodeInterpretation,
     "LibraryBookMetadata": LibraryBookMetadata,
     "LibraryReadableResourceMetadata": LibraryReadableResourceMetadata,
     "LibraryFacet": LibraryFacet,
@@ -88,6 +103,7 @@ TABLE_MODELS: dict[str, type[Base]] = {
     "ReadableResourceNavigationUnit": ReadableResourceNavigationUnit,
     "LibraryImportTask": LibraryImportTask,
     "OrganizeJob": OrganizeJob,
+    "OrganizeRun": OrganizeRun,
     "MetadataSuggestion": MetadataSuggestion,
     "MetadataLookupTask": MetadataLookupTask,
     "ExternalMetadataCache": ExternalMetadataCache,
@@ -95,10 +111,50 @@ TABLE_MODELS: dict[str, type[Base]] = {
     "ReaderBookPreference": ReaderBookPreference,
     "ReaderProgressCursor": ReaderProgressCursor,
     "ReaderBookmark": ReaderBookmark,
+    "ReaderProgressMutation": ReaderProgressMutation,
+    "LibraryOperation": LibraryOperation,
     "Source": Source,
     "MetadataProviderPipeline": MetadataProviderPipeline,
     "SystemSetting": SystemSetting,
 }
+
+
+def table_dependency_order(table_names: Iterable[str]) -> tuple[str, ...]:
+    """Return a stable parent-before-child order for the selected ORM tables.
+
+    SQLAlchemy's metadata is the source of truth for ownership.  Keeping the
+    order derived from foreign keys prevents a newly-added child table from
+    silently being inserted before its parent in a backup restore.  Self
+    references (the SourceNode parent tree) are resolved at row level by
+    ``_row_dependency_order`` below.
+    """
+
+    ordered_names = tuple(dict.fromkeys(table_names))
+    selected = set(ordered_names)
+    dependencies: dict[str, set[str]] = {name: set() for name in ordered_names}
+    for table_name in ordered_names:
+        model = TABLE_MODELS.get(table_name)
+        if model is None:
+            continue
+        table = cast(Table, model.__table__)
+        for constraint in table.foreign_key_constraints:
+            parent_table = constraint.referred_table.name
+            if parent_table in selected and parent_table != table_name:
+                dependencies[table_name].add(parent_table)
+
+    result: list[str] = []
+    remaining = set(ordered_names)
+    while remaining:
+        ready = [
+            name
+            for name in ordered_names
+            if name in remaining and not (dependencies[name] & remaining)
+        ]
+        if not ready:
+            raise BackupRecordValidationError("BACKUP_TABLE_DEPENDENCY_CYCLE")
+        result.extend(ready)
+        remaining.difference_update(ready)
+    return tuple(result)
 
 
 def model_columns(model: type[Base]) -> set[str]:
@@ -221,45 +277,89 @@ def prepare_table_records(
     return tuple(prepared)
 
 
+def _row_dependency_order(
+    table_name: str,
+    records: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    """Order rows with a same-table parent FK before their children."""
+
+    if table_name != "LibrarySourceNode" or not records:
+        return records
+    records_by_id = {
+        record.get("id"): record for record in records if record.get("id") is not None
+    }
+    ordered: list[dict[str, object]] = []
+    visiting: set[object] = set()
+    visited: set[object] = set()
+
+    def visit(record_id: object) -> None:
+        if record_id in visited or record_id is None:
+            return
+        if record_id in visiting:
+            raise BackupRecordValidationError(
+                "BACKUP_ROW_DEPENDENCY_CYCLE:LibrarySourceNode"
+            )
+        record = records_by_id.get(record_id)
+        if record is None:
+            return
+        visiting.add(record_id)
+        visit(record.get("parentId"))
+        visiting.remove(record_id)
+        visited.add(record_id)
+        ordered.append(record)
+
+    for record in records:
+        visit(record.get("id"))
+    return tuple(ordered)
+
+
 def validate_restore_relationships(
     records_by_table: dict[str, tuple[dict[str, object], ...]],
 ) -> None:
     """Reject duplicate identities and dangling exported foreign keys in memory."""
 
-    referenced_columns = {
-        (foreign_key.column.table.name, foreign_key.column.name)
-        for model in TABLE_MODELS.values()
-        for foreign_key in model.__table__.foreign_keys
-    }
-    values_by_column: dict[tuple[str, str], set[object]] = defaultdict(set)
     for table_name, records in records_by_table.items():
-        model = TABLE_MODELS[table_name]
+        model = TABLE_MODELS.get(table_name)
+        if model is None:
+            raise BackupRecordValidationError(f"BACKUP_TABLE_UNKNOWN:{table_name}")
         primary_keys = tuple(column.name for column in model.__table__.primary_key)
         seen_primary_keys: set[tuple[object, ...]] = set()
         for record in records:
             primary_key = tuple(record.get(name) for name in primary_keys)
             if primary_keys and primary_key in seen_primary_keys:
-                raise ValueError(f"BACKUP_DUPLICATE_PRIMARY_KEY:{table_name}")
+                raise BackupRecordValidationError(
+                    f"BACKUP_DUPLICATE_PRIMARY_KEY:{table_name}"
+                )
             if primary_keys:
                 seen_primary_keys.add(primary_key)
-            for name, value in record.items():
-                if value is not None and (table_name, name) in referenced_columns:
-                    values_by_column[(table_name, name)].add(value)
 
-    exported_tables = set(records_by_table)
     for table_name, records in records_by_table.items():
         model = TABLE_MODELS[table_name]
-        for foreign_key in model.__table__.foreign_keys:
-            target_table = foreign_key.column.table.name
-            if target_table not in exported_tables:
-                continue
-            target_values = values_by_column[(target_table, foreign_key.column.name)]
+        table = cast(Table, model.__table__)
+        for constraint in table.foreign_key_constraints:
+            target_table = constraint.referred_table.name
+            target_records = records_by_table.get(target_table, ())
+            target_columns = tuple(
+                element.column.name for element in constraint.elements
+            )
+            target_values = {
+                tuple(record.get(column_name) for column_name in target_columns)
+                for record in target_records
+            }
+            local_columns = tuple(
+                element.parent.name for element in constraint.elements
+            )
             for record in records:
-                value = record.get(foreign_key.parent.name)
-                if value is not None and value not in target_values:
-                    raise ValueError(
-                        "BACKUP_FOREIGN_KEY_INVALID:"
-                        f"{table_name}.{foreign_key.parent.name}"
+                values = tuple(record.get(column_name) for column_name in local_columns)
+                # SQLite follows normal nullable-FK semantics for a composite
+                # key: a NULL component means the relationship is not
+                # asserted.  The SourceNode parent-pair CHECK constraint is
+                # still enforced by the validation database before restore.
+                if any(value is None for value in values):
+                    continue
+                if values not in target_values:
+                    raise BackupRecordValidationError(
+                        f"BACKUP_FOREIGN_KEY_INVALID:{table_name}.{local_columns[0]}"
                     )
 
 
@@ -281,16 +381,25 @@ def prepare_restore_plan(
 ) -> PreparedRestorePlan:
     """Construct all typed SQL and chunks before the writer slot is acquired."""
 
+    insertion_by_table = {
+        table_name: export_key for export_key, table_name in insertion_order
+    }
+    insertion_tables = table_dependency_order(insertion_by_table)
+    delete_tables = tuple(reversed(table_dependency_order(delete_order)))
+
     statements: list[Any] = []
-    for table_name in delete_order:
+    for table_name in delete_tables:
         model = TABLE_MODELS.get(table_name)
         if model is not None:
             statements.append(delete(model))
 
     restored_counts: dict[str, int] = {}
-    for export_key, table_name in insertion_order:
+    for table_name in insertion_tables:
+        export_key = insertion_by_table[table_name]
         model = TABLE_MODELS.get(table_name)
-        records = records_by_table.get(table_name, ())
+        records = _row_dependency_order(
+            table_name, records_by_table.get(table_name, ())
+        )
         restored_counts[export_key] = len(records)
         if model is None:
             continue

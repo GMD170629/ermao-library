@@ -189,7 +189,7 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
     init(serverIdentity: String, userID: String, defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let digest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
-        key = "reader.preferences.v4." + digest.map { String(format: "%02x", $0) }.joined()
+        key = "reader.preferences.v5." + digest.map { String(format: "%02x", $0) }.joined()
     }
 
     func load() -> IosReaderPreferences {
@@ -270,6 +270,16 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
         return preferences
     }
 
+    static func clearNamespace(
+        serverIdentity: String,
+        userID: String,
+        defaults: UserDefaults = .standard
+    ) {
+        let digest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        defaults.removeObject(forKey: "reader.preferences.v5.\(digest)")
+    }
+
 }
 
 struct IosReaderBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
@@ -296,13 +306,15 @@ final class IosReaderBookmarkStore: @unchecked Sendable {
     init(
         serverIdentity: String,
         userID: String,
-        volumeID: String,
+        resourceID: String,
         defaults: UserDefaults = .standard
     ) {
         self.defaults = defaults
-        let namespace = "\(serverIdentity)\0\(userID)\0\(volumeID)"
-        let digest = SHA256.hash(data: Data(namespace.utf8))
-        key = "reader.bookmarks.v1." + digest.map { String(format: "%02x", $0) }.joined()
+        let accountDigest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let resourceDigest = SHA256.hash(data: Data(resourceID.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        key = "reader.bookmarks.v2.\(accountDigest).\(resourceDigest)"
     }
 
     fileprivate func load() -> IosReaderBookmarkState {
@@ -315,6 +327,19 @@ final class IosReaderBookmarkStore: @unchecked Sendable {
     fileprivate func save(_ state: IosReaderBookmarkState) {
         guard let data = try? JSONEncoder().encode(state) else { return }
         defaults.set(data, forKey: key)
+    }
+
+    static func clearNamespace(
+        serverIdentity: String,
+        userID: String,
+        defaults: UserDefaults = .standard
+    ) {
+        let accountDigest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let prefix = "reader.bookmarks.v2.\(accountDigest)."
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            defaults.removeObject(forKey: key)
+        }
     }
 }
 
@@ -437,7 +462,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     @Published var controlsVisible = false
     @Published var preferences: IosReaderPreferences
 
-    let sourceID: String
+    let resourceID: String
     let displayTitle: String
     let sourceFormat: ErmaoShared.ReaderSourceFormat
     let capabilities = IosReaderCapabilities()
@@ -453,7 +478,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let bookmarkRemote: IosReaderBookmarkRemote?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
-    private let workID: String
+    private let bookID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
     private let canonicalNavigation: [IosReaderTocEntry]
     private var publication: Publication?
@@ -467,7 +492,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let navigationQueue = IosReaderNavigationQueue()
 
     init(
-        sourceID: String,
+        resourceID: String,
         displayTitle: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat = .epub,
         canonicalNavigation: [IosReaderTocEntry] = [],
@@ -481,13 +506,13 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         bookmarkSyncTarget: ErmaoShared.ReaderBookmarkSyncTarget? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4? = nil,
         namespaceKey: String = "local",
-        workID: String = "local",
+        bookID: String = "local",
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void = { _ in },
         runtime: IosReadiumRuntime = IosReadiumRuntime(),
         mapper: ReadiumSwiftLocatorMapper = ReadiumSwiftLocatorMapper(),
         deviceIdentity: IosReaderDeviceIdentity = IosReaderDeviceIdentity()
     ) {
-        self.sourceID = sourceID
+        self.resourceID = resourceID
         self.displayTitle = displayTitle
         self.sourceFormat = sourceFormat
         self.canonicalNavigation = canonicalNavigation
@@ -504,7 +529,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         }
         self.remoteSnapshot = remoteSnapshot
         self.namespaceKey = namespaceKey
-        self.workID = workID
+        self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
         self.runtime = runtime
         self.mapper = mapper
@@ -524,14 +549,17 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         didOpen = true
         phase = .opening
         do {
-            let managed = try await managedStore.resolve(sourceID: sourceID)
+            let managed = try await managedStore.resolve(
+                resourceID: resourceID,
+                namespace: namespaceKey
+            )
             guard managed.sourceFormat == sourceFormat else {
                 throw IosReaderFailure(code: .corruptFile)
             }
             let openedPublication = try await runtime.open(managed)
             let publication = openedPublication.publication
             self.openedPublication = openedPublication
-            let saved = try? await progressStore.load(sourceId: sourceID)
+            let saved = try? await progressStore.load(resourceId: resourceID)
             let initial = await restore(
                 local: saved,
                 remote: remoteSnapshot,
@@ -835,11 +863,11 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         managed: IosManagedPublication
     ) async -> Locator? {
         let openedSource = ErmaoShared.LocalReaderSource(
-            sourceId: managed.sourceID,
+            resourceId: managed.resourceID,
             displayTitle: managed.displayTitle,
             format: managed.sourceFormat.readerFormat,
-            workId: managed.workID,
-            volumeId: managed.volumeID,
+            bookId: managed.bookID,
+            resourceId: managed.resourceID,
             sourceFormat: managed.sourceFormat
         )
         let decision = ErmaoShared.PublicKt.decideReaderResume(
@@ -1123,8 +1151,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         if progressCoordination?.remoteSnapshot == nil { dismissResumePrompt() }
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
-            workId: workID,
-            volumeId: sourceID,
+            bookId: bookID,
+            resourceId: resourceID,
             percent: min(100, max(0, self.progress * 100)),
             progress: progress,
             chapterTitle: chapterTitle
@@ -1135,7 +1163,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         guard let managedPublication else { throw IosReaderFailure(code: .persistenceFailed) }
         let location = try mapper.sharedLocation(from: locator)
         return ErmaoShared.ReaderProgress(
-            sourceId: sourceID,
+            resourceId: resourceID,
             location: location,
             updatedAtEpochMillis: Int64(Date().timeIntervalSince1970 * 1_000),
             deviceId: deviceIdentity.stableDeviceId(),

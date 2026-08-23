@@ -65,7 +65,7 @@ enum RootTabContract {
 }
 
 enum AppRoute: Hashable, Sendable {
-    case work(workID: String)
+    case work(bookID: String)
     case downloads
     case reader(ReaderHandoff)
     case facet(kind: FacetKind, facetID: String)
@@ -75,9 +75,9 @@ enum AppRoute: Hashable, Sendable {
 
     var identityKey: String {
         switch self {
-        case .work(let workID): "work:\(workID)"
+        case .work(let bookID): "work:\(bookID)"
         case .downloads: "downloads"
-        case .reader(let handoff): "reader:\(handoff.volumeID):\(handoff.source)"
+        case .reader(let handoff): "reader:\(handoff.resourceID):\(handoff.source)"
         case .facet(let kind, let facetID): "facet:\(kind.rawValue):\(facetID)"
         case .collection(let kind): "collection:\(kind.rawValue)"
         case .settings(let route): "settings:\(route.rawValue)"
@@ -225,7 +225,7 @@ struct MainTabView: View {
                         client: contentClient,
                         cache: cache,
                         onUnauthorized: store.refreshForForeground,
-                        openWork: { open(.work(workID: $0), in: .home) },
+                        openWork: { open(.work(bookID: $0), in: .home) },
                         openCollection: { open(.collection($0), in: .home) }
                     )
                     .id(context.namespaceKey)
@@ -281,11 +281,11 @@ struct MainTabView: View {
             client: contentClient,
             cache: cache,
             onUnauthorized: store.refreshForForeground,
-            openWork: { workID in
+            openWork: { bookID in
                 if horizontalSizeClass == .regular {
-                    expandedLibraryWorkID = workID
+                    expandedLibraryWorkID = bookID
                 } else {
-                    open(.work(workID: workID), in: .library)
+                    open(.work(bookID: bookID), in: .library)
                 }
             },
             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) }
@@ -296,7 +296,7 @@ struct MainTabView: View {
                     .frame(minWidth: 360, idealWidth: 460, maxWidth: 520)
                 Divider()
                 Group {
-                    if let workID = expandedLibraryWorkID {
+                    if let bookID = expandedLibraryWorkID {
                         WorkDetailView(
                             context: context,
                             client: contentClient,
@@ -305,14 +305,14 @@ struct MainTabView: View {
                             downloads: downloads,
                             managementRepository: workManagementRepository,
                             canManageSystem: store.snapshot.authorization?.canManageSystem == true,
-                            workID: workID,
+                            bookID: bookID,
                             onUnauthorized: store.refreshForForeground,
                             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
                             openDownloads: openDownloadsCenter,
                             openReader: { openReader($0, context: context, fallbackTab: .library) },
                             prepareReader: { readerPreparation = $0 }
                         )
-                        .id(workID)
+                        .id(bookID)
                     } else {
                         ContentStatusView(
                             systemImage: "book.closed",
@@ -335,7 +335,7 @@ struct MainTabView: View {
         context: ContentRequestContext
     ) -> some View {
         switch route {
-        case .work(let workID):
+        case .work(let bookID):
             WorkDetailView(
                 context: context,
                 client: contentClient,
@@ -344,7 +344,7 @@ struct MainTabView: View {
                 downloads: downloads,
                 managementRepository: workManagementRepository,
                 canManageSystem: store.snapshot.authorization?.canManageSystem == true,
-                workID: workID,
+                bookID: bookID,
                 onUnauthorized: store.refreshForForeground,
                 openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
                 openDownloads: openDownloadsCenter,
@@ -366,7 +366,7 @@ struct MainTabView: View {
                 kind: kind,
                 facetID: facetID,
                 onUnauthorized: store.refreshForForeground,
-                openWork: { open(.work(workID: $0), in: presentation) }
+                openWork: { open(.work(bookID: $0), in: presentation) }
             )
         case .collection(let kind):
             WorkCollectionView(
@@ -375,7 +375,7 @@ struct MainTabView: View {
                 cache: cache,
                 kind: kind,
                 onUnauthorized: store.refreshForForeground,
-                openWork: { open(.work(workID: $0), in: presentation) }
+                openWork: { open(.work(bookID: $0), in: presentation) }
             )
         case .settings(let route):
             if let settingsViewModel {
@@ -430,8 +430,8 @@ struct MainTabView: View {
         guard readerComposition != nil else { return }
         readerLaunch = IosReaderLaunchRequest(
             context: context,
-            workID: selection.workID,
-            volumeID: selection.volumeID,
+            bookID: selection.bookID,
+            resourceID: selection.resourceID,
             displayTitle: selection.displayTitle,
             managedDownloadRecordID: managedDownloadRecordID
         )
@@ -455,8 +455,8 @@ struct MainTabView: View {
             }
             openReader(
                 WorkReaderSelection(
-                    workID: handoff.workID,
-                    volumeID: handoff.volumeID,
+                    bookID: handoff.bookID,
+                    resourceID: handoff.resourceID,
                     displayTitle: handoff.title
                 ),
                 context: context,

@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.content.model.ContentFreshness
-import com.ermao.library.features.content.model.WorkCard
+import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.platform.persistence.AndroidCoverCache
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -71,17 +71,17 @@ enum class CoverSize {
 }
 
 @Composable
-fun WorkCover(
-    work: WorkCard,
+fun BookCover(
+    book: BookCard,
     repository: ContentRepository,
     context: ContentRequestContext,
     role: CoverRole,
     modifier: Modifier = Modifier,
 ) {
     ContentCover(
-        contentId = work.id,
-        title = work.title,
-        coverUrl = work.coverUrl,
+        contentId = book.id,
+        title = book.title,
+        coverUrl = book.coverUrl,
         repository = repository,
         context = context,
         role = role,
@@ -90,15 +90,15 @@ fun WorkCover(
 }
 
 @Composable
-fun WorkCover(
-    work: WorkCard,
+fun BookCover(
+    book: BookCard,
     repository: ContentRepository,
     context: ContentRequestContext,
     size: CoverSize,
     modifier: Modifier = Modifier,
 ) {
-    WorkCover(
-        work = work,
+    BookCover(
+        book = book,
         repository = repository,
         context = context,
         role = size.toCoverRole(),
@@ -181,36 +181,36 @@ fun ContentCover(
 }
 
 @Composable
-fun WorkGridItem(
-    work: WorkCard,
+fun BookGridItem(
+    book: BookCard,
     repository: ContentRepository,
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
-    Column(modifier = modifier.testTag("work-${work.id}")) {
-        WorkCover(
-            work = work,
+    Column(modifier = modifier.testTag("book-${book.id}")) {
+        BookCover(
+            book = book,
             repository = repository,
             context = context,
             role = CoverRole.Compact,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            text = work.title,
+            text = book.title,
             style = theme.typography.callout,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = theme.spacing.one),
         )
         Text(
-            text = work.author,
+            text = book.author,
             color = theme.colors.textSecondary,
             style = theme.typography.caption,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        work.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
+        book.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
             CoverProgress(
                 progressPercent = progress,
                 modifier = Modifier.padding(top = theme.spacing.one),
@@ -220,20 +220,20 @@ fun WorkGridItem(
 }
 
 @Composable
-fun WorkListItem(
-    work: WorkCard,
+fun BookListItem(
+    book: BookCard,
     repository: ContentRepository,
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
     Row(
-        modifier = modifier.testTag("work-${work.id}"),
+        modifier = modifier.testTag("book-${book.id}"),
         horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        WorkCover(
-            work = work,
+        BookCover(
+            book = book,
             repository = repository,
             context = context,
             role = CoverRole.Compact,
@@ -244,19 +244,19 @@ fun WorkListItem(
             verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
         ) {
             Text(
-                text = work.title,
+                text = book.title,
                 style = theme.typography.headline,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = work.author,
+                text = book.author,
                 color = theme.colors.textSecondary,
                 style = theme.typography.callout,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            work.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
+            book.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
                 ReadingProgress(progressPercent = progress)
             }
         }

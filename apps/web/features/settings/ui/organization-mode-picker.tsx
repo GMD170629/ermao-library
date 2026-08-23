@@ -1,14 +1,13 @@
 'use client';
 
-import { BookOpen, Check, FileAudio, Files, FolderOpen } from 'lucide-react';
+import { BookOpen, Check, Files } from 'lucide-react';
 import { cn } from '../../../components/ui/cn';
-import { I18nText, useI18n } from '@/i18n/provider';
+import { useI18n } from '@/i18n/provider';
 import { ORGANIZATION_MODES, type OrganizationMode } from '../model/organization-mode';
 
 const MODE_ICONS = {
   FLAT: Files,
-  VOLUMES: BookOpen,
-  AUDIOBOOK: FileAudio
+  VOLUMES: BookOpen
 } as const;
 
 export function OrganizationModePicker({
@@ -24,7 +23,7 @@ export function OrganizationModePicker({
 }) {
   const { t } = useI18n();
   return (
-    <div role="radiogroup" aria-label={t('组织方式')} className={cn('grid items-stretch gap-3', compact ? 'md:grid-cols-3' : 'sm:grid-cols-3')}>
+    <div role="radiogroup" aria-label={t('组织方式')} className={cn('grid items-stretch gap-3', compact ? 'md:grid-cols-2' : 'sm:grid-cols-2')}>
       {ORGANIZATION_MODES.map((option) => {
         const Icon = MODE_ICONS[option.value];
         const selected = value === option.value;
@@ -52,11 +51,6 @@ export function OrganizationModePicker({
             </span>
             <span className="mt-3 block shrink-0 text-sm font-semibold text-[#606C38]">{t(option.label)}</span>
             <span className="mt-1.5 block text-xs leading-5 text-[#606C38]/70">{t(option.description)}</span>
-            {option.value === 'AUDIOBOOK' ? (
-              <span className="mt-auto flex items-center gap-1.5 pt-3 text-xs font-semibold text-[#9E4D29]">
-                <FolderOpen size={13} /><I18nText>示例：图书 / 可读资源 / 音轨</I18nText>
-              </span>
-            ) : null}
           </button>
         );
       })}

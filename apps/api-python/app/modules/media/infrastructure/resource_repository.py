@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import cast
 
 from sqlalchemy import select
@@ -140,7 +139,8 @@ class SqlAlchemyMediaResourceRepository:
         )
         return MediaAssetResource(
             id=asset.id,
-            path=str(Path(library.root_path) / source_node.relative_path),
+            path=source_node.relative_path,
+            source_root=library.root_path,
             mime_type=(
                 metadata.mime_type
                 if metadata is not None and metadata.mime_type

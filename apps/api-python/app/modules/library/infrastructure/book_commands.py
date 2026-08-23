@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.library.application.book_commands import BookMutationPort
 from app.modules.library.infrastructure import books
+from app.modules.library.infrastructure.facets import sync_book_facets
 
 
 class SqlAlchemyBookMutation(BookMutationPort):
@@ -20,6 +21,10 @@ class SqlAlchemyBookMutation(BookMutationPort):
         self, *, book_id: str, values: Mapping[str, object]
     ) -> Mapping[str, object] | None:
         updated = books.update_book_fields(self._db, book_id, dict(values))
+        if updated is not None and {"author", "seriesName", "series_name"}.intersection(
+            values
+        ):
+            sync_book_facets(self._db, book_id)
         return dict(updated) if updated is not None else None
 
 

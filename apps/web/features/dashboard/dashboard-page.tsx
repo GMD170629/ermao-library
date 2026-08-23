@@ -11,16 +11,14 @@ import { Progress } from '../../components/ui/progress';
 import { useI18n } from '../../i18n/provider';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { UploadBookDialog } from '../library/public';
-import { mapContinueReadingItem, type ContinueReadingItem } from './model/continue-reading';
+import {
+  fetchDashboardContinueReading,
+  fetchDashboardRecentBooks,
+  fetchDashboardRecentReading
+} from './api/dashboard';
+import type { ContinueReadingItem } from './model/continue-reading';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-async function api<T>(path: string): Promise<T> {
-  const response = await fetch(path);
-  const payload = (await response.json()) as { ok: boolean; data?: T; error?: { message: string } };
-  if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取数据失败');
-  return payload.data;
-}
 
 function shortReadTime(value: string | null, locale: string, t: (source: string, values?: Record<string, string>) => string) {
   if (!value) return '';
@@ -52,16 +50,16 @@ export function DashboardPage() {
   useEffect(() => {
     let active = true;
     Promise.allSettled([
-      api<{ item: unknown }>('/api/dashboard/continue-reading'),
-      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-reading?limit=10'),
-      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-books?limit=10')
+      fetchDashboardContinueReading(),
+      fetchDashboardRecentReading(),
+      fetchDashboardRecentBooks()
     ]).then(([continueResult, readingResult, addedResult]) => {
       if (!active) return;
-      if (continueResult.status === 'fulfilled') setContinueItem(mapContinueReadingItem(continueResult.value.item));
+      if (continueResult.status === 'fulfilled') setContinueItem(continueResult.value);
       if (readingResult.status === 'fulfilled') {
-        setRecentReading(readingResult.value.books.slice(0, 10));
+        setRecentReading(readingResult.value.slice(0, 10));
       }
-      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.books.slice(0, 10));
+      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.slice(0, 10));
 
       const failure = [continueResult, readingResult, addedResult].find((result) => result.status === 'rejected');
       setError(failure?.status === 'rejected' ? (failure.reason instanceof Error ? failure.reason.message : '部分书库内容暂时无法读取') : '');

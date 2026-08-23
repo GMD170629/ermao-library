@@ -16,7 +16,6 @@ from app.models import (
     Library,
     LibraryBook,
     LibraryBookFacet,
-    LibraryBookMetadata,
     LibraryFacet,
     LibraryReadableResource,
 )
@@ -56,15 +55,8 @@ class SqlAlchemyLibraryFilterQueries:
         query: str,
         limit: int,
     ) -> LibraryFilterOptionPage:
-        if source == "tags":
-            options, has_more = self._tag_options(context, query, limit)
-        else:
-            column = (
-                LibraryBookMetadata.author
-                if source == "authors"
-                else LibraryBookMetadata.series_name
-            )
-            options, has_more = self._book_text_options(context, column, query, limit)
+        kind = {"authors": "AUTHOR", "tags": "TAG", "series": "SERIES"}[source]
+        options, has_more = self._facet_options(context, kind, query, limit)
         return LibraryFilterOptionPage(
             source=source,
             query=query,
@@ -124,40 +116,10 @@ class SqlAlchemyLibraryFilterQueries:
             LibraryFilterOption(value=str(row.id), label=str(row.name)) for row in rows
         )
 
-    def _book_text_options(
+    def _facet_options(
         self,
         context: AuthorizationContext,
-        column: object,
-        query: str,
-        limit: int,
-    ) -> tuple[tuple[LibraryFilterOption, ...], bool]:
-        value = func.trim(func.coalesce(cast(ColumnElement[str | None], column), ""))
-        normalized = func.lower(value)
-        count = func.count(distinct(LibraryBook.id)).label("option_count")
-        rows = self._db.execute(
-            select(
-                value.label("value"), count, func.min(LibraryBook.id).label("stable_id")
-            )
-            .select_from(LibraryBook)
-            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-            .where(
-                LibraryBook.visibility_state == "VISIBLE",
-                book_visibility_predicate(context),
-                value != "",
-                normalized.contains(query.lower(), autoescape=True),
-            )
-            .group_by(value)
-            .order_by(count.desc(), normalized.asc(), value.asc())
-            .limit(limit + 1)
-        ).all()
-        return tuple(
-            LibraryFilterOption(str(row.value), str(row.value), int(row.option_count))
-            for row in rows[:limit]
-        ), len(rows) > limit
-
-    def _tag_options(
-        self,
-        context: AuthorizationContext,
+        kind: str,
         query: str,
         limit: int,
     ) -> tuple[tuple[LibraryFilterOption, ...], bool]:
@@ -167,7 +129,7 @@ class SqlAlchemyLibraryFilterQueries:
             .join(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
             .join(LibraryBook, LibraryBook.id == LibraryBookFacet.book_id)
             .where(
-                LibraryFacet.kind == "TAG",
+                LibraryFacet.kind == kind,
                 func.lower(LibraryFacet.name).contains(query.lower(), autoescape=True),
                 LibraryBook.visibility_state == "VISIBLE",
                 book_visibility_predicate(context),

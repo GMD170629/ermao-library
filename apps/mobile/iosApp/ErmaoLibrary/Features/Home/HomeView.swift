@@ -99,11 +99,11 @@ struct HomeView: View {
                 )
             case .content(let item, _):
                 VStack(spacing: .space1Half) {
-                    Button { openWork(item.work.id) } label: {
+                    Button { openWork(item.book.id) } label: {
                         HStack(spacing: .space2) {
                             BookCoverView(
-                                reference: item.work.cover,
-                                title: item.work.title,
+                                reference: item.book.cover,
+                                title: item.book.title,
                                 context: context,
                                 client: client,
                                 cache: cache,
@@ -111,18 +111,18 @@ struct HomeView: View {
                             )
                             .frame(width: 104)
                             VStack(alignment: .leading, spacing: .spaceHalf) {
-                                Text(item.work.title).appTextStyle(.headline).lineLimit(2)
-                                Text(item.work.author)
+                                Text(item.book.title).appTextStyle(.headline).lineLimit(2)
+                                Text(item.book.author ?? "—")
                                     .appTextStyle(.callout)
                                     .foregroundStyle(theme.textSecondary)
                                     .lineLimit(1)
-                                if let position = item.positionLabel ?? item.volumeTitle {
+                                if let position = item.positionLabel ?? item.resourceTitle {
                                     Text(position)
                                         .appTextStyle(.label)
                                         .foregroundStyle(theme.textSecondary)
                                         .lineLimit(2)
                                 }
-                                if let progress = item.work.progress {
+                                if let progress = item.book.progress {
                                     Text(progress / 100, format: .percent.precision(.fractionLength(0)))
                                         .appTextStyle(.caption)
                                         .monospacedDigit()
@@ -134,7 +134,7 @@ struct HomeView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    PrimaryActionButton("home.continue.action") { openWork(item.work.id) }
+                    PrimaryActionButton("home.continue.action") { openWork(item.book.id) }
                 }
                 .padding(.space1Half)
                 .background(theme.surface)
@@ -150,7 +150,7 @@ struct HomeView: View {
     @ViewBuilder
     private func horizontalSection(
         title: LocalizedStringKey,
-        state: HomeSectionState<[WorkCard]>,
+        state: HomeSectionState<[BookCard]>,
         collection: HomeCollectionKind,
         retry: @escaping () -> Void
     ) -> some View {

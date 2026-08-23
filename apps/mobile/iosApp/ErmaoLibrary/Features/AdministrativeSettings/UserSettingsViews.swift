@@ -200,7 +200,7 @@ struct UserAccessView: View {
                 Section(copy[.selectedDirectories]) {
                     ForEach(snapshot.scopes.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }) { scope in
                         Button { if selected.contains(scope.id) { selected.remove(scope.id) } else { selected.insert(scope.id) } } label: {
-                            HStack { Image(systemName: selected.contains(scope.id) ? "checkmark.square.fill" : "square"); VStack(alignment: .leading) { Text(scope.name); Text(scope.serverPath).font(.caption).foregroundStyle(theme.textSecondary) }; Spacer(); Text("\(scope.workCount)").foregroundStyle(theme.textSecondary) }
+                            HStack { Image(systemName: selected.contains(scope.id) ? "checkmark.square.fill" : "square"); VStack(alignment: .leading) { Text(scope.name); Text(scope.serverPath).font(.caption).foregroundStyle(theme.textSecondary) }; Spacer(); Text("\(scope.bookCount)").foregroundStyle(theme.textSecondary) }
                         }
                     }
                 }

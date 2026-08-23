@@ -38,11 +38,10 @@ class ReaderMobiInstrumentedTest {
     fun publishMobiWithoutEpubConversion() = runBlocking {
         source = instrumentation.context.assets.open("01-basic-mobi6.mobi").use { input ->
             publicationStore.publishLocalPublication(
-                sourceId = sourceId,
+                resourceId = sourceId,
                 displayTitle = "MOBI product fixture",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Mobi,
-                volumeId = "mobi-volume",
             )
         }
     }

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 import pytest
-from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import (
@@ -30,8 +31,23 @@ from app.db.bootstrap import bootstrap_database
 from app.db.runner import head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
+from app.models import (
+    Library,
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
+    LibrarySourceNodeInterpretation,
+    LibrarySourceNodeMetadata,
+)
 from app.models.import_pipeline import Source
 from app.models.settings import ReaderBookPreference, SystemSetting
+from app.modules.imports.infrastructure.readable_resource_import_schema import (
+    LibraryImportTask,
+)
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
 
@@ -310,37 +326,33 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 2
-    assert script.get_heads() == ["0002_source_node_writeback"]
-    assert head_revision() == "0002_source_node_writeback"
+    assert len(revisions) == 1
+    assert script.get_heads() == ["0001_library_topology_baseline"]
+    assert head_revision() == "0001_library_topology_baseline"
     assert [revision.revision for revision in revisions] == [
-        "0002_source_node_writeback",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision == "0001_library_topology_baseline"
-    assert revisions[1].down_revision is None
+    assert revisions[0].down_revision is None
 
 
-def test_apply_schema_upgrades_the_supported_baseline(tmp_path) -> None:
+def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(settings.database_path)
-    config = runner_module.alembic_config_for_engine(engine)
     try:
-        with engine.connect() as connection:
-            config.attributes["connection"] = connection
-            command.upgrade(config, "0001_library_topology_baseline")
-        assert _current_revision(engine) == "0001_library_topology_baseline"
-
         runner_module.apply_schema(engine, settings)
-
-        assert _current_revision(engine) == "0002_source_node_writeback"
+        assert _current_revision(engine) == "0001_library_topology_baseline"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
         }
         assert operation_columns["sourceNodeId"]["nullable"] is False
         assert operation_columns["resourceId"]["nullable"] is True
+        preparation_columns = {
+            column["name"]: column
+            for column in inspect(engine).get_columns("MetadataWritebackPreparation")
+        }
+        assert preparation_columns["sourceNodeId"]["nullable"] is False
     finally:
         engine.dispose()
 
@@ -357,6 +369,7 @@ def test_apply_schema_rejects_former_development_revisions(tmp_path) -> None:
     )
     try:
         for retired in (
+            "0002_source_node_writeback",
             "0002_version_covers",
             "0003_readable_resource_overlay_schema",
         ):
@@ -526,7 +539,7 @@ def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> N
             backup = create_backup(db, settings)
             with zipfile.ZipFile(backup_path(settings, backup.id)) as archive:
                 metadata = json.loads(archive.read("metadata.json"))
-            assert metadata["version"] == 3
+            assert metadata["version"] == 4
             assert metadata["databaseRevision"] == head_revision(engine)
 
             guard = db.get(SystemSetting, "backup.guard")
@@ -537,6 +550,213 @@ def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> N
 
             assert restored["restored"] is True
             assert db.get(SystemSetting, "backup.guard").value == "archived"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("organization_mode", ("FLAT", "VOLUMES"))
+def test_backup_restore_round_trip_preserves_fresh_source_topology(
+    tmp_path, organization_mode: str
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        observed_at = datetime.now(UTC)
+        library_id = "backup-topology-library"
+        book_node_id = "backup-topology-book-node"
+        resource_node_id = "backup-topology-resource-node"
+        book_id = "backup-topology-book"
+        resource_id = "backup-topology-resource"
+        asset_id = "backup-topology-asset"
+        with Session(engine) as db:
+            db.add(
+                Library(
+                    id=library_id,
+                    name="Backup topology",
+                    root_path=str(tmp_path / "library"),
+                    organization_mode=organization_mode,
+                )
+            )
+            db.flush()
+            book_node = LibrarySourceNode(
+                id=book_node_id,
+                library_id=library_id,
+                relative_path="book/",
+                path_key="v1:" + hashlib.sha256(b"book/").hexdigest(),
+                name="book",
+                physical_kind="DIRECTORY",
+                observed_size_bytes=None,
+                observed_mtime_ns=1,
+                observed_at=observed_at,
+            )
+            resource_node = LibrarySourceNode(
+                id=resource_node_id,
+                library_id=library_id,
+                parent_id=book_node_id,
+                parent_physical_kind="DIRECTORY",
+                relative_path="book/book.epub",
+                path_key="v1:" + hashlib.sha256(b"book/book.epub").hexdigest(),
+                name="book.epub",
+                physical_kind="REGULAR_FILE",
+                observed_size_bytes=3,
+                observed_mtime_ns=1,
+                observed_at=observed_at,
+            )
+            db.add_all([book_node, resource_node])
+            db.flush()
+            db.add(
+                LibrarySourceNodeMetadata(
+                    source_node_id=book_node_id,
+                    title="Directory title",
+                )
+            )
+            db.add_all(
+                [
+                    LibrarySourceNodeInterpretation(
+                        source_node_id=book_node_id,
+                        result="NODE_ONLY",
+                        source="AUTO",
+                    ),
+                    LibrarySourceNodeInterpretation(
+                        source_node_id=resource_node_id,
+                        result="RESOURCE",
+                        source="AUTO",
+                        adapter_id="epub-file",
+                        adapter_version="1",
+                    ),
+                ]
+            )
+            book = LibraryBook(
+                id=book_id,
+                library_id=library_id,
+                source_node_id=book_node_id,
+            )
+            db.add(book)
+            db.flush()
+            db.add(
+                LibraryBookMetadata(
+                    book_id=book_id,
+                    title="Backup topology book",
+                    normalized_title="backup topology book",
+                )
+            )
+            resource = LibraryReadableResource(
+                id=resource_id,
+                library_id=library_id,
+                book_id=book_id,
+                source_node_id=resource_node_id,
+                adapter_id="epub-file",
+                adapter_version="1",
+                media_kind="EBOOK",
+                format="EPUB",
+                enablement_state="ENABLED",
+                import_state="READY",
+            )
+            db.add(resource)
+            db.flush()
+            db.add(
+                LibraryReadableResourceMetadata(
+                    resource_id=resource_id,
+                    title="Backup topology resource",
+                )
+            )
+            asset = LibraryResourceAsset(
+                id=asset_id,
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=resource_node_id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            )
+            db.add(asset)
+            db.flush()
+            db.add(
+                LibraryResourceAssetMetadata(
+                    asset_id=asset_id,
+                    mime_type="application/epub+zip",
+                )
+            )
+            db.add(
+                LibraryImportTask(
+                    id="backup-topology-import-task",
+                    kind="IMPORT_ASSET",
+                    library_id=library_id,
+                    resource_id=resource_id,
+                    source_node_id=resource_node_id,
+                    role="PRIMARY",
+                    state="SUCCEEDED",
+                )
+            )
+            db.commit()
+
+            backup = create_backup(db, settings)
+            with zipfile.ZipFile(backup_path(settings, backup.id)) as archive:
+                database_export = json.loads(
+                    archive.read("database-export.json").decode("utf-8")
+                )
+                metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
+            assert metadata["version"] == 4
+            assert database_export["sourceNodes"]
+            assert database_export["sourceNodeMetadata"]
+            assert database_export["sourceNodeInterpretations"]
+            assert database_export["resourceAssetMetadata"]
+
+            db.execute(
+                LibrarySourceNodeMetadata.__table__.update()
+                .where(LibrarySourceNodeMetadata.source_node_id == book_node_id)
+                .values(title="changed after backup")
+            )
+            db.commit()
+            restore_backup(db, settings, backup.id)
+
+            restored_metadata = db.get(LibrarySourceNodeMetadata, book_node_id)
+            assert restored_metadata is not None
+            assert restored_metadata.title == "Directory title"
+            assert db.get(LibrarySourceNode, resource_node_id) is not None
+            assert db.get(LibraryResourceAssetMetadata, asset_id) is not None
+    finally:
+        engine.dispose()
+
+
+def test_invalid_topology_backup_is_rejected_before_live_restore(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(SystemSetting(key="backup.sentinel", value="before"))
+            db.commit()
+            backup = create_backup(db, settings)
+
+            backup_file = backup_path(settings, backup.id)
+            with zipfile.ZipFile(backup_file) as archive:
+                metadata_bytes = archive.read("metadata.json")
+                database_export = json.loads(
+                    archive.read("database-export.json").decode("utf-8")
+                )
+                settings_bytes = archive.read("settings.json")
+            database_export["libraries"] = [{"id": "library-with-dangling-book"}]
+            database_export["sourceNodes"] = []
+            database_export["books"] = [
+                {
+                    "id": "book-with-dangling-source-node",
+                    "libraryId": "library-with-dangling-book",
+                    "sourceNodeId": "missing-source-node",
+                }
+            ]
+            with zipfile.ZipFile(backup_file, "w") as archive:
+                archive.writestr("metadata.json", metadata_bytes)
+                archive.writestr(
+                    "database-export.json",
+                    json.dumps(database_export).encode("utf-8"),
+                )
+                archive.writestr("settings.json", settings_bytes)
+
+            with pytest.raises(ValueError, match="BACKUP_FOREIGN_KEY_INVALID"):
+                restore_backup(db, settings, backup.id)
+            assert db.get(SystemSetting, "backup.sentinel").value == "before"
     finally:
         engine.dispose()
 

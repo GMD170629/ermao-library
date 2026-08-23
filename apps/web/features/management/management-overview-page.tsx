@@ -10,25 +10,7 @@ import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type SystemEvent = {
-  id: string;
-  level: string;
-  source: string;
-  action: string;
-  message: string;
-  createdAt: string;
-};
-
-type OverviewPayload = {
-  ok: boolean;
-  data?: {
-    cards: Record<string, number>;
-    checks: Record<string, { status: string; message: string }>;
-    recentEvents: SystemEvent[];
-  };
-  error?: { message: string };
-};
+import { fetchManagementOverview, type ManagementOverview } from './api/overview';
 
 function formatBytes(value: number) {
   if (!value) return '0 B';
@@ -58,17 +40,14 @@ function eventTone(level: string): BadgeTone {
 export function ManagementOverviewPage() {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
-  const [payload, setPayload] = useState<OverviewPayload['data'] | null>(null);
+  const [payload, setPayload] = useState<ManagementOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      const response = await fetch('/api/management/overview');
-      const data = (await response.json()) as OverviewPayload;
-      if (!data.ok) throw new Error(data.error?.message ?? '读取管理概览失败');
-      setPayload(data.data ?? null);
+      setPayload(await fetchManagementOverview());
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取管理概览失败');

@@ -1,14 +1,17 @@
 package com.ermao.library.shared.modules.library.domain
 
-data class Volume(
+data class Resource(
     val id: String,
-    val versionId: String,
+    val bookId: String,
+    val sourceNodeId: String,
     val title: String,
-    val volumeIndex: Double?,
+    val description: String?,
+    val resourceIndex: Double?,
     val sortOrder: Int,
     val format: String,
+    val mediaKind: MediaKind,
     val readerType: String,
-    val classification: VolumeClassification,
+    val classification: ResourceClassification,
     val readable: Boolean,
     val kindleSendAvailable: Boolean,
     val publisher: String?,
@@ -18,10 +21,10 @@ data class Volume(
     val identifier: String?,
     val narrator: String?,
     val abridged: Boolean?,
-    val origin: String?,
-    val importStatus: String?,
+    val importStatus: String,
     val importError: String?,
-    val coverStatus: String?,
+    val coverStatus: String,
+    val coverPath: String?,
     val coverUrl: String,
     val sizeBytes: Long,
     val pageCount: Int?,
@@ -29,26 +32,27 @@ data class Volume(
     val durationMillis: Long?,
     val trackCount: Int?,
     val progress: Double,
-    val completed: Boolean?,
     val lastReadAt: String?,
-    val files: List<VolumeFile>,
+    val hidden: Boolean,
+    val completed: Boolean,
+    val assets: List<Asset>,
 )
 
-data class VolumeClassification(
+data class ResourceClassification(
     val source: String,
     val reason: String,
     val suggestedMediaKind: MediaKind?,
 )
 
-data class VolumeFile(
+data class Asset(
     val id: String,
-    val volumeId: String?,
-    val path: String,
+    val resourceId: String?,
+    val sourceNodeId: String?,
+    val role: String?,
     val mimeType: String?,
-    val kind: String?,
-    val sortOrder: Int?,
     val sizeBytes: Long,
     val displaySize: String,
+    val mtimeMillis: Long?,
     val durationMillis: Long?,
     val codec: String?,
     val bitrate: Int?,
@@ -56,5 +60,7 @@ data class VolumeFile(
     val channels: Int?,
     val discNumber: Int?,
     val trackNumber: Int?,
+    val sortOrder: Int?,
     val url: String?,
+    val downloadUrl: String?,
 )

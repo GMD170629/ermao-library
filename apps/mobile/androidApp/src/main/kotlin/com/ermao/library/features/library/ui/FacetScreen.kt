@@ -32,9 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.R
 import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.WorkCard
-import com.ermao.library.features.content.ui.WorkGridItem
-import com.ermao.library.features.content.ui.WorkListItem
+import com.ermao.library.features.content.model.BookCard
+import com.ermao.library.features.content.ui.BookGridItem
+import com.ermao.library.features.content.ui.BookListItem
 import com.ermao.library.features.content.ui.responsiveCoverColumnCount
 import com.ermao.library.features.library.application.FacetUiState
 import com.ermao.library.shared.modules.library.ContentRepository
@@ -119,7 +119,7 @@ fun FacetScreen(
                     title = stringResource(R.string.content_loading_title),
                     message = stringResource(R.string.facet_loading_message),
                 )
-                state.errorCode != null && state.works.isEmpty() -> if (state.errorCode == "CONTENT_NOT_ACCESSIBLE") {
+                state.errorCode != null && state.books.isEmpty() -> if (state.errorCode == "CONTENT_NOT_ACCESSIBLE") {
                     WarmPageErrorState(
                         title = stringResource(R.string.work_unavailable_title),
                         message = stringResource(R.string.work_unavailable_message),
@@ -132,7 +132,7 @@ fun FacetScreen(
                         onRetry = onRetry,
                     )
                 }
-                state.works.isEmpty() -> WarmPageEmptyState(
+                state.books.isEmpty() -> WarmPageEmptyState(
                     title = stringResource(R.string.facet_empty_title),
                     message = stringResource(R.string.facet_empty_message),
                 )
@@ -142,17 +142,17 @@ fun FacetScreen(
                         vertical = theme.spacing.one,
                     ),
                 ) {
-                    items(state.works, key = WorkCard::id) { work ->
+                    items(state.books, key = BookCard::id) { book ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onOpenWork(work.id) }
+                                .clickable { onOpenWork(book.id) }
                                 .heightIn(min = theme.components.controls.minimumTouchTarget)
                                 .padding(vertical = theme.spacing.one),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            WorkListItem(
-                                work = work,
+                            BookListItem(
+                                book = book,
                                 repository = repository,
                                 context = context,
                                 modifier = Modifier.weight(1f),
@@ -181,8 +181,8 @@ fun FacetScreen(
                         horizontalArrangement = Arrangement.spacedBy(theme.components.grid.horizontalGap),
                         verticalArrangement = Arrangement.spacedBy(theme.components.grid.verticalGap),
                     ) {
-                        items(state.works, key = WorkCard::id) { work ->
-                            WorkGridItem(work, repository, context, Modifier.clickable { onOpenWork(work.id) })
+                        items(state.books, key = BookCard::id) { book ->
+                            BookGridItem(book, repository, context, Modifier.clickable { onOpenWork(book.id) })
                         }
                         item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                             FacetPagination(state, onLoadNextPage)

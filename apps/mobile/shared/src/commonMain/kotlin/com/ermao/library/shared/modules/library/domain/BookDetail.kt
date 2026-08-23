@@ -1,9 +1,10 @@
 package com.ermao.library.shared.modules.library.domain
 
-data class WorkDetail(
+data class BookDetail(
     val id: String,
+    val sourceNodeId: String,
     val title: String,
-    val author: String,
+    val author: String?,
     val description: String?,
     val publicationStatus: String,
     val trackingStatus: String,
@@ -13,31 +14,25 @@ data class WorkDetail(
     val authorFacets: List<AppliedFacet> = emptyList(),
     val seriesIndex: Double?,
     val organized: Boolean,
-    val organizeStatus: String,
-    val metadataQuality: Int,
-    val metadataLookupStatus: String?,
-    val metadataLookupSource: String?,
-    val metadataLookupError: String?,
     val coverStatus: String,
     val coverUrl: String,
-    val continueVolumeId: String?,
-    val continueVolumeTitle: String?,
-    val continueVolumeProgress: Double,
+    val continueResourceId: String?,
+    val continueResourceTitle: String?,
+    val continueResourceProgress: Double,
     val completed: Boolean,
     val lastReadAt: String?,
     val addedAt: String?,
-    val versions: List<WorkVersion>,
+    val resources: List<Resource>,
     val readingUnits: List<ReadingUnit>,
-    val volumeSections: List<VolumeSection>,
+    val resourceSections: List<ResourceSection>,
     val readingUnitsPage: ReadingUnitsPage,
 )
 
 data class ActiveMedia(
     val key: MediaKind,
     val formatLabel: String,
-    val versionId: String,
-    val selectedVolumeId: String,
-    val selectedVolumeTitle: String,
+    val selectedResourceId: String,
+    val selectedResourceTitle: String,
     val status: String,
     val progressStatus: String,
     val progress: Double,
@@ -46,8 +41,8 @@ data class ActiveMedia(
     val narrator: String?,
     val primaryAction: PrimaryAction?,
     val units: List<ReadingUnit>,
-    val volumes: List<Volume>,
-    val tracks: List<VolumeFile>,
+    val resources: List<Resource>,
+    val tracks: List<Asset>,
     val localProgressScope: LocalProgressScope,
     val currentHref: String?,
     val currentSectionIndex: Int?,
@@ -63,7 +58,7 @@ data class PrimaryAction(val label: String, val href: String)
 
 data class LocalProgressScope(
     val userId: String,
-    val volumeId: String,
+    val resourceId: String,
 )
 
 data class ReadingUnitsPage(
@@ -75,8 +70,8 @@ data class ReadingUnitsPage(
 
 data class ReadingUnit(
     val id: String,
-    val volumeId: String,
-    val fileId: String?,
+    val resourceId: String,
+    val assetId: String?,
     val unitType: String,
     val title: String?,
     val href: String?,
@@ -102,24 +97,24 @@ data class ReadingUnitMetadata(
     val idref: String?,
     val linear: Boolean?,
     val properties: List<String>?,
-    val volumeIndex: Double?,
+    val resourceIndex: Double?,
     val trackIndex: Int?,
     val pageNumber: Int?,
     val sourceFileName: String?,
     val hrefBase: String?,
     val recovered: Boolean?,
     val originalName: String? = null,
-    val pageInVolume: Int? = null,
+    val pageInResource: Int? = null,
     val pageInSection: Int? = null,
     val readingOrderPosition: Int? = null,
 )
 
-data class VolumeSection(
+data class ResourceSection(
     val id: String,
-    val versionId: String,
+    val resourceId: String,
     val title: String,
     val index: Double,
-    val fileId: String,
+    val assetId: String,
     val pageCount: Int,
     val coverUrl: String,
     val progress: Double,
@@ -141,10 +136,10 @@ data class ProgressExtra(
     val navigationKey: String? = null,
     val navigationFingerprint: String? = null,
     val sourceFormat: String? = null,
-    val fileId: String? = null,
+    val assetId: String? = null,
     val chapterId: String? = null,
     val positionMillis: Long? = null,
-    val volumeId: String? = null,
+    val resourceId: String? = null,
     val pageIndex: Double? = null,
     val chapterHref: String? = null,
     val currentHref: String? = null,

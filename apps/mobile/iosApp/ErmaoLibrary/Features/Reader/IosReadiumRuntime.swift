@@ -136,7 +136,7 @@ final class IosReadiumRuntime {
         do {
             let result = try await IosMobiPublicationFactory().open(
                 fileURL: managed.fileURL,
-                sourceID: managed.sourceID,
+                resourceID: managed.resourceID,
                 displayTitle: managed.displayTitle
             )
             return IosOpenedReadiumPublication(publication: result.publication) {

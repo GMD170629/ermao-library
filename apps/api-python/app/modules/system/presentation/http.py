@@ -18,6 +18,7 @@ from app.bootstrap.system import (
     library_import_dashboard_snapshot,
     list_settings,
     list_system_events_page,
+    management_overview_snapshot,
     persist_opds_settings_update,
     persist_system_settings_update,
     prepare_system_event,
@@ -28,6 +29,7 @@ from app.contracts.http_errors import ErrorResponses
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
+from app.modules.backup.application.restore import BackupRecordValidationError
 from app.modules.opds.public import (
     OPDS_ENABLED_SETTING_KEY,
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
@@ -63,6 +65,8 @@ from app.modules.system.presentation.schemas import (
     DashboardSystemStatusResponse,
     ManagementEventsPayload,
     ManagementEventsResponse,
+    ManagementOverviewPayload,
+    ManagementOverviewResponse,
     OpdsSystemSettingsPayload,
     OpdsSystemSettingsResponse,
     SystemSettingsResponse,
@@ -70,6 +74,7 @@ from app.modules.system.presentation.schemas import (
     UpdateSystemSettingsRequest,
 )
 from app.schemas.responses import fail, ok
+from app.services.backup_service import BackupFormatError
 from app.services.backup_service import create_backup as create_backup_archive
 from app.services.backup_service import list_backups as list_backup_archives
 from app.services.backup_service import restore_backup as restore_backup_archive
@@ -349,6 +354,25 @@ def list_system_events(
     )
 
 
+@router.get("/management/overview", response_model=ManagementOverviewResponse)
+def get_management_overview(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    ManagementOverviewResponse | Response,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
+    if auth_error:
+        return auth_error
+    return ManagementOverviewResponse(
+        data=ManagementOverviewPayload.model_validate(
+            management_overview_snapshot(db, settings)
+        )
+    )
+
+
 @router.delete("/management/events", response_model=ClearedEventsResponse)
 def clear_system_events(
     request: Request,
@@ -448,6 +472,12 @@ def restore_backup(
         return fail("备份不存在", status_code=404)
     try:
         result = restore_backup_archive(db, settings, backup_id)
+    except (BackupFormatError, BackupRecordValidationError) as exc:
+        return fail(
+            str(exc),
+            status_code=400,
+            code="BACKUP_CONTENT_INVALID",
+        )
     except ValueError as exc:
         if str(exc) == "BACKUP_REVISION_UNSUPPORTED":
             return fail(

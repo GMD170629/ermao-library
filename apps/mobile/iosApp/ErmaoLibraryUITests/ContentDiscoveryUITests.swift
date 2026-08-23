@@ -32,7 +32,7 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Currently Reading"].exists)
         XCTAssertTrue(app.staticTexts["Unread"].exists)
         XCTAssertTrue(app.buttons["Add to Shelf"].exists)
-        attachScreenshot(named: "work-detail-final-single-volume", app: app)
+        attachScreenshot(named: "work-detail-final-single-resource", app: app)
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.scrollViews["library.screen"].waitForExistence(timeout: 10))
@@ -69,7 +69,7 @@ final class ContentDiscoveryUITests: XCTestCase {
         attachScreenshot(named: "work-detail-direct-chapters", app: app)
     }
 
-    func testMultiVolumeWorkUsesSelectableCoverGrid() throws {
+    func testMultiResourceBookUsesSelectableCoverGrid() throws {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -82,17 +82,17 @@ final class ContentDiscoveryUITests: XCTestCase {
         work.tap()
 
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["All Volumes"].exists)
-        let volumeOne = app.otherElements["work.volume.volume-1"]
-        let volumeTwo = app.otherElements["work.volume.volume-2"]
-        XCTAssertTrue(volumeOne.waitForExistence(timeout: 5))
-        XCTAssertTrue(volumeTwo.exists)
-        XCTAssertTrue(app.otherElements["work.volume.volume-3"].exists)
-        XCTAssertEqual(volumeOne.value as? String, "34% read")
+        XCTAssertTrue(app.staticTexts["All Resources"].exists)
+        let resourceOne = app.otherElements["work.resource.resource-1"]
+        let resourceTwo = app.otherElements["work.resource.resource-2"]
+        XCTAssertTrue(resourceOne.waitForExistence(timeout: 5))
+        XCTAssertTrue(resourceTwo.exists)
+        XCTAssertTrue(app.otherElements["work.resource.resource-3"].exists)
+        XCTAssertEqual(resourceOne.value as? String, "34% read")
 
-        volumeTwo.tap()
-        XCTAssertTrue(volumeTwo.isSelected)
-        attachScreenshot(named: "work-detail-final-volume-rail", app: app)
+        resourceTwo.tap()
+        XCTAssertTrue(resourceTwo.isSelected)
+        attachScreenshot(named: "work-detail-final-resource-rail", app: app)
     }
 
     private func attachScreenshot(named name: String, app: XCUIApplication) {

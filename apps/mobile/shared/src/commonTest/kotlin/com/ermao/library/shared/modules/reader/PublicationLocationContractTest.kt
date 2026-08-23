@@ -24,7 +24,7 @@ class PublicationLocationContractTest {
     }
 
     @Test
-    fun localProgressRoundTripsAllMorphologiesAtVersionSix() {
+    fun localProgressRoundTripsAllMorphologiesAtVersionSeven() {
         val locations = listOf(
             ReflowReaderLocation(
                 resourceKey = "chapter.xhtml",
@@ -50,7 +50,7 @@ class PublicationLocationContractTest {
             "device-1",
             0.0,
         )
-        val oldProgress = ReaderProgressJson().encode(progress).replace("\"version\":6", "\"version\":4")
+        val oldProgress = ReaderProgressJson().encode(progress).replace("\"version\":7", "\"version\":4")
         assertFailsWith<IllegalArgumentException> { ReaderProgressJson().decode(oldProgress) }
         assertFailsWith<IllegalArgumentException> {
             ReaderProgressSyncStateJson().decode(

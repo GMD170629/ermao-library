@@ -40,13 +40,13 @@ class HomeViewModel(
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = mutableUiState.asStateFlow()
-    private val latestProgressUpdatesByVolumeId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
+    private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
 
     init {
         viewModelScope.launch {
             (appContext as ErmaoLibraryApplication).readerProgressPresentationCenter.updates.collect { update ->
                 if (update.namespaceKey == context.presentationKey()) {
-                    latestProgressUpdatesByVolumeId[update.volumeId] = update
+                    latestProgressUpdatesByResourceId[update.resourceId] = update
                     mutableUiState.update { state ->
                         val content = state.content?.applying(update) ?: return@update state
                         if (content === state.content) state else state.copy(content = content)
@@ -74,7 +74,7 @@ class HomeViewModel(
             try {
                 when (val result = repository.loadHome(context)) {
                     is ContentResult.Content -> {
-                        val content = latestProgressUpdatesByVolumeId.values.fold(result.value.toUiContent()) {
+                        val content = latestProgressUpdatesByResourceId.values.fold(result.value.toUiContent()) {
                             current, update -> current.applying(update)
                         }
                         mutableUiState.update { it.copy(
@@ -114,15 +114,15 @@ class HomeViewModel(
 
 internal fun HomeContent.applying(update: ReaderProgressPresentationUpdate): HomeContent {
     val current = continueReading ?: return this
-    if (current.work.id != update.workId || current.resumeVolumeId != update.volumeId) return this
+    if (current.book.id != update.bookId || current.resumeResourceId != update.resourceId) return this
     val progress = update.percent.toInt().coerceIn(0, 100).takeIf { it > 0 }
     return copy(
-        continueReading = current.copy(work = current.work.copy(progressPercent = progress)),
-        recentReading = recentReading.map { work ->
-            if (work.id == update.workId) work.copy(progressPercent = progress) else work
+        continueReading = current.copy(book = current.book.copy(progressPercent = progress)),
+        recentReading = recentReading.map { book ->
+            if (book.id == update.bookId) book.copy(progressPercent = progress) else book
         },
-        recentAdded = recentAdded.map { work ->
-            if (work.id == update.workId) work.copy(progressPercent = progress) else work
+        recentAdded = recentAdded.map { book ->
+            if (book.id == update.bookId) book.copy(progressPercent = progress) else book
         },
     )
 }

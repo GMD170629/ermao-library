@@ -29,6 +29,10 @@ class ResourceAdapterSpec:
     is_directory_adapter: bool
     asset_role: AssetRole
     minimum_ready_assets: int
+    # Most adapters have one stable format label.  Adapters that accept
+    # multiple concrete source containers can opt into an explicit
+    # suffix-to-format mapping without conflating media kind with format.
+    format_by_extension: tuple[tuple[str, str], ...] = ()
 
 
 ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
@@ -81,6 +85,12 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
+        format_by_extension=(
+            (".cbz", "CBZ"),
+            (".cbr", "CBR"),
+            (".zip", "ZIP"),
+            (".rar", "RAR"),
+        ),
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.AUDIO_FILE,
@@ -154,6 +164,28 @@ def match_file_adapters(filename: str) -> tuple[ResourceAdapterSpec, ...]:
         for spec in ADAPTER_SPECS
         if not spec.is_directory_adapter and extension in spec.file_extensions
     )
+
+
+def source_format_for_filename(spec: ResourceAdapterSpec, filename: str) -> str:
+    """Resolve the concrete stored format for one accepted source filename.
+
+    ``media_kind`` describes the product category (for example ``COMIC``),
+    while ``format`` describes the actual source container consumed by the
+    Reader (for example ``CBZ``).  A spec without an explicit mapping keeps
+    its stable format label; this makes the few intentional generic labels
+    explicit instead of deriving arbitrary values from every suffix.
+    """
+
+    extension = file_extension(filename)
+    if extension not in spec.file_extensions:
+        raise ValueError(
+            f"source filename extension {extension!r} is not accepted by "
+            f"adapter {spec.adapter_id.value}"
+        )
+    for mapped_extension, source_format in spec.format_by_extension:
+        if mapped_extension == extension:
+            return source_format
+    return spec.format_label
 
 
 def match_directory_adapters_for_samples(

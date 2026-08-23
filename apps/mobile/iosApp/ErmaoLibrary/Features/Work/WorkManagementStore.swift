@@ -5,7 +5,7 @@ import Foundation
 final class WorkManagementStore: ObservableObject {
     enum Action: Equatable {
         case workUpdated, coverUpdated
-        case volumeUpdated, volumeReclassified
+        case resourceUpdated, resourceReclassified
         case metadataApplied, kindleQueued, readingStatusUpdated
     }
 
@@ -20,12 +20,12 @@ final class WorkManagementStore: ObservableObject {
 
     private let repository: any ErmaoShared.WorkManagementRepository
     private let context: ErmaoShared.WorkManagementContext
-    private let workID: String
+    private let bookID: String
 
     init(
         repository: any ErmaoShared.WorkManagementRepository,
         context: ContentRequestContext,
-        workID: String
+        bookID: String
     ) {
         self.repository = repository
         self.context = ErmaoShared.PublicKt.createWorkManagementContext(
@@ -37,7 +37,7 @@ final class WorkManagementStore: ObservableObject {
             userId: context.userID,
             authorizationVersion: context.authorizationVersion
         )
-        self.workID = workID
+        self.bookID = bookID
         checkCapability()
     }
 
@@ -54,11 +54,11 @@ final class WorkManagementStore: ObservableObject {
         seriesIndex: Double?,
         tags: [String]
     ) {
-        run(.workUpdated) { [repository, context, workID] in
-            try await repository.updateWork(
+        run(.workUpdated) { [repository, context, bookID] in
+            try await repository.updateBook(
                 context: context,
-                workId: workID,
-                draft: ErmaoShared.WorkMetadataDraft(
+                bookId: bookID,
+                draft: ErmaoShared.BookMetadataDraft(
                     title: title,
                     author: author,
                     description: description,
@@ -70,38 +70,52 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func regenerateCover() {
-        run(.coverUpdated) { [repository, context, workID] in
-            try await repository.regenerateCover(context: context, workId: workID)
+    func regenerateCover(resourceID: String) {
+        run(.coverUpdated) { [repository, context, bookID] in
+            try await repository.regenerateResourceCover(
+                context: context,
+                bookId: bookID,
+                resourceId: resourceID
+            )
         }
     }
 
-    func uploadCover(data: Data, mimeType: String, fileName: String) {
+    func uploadCover(
+        data: Data,
+        mimeType: String,
+        fileName: String,
+        sourceNodeID: String,
+        title: String,
+        description: String?
+    ) {
         let bytes = KotlinByteArray(size: Int32(data.count))
         for (index, byte) in data.enumerated() { bytes.set(index: Int32(index), value: Int8(bitPattern: byte)) }
-        run(.coverUpdated) { [repository, context, workID] in
+        run(.coverUpdated) { [repository, context, bookID] in
             try await repository.uploadCover(
                 context: context,
-                workId: workID,
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
+                title: title,
+                description: description,
                 upload: ErmaoShared.CoverUpload(fileName: fileName, mimeType: mimeType, bytes: bytes)
             )
         }
     }
 
-    func updateVolume(
-        _ volume: WorkVolume,
+    func updateResource(
+        _ resource: BookResource,
         publisher: String?,
         language: String?,
         isbn: String?,
         identifier: String?,
         narrator: String?
     ) {
-        runMutation(.volumeUpdated) { [repository, context, workID] in
-            try await repository.updateVolume(
+        runMutation(.resourceUpdated) { [repository, context, bookID] in
+            try await repository.updateResource(
                 context: context,
-                workId: workID,
-                volumeId: volume.id,
-                draft: ErmaoShared.VolumeMetadataDraft(
+                bookId: bookID,
+                resourceId: resource.id,
+                draft: ErmaoShared.ResourceMetadataDraft(
                     publisher: publisher,
                     language: language,
                     isbn: isbn,
@@ -113,12 +127,12 @@ final class WorkManagementStore: ObservableObject {
     }
 
     func reclassify(
-        _ volume: WorkVolume,
+        _ resource: BookResource,
         kind: ErmaoShared.ManagedMediaKind
     ) {
-        runMutation(.volumeReclassified) { [repository, context, workID] in
-            try await repository.reclassifyVolume(
-                context: context, workId: workID, volumeId: volume.id, mediaKind: kind
+        runMutation(.resourceReclassified) { [repository, context, bookID] in
+            try await repository.reclassifyResource(
+                context: context, bookId: bookID, resourceId: resource.id, mediaKind: kind
             )
         }
     }
@@ -131,10 +145,14 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func searchMetadata(providerID: String, query: String) {
-        runValue { [repository, context, workID] in
+    func searchMetadata(providerID: String, sourceNodeID: String, query: String) {
+        runValue { [repository, context, bookID] in
             let result = try await repository.searchMetadata(
-                context: context, workId: workID, providerId: providerID, query: query
+                context: context,
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
+                providerId: providerID,
+                query: query
             )
             let search: ErmaoShared.MetadataSearchResult = try Self.value(result)
             self.metadataCandidates = search.candidates
@@ -145,18 +163,20 @@ final class WorkManagementStore: ObservableObject {
         providerID: String,
         candidate: ErmaoShared.MetadataCandidate,
         fields: Set<ErmaoShared.MetadataField>,
-        volumeID: String?,
-        applyToAllVolumes: Bool
+        resourceID: String?,
+        sourceNodeID: String,
+        applyToAllResources: Bool
     ) {
-        run(.metadataApplied) { [repository, context, workID] in
+        run(.metadataApplied) { [repository, context, bookID] in
             try await repository.applyMetadata(
                 context: context,
-                workId: workID,
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
                 providerId: providerID,
                 candidate: candidate,
                 fields: fields,
-                volumeId: volumeID,
-                applyToAllVolumes: applyToAllVolumes
+                resourceId: resourceID,
+                applyToAllResources: applyToAllResources
             )
         }
     }
@@ -169,15 +189,15 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func sendToKindle(fileID: String) {
-        run(.kindleQueued) { [repository, context, workID] in
-            try await repository.sendToKindle(context: context, workId: workID, fileId: fileID)
+    func sendToKindle(assetID: String) {
+        run(.kindleQueued) { [repository, context, bookID] in
+            try await repository.sendToKindle(context: context, bookId: bookID, assetId: assetID)
         }
     }
 
-    func setReadingStatus(volumeID: String, status: ErmaoShared.ManagedReadingStatus) {
+    func setReadingStatus(resourceID: String, status: ErmaoShared.ManagedReadingStatus) {
         run(.readingStatusUpdated) { [repository, context] in
-            try await repository.setReadingStatus(context: context, volumeId: volumeID, status: status)
+            try await repository.setReadingStatus(context: context, resourceId: resourceID, status: status)
         }
     }
 
@@ -212,7 +232,7 @@ final class WorkManagementStore: ObservableObject {
     ) {
         runValue {
             let result = try await operation()
-            let _: ErmaoShared.WorkMutationOutcome = try Self.value(result)
+            let _: ErmaoShared.BookMutationOutcome = try Self.value(result)
             self.completedAction = action
         }
     }

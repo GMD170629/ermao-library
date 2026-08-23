@@ -247,10 +247,16 @@ def test_patch_library_organization_mode_persists_enum_value(
     db_session.commit()
     locked = client.patch(
         f"/api/libraries/{library_id}",
-        json={"organizationMode": "AUDIOBOOK"},
+        json={"organizationMode": "FLAT"},
     )
     assert locked.status_code == 409
     assert locked.json()["error"]["code"] == "LIBRARY_TOPOLOGY_LOCKED"
+
+    invalid = client.patch(
+        f"/api/libraries/{library_id}",
+        json={"organizationMode": "AUDIOBOOK"},
+    )
+    assert invalid.status_code == 422
 
 
 def test_library_scan_request_always_schedules_the_library_root(

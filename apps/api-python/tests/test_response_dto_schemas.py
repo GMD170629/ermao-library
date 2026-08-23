@@ -191,13 +191,12 @@ def test_library_resource_asset_schema_accepts_comic_page_fields() -> None:
             "sourceNodeId": "source-1",
             "role": "PAGE",
             "mimeType": "image/jpeg",
-            "path": "pages/001.jpg",
-            "kind": "PAGE",
             "sizeBytes": 1024,
             "size": "1 KB",
             "mtimeMs": 0,
             "sortOrder": 1,
             "url": "/api/assets/asset-1",
+            "downloadUrl": "/api/assets/asset-1?download=true",
         }
     )
 
@@ -207,11 +206,10 @@ def test_library_resource_asset_schema_accepts_comic_page_fields() -> None:
         "sourceNodeId": "source-1",
         "role": "PAGE",
         "mimeType": "image/jpeg",
-        "path": "pages/001.jpg",
-        "kind": "PAGE",
         "sizeBytes": 1024,
         "size": "1 KB",
         "mtimeMs": 0,
         "sortOrder": 1,
         "url": "/api/assets/asset-1",
+        "downloadUrl": "/api/assets/asset-1?download=true",
     }

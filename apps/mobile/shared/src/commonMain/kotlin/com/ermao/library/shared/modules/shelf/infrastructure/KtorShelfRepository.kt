@@ -35,7 +35,7 @@ class KtorShelfRepository(
 
     override suspend fun loadShelves(
         context: ShelfRequestContext,
-        workId: String,
+        bookId: String,
     ): ShelfResult<List<ShelfSummary>> = coroutineScope {
         when (val result = request(context) { client ->
             client.execute(ApiRequest(ApiMethod.Get, "/api/shelves", JsonElement.serializer()))
@@ -78,7 +78,7 @@ class KtorShelfRepository(
                                         id = id,
                                         name = name,
                                         kind = ShelfKind.Static,
-                                        containsWork = ids.any { (it as? JsonPrimitive)?.contentOrNull == workId },
+                                        containsBook = ids.any { (it as? JsonPrimitive)?.contentOrNull == bookId },
                                     ),
                                 )
                             }
@@ -99,7 +99,7 @@ class KtorShelfRepository(
     ): ShelfResult<Unit> {
         val body = encoder.encodeToString(
             BulkShelfMembershipWire(
-                ids = listOf(change.workId),
+                ids = listOf(change.bookId),
                 shelfId = change.shelfId,
                 membership = change.membership.name.uppercase(),
             ),
@@ -108,7 +108,7 @@ class KtorShelfRepository(
             client.execute(
                 ApiRequest(
                     ApiMethod.Post,
-                    "/api/works/bulk",
+                    "/api/library/operations/books/shelf-membership",
                     JsonElement.serializer(),
                     requestBody = body,
                 ),
@@ -126,12 +126,18 @@ class KtorShelfRepository(
     private suspend fun <T> request(
         context: ShelfRequestContext,
         block: suspend (ApiClient) -> ApiResult<T>,
-    ): ApiResult<T> = block(clientProvider(context.profile))
+    ): ApiResult<T> {
+        val client = clientProvider(context.profile)
+        return try {
+            block(client)
+        } finally {
+            client.close()
+        }
+    }
 }
 
 @kotlinx.serialization.Serializable
 private data class BulkShelfMembershipWire(
-    val action: String = "shelf_membership",
     val ids: List<String>,
     val shelfId: String,
     val membership: String,

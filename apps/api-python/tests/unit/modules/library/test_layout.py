@@ -7,7 +7,6 @@ import pytest
 from app.modules.library.domain.layout import (
     LayoutViolationCode,
     LibraryOrganizationMode,
-    is_audiobook_disc_directory,
     parse_library_file_path,
 )
 
@@ -94,80 +93,16 @@ def test_volumes_anchors_book_and_resource_from_the_source_path(
     assert _topology(LibraryOrganizationMode.VOLUMES, path) == expected
 
 
-@pytest.mark.parametrize(
-    ("path", "expected"),
-    [
-        (
-            "book.mp3",
-            ("book:book.mp3", "book", "resource:book.mp3", "book", "book.mp3", 0),
-        ),
-        (
-            "Book/CD1/01.mp3",
-            ("book:Book", "Book", "resource:Book", "Book", "Book/CD1/01.mp3", 0),
-        ),
-        (
-            "Book/V1/CD1/01.mp3",
-            ("book:Book", "Book", "resource:Book/V1", "V1", "Book/V1/CD1/01.mp3", 0),
-        ),
-        (
-            "Book/V1/Vol1/CD2/01.mp3",
-            (
-                "book:Book",
-                "Book",
-                "resource:Book/V1/Vol1",
-                "Vol1",
-                "Book/V1/Vol1/CD2/01.mp3",
-                0,
-            ),
-        ),
-        (
-            "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3",
-            (
-                "book:Book",
-                "Book",
-                "resource:Book/V1/Vol1/Extra",
-                "Extra",
-                "Book/Disc 1/V1/Disk-02/Vol1/盘3/Extra/01.mp3",
-                0,
-            ),
-        ),
-    ],
-)
-def test_audiobook_uses_resource_positions_after_transparent_disc_directories(
-    path: str, expected: tuple[str, str, str, str, str, int]
-) -> None:
-    assert _topology(LibraryOrganizationMode.AUDIOBOOK, path) == expected
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["CD", "cd1", "CD 2", "Disc-03", "disk_4", "碟", "碟1", "盘 2"],
-)
-def test_disc_directory_variants_are_transparent(name: str) -> None:
-    assert is_audiobook_disc_directory(name)
-
-
-def test_multiple_audio_assets_replay_the_same_resource_identity() -> None:
-    first = _topology(LibraryOrganizationMode.AUDIOBOOK, "Book/V1/Vol1/CD1/01.mp3")
-    second = _topology(LibraryOrganizationMode.AUDIOBOOK, "Book/V1/Vol1/CD2/99.mp3")
-
-    assert first[:4] == second[:4]
-    assert first[2] == "resource:Book/V1/Vol1"
-    assert first[4] == "Book/V1/Vol1/CD1/01.mp3"
-    assert second[4] == "Book/V1/Vol1/CD2/99.mp3"
-
-
 def test_same_path_is_independent_of_other_inputs_and_order() -> None:
-    target = "Book/V1/Vol1/CD1/01.mp3"
-    expected = parse_library_file_path(target, LibraryOrganizationMode.AUDIOBOOK)
-    paths = ["Other/V2/02.mp3", target, "Book/V1/Vol2/03.mp3"]
+    target = "Book/Edition/01.epub"
+    expected = parse_library_file_path(target, LibraryOrganizationMode.VOLUMES)
+    paths = ["Other/02.epub", target, "Book/03.epub"]
 
     first = [
-        parse_library_file_path(path, LibraryOrganizationMode.AUDIOBOOK)
-        for path in paths
+        parse_library_file_path(path, LibraryOrganizationMode.VOLUMES) for path in paths
     ][1]
     second = [
-        parse_library_file_path(path, LibraryOrganizationMode.AUDIOBOOK)
+        parse_library_file_path(path, LibraryOrganizationMode.VOLUMES)
         for path in reversed(paths)
     ][1]
 

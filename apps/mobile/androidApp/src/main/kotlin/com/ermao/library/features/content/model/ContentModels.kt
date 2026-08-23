@@ -4,7 +4,7 @@ import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class LibraryScope { Works, Series, Authors }
+enum class LibraryScope { Books, Series, Authors }
 
 @Serializable
 enum class ContentSort { RecentAdded, RecentReading, Title, Author }
@@ -30,7 +30,7 @@ data class WorksFilters(
 
 @Immutable
 @Serializable
-data class WorkCard(
+data class BookCard(
     val id: String,
     val title: String,
     val author: String,
@@ -44,26 +44,26 @@ data class WorkCard(
 data class GroupingCard(
     val id: String,
     val name: String,
-    val workCount: Int,
-    val representativeWorks: List<WorkCard>,
+    val bookCount: Int,
+    val representativeBooks: List<BookCard>,
 )
 
 @Immutable
 @Serializable
 data class ContinueReadingCard(
-    val work: WorkCard,
-    val volumeTitle: String?,
+    val book: BookCard,
+    val resourceTitle: String?,
     val positionLabel: String?,
     val lastReadAtEpochMillis: Long?,
-    val resumeVolumeId: String? = null,
+    val resumeResourceId: String? = null,
 )
 
 @Immutable
 @Serializable
 data class HomeContent(
     val continueReading: ContinueReadingCard?,
-    val recentReading: List<WorkCard>,
-    val recentAdded: List<WorkCard>,
+    val recentReading: List<BookCard>,
+    val recentAdded: List<BookCard>,
 )
 
 @Serializable
@@ -71,13 +71,12 @@ enum class ContentFreshness { Fresh, Stale }
 
 @Immutable
 @Serializable
-data class VolumeContent(
+data class ResourceContent(
     val id: String,
     val title: String,
     val format: String,
     val readerType: String = "reflowable",
-    val versionId: String = "",
-    val volumeIndex: Double? = null,
+    val resourceIndex: Double? = null,
     val sortOrder: Int = 0,
     val publisher: String? = null,
     val publishedAt: String? = null,
@@ -89,7 +88,7 @@ data class VolumeContent(
     val metadataSource: String? = null,
     val suggestedMediaKind: String? = null,
     val kindleSendAvailable: Boolean = false,
-    val files: List<VolumeFileContent> = emptyList(),
+    val assets: List<AssetContent> = emptyList(),
     val coverUrl: String = "",
     val sizeBytes: Long = 0,
     val progressPercent: Int?,
@@ -97,7 +96,7 @@ data class VolumeContent(
     val selected: Boolean,
 ) {
     fun displayIndex(position: Int): String {
-        val explicitIndex = volumeIndex?.takeIf { it.isFinite() && it > 0 }
+        val explicitIndex = resourceIndex?.takeIf { it.isFinite() && it > 0 }
         val value = when {
             explicitIndex == null -> (position + 1).toString()
             explicitIndex % 1.0 == 0.0 -> explicitIndex.toInt().toString()
@@ -109,7 +108,7 @@ data class VolumeContent(
 
 @Immutable
 @Serializable
-data class VolumeFileContent(
+data class AssetContent(
     val id: String,
     val path: String,
     val sizeBytes: Long,
@@ -134,38 +133,24 @@ enum class ChapterReadingState { Current, Read, Unread }
 
 @Immutable
 @Serializable
-data class VersionContent(
-    val id: String,
-    val sourceKey: String,
-    val sourceName: String? = null,
-    val volumes: List<VolumeContent>,
-    val volumeCount: Int = volumes.size,
-)
-
-@Immutable
-@Serializable
-data class WorkDetailContent(
-    val work: WorkCard,
+data class BookDetailContent(
+    val book: BookCard,
     val seriesId: String?,
     val seriesName: String?,
     val seriesIndex: Double? = null,
     val authorFacetId: String?,
     val description: String?,
     val tags: List<String>,
-    val versions: List<VersionContent>,
-    val selectedVersionId: String?,
+    val resources: List<ResourceContent>,
+    val selectedResourceId: String?,
     val completed: Boolean = false,
     val readingUnits: List<ReadingUnitContent> = emptyList(),
 ) {
     val hasDescription: Boolean get() = !description.isNullOrBlank()
-
-    val showsVersionPicker: Boolean get() = versions.size > 1
-
-    val allVolumes: List<VolumeContent> get() = versions.flatMap { it.volumes }
-
-    fun supportsChapterDirectory(volumeId: String?): Boolean =
-        volumeId != null &&
-            allVolumes.firstOrNull { it.id == volumeId }
+    val showsResourcePicker: Boolean get() = resources.size > 1
+    fun supportsChapterDirectory(resourceId: String?): Boolean =
+        resourceId != null &&
+            resources.firstOrNull { it.id == resourceId }
                 ?.readerType.equals("reflowable", ignoreCase = true) &&
             readingUnits.isNotEmpty()
 }

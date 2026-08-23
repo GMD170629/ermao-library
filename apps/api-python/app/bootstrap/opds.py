@@ -746,9 +746,7 @@ class OpdsMediaResources:
             path_value = media_resource_query(db).cover_path(
                 book_id=book_id, resource_id=resource_id
             )
-            path = media_streaming.stored_path(
-                path_value, self._settings, database_backed=True
-            )
+            path = media_streaming.stored_path(path_value, self._settings)
             if path is None or not path.is_file():
                 return Response(status_code=404)
             return media_streaming.send_pse_page_file(
@@ -775,7 +773,7 @@ class OpdsMediaResources:
                 media_streaming.stored_path(
                     resource.path if resource else None,
                     self._settings,
-                    database_backed=True,
+                    (Path(resource.source_root),) if resource else (),
                 ),
                 request,
                 user.id,
@@ -815,7 +813,7 @@ class OpdsMediaResources:
             entry_name = metadata.get("zipEntryName") or unit.href
             return media_streaming.send_pse_page_zip_entry(
                 media_streaming.stored_path(
-                    source.path, self._settings, database_backed=True
+                    source.path, self._settings, (Path(source.source_root),)
                 ),
                 str(entry_name) if entry_name else None,
                 request,
@@ -827,7 +825,9 @@ class OpdsMediaResources:
             )
         return media_streaming.send_pse_page_file(
             media_streaming.stored_path(
-                unit.href, self._settings, database_backed=True
+                unit.href if source is not None else None,
+                self._settings,
+                (Path(source.source_root),) if source is not None else (),
             ),
             request,
             user_id,

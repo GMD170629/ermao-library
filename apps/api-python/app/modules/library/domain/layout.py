@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import unicodedata
 from dataclasses import dataclass
 from enum import Enum
@@ -12,7 +11,6 @@ from pathlib import PurePosixPath
 class LibraryOrganizationMode(str, Enum):
     FLAT = "FLAT"
     VOLUMES = "VOLUMES"
-    AUDIOBOOK = "AUDIOBOOK"
 
 
 class LayoutViolationCode(str, Enum):
@@ -54,11 +52,6 @@ class ParsedLayoutPath:
 
 
 _DRIVE_PREFIX_LENGTH = 2
-_DISC_DIRECTORY_PATTERN = re.compile(
-    r"^(?:cd|disc|disk|\u789f|\u76d8)"
-    r"(?:\s*[-_. ]*\d+(?:\s*(?:of|/|[-\u2013\u2014])\s*\d+)?)?$",
-    re.IGNORECASE,
-)
 
 
 def parse_library_file_path(
@@ -83,17 +76,9 @@ def parse_library_file_path(
         book = _single_file_book(physical_path, canonical_path)
     elif organization_mode is LibraryOrganizationMode.VOLUMES:
         book = _publication_book(physical_path, canonical_path)
-    elif organization_mode is LibraryOrganizationMode.AUDIOBOOK:
-        book = _audiobook_book(physical_path, canonical_path)
     else:
         raise ValueError(f"unsupported organization mode: {organization_mode}")
     return ParsedLayoutPath(book=book)
-
-
-def is_audiobook_disc_directory(name: str) -> bool:
-    """Return whether a directory is a transparent audiobook disc grouping."""
-
-    return bool(_DISC_DIRECTORY_PATTERN.fullmatch(unicodedata.normalize("NFC", name)))
 
 
 def _single_file_book(physical_path: str, canonical_path: str) -> LayoutBook:
@@ -127,41 +112,6 @@ def _publication_book(physical_path: str, canonical_path: str) -> LayoutBook:
         source_key=_book_key(book_path),
         source_name=book_name,
         resources=(resource,),
-    )
-
-
-def _audiobook_book(physical_path: str, canonical_path: str) -> LayoutBook:
-    physical_parts = physical_path.split("/")
-    canonical_parts = canonical_path.split("/")
-    if len(physical_parts) == 1:
-        return _single_file_book(physical_path, canonical_path)
-
-    book_name = physical_parts[0]
-    book_path = canonical_parts[0]
-    semantic_directories = [
-        (physical, canonical)
-        for physical, canonical in zip(
-            physical_parts[1:-1], canonical_parts[1:-1], strict=True
-        )
-        if not is_audiobook_disc_directory(physical)
-    ]
-    resource_path = "/".join(
-        [
-            canonical_parts[0],
-            *(canonical for _physical, canonical in semantic_directories),
-        ]
-    )
-    resource_name = semantic_directories[-1][0] if semantic_directories else book_name
-    return LayoutBook(
-        source_key=_book_key(book_path),
-        source_name=book_name,
-        resources=(
-            _single_asset_resource(
-                source_key=_resource_key(resource_path),
-                source_name=resource_name,
-                physical_path=physical_path,
-            ),
-        ),
     )
 
 

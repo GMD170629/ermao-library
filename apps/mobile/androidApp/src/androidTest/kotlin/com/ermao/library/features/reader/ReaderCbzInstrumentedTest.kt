@@ -43,11 +43,10 @@ class ReaderCbzInstrumentedTest {
     fun publishCbz() = runBlocking {
         source = ByteArrayInputStream(buildArchive()).use { input ->
             publicationStore.publishLocalPublication(
-                sourceId = sourceId,
+                resourceId = sourceId,
                 displayTitle = "CBZ Book",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Cbz,
-                volumeId = sourceId,
             )
         }
     }

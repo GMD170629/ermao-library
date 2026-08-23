@@ -41,6 +41,16 @@ class ReadableResourceTopologyError(Exception):
         super().__init__(code.value if detail is None else f"{code.value}:{detail}")
 
 
+def resource_owns_book_metadata(
+    *,
+    book_source_node_id: str,
+    resource_source_node_id: str,
+) -> bool:
+    """Only the Resource anchored to the Book node may project Book metadata."""
+
+    return resource_source_node_id == book_source_node_id
+
+
 def is_same_or_descendant_path(
     *,
     ancestor: SourceNodeRelativePath,

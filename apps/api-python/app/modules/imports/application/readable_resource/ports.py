@@ -15,7 +15,10 @@ from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
     ProbeTerminationReason,
 )
-from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
+from app.modules.imports.domain.resource_adapters import (
+    ResourceAdapterSpec,
+    source_format_for_filename,
+)
 from app.modules.library.domain.readable_resource_states import AssetRole
 from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 from app.modules.library.public import (
@@ -26,6 +29,7 @@ from app.modules.library.public import (
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
+    ResourceNavigationUnitInput,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
 )
@@ -54,6 +58,7 @@ __all__ = [
     "ReadableResourceRecord",
     "ResourceAdapterExecutorPort",
     "ResourceAdapterSpec",
+    "ResourceNavigationUnitInput",
     "SidecarWritebackPort",
     "SourceNodeRecord",
     "SourceNodeRepositoryPort",
@@ -68,12 +73,19 @@ ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 WORKER_INTERRUPTED = "WORKER_INTERRUPTED"
 
 
-def adapter_identity(spec: ResourceAdapterSpec) -> AdapterIdentity:
+def adapter_identity(
+    spec: ResourceAdapterSpec, *, source_name: str | None = None
+) -> AdapterIdentity:
+    source_format = (
+        source_format_for_filename(spec, source_name)
+        if source_name is not None
+        else spec.format_label
+    )
     return AdapterIdentity(
         adapter_id=spec.adapter_id.value,
         adapter_version=spec.adapter_version,
         media_kind=spec.media_kind,
-        format_label=spec.format_label,
+        format_label=source_format,
     )
 
 
@@ -109,6 +121,7 @@ class ParsedAssetPayload:
     duration_ms: int | None
     failure_reason: str | None
     technical: AssetTechnicalMetadata
+    navigation_units: tuple[ResourceNavigationUnitInput, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +250,7 @@ class LocalMetadataPriorityPort(Protocol):
 
 
 class LocalCoverPublicationPort(Protocol):
-    def prepare(self, *, book_id: str, content: bytes) -> PreparedLocalCover: ...
+    def prepare(self, *, resource_id: str, content: bytes) -> PreparedLocalCover: ...
 
     def publish(self, prepared: PreparedLocalCover) -> None: ...
 

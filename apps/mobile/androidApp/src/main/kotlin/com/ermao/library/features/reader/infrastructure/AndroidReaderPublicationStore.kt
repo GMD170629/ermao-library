@@ -6,6 +6,7 @@ import com.ermao.library.shared.modules.reader.LocalReaderSourceResolver
 import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderSource
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.PublicationDownloadSink
 import com.ermao.library.shared.modules.reader.PublicationDownloadSinkFactory
 import com.ermao.library.shared.modules.reader.ReaderPublicationDownload
@@ -21,38 +22,46 @@ import com.ermao.library.mobi.infrastructure.MobiReadiumPublicationFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal class AndroidReaderPublicationStore(context: Context) {
-    private val publicationRoot = File(context.filesDir, PUBLICATION_DIRECTORY)
+internal class AndroidReaderPublicationStore(
+    context: Context,
+    namespace: ReaderSyncNamespace? = null,
+) {
+    private val publicationRoot = namespace?.let { value ->
+        File(
+            File(File(context.filesDir, PUBLICATION_DIRECTORY), sha256(readerAccountStorageKey(value))),
+            sha256(value.stableKey),
+        )
+    } ?: File(File(context.filesDir, PUBLICATION_DIRECTORY), "unscoped")
 
     init {
         removeLegacyHashedPublicationArtifacts(publicationRoot)
     }
 
     suspend fun publishLocalEpub(
-        sourceId: String,
+        resourceId: String,
         displayTitle: String,
         input: InputStream,
-        workId: String? = null,
-        volumeId: String? = null,
+        bookId: String? = null,
+        assetId: String? = null,
     ): LocalReaderSource = publishLocalPublication(
-        sourceId = sourceId,
+        resourceId = resourceId,
         displayTitle = displayTitle,
         input = input,
         sourceFormat = ReaderSourceFormat.Epub,
-        workId = workId,
-        volumeId = volumeId,
+        bookId = bookId,
+        assetId = assetId,
     )
 
     suspend fun publishLocalPublication(
-        sourceId: String,
+        resourceId: String,
         displayTitle: String,
         input: InputStream,
         sourceFormat: ReaderSourceFormat,
-        workId: String? = null,
-        volumeId: String? = null,
+        bookId: String? = null,
+        assetId: String? = null,
     ): LocalReaderSource = withContext(Dispatchers.IO) {
-        require(sourceId.isNotBlank() && sourceId.length <= MAX_SOURCE_ID_LENGTH) {
-            "Reader source id is invalid"
+        require(resourceId.isNotBlank() && resourceId.length <= MAX_RESOURCE_ID_LENGTH) {
+            "Reader resource id is invalid"
         }
         require(displayTitle.isNotBlank() && displayTitle.length <= MAX_TITLE_LENGTH) {
             "Reader title is invalid"
@@ -60,7 +69,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
         publicationRoot.mkdirs()
         require(publicationRoot.isDirectory) { "Reader publication root is unavailable" }
 
-        val target = targetFile(sourceId, sourceFormat)
+        val target = targetFile(resourceId, assetId, sourceFormat)
         val temporary = File(publicationRoot, ".${target.name}.${System.nanoTime()}.tmp")
         var written = 0L
         try {
@@ -83,11 +92,11 @@ internal class AndroidReaderPublicationStore(context: Context) {
         }
 
         LocalReaderSource(
-            sourceId = sourceId,
+            resourceId = resourceId,
             displayTitle = displayTitle,
             format = sourceFormat.readerFormat,
-            workId = workId,
-            volumeId = volumeId,
+            bookId = bookId,
+            assetId = assetId,
             sourceFormat = sourceFormat,
         )
     }
@@ -100,7 +109,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
             }
             publicationRoot.mkdirs()
             require(publicationRoot.isDirectory) { "Reader publication root is unavailable" }
-            val target = targetFile(download.sourceId, download.sourceFormat)
+            val target = targetFile(download.resourceId, download.assetId, download.sourceFormat)
             val temporary = File(publicationRoot, ".${target.name}.${System.nanoTime()}.download")
             DownloadSink(download, temporary, target)
         }
@@ -108,11 +117,11 @@ internal class AndroidReaderPublicationStore(context: Context) {
 
     fun localSourceResolver(): LocalReaderSourceResolver = LocalReaderSourceResolver { download ->
         val source = LocalReaderSource(
-            sourceId = download.sourceId,
+            resourceId = download.resourceId,
             displayTitle = download.displayTitle,
             format = download.sourceFormat.readerFormat,
-            workId = download.workId,
-            volumeId = download.volumeId,
+            bookId = download.bookId,
+            assetId = download.assetId,
             sourceFormat = download.sourceFormat,
         )
         runCatching {
@@ -127,7 +136,7 @@ internal class AndroidReaderPublicationStore(context: Context) {
             ReaderFormat.Epub -> ReaderSourceFormat.Epub
             else -> error("Reader source container format is missing")
         }
-        val target = targetFile(source.sourceId, sourceFormat)
+        val target = targetFile(source.resourceId, source.assetId, sourceFormat)
         val rootPath = publicationRoot.canonicalFile.toPath()
         val targetPath = target.canonicalFile.toPath()
         require(targetPath.startsWith(rootPath)) { "Reader publication escaped the managed root" }
@@ -143,15 +152,15 @@ internal class AndroidReaderPublicationStore(context: Context) {
         target
     }
 
-    suspend fun delete(sourceId: String): Unit = withContext(Dispatchers.IO) {
-        require(sourceId.isNotBlank()) { "Reader source id is blank" }
+    suspend fun delete(resourceId: String, assetId: String? = null): Unit = withContext(Dispatchers.IO) {
+        require(resourceId.isNotBlank()) { "Reader resource id is blank" }
         ReaderSourceFormat.entries.forEach {
-            Files.deleteIfExists(targetFile(sourceId, it).toPath())
+            Files.deleteIfExists(targetFile(resourceId, assetId, it).toPath())
         }
     }
 
-    private fun targetFile(sourceId: String, sourceFormat: ReaderSourceFormat): File =
-        File(publicationRoot, sha256(sourceId) + "." + sourceFormat.wireValue)
+    private fun targetFile(resourceId: String, assetId: String?, sourceFormat: ReaderSourceFormat): File =
+        File(publicationRoot, sha256("$resourceId\u0000${assetId.orEmpty()}") + "." + sourceFormat.wireValue)
 
     private fun atomicReplace(temporary: File, target: File) {
         try {
@@ -199,11 +208,11 @@ internal class AndroidReaderPublicationStore(context: Context) {
                 validatePublication(temporary, download.sourceFormat)
                 atomicReplace(temporary, target)
                 LocalReaderSource(
-                    sourceId = download.sourceId,
+                    resourceId = download.resourceId,
                     displayTitle = download.displayTitle,
                     format = download.sourceFormat.readerFormat,
-                    workId = download.workId,
-                    volumeId = download.volumeId,
+                    bookId = download.bookId,
+                    assetId = download.assetId,
                     sourceFormat = download.sourceFormat,
                 )
             } finally {
@@ -255,6 +264,16 @@ internal class AndroidReaderPublicationStore(context: Context) {
             ReaderSourceFormat.Azw3,
             ReaderSourceFormat.Prc,
             -> MobiReadiumPublicationFactory().open(file).close()
+            ReaderSourceFormat.Audio,
+            ReaderSourceFormat.Audiobook,
+            ReaderSourceFormat.M4b,
+            ReaderSourceFormat.M4a,
+            ReaderSourceFormat.Mp3,
+            ReaderSourceFormat.Flac,
+            ReaderSourceFormat.Ogg,
+            ReaderSourceFormat.Opus,
+            ReaderSourceFormat.Wav,
+            -> throw IllegalArgumentException("Audio publications are opened by the native audio reader")
         }
     }
 
@@ -304,9 +323,9 @@ internal class AndroidReaderPublicationStore(context: Context) {
         const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v2"
         @Deprecated("Use EPUB_PARSER_VERSION")
         const val READIUM_PARSER_VERSION = EPUB_PARSER_VERSION
-        private const val PUBLICATION_DIRECTORY = "reader-publications"
+        private const val PUBLICATION_DIRECTORY = "reader-publications-v3"
         private const val COPY_BUFFER_BYTES = 64 * 1024
-        private const val MAX_SOURCE_ID_LENGTH = 256
+        private const val MAX_RESOURCE_ID_LENGTH = 256
         private const val MAX_TITLE_LENGTH = 512
         private const val MAX_PUBLICATION_BYTES = 512L * 1024 * 1024
         private const val MAXIMUM_MIMETYPE_BYTES = 64L
@@ -324,6 +343,14 @@ internal class AndroidReaderPublicationStore(context: Context) {
             ReaderFormat.Comic,
             ReaderFormat.Pdf,
         )
+
+        internal fun clearNamespace(context: Context, namespace: ReaderSyncNamespace) {
+            val directory = File(
+                File(context.filesDir, PUBLICATION_DIRECTORY),
+                sha256(readerAccountStorageKey(namespace)),
+            )
+            if (directory.exists()) check(directory.deleteRecursively()) { "Unable to clear Reader publications" }
+        }
     }
 }
 

@@ -7,6 +7,7 @@ class ServerCompatibilityChecker(
     private val clientProtocolVersion: Int,
     private val supportedServerProtocolVersions: Set<Int>,
     private val supportedReaderSchemaVersions: Set<Int>,
+    private val supportedLibrarySchemaVersions: Set<Int>,
 ) {
     fun check(compatibility: ServerCompatibility): ServerCompatibilityDecision {
         if (compatibility.service != EXPECTED_SERVICE) {
@@ -24,11 +25,20 @@ class ServerCompatibilityChecker(
         if (compatibility.readerSchemaVersion !in supportedReaderSchemaVersions) {
             return ServerCompatibilityDecision.Incompatible("UNSUPPORTED_READER_SCHEMA")
         }
+        if (compatibility.librarySchemaVersion !in supportedLibrarySchemaVersions) {
+            return ServerCompatibilityDecision.Incompatible("UNSUPPORTED_LIBRARY_SCHEMA")
+        }
         if (!compatibility.capabilities.cookieSession) {
             return ServerCompatibilityDecision.Incompatible("COOKIE_SESSION_REQUIRED")
         }
         if (!compatibility.capabilities.readerV4) {
             return ServerCompatibilityDecision.Incompatible("READER_V4_REQUIRED")
+        }
+        if (!compatibility.capabilities.bookResourceAsset) {
+            return ServerCompatibilityDecision.Incompatible("BOOK_RESOURCE_ASSET_REQUIRED")
+        }
+        if (!compatibility.capabilities.managedOfflineDownloads) {
+            return ServerCompatibilityDecision.Incompatible("MOBILE_DOWNLOADS_REQUIRED")
         }
         return ServerCompatibilityDecision.Compatible(compatibility)
     }

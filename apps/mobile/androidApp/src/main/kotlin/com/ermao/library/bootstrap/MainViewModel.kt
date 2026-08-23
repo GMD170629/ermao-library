@@ -36,6 +36,7 @@ import android.content.Context
 import com.ermao.library.features.me.platform.AppLocaleController
 import com.ermao.library.features.reader.infrastructure.AndroidPdfRangeCache
 import com.ermao.library.platform.persistence.AndroidCoverCache
+import com.ermao.library.platform.persistence.AndroidReaderPrivateStateStore
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import java.io.File
@@ -323,7 +324,8 @@ class MainViewModel(
             val context = ContentRequestContext(session.profile, session.identity.namespace)
             try {
                 AndroidCoverCache.clearNamespace(appContext, context)
-                AndroidPdfRangeCache(File(appContext.cacheDir, "reader/pdf-range-v1")).clearNamespace(
+                AndroidReaderPrivateStateStore.clearNamespace(
+                    appContext,
                     ReaderSyncNamespace(
                         session.identity.namespace.serverIdentity,
                         session.identity.namespace.userId,

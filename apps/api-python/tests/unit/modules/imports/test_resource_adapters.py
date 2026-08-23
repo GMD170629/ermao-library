@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from app.modules.imports.application.readable_resource.ports import adapter_identity
 from app.modules.imports.domain.resource_adapters import (
+    ADAPTER_SPECS,
     ResourceAdapterId,
     match_directory_adapters_for_samples,
     match_file_adapters,
+    source_format_for_filename,
     unique_adapter_or_none,
 )
 
@@ -71,3 +74,52 @@ def test_unique_adapter_or_none_rejects_empty_and_ambiguous() -> None:
     epub = match_file_adapters("a.epub")
     pdf = match_file_adapters("a.pdf")
     assert unique_adapter_or_none(epub + pdf) is None
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format"),
+    (
+        ("issue.cbz", "CBZ"),
+        ("issue.cbr", "CBR"),
+        ("issue.zip", "ZIP"),
+        ("issue.rar", "RAR"),
+    ),
+)
+def test_comic_archive_source_format_is_concrete(
+    filename: str, expected_format: str
+) -> None:
+    adapter = unique_adapter_or_none(match_file_adapters(filename))
+    assert adapter is not None
+    assert adapter.adapter_id is ResourceAdapterId.COMIC_ARCHIVE
+    assert source_format_for_filename(adapter, filename) == expected_format
+
+
+def test_comic_media_kind_is_not_a_concrete_source_format() -> None:
+    adapter = next(
+        spec
+        for spec in ADAPTER_SPECS
+        if spec.adapter_id is ResourceAdapterId.COMIC_ARCHIVE
+    )
+    assert adapter.media_kind == "COMIC"
+    assert adapter.format_label == "COMIC"
+    assert source_format_for_filename(adapter, "issue.cbz") != adapter.media_kind
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format"),
+    (
+        ("issue.cbz", "CBZ"),
+        ("issue.cbr", "CBR"),
+        ("issue.zip", "ZIP"),
+        ("issue.rar", "RAR"),
+    ),
+)
+def test_adapter_identity_persists_concrete_comic_format(
+    filename: str, expected_format: str
+) -> None:
+    adapter = unique_adapter_or_none(match_file_adapters(filename))
+    assert adapter is not None
+    identity = adapter_identity(adapter, source_name=filename)
+    assert identity.adapter_id == ResourceAdapterId.COMIC_ARCHIVE.value
+    assert identity.media_kind == "COMIC"
+    assert identity.format_label == expected_format

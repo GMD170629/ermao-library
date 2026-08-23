@@ -10,6 +10,160 @@ from pydantic import Field
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 
 MediaKind = Literal["EBOOK", "COMIC", "AUDIOBOOK"]
+FacetKind = Literal["AUTHOR", "TAG", "SERIES"]
+
+
+class LibraryFacetView(HttpContractModel):
+    id: str
+    kind: FacetKind
+    name: str
+    normalized_name: str = Field(alias="normalizedName")
+    aliases: list[str] = Field(default_factory=list)
+    book_count: int = Field(alias="bookCount", ge=0)
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class LibraryFacetPagePayload(HttpContractModel):
+    facets: list[LibraryFacetView]
+    page: int = Field(ge=1)
+    page_size: int = Field(alias="pageSize", ge=1)
+    total: int = Field(ge=0)
+    total_pages: int = Field(alias="totalPages", ge=1)
+
+
+class LibraryOperationView(HttpContractModel):
+    id: str
+    action: str
+    status: str
+    summary: str
+    expires_at: datetime | None = Field(default=None, alias="expiresAt")
+    undo_available: bool = Field(alias="undoAvailable")
+
+
+class MergeLibraryFacetsRequest(HttpContractModel):
+    kind: FacetKind
+    target_id: str = Field(alias="targetId", min_length=1)
+    source_ids: list[str] = Field(alias="sourceIds", min_length=1)
+
+
+class RenameLibraryFacetRequest(HttpContractModel):
+    name: str = Field(min_length=1, max_length=500)
+
+
+class LibraryFacetMergePayload(HttpContractModel):
+    target_id: str = Field(alias="targetId")
+    merged_ids: list[str] = Field(alias="mergedIds")
+    operation: LibraryOperationView
+
+
+class LibraryFacetRenamePayload(HttpContractModel):
+    facet_id: str = Field(alias="facetId")
+    name: str
+    operation: LibraryOperationView
+
+
+class LibraryFacetDeletePayload(HttpContractModel):
+    facet_id: str = Field(alias="facetId")
+    deleted: Literal[True] = True
+    operation: LibraryOperationView
+
+
+class LibraryOperationUndoPayload(HttpContractModel):
+    operation: LibraryOperationView
+    restored: Literal[True] = True
+
+
+class LibraryGroupingBookView(HttpContractModel):
+    id: str
+    title: str
+    author: str
+    cover_url: str = Field(alias="coverUrl")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class LibraryGroupingView(HttpContractModel):
+    id: str
+    name: str
+    book_count: int = Field(alias="bookCount", ge=1)
+    updated_at: datetime = Field(alias="updatedAt")
+    representative_books: list[LibraryGroupingBookView] = Field(
+        default_factory=list,
+        alias="representativeBooks",
+    )
+
+
+class LibraryGroupingPagePayload(HttpContractModel):
+    groups: list[LibraryGroupingView]
+    page: int = Field(ge=1)
+    page_size: int = Field(alias="pageSize", ge=1)
+    total: int = Field(ge=0)
+    total_pages: int = Field(alias="totalPages", ge=1)
+
+
+class BulkBookMetadataRequest(HttpContractModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    fields: dict[str, str] = Field(default_factory=dict)
+    add_tags: list[str] = Field(default_factory=list, alias="addTags")
+    remove_tags: list[str] = Field(default_factory=list, alias="removeTags")
+
+
+class BulkBookFindReplaceRequest(HttpContractModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    field: Literal[
+        "title",
+        "author",
+        "description",
+        "seriesName",
+        "tags",
+        "resourceTitle",
+    ]
+    find: str = Field(min_length=1, max_length=500)
+    replacement: str = Field(max_length=10_000)
+    regex: bool = False
+    case_sensitive: bool = Field(default=False, alias="caseSensitive")
+    start_number: int = Field(default=1, alias="startNumber", ge=1, le=1_000_000)
+
+
+class BulkBookShelfMembershipRequest(HttpContractModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    shelf_id: str = Field(alias="shelfId", min_length=1)
+    membership: Literal["ADD", "REMOVE"]
+
+
+class BulkBookReadingStatusRequest(HttpContractModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    status: Literal["UNREAD", "FINISHED"]
+
+
+class BulkBookOperationPayload(HttpContractModel):
+    updated: int = Field(ge=0)
+    changed_values: int = Field(alias="changedValues", ge=0)
+    operation: LibraryOperationView
+
+
+class BulkBookCoverSkipped(HttpContractModel):
+    book_id: str = Field(alias="bookId")
+    reason: str
+
+
+class BulkBookCoverPayload(HttpContractModel):
+    updated: int = Field(ge=0)
+    skipped: list[BulkBookCoverSkipped]
+    operation: LibraryOperationView
+
+
+class BulkBookFindReplacePreviewItem(HttpContractModel):
+    book_id: str = Field(alias="bookId")
+    title: str
+    before: str | list[str]
+    after: str | list[str]
+    resource_id: str | None = Field(default=None, alias="resourceId")
+
+
+class BulkBookFindReplacePreviewPayload(HttpContractModel):
+    changed_books: int = Field(alias="changedBooks", ge=0)
+    changed_values: int = Field(alias="changedValues", ge=0)
+    items: list[BulkBookFindReplacePreviewItem]
 
 
 class FilterOption(HttpContractModel):
@@ -57,8 +211,6 @@ class ResourceAssetView(HttpContractModel):
     source_node_id: str = Field(alias="sourceNodeId")
     role: str
     mime_type: str = Field(alias="mimeType")
-    path: str = ""
-    kind: str = ""
     size_bytes: int = Field(alias="sizeBytes", ge=0)
     size: str = "0 B"
     mtime_ms: int = Field(alias="mtimeMs", ge=0)
@@ -71,6 +223,7 @@ class ResourceAssetView(HttpContractModel):
     track_number: int | None = Field(default=None, alias="trackNumber")
     sort_order: int = Field(alias="sortOrder")
     url: str
+    download_url: str = Field(alias="downloadUrl")
 
 
 class ResourceView(HttpContractModel):
@@ -78,6 +231,7 @@ class ResourceView(HttpContractModel):
     book_id: str = Field(alias="bookId")
     source_node_id: str = Field(alias="sourceNodeId")
     title: str
+    description: str | None = None
     resource_index: float | None = Field(default=None, alias="resourceIndex")
     sort_order: int = Field(default=0, alias="sortOrder")
     format: str
@@ -222,10 +376,16 @@ class ContinueReadingItem(HttpContractModel):
     reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
         alias="readerType"
     )
-    resource_id: str = Field(alias="resourceId")
-    resource_title: str = Field(alias="resourceTitle")
-    percent: float = Field(ge=0, le=100)
-    updated_at: datetime | None = Field(alias="updatedAt")
+    resume_resource_id: str = Field(alias="resumeResourceId")
+    progress: float = Field(ge=0, le=100)
+    last_read_at: datetime | None = Field(alias="lastReadAt")
+    chapter: str | None = None
+    resource_title: str | None = Field(default=None, alias="resourceTitle")
+    narrator: str | None = None
+
+
+class DashboardBooksPayload(HttpContractModel):
+    books: list[BookshelfBookSummary]
 
 
 class UpdateBookRequest(HttpContractModel):
@@ -515,6 +675,48 @@ class ContinueReadingPayload(HttpContractModel):
 
 
 class ContinueReadingResponse(SuccessEnvelope[ContinueReadingPayload]):
+    pass
+
+
+class DashboardBooksResponse(SuccessEnvelope[DashboardBooksPayload]):
+    pass
+
+
+class LibraryFacetPageResponse(SuccessEnvelope[LibraryFacetPagePayload]):
+    pass
+
+
+class LibraryFacetMergeResponse(SuccessEnvelope[LibraryFacetMergePayload]):
+    pass
+
+
+class LibraryFacetRenameResponse(SuccessEnvelope[LibraryFacetRenamePayload]):
+    pass
+
+
+class LibraryFacetDeleteResponse(SuccessEnvelope[LibraryFacetDeletePayload]):
+    pass
+
+
+class LibraryOperationUndoResponse(SuccessEnvelope[LibraryOperationUndoPayload]):
+    pass
+
+
+class LibraryGroupingPageResponse(SuccessEnvelope[LibraryGroupingPagePayload]):
+    pass
+
+
+class BulkBookOperationResponse(SuccessEnvelope[BulkBookOperationPayload]):
+    pass
+
+
+class BulkBookCoverResponse(SuccessEnvelope[BulkBookCoverPayload]):
+    pass
+
+
+class BulkBookFindReplacePreviewResponse(
+    SuccessEnvelope[BulkBookFindReplacePreviewPayload]
+):
     pass
 
 

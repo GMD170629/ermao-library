@@ -1,162 +1,170 @@
 package com.ermao.library.shared.modules.library.infrastructure
 
-import com.ermao.library.shared.modules.library.domain.AppliedFacet
-import com.ermao.library.shared.modules.library.domain.FacetKind
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.MediaKind
-import com.ermao.library.shared.modules.library.domain.Volume
-import com.ermao.library.shared.modules.library.domain.VolumeClassification
-import com.ermao.library.shared.modules.library.domain.VolumeFile
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkVersion
+import com.ermao.library.shared.modules.library.domain.Resource
+import com.ermao.library.shared.modules.library.domain.ResourceClassification
+import com.ermao.library.shared.modules.library.domain.Asset
 import kotlinx.serialization.Serializable
-
-@Serializable
-data class WorkDetailSummaryPayloadWire(
-    val book: WorkWire,
-)
-
-@Serializable
-data class WorkWire(
-    val id: String,
-    val title: String,
-    val author: String,
-    val description: String? = null,
-    val tags: List<String>,
-    val seriesName: String? = null,
-    val seriesFacet: FacetReferenceWire? = null,
-    val authorFacets: List<FacetReferenceWire> = emptyList(),
-    val seriesIndex: Double? = null,
-    val coverStatus: String,
-    val coverUrl: String,
-    val continueVolumeId: String? = null,
-    val continueVolumeProgress: Double = 0.0,
-    val completed: Boolean,
-    val versions: List<WorkVersionWire>,
-)
 
 @Serializable
 data class FacetReferenceWire(val id: String, val kind: String, val name: String)
 
-internal fun FacetReferenceWire.toDomain(): AppliedFacet = AppliedFacet(
-    id = id.also { require(it.isNotBlank()) },
-    kind = when (kind.uppercase()) {
-        "SERIES" -> FacetKind.Series
-        "AUTHOR" -> FacetKind.Author
-        else -> error("Unsupported facet kind")
-    },
-    name = name.also { require(it.isNotBlank()) },
+@Serializable
+data class BookPayloadWire(
+    val book: BookWire,
 )
 
 @Serializable
-data class WorkVersionWire(
+data class BookWire(
     val id: String,
-    val sourceKey: String,
-    val sourceName: String? = null,
-    val completed: Boolean,
-    val volumeCount: Int,
-    val sizeBytes: Long,
-    val volumes: List<VolumeWire>,
-)
-
-@Serializable
-data class VolumeWire(
-    val id: String,
-    val versionId: String,
+    val libraryId: String,
+    val sourceNodeId: String,
     val title: String,
-    val volumeIndex: Double? = null,
-    val sortOrder: Int,
+    val author: String? = null,
+    val description: String? = null,
+    val seriesName: String? = null,
+    val seriesIndex: Double? = null,
+    val visibilityState: String,
+    val curationState: String,
+    val publicationStatus: String,
+    val trackingStatus: String,
+    val metadataQuality: Int,
+    val coverStatus: String,
+    val coverPath: String? = null,
+    val coverUrl: String,
+    val tags: List<String> = emptyList(),
+    val ignored: Boolean = false,
+    val organized: Boolean = false,
+    val addedAt: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+    val gradient: String = "",
+    val resources: List<ResourceWire> = emptyList(),
+    val availableMediaKinds: List<String> = emptyList(),
+    val completed: Boolean = false,
+    val continueResourceId: String? = null,
+    val continueResourceTitle: String? = null,
+    val continueResourceProgress: Double = 0.0,
+)
+
+@Serializable
+data class ResourceWire(
+    val id: String,
+    val bookId: String,
+    val sourceNodeId: String,
+    val title: String,
+    val description: String? = null,
+    val resourceIndex: Double? = null,
+    val sortOrder: Int = 0,
     val format: String,
+    val mediaKind: String,
     val readerType: String,
-    val classification: VolumeClassificationWire,
-    val readable: Boolean,
-    val kindleSendAvailable: Boolean,
+    val classification: ResourceClassificationWire = ResourceClassificationWire(),
+    val kindleSendAvailable: Boolean = false,
     val publisher: String? = null,
     val publishedAt: String? = null,
     val language: String? = null,
     val isbn: String? = null,
     val identifier: String? = null,
     val narrator: String? = null,
-    val coverUrl: String,
-    val sizeBytes: Long,
+    val abridged: Boolean? = null,
+    val importStatus: String = "READY",
+    val importError: String? = null,
+    val sizeBytes: Long = 0,
     val pageCount: Int? = null,
     val chapterCount: Int? = null,
     val durationMs: Long? = null,
     val trackCount: Int? = null,
-    val progress: Double,
-    val files: List<VolumeFileSummaryWire>,
+    val coverStatus: String = "UNKNOWN",
+    val coverPath: String? = null,
+    val coverUrl: String = "",
+    val progress: Double = 0.0,
+    val lastReadAt: String? = null,
+    val hidden: Boolean = false,
+    val readable: Boolean = true,
+    val resourceCompleted: Boolean = false,
+    val assets: List<AssetWire> = emptyList(),
 )
 
 @Serializable
-data class VolumeClassificationWire(
-    val source: String,
-    val reason: String,
+data class ResourceClassificationWire(
+    val source: String = "UNKNOWN",
+    val reason: String = "",
     val suggestedMediaKind: String? = null,
 )
 
 @Serializable
-data class VolumeFileSummaryWire(
+data class AssetWire(
     val id: String,
-    val path: String,
-    val sizeBytes: Long,
-    val size: String,
+    val resourceId: String? = null,
+    val sourceNodeId: String? = null,
+    val role: String? = null,
+    val mimeType: String? = null,
+    val sizeBytes: Long = 0,
+    val size: String = "0 B",
+    val mtimeMs: Long? = null,
+    val durationMs: Long? = null,
+    val codec: String? = null,
+    val bitrate: Int? = null,
+    val sampleRate: Int? = null,
+    val channels: Int? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null,
+    val sortOrder: Int? = null,
+    val url: String? = null,
+    val downloadUrl: String? = null,
 )
 
-fun WorkDetailSummaryPayloadWire.toDomain(): WorkDetailSummary = book.toDomain()
+fun BookPayloadWire.toDomain(): BookDetailSummary = book.toBookDetailSummary()
 
-fun WorkWire.toDomain(): WorkDetailSummary {
-    require(id.isNotBlank()) { "Work id is blank" }
-    require(title.isNotBlank()) { "Work title is blank" }
-    return WorkDetailSummary(
+fun BookWire.toBookDetailSummary(): BookDetailSummary {
+    require(id.isNotBlank()) { "Book id is blank" }
+    require(title.isNotBlank()) { "Book title is blank" }
+    require(continueResourceProgress in 0.0..100.0) { "Book progress is outside 0..100" }
+    return BookDetailSummary(
         id = id,
+        sourceNodeId = sourceNodeId,
         title = title,
         author = author,
         description = description,
         tags = tags,
         seriesName = seriesName,
-        seriesFacet = seriesFacet?.toDomain(),
-        authorFacets = authorFacets.map(FacetReferenceWire::toDomain),
+        seriesFacet = null,
+        authorFacets = emptyList(),
         seriesIndex = seriesIndex,
         coverStatus = coverStatus,
         coverUrl = coverUrl,
-        continueVolumeId = continueVolumeId,
-        continueVolumeProgress = continueVolumeProgress.also { require(it in 0.0..100.0) },
+        continueResourceId = continueResourceId,
+        continueResourceProgress = continueResourceProgress,
         completed = completed,
-        versions = versions.map(WorkVersionWire::toDomain),
+        availableMediaKinds = availableMediaKinds.map(::MediaKind),
+        resources = resources.map(ResourceWire::toDomain),
     )
 }
 
-fun WorkVersionWire.toDomain(): WorkVersion {
-    require(id.isNotBlank()) { "Work version id is blank" }
-    require(sourceKey.isNotBlank()) { "Work version source key is blank" }
-    require(volumeCount >= volumes.size) { "Bounded volume page exceeds total count" }
-    require(sizeBytes >= 0) { "Work version size is negative" }
-    return WorkVersion(
+fun ResourceWire.toDomain(): Resource {
+    require(id.isNotBlank() && bookId.isNotBlank() && sourceNodeId.isNotBlank()) {
+        "Resource identity is blank"
+    }
+    require(sizeBytes >= 0 && progress in 0.0..100.0) {
+        "Resource metrics are invalid"
+    }
+    return Resource(
         id = id,
-        sourceKey = sourceKey,
-        sourceName = sourceName?.takeIf { it.isNotBlank() },
-        completed = completed,
-        volumeCount = volumeCount,
-        sizeBytes = sizeBytes,
-        volumes = volumes.map(VolumeWire::toDomain),
-    )
-}
-
-fun VolumeWire.toDomain(): Volume {
-    require(id.isNotBlank() && versionId.isNotBlank()) { "Volume identity is blank" }
-    require(sizeBytes >= 0) { "Volume size is negative" }
-    require(progress in 0.0..100.0) { "Volume progress is outside 0..100" }
-    return Volume(
-        id = id,
-        versionId = versionId,
+        bookId = bookId,
+        sourceNodeId = sourceNodeId,
         title = title,
-        volumeIndex = volumeIndex,
+        description = description,
+        resourceIndex = resourceIndex,
         sortOrder = sortOrder,
         format = format,
+        mediaKind = MediaKind(mediaKind),
         readerType = readerType,
-        classification = VolumeClassification(
-            classification.source,
-            classification.reason,
-            classification.suggestedMediaKind?.let(::MediaKind),
+        classification = ResourceClassification(
+            source = classification.source,
+            reason = classification.reason,
+            suggestedMediaKind = classification.suggestedMediaKind?.let(::MediaKind),
         ),
         readable = readable,
         kindleSendAvailable = kindleSendAvailable,
@@ -166,11 +174,11 @@ fun VolumeWire.toDomain(): Volume {
         isbn = isbn,
         identifier = identifier,
         narrator = narrator,
-        abridged = null,
-        origin = null,
-        importStatus = null,
-        importError = null,
-        coverStatus = null,
+        abridged = abridged,
+        importStatus = importStatus,
+        importError = importError,
+        coverStatus = coverStatus,
+        coverPath = coverPath,
         coverUrl = coverUrl,
         sizeBytes = sizeBytes,
         pageCount = pageCount,
@@ -178,27 +186,33 @@ fun VolumeWire.toDomain(): Volume {
         durationMillis = durationMs,
         trackCount = trackCount,
         progress = progress,
-        completed = null,
-        lastReadAt = null,
-        files = files.map {
-            VolumeFile(
-                id = it.id,
-                volumeId = null,
-                path = it.path,
-                mimeType = null,
-                kind = null,
-                sortOrder = null,
-                sizeBytes = it.sizeBytes,
-                displaySize = it.size,
-                durationMillis = null,
-                codec = null,
-                bitrate = null,
-                sampleRate = null,
-                channels = null,
-                discNumber = null,
-                trackNumber = null,
-                url = null,
-            )
-        },
+        lastReadAt = lastReadAt,
+        hidden = hidden,
+        completed = resourceCompleted,
+        assets = assets.map(AssetWire::toDomain),
+    )
+}
+
+fun AssetWire.toDomain(): Asset {
+    require(id.isNotBlank() && sizeBytes >= 0) { "Asset identity or size is invalid" }
+    return Asset(
+        id = id,
+        resourceId = resourceId,
+        sourceNodeId = sourceNodeId,
+        role = role,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        displaySize = size,
+        mtimeMillis = mtimeMs,
+        durationMillis = durationMs,
+        codec = codec,
+        bitrate = bitrate,
+        sampleRate = sampleRate,
+        channels = channels,
+        discNumber = discNumber,
+        trackNumber = trackNumber,
+        sortOrder = sortOrder,
+        url = url,
+        downloadUrl = downloadUrl,
     )
 }

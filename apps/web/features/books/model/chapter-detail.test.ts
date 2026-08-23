@@ -5,7 +5,7 @@ import { detailReaderHref, singleResourceEbook, syntheticPdfPageUnits } from './
 
 function resource(overrides: Partial<ReadableResourceView> = {}): ReadableResourceView {
   return {
-    id: 'resource-1', bookId: 'book-1', title: '第一卷', resourceIndex: 1, sortOrder: 0,
+    id: 'resource-1', bookId: 'book-1', sourceNodeId: 'resource-1-source-node', title: '第一卷', description: '', resourceIndex: 1, sortOrder: 0,
     format: 'EPUB', readerType: 'reflowable', classification: { source: 'AUTO', reason: 'FORMAT_DEFAULT', suggestedMediaKind: null }, publisher: null, publishedAt: null, language: null,
     isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null,
     coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: 3, durationMs: null, trackCount: null, progress: 0,

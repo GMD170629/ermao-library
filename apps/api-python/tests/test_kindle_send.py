@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
 from app.core.auth import hash_password
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
@@ -65,6 +66,9 @@ def _seed_book_resource_asset(db_session, test_settings) -> tuple[Path, str]:
     path = test_settings.resolved_storage_root / "books" / "book-kindle" / "book.epub"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"epub fixture")
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(test_settings.resolved_storage_root)
     book_node = _node("kindle-book-node", "books/book-kindle", directory=True)
     resource_node = _node("kindle-resource-node", "books/book-kindle/book.epub")
     book = LibraryBook(
@@ -153,6 +157,32 @@ def _enqueue(client, *, book_id: str = "book-kindle", asset_id: str = "asset-kin
     )
     assert response.status_code in {200, 201}, response.text
     return response.json()["data"]["task"]
+
+
+def test_kindle_asset_path_must_remain_inside_its_library_root(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    asset = root / "book.epub"
+    asset.write_bytes(b"book")
+
+    assert (
+        kindle_queue._library_asset_path(
+            {"libraryRoot": str(root), "sourceRelativePath": "book.epub"}
+        )
+        == asset.resolve()
+    )
+    assert (
+        kindle_queue._library_asset_path(
+            {"libraryRoot": str(root), "sourceRelativePath": "../outside.epub"}
+        )
+        is None
+    )
+    assert (
+        kindle_queue._library_asset_path(
+            {"libraryRoot": str(root), "sourceRelativePath": str(asset.resolve())}
+        )
+        is None
+    )
 
 
 def test_recover_interrupted_kindle_tasks_uses_set_based_dml(db_session) -> None:

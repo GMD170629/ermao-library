@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
+from app.modules.library.infrastructure.dashboard import (
+    management_card_counts,
+    recent_system_events,
+)
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.domain.events import (
     LOG_MAX_BYTES_SETTING,
@@ -67,6 +71,34 @@ from app.modules.system.infrastructure.settings import (
     upsert_settings,
     write_prepared_settings,
 )
+
+
+def management_overview_snapshot(
+    db: Session,
+    settings: Settings,
+) -> dict[str, object]:
+    health = run_system_health_checks(db, settings)
+    raw_checks = health.get("checks")
+    check_items = raw_checks if isinstance(raw_checks, list) else []
+    checks = {
+        str(item.get("name") or "unknown"): {
+            "status": str(item.get("status") or "unknown"),
+            "message": str(item.get("message") or ""),
+        }
+        for item in check_items
+        if isinstance(item, dict)
+    }
+    storage = system_event_storage_view(db)
+    cards = {
+        **management_card_counts(db),
+        "eventLogSizeBytes": int(storage["sizeBytes"]),
+        "eventLogMaxBytes": int(storage["maxBytes"]),
+    }
+    return {
+        "cards": cards,
+        "checks": checks,
+        "recentEvents": recent_system_events(db, limit=8),
+    }
 
 
 def prune_system_events(

@@ -55,7 +55,7 @@ struct BackupsView: View {
                 VStack(alignment: .leading, spacing: .space1) {
                     HStack { Label(backup.filename, systemImage: "doc.zipper"); Spacer(); Menu { Button(copy[.downloadFile]) { prepareExport(backup) }; Button(copy[.restoreBackup]) { restoreBackup = backup }; Button(copy[.deleteBackup], role: .destructive) { deleteBackup = backup } } label: { Image(systemName: "ellipsis") } }
                     Text("\(backup.kind) · \(backup.sizeBytes.administrativeByteCount) · \(backup.createdAt.administrativeFormatted(locale: copy.locale))").font(.caption).foregroundStyle(theme.textSecondary)
-                    Text("\(backup.workCount) \(copy[.backupWorkCount]) · \(backup.progressCount) \(copy[.backupProgressCount]) · \(backup.directoryCount) \(copy[.backupDirectoryCount])").font(.caption).foregroundStyle(theme.textSecondary)
+                    Text("\(backup.bookCount) \(copy[.backupBookCount]) · \(backup.progressCount) \(copy[.backupProgressCount]) · \(backup.libraryCount) \(copy[.backupLibraryCount])").font(.caption).foregroundStyle(theme.textSecondary)
                 }.padding(.vertical, .spaceHalf)
             }.administrativeListSurface().overlay { if backups.isEmpty { AdministrativeEmptyView(title: copy[.empty], systemImage: "externaldrive") } }
         }.navigationTitle(copy[.backupsTitle]).navigationBarTitleDisplayMode(.inline)

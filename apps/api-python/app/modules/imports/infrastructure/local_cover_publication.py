@@ -19,9 +19,9 @@ class FilesystemLocalCoverPublication:
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root.resolve()
 
-    def prepare(self, *, book_id: str, content: bytes) -> PreparedLocalCover:
-        if not book_id or Path(book_id).name != book_id:
-            raise ValueError("invalid book identifier")
+    def prepare(self, *, resource_id: str, content: bytes) -> PreparedLocalCover:
+        if not resource_id or Path(resource_id).name != resource_id:
+            raise ValueError("invalid resource identifier")
         if not 0 < len(content) <= _MAX_COVER_BYTES:
             raise ValueError("local cover exceeds the supported size")
         try:
@@ -33,11 +33,11 @@ class FilesystemLocalCoverPublication:
         suffix = _SUFFIXES.get(image_format)
         if suffix is None:
             raise ValueError("local cover is not a supported image")
-        target_dir = self._storage_root / "covers"
+        target_dir = self._storage_root / "covers" / "resources"
         target_dir.mkdir(parents=True, exist_ok=True)
-        temporary_path = target_dir / f".{book_id}.{uuid4().hex}.part"
+        temporary_path = target_dir / f".{resource_id}.{uuid4().hex}.part"
         temporary_path.write_bytes(content)
-        final_path = target_dir / f"{book_id}{suffix}"
+        final_path = target_dir / f"{resource_id}{suffix}"
         return PreparedLocalCover(
             temporary_path=temporary_path,
             final_path=final_path,

@@ -153,7 +153,7 @@ class ReaderR4PersistenceInstrumentedTest {
 
         val anotherWork = AndroidReaderProgressDatabase(
             context,
-            identity(namespace).copy(workId = "work-2"),
+            identity(namespace).copy(bookId = "book-2"),
             legacyProgressStore = null,
             databaseName = databaseName,
         )

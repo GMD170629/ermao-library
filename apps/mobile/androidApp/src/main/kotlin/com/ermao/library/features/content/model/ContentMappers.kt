@@ -3,17 +3,18 @@ package com.ermao.library.features.content.model
 import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
-import com.ermao.library.shared.modules.library.domain.Volume
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
+import com.ermao.library.shared.modules.library.domain.Resource
 import java.time.Instant
 
-fun ContentResult.Content<*>.freshness(): ContentFreshness = ContentFreshness.Fresh
+fun ContentResult.Content<*>.freshness(): ContentFreshness =
+    if (isStale) ContentFreshness.Stale else ContentFreshness.Fresh
 
-fun WorkSummary.toCard(): WorkCard = WorkCard(
+fun BookSummary.toCard(): BookCard = BookCard(
     id = id,
     title = title,
-    author = author,
+    author = author.orEmpty(),
     coverUrl = coverUrl,
     mediaKinds = availableMediaKinds.map { it.wireValue },
     progressPercent = progress.toInt().takeIf { it > 0 },
@@ -35,22 +36,22 @@ fun HomeSnapshot.toUiContent(): HomeContent {
     return HomeContent(
         continueReading = continueItem?.let {
             ContinueReadingCard(
-                work = WorkCard(
-                    id = it.workId,
+                book = BookCard(
+                    id = it.bookId,
                     title = it.title,
-                    author = it.author,
+                    author = it.author.orEmpty(),
                     coverUrl = it.coverUrl,
                     mediaKinds = listOf(it.mediaKind.wireValue),
                     progressPercent = it.progress.toInt().takeIf { percent -> percent > 0 },
                 ),
-                volumeTitle = it.volumeTitle,
-                positionLabel = null,
+                resourceTitle = it.resourceTitle,
+                positionLabel = it.chapter,
                 lastReadAtEpochMillis = it.lastReadAt.toEpochMillisOrNull(),
-                resumeVolumeId = it.resumeVolumeId,
+                resumeResourceId = it.resumeResourceId,
             )
         },
-        recentReading = readingItems.map(WorkSummary::toCard),
-        recentAdded = addedItems.map(WorkSummary::toCard),
+        recentReading = readingItems.map(BookSummary::toCard),
+        recentAdded = addedItems.map(BookSummary::toCard),
     )
 }
 
@@ -60,53 +61,44 @@ internal fun String?.toEpochMillisOrNull(): Long? = this
     ?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
 
 fun HomeSnapshot.hasSectionFailure(): Boolean =
-    continueReading is HomeSection.Failure || recentReading is HomeSection.Failure || recentAdded is HomeSection.Failure
+    continueReading is HomeSection.Failure ||
+        recentReading is HomeSection.Failure ||
+        recentAdded is HomeSection.Failure
 
-fun WorkDetailSummary.toUiContent(): WorkDetailContent {
-    val continueVolumeId = continueVolumeId
-    val versions = versions.map { version ->
-        VersionContent(
-            id = version.id,
-            sourceKey = version.sourceKey,
-            sourceName = version.sourceName,
-            volumeCount = version.volumeCount,
-            volumes = version.volumes.map { volume -> volume.toUiContent(volume.id == continueVolumeId) },
-        )
+fun BookDetailSummary.toUiContent(): BookDetailContent {
+    val mappedResources = resources.map { resource ->
+        resource.toUiContent(resource.id == continueResourceId)
     }
-    val selectedVersionId = versions.firstOrNull { version ->
-        version.volumes.any { it.id == continueVolumeId }
-    }?.id ?: versions.firstOrNull()?.id
-    return WorkDetailContent(
-    work = WorkCard(
-        id = id,
-        title = title,
-        author = author,
-        coverUrl = coverUrl,
-        mediaKinds = versions.flatMap { version ->
-            version.volumes.mapNotNull { volume -> volume.suggestedMediaKind }
-        }.distinct(),
-        progressPercent = continueVolumeProgress.toInt().takeIf { it > 0 },
-    ),
-    seriesId = seriesFacet?.id,
-    seriesName = seriesFacet?.name ?: seriesName,
-    seriesIndex = seriesIndex,
-    authorFacetId = authorFacets.firstOrNull()?.id,
-    description = description,
-    tags = tags,
-    versions = versions,
-    selectedVersionId = selectedVersionId,
-    completed = completed,
-    readingUnits = emptyList(),
+    val selectedResourceId = mappedResources.firstOrNull { it.selected }?.id
+        ?: mappedResources.firstOrNull()?.id
+    return BookDetailContent(
+        book = BookCard(
+            id = id,
+            title = title,
+            author = author.orEmpty(),
+            coverUrl = coverUrl,
+            mediaKinds = availableMediaKinds.map { it.wireValue },
+            progressPercent = continueResourceProgress.toInt().takeIf { it > 0 },
+        ),
+        seriesId = seriesFacet?.id,
+        seriesName = seriesFacet?.name ?: seriesName,
+        seriesIndex = seriesIndex,
+        authorFacetId = authorFacets.firstOrNull()?.id,
+        description = description,
+        tags = tags,
+        resources = mappedResources,
+        selectedResourceId = selectedResourceId,
+        completed = completed,
+        readingUnits = emptyList(),
     )
 }
 
-fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent(
+fun Resource.toUiContent(selected: Boolean = false): ResourceContent = ResourceContent(
     id = id,
     title = title,
     format = format,
     readerType = readerType,
-    versionId = versionId,
-    volumeIndex = volumeIndex,
+    resourceIndex = resourceIndex,
     sortOrder = sortOrder,
     publisher = publisher,
     publishedAt = publishedAt,
@@ -115,10 +107,17 @@ fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent
     identifier = identifier,
     narrator = narrator,
     pageCount = pageCount,
-    metadataSource = origin,
-    suggestedMediaKind = classification.suggestedMediaKind?.wireValue,
+    metadataSource = classification.source,
+    suggestedMediaKind = classification.suggestedMediaKind?.wireValue ?: mediaKind.wireValue,
     kindleSendAvailable = kindleSendAvailable,
-    files = files.map { file -> VolumeFileContent(file.id, file.path, file.sizeBytes, file.displaySize) },
+    assets = assets.map { asset ->
+        AssetContent(
+            id = asset.id,
+            path = asset.downloadUrl ?: asset.url.orEmpty(),
+            sizeBytes = asset.sizeBytes,
+            displaySize = asset.displaySize,
+        )
+    },
     coverUrl = coverUrl,
     sizeBytes = sizeBytes,
     progressPercent = progress.toInt().takeIf { it > 0 },
@@ -134,5 +133,8 @@ fun ContentSort.toShared(): com.ermao.library.shared.modules.library.LibrarySort
 }
 
 fun LibraryScope.toFacetKind(): com.ermao.library.shared.modules.library.domain.FacetKind =
-    if (this == LibraryScope.Series) com.ermao.library.shared.modules.library.domain.FacetKind.Series
-    else com.ermao.library.shared.modules.library.domain.FacetKind.Author
+    if (this == LibraryScope.Series) {
+        com.ermao.library.shared.modules.library.domain.FacetKind.Series
+    } else {
+        com.ermao.library.shared.modules.library.domain.FacetKind.Author
+    }

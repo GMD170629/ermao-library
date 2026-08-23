@@ -69,17 +69,22 @@ def _requires_system_manager(path: str, method: str) -> bool:
         return True
     if path.startswith(SYSTEM_MANAGER_PREFIXES):
         return True
+    if (
+        method == "POST"
+        and path.startswith("/api/library/operations/")
+        and path.endswith("/undo")
+    ):
+        return False
     if path.startswith("/api/library/") and path not in {
         "/api/library/facets",
+        "/api/library/groupings",
         "/api/library/filter-schema",
         "/api/library/filter-options",
+        "/api/library/operations/books/reading-status",
+        "/api/library/operations/books/shelf-membership",
     }:
         return True
-    if path in {
-        "/api/books/import",
-        "/api/books/bulk/cover",
-        "/api/books/bulk/find-replace/preview",
-    }:
+    if path == "/api/books/import":
         return True
     return method != "GET" and path.startswith("/api/metadata/")
 

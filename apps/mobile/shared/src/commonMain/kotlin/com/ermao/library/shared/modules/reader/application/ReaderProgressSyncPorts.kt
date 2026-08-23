@@ -10,7 +10,7 @@ data class ReaderProgressUpload(
     val mutation: ReaderProgressMutation,
 ) {
     init {
-        require(mutation.sourceId == target.volumeId) { "Reader mutation source does not match its volume" }
+        require(mutation.resourceId == target.resourceId) { "Reader mutation resource does not match its target" }
     }
 }
 

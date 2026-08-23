@@ -62,7 +62,7 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, fallbackCoverUrl
         removeCover
       });
       await onSaved();
-      feedback.success(t('版本信息已保存'));
+      feedback.success(t('来源目录信息已保存'));
       onClose();
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
@@ -71,9 +71,9 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, fallbackCoverUrl
     }
   };
 
-  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('编辑版本')}>
+  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('编辑来源目录')}>
     <div className="w-full max-w-xl rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
-      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑版本</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
+      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑来源目录</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
       <div className="mt-5 grid gap-5 md:grid-cols-[140px_minmax(0,1fr)]">
         <div>
           <div className="text-sm text-stone-600"><I18nText>目录封面</I18nText></div>
@@ -83,7 +83,7 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, fallbackCoverUrl
             <Button variant="secondary" icon={ImagePlus} className="!min-h-9 !rounded-lg !px-3 text-xs" onClick={() => coverInputRef.current?.click()}><I18nText>{entry.coverUrl || coverFile ? '更换封面' : '选择封面'}</I18nText></Button>
             {entry.coverUrl || coverFile ? <Button variant="secondary" icon={Trash2} className="!min-h-9 !rounded-lg !px-3 text-xs" onClick={() => { setCoverFile(null); setRemoveCover(Boolean(entry.coverUrl)); }}><I18nText>移除独立封面</I18nText></Button> : null}
           </div>
-          <p className="mt-2 text-xs leading-5 text-stone-500"><I18nText>未单独设置时沿用图书卷或图书封面</I18nText></p>
+          <p className="mt-2 text-xs leading-5 text-stone-500"><I18nText>未单独设置时沿用可读资源或图书封面</I18nText></p>
         </div>
         <div className="grid content-start gap-4">
           <label className="text-sm text-stone-600"><I18nText>标题</I18nText><input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -133,7 +133,7 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
         description: candidate.description?.trim() || entry.description
       });
       await onSaved();
-      feedback.success(t('识别结果已应用到版本'));
+      feedback.success(t('识别结果已应用到来源目录'));
       onClose();
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
@@ -142,9 +142,9 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     }
   };
 
-  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('识别版本元数据')}>
+  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('识别来源目录元数据')}>
     <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
-      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>识别版本元数据</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
+      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>识别来源目录元数据</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
       <div className="mt-5 flex flex-col gap-3 sm:flex-row">
         <Select value={providerId} ariaLabel="元数据来源" options={[{ value: 'douban', label: '豆瓣图书' }, { value: 'bangumi', label: 'Bangumi 漫画' }, { value: 'ai', label: 'AI 元数据识别' }]} onChange={setProviderId} className="sm:w-44" />
         <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 rounded-xl border border-stone-200 px-3 py-2.5" aria-label={t('识别关键词')} />

@@ -60,7 +60,7 @@ internal class RemoteComicReadiumPublicationFactory(
         return Publication(
             manifest = Manifest(
                 metadata = Metadata(
-                    identifier = "urn:shuku:comic:${source.volumeId}",
+                    identifier = "urn:shuku:comic:${source.resourceId}",
                     type = "https://schema.org/ComicStory",
                     conformsTo = setOf(Publication.Profile.DIVINA),
                     localizedTitle = LocalizedString(source.displayTitle),

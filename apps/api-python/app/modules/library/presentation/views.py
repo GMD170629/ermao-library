@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -17,7 +16,6 @@ from app.contracts.media_capabilities import (
     reader_type_for_format,
 )
 from app.models import (
-    Library,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
@@ -91,17 +89,15 @@ def _asset_rows(
         LibraryResourceAsset,
         LibraryResourceAssetMetadata | None,
         LibrarySourceNode,
-        Library,
     ]
 ]:
     return [
-        (row[0], row[1], row[2], row[3])
+        (row[0], row[1], row[2])
         for row in db.execute(
             select(
                 LibraryResourceAsset,
                 LibraryResourceAssetMetadata,
                 LibrarySourceNode,
-                Library,
             )
             .outerjoin(
                 LibraryResourceAssetMetadata,
@@ -111,7 +107,6 @@ def _asset_rows(
                 LibrarySourceNode,
                 LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
-            .join(Library, Library.id == LibraryResourceAsset.library_id)
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.import_state == "READY",
@@ -144,8 +139,6 @@ def _resource_view(
             if asset_metadata
             else "application/octet-stream",
             "sizeBytes": int(source.observed_size_bytes or 0),
-            "path": str(Path(library.root_path) / source.relative_path),
-            "kind": asset.role,
             "size": _format_bytes(source.observed_size_bytes),
             "mtimeMs": int(source.observed_mtime_ns // 1_000_000),
             "durationMs": asset_metadata.duration_ms if asset_metadata else None,
@@ -154,8 +147,9 @@ def _resource_view(
             "trackNumber": asset_metadata.track_number if asset_metadata else None,
             "sortOrder": int(asset.sequence_index or 0),
             "url": f"/api/assets/{quote(asset.id, safe='')}",
+            "downloadUrl": f"/api/assets/{quote(asset.id, safe='')}?download=true",
         }
-        for asset, asset_metadata, source, library in assets
+        for asset, asset_metadata, source in assets
     ]
     total_size = sum(
         int(item["sizeBytes"])
@@ -168,6 +162,7 @@ def _resource_view(
         "bookId": resource.book_id,
         "sourceNodeId": resource.source_node_id,
         "title": metadata.title if metadata else "",
+        "description": metadata.description if metadata else None,
         "resourceIndex": metadata.resource_index if metadata else None,
         "sortOrder": sort_order,
         "format": format_value,

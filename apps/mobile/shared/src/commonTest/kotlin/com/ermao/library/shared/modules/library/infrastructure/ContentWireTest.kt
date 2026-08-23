@@ -14,59 +14,62 @@ class ContentWireTest {
     private val decoder = ApiEnvelopeDecoder(Json { ignoreUnknownKeys = false; explicitNulls = false })
 
     @Test
-    fun decodesFacetPageWithStableIdentity() {
+    fun decodesBookFacetPageWithStableIdentity() {
         val result = decoder.decode(
             200,
             """{"ok":true,"data":{"books":[],"page":1,"pageSize":24,"total":0,"totalPages":1,"appliedFacet":{"id":"series-1","kind":"SERIES","name":"Saga"}}}""",
-            WorkPageWire.serializer(),
+            BookPageWire.serializer(),
         )
 
-        val page = assertNotNull(assertIs<ApiResult.Success<WorkPageWire>>(result).value.toFacetPage())
+        val page = assertNotNull(
+            assertIs<ApiResult.Success<BookPageWire>>(result).value.toFacetPage(FacetKind.Series, "series-1"),
+        )
         assertEquals("series-1", page.facet.id)
         assertEquals(FacetKind.Series, page.facet.kind)
     }
 
     @Test
-    fun missingFacetIdentityIsRejectedWithoutThrowingAcrossPlatformBoundary() {
+    fun missingFacetIdentityFallsBackToRequestedBookFacet() {
         val result = decoder.decode(
             200,
             """{"ok":true,"data":{"books":[],"page":1,"pageSize":24,"total":0,"totalPages":1,"appliedFacet":null}}""",
-            WorkPageWire.serializer(),
+            BookPageWire.serializer(),
         )
 
-        assertNull(assertIs<ApiResult.Success<WorkPageWire>>(result).value.toFacetPage())
+        val page = assertIs<ApiResult.Success<BookPageWire>>(result).value
+            .toFacetPage(FacetKind.Author, "author-1")
+        assertEquals("author-1", page.facet.id)
+        assertEquals(FacetKind.Author, page.facet.kind)
+        assertEquals("author-1", page.facet.name)
     }
 
     @Test
-    fun groupingRepresentativeWorksAreBounded() {
+    fun groupingRepresentativeBooksAreBounded() {
         val result = decoder.decode(
             200,
-            """{"ok":true,"data":{"kind":"AUTHOR","groups":[{"id":"author-1","name":"Ursula","bookCount":4,"updatedAt":"2026-01-01T00:00:00Z","representativeWorks":[${representativeWork("1")},${representativeWork("2")},${representativeWork("3")}]}],"page":1,"pageSize":30,"total":1,"totalPages":1}}""",
+            """{"ok":true,"data":{"kind":"AUTHOR","groups":[{"id":"author-1","name":"Ursula","bookCount":4,"updatedAt":"2026-01-01T00:00:00Z","representativeBooks":[${representativeBook("1")},${representativeBook("2")},${representativeBook("3")},${representativeBook("4")}]}],"page":1,"pageSize":30,"total":1,"totalPages":1}}""",
             GroupingPageWire.serializer(),
         )
 
         val group = assertIs<ApiResult.Success<GroupingPageWire>>(result).value.toPage().items.single()
-        assertEquals(listOf("1", "2", "3"), group.representativeWorks.map { it.id })
+        assertEquals(listOf("1", "2", "3"), group.representativeBooks.map { it.id })
     }
 
     @Test
-    fun decodesCurrentContinueReadingContractWithoutDroppingStrictFields() {
+    fun decodesCurrentContinueReadingBookResourceContract() {
         val result = decoder.decode(
             200,
-            """{"ok":true,"data":{"item":{"workId":"work-1","title":"Title","author":"Author","coverUrl":"/api/works/work-1/cover","mediaKind":"EBOOK","volumeFormat":"EPUB","readerType":"reflowable","resumeVolumeId":"volume-1","progress":42.0,"chapter":null,"lastReadAt":"2026-08-12T00:00:00Z","volumeTitle":"Volume 1","narrator":null}}}""",
+            """{"ok":true,"data":{"item":{"bookId":"book-1","title":"Title","author":null,"coverUrl":"/api/books/book-1/cover","mediaKind":"EBOOK","resourceFormat":"EPUB","readerType":"reflowable","resumeResourceId":"resource-1","progress":42.0,"chapter":null,"lastReadAt":"2026-08-12T00:00:00Z","resourceTitle":"Resource 1","narrator":null}}}""",
             ContinueReadingPayloadWire.serializer(),
         )
 
         val item = assertIs<ApiResult.Success<ContinueReadingPayloadWire>>(result).value.item
-        assertEquals("work-1", item?.toDomain()?.workId)
-        assertEquals("EPUB", item?.volumeFormat)
-        assertEquals("reflowable", item?.readerType)
+        assertEquals("book-1", item?.toDomain()?.bookId)
+        assertEquals("EPUB", item?.resourceFormat)
+        assertEquals("resource-1", item?.resumeResourceId)
         assertNull(item?.chapter)
     }
 
-    private fun work(id: String) =
-        """{"id":"$id","title":"Title $id","author":"Author","coverUrl":"/api/works/$id/cover","availableMediaKinds":["EBOOK"],"progress":0.0}"""
-
-    private fun representativeWork(id: String) =
-        """{"id":"$id","title":"Title $id","author":"Author","coverUrl":"/api/works/$id/cover"}"""
+    private fun representativeBook(id: String) =
+        """{"id":"$id","title":"Title $id","author":null,"coverUrl":"/api/books/$id/cover","updatedAt":"2026-01-01T00:00:00Z"}"""
 }

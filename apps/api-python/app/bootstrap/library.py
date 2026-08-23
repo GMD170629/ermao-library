@@ -13,12 +13,27 @@ from app.modules.library.application.book_commands import UpdateBook
 from app.modules.library.application.book_contents import BrowseBookContents
 from app.modules.library.application.book_list import BookListQuery, BookListResult
 from app.modules.library.application.bookshelf import ListBookshelfItems
+from app.modules.library.application.bulk_operations import (
+    ExecuteBulkFindReplace,
+    ExecuteBulkMetadata,
+    ExecuteBulkReadingStatus,
+    ExecuteBulkShelfMembership,
+    PreviewBulkFindReplace,
+)
+from app.modules.library.application.dashboard import DashboardQueries
 from app.modules.library.application.facet_sync import (
     prepare_book_facet,
 )
 from app.modules.library.application.filter_options import (
     GetLibraryFilterSchema,
     SearchLibraryFilterOptions,
+)
+from app.modules.library.application.groupings import ListLibraryGroupings
+from app.modules.library.application.management_commands import (
+    DeleteLibraryFacet,
+    MergeLibraryFacets,
+    RenameLibraryFacet,
+    UndoLibraryOperation,
 )
 from app.modules.library.application.queries import (
     SmartShelfCriteria,
@@ -48,8 +63,14 @@ from app.modules.library.infrastructure.book_contents import (
     SqlAlchemyBookContentsQueries,
 )
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
+from app.modules.library.infrastructure.bulk_operations import (
+    SqlAlchemyBulkBookOperations,
+)
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
+from app.modules.library.infrastructure.facet_management import (
+    SqlAlchemyLibraryFacetManagement,
+)
 from app.modules.library.infrastructure.facet_sync import (
     PreparedBookFacetWrite,
     execute_book_facet_write,
@@ -58,6 +79,12 @@ from app.modules.library.infrastructure.facet_sync import (
 )
 from app.modules.library.infrastructure.filter_options import (
     SqlAlchemyLibraryFilterQueries,
+)
+from app.modules.library.infrastructure.groupings import (
+    SqlAlchemyLibraryGroupingQueries,
+)
+from app.modules.library.infrastructure.operation_management import (
+    SqlAlchemyLibraryOperationManagement,
 )
 from app.modules.library.infrastructure.resource_commands import (
     SqlAlchemyResourceMetadata,
@@ -79,6 +106,42 @@ def bookshelf_items(db: Session) -> ListBookshelfItems:
 
 def library_catalog(db: Session) -> SqlAlchemyCatalogQueries:
     return SqlAlchemyCatalogQueries(db)
+
+
+def bulk_metadata(db: Session) -> ExecuteBulkMetadata:
+    return ExecuteBulkMetadata(SqlAlchemyBulkBookOperations(db), db)
+
+
+def bulk_find_replace_preview(db: Session) -> PreviewBulkFindReplace:
+    return PreviewBulkFindReplace(SqlAlchemyBulkBookOperations(db))
+
+
+def bulk_find_replace(db: Session) -> ExecuteBulkFindReplace:
+    return ExecuteBulkFindReplace(SqlAlchemyBulkBookOperations(db), db)
+
+
+def bulk_shelf_membership(db: Session) -> ExecuteBulkShelfMembership:
+    return ExecuteBulkShelfMembership(SqlAlchemyBulkBookOperations(db), db)
+
+
+def bulk_reading_status(db: Session) -> ExecuteBulkReadingStatus:
+    return ExecuteBulkReadingStatus(SqlAlchemyBulkBookOperations(db), db)
+
+
+def merge_library_facets(db: Session) -> MergeLibraryFacets:
+    return MergeLibraryFacets(SqlAlchemyLibraryFacetManagement(db), db)
+
+
+def rename_library_facet(db: Session) -> RenameLibraryFacet:
+    return RenameLibraryFacet(SqlAlchemyLibraryFacetManagement(db), db)
+
+
+def delete_library_facet(db: Session) -> DeleteLibraryFacet:
+    return DeleteLibraryFacet(SqlAlchemyLibraryFacetManagement(db), db)
+
+
+def undo_library_operation(db: Session) -> UndoLibraryOperation:
+    return UndoLibraryOperation(SqlAlchemyLibraryOperationManagement(db), db)
 
 
 def smart_shelf_book_ids(
@@ -117,6 +180,17 @@ def library_filter_schema(db: Session) -> GetLibraryFilterSchema:
 
 def library_filter_options(db: Session) -> SearchLibraryFilterOptions:
     return SearchLibraryFilterOptions(SqlAlchemyLibraryFilterQueries(db))
+
+
+def library_groupings(db: Session) -> ListLibraryGroupings:
+    return ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db))
+
+
+def dashboard_queries(db: Session) -> DashboardQueries:
+    return DashboardQueries(
+        activity=library_dashboard.SqlAlchemyDashboardActivityQueries(db),
+        bookshelf=SqlAlchemyBookshelfItemQueries(db),
+    )
 
 
 def library_cover_publication(settings: Settings) -> RemoteCoverPublication:
@@ -180,6 +254,12 @@ __all__ = [
     "PreparedBookFacetWrite",
     "bookshelf_items",
     "browse_book_contents",
+    "bulk_find_replace",
+    "bulk_find_replace_preview",
+    "bulk_metadata",
+    "bulk_reading_status",
+    "bulk_shelf_membership",
+    "delete_library_facet",
     "delete_resource_asset",
     "execute_book_facet_write",
     "get_book",
@@ -197,9 +277,11 @@ __all__ = [
     "list_books",
     "load_book_facet_projections",
     "load_metadata_apply_job_ids",
+    "merge_library_facets",
     "prepare_book_facet",
     "prepare_book_facet_write",
     "recognize_source_node_metadata",
+    "rename_library_facet",
     "resource_metadata",
     "smart_shelf_book_ids",
     "update_book",
