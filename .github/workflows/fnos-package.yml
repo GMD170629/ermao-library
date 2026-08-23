@@ -99,7 +99,7 @@ jobs:
       - name: Validate fnOS package templates
         env:
           FNOS_VALIDATE_ONLY: 'true'
-        run: scripts/build-fnos-package.sh
+        run: bash scripts/build-fnos-package.sh
 
   publish-prod-image:
     name: Publish prod Docker image
