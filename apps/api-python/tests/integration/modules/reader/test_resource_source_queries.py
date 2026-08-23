@@ -196,7 +196,7 @@ def test_reader_production_code_does_not_use_media_version_contract() -> None:
 def test_reader_source_lookup_joins_book_and_resource() -> None:
     source = _SOURCE_REPOSITORY.read_text(encoding="utf-8")
     assert "LibraryMediaVersion" not in source
-    context_source = inspect.getsource(SqlAlchemyReaderResourceRepository.get_context)
+    context_source = inspect.getsource(SqlAlchemyReaderResourceRepository._get_context)
     assert "LibraryReadableResource.book_id == LibraryBook.id" in context_source
     assert "LibraryReadableResource.id == resource_id" in context_source
 

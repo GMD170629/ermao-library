@@ -221,7 +221,10 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             description=metadata.description if metadata else None,
             series_name=metadata.series_name if metadata else None,
             series_index=metadata.series_index if metadata else None,
-            has_cover=bool(metadata and metadata.cover_path),
+            has_cover=(
+                bool(metadata and metadata.cover_path)
+                or any(resource.has_cover for resource in resources)
+            ),
             facets=facets,
             resources=resources,
             created_at=book.created_at,

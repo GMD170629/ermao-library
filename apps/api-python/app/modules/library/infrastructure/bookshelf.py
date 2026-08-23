@@ -23,6 +23,7 @@ from app.modules.library.application.bookshelf import (
     BookshelfItemQueryPort,
     BookshelfItemSummary,
 )
+from app.modules.library.infrastructure.book_covers import effective_book_cover_path
 from app.modules.reader.public import (
     MediaKind,
     ResourceReadingState,
@@ -49,6 +50,11 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 LibraryBookMetadata.title,
                 LibraryBookMetadata.author,
                 LibraryBookMetadata.cover_path,
+                effective_book_cover_path(
+                    LibraryBook.id,
+                    LibraryBookMetadata.cover_path,
+                    LibraryBookMetadata.cover_status,
+                ).label("effective_cover_path"),
             )
             .select_from(LibraryBook)
             .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
@@ -64,7 +70,6 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
         )
         if not visible_book_ids:
             return ()
-
         rows = self._db.execute(
             select(
                 LibraryReadableResource.book_id,
@@ -126,7 +131,7 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                     id=book_id,
                     title=str(book.title),
                     author=str(book.author or "未知作者"),
-                    cover_path=book.cover_path,
+                    cover_path=book.effective_cover_path or book.cover_path,
                     updated_at=book.updated_at,
                     available_media_kinds=tuple(
                         sorted(

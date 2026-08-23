@@ -33,6 +33,7 @@ from app.modules.library.application.dashboard import (
     DashboardActivityQueryPort,
     DashboardContinueReading,
 )
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.library.infrastructure.books import entity_record
 from app.modules.reader.public import MediaKind
 
@@ -135,13 +136,18 @@ def recent_books(
         .order_by(LibraryBook.created_at.desc(), LibraryBook.id.desc())
         .limit(limit)
     ).all()
+    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(
+        tuple(str(row.id) for row in rows)
+    )
     return [
         {
             "id": row.id,
             "title": row.title,
             "author": row.author,
-            "coverStatus": row.cover_status,
-            "coverPath": row.cover_path,
+            "coverStatus": (
+                "READY" if cover_paths.get(str(row.id)) else row.cover_status
+            ),
+            "coverPath": cover_paths.get(str(row.id)) or row.cover_path,
             "createdAt": row.created_at,
         }
         for row in rows
@@ -183,13 +189,18 @@ def recent_reading(
         .order_by(latest_read_at.desc(), LibraryBook.id.desc())
         .limit(limit)
     ).all()
+    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(
+        tuple(str(row.id) for row in rows)
+    )
     return [
         {
             "id": row.id,
             "title": row.title,
             "author": row.author,
-            "coverStatus": row.cover_status,
-            "coverPath": row.cover_path,
+            "coverStatus": (
+                "READY" if cover_paths.get(str(row.id)) else row.cover_status
+            ),
+            "coverPath": cover_paths.get(str(row.id)) or row.cover_path,
             "lastReadAt": row.lastReadAt,
         }
         for row in rows
@@ -250,13 +261,18 @@ def continue_reading_progress(
     )
     if selected is None:
         return None
+    cover_path = (
+        SqlAlchemyBookCoverQueries(db)
+        .preferred_paths((str(selected.book_id),))
+        .get(str(selected.book_id))
+    )
     reader_type = reader_type_for_format(str(selected.resource_format))
     return {
         "bookId": selected.book_id,
         "title": selected.book_title,
         "author": selected.author,
-        "coverPath": selected.cover_path,
-        "coverStatus": selected.cover_status,
+        "coverPath": cover_path or selected.cover_path,
+        "coverStatus": "READY" if cover_path else selected.cover_status,
         "bookUpdatedAt": selected.book_updated_at,
         "mediaKind": selected.media_kind,
         "resourceFormat": selected.resource_format,

@@ -25,8 +25,6 @@ class MediaResourceRepository(Protocol):
 
     def first_resource_asset(self, resource_id: str) -> MediaAssetResource | None: ...
 
-    def book_cover_path(self, book_id: str) -> str | None: ...
-
     def resource_cover_path(self, resource_id: str) -> str | None: ...
 
     def source_node_cover(
@@ -47,11 +45,8 @@ class MediaResourceQuery:
     def cover_path(
         self,
         *,
-        book_id: str | None = None,
-        resource_id: str | None = None,
+        resource_id: str | None,
     ) -> str | None:
-        if book_id is not None:
-            return self._repository.book_cover_path(book_id)
         if resource_id is not None:
             return self._repository.resource_cover_path(resource_id)
         return None

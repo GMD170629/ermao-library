@@ -78,7 +78,10 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
 
   return <section className="mt-6 border-t border-stone-200 pt-8">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <h2 className="text-lg font-semibold text-stone-950"><I18nText>来源目录与可读资源</I18nText></h2>
+      <nav className="flex min-h-9 min-w-0 flex-wrap items-center gap-1 text-sm" aria-label={t('来源目录路径')}>
+        <button type="button" onClick={() => onNavigate(null)} className="max-w-64 truncate rounded-lg px-2 py-1.5 font-medium text-stone-700 hover:bg-stone-100" data-i18n-skip>{book.title}</button>
+        {(contents?.breadcrumbs ?? []).map((crumb) => <span key={crumb.sourceNodeId} className="contents"><ChevronRight size={14} className="text-stone-400" /><button type="button" onClick={() => onNavigate(crumb.sourceNodeId, crumb)} className="max-w-56 truncate rounded-lg px-2 py-1.5 text-stone-600 hover:bg-stone-100" data-i18n-skip>{crumb.title}</button></span>)}
+      </nav>
       <div className="flex flex-wrap items-center gap-2" aria-label={t('图书内容显示控制')}>
         <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1" role="group" aria-label={t('显示方式')}>
           <button type="button" aria-label={t('网格显示')} aria-pressed={layout === 'grid'} onClick={() => onLayoutChange('grid')} className={cn('flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 transition', layout === 'grid' && 'bg-[#fff0ea] text-[#d94322]')}><Grid2X2 size={17} /></button>
@@ -87,11 +90,6 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
         <Select<BookContentSort> value={sort} ariaLabel="排序方式" size="sm" align="right" menuWidth={180} options={[{ value: 'name-asc', label: '名称 A–Z' }, { value: 'name-desc', label: '名称 Z–A' }, { value: 'updated-desc', label: '最近更新' }, { value: 'updated-asc', label: '最早更新' }, { value: 'type-asc', label: '内容类型' }, { value: 'size-desc', label: '内容大小' }]} onChange={onSortChange} />
       </div>
     </div>
-
-    <nav className="mt-5 flex min-h-9 flex-wrap items-center gap-1 text-sm" aria-label={t('来源目录路径')}>
-      <button type="button" onClick={() => onNavigate(null)} className="max-w-64 truncate rounded-lg px-2 py-1.5 font-medium text-stone-700 hover:bg-stone-100" data-i18n-skip>{book.title}</button>
-      {(contents?.breadcrumbs ?? []).map((crumb) => <span key={crumb.sourceNodeId} className="contents"><ChevronRight size={14} className="text-stone-400" /><button type="button" onClick={() => onNavigate(crumb.sourceNodeId, crumb)} className="max-w-56 truncate rounded-lg px-2 py-1.5 text-stone-600 hover:bg-stone-100" data-i18n-skip>{crumb.title}</button></span>)}
-    </nav>
 
     {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
     {loading ? <div className="flex min-h-48 items-center justify-center"><span className="text-sm text-stone-500"><I18nText>正在加载图书内容</I18nText></span></div> : null}

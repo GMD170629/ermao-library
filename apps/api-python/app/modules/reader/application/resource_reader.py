@@ -144,28 +144,20 @@ class ResourceReaderService:
         resource_id: str,
         access_scope: ReaderAccessScope,
     ) -> ReaderBootstrapDto:
-        context = self._repository.get_context(resource_id)
+        context = self._repository.get_visible_context(resource_id, access_scope)
         if context is None:
             raise ReaderResourceNotFound
         if reader_type_for_format(context.resource.format) is None:
             raise ReaderResourceFormatUnsupported
-        available_resources = self._repository.list_visible_resources_for_book(
-            context.book.id, access_scope
-        )
-        if all(resource.id != resource_id for resource in available_resources):
-            raise ReaderResourceNotFound
         assets = self._repository.list_assets(resource_id)
         units = self._repository.list_navigation_units(resource_id)
-        progresses = self._repository.list_progresses(
-            user_id, [resource.id for resource in available_resources]
+        selected_progress = self._repository.get_progress(user_id, resource_id)
+        progress_by_resource_id = (
+            {resource_id: selected_progress} if selected_progress is not None else {}
         )
-        progress_by_resource_id = {
-            progress.resource_id: progress for progress in progresses
-        }
-        selected_progress = progress_by_resource_id.get(resource_id)
         return ReaderBootstrapDto(
             context=context,
-            available_resources=tuple(available_resources),
+            available_resources=(context.resource,),
             assets=tuple(assets),
             units=tuple(units),
             progress_by_resource_id=progress_by_resource_id,
@@ -366,13 +358,8 @@ class ResourceReaderService:
     def _require_visible_context(
         self, resource_id: str, access_scope: ReaderAccessScope
     ) -> ReaderResourceContextDto:
-        context = self._repository.get_context(resource_id)
+        context = self._repository.get_visible_context(resource_id, access_scope)
         if context is None:
-            raise ReaderResourceNotFound
-        visible = self._repository.list_visible_resources_for_book(
-            context.book.id, access_scope
-        )
-        if all(resource.id != resource_id for resource in visible):
             raise ReaderResourceNotFound
         return context
 

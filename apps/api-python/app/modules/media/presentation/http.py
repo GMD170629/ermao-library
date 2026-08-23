@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.media import (
+    effective_book_cover_query,
     media_page_index,
     media_resource_query,
     media_streaming,
@@ -242,6 +243,8 @@ def get_cover(
         )
         if not resource_book_id or not can_access_book(db, user, str(resource_book_id)):
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
+    cover_path_value: str | None = None
+    cover_path: Path | None = None
     if source_node_id is not None:
         if book_id is None:
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
@@ -253,15 +256,26 @@ def get_cover(
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
         cover_path_value = source_node_cover.path
         cover_id = source_node_id
+    elif book_id is not None:
+        for candidate in effective_book_cover_query(db).execute(book_id):
+            candidate_path = media_streaming.stored_path(
+                candidate.stored_path, settings
+            )
+            if candidate_path is not None and candidate_path.is_file():
+                cover_path_value = candidate.stored_path
+                cover_path = candidate_path
+                break
+        cover_id = book_id or resource_id or "cover"
     else:
         cover_path_value = media_resource_query(db).cover_path(
-            book_id=book_id,
             resource_id=resource_id,
         )
-        cover_id = book_id or resource_id or "cover"
+        cover_path = media_streaming.stored_path(cover_path_value, settings)
+        cover_id = resource_id or "cover"
     if not book_id and not resource_id and not source_node_id:
         return fail("条目不存在", status_code=404)
-    cover_path = media_streaming.stored_path(cover_path_value, settings)
+    if cover_path is None and cover_path_value is not None:
+        cover_path = media_streaming.stored_path(cover_path_value, settings)
     if (
         cover_path is None
         or not cover_path.is_file()

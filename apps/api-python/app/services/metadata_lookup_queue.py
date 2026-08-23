@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.library import (
     PreparedBookFacetWrite,
+    effective_book_cover_paths,
     execute_book_facet_write,
     load_book_facet_projections,
     prepare_book_facet_write,
@@ -197,14 +198,9 @@ def _parse_tags(value: Any) -> list[str]:
 def _local_cover_exists(
     db: Session, book: dict[str, Any], resource_id: str | None
 ) -> bool:
-    if str(book.get("coverPath") or "").strip():
-        return True
-    if not resource_id:
-        return False
-    resource = lookup_persist.get_resource(db, resource_id)
-    if str((resource or {}).get("coverPath") or "").strip():
-        return True
-    return lookup_persist.resource_has_cover(db, resource_id)
+    del resource_id
+    book_id = str(book.get("id") or "").strip()
+    return bool(book_id and effective_book_cover_paths(db, (book_id,)).get(book_id))
 
 
 @dataclass(frozen=True, slots=True)

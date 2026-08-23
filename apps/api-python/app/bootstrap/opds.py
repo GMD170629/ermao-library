@@ -16,7 +16,12 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.bootstrap.auth import build_password_authenticator
-from app.bootstrap.media import media_page_index, media_resource_query, media_streaming
+from app.bootstrap.media import (
+    effective_book_cover_query,
+    media_page_index,
+    media_resource_query,
+    media_streaming,
+)
 from app.bootstrap.reader import reader_resource_service
 from app.core.authorization import (
     AuthorizationContext,
@@ -743,10 +748,20 @@ class OpdsMediaResources:
                 db, user, resource_id
             ):
                 return Response(status_code=404)
-            path_value = media_resource_query(db).cover_path(
-                book_id=book_id, resource_id=resource_id
-            )
-            path = media_streaming.stored_path(path_value, self._settings)
+            path = None
+            if book_id is not None:
+                for candidate in effective_book_cover_query(db).execute(book_id):
+                    candidate_path = media_streaming.stored_path(
+                        candidate.stored_path, self._settings
+                    )
+                    if candidate_path is not None and candidate_path.is_file():
+                        path = candidate_path
+                        break
+            else:
+                path_value = media_resource_query(db).cover_path(
+                    resource_id=resource_id
+                )
+                path = media_streaming.stored_path(path_value, self._settings)
             if path is None or not path.is_file():
                 return Response(status_code=404)
             return media_streaming.send_pse_page_file(

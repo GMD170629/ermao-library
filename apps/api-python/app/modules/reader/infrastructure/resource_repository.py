@@ -182,6 +182,30 @@ class SqlAlchemyReaderResourceRepository:
         self._session = session
 
     def get_context(self, resource_id: str) -> ReaderResourceContextDto | None:
+        return self._get_context(
+            resource_id,
+            LibraryReadableResource.id.is_not(None),
+        )
+
+    def get_visible_context(
+        self,
+        resource_id: str,
+        access_scope: ReaderAccessScope,
+    ) -> ReaderResourceContextDto | None:
+        visibility: ColumnElement[bool] = LibraryReadableResource.id.is_not(None)
+        if not access_scope.is_admin:
+            visibility = (
+                LibraryReadableResource.library_id.in_(access_scope.library_ids)
+                if access_scope.library_ids
+                else false()
+            )
+        return self._get_context(resource_id, visibility)
+
+    def _get_context(
+        self,
+        resource_id: str,
+        visibility: ColumnElement[bool],
+    ) -> ReaderResourceContextDto | None:
         row = self._session.execute(
             select(
                 LibraryBook,
@@ -211,6 +235,7 @@ class SqlAlchemyReaderResourceRepository:
                 LibraryReadableResource.id == resource_id,
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryReadableResource.import_state == "READY",
+                visibility,
             )
         ).one_or_none()
         if row is None:

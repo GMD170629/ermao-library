@@ -1,5 +1,11 @@
 """Stable public contracts for the Book/ReadableResource capability."""
 
+from app.modules.library.application.book_covers import (
+    BookCoverCandidate,
+    BookCoverQueryPort,
+    BookCoverSource,
+    ResolveBookCoverCandidates,
+)
 from app.modules.library.application.book_list import (
     BookListProjection,
     BookListQuery,
@@ -132,6 +138,9 @@ __all__ = [
     "AssetImportState",
     "AssetRole",
     "BookAnchorDecision",
+    "BookCoverCandidate",
+    "BookCoverQueryPort",
+    "BookCoverSource",
     "BookFacetProjection",
     "BookFacetReferences",
     "BookListProjection",
@@ -183,6 +192,7 @@ __all__ = [
     "ReadableResourceAnchorViolationCode",
     "ReadableResourceRecord",
     "ReadableResourceTopologyError",
+    "ResolveBookCoverCandidates",
     "ResourceEnablementState",
     "ResourceImportState",
     "ResourceNavigationUnitInput",

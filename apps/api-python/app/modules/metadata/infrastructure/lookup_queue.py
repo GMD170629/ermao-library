@@ -433,22 +433,6 @@ def get_resource(db: Session, resource_id: str | None) -> dict[str, Any] | None:
     }
 
 
-def resource_has_cover(db: Session, resource_id: str) -> bool:
-    return (
-        db.scalar(
-            select(LibraryReadableResourceMetadata.resource_id)
-            .select_from(LibraryReadableResourceMetadata)
-            .where(
-                LibraryReadableResourceMetadata.resource_id == resource_id,
-                LibraryReadableResourceMetadata.cover_path.is_not(None),
-                LibraryReadableResourceMetadata.cover_path != "",
-            )
-            .limit(1)
-        )
-        is not None
-    )
-
-
 def get_import_task_status(db: Session, import_task_id: str | None) -> str | None:
     if not import_task_id:
         return None

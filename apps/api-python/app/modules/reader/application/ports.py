@@ -14,16 +14,15 @@ from app.modules.reader.application.dto import (
     ReaderProgressDto,
     ReaderReadingStatus,
     ReaderResourceContextDto,
-    ReaderResourceDto,
 )
 
 
 class ReaderResourceRepository(Protocol):
     def get_context(self, resource_id: str) -> ReaderResourceContextDto | None: ...
 
-    def list_visible_resources_for_book(
-        self, book_id: str, access_scope: ReaderAccessScope
-    ) -> list[ReaderResourceDto]: ...
+    def get_visible_context(
+        self, resource_id: str, access_scope: ReaderAccessScope
+    ) -> ReaderResourceContextDto | None: ...
 
     def list_assets(self, resource_id: str) -> list[ReaderAssetDto]: ...
 

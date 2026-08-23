@@ -13,6 +13,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
 )
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.library.infrastructure.books import entity_record
 
 
@@ -86,25 +87,7 @@ def update_cover_record(
 
 
 def preferred_book_cover_path(db: Session, book_id: str) -> str | None:
-    cover = db.scalar(
-        select(LibraryReadableResourceMetadata.cover_path)
-        .join(
-            LibraryReadableResource,
-            LibraryReadableResource.id == LibraryReadableResourceMetadata.resource_id,
-        )
-        .where(
-            LibraryReadableResource.book_id == book_id,
-            LibraryReadableResource.enablement_state == "ENABLED",
-            LibraryReadableResourceMetadata.cover_path.is_not(None),
-            LibraryReadableResourceMetadata.cover_path != "",
-        )
-        .order_by(
-            LibraryReadableResource.created_at.asc(),
-            LibraryReadableResource.id.asc(),
-        )
-        .limit(1)
-    )
-    return str(cover) if cover else None
+    return SqlAlchemyBookCoverQueries(db).preferred_paths((book_id,)).get(book_id)
 
 
 def update_book_cover(

@@ -1266,6 +1266,96 @@ def test_book_cover_route_returns_the_book_cover(
     assert response.content == b"ebook-cover"
 
 
+def test_book_cover_route_falls_back_to_the_first_existing_readable_resource_cover(
+    client: TestClient,
+    db_session: Session,
+    test_settings,
+) -> None:
+    _login(client, db_session)
+    source_path = (
+        Path(__file__).parents[3] / "test-data" / "library" / "epub" / "reader-v2.epub"
+    )
+    first_resource, _first_asset = _add_resource(
+        db_session,
+        book_id="dynamic-cover-book",
+        resource_id="dynamic-cover-a",
+        asset_id="dynamic-cover-asset-a",
+        source_path=source_path,
+    )
+    second_resource, _second_asset = _add_resource(
+        db_session,
+        book_id="dynamic-cover-book",
+        resource_id="dynamic-cover-b",
+        asset_id="dynamic-cover-asset-b",
+        source_path=source_path,
+    )
+    third_resource, _third_asset = _add_resource(
+        db_session,
+        book_id="dynamic-cover-book",
+        resource_id="dynamic-cover-c",
+        asset_id="dynamic-cover-asset-c",
+        source_path=source_path,
+    )
+    first_metadata = db_session.get(LibraryReadableResourceMetadata, first_resource.id)
+    second_metadata = db_session.get(
+        LibraryReadableResourceMetadata, second_resource.id
+    )
+    third_metadata = db_session.get(LibraryReadableResourceMetadata, third_resource.id)
+    assert first_metadata is not None
+    assert second_metadata is not None
+    assert third_metadata is not None
+    book_metadata = db_session.get(LibraryBookMetadata, "dynamic-cover-book")
+    assert book_metadata is not None
+    book_metadata.cover_path = "covers/missing-book-cover.jpg"
+    book_metadata.cover_status = "READY"
+    first_resource.import_state = "FAILED"
+    first_metadata.cover_path = "covers/failed-resource-cover.jpg"
+    first_metadata.cover_status = "READY"
+    second_metadata.cover_path = "covers/missing-resource-cover.jpg"
+    second_metadata.cover_status = "READY"
+    third_metadata.cover_path = "covers/existing-resource-cover.jpg"
+    third_metadata.cover_status = "READY"
+    db_session.commit()
+
+    cover_root = test_settings.resolved_storage_root / "covers"
+    cover_root.mkdir(parents=True, exist_ok=True)
+    (cover_root / "failed-resource-cover.jpg").write_bytes(b"failed-cover")
+    (cover_root / "existing-resource-cover.jpg").write_bytes(b"resource-cover")
+
+    response = client.get("/api/books/dynamic-cover-book/cover")
+
+    assert response.status_code == 200
+    assert response.content == b"resource-cover"
+
+    management = client.get(
+        "/api/books", params={"view": "management", "pageSize": 100}
+    )
+    assert management.status_code == 200
+    item = next(
+        book
+        for book in management.json()["data"]["books"]
+        if book["id"] == "dynamic-cover-book"
+    )
+    assert item["coverStatus"] == "READY"
+
+    has_cover = client.get(
+        "/api/books",
+        params={
+            "pageSize": 100,
+            "filters": json.dumps(
+                {
+                    "combinator": "ALL",
+                    "conditions": [{"field": "hasCover", "operator": "is_true"}],
+                }
+            ),
+        },
+    )
+    assert has_cover.status_code == 200
+    assert "dynamic-cover-book" in {
+        book["id"] for book in has_cover.json()["data"]["books"]
+    }
+
+
 def test_sibling_resources_keep_independent_progress_and_completion(
     client: TestClient,
     db_session: Session,
@@ -1352,6 +1442,36 @@ def test_reader_v4_bootstrap_uses_book_and_resources(
     assert all(
         item["bookId"] == "book-reader-v4" for item in bootstrap["availableResources"]
     )
+
+
+def test_reader_v4_bootstrap_only_returns_the_current_resource(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login(client, db_session)
+    resource, asset = _ebook_resource(db_session)
+    resource.format = "PDF"
+    asset_metadata = db_session.get(LibraryResourceAssetMetadata, asset.id)
+    assert asset_metadata is not None
+    asset_metadata.mime_type = "application/pdf"
+    db_session.commit()
+    _add_resource(
+        db_session,
+        book_id=resource.book_id,
+        resource_id="unsupported-sibling",
+        asset_id="unsupported-sibling-asset",
+        source_path=tmp_path / "unsupported.azw",
+        title="其他卷册",
+        fmt="KINDLE",
+        mime_type="application/octet-stream",
+    )
+
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+
+    assert response.status_code == 200
+    bootstrap = response.json()["data"]
+    assert [item["id"] for item in bootstrap["availableResources"]] == [resource.id]
 
 
 def test_reader_v4_reader_type_follows_resource_format(

@@ -133,6 +133,7 @@ test('book detail resource covers support selection, keyboard-accessible context
   const resource = (id: string, title: string, sortOrder: number) => ({
     id,
     bookId: 'context-book',
+    sourceNodeId: `${id}-source-node`,
     title,
     resourceIndex: sortOrder + 1,
     sortOrder,
@@ -164,6 +165,7 @@ test('book detail resource covers support selection, keyboard-accessible context
   const sourceNodeEntry = { sourceNodeId: 'context-source-node', parentSourceNodeId: 'context-book-node', name: '测试来源目录', title: '测试目录标题', description: '目录简介', kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: '2026-08-03T08:00:00.000Z', hasChildren: true, resourceId: null, representativeResourceId: resources[0].id };
   const book = {
     id: 'context-book',
+    sourceNodeId: 'context-book-node',
     title: '右键菜单测试图书',
     author: '测试作者',
     description: '',
@@ -227,6 +229,9 @@ test('book detail resource covers support selection, keyboard-accessible context
   });
 
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
+  const sourcePath = page.getByRole('navigation', { name: '来源目录路径' });
+  await expect(sourcePath).toBeVisible();
+  await expect(page.getByRole('heading', { name: '来源目录与可读资源' })).toHaveCount(0);
   const sourceNodeActions = page.getByRole('button', { name: '管理 测试目录标题', exact: true });
   await sourceNodeActions.click();
   const sourceNodeMenu = page.getByRole('menu', { name: '管理来源目录' });
@@ -240,6 +245,8 @@ test('book detail resource covers support selection, keyboard-accessible context
   await expect(page.getByRole('heading', { name: '测试目录标题', level: 1 })).toBeVisible();
   await expect(page.getByText('目录简介', { exact: true })).toBeVisible();
   await expect(page.getByText('90%', { exact: true })).toBeVisible();
+  await expect(sourcePath.getByRole('button', { name: book.title, exact: true })).toBeVisible();
+  await expect(sourcePath.getByRole('button', { name: sourceNodeEntry.title, exact: true })).toBeVisible();
   await page.getByRole('button', { name: book.title, exact: true }).click();
   const first = page.getByRole('button', { name: '可读资源 1，阅读进度 80%' });
   const second = page.getByRole('button', { name: '可读资源 2，阅读进度 100%' });

@@ -30,6 +30,10 @@ from app.modules.library.application.book_list import (
     BookListResult,
     resolve_page_size,
 )
+from app.modules.library.infrastructure.book_covers import (
+    SqlAlchemyBookCoverQueries,
+    effective_book_cover_exists,
+)
 from app.modules.library.infrastructure.books import _book_record
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
@@ -198,13 +202,7 @@ def _predicates(
             )
         )
     if query.missing_cover:
-        predicates.append(
-            or_(
-                LibraryBookMetadata.cover_path.is_(None),
-                func.trim(func.coalesce(LibraryBookMetadata.cover_path, "")) == "",
-                LibraryBookMetadata.cover_status != "READY",
-            )
-        )
+        predicates.append(~effective_book_cover_exists(LibraryBook.id))
     if query.new_import:
         predicates.append(_resource_exists(book_id=LibraryBook.id))
     if query.series_name:
@@ -430,9 +428,13 @@ def _project_books(
     rows: list[tuple[LibraryBook, LibraryBookMetadata | None]],
     projection: str,
 ) -> list[dict[str, Any]]:
-    if projection == "full":
-        return [_book_record(book, metadata) for book, metadata in rows]
     book_ids = tuple(str(book.id) for book, _metadata in rows)
+    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(book_ids)
+    if projection == "full":
+        return [
+            _book_record(book, metadata, cover_paths.get(str(book.id)))
+            for book, metadata in rows
+        ]
     resources_by_book = _resource_summaries(
         db,
         context=context,
@@ -456,13 +458,19 @@ def _project_books(
             else book_id
         )
         author = metadata.author if metadata is not None else None
+        effective_cover_path = cover_paths.get(book_id)
+        cover_path = effective_cover_path or (
+            metadata.cover_path if metadata is not None else None
+        )
         common: dict[str, object] = {
             "id": book_id,
             "title": title,
             "author": author,
-            "coverPath": metadata.cover_path if metadata is not None else None,
+            "coverPath": cover_path,
             "coverStatus": (
-                metadata.cover_status if metadata is not None else "PENDING"
+                "READY"
+                if effective_cover_path
+                else (metadata.cover_status if metadata is not None else "PENDING")
             ),
             "seriesName": metadata.series_name if metadata is not None else None,
             "tags": tags_by_book[book_id],

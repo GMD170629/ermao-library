@@ -12,6 +12,7 @@ from app.modules.library.application.groupings import (
     LibraryGroupingBook,
     LibraryGroupingPage,
 )
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 
 
 class SqlAlchemyLibraryGroupingQueries:
@@ -167,6 +168,9 @@ class SqlAlchemyLibraryGroupingQueries:
             .where(ranked.c.representative_rank <= 3)
             .order_by(ranked.c.facet_id.asc(), ranked.c.representative_rank.asc())
         ).all()
+        cover_paths = SqlAlchemyBookCoverQueries(self._db).preferred_paths(
+            tuple(str(row.book_id) for row in rows)
+        )
         grouped: dict[str, list[LibraryGroupingBook]] = {}
         for row in rows:
             grouped.setdefault(str(row.facet_id), []).append(
@@ -174,7 +178,7 @@ class SqlAlchemyLibraryGroupingQueries:
                     id=str(row.book_id),
                     title=str(row.title),
                     author=str(row.author or ""),
-                    cover_path=(str(row.cover_path) if row.cover_path else None),
+                    cover_path=cover_paths.get(str(row.book_id)) or row.cover_path,
                     updated_at=row.updated_at,
                 )
             )

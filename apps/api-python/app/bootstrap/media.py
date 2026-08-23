@@ -2,6 +2,8 @@
 
 from sqlalchemy.orm import Session
 
+from app.modules.library.application.book_covers import ResolveBookCoverCandidates
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.media.application.page_index import (
     ReadOnlyResourcePageIndex,
     ResolvedResourcePageIndex,
@@ -48,7 +50,12 @@ def media_resource_query(db: Session) -> MediaResourceQuery:
     return MediaResourceQuery(SqlAlchemyMediaResourceRepository(db))
 
 
+def effective_book_cover_query(db: Session) -> ResolveBookCoverCandidates:
+    return ResolveBookCoverCandidates(SqlAlchemyBookCoverQueries(db))
+
+
 __all__ = [
+    "effective_book_cover_query",
     "load_read_only_resource_page_index",
     "media_page_index",
     "media_resource_query",

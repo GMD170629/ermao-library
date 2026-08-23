@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import LibraryBook, LibraryBookMetadata
 from app.modules.library.domain.facets import normalize_facet_name
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 
 STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
 
@@ -27,7 +28,9 @@ def entity_record(entity: object) -> dict[str, Any]:
 def _book_record(
     book: LibraryBook,
     metadata: LibraryBookMetadata | None,
+    effective_cover_path: str | None = None,
 ) -> dict[str, Any]:
+    cover_path = effective_cover_path or (metadata.cover_path if metadata else None)
     return {
         "id": book.id,
         "libraryId": book.library_id,
@@ -41,8 +44,10 @@ def _book_record(
         "description": metadata.description if metadata else None,
         "seriesName": metadata.series_name if metadata else None,
         "seriesIndex": metadata.series_index if metadata else None,
-        "coverPath": metadata.cover_path if metadata else None,
-        "coverStatus": metadata.cover_status if metadata else "PENDING",
+        "coverPath": cover_path,
+        "coverStatus": "READY"
+        if effective_cover_path
+        else (metadata.cover_status if metadata else "PENDING"),
         "metadataQuality": metadata.metadata_quality if metadata else 0,
         "publicationStatus": metadata.publication_status if metadata else "UNKNOWN",
         "trackingStatus": metadata.tracking_status if metadata else "NOT_TRACKING",
@@ -65,12 +70,18 @@ def get_visible_book(db: Session, book_id: str) -> dict[str, Any] | None:
     row = db.execute(
         _book_statement(book_id).where(LibraryBook.visibility_state == "VISIBLE")
     ).first()
-    return _book_record(row[0], row[1]) if row is not None else None
+    if row is None:
+        return None
+    cover_path = SqlAlchemyBookCoverQueries(db).preferred_paths((book_id,)).get(book_id)
+    return _book_record(row[0], row[1], cover_path)
 
 
 def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
     row = db.execute(_book_statement(book_id)).first()
-    return _book_record(row[0], row[1]) if row is not None else None
+    if row is None:
+        return None
+    cover_path = SqlAlchemyBookCoverQueries(db).preferred_paths((book_id,)).get(book_id)
+    return _book_record(row[0], row[1], cover_path)
 
 
 def list_books_by_ids(
@@ -80,7 +91,11 @@ def list_books_by_ids(
     if not book_ids:
         return []
     rows = db.execute(_book_statement(book_ids)).all()
-    by_id = {str(row[0].id): _book_record(row[0], row[1]) for row in rows}
+    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(tuple(book_ids))
+    by_id = {
+        str(row[0].id): _book_record(row[0], row[1], cover_paths.get(str(row[0].id)))
+        for row in rows
+    }
     return [by_id[book_id] for book_id in book_ids if book_id in by_id]
 
 

@@ -62,6 +62,7 @@ from app.modules.library.infrastructure.book_commands import SqlAlchemyBookMutat
 from app.modules.library.infrastructure.book_contents import (
     SqlAlchemyBookContentsQueries,
 )
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.bulk_operations import (
     SqlAlchemyBulkBookOperations,
@@ -106,6 +107,12 @@ def bookshelf_items(db: Session) -> ListBookshelfItems:
 
 def library_catalog(db: Session) -> SqlAlchemyCatalogQueries:
     return SqlAlchemyCatalogQueries(db)
+
+
+def effective_book_cover_paths(
+    db: Session, book_ids: tuple[str, ...]
+) -> dict[str, str]:
+    return dict(SqlAlchemyBookCoverQueries(db).preferred_paths(book_ids))
 
 
 def bulk_metadata(db: Session) -> ExecuteBulkMetadata:
@@ -261,6 +268,7 @@ __all__ = [
     "bulk_shelf_membership",
     "delete_library_facet",
     "delete_resource_asset",
+    "effective_book_cover_paths",
     "execute_book_facet_write",
     "get_book",
     "library_books",

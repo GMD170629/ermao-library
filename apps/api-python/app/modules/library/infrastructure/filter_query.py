@@ -40,6 +40,7 @@ from app.models import (
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
+from app.modules.library.infrastructure.book_covers import effective_book_cover_exists
 
 BOOK_TEXT_FIELDS = {
     "title": LibraryBookMetadata.title,
@@ -287,6 +288,7 @@ def _condition(
 
     resource = aliased(LibraryReadableResource)
     resource_metadata = aliased(LibraryReadableResourceMetadata)
+    source_node = aliased(LibrarySourceNode)
     visible = _visible_resource(context, resource, LibraryBook)
     resource_base = (
         select(resource.id)
@@ -336,7 +338,6 @@ def _condition(
         return _text(expression, condition)
     if field == "sourcePath":
         asset = aliased(LibraryResourceAsset)
-        source_node = aliased(LibrarySourceNode)
         return _relation_text(
             select(asset.id)
             .join(resource, resource.id == asset.resource_id)
@@ -418,10 +419,7 @@ def _condition(
             else not_(organized_value)
         )
     if field == "hasCover":
-        cover_value = and_(
-            LibraryBookMetadata.cover_path.is_not(None),
-            LibraryBookMetadata.cover_status == "READY",
-        )
+        cover_value = effective_book_cover_exists(LibraryBook.id)
         return cover_value if condition.operator == "is_true" else not_(cover_value)
     raise ValueError(f"Unsupported filter field: {field}")
 

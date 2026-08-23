@@ -301,7 +301,6 @@ const exactOverrides = {
   '来源目录标题不能为空': 'Source directory title cannot be empty',
   '来源目录路径': 'Source directory path',
   '来源目录信息已保存': 'Source directory details saved',
-  '来源目录与可读资源': 'Source directories and readable resources',
   '识别结果已应用到来源目录': 'The identified metadata was applied to the source directory',
   '识别来源目录元数据': 'Identify source directory metadata',
   '识别所选可读资源的出版元数据': 'Identify publication metadata for the selected readable resource',

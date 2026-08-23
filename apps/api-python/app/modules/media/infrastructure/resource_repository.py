@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.models import (
     Library,
     LibraryBook,
-    LibraryBookMetadata,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
@@ -83,13 +82,6 @@ class SqlAlchemyMediaResourceRepository:
             .limit(1)
         ).first()
         return self._asset_resource(row)
-
-    def book_cover_path(self, book_id: str) -> str | None:
-        return self._session.scalar(
-            select(LibraryBookMetadata.cover_path).where(
-                LibraryBookMetadata.book_id == book_id
-            )
-        )
 
     def resource_cover_path(self, resource_id: str) -> str | None:
         return self._session.scalar(
